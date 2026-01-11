@@ -958,20 +958,6 @@ export function registerAllIpcHandlers(): void {
     return true;
   }));
 
-  // Approval queue
-  ipcMain.handle('get-pending-approvals', withContext('get-pending-approvals', async (_, { sessionId }: { sessionId?: string }) => {
-    return hookEvents.getPendingApprovals(sessionId);
-  }));
-
-  ipcMain.handle('add-to-approval-queue', withContext('add-to-approval-queue', async (_, item: { sessionId: string; requestType: string; requestDetails: string }) => {
-    return hookEvents.addToApprovalQueue(item);
-  }));
-
-  ipcMain.handle('update-approval-status', withContext('update-approval-status', async (_, { id, status, decidedBy, policyId }: { id: number; status: 'approved' | 'denied' | 'expired'; decidedBy: 'user' | 'policy'; policyId?: number }) => {
-    hookEvents.updateApprovalStatus(id, status, decidedBy, policyId);
-    return true;
-  }));
-
   // Approval policies
   ipcMain.handle('get-approval-policies', withContext('get-approval-policies', async () => {
     return hookEvents.getAllApprovalPolicies();

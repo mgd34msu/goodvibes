@@ -18,12 +18,6 @@ import {
   Brain,
   Sparkles,
   Activity,
-  Store,
-  DollarSign,
-  ShieldCheck,
-  GitBranch,
-  Lightbulb,
-  Monitor,
   FolderKanban,
   ChevronDown,
 } from 'lucide-react';
@@ -48,12 +42,6 @@ const VIEW_ICONS: Record<ViewName, React.ReactNode> = {
   skills: <Sparkles className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   monitor: <Activity className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   // Phase 9-12 views
-  agency: <Store className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
-  costs: <DollarSign className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
-  approvals: <ShieldCheck className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
-  'agent-tree': <GitBranch className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
-  intelligence: <Lightbulb className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
-  'live-monitor': <Monitor className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   projects: <FolderKanban className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
 };
 
@@ -71,12 +59,6 @@ const VIEW_LABELS: Record<ViewName, string> = {
   skills: 'Skills',
   monitor: 'Monitor',
   // Phase 9-12 views
-  agency: 'Agency',
-  costs: 'Costs',
-  approvals: 'Approvals',
-  'agent-tree': 'Agent Tree',
-  intelligence: 'Intelligence',
-  'live-monitor': 'Live Monitor',
   projects: 'Projects',
 };
 

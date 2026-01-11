@@ -161,12 +161,6 @@ export const VIEWS = [
   'memory',
   'skills',
   'monitor',
-  'agency',
-  'costs',
-  'approvals',
-  'agent-tree',
-  'intelligence',
-  'live-monitor',
   'projects',
   'settings',
 ] as const;
@@ -192,11 +186,6 @@ export const NAV_GROUPS: NavGroup[] = [
     views: ['memory', 'agents', 'skills', 'mcp', 'hooks'],
   },
   {
-    id: 'orchestration',
-    label: 'Orchestration',
-    views: ['agency', 'agent-tree'],
-  },
-  {
     id: 'monitoring',
     label: 'Monitoring',
     views: ['monitor', 'analytics'],
@@ -210,11 +199,6 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'system',
     label: 'System',
     views: ['projects', 'settings'],
-  },
-  {
-    id: 'tbd',
-    label: 'TBD',
-    views: ['live-monitor', 'intelligence', 'approvals', 'costs'],
   },
 ];
 

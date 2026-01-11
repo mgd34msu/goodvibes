@@ -2327,9 +2327,12 @@ function GitPanel({ cwd, position }: GitPanelProps) {
             {/* Staged Changes */}
             {state.staged.length > 0 && (
               <div className="border border-surface-700 rounded overflow-hidden">
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggleSection('staged')}
-                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('staged'); } }}
+                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2">
                     <svg
@@ -2350,7 +2353,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
                   >
                     - All
                   </button>
-                </button>
+                </div>
                 {state.expandedSections.staged && (
                   <div className="max-h-40 overflow-y-auto">
                     {state.staged.map((change) => renderFileChange(change, false, true, false))}
@@ -2362,9 +2365,12 @@ function GitPanel({ cwd, position }: GitPanelProps) {
             {/* Unstaged Changes */}
             {state.unstaged.length > 0 && (
               <div className="border border-surface-700 rounded overflow-hidden">
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggleSection('unstaged')}
-                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('unstaged'); } }}
+                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2">
                     <svg
@@ -2385,7 +2391,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
                   >
                     + All
                   </button>
-                </button>
+                </div>
                 {state.expandedSections.unstaged && (
                   <div className="max-h-40 overflow-y-auto">
                     {state.unstaged.map((change) => renderFileChange(change, true, false, true))}
@@ -2397,9 +2403,12 @@ function GitPanel({ cwd, position }: GitPanelProps) {
             {/* Untracked Files */}
             {state.untracked.length > 0 && (
               <div className="border border-surface-700 rounded overflow-hidden">
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggleSection('untracked')}
-                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('untracked'); } }}
+                  className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-800 hover:bg-surface-750 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2">
                     <svg
@@ -2420,7 +2429,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
                   >
                     + All
                   </button>
-                </button>
+                </div>
                 {state.expandedSections.untracked && (
                   <div className="max-h-40 overflow-y-auto">
                     {state.untracked.map((change) => renderFileChange(change, true, false, true))}

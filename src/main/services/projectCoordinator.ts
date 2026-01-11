@@ -735,11 +735,3 @@ export function getProjectCoordinator() {
   return instance;
 }
 
-// Re-export types
-export type {
-  CrossProjectAgent,
-  SharedSkillConfig,
-  ProjectState,
-  ProjectEvent,
-  CoordinationStatus,
-};

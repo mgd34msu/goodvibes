@@ -380,7 +380,7 @@
   input[type="search"] {
     width: 100%;
     height: var(--height-input);
-    padding: var(--space-2) var(--space-3) !important;
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
     background: var(--color-bg-tertiary);
@@ -399,6 +399,19 @@
   .input::placeholder,
   input::placeholder {
     color: var(--color-text-muted);
+  }
+
+  /* Fix browser autofill styling */
+  .input:-webkit-autofill,
+  .input:-webkit-autofill:hover,
+  .input:-webkit-autofill:focus,
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--color-bg-tertiary) inset !important;
+    -webkit-text-fill-color: var(--color-text-primary) !important;
+    caret-color: var(--color-text-primary);
+    transition: background-color 5000s ease-in-out 0s;
   }
 
   .select,

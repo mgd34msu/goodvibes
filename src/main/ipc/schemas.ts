@@ -288,7 +288,7 @@ export const advancedSearchOptionsSchema = z.object({
 export const saveSearchSchema = z.object({
   name: z.string().min(1).max(200),
   query: z.string().max(1000),
-  filters: z.record(z.unknown()).optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================================
@@ -969,7 +969,7 @@ export const createMCPServerSchema = z.object({
   description: z.string().max(1000).optional(),
   command: z.string().min(1).max(1000),
   args: z.array(z.string().max(1000)).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   enabled: z.boolean(),
   autoStart: z.boolean().optional(),
 });
@@ -1027,7 +1027,7 @@ export const updateAgentTemplateSchema = z.object({
 export const createProjectConfigSchema = z.object({
   projectPath: filePathSchema,
   defaultBranch: z.string().max(200).optional(),
-  claudeConfig: z.record(z.unknown()).optional(),
+  claudeConfig: z.record(z.string(), z.unknown()).optional(),
   hooks: z.array(z.number().int().positive()).optional(),
   agents: z.array(z.string()).optional(),
 });

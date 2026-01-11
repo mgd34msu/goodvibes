@@ -1,21 +1,17 @@
 // ============================================================================
-// HOOK HANDLERS - Enhanced handlers integrating all Phase 5-8 services
+// HOOK HANDLERS - Enhanced handlers integrating services
 // ============================================================================
 //
 // This module registers enhanced hook handlers that integrate:
-// - Budget & Cost Controls (Phase 5)
 // - Approval Queue with Policy Engine (Phase 6)
 // - Agent Tree Orchestration (Phase 7)
-// - Session Intelligence (Phase 8)
 //
 // ============================================================================
 
 import { Logger } from './logger.js';
 import { getHookServer, type HookPayload, type HookResponse } from './hookServer.js';
-import { getBudgetService } from './budgetService.js';
 import { getPolicyEngine } from './policyEngine.js';
 import { getAgentTreeService } from './agentTree.js';
-import { getSessionIntelligence } from './sessionIntelligence.js';
 import type { ExtendedHookEventType } from '../database/hookEvents.js';
 
 const logger = new Logger('HookHandlers');
@@ -66,39 +62,9 @@ export function registerEnhancedHookHandlers(): void {
 // ============================================================================
 
 /**
- * Handle PreToolUse - Budget checking before tool execution
+ * Handle PreToolUse - Track tool calls in agent tree
  */
 async function handlePreToolUse(payload: HookPayload): Promise<HookResponse> {
-  const budgetService = getBudgetService();
-
-  const toolName = payload.tool_name || 'unknown';
-  const toolInput = payload.tool_input || {};
-
-  // Estimate cost for this operation
-  const estimate = budgetService.estimateCost(toolName, toolInput);
-
-  // Check budget
-  const budgetCheck = budgetService.checkBudget(
-    payload.working_directory,
-    payload.session_id,
-    estimate.estimatedCostUsd
-  );
-
-  // Block if budget exceeded and hard stop enabled
-  if (!budgetCheck.allowed) {
-    logger.warn(`Blocking operation due to budget: ${budgetCheck.blockMessage}`);
-    return {
-      decision: 'block',
-      message: budgetCheck.blockMessage,
-    };
-  }
-
-  // Emit warning if approaching budget limit
-  if (budgetCheck.warningMessage) {
-    logger.info(budgetCheck.warningMessage);
-    // This warning will be shown in the UI but won't block
-  }
-
   // Track tool call in agent tree if in sub-agent context
   if (payload.session_id) {
     const agentTree = getAgentTreeService();
@@ -116,48 +82,10 @@ async function handlePreToolUse(payload: HookPayload): Promise<HookResponse> {
 // ============================================================================
 
 /**
- * Handle PostToolUse - Cost tracking and session metrics after tool execution
+ * Handle PostToolUse - Track in agent tree after tool execution
  */
-async function handlePostToolUse(payload: HookPayload): Promise<HookResponse> {
-  const budgetService = getBudgetService();
-  const sessionIntelligence = getSessionIntelligence();
-  const agentTree = getAgentTreeService();
-
-  const toolName = payload.tool_name || 'unknown';
-  const toolInput = payload.tool_input || {};
-  const toolResponse = payload.tool_response || { success: true, content: '' };
-
-  // Calculate actual cost
-  const actualCost = budgetService.calculateActualCost(
-    toolName,
-    toolInput,
-    toolResponse
-  );
-
-  // Record cost in budget
-  budgetService.recordCost(
-    actualCost,
-    payload.working_directory,
-    payload.session_id
-  );
-
-  // Record tool call in session intelligence
-  if (payload.session_id) {
-    sessionIntelligence.recordToolCall(
-      payload.session_id,
-      toolName,
-      toolInput,
-      toolResponse
-    );
-    sessionIntelligence.recordCost(payload.session_id, actualCost);
-
-    // Also track in agent tree if applicable
-    const agent = agentTree.getAgent(payload.session_id);
-    if (agent) {
-      agentTree.recordCost(payload.session_id, actualCost);
-    }
-  }
-
+async function handlePostToolUse(_payload: HookPayload): Promise<HookResponse> {
+  // Agent tree tracking handled in PreToolUse
   return { decision: 'allow' };
 }
 
@@ -166,21 +94,11 @@ async function handlePostToolUse(payload: HookPayload): Promise<HookResponse> {
 // ============================================================================
 
 /**
- * Handle SessionStart - Initialize session intelligence
+ * Handle SessionStart - Context injection for agents/skills is handled by hookServer.ts
  */
-async function handleSessionStart(payload: HookPayload): Promise<HookResponse> {
-  const sessionIntelligence = getSessionIntelligence();
-
-  if (payload.session_id && payload.working_directory) {
-    // Initialize session tracking
-    sessionIntelligence.handleSessionStart({
-      sessionId: payload.session_id,
-      projectPath: payload.working_directory,
-    });
-  }
-
+async function handleSessionStart(_payload: HookPayload): Promise<HookResponse> {
   // Note: Context injection for agents/skills is handled by the existing
-  // handler in hookServer.ts - this adds session intelligence on top
+  // handler in hookServer.ts
   return { decision: 'allow' };
 }
 
@@ -189,18 +107,9 @@ async function handleSessionStart(payload: HookPayload): Promise<HookResponse> {
 // ============================================================================
 
 /**
- * Handle SessionEnd - Finalize session metrics
+ * Handle SessionEnd - Session cleanup
  */
-async function handleSessionEnd(payload: HookPayload): Promise<HookResponse> {
-  const sessionIntelligence = getSessionIntelligence();
-
-  if (payload.session_id) {
-    sessionIntelligence.handleSessionEnd({
-      sessionId: payload.session_id,
-      status: 'completed',
-    });
-  }
-
+async function handleSessionEnd(_payload: HookPayload): Promise<HookResponse> {
   return { decision: 'allow' };
 }
 
@@ -209,19 +118,9 @@ async function handleSessionEnd(payload: HookPayload): Promise<HookResponse> {
 // ============================================================================
 
 /**
- * Handle Stop - Generate session summary
+ * Handle Stop - Session stop event
  */
-async function handleStop(payload: HookPayload): Promise<HookResponse> {
-  const sessionIntelligence = getSessionIntelligence();
-
-  if (payload.session_id) {
-    // End session and generate summary
-    sessionIntelligence.handleSessionEnd({
-      sessionId: payload.session_id,
-      status: 'completed',
-    });
-  }
-
+async function handleStop(_payload: HookPayload): Promise<HookResponse> {
   return { decision: 'allow' };
 }
 
@@ -241,22 +140,6 @@ async function handleSubagentStart(payload: HookPayload): Promise<HookResponse> 
       agentName: payload.agent_name,
       parentSessionId: payload.parent_session_id,
     });
-
-    // Allocate budget to sub-agent if parent has budget
-    if (payload.parent_session_id) {
-      const budgetService = getBudgetService();
-      const parentBudget = budgetService.getBudget(
-        payload.working_directory,
-        payload.parent_session_id
-      );
-
-      if (parentBudget) {
-        // Allocate 20% of remaining parent budget to child
-        const remaining = parentBudget.limitUsd - parentBudget.spentUsd;
-        const allocation = remaining * 0.2;
-        agentTree.allocateBudget(payload.session_id, allocation, true);
-      }
-    }
   }
 
   return { decision: 'allow' };
@@ -346,15 +229,9 @@ async function handlePermissionRequest(payload: HookPayload): Promise<HookRespon
 // ============================================================================
 
 /**
- * Handle UserPromptSubmit - Record prompt for session intelligence
+ * Handle UserPromptSubmit - User prompt received
  */
-async function handleUserPromptSubmit(payload: HookPayload): Promise<HookResponse> {
-  const sessionIntelligence = getSessionIntelligence();
-
-  if (payload.session_id && payload.user_prompt) {
-    sessionIntelligence.recordPrompt(payload.session_id, payload.user_prompt);
-  }
-
+async function handleUserPromptSubmit(_payload: HookPayload): Promise<HookResponse> {
   return { decision: 'allow' };
 }
 
@@ -367,10 +244,8 @@ async function handleUserPromptSubmit(payload: HookPayload): Promise<HookRespons
  */
 export function initializeHookHandlers(): void {
   // Initialize services
-  getBudgetService();
   getPolicyEngine();
   getAgentTreeService().initialize();
-  getSessionIntelligence().initialize();
 
   // Install default policies
   getPolicyEngine().installDefaultPolicies();

@@ -70,8 +70,8 @@ export default function SessionsView() {
       {/* Left Panel - Sessions List (60%) */}
       <div className="flex flex-col w-[60%] min-w-0 border-r border-surface-700/50">
         {/* Sessions Header */}
-        <div className="px-5 py-4 border-b border-surface-800 bg-surface-900/80">
-          <div className="flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-surface-800 bg-surface-900/80 h-[68px] flex items-center">
+          <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-4">
               <h2 className="text-lg font-semibold text-surface-100">Session History</h2>
               {/* Filter tabs - inline with title */}
@@ -120,7 +120,7 @@ export default function SessionsView() {
       </div>
 
       {/* Right Panel - Monitor (40%) */}
-      <div className="flex flex-col w-[40%] min-w-0 bg-surface-950/50">
+      <div className="w-[40%] min-w-0 bg-surface-950/50">
         <MonitorPanel projectsRoot={settings.projectsRoot} />
       </div>
 
@@ -179,8 +179,8 @@ function MonitorPanel({ projectsRoot }: MonitorPanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Monitor Header */}
-      <div className="px-5 py-4 border-b border-surface-800 bg-surface-900/80">
-        <div className="flex items-center justify-between">
+      <div className="px-5 py-4 border-b border-surface-800 bg-surface-900/80 h-[68px] flex items-center">
+        <div className="flex items-center justify-between w-full">
           <h2 className="text-lg font-semibold text-surface-100">Live Monitor</h2>
           {terminalCount > 0 ? (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-500/10 border border-success-500/20">

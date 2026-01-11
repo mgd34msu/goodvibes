@@ -471,9 +471,10 @@ class PolicyEngineClass extends EventEmitter {
     conditions: PolicyConditions | null;
     enabled: boolean;
   }>): void {
-    const updateObj: Partial<ApprovalPolicy> = { ...updates };
-    if (updates.conditions !== undefined) {
-      updateObj.conditions = updates.conditions ? JSON.stringify(updates.conditions) : null;
+    const { conditions, ...rest } = updates;
+    const updateObj: Partial<ApprovalPolicy> = { ...rest };
+    if (conditions !== undefined) {
+      updateObj.conditions = conditions ? JSON.stringify(conditions) : null;
     }
 
     updateApprovalPolicy(id, updateObj);

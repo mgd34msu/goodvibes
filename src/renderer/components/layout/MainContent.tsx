@@ -21,14 +21,7 @@ const AgentsView = lazy(() => import('../views/AgentsView'));
 const MemoryView = lazy(() => import('../views/MemoryView'));
 const SkillsView = lazy(() => import('../views/SkillsView'));
 const MonitorView = lazy(() => import('../views/MonitorView'));
-// Phase 5-8 views
-const AgencyBrowserView = lazy(() => import('../views/AgencyBrowserView'));
-const CostCenterView = lazy(() => import('../views/CostCenterView'));
-const ApprovalQueueView = lazy(() => import('../views/ApprovalQueueView'));
-const AgentTreeView = lazy(() => import('../views/AgentTreeView'));
-const SessionIntelligenceView = lazy(() => import('../views/SessionIntelligenceView'));
 // Phase 9-12 views
-const LiveMonitorView = lazy(() => import('../views/LiveMonitorView'));
 const ProjectRegistryView = lazy(() => import('../views/ProjectRegistryView'));
 
 const VIEW_COMPONENTS: Record<ViewName, React.LazyExoticComponent<() => React.JSX.Element>> = {
@@ -44,14 +37,7 @@ const VIEW_COMPONENTS: Record<ViewName, React.LazyExoticComponent<() => React.JS
   memory: MemoryView,
   skills: SkillsView,
   monitor: MonitorView,
-  // Phase 5-8 views
-  agency: AgencyBrowserView,
-  costs: CostCenterView,
-  approvals: ApprovalQueueView,
-  'agent-tree': AgentTreeView,
-  intelligence: SessionIntelligenceView,
   // Phase 9-12 views
-  'live-monitor': LiveMonitorView,
   projects: ProjectRegistryView,
 };
 

@@ -7,7 +7,6 @@
 // - Project Coordination (cross-project agents, shared skills)
 // - Project Templates (create, apply, manage)
 // - Global Analytics (cross-project metrics)
-// - Live Monitor (file change tracking, rollback)
 // - Test Monitor (test result parsing, statistics)
 // - Agent Recommendations (Phase 10)
 //
@@ -17,14 +16,6 @@ import { ipcMain } from 'electron';
 import { Logger } from '../services/logger.js';
 import { getProjectRegistry } from '../services/projectRegistry.js';
 import { getProjectCoordinator } from '../services/projectCoordinator.js';
-import {
-  getLiveMonitor,
-  startLiveMonitor,
-  stopLiveMonitor,
-  type FileChange,
-  type RollbackResult,
-  type FileChangeStats,
-} from '../services/liveMonitor.js';
 import {
   getTestMonitor,
   startTestMonitor,
@@ -71,9 +62,6 @@ export function registerPhase9to12Handlers(): void {
 
   // Analytics Handlers
   registerAnalyticsHandlers();
-
-  // Live Monitor Handlers
-  registerLiveMonitorHandlers();
 
   // Test Monitor Handlers
   registerTestMonitorHandlers();
@@ -533,91 +521,6 @@ function registerAnalyticsHandlers(): void {
 }
 
 // ============================================================================
-// LIVE MONITOR HANDLERS
-// ============================================================================
-
-function registerLiveMonitorHandlers(): void {
-  const liveMonitor = getLiveMonitor();
-
-  // Start the live monitor
-  ipcMain.handle('live-monitor:start', async () => {
-    startLiveMonitor();
-    return liveMonitor.getStatus();
-  });
-
-  // Stop the live monitor
-  ipcMain.handle('live-monitor:stop', async () => {
-    stopLiveMonitor();
-    return { listening: false, changeCount: 0 };
-  });
-
-  // Get monitor status
-  ipcMain.handle('live-monitor:status', async () => {
-    return liveMonitor.getStatus();
-  });
-
-  // Get recent file changes
-  ipcMain.handle('live-monitor:getRecentFileChanges', async (
-    _event,
-    options?: { limit?: number; sessionId?: string }
-  ): Promise<FileChange[]> => {
-    return liveMonitor.getRecentFileChanges(
-      options?.limit ?? 50,
-      options?.sessionId
-    );
-  });
-
-  // Get a specific file change by ID
-  ipcMain.handle('live-monitor:getFileChange', async (
-    _event,
-    id: string
-  ): Promise<FileChange | null> => {
-    return liveMonitor.getFileChange(id);
-  });
-
-  // Rollback a file to its previous state
-  ipcMain.handle('live-monitor:rollbackFile', async (
-    _event,
-    id: string
-  ): Promise<RollbackResult> => {
-    return liveMonitor.rollbackFile(id);
-  });
-
-  // Get file change statistics
-  ipcMain.handle('live-monitor:getStats', async (): Promise<FileChangeStats> => {
-    return liveMonitor.getStats();
-  });
-
-  // Clear all file changes
-  ipcMain.handle('live-monitor:clear', async () => {
-    liveMonitor.clear();
-    return true;
-  });
-
-  // Get git diff for a file
-  ipcMain.handle('live-monitor:getGitDiff', async (
-    _event,
-    projectPath: string,
-    filePath: string
-  ): Promise<string | null> => {
-    return liveMonitor.getGitDiff(projectPath, filePath);
-  });
-
-  // Subscribe to file change events
-  ipcMain.handle('live-monitor:subscribe', async () => {
-    if (!liveMonitor.getStatus().listening) {
-      startLiveMonitor();
-    }
-    return { subscribed: true };
-  });
-
-  // Unsubscribe from file change events
-  ipcMain.handle('live-monitor:unsubscribe', async () => {
-    return { subscribed: false };
-  });
-}
-
-// ============================================================================
 // TEST MONITOR HANDLERS
 // ============================================================================
 
@@ -697,7 +600,6 @@ function registerTestMonitorHandlers(): void {
  * Call this during app startup after hook server is ready
  */
 export function initializePhase9to12Services(): void {
-  startLiveMonitor();
   startTestMonitor();
   logger.info('Phase 9-12 monitoring services initialized');
 }
@@ -707,7 +609,6 @@ export function initializePhase9to12Services(): void {
  * Call this during app shutdown
  */
 export function cleanupPhase9to12Services(): void {
-  stopLiveMonitor();
   stopTestMonitor();
   logger.info('Phase 9-12 monitoring services cleaned up');
 }

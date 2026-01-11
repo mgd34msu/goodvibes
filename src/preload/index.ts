@@ -552,36 +552,6 @@ const api = {
   cleanupHookEvents: (maxAgeHours?: number) =>
     ipcRenderer.invoke('cleanup-hook-events', { maxAgeHours }),
 
-  // Budget management
-  getBudgets: () =>
-    ipcRenderer.invoke('get-budgets'),
-  getBudget: (projectPath?: string, sessionId?: string) =>
-    ipcRenderer.invoke('get-budget', { projectPath, sessionId }),
-  upsertBudget: (budget: { projectPath?: string; sessionId?: string; limitUsd: number; spentUsd: number; warningThreshold: number; hardStopEnabled: boolean; resetPeriod: string; lastReset: string }) =>
-    ipcRenderer.invoke('upsert-budget', budget),
-  updateBudgetSpent: (id: number, additionalCost: number) =>
-    ipcRenderer.invoke('update-budget-spent', { id, additionalCost }),
-
-  // Approval queue
-  getPendingApprovals: (sessionId?: string) =>
-    ipcRenderer.invoke('get-pending-approvals', { sessionId }),
-  addToApprovalQueue: (item: { sessionId: string; requestType: string; requestDetails: string }) =>
-    ipcRenderer.invoke('add-to-approval-queue', item),
-  updateApprovalStatus: (id: number, status: 'approved' | 'denied' | 'expired', decidedBy: 'user' | 'policy', policyId?: number) =>
-    ipcRenderer.invoke('update-approval-status', { id, status, decidedBy, policyId }),
-
-  // Approval policies
-  getApprovalPolicies: () =>
-    ipcRenderer.invoke('get-approval-policies'),
-  getEnabledApprovalPolicies: () =>
-    ipcRenderer.invoke('get-enabled-approval-policies'),
-  createApprovalPolicy: (policy: { name: string; matcher: string; action: string; priority: number; conditions?: string; enabled: boolean }) =>
-    ipcRenderer.invoke('create-approval-policy', policy),
-  updateApprovalPolicy: (id: number, updates: Record<string, unknown>) =>
-    ipcRenderer.invoke('update-approval-policy', { id, updates }),
-  deleteApprovalPolicy: (id: number) =>
-    ipcRenderer.invoke('delete-approval-policy', id),
-
   // ============================================================================
   // MCP SERVERS
   // ============================================================================
@@ -939,69 +909,6 @@ const api = {
     const handler = (_: unknown, data: { id: number; sessionId: string; requestType: string; requestDetails: string }) => callback(data);
     ipcRenderer.on('hook:approval-required', handler);
     return () => { ipcRenderer.removeListener('hook:approval-required', handler); };
-  },
-  onBudgetWarning: (callback: (data: { id: number; projectPath?: string; spentUsd: number; limitUsd: number; percentage: number }) => void): (() => void) => {
-    const handler = (_: unknown, data: { id: number; projectPath?: string; spentUsd: number; limitUsd: number; percentage: number }) => callback(data);
-    ipcRenderer.on('hook:budget-warning', handler);
-    return () => { ipcRenderer.removeListener('hook:budget-warning', handler); };
-  },
-
-  // ============================================================================
-  // LIVE MONITOR (Phase 9)
-  // ============================================================================
-  liveMonitorStart: () =>
-    ipcRenderer.invoke('live-monitor:start'),
-  liveMonitorStop: () =>
-    ipcRenderer.invoke('live-monitor:stop'),
-  liveMonitorStatus: () =>
-    ipcRenderer.invoke('live-monitor:status'),
-  liveMonitorGetRecentFileChanges: (options?: { limit?: number; sessionId?: string }) =>
-    ipcRenderer.invoke('live-monitor:getRecentFileChanges', options),
-  liveMonitorGetFileChange: (id: string) =>
-    ipcRenderer.invoke('live-monitor:getFileChange', id),
-  liveMonitorRollbackFile: (id: string) =>
-    ipcRenderer.invoke('live-monitor:rollbackFile', id),
-  liveMonitorGetStats: () =>
-    ipcRenderer.invoke('live-monitor:getStats'),
-  liveMonitorClear: () =>
-    ipcRenderer.invoke('live-monitor:clear'),
-  liveMonitorGetGitDiff: (projectPath: string, filePath: string) =>
-    ipcRenderer.invoke('live-monitor:getGitDiff', projectPath, filePath),
-  liveMonitorSubscribe: () =>
-    ipcRenderer.invoke('live-monitor:subscribe'),
-  liveMonitorUnsubscribe: () =>
-    ipcRenderer.invoke('live-monitor:unsubscribe'),
-
-  // Live Monitor Event Listeners
-  onFileChanged: (callback: (data: {
-    id: string;
-    sessionId: string | null;
-    projectPath: string | null;
-    filePath: string;
-    action: 'created' | 'modified' | 'deleted';
-    toolName: 'Edit' | 'Write';
-    timestamp: string;
-    isGitRepo: boolean;
-    canRollback: boolean;
-  }) => void): (() => void) => {
-    const handler = (_: unknown, data: {
-      id: string;
-      sessionId: string | null;
-      projectPath: string | null;
-      filePath: string;
-      action: 'created' | 'modified' | 'deleted';
-      toolName: 'Edit' | 'Write';
-      timestamp: string;
-      isGitRepo: boolean;
-      canRollback: boolean;
-    }) => callback(data);
-    ipcRenderer.on('live-monitor:file-changed', handler);
-    return () => { ipcRenderer.removeListener('live-monitor:file-changed', handler); };
-  },
-  onFileRolledback: (callback: (data: { id: string; filePath: string; method: 'git' | 'content' }) => void): (() => void) => {
-    const handler = (_: unknown, data: { id: string; filePath: string; method: 'git' | 'content' }) => callback(data);
-    ipcRenderer.on('live-monitor:file-rolledback', handler);
-    return () => { ipcRenderer.removeListener('live-monitor:file-rolledback', handler); };
   },
 
   // ============================================================================

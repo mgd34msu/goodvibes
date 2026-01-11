@@ -20,6 +20,7 @@ import type { TerminalInfo, TerminalStartResult } from '../../shared/types';
 interface TerminalInstance extends TerminalInfo {
   isLoading: boolean;
   error?: string;
+  isPlainTerminal?: boolean;
 }
 
 interface TerminalState {
@@ -32,6 +33,7 @@ interface TerminalState {
 
   // Actions
   createTerminal: (cwd?: string, name?: string, resumeSessionId?: string) => Promise<TerminalStartResult>;
+  createPlainTerminal: (cwd?: string, name?: string) => Promise<TerminalStartResult>;
   createPreviewTerminal: (sessionId: string, name: string, cwd?: string) => number;
   closeTerminal: (id: number) => Promise<void>;
   closePreviewTerminal: (id: number) => void;
@@ -74,6 +76,40 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           resumeSessionId: result.resumeSessionId,
           sessionType: result.sessionType as 'user' | 'subagent' | undefined,
           isLoading: false,
+        };
+
+        set((state) => {
+          const newMap = new Map(state.terminals);
+          newMap.set(result.id!, terminal);
+          return { terminals: newMap, activeTerminalId: result.id };
+        });
+      }
+
+      return result;
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+
+  createPlainTerminal: async (cwd, name) => {
+    try {
+      const result = await window.clausitron.startPlainTerminal({
+        cwd,
+        name,
+      });
+
+      if (result.error) {
+        return result;
+      }
+
+      if (result.id !== undefined) {
+        const terminal: TerminalInstance = {
+          id: result.id,
+          name: result.name || 'Terminal',
+          cwd: result.cwd || cwd || '',
+          startTime: new Date(),
+          isLoading: false,
+          isPlainTerminal: true,
         };
 
         set((state) => {

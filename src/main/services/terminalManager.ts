@@ -20,6 +20,7 @@ interface InternalTerminal {
   startTime: Date;
   resumeSessionId?: string;
   sessionType?: 'user' | 'subagent';
+  isPlainTerminal?: boolean;
 }
 
 const terminals = new Map<number, InternalTerminal>();
@@ -193,6 +194,91 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
   }
 }
 
+export async function startPlainTerminal(options: TerminalStartOptions): Promise<TerminalStartResult> {
+  try {
+    const workingDir = options.cwd || process.cwd();
+    const terminalId = ++terminalIdCounter;
+
+    // Determine shell based on platform
+    const shell = process.platform === 'win32'
+      ? process.env.COMSPEC || 'cmd.exe'
+      : process.env.SHELL || '/bin/bash';
+
+    logger.info(`Starting plain terminal with shell: ${shell} in ${workingDir}`);
+
+    // Spawn shell with node-pty
+    const ptyProc = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: workingDir,
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        FORCE_COLOR: '1',
+        COLORTERM: 'truecolor',
+      },
+      useConpty: process.platform === 'win32',
+    });
+
+    const name = options.name || 'Terminal';
+
+    const terminalInfo: InternalTerminal = {
+      id: terminalId,
+      pty: ptyProc,
+      name,
+      cwd: workingDir,
+      startTime: new Date(),
+      isPlainTerminal: true,
+    };
+
+    terminals.set(terminalId, terminalInfo);
+
+    // Handle PTY data
+    ptyProc.onData((data) => {
+      sendToRenderer('terminal-data', { id: terminalId, data });
+    });
+
+    // Handle PTY exit
+    ptyProc.onExit(({ exitCode }) => {
+      sendToRenderer('terminal-exit', { id: terminalId, exitCode });
+      terminals.delete(terminalId);
+
+      // Log activity for terminal exit
+      logActivity(
+        'terminal_end',
+        null,
+        `Plain terminal closed: ${name} (exit code: ${exitCode})`,
+        { cwd: workingDir, terminalId, exitCode, isPlainTerminal: true }
+      );
+
+      logger.info(`Plain terminal ${terminalId} exited with code ${exitCode}`);
+    });
+
+    // Note: Plain terminals do NOT add to recent projects - only Claude sessions do
+
+    // Log activity for terminal start
+    logActivity(
+      'terminal_start',
+      null,
+      `Started plain terminal: ${name}`,
+      { cwd: workingDir, terminalId, isPlainTerminal: true }
+    );
+
+    logger.info(`Plain terminal ${terminalId} started in ${workingDir}`);
+
+    return {
+      id: terminalId,
+      name,
+      cwd: workingDir,
+      isPlainTerminal: true,
+    };
+  } catch (error) {
+    logger.error('Failed to start plain terminal', error);
+    return { error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
 export function writeToTerminal(id: number, data: string): void {
   const terminal = terminals.get(id);
   if (terminal) {
@@ -240,6 +326,7 @@ export function getAllTerminals(): TerminalInfo[] {
       startTime: term.startTime,
       resumeSessionId: term.resumeSessionId,
       sessionType: term.sessionType,
+      isPlainTerminal: term.isPlainTerminal,
     });
   }
   return list;

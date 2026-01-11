@@ -265,8 +265,8 @@ function ToolUsageGrid({ data }: { data: ToolUsageStat[] }) {
   }
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-      {data.slice(0, 12).map((tool) => (
+    <div className="grid grid-cols-4 md:grid-cols-8 lg:grid-cols-12 gap-2">
+      {data.slice(0, 24).map((tool) => (
         <div key={tool.toolName} className="p-3 bg-surface-800 rounded-lg">
           <div className="text-lg font-bold text-surface-100">{formatNumber(tool.totalCount)}</div>
           <div className="text-xs text-surface-500 truncate">{tool.toolName}</div>

@@ -14,7 +14,7 @@ import { registerPhase5to8Handlers } from './phase5to8Handlers.js';
 import { registerPhase9to12Handlers } from './phase9to12Handlers.js';
 import { initProjectRegistry } from '../services/projectRegistry.js';
 import { initProjectCoordinator } from '../services/projectCoordinator.js';
-import { startTerminal, writeToTerminal, resizeTerminal, killTerminal, getAllTerminals } from '../services/terminalManager.js';
+import { startTerminal, startPlainTerminal, writeToTerminal, resizeTerminal, killTerminal, getAllTerminals } from '../services/terminalManager.js';
 import { getSessionManager } from '../services/sessionManager.js';
 import { getRecentProjects, addRecentProject, removeRecentProject, clearRecentProjects, pinProject } from '../services/recentProjects.js';
 import * as git from '../services/git.js';
@@ -78,6 +78,14 @@ export function registerAllIpcHandlers(): void {
       sessionType: options.sessionType
     });
     return startTerminal(options);
+  }));
+
+  ipcMain.handle('start-plain-terminal', withContext('start-plain-terminal', async (_, options: { cwd?: string; name?: string }) => {
+    logger.info('IPC: start-plain-terminal received', {
+      cwd: options.cwd,
+      name: options.name
+    });
+    return startPlainTerminal(options);
   }));
 
   ipcMain.handle('terminal-input', withContext('terminal-input', async (_, { id, data }) => {

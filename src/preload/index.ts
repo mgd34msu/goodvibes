@@ -11,6 +11,8 @@ const api = {
   // ============================================================================
   startClaude: (options: { cwd?: string; name?: string; resumeSessionId?: string; sessionType?: string }) =>
     ipcRenderer.invoke('start-claude', options),
+  startPlainTerminal: (options: { cwd?: string; name?: string }) =>
+    ipcRenderer.invoke('start-plain-terminal', options),
   terminalInput: (id: number, data: string) =>
     ipcRenderer.invoke('terminal-input', { id, data }),
   terminalResize: (id: number, cols: number, rows: number) =>

@@ -66,6 +66,7 @@ export interface TerminalInfo {
   sessionType?: 'user' | 'subagent';
   isPreview?: boolean;
   previewSessionId?: string;
+  isPlainTerminal?: boolean;
 }
 
 export interface TerminalStartOptions {
@@ -73,6 +74,7 @@ export interface TerminalStartOptions {
   name?: string;
   resumeSessionId?: string;
   sessionType?: 'user' | 'subagent';
+  isPlainTerminal?: boolean;
 }
 
 export interface TerminalStartResult {
@@ -81,6 +83,7 @@ export interface TerminalStartResult {
   cwd?: string;
   resumeSessionId?: string;
   sessionType?: string;
+  isPlainTerminal?: boolean;
   error?: string;
 }
 

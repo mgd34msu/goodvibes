@@ -23,6 +23,7 @@ export default function TerminalView() {
   const terminals = useMemo(() => Array.from(terminalsMap.values()), [terminalsMap]);
   const activeTerminalId = useTerminalStore((s) => s.activeTerminalId);
   const zoomLevel = useTerminalStore((s) => s.zoomLevel);
+  const createPlainTerminal = useTerminalStore((s) => s.createPlainTerminal);
   const gitPanelPosition = useSettingsStore((s) => s.settings.gitPanelPosition);
 
   const openFolderPicker = useAppStore((s) => s.openFolderPicker);
@@ -33,6 +34,22 @@ export default function TerminalView() {
   const hasTerminals = terminals.length > 0;
   const activeTerminal = activeTerminalId ? terminalsMap.get(activeTerminalId) : undefined;
   const hasActiveSession = hasTerminals && activeTerminal && !activeTerminal.isPreview;
+
+  // Handler for opening a plain terminal in project root or most recent project
+  const projectsRoot = useSettingsStore((s) => s.settings.projectsRoot);
+  const handleOpenTerminal = useCallback(async () => {
+    // Use projectsRoot setting if defined, or fall back to most recent project
+    let cwd = projectsRoot;
+    if (!cwd) {
+      const recentProjects = await window.clausitron.getRecentProjects();
+      if (recentProjects.length > 0) {
+        cwd = recentProjects[0].path;
+      }
+    }
+    if (cwd) {
+      await createPlainTerminal(cwd);
+    }
+  }, [createPlainTerminal, projectsRoot]);
 
   return (
     <div className="flex flex-col h-full">
@@ -82,7 +99,7 @@ export default function TerminalView() {
             )}
           </>
         ) : (
-          <EmptyState onNewSession={openFolderPicker} />
+          <EmptyState onNewSession={openFolderPicker} onNewTerminal={handleOpenTerminal} />
         )}
       </div>
 
@@ -111,7 +128,42 @@ function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: Te
   const activeTerminalId = useTerminalStore((s) => s.activeTerminalId);
   const setActiveTerminal = useTerminalStore((s) => s.setActiveTerminal);
   const closeTerminal = useTerminalStore((s) => s.closeTerminal);
+  const createPlainTerminal = useTerminalStore((s) => s.createPlainTerminal);
   const openFolderPicker = useAppStore((s) => s.openFolderPicker);
+  const projectsRoot = useSettingsStore((s) => s.settings.projectsRoot);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleNewClaudeSession = useCallback(() => {
+    setIsDropdownOpen(false);
+    openFolderPicker();
+  }, [openFolderPicker]);
+
+  const handleNewTerminal = useCallback(async () => {
+    setIsDropdownOpen(false);
+    // Use projectsRoot setting if defined, or fall back to most recent project
+    let cwd = projectsRoot;
+    if (!cwd) {
+      const recentProjects = await window.clausitron.getRecentProjects();
+      if (recentProjects.length > 0) {
+        cwd = recentProjects[0].path;
+      }
+    }
+    if (cwd) {
+      await createPlainTerminal(cwd);
+    }
+  }, [createPlainTerminal, projectsRoot]);
 
   return (
     <div className="flex items-center gap-4 px-3 py-3 bg-surface-900 border-b border-surface-800">
@@ -143,9 +195,10 @@ function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: Te
           >
             <span className={clsx(
                 'w-2.5 h-2.5 rounded-full flex-shrink-0',
-                terminal.isPreview ? 'bg-accent-500' : 'bg-success-500'
+                terminal.isPreview ? 'bg-accent-500' : terminal.isPlainTerminal ? 'bg-warning-500' : 'bg-success-500'
               )}
               aria-hidden="true"
+              title={terminal.isPreview ? 'Preview' : terminal.isPlainTerminal ? 'Terminal' : 'Claude Session'}
             />
             <span className="truncate">{terminal.name}</span>
             <button
@@ -164,12 +217,64 @@ function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: Te
         ))}
       </div>
 
+      {/* New Dropdown - positioned BEFORE git icon */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-surface-200 bg-surface-800 hover:text-white hover:bg-surface-700 transition-colors border border-surface-700"
+          title="New... (Ctrl+N)"
+          aria-label="New"
+          aria-expanded={isDropdownOpen}
+          aria-haspopup="menu"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          <span className="text-sm font-medium">New...</span>
+          <svg className={clsx('w-3 h-3 transition-transform', isDropdownOpen && 'rotate-180')} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {/* Dropdown Menu */}
+        {isDropdownOpen && (
+          <div className="absolute right-0 top-full mt-1 w-56 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-50" role="menu">
+            <button
+              onClick={handleNewClaudeSession}
+              className="flex items-center gap-3 w-full px-4 py-3 text-left text-surface-200 hover:bg-surface-700 hover:text-white transition-colors rounded-t-lg"
+              role="menuitem"
+            >
+              <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <div>
+                <div className="font-medium">Claude Code Session</div>
+                <div className="text-xs text-surface-400">Start a new Claude CLI session</div>
+              </div>
+            </button>
+            <button
+              onClick={handleNewTerminal}
+              className="flex items-center gap-3 w-full px-4 py-3 text-left text-surface-200 hover:bg-surface-700 hover:text-white transition-colors rounded-b-lg border-t border-surface-700"
+              role="menuitem"
+            >
+              <svg className="w-5 h-5 text-success-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <div>
+                <div className="font-medium">Terminal Window</div>
+                <div className="text-xs text-surface-400">Open a plain shell terminal</div>
+              </div>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Git Toggle Button - Only show when there's an active CLI session */}
       {hasActiveSession && (
         <button
           onClick={onToggleGitPanel}
           className={clsx(
-            'p-2 rounded-lg transition-colors',
+            'p-2 mr-2 rounded-lg transition-colors',
             showGitPanel
               ? 'text-primary-400 bg-primary-500/20 hover:bg-primary-500/30'
               : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800'
@@ -184,18 +289,6 @@ function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: Te
           </svg>
         </button>
       )}
-
-      {/* New Tab Button */}
-      <button
-        onClick={openFolderPicker}
-        className="p-2 mr-2 rounded-lg text-surface-200 bg-surface-800 hover:text-white hover:bg-surface-700 transition-colors border border-surface-700"
-        title="New Terminal (Ctrl+N)"
-        aria-label="New Terminal (Ctrl+N)"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
     </div>
   );
 }
@@ -478,24 +571,47 @@ function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
 // EMPTY STATE
 // ============================================================================
 
-function EmptyState({ onNewSession }: { onNewSession: () => void }) {
+function EmptyState({ onNewSession, onNewTerminal }: { onNewSession: () => void; onNewTerminal: () => void }) {
   return (
     <div className="flex-1 flex items-center justify-center bg-surface-900">
-      <div className="text-center max-w-md mx-auto px-6">
+      <div className="text-center max-w-lg mx-auto px-6">
         <img src={appIcon} alt="Clausitron" className="w-24 h-24 mx-auto mb-8" />
         <h2 className="text-3xl font-bold text-surface-100 mb-4">Welcome to Clausitron</h2>
         <p className="text-surface-400 text-base mb-10 leading-relaxed">
-          Start a new Claude CLI session to begin working on your project.
+          Start a new Claude Code session to begin working on your project, or open a plain terminal.
         </p>
-        <button
-          onClick={onNewSession}
-          className="btn btn-primary btn-lg gap-3 px-8 py-4"
-        >
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Session
-        </button>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <button
+            onClick={onNewSession}
+            className="flex items-center gap-4 px-6 py-4 bg-surface-800 border border-surface-700 rounded-xl hover:bg-surface-700 hover:border-surface-600 transition-colors text-left"
+            aria-label="Start new Claude Code session"
+          >
+            <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-primary-500/20 flex items-center justify-center">
+              <svg className="w-6 h-6 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <div className="font-semibold text-surface-100">Claude Code Session</div>
+              <div className="text-sm text-surface-400">Start a new Claude CLI session</div>
+            </div>
+          </button>
+          <button
+            onClick={onNewTerminal}
+            className="flex items-center gap-4 px-6 py-4 bg-surface-800 border border-surface-700 rounded-xl hover:bg-surface-700 hover:border-surface-600 transition-colors text-left"
+            aria-label="Open new terminal"
+          >
+            <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-success-500/20 flex items-center justify-center">
+              <svg className="w-6 h-6 text-success-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <div className="font-semibold text-surface-100">Terminal Window</div>
+              <div className="text-sm text-surface-400">Open a plain shell terminal</div>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3535,6 +3651,36 @@ function FolderPickerModal() {
         </div>
 
         <div className="modal-body folder-picker">
+          {/* Open Project + Selected Path - Combined Row */}
+          <div className="flex items-stretch gap-2 mb-4">
+            {/* Open Project Button */}
+            <button
+              onClick={handleSelectFolder}
+              className="flex items-center gap-2 px-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg hover:bg-surface-700 hover:border-surface-600 transition-colors flex-shrink-0"
+            >
+              <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+              </svg>
+              <div className="text-sm font-medium text-surface-100">Open Project</div>
+            </button>
+
+            {/* Selected Path Display */}
+            <div
+              className={clsx(
+                'flex-1 flex items-center px-4 py-2.5 rounded-lg border min-w-0',
+                selectedFolder
+                  ? 'bg-primary-500/10 border-primary-500/30'
+                  : 'bg-surface-900 border-surface-700'
+              )}
+            >
+              {selectedFolder ? (
+                <div className="truncate text-sm text-surface-100">{selectedFolder}</div>
+              ) : (
+                <div className="text-sm text-surface-500 italic">No folder selected</div>
+              )}
+            </div>
+          </div>
+
           {/* Recent Projects */}
           {recentProjects.length > 0 && (
             <div className="recent-projects-section">
@@ -3542,13 +3688,13 @@ function FolderPickerModal() {
                 <span className="section-title">Recent Projects</span>
               </div>
               <div className="recent-projects-list">
-                {recentProjects.slice(0, 5).map((project) => (
+                {recentProjects.slice(0, 3).map((project) => (
                   <button
                     key={project.path}
                     onClick={() => setSelectedFolder(project.path)}
                     className={clsx(
                       'template-option',
-                      selectedFolder === project.path && 'bg-primary-500\/20'
+                      selectedFolder === project.path && 'bg-primary-500/20'
                     )}
                   >
                     <span className="template-icon">📁</span>
@@ -3557,32 +3703,6 @@ function FolderPickerModal() {
                     </div>
                   </button>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Browse */}
-          <div>
-            <div className="section-header">
-              <span className="section-title">Browse</span>
-            </div>
-            <button
-              onClick={handleSelectFolder}
-              className="folder-option"
-              style={{ borderStyle: 'dashed' }}
-            >
-              <span className="folder-icon">📂</span>
-              <span className="folder-label">Open Folder</span>
-              <span className="folder-desc">Select an existing project directory</span>
-            </button>
-          </div>
-
-          {/* Selected Folder */}
-          {selectedFolder && (
-            <div className="selected-folder">
-              <div>
-                <div className="text-xs text-surface-500 mb-1">Selected:</div>
-                <div className="folder-path">{selectedFolder}</div>
               </div>
             </div>
           )}

@@ -63,10 +63,21 @@ export function addRecentProject(projectPath: string, name?: string): void {
 
 export function getRecentProjects(): RecentProject[] {
   // Sort: pinned first, then by lastOpened
-  return [...recentProjects].sort((a, b) => {
+  const sorted = [...recentProjects].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
     return new Date(b.lastOpened).getTime() - new Date(a.lastOpened).getTime();
+  });
+
+  // Deduplicate by normalized path (case-insensitive on Windows, handles trailing slashes)
+  const seen = new Set<string>();
+  return sorted.filter(project => {
+    const normalizedPath = path.normalize(project.path).toLowerCase().replace(/[\\/]+$/, '');
+    if (seen.has(normalizedPath)) {
+      return false;
+    }
+    seen.add(normalizedPath);
+    return true;
   });
 }
 

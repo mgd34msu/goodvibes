@@ -93,6 +93,39 @@ export function FolderPickerModal() {
         </div>
 
         <div className="modal-body folder-picker">
+          {/* Open Project + Selected Path - Combined Row */}
+          <div className="flex items-stretch gap-2 mb-4">
+            {/* Open Project Button */}
+            <button
+              onClick={handleSelectFolder}
+              className="flex items-center gap-2 px-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg hover:bg-surface-700 hover:border-surface-600 transition-colors flex-shrink-0"
+            >
+              <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+              </svg>
+              <div className="text-left">
+                <div className="text-sm font-medium text-surface-100">Open Project</div>
+              </div>
+            </button>
+
+            {/* Selected Path Display */}
+            <div
+              className={clsx(
+                'flex-1 flex items-center px-4 py-2.5 rounded-lg border min-w-0',
+                selectedFolder
+                  ? 'bg-primary-500/10 border-primary-500/30'
+                  : 'bg-surface-900 border-surface-700'
+              )}
+              aria-live="polite"
+            >
+              {selectedFolder ? (
+                <div className="truncate text-sm text-surface-100">{selectedFolder}</div>
+              ) : (
+                <div className="text-sm text-surface-500 italic">No folder selected</div>
+              )}
+            </div>
+          </div>
+
           {/* Recent Projects */}
           {recentProjects.length > 0 && (
             <div className="recent-projects-section">
@@ -100,7 +133,7 @@ export function FolderPickerModal() {
                 <span className="section-title">Recent Projects</span>
               </div>
               <div className="recent-projects-list" role="listbox" aria-label="Recent projects">
-                {recentProjects.slice(0, 5).map((project) => (
+                {recentProjects.slice(0, 3).map((project) => (
                   <button
                     key={project.path}
                     onClick={() => setSelectedFolder(project.path)}
@@ -117,32 +150,6 @@ export function FolderPickerModal() {
                     </div>
                   </button>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Browse */}
-          <div>
-            <div className="section-header">
-              <span className="section-title">Browse</span>
-            </div>
-            <button
-              onClick={handleSelectFolder}
-              className="folder-option"
-              style={{ borderStyle: 'dashed' }}
-            >
-              <span className="folder-icon" aria-hidden="true">folder_open</span>
-              <span className="folder-label">Open Folder</span>
-              <span className="folder-desc">Select an existing project directory</span>
-            </button>
-          </div>
-
-          {/* Selected Folder */}
-          {selectedFolder && (
-            <div className="selected-folder" aria-live="polite">
-              <div>
-                <div className="text-xs text-surface-500 mb-1">Selected:</div>
-                <div className="folder-path">{selectedFolder}</div>
               </div>
             </div>
           )}

@@ -329,10 +329,12 @@ export const phase5to8Api = {
   // EVENT LISTENERS
   // =====================
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on: (channel: string, callback: (...args: any[]) => void): void => {
     ipcRenderer.on(channel, callback);
   },
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   off: (channel: string, callback: (...args: any[]) => void): void => {
     ipcRenderer.removeListener(channel, callback);
   },

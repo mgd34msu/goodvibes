@@ -204,8 +204,12 @@ export function rollbackMigrations(
     logger.info(`Rolling back migration ${migration.version}: ${migration.description}`);
 
     try {
+      const rollbackFn = migration.down;
+      if (!rollbackFn) {
+        throw new Error(`Migration ${migration.version} has no rollback function`);
+      }
       const runRollback = db.transaction(() => {
-        migration.down!(db);
+        rollbackFn(db);
         removeMigrationRecord(db, migration.version);
       });
 

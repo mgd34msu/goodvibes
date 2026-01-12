@@ -12,6 +12,7 @@
 
 import { EventEmitter } from 'events';
 import { Logger } from './logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 import { getMainWindow } from '../window.js';
 import { getHookServer, type HookPayload } from './hookServer.js';
 
@@ -292,7 +293,7 @@ class TestMonitorService extends EventEmitter {
       sessionId,
       projectPath,
       command,
-      timestamp: new Date().toISOString(),
+      timestamp: formatTimestamp(),
       durationMs,
       status: this.determineStatus(parsed),
       totalTests: parsed.totalTests || 0,
@@ -588,8 +589,8 @@ class TestMonitorService extends EventEmitter {
     result.totalTests = result.passedTests + result.failedTests + result.skippedTests;
 
     // Alternative: Parse summary line "ok package 0.123s"
-    const okMatches = output.match(/^ok\s+.+/gm);
-    const failSummaryMatches = output.match(/^FAIL\s+.+/gm);
+    const _okMatches = output.match(/^ok\s+.+/gm);
+    const _failSummaryMatches = output.match(/^FAIL\s+.+/gm);
 
     if (!result.totalTests) {
       // Count test functions run

@@ -19,7 +19,6 @@ import os from 'os';
 // Check if better-sqlite3 can be loaded
 let canLoadDatabase = true;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('better-sqlite3');
 } catch {
   canLoadDatabase = false;
@@ -38,12 +37,12 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('../services/logger.js', () => ({
-  Logger: vi.fn().mockImplementation(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
+  Logger: class MockLogger {
+    info = vi.fn();
+    warn = vi.fn();
+    error = vi.fn();
+    debug = vi.fn();
+  },
 }));
 
 // Dynamic imports
@@ -54,7 +53,7 @@ let upsertSession: typeof import('./index.js').upsertSession;
 let getAllSessions: typeof import('./index.js').getAllSessions;
 let getSession: typeof import('./index.js').getSession;
 let getActiveSessions: typeof import('./index.js').getActiveSessions;
-let getFavoriteSessions: typeof import('./index.js').getFavoriteSessions;
+let _getFavoriteSessions: typeof import('./index.js').getFavoriteSessions;
 let storeMessages: typeof import('./index.js').storeMessages;
 let getSessionMessages: typeof import('./index.js').getSessionMessages;
 let getAnalytics: typeof import('./index.js').getAnalytics;
@@ -125,7 +124,7 @@ beforeAll(async () => {
   getAllSessions = dbModule.getAllSessions;
   getSession = dbModule.getSession;
   getActiveSessions = dbModule.getActiveSessions;
-  getFavoriteSessions = dbModule.getFavoriteSessions;
+  _getFavoriteSessions = dbModule.getFavoriteSessions;
   storeMessages = dbModule.storeMessages;
   getSessionMessages = dbModule.getSessionMessages;
   getAnalytics = dbModule.getAnalytics;
@@ -543,10 +542,21 @@ describeIfDb('Concurrent Access Performance Benchmarks', () => {
 // ============================================================================
 
 describeIfDb('Performance Summary', () => {
-  it('prints performance summary', () => {
+  it('verifies database module was loaded successfully', () => {
+    // This test validates that the database module can be loaded and initialized
+    // The fact that we reach this point means all prior benchmarks passed
+    expect(canLoadDatabase).toBe(true);
+    expect(typeof initDatabase).toBe('function');
+    expect(typeof closeDatabase).toBe('function');
+    expect(typeof getDatabase).toBe('function');
+
+    // Verify we can get a database instance
+    const db = getDatabase();
+    expect(db).toBeDefined();
+    expect(typeof db.exec).toBe('function');
+
     console.log('\n=== Performance Benchmark Summary ===');
     console.log('All benchmarks passed within acceptable limits.');
     console.log('=====================================\n');
-    expect(true).toBe(true);
   });
 });

@@ -6,6 +6,9 @@
 // Uses mocked dependencies to test session management behavior.
 // ============================================================================
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock all external dependencies before importing the module under test
@@ -66,12 +69,12 @@ vi.mock('../window.js', () => ({
 }));
 
 vi.mock('./logger.js', () => ({
-  Logger: vi.fn().mockImplementation(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
+  Logger: class MockLogger {
+    info = vi.fn();
+    warn = vi.fn();
+    error = vi.fn();
+    debug = vi.fn();
+  },
 }));
 
 // Import after mocks are set up

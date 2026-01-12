@@ -10,6 +10,9 @@ import PullRequestList from './PullRequestList';
 import IssueList from './IssueList';
 import CreatePullRequestModal from './CreatePullRequestModal';
 import CIStatusBadge, { CombinedStatusBadge } from './CIStatusBadge';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('GitHubPanel');
 
 interface GitHubPanelProps {
   cwd: string;
@@ -63,6 +66,7 @@ export default function GitHubPanel({
   // Load auth state and repo info on mount
   useEffect(() => {
     loadAuthState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load repo info when cwd changes
@@ -70,6 +74,7 @@ export default function GitHubPanel({
     if (isAuthenticated && cwd) {
       loadRepoInfo();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, isAuthenticated]);
 
   // Load CI status when branch changes
@@ -77,6 +82,7 @@ export default function GitHubPanel({
     if (repoInfo && currentBranch) {
       loadCIStatus();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoInfo, currentBranch]);
 
   const loadAuthState = async () => {
@@ -91,7 +97,7 @@ export default function GitHubPanel({
         await loadRepoInfo();
       }
     } catch (err) {
-      console.error('Failed to load GitHub auth state:', err);
+      logger.error('Failed to load GitHub auth state:', err);
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +132,7 @@ export default function GitHubPanel({
         setRepoInfo(null);
       }
     } catch (err) {
-      console.error('Failed to load repo info:', err);
+      logger.error('Failed to load repo info:', err);
       setRepoInfo(null);
     }
   };
@@ -147,7 +153,7 @@ export default function GitHubPanel({
         combined: statusResult.success ? statusResult.data || null : null,
       });
     } catch (err) {
-      console.error('Failed to load CI status:', err);
+      logger.error('Failed to load CI status:', err);
     } finally {
       setCILoading(false);
     }
@@ -171,7 +177,7 @@ export default function GitHubPanel({
         setOrgs(orgsResult.data);
       }
     } catch (err) {
-      console.error('Failed to load repos:', err);
+      logger.error('Failed to load repos:', err);
     } finally {
       setReposLoading(false);
     }
@@ -187,7 +193,7 @@ export default function GitHubPanel({
         setRepos(result.data);
       }
     } catch (err) {
-      console.error('Failed to load org repos:', err);
+      logger.error('Failed to load org repos:', err);
     } finally {
       setReposLoading(false);
     }
@@ -228,7 +234,7 @@ export default function GitHubPanel({
         }
       }
     } catch (err) {
-      console.error('Failed to add remote:', err);
+      logger.error('Failed to add remote:', err);
       setError('Failed to add remote');
     } finally {
       setAddingRemote(false);
@@ -250,11 +256,12 @@ export default function GitHubPanel({
     } else {
       setRepoInfo(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd]);
 
   const handlePRCreated = useCallback((prNumber: number, prUrl: string) => {
     // Refresh PR list or show success message
-    console.log(`PR #${prNumber} created: ${prUrl}`);
+    logger.info(`PR #${prNumber} created: ${prUrl}`);
   }, []);
 
   // Open the dropdown and load repos
@@ -618,7 +625,7 @@ function CreateRepositoryModal({
         setError(result.error || 'Failed to create repository');
       }
     } catch (err) {
-      console.error('Failed to create repo:', err);
+      logger.error('Failed to create repo:', err);
       setError('Failed to create repository');
     } finally {
       setIsCreating(false);

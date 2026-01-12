@@ -5,6 +5,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Recommendation } from '../components/recommendations';
+import { createLogger } from '../../shared/logger';
+
+const logger = createLogger('Recommendations');
 
 // ============================================================================
 // TYPES
@@ -139,6 +142,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
     if (autoFetch && projectPath) {
       getForProject();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFetch, projectPath]);
 
   /**
@@ -216,7 +220,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
       }
       return success;
     } catch (err) {
-      console.error('Failed to accept recommendation:', err);
+      logger.error('Failed to accept recommendation:', err);
       return false;
     }
   }, [queryClient]);
@@ -235,7 +239,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
       }
       return success;
     } catch (err) {
-      console.error('Failed to reject recommendation:', err);
+      logger.error('Failed to reject recommendation:', err);
       return false;
     }
   }, [queryClient]);
@@ -254,7 +258,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
       }
       return success;
     } catch (err) {
-      console.error('Failed to ignore recommendation:', err);
+      logger.error('Failed to ignore recommendation:', err);
       return false;
     }
   }, [queryClient]);

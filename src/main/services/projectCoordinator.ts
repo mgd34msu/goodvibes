@@ -10,7 +10,8 @@
 
 import { EventEmitter } from 'events';
 import { Logger } from './logger.js';
-import { getProjectRegistry, type ProjectContext } from './projectRegistry.js';
+import { getProjectRegistry } from './projectRegistry.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 
 const logger = new Logger('ProjectCoordinator');
 
@@ -260,7 +261,7 @@ function preserveAgentState(agentId: number, projectId: number): void {
     agent.metadata = {};
   }
   agent.metadata[`project_${projectId}_state`] = {
-    timestamp: new Date().toISOString(),
+    timestamp: formatTimestamp(),
     // Additional state could be preserved here
   };
 }
@@ -561,12 +562,14 @@ function generateEventId(): string {
 
 function handleProjectRegistryEvent(data: { event: string; [key: string]: unknown }): void {
   switch (data.event) {
-    case 'project:registered':
+    case 'project:registered': {
       // Initialize state for new project
-      if (data.project && typeof (data.project as any).id === 'number') {
-        getProjectState((data.project as any).id);
+      const project = data.project as { id?: number } | undefined;
+      if (project && typeof project.id === 'number') {
+        getProjectState(project.id);
       }
       break;
+    }
 
     case 'project:removed':
       // Clean up state

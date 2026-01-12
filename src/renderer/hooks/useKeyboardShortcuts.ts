@@ -8,6 +8,9 @@ import { create } from 'zustand';
 import { useAppStore } from '../stores/appStore';
 import { useTerminalStore } from '../stores/terminalStore';
 import { VIEWS, type ViewName } from '../../shared/constants';
+import { createLogger } from '../../shared/logger';
+
+const logger = createLogger('KeyboardShortcuts');
 
 // ============================================================================
 // Types
@@ -100,7 +103,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
         const stored = Object.fromEntries(newBindings);
         localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
       } catch (e) {
-        console.error('Failed to save shortcuts:', e);
+        logger.error('Failed to save shortcuts:', e);
       }
       return { customBindings: newBindings };
     });
@@ -115,7 +118,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
         const stored = Object.fromEntries(newBindings);
         localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
       } catch (e) {
-        console.error('Failed to save shortcuts:', e);
+        logger.error('Failed to save shortcuts:', e);
       }
       return { customBindings: newBindings };
     });
@@ -126,7 +129,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
     try {
       localStorage.removeItem('goodvibes-shortcuts');
     } catch (e) {
-      console.error('Failed to clear shortcuts:', e);
+      logger.error('Failed to clear shortcuts:', e);
     }
   },
 
@@ -282,7 +285,7 @@ export function useKeyboardShortcuts() {
         useShortcutRegistry.setState({ customBindings: bindings });
       }
     } catch (e) {
-      console.error('Failed to load shortcuts:', e);
+      logger.error('Failed to load shortcuts:', e);
     }
   }, []);
 
@@ -491,8 +494,8 @@ export function useShortcutState() {
   const getShortcutsByCategory = useShortcutRegistry((s) => s.getShortcutsByCategory);
   const getEffectiveBinding = useShortcutRegistry((s) => s.getEffectiveBinding);
 
-  const shortcutsByCategory = useMemo(() => getShortcutsByCategory(), [getShortcutsByCategory, shortcuts]);
-  const conflicts = useMemo(() => findConflicts(), [findConflicts, customBindings, shortcuts]);
+  const shortcutsByCategory = useMemo(() => getShortcutsByCategory(), [getShortcutsByCategory]);
+  const conflicts = useMemo(() => findConflicts(), [findConflicts]);
 
   return {
     shortcuts,

@@ -13,7 +13,6 @@ import { getMainWindow } from '../window.js';
 import {
   createAgentTreeTables,
   registerAgent,
-  getAgentNode,
   getAgentBySessionId,
   getAgentChildren,
   getAgentTree,
@@ -361,7 +360,8 @@ class AgentTreeServiceClass extends EventEmitter {
     let root: TreeVisualizationNode | null = null;
 
     for (const node of nodes) {
-      const vizNode = nodeMap.get(node.sessionId)!;
+      const vizNode = nodeMap.get(node.sessionId);
+      if (!vizNode) continue;
 
       if (node.parentSessionId) {
         const parent = nodeMap.get(node.parentSessionId);

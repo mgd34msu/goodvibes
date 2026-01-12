@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { getRequestContext } from './requestContext.js';
+import { formatTimestamp, getTodayString } from '../../shared/dateUtils.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -96,7 +97,7 @@ export class Logger {
       }
 
       // Create log file with date
-      const date = new Date().toISOString().split('T')[0];
+      const date = getTodayString();
       Logger.currentLogFile = path.join(logDir, `goodvibes-${date}.log`);
 
       // Open write stream in append mode
@@ -163,7 +164,7 @@ export class Logger {
   private createEntry(level: LogLevel, message: string, data?: unknown, metadata?: LogMetadata): LogEntry {
     const context = getRequestContext();
     return {
-      timestamp: new Date().toISOString(),
+      timestamp: formatTimestamp(),
       level,
       module: this.module,
       message,

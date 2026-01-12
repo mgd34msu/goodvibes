@@ -29,6 +29,7 @@ export default function PullRequestList({
 
   useEffect(() => {
     loadPullRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner, repo]);
 
   const loadPullRequests = async () => {

@@ -6,6 +6,9 @@
 // Uses mocked node-pty to test terminal creation and management.
 // ============================================================================
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock modules before importing the module under test
@@ -30,12 +33,18 @@ vi.mock('./recentProjects.js', () => ({
 }));
 
 vi.mock('./logger.js', () => ({
-  Logger: vi.fn().mockImplementation(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
+  Logger: class MockLogger {
+    info = vi.fn();
+    warn = vi.fn();
+    error = vi.fn();
+    debug = vi.fn();
+  },
+}));
+
+vi.mock('electron', () => ({
+  ipcMain: {
+    emit: vi.fn(),
+  },
 }));
 
 // Import after mocks are set up

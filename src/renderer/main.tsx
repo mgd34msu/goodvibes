@@ -9,7 +9,10 @@ import { ErrorBoundary } from 'react-error-boundary';
 
 import App from './App';
 import { ErrorFallback } from './components/common/ErrorFallback';
+import { createLogger } from '../shared/logger';
 import './styles/index.css';
+
+const logger = createLogger('Main');
 
 // Create React Query client
 const queryClient = new QueryClient({
@@ -24,8 +27,8 @@ const queryClient = new QueryClient({
 
 // Global error handler
 function handleError(error: Error, info: React.ErrorInfo) {
-  console.error('Application Error:', error);
-  console.error('Error Info:', info);
+  logger.error('Application Error:', error);
+  logger.error('Error Info:', info);
 }
 
 // Render application

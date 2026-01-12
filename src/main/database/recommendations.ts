@@ -8,7 +8,7 @@
 //
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import { Logger } from '../services/logger.js';
 
 const logger = new Logger('RecommendationsDB');
@@ -92,6 +92,78 @@ export interface ItemSuccessRate {
   totalRecommendations: number;
   acceptedCount: number;
   successRate: number;
+}
+
+/**
+ * Database row type for recommendations table
+ */
+interface RecommendationRow {
+  id: number;
+  session_id: string | null;
+  project_path: string | null;
+  recommendation_type: RecommendationType;
+  item_id: number;
+  item_slug: string;
+  item_name: string;
+  confidence_score: number;
+  source: RecommendationSource;
+  matched_keywords: string;
+  prompt_snippet: string | null;
+  action: RecommendationAction | null;
+  action_timestamp: string | null;
+  created_at: string;
+}
+
+/**
+ * Database row type for stats queries
+ */
+interface StatsRow {
+  total: number;
+  accepted: number;
+  rejected: number;
+  ignored: number;
+  pending: number;
+}
+
+/**
+ * Database row type for by-type stats
+ */
+interface TypeStatsRow {
+  type: RecommendationType;
+  total: number;
+  accepted: number;
+}
+
+/**
+ * Database row type for by-source stats
+ */
+interface SourceStatsRow {
+  source: RecommendationSource;
+  total: number;
+  accepted: number;
+}
+
+/**
+ * Database row type for top items
+ */
+interface TopItemRow {
+  item_id: number;
+  item_slug: string;
+  item_name: string;
+  type: RecommendationType;
+  accepted_count: number;
+}
+
+/**
+ * Database row type for item success queries
+ */
+interface ItemSuccessRow {
+  item_id: number;
+  item_slug: string;
+  item_name: string;
+  type: RecommendationType;
+  total: number;
+  accepted: number;
 }
 
 // ============================================================================
@@ -182,7 +254,11 @@ export function recordRecommendation(
     recommendation.promptSnippet
   );
 
-  return getRecommendation(result.lastInsertRowid as number)!;
+  const inserted = getRecommendation(result.lastInsertRowid as number);
+  if (!inserted) {
+    throw new Error(`Failed to retrieve recommendation with id ${result.lastInsertRowid}`);
+  }
+  return inserted;
 }
 
 /**
@@ -190,7 +266,7 @@ export function recordRecommendation(
  */
 export function getRecommendation(id: number): RecommendationRecord | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM recommendations WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM recommendations WHERE id = ?').get(id) as RecommendationRow | undefined;
   return row ? mapRowToRecommendation(row) : null;
 }
 
@@ -223,7 +299,7 @@ export function getRecommendationsForSession(
     WHERE session_id = ?
     ORDER BY created_at DESC
     LIMIT ?
-  `).all(sessionId, limit) as any[];
+  `).all(sessionId, limit) as RecommendationRow[];
   return rows.map(mapRowToRecommendation);
 }
 
@@ -240,7 +316,7 @@ export function getRecommendationsForProject(
     WHERE project_path = ?
     ORDER BY created_at DESC
     LIMIT ?
-  `).all(projectPath, limit) as any[];
+  `).all(projectPath, limit) as RecommendationRow[];
   return rows.map(mapRowToRecommendation);
 }
 
@@ -263,7 +339,7 @@ export function getPendingRecommendations(
   query += ' ORDER BY created_at DESC LIMIT ?';
   params.push(limit);
 
-  const rows = db.prepare(query).all(...params) as any[];
+  const rows = db.prepare(query).all(...params) as RecommendationRow[];
   return rows.map(mapRowToRecommendation);
 }
 
@@ -281,7 +357,7 @@ export function getRecommendationsForItem(
     WHERE item_id = ? AND recommendation_type = ?
     ORDER BY created_at DESC
     LIMIT ?
-  `).all(itemId, type, limit) as any[];
+  `).all(itemId, type, limit) as RecommendationRow[];
   return rows.map(mapRowToRecommendation);
 }
 
@@ -304,7 +380,7 @@ export function getRecommendationStats(): RecommendationStats {
       SUM(CASE WHEN action = 'ignored' THEN 1 ELSE 0 END) as ignored,
       SUM(CASE WHEN action IS NULL THEN 1 ELSE 0 END) as pending
     FROM recommendations
-  `).get() as any;
+  `).get() as StatsRow;
 
   // By type
   const byTypeRows = db.prepare(`
@@ -314,7 +390,7 @@ export function getRecommendationStats(): RecommendationStats {
       SUM(CASE WHEN action = 'accepted' THEN 1 ELSE 0 END) as accepted
     FROM recommendations
     GROUP BY recommendation_type
-  `).all() as any[];
+  `).all() as TypeStatsRow[];
 
   const byType: RecommendationStats['byType'] = {
     agent: { total: 0, accepted: 0, rate: 0 },
@@ -322,8 +398,7 @@ export function getRecommendationStats(): RecommendationStats {
   };
 
   for (const row of byTypeRows) {
-    const type = row.type as RecommendationType;
-    byType[type] = {
+    byType[row.type] = {
       total: row.total,
       accepted: row.accepted,
       rate: row.total > 0 ? row.accepted / row.total : 0,
@@ -338,7 +413,7 @@ export function getRecommendationStats(): RecommendationStats {
       SUM(CASE WHEN action = 'accepted' THEN 1 ELSE 0 END) as accepted
     FROM recommendations
     GROUP BY source
-  `).all() as any[];
+  `).all() as SourceStatsRow[];
 
   const bySource: RecommendationStats['bySource'] = {
     prompt: { total: 0, accepted: 0, rate: 0 },
@@ -348,8 +423,7 @@ export function getRecommendationStats(): RecommendationStats {
   };
 
   for (const row of bySourceRows) {
-    const source = row.source as RecommendationSource;
-    bySource[source] = {
+    bySource[row.source] = {
       total: row.total,
       accepted: row.accepted,
       rate: row.total > 0 ? row.accepted / row.total : 0,
@@ -366,13 +440,13 @@ export function getRecommendationStats(): RecommendationStats {
     GROUP BY item_id, recommendation_type
     ORDER BY accepted_count DESC
     LIMIT 10
-  `).all() as any[];
+  `).all() as TopItemRow[];
 
   const topAcceptedItems = topItems.map(row => ({
     itemId: row.item_id,
     itemSlug: row.item_slug,
     itemName: row.item_name,
-    type: row.type as RecommendationType,
+    type: row.type,
     acceptedCount: row.accepted_count,
   }));
 
@@ -408,7 +482,7 @@ export function getItemSuccessRate(
     FROM recommendations
     WHERE item_id = ? AND recommendation_type = ?
     GROUP BY item_id
-  `).get(itemId, type) as any;
+  `).get(itemId, type) as ItemSuccessRow | undefined;
 
   if (!row) return null;
 
@@ -456,7 +530,7 @@ export function getTopPerformingItems(
   `;
   params.push(minRecommendations, limit);
 
-  const rows = db.prepare(query).all(...params) as any[];
+  const rows = db.prepare(query).all(...params) as ItemSuccessRow[];
 
   return rows.map(row => ({
     itemId: row.item_id,
@@ -504,7 +578,7 @@ export function cleanupOldRecommendations(maxAgeDays: number = 90): number {
 // MAPPER
 // ============================================================================
 
-function mapRowToRecommendation(row: any): RecommendationRecord {
+function mapRowToRecommendation(row: RecommendationRow): RecommendationRecord {
   return {
     id: row.id,
     sessionId: row.session_id,

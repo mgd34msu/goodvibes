@@ -6,6 +6,9 @@
 import { useState } from 'react';
 import { Play, CheckCircle, Terminal, FileCode, Zap, Copy, Check } from 'lucide-react';
 import { clsx } from 'clsx';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('HookSetupStep');
 
 // ============================================================================
 // Component
@@ -151,7 +154,7 @@ function CodeBlock({ code }: CodeBlockProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      logger.error('Failed to copy:', err);
     }
   };
 

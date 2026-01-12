@@ -430,6 +430,7 @@ class PTYStreamAnalyzerService extends EventEmitter {
 
     // Strip ANSI escape codes for pattern matching (important for terminal output)
     // Use comprehensive regex that handles all ANSI sequences including cursor control
+    // eslint-disable-next-line no-control-regex
     const cleanData = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
 
     // Run pattern matching

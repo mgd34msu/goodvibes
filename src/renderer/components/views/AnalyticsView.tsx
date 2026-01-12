@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import type { Analytics, ToolUsageStat } from '../../../shared/types';
 import { formatNumber, formatCost, formatDate, decodeProjectName } from '../../../shared/utils';
+import { formatTimestamp } from '../../../shared/dateUtils';
 import { AnalyticsCardSkeleton } from '../common/Skeleton';
 import { toast } from '../../stores/toastStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -26,8 +27,9 @@ export default function AnalyticsView() {
 
   const handleGenerateReport = async () => {
     try {
+      const now = formatTimestamp();
       const reportData = {
-        generatedAt: new Date().toISOString(),
+        generatedAt: now,
         summary: {
           totalSessions: analytics?.totalSessions ?? 0,
           totalTokens: analytics?.totalTokens ?? 0,
@@ -42,14 +44,14 @@ export default function AnalyticsView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `goodvibes-report-${formatDate(new Date().toISOString()).replace(/[,\s]+/g, '-')}.json`;
+      a.download = `goodvibes-report-${formatDate(now).replace(/[,\s]+/g, '-')}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
       toast.success('Report exported successfully');
-    } catch (error) {
+    } catch {
       toast.error('Failed to export report');
     }
   };

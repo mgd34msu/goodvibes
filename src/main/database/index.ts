@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { Logger } from '../services/logger.js';
+import { getTodayString } from '../../shared/dateUtils.js';
 import type {
   Session,
   SessionMessage,
@@ -26,6 +27,14 @@ import {
 } from './mappers.js';
 import { createPrimitiveTables } from './primitives.js';
 import { createAgencyIndexTables } from './agencyIndex.js';
+import {
+  getDatabase,
+  setDatabaseInstance,
+  clearDatabaseInstance,
+} from './connection.js';
+
+// Re-export getDatabase from connection.ts for backward compatibility
+export { getDatabase } from './connection.js';
 
 const logger = new Logger('Database');
 
@@ -45,6 +54,9 @@ export async function initDatabase(userDataPath: string): Promise<void> {
   }
 
   db = new Database(dbPath);
+
+  // Set the database instance in the shared connection module
+  setDatabaseInstance(db);
 
   // Enable WAL mode for better concurrent access
   db.pragma('journal_mode = WAL');
@@ -67,15 +79,9 @@ export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    clearDatabaseInstance();
     logger.info('Database closed');
   }
-}
-
-export function getDatabase(): Database.Database {
-  if (!db) {
-    throw new Error('Database not initialized');
-  }
-  return db;
 }
 
 // ============================================================================
@@ -574,7 +580,7 @@ export function getAllSettings(): Record<string, unknown> {
 export function getAnalytics(): Analytics {
   const database = getDatabase();
 
-  const sessions = database.prepare('SELECT * FROM sessions').all() as any[];
+  const sessions = database.prepare('SELECT * FROM sessions').all() as SessionRow[];
   const totalSessions = sessions.length;
 
   let totalTokens = 0;
@@ -638,7 +644,7 @@ export function getAnalytics(): Analytics {
   }
 
   // Daily cost
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayString();
   const todaySessions = sessions.filter(s => s.start_time?.startsWith(today));
   const dailyCost = todaySessions.reduce((sum, s) => sum + (s.cost ?? 0), 0);
 
@@ -681,7 +687,7 @@ export function createTag(name: string, color: string): void {
   const database = getDatabase();
   try {
     database.prepare('INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)').run(name, color);
-  } catch (e) {
+  } catch {
     // Tag may already exist
   }
 }
@@ -696,7 +702,7 @@ export function addTagToSession(sessionId: string, tagId: number): void {
   const database = getDatabase();
   try {
     database.prepare('INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)').run(sessionId, tagId);
-  } catch (e) {
+  } catch {
     // Already exists
   }
 }
@@ -729,7 +735,7 @@ export function getToolUsageStats(): ToolUsageStat[] {
     FROM tool_usage
     GROUP BY tool_name
     ORDER BY total_count DESC
-  `).all() as any[];
+  `).all() as { tool_name: string; total_count: number; last_used: string }[];
 
   return rows.map(row => ({
     toolName: row.tool_name,
@@ -764,7 +770,7 @@ export function logActivity(type: string, sessionId: string | null, description:
 
 export function getRecentActivity(limit: number = 50): ActivityLogEntry[] {
   const database = getDatabase();
-  const rows = database.prepare('SELECT * FROM activity_log ORDER BY timestamp DESC LIMIT ?').all(limit) as ActivityLogRow[];
+  const rows = database.prepare('SELECT * FROM activity_log ORDER BY timestamp DESC, id DESC LIMIT ?').all(limit) as ActivityLogRow[];
   return rows.map(mapRowToActivity);
 }
 

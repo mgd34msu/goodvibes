@@ -174,7 +174,7 @@ class PolicyEngineClass extends EventEmitter {
         if (!conditionsResult.passed) {
           return { matched: false, policy: null, action: 'queue', reason: conditionsResult.reason };
         }
-      } catch (e) {
+      } catch {
         logger.warn('Failed to parse policy conditions', { policyId: policy.id });
       }
     }
@@ -278,8 +278,9 @@ class PolicyEngineClass extends EventEmitter {
   ): { passed: boolean; reason: string } {
     // Check allowed paths
     if (conditions.allowedPaths && request.filePath) {
+      const filePath = request.filePath;
       const allowed = conditions.allowedPaths.some(p =>
-        this.matchGlobPattern(p, request.filePath!)
+        this.matchGlobPattern(p, filePath)
       );
       if (!allowed) {
         return { passed: false, reason: 'Path not in allowed list' };
@@ -288,8 +289,9 @@ class PolicyEngineClass extends EventEmitter {
 
     // Check blocked paths
     if (conditions.blockedPaths && request.filePath) {
+      const filePath = request.filePath;
       const blocked = conditions.blockedPaths.some(p =>
-        this.matchGlobPattern(p, request.filePath!)
+        this.matchGlobPattern(p, filePath)
       );
       if (blocked) {
         return { passed: false, reason: 'Path is blocked' };
@@ -298,8 +300,9 @@ class PolicyEngineClass extends EventEmitter {
 
     // Check allowed commands
     if (conditions.allowedCommands && request.command) {
+      const command = request.command;
       const allowed = conditions.allowedCommands.some(c =>
-        this.matchGlobPattern(c, request.command!)
+        this.matchGlobPattern(c, command)
       );
       if (!allowed) {
         return { passed: false, reason: 'Command not in allowed list' };
@@ -308,8 +311,9 @@ class PolicyEngineClass extends EventEmitter {
 
     // Check blocked commands
     if (conditions.blockedCommands && request.command) {
+      const command = request.command;
       const blocked = conditions.blockedCommands.some(c =>
-        this.matchGlobPattern(c, request.command!)
+        this.matchGlobPattern(c, command)
       );
       if (blocked) {
         return { passed: false, reason: 'Command is blocked' };

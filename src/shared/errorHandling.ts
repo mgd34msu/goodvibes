@@ -6,6 +6,8 @@
 // consistent error messages, logging, and user feedback throughout the app.
 // ============================================================================
 
+import { formatTimestamp } from './dateUtils.js';
+
 // ============================================================================
 // ERROR TYPES
 // ============================================================================
@@ -322,7 +324,7 @@ export interface ErrorLogger {
  */
 export const consoleLogger: ErrorLogger = {
   log(level: LogLevel, message: string, context?: Record<string, unknown>) {
-    const timestamp = new Date().toISOString();
+    const timestamp = formatTimestamp();
     const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
 
     switch (level) {

@@ -7,6 +7,9 @@ import { useState, useCallback } from 'react';
 import { FolderOpen, Check, AlertCircle, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('ProjectSetupStep');
 
 // ============================================================================
 // Component
@@ -41,7 +44,7 @@ export function ProjectSetupStep() {
         setValidationState((s) => ({ ...s, projectsRoot: 'valid' }));
       }
     } catch (err) {
-      console.error('Failed to open directory picker:', err);
+      logger.error('Failed to open directory picker:', err);
     }
   }, [updateSetting]);
 
@@ -54,7 +57,7 @@ export function ProjectSetupStep() {
         setValidationState((s) => ({ ...s, defaultCwd: 'valid' }));
       }
     } catch (err) {
-      console.error('Failed to open directory picker:', err);
+      logger.error('Failed to open directory picker:', err);
     }
   }, [updateSetting]);
 

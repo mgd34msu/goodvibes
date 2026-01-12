@@ -18,6 +18,10 @@ import {
   File,
   Folder,
 } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+import { formatTimestamp } from '../../../shared/dateUtils';
+
+const logger = createLogger('MemoryView');
 
 // ============================================================================
 // TYPES
@@ -437,7 +441,7 @@ export default function MemoryView() {
         handleSelectFile(firstFile);
       }
     } catch (error) {
-      console.error('Failed to load CLAUDE.md files:', error);
+      logger.error('Failed to load CLAUDE.md files:', error);
       // Set default empty files on error
       const defaultFiles: ClaudeMdFile[] = [
         { path: 'user://CLAUDE.md', name: 'CLAUDE.md', scope: 'user', content: '', exists: false },
@@ -448,6 +452,7 @@ export default function MemoryView() {
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFile]);
 
   useEffect(() => {
@@ -512,12 +517,12 @@ export default function MemoryView() {
       setFiles((prev) =>
         prev.map((f) =>
           f.path === selectedFile.path
-            ? { ...f, content, exists: true, lastModified: new Date().toISOString() }
+            ? { ...f, content, exists: true, lastModified: formatTimestamp() }
             : f
         )
       );
     } catch (error) {
-      console.error('Failed to save CLAUDE.md:', error);
+      logger.error('Failed to save CLAUDE.md:', error);
     } finally {
       setSaving(false);
     }

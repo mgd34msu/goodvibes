@@ -21,6 +21,10 @@ import {
   Zap,
   Terminal,
 } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+import { formatTimestamp } from '../../../shared/dateUtils';
+
+const logger = createLogger('HooksView');
 
 // ============================================================================
 // TYPES
@@ -389,7 +393,7 @@ export default function HooksView() {
       const result = await window.goodvibes.getHooks();
       setHooks(result || []);
     } catch (error) {
-      console.error('Failed to load hooks:', error);
+      logger.error('Failed to load hooks:', error);
       setHooks([]);
     } finally {
       setLoading(false);
@@ -418,7 +422,7 @@ export default function HooksView() {
       setEditingHook(undefined);
       loadHooks();
     } catch (error) {
-      console.error('Failed to save hook:', error);
+      logger.error('Failed to save hook:', error);
     }
   };
 
@@ -427,7 +431,7 @@ export default function HooksView() {
       await window.goodvibes.updateHook(id, { enabled });
       loadHooks();
     } catch (error) {
-      console.error('Failed to toggle hook:', error);
+      logger.error('Failed to toggle hook:', error);
     }
   };
 
@@ -437,7 +441,7 @@ export default function HooksView() {
         await window.goodvibes.deleteHook(id);
         loadHooks();
       } catch (error) {
-        console.error('Failed to delete hook:', error);
+        logger.error('Failed to delete hook:', error);
       }
     }
   };
@@ -446,7 +450,7 @@ export default function HooksView() {
     // Find the hook to test
     const hook = hooks.find((h) => h.id === id);
     if (!hook) {
-      console.error('Hook not found:', id);
+      logger.error('Hook not found:', id);
       return;
     }
 
@@ -466,7 +470,7 @@ export default function HooksView() {
       // Update hook execution count and last executed in the database
       await window.goodvibes.updateHook(id, {
         executionCount: (hook.executionCount || 0) + 1,
-        lastExecuted: new Date().toISOString(),
+        lastExecuted: formatTimestamp(),
       });
 
       // Reload hooks to reflect the update
@@ -475,7 +479,7 @@ export default function HooksView() {
       // Show success notification by alerting user
       alert(`Hook "${testingHookName}" test triggered.\n\nCommand: ${hook.command}\n\nCheck the activity log for execution details.`);
     } catch (error) {
-      console.error('Failed to test hook:', error);
+      logger.error('Failed to test hook:', error);
       alert(`Failed to test hook "${testingHookName}": ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };

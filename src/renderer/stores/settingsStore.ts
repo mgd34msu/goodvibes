@@ -5,6 +5,9 @@
 import { create } from 'zustand';
 import type { AppSettings } from '../../shared/types';
 import { DEFAULT_SETTINGS, SETTINGS_VERSION, SETTINGS_MIGRATIONS } from '../../shared/types';
+import { createLogger } from '../../shared/logger';
+
+const logger = createLogger('SettingsStore');
 
 interface SettingsState {
   settings: AppSettings;
@@ -63,10 +66,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         // Use individual try-catch to ensure we attempt all keys even if some fail
         for (const key of keysToReset) {
           try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const defaultValue = (DEFAULT_SETTINGS as any)[key];
             await window.goodvibes.setSetting(key, defaultValue);
           } catch (err) {
-            console.error(`Failed to migrate setting ${key}:`, err);
+            logger.error(`Failed to migrate setting ${key}:`, err);
           }
         }
 
@@ -75,13 +79,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         try {
           await window.goodvibes.setSetting('_settingsVersion', SETTINGS_VERSION);
         } catch (err) {
-          console.error('Failed to save settings version:', err);
+          logger.error('Failed to save settings version:', err);
         }
       }
 
       set({ settings: merged, isLoaded: true });
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      logger.error('Failed to load settings:', error);
       set({ isLoaded: true });
     }
   },
@@ -93,7 +97,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         settings: { ...state.settings, [key]: value },
       }));
     } catch (error) {
-      console.error(`Failed to update setting ${key}:`, error);
+      logger.error(`Failed to update setting ${key}:`, error);
       throw error;
     }
   },
@@ -105,7 +109,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       }
       set({ settings: DEFAULT_SETTINGS });
     } catch (error) {
-      console.error('Failed to reset settings:', error);
+      logger.error('Failed to reset settings:', error);
       throw error;
     }
   },

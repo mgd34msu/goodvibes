@@ -451,12 +451,15 @@ class HooksService extends EventEmitter {
     }
 
     // Check if hook already exists
-    const existing = settings.hooks[eventType]!.find(
+    const eventHooks = settings.hooks[eventType];
+    if (!eventHooks) return;
+
+    const existing = eventHooks.find(
       h => h.matcher === matcher && h.hooks.some(hook => hook.command === command)
     );
 
     if (!existing) {
-      settings.hooks[eventType]!.push({
+      eventHooks.push({
         matcher,
         hooks: [{ type: 'command', command }],
       });
@@ -478,9 +481,12 @@ class HooksService extends EventEmitter {
     const settings = await this.readClaudeSettings(projectPath);
     if (!settings?.hooks?.[eventType]) return;
 
-    settings.hooks[eventType] = settings.hooks[eventType]!.filter(
-      h => !(h.matcher === matcher && h.hooks.some(hook => hook.command === command))
-    );
+    const eventHooksToFilter = settings.hooks[eventType];
+    if (eventHooksToFilter) {
+      settings.hooks[eventType] = eventHooksToFilter.filter(
+        h => !(h.matcher === matcher && h.hooks.some(hook => hook.command === command))
+      );
+    }
 
     await this.writeClaudeSettings(settings, scope, projectPath);
   }
@@ -517,14 +523,17 @@ class HooksService extends EventEmitter {
         settings.hooks[hook.eventType] = [];
       }
 
-      settings.hooks[hook.eventType]!.push({
-        matcher: hook.matcher || '*',
-        hooks: [{
-          type: 'command',
-          command: hook.command,
-          timeout: hook.timeout,
-        }],
-      });
+      const targetHooks = settings.hooks[hook.eventType];
+      if (targetHooks) {
+        targetHooks.push({
+          matcher: hook.matcher || '*',
+          hooks: [{
+            type: 'command',
+            command: hook.command,
+            timeout: hook.timeout,
+          }],
+        });
+      }
     }
 
     // Write settings

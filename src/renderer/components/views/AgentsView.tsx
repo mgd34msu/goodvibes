@@ -25,6 +25,9 @@ import {
   Shield,
 } from 'lucide-react';
 import ProjectSelector from '../shared/ProjectSelector';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('AgentsView');
 
 // ============================================================================
 // TYPES
@@ -707,7 +710,7 @@ export default function AgentsView() {
       const result = await window.goodvibes.getAgentTemplates();
       setAgents(result || []);
     } catch (error) {
-      console.error('Failed to load agent templates:', error);
+      logger.error('Failed to load agent templates:', error);
       setAgents([]);
     } finally {
       setLoading(false);
@@ -741,7 +744,7 @@ export default function AgentsView() {
       setEditingAgent(undefined);
       loadAgents();
     } catch (error) {
-      console.error('Failed to save agent template:', error);
+      logger.error('Failed to save agent template:', error);
     }
   };
 
@@ -750,7 +753,7 @@ export default function AgentsView() {
       // Copy agent name to clipboard for easy use
       await navigator.clipboard.writeText(agentName);
     } catch (error) {
-      console.error('Failed to copy agent name:', error);
+      logger.error('Failed to copy agent name:', error);
     }
   };
 
@@ -764,7 +767,7 @@ export default function AgentsView() {
         await window.goodvibes.deleteAgentTemplate(id);
         loadAgents();
       } catch (error) {
-        console.error('Failed to delete agent template:', error);
+        logger.error('Failed to delete agent template:', error);
       }
     }
   };

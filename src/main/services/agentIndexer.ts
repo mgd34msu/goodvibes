@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { Logger } from './logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 import {
   createAgencyIndexTables,
   upsertCategory,
@@ -53,7 +54,7 @@ interface ParsedAgent {
 /**
  * Indexing progress event
  */
-interface IndexProgress {
+interface _IndexProgress {
   current: number;
   total: number;
   currentFile: string;
@@ -164,7 +165,7 @@ export class AgentIndexer extends EventEmitter {
               filePath: parsed.filePath,
               skills: parsed.frontmatter.skills || [],
               tags: parsed.frontmatter.tags || this.extractTags(parsed.content),
-              lastIndexed: new Date().toISOString(),
+              lastIndexed: formatTimestamp(),
             });
             indexed++;
           }
@@ -217,7 +218,7 @@ export class AgentIndexer extends EventEmitter {
         filePath: parsed.filePath,
         skills: parsed.frontmatter.skills || [],
         tags: parsed.frontmatter.tags || this.extractTags(parsed.content),
-        lastIndexed: new Date().toISOString(),
+        lastIndexed: formatTimestamp(),
       });
     } catch (err) {
       const error = err as Error;
@@ -402,8 +403,9 @@ export class AgentIndexer extends EventEmitter {
     cache: Map<string, AgencyCategory>
   ): Promise<AgencyCategory> {
     // Check cache first
-    if (cache.has(categoryPath)) {
-      return cache.get(categoryPath)!;
+    const cached = cache.get(categoryPath);
+    if (cached) {
+      return cached;
     }
 
     // Check database
@@ -437,7 +439,11 @@ export class AgentIndexer extends EventEmitter {
       cache.set(currentPath, category);
     }
 
-    return cache.get(categoryPath)!;
+    const result = cache.get(categoryPath);
+    if (!result) {
+      throw new Error(`Failed to create category for path: ${categoryPath}`);
+    }
+    return result;
   }
 
   /**

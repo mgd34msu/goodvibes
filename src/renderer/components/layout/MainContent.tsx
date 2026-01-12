@@ -7,6 +7,9 @@ import { useAppStore } from '../../stores/appStore';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 import type { ViewName } from '../../../shared/constants';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('MainContent');
 
 // Lazy load views for code splitting
 const TerminalView = lazy(() => import('../views/TerminalView'));
@@ -48,7 +51,7 @@ export function MainContent() {
       <ErrorBoundary
         resetKeys={[currentView]}
         onError={(error, errorInfo) => {
-          console.error(`Error in ${currentView} view:`, error, errorInfo);
+          logger.error(`Error in ${currentView} view:`, error, errorInfo);
         }}
       >
         <Suspense fallback={<ViewLoader />}>

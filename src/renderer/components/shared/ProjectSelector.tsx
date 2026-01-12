@@ -4,6 +4,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { FolderOpen, AlertTriangle, X } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('ProjectSelector');
 
 // ============================================================================
 // TYPES
@@ -59,7 +62,7 @@ function AddProjectModal({ isOpen, onClose, onProjectAdded }: AddProjectModalPro
         setError(null);
       }
     } catch (err) {
-      console.error('Failed to select folder:', err);
+      logger.error('Failed to select folder:', err);
     }
   };
 
@@ -84,7 +87,7 @@ function AddProjectModal({ isOpen, onClose, onProjectAdded }: AddProjectModalPro
         resetForm();
       }
     } catch (err) {
-      console.error('Failed to register project:', err);
+      logger.error('Failed to register project:', err);
       setError(err instanceof Error ? err.message : 'Failed to register project');
     } finally {
       setIsLoading(false);
@@ -270,7 +273,7 @@ export default function ProjectSelector({
       const result = await window.goodvibes?.projectGetAll?.();
       setProjects(result || []);
     } catch (error) {
-      console.error('Failed to load projects:', error);
+      logger.error('Failed to load projects:', error);
       setProjects([]);
     } finally {
       setLoading(false);

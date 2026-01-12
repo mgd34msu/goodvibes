@@ -2,8 +2,23 @@
 // NOTIFICATION DATABASE OPERATIONS
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import type { AppNotification, NotificationType } from '../../shared/types/index.js';
+
+/**
+ * Database row type for notifications table
+ */
+interface NotificationRow {
+  id: number;
+  type: NotificationType;
+  title: string;
+  message: string | null;
+  priority: string;
+  read: number;
+  dismissed: number;
+  session_id: string | null;
+  created_at: string;
+}
 
 export function createNotification(
   type: NotificationType,
@@ -25,7 +40,7 @@ export function getNotifications(includeRead: boolean = false, limit: number = 5
   const sql = includeRead
     ? 'SELECT * FROM notifications WHERE dismissed = 0 ORDER BY created_at DESC LIMIT ?'
     : 'SELECT * FROM notifications WHERE read = 0 AND dismissed = 0 ORDER BY created_at DESC LIMIT ?';
-  const rows = database.prepare(sql).all(limit);
+  const rows = database.prepare(sql).all(limit) as NotificationRow[];
   return rows.map(mapRowToNotification);
 }
 
@@ -60,7 +75,7 @@ export function deleteOldNotifications(daysOld: number = 30): void {
   database.prepare('DELETE FROM notifications WHERE created_at < datetime("now", "-" || ? || " days")').run(daysOld);
 }
 
-function mapRowToNotification(row: any): AppNotification {
+function mapRowToNotification(row: NotificationRow): AppNotification {
   return {
     id: row.id,
     type: row.type,

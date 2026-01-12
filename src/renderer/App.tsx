@@ -21,6 +21,9 @@ import { useScanStatus } from './hooks/useScanStatus';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useIpcListeners } from './hooks/useIpcListeners';
 import { useContextMenu } from './hooks/useContextMenu';
+import { createLogger } from '../shared/logger';
+
+const logger = createLogger('App');
 
 export default function App() {
   const theme = useSettingsStore((s) => s.settings.theme);
@@ -53,8 +56,8 @@ export default function App() {
   return (
     <ErrorBoundary
       onError={(error, errorInfo) => {
-        console.error('App Error:', error);
-        console.error('Component Stack:', errorInfo.componentStack);
+        logger.error('App Error:', error);
+        logger.error('Component Stack:', errorInfo.componentStack);
       }}
       onReset={() => {
         // Reset app state on error recovery

@@ -42,6 +42,7 @@ export default function CreatePullRequestModal({
         .replace(/\b\w/g, (c) => c.toUpperCase());
       setTitle(branchTitle);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, currentBranch]);
 
   const loadBranches = async () => {

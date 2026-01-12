@@ -14,12 +14,10 @@ import {
   updateAgentStatus,
   updateAgentActivity,
   completeAgent,
-  deleteAgent,
   cleanupStaleAgents,
   cleanupGarbageAgents,
   deleteAllAgents,
   findAgentBySession,
-  upsertAgent,
   type AgentRecord,
   type AgentStatus,
 } from '../database/primitives.js';
@@ -130,7 +128,7 @@ class AgentRegistryService extends EventEmitter {
       const hookServer = getHookServer();
 
       // Listen for session start/end events
-      hookServer.on('session:start', ({ sessionId, projectPath }) => {
+      hookServer.on('session:start', ({ sessionId }) => {
         if (sessionId) {
           // Record session-to-agent mapping
           const agent = findAgentBySession(sessionId);
@@ -149,7 +147,7 @@ class AgentRegistryService extends EventEmitter {
       });
 
       // Listen for agent start/stop events
-      hookServer.on('agent:start', ({ agentName, sessionId, parentSessionId }) => {
+      hookServer.on('agent:start', ({ agentName, sessionId }) => {
         if (sessionId) {
           const agent = findAgentBySession(sessionId);
           if (agent) {
@@ -278,7 +276,10 @@ class AgentRegistryService extends EventEmitter {
     const agent = getAgent(agentId);
     if (agent && agent.status !== 'active') {
       this.updateStatus(agentId, 'active');
-      this.emit('agent:active', getAgent(agentId)!);
+      const updatedAgent = getAgent(agentId);
+      if (updatedAgent) {
+        this.emit('agent:active', updatedAgent);
+      }
     } else if (agent) {
       // Just update activity timestamp
       updateAgentActivity(agentId);

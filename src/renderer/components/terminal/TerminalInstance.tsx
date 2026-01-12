@@ -15,16 +15,13 @@ import '@xterm/xterm/css/xterm.css';
 // TYPES
 // ============================================================================
 
-interface TerminalInstanceProps {
-  id: number;
-  zoomLevel: number;
-}
+import type { TerminalInstanceProps } from './types';
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
+export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -257,6 +254,17 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
       terminalRef.current.options.theme = TERMINAL_THEMES[theme];
     }
   }, [theme]);
+
+  // Focus terminal when it becomes active (with 500ms delay)
+  useEffect(() => {
+    if (isActive && terminalRef.current) {
+      const timeout = setTimeout(() => {
+        terminalRef.current?.focus();
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+    return undefined;
+  }, [isActive]);
 
   // Scroll to bottom handler for the button
   const handleScrollToBottom = useCallback(() => {

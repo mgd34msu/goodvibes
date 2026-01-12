@@ -189,7 +189,7 @@ async function handlePermissionRequest(payload: HookPayload): Promise<HookRespon
       toolName = details.tool_name || details.toolName;
       filePath = details.file_path || details.filePath;
       command = details.command;
-    } catch (e) {
+    } catch {
       // Use raw details if not JSON
     }
   }

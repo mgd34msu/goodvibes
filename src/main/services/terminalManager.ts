@@ -106,6 +106,7 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
 
       // DEBUG: Log data that might contain agent patterns
       // Strip ANSI codes for pattern matching
+      // eslint-disable-next-line no-control-regex
       const cleanData = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
       const hasArrow = data.includes('→') || data.includes('\u2192') || data.includes('\u279C');
       const hasParenthesis = data.includes('(') && data.includes(')');
@@ -152,7 +153,11 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
       // Notify main process about terminal exit for agent cleanup
       // This is sent via the internal event, not to renderer
       import('electron').then(({ ipcMain }) => {
-        ipcMain.emit('terminal-exited', null, { terminalId });
+        if (ipcMain?.emit) {
+          ipcMain.emit('terminal-exited', null, { terminalId });
+        }
+      }).catch((error) => {
+        logger.error('Failed to emit terminal-exited event', error);
       });
 
       terminals.delete(terminalId);

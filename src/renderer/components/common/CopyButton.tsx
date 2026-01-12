@@ -6,6 +6,9 @@
 import React, { useState, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { Clipboard, Check } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('CopyButton');
 
 export interface CopyButtonProps {
   /** Content to copy to clipboard */
@@ -49,7 +52,7 @@ export function CopyButton({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      logger.error('Failed to copy:', err);
     }
   }, [content]);
 

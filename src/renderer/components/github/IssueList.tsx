@@ -27,6 +27,7 @@ export default function IssueList({
 
   useEffect(() => {
     loadIssues();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner, repo]);
 
   const loadIssues = async () => {

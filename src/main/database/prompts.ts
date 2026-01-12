@@ -2,8 +2,21 @@
 // PROMPT DATABASE OPERATIONS
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import type { Prompt } from '../../shared/types/index.js';
+
+/**
+ * Database row type for prompts table
+ */
+interface PromptRow {
+  id: number;
+  title: string;
+  content: string;
+  category: string;
+  use_count: number;
+  last_used: string | null;
+  created_at: string;
+}
 
 export function savePrompt(title: string, content: string, category?: string): number {
   const database = getDatabase();
@@ -16,13 +29,13 @@ export function savePrompt(title: string, content: string, category?: string): n
 
 export function getAllPrompts(): Prompt[] {
   const database = getDatabase();
-  const rows = database.prepare('SELECT * FROM prompts ORDER BY use_count DESC, created_at DESC').all();
+  const rows = database.prepare('SELECT * FROM prompts ORDER BY use_count DESC, created_at DESC').all() as PromptRow[];
   return rows.map(mapRowToPrompt);
 }
 
 export function getPromptsByCategory(category: string): Prompt[] {
   const database = getDatabase();
-  const rows = database.prepare('SELECT * FROM prompts WHERE category = ? ORDER BY use_count DESC').all(category);
+  const rows = database.prepare('SELECT * FROM prompts WHERE category = ? ORDER BY use_count DESC').all(category) as PromptRow[];
   return rows.map(mapRowToPrompt);
 }
 
@@ -47,7 +60,7 @@ export function getPromptCategories(): string[] {
   return rows.map(r => r.category);
 }
 
-function mapRowToPrompt(row: any): Prompt {
+function mapRowToPrompt(row: PromptRow): Prompt {
   return {
     id: row.id,
     title: row.title,

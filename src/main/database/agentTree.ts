@@ -7,8 +7,9 @@
 //
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import { Logger } from '../services/logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 
 const logger = new Logger('AgentTreeDB');
 
@@ -64,6 +65,60 @@ export interface AgentHierarchySummary {
   runningAgents: number;
   completedAgents: number;
   failedAgents: number;
+}
+
+/**
+ * Database row type for agent_tree_nodes table (snake_case columns)
+ */
+interface AgentTreeNodeRow {
+  id: number;
+  session_id: string;
+  agent_name: string;
+  parent_id: number | null;
+  parent_session_id: string | null;
+  root_session_id: string;
+  depth: number;
+  status: 'running' | 'completed' | 'failed' | 'terminated';
+  started_at: string;
+  completed_at: string | null;
+  allocated_budget_usd: number;
+  spent_budget_usd: number;
+  tool_calls: number;
+  tokens_used: number;
+  metadata: string | null;
+}
+
+/**
+ * Database row type for agent_metrics table
+ */
+interface AgentMetricsRow {
+  id: number;
+  agent_name: string;
+  total_sessions: number;
+  success_count: number;
+  failure_count: number;
+  total_duration_ms: number;
+  total_tool_calls: number;
+  total_tokens_used: number;
+  total_cost_usd: number;
+  first_used: string;
+  last_used: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Database row type for hierarchy summary query
+ */
+interface _HierarchySummaryRow {
+  root_session_id: string;
+  total_agents: number;
+  max_depth: number;
+  total_budget_allocated: number;
+  total_budget_spent: number;
+  running_agents: number;
+  completed_agents: number;
+  failed_agents: number;
 }
 
 // ============================================================================
@@ -187,7 +242,11 @@ export function registerAgent(
     allocatedBudgetUsd
   );
 
-  return getAgentNode(result.lastInsertRowid as number)!;
+  const inserted = getAgentNode(result.lastInsertRowid as number);
+  if (!inserted) {
+    throw new Error(`Failed to retrieve registered agent with id ${result.lastInsertRowid}`);
+  }
+  return inserted;
 }
 
 /**
@@ -195,7 +254,7 @@ export function registerAgent(
  */
 export function getAgentNode(id: number): AgentTreeNode | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM agent_tree_nodes WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM agent_tree_nodes WHERE id = ?').get(id) as AgentTreeNodeRow | undefined;
   return row ? mapRowToAgentNode(row) : null;
 }
 
@@ -204,7 +263,7 @@ export function getAgentNode(id: number): AgentTreeNode | null {
  */
 export function getAgentBySessionId(sessionId: string): AgentTreeNode | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM agent_tree_nodes WHERE session_id = ?').get(sessionId) as any;
+  const row = db.prepare('SELECT * FROM agent_tree_nodes WHERE session_id = ?').get(sessionId) as AgentTreeNodeRow | undefined;
   return row ? mapRowToAgentNode(row) : null;
 }
 
@@ -217,7 +276,7 @@ export function getAgentChildren(parentId: number): AgentTreeNode[] {
     SELECT * FROM agent_tree_nodes
     WHERE parent_id = ?
     ORDER BY started_at ASC
-  `).all(parentId) as any[];
+  `).all(parentId) as AgentTreeNodeRow[];
   return rows.map(mapRowToAgentNode);
 }
 
@@ -230,7 +289,7 @@ export function getAgentDescendants(rootSessionId: string): AgentTreeNode[] {
     SELECT * FROM agent_tree_nodes
     WHERE root_session_id = ?
     ORDER BY depth ASC, started_at ASC
-  `).all(rootSessionId) as any[];
+  `).all(rootSessionId) as AgentTreeNodeRow[];
   return rows.map(mapRowToAgentNode);
 }
 
@@ -256,7 +315,7 @@ export function getRunningAgents(rootSessionId?: string): AgentTreeNode[] {
   }
 
   query += ' ORDER BY started_at ASC';
-  const rows = db.prepare(query).all(...params) as any[];
+  const rows = db.prepare(query).all(...params) as AgentTreeNodeRow[];
   return rows.map(mapRowToAgentNode);
 }
 
@@ -268,7 +327,7 @@ export function updateAgentStatus(
   status: 'running' | 'completed' | 'failed' | 'terminated'
 ): void {
   const db = getDatabase();
-  const completedAt = status !== 'running' ? new Date().toISOString() : null;
+  const completedAt = status !== 'running' ? formatTimestamp() : null;
 
   db.prepare(`
     UPDATE agent_tree_nodes SET
@@ -361,7 +420,7 @@ export function allocateBudgetToChild(
   return true;
 }
 
-function mapRowToAgentNode(row: any): AgentTreeNode {
+function mapRowToAgentNode(row: AgentTreeNodeRow): AgentTreeNode {
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -449,7 +508,7 @@ function updateAgentMetrics(node: AgentTreeNode, success: boolean): void {
  */
 export function getAgentMetricsByName(agentName: string): AgentMetrics | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM agent_metrics WHERE agent_name = ?').get(agentName) as any;
+  const row = db.prepare('SELECT * FROM agent_metrics WHERE agent_name = ?').get(agentName) as AgentMetricsRow | undefined;
 
   if (!row) return null;
 
@@ -474,7 +533,7 @@ export function getAllAgentMetrics(): AgentMetrics[] {
   const rows = db.prepare(`
     SELECT * FROM agent_metrics
     ORDER BY total_sessions DESC
-  `).all() as any[];
+  `).all() as AgentMetricsRow[];
 
   return rows.map(row => ({
     agentName: row.agent_name,
@@ -506,7 +565,15 @@ export function getHierarchySummary(rootSessionId: string): AgentHierarchySummar
       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
     FROM agent_tree_nodes
     WHERE root_session_id = ?
-  `).get(rootSessionId) as any;
+  `).get(rootSessionId) as {
+    total_agents: number;
+    max_depth: number;
+    total_allocated: number | null;
+    total_spent: number | null;
+    running: number;
+    completed: number;
+    failed: number;
+  };
 
   return {
     rootSessionId,

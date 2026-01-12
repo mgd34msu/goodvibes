@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { existsSync, watchFile, unwatchFile } from 'fs';
 import path from 'path';
 import os from 'os';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 import {
   upsertSession,
   storeMessages,
@@ -394,6 +395,7 @@ class SessionManagerInstance {
    * Extract tool usage from a session entry and update the toolUsage map.
    * Handles nested tool_use in message.content arrays and direct tool_use entries.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractToolUsage(entry: any, toolUsage: Map<string, number>): void {
     // Check for direct tool_use entry
     if (entry.type === 'tool_use' || entry.tool_use) {
@@ -427,6 +429,7 @@ class SessionManagerInstance {
     return messages;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private parseEntry(entry: any): Partial<SessionMessage> | null {
     let role = entry.type || entry.role || 'unknown';
     let content = '';
@@ -465,6 +468,7 @@ class SessionManagerInstance {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractContent(message: any): string {
     if (typeof message === 'string') return message;
 
@@ -660,14 +664,14 @@ class SessionManagerInstance {
           id: index,
           sessionId,
           messageIndex: index,
-          role: msg.role as any ?? 'unknown',
+          role: (msg.role as 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'system') ?? 'unknown',
           content: msg.content ?? '',
           timestamp: msg.timestamp ?? null,
           tokenCount: msg.tokenCount ?? 0,
           toolName: msg.toolName ?? null,
           toolInput: msg.toolInput ?? null,
           toolResult: msg.toolResult ?? null,
-          createdAt: new Date().toISOString(),
+          createdAt: formatTimestamp(),
         }));
       } catch (error) {
         logger.error(`Failed to read messages from file for session ${sessionId}`, error);

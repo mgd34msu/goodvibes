@@ -23,6 +23,9 @@ import {
   Wrench,
   Search,
 } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('MCPView');
 
 // ============================================================================
 // TYPES
@@ -508,7 +511,7 @@ export default function MCPView() {
       const result = await window.goodvibes.getMCPServers();
       setServers(result || []);
     } catch (error) {
-      console.error('Failed to load MCP servers:', error);
+      logger.error('Failed to load MCP servers:', error);
       setServers([]);
     } finally {
       setLoading(false);
@@ -538,7 +541,7 @@ export default function MCPView() {
       setEditingServer(undefined);
       loadServers();
     } catch (error) {
-      console.error('Failed to save MCP server:', error);
+      logger.error('Failed to save MCP server:', error);
     }
   };
 
@@ -547,7 +550,7 @@ export default function MCPView() {
       await window.goodvibes.setMCPServerStatus(id, 'connected');
       loadServers();
     } catch (error) {
-      console.error('Failed to start MCP server:', error);
+      logger.error('Failed to start MCP server:', error);
     }
   };
 
@@ -556,7 +559,7 @@ export default function MCPView() {
       await window.goodvibes.setMCPServerStatus(id, 'disconnected');
       loadServers();
     } catch (error) {
-      console.error('Failed to stop MCP server:', error);
+      logger.error('Failed to stop MCP server:', error);
     }
   };
 
@@ -568,7 +571,7 @@ export default function MCPView() {
         loadServers();
       }, 500);
     } catch (error) {
-      console.error('Failed to restart MCP server:', error);
+      logger.error('Failed to restart MCP server:', error);
     }
   };
 
@@ -578,7 +581,7 @@ export default function MCPView() {
         await window.goodvibes.deleteMCPServer(id);
         loadServers();
       } catch (error) {
-        console.error('Failed to delete MCP server:', error);
+        logger.error('Failed to delete MCP server:', error);
       }
     }
   };
@@ -596,7 +599,7 @@ export default function MCPView() {
       loadServers();
       setActiveTab('installed');
     } catch (error) {
-      console.error('Failed to install MCP server:', error);
+      logger.error('Failed to install MCP server:', error);
     }
   };
 

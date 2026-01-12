@@ -145,11 +145,12 @@ export function CommandPalette() {
 
   // Group commands by category
   const groupedCommands = filteredCommands.reduce((groups, cmd) => {
-    const category = groups[cmd.category];
-    if (!category) {
-      groups[cmd.category] = [];
+    const categoryGroup = groups[cmd.category];
+    if (!categoryGroup) {
+      groups[cmd.category] = [cmd];
+    } else {
+      categoryGroup.push(cmd);
     }
-    groups[cmd.category]!.push(cmd);
     return groups;
   }, {} as Record<string, Command[]>);
 

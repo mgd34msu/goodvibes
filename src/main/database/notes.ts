@@ -2,8 +2,21 @@
 // QUICK NOTES DATABASE OPERATIONS
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import type { QuickNote } from '../../shared/types/index.js';
+
+/**
+ * Database row type for quick_notes table (with join to sessions)
+ */
+interface QuickNoteRow {
+  id: number;
+  content: string;
+  session_id: string | null;
+  status: string;
+  priority: string;
+  project_name: string | null;
+  created_at: string;
+}
 
 export function createQuickNote(content: string, sessionId?: string, priority?: string): number {
   const database = getDatabase();
@@ -22,7 +35,7 @@ export function getQuickNotes(status: string = 'active'): QuickNote[] {
     LEFT JOIN sessions s ON qn.session_id = s.id
     WHERE qn.status = ?
     ORDER BY qn.created_at DESC
-  `).all(status);
+  `).all(status) as QuickNoteRow[];
   return rows.map(mapRowToQuickNote);
 }
 
@@ -46,7 +59,7 @@ export function linkQuickNoteToSession(noteId: number, sessionId: string): void 
   database.prepare('UPDATE quick_notes SET session_id = ? WHERE id = ?').run(sessionId, noteId);
 }
 
-function mapRowToQuickNote(row: any): QuickNote {
+function mapRowToQuickNote(row: QuickNoteRow): QuickNote {
   return {
     id: row.id,
     content: row.content,

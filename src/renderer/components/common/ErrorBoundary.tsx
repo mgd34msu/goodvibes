@@ -3,6 +3,9 @@
 // ============================================================================
 
 import React, { Component, ErrorInfo } from 'react';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('ErrorBoundary');
 
 interface ErrorBoundaryProps {
   /** Fallback UI to show on error */
@@ -39,7 +42,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error:', error, errorInfo);
     this.props.onError?.(error, errorInfo);
   }
 

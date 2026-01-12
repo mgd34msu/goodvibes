@@ -5,6 +5,7 @@
 import path from 'path';
 import { getSetting, setSetting } from '../database/index.js';
 import { Logger } from './logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 import { MAX_RECENT_PROJECTS } from '../../shared/constants.js';
 
 const logger = new Logger('RecentProjects');
@@ -49,7 +50,7 @@ export function addRecentProject(projectPath: string, name?: string): void {
   recentProjects.unshift({
     path: projectPath,
     name: name || path.basename(projectPath),
-    lastOpened: new Date().toISOString(),
+    lastOpened: formatTimestamp(),
   });
 
   // Keep only MAX_RECENT_PROJECTS

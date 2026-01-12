@@ -25,6 +25,21 @@ import type { ExtendedHookEventType } from '../database/hookEvents.js';
 const logger = new Logger('HookScripts');
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+/**
+ * Claude hook configuration entry in settings.json
+ */
+interface ClaudeHookEntry {
+  hooks?: Array<{
+    command?: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
+// ============================================================================
 // CONSTANTS
 // ============================================================================
 
@@ -489,7 +504,7 @@ export async function configureClaudeHooks(): Promise<boolean> {
         const content = await fs.readFile(CLAUDE_SETTINGS_PATH, 'utf-8');
         settings = JSON.parse(content);
         logger.debug('Read existing Claude settings.json');
-      } catch (e) {
+      } catch {
         logger.warn('Failed to parse existing Claude settings.json, starting fresh');
         settings = {};
       }
@@ -499,14 +514,14 @@ export async function configureClaudeHooks(): Promise<boolean> {
     const hooksConfig = generateClaudeHooksConfig();
 
     // Merge with existing hooks (GoodVibes hooks take precedence)
-    const existingHooks = (settings.hooks || {}) as Record<string, unknown[]>;
+    const existingHooks = (settings.hooks || {}) as Record<string, ClaudeHookEntry[]>;
     const mergedHooks: Record<string, unknown[]> = { ...existingHooks };
 
     for (const [eventType, goodvibesHooks] of Object.entries(hooksConfig)) {
       // Get existing hooks for this event type (non-GoodVibes ones)
-      const existingEventHooks = (existingHooks[eventType] || []).filter((hook: any) => {
+      const existingEventHooks = (existingHooks[eventType] || []).filter((hook: ClaudeHookEntry) => {
         // Keep hooks that don't contain our scripts path
-        const isGoodVibesHook = hook?.hooks?.some?.((h: any) =>
+        const isGoodVibesHook = hook?.hooks?.some?.((h: { command?: string }) =>
           h?.command?.includes?.('.goodvibes/hooks/') ||
           h?.command?.includes?.('.goodvibes\\hooks\\')
         );
@@ -547,10 +562,10 @@ export async function removeClaudeHooks(): Promise<boolean> {
     }
 
     // Filter out GoodVibes hooks
-    const hooks = settings.hooks as Record<string, unknown[]>;
+    const hooks = settings.hooks as Record<string, ClaudeHookEntry[]>;
     for (const eventType of Object.keys(hooks)) {
-      hooks[eventType] = (hooks[eventType] || []).filter((hook: any) => {
-        const isGoodVibesHook = hook?.hooks?.some?.((h: any) =>
+      hooks[eventType] = (hooks[eventType] || []).filter((hook: ClaudeHookEntry) => {
+        const isGoodVibesHook = hook?.hooks?.some?.((h: { command?: string }) =>
           h?.command?.includes?.('.goodvibes/hooks/') ||
           h?.command?.includes?.('.goodvibes\\hooks\\')
         );
@@ -596,8 +611,8 @@ export async function areClaudeHooksConfigured(): Promise<boolean> {
 
     // Check if at least SessionStart hook is configured (our most important hook)
     const sessionStartHooks = settings.hooks.SessionStart || [];
-    const hasGoodVibesHook = sessionStartHooks.some((hook: any) =>
-      hook?.hooks?.some?.((h: any) =>
+    const hasGoodVibesHook = sessionStartHooks.some((hook: ClaudeHookEntry) =>
+      hook?.hooks?.some?.((h: { command?: string }) =>
         h?.command?.includes?.('.goodvibes/hooks/') ||
         h?.command?.includes?.('.goodvibes\\hooks\\')
       )

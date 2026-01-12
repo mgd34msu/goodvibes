@@ -52,6 +52,8 @@ interface ToastItemProps {
 function ToastItem({ toast, onClose }: ToastItemProps) {
   return (
     <div
+      role="alert"
+      aria-live="polite"
       className={clsx(
         'flex items-start gap-3 p-4 rounded-lg shadow-elevation-4 animate-slide-in',
         'bg-surface-900 border border-surface-700'

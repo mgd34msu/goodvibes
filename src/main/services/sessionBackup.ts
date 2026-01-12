@@ -113,8 +113,11 @@ function backupSessionFile(sourcePath: string, backupDir: string): boolean {
 
     // Preserve the original modification time
     const sourceStats = statSync(sourcePath);
-    fs.utimes(backupPath, sourceStats.atime, sourceStats.mtime).catch(() => {
-      // Ignore errors preserving timestamps
+    fs.utimes(backupPath, sourceStats.atime, sourceStats.mtime).catch((error) => {
+      logger.debug('Failed to preserve timestamps', {
+        backupPath,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     });
 
     return true;

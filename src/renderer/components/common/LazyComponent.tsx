@@ -18,14 +18,17 @@ import {
 import { clsx } from 'clsx';
 import { Skeleton } from './Skeleton';
 import { LoadingSpinner } from './LoadingSpinner';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('LazyComponent');
 
 // ============================================================================
 // Types
 // ============================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface LazyComponentProps {
   /** The lazy component to render */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   component: LazyExoticComponent<ComponentType<any>>;
   /** Props to pass to the component */
   componentProps?: Record<string, unknown>;
@@ -85,7 +88,7 @@ class LazyErrorBoundary extends Component<LazyErrorBoundaryProps, LazyErrorBound
   }
 
   override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('LazyComponent failed to load:', error, errorInfo);
+    logger.error('LazyComponent failed to load:', error, errorInfo);
     this.props.onError?.(error);
   }
 
@@ -307,7 +310,7 @@ export function prefetchComponent(loader: LazyComponentLoader): void {
   if (!prefetchedComponents.has(loader)) {
     prefetchedComponents.add(loader);
     loader().catch((err) => {
-      console.warn('Failed to prefetch component:', err);
+      logger.warn('Failed to prefetch component:', err);
       prefetchedComponents.delete(loader);
     });
   }

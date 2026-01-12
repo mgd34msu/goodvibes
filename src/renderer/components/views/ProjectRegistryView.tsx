@@ -4,6 +4,9 @@
 
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('ProjectRegistryView');
 
 // ============================================================================
 // TYPES
@@ -122,7 +125,7 @@ export default function ProjectRegistryView() {
         setProjectAnalytics(analyticsMap);
       }
     } catch (error) {
-      console.error('Failed to load project registry data:', error);
+      logger.error('Failed to load project registry data:', error);
     } finally {
       setIsLoading(false);
     }

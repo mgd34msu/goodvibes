@@ -118,7 +118,7 @@ export default function KnowledgeView() {
               return (
                 <button
                   key={category}
-                  onClick={() => setSelectedCategory(category!)}
+                  onClick={() => category && setSelectedCategory(category)}
                   className={clsx(
                     'w-full px-3 py-2 text-sm text-left rounded-lg transition-all duration-150 flex items-center justify-between',
                     selectedCategory === category

@@ -20,6 +20,10 @@ import {
   Settings,
 } from 'lucide-react';
 import ProjectSelector from '../shared/ProjectSelector';
+import { createLogger } from '../../../shared/logger';
+import { formatTimestamp } from '../../../shared/dateUtils';
+
+const logger = createLogger('SkillsView');
 
 // ============================================================================
 // TYPES
@@ -498,12 +502,12 @@ export default function SkillsView() {
         projectPath: s.projectPath as string | null,
         useCount: (s.useCount as number) || 0,
         lastUsed: s.lastUsed as string | null,
-        createdAt: s.createdAt as string || new Date().toISOString(),
-        updatedAt: s.updatedAt as string || new Date().toISOString(),
+        createdAt: s.createdAt as string || formatTimestamp(),
+        updatedAt: s.updatedAt as string || formatTimestamp(),
       }));
       setSkills(mappedSkills);
     } catch (error) {
-      console.error('Failed to load skills:', error);
+      logger.error('Failed to load skills:', error);
       setSkills([]);
     } finally {
       setLoading(false);
@@ -539,7 +543,7 @@ export default function SkillsView() {
       setEditingSkill(undefined);
       loadSkills();
     } catch (error) {
-      console.error('Failed to save skill:', error);
+      logger.error('Failed to save skill:', error);
     }
   };
 
@@ -548,7 +552,7 @@ export default function SkillsView() {
       // Copy slash command to clipboard
       await navigator.clipboard.writeText(`/${skillName}`);
     } catch (error) {
-      console.error('Failed to copy skill command:', error);
+      logger.error('Failed to copy skill command:', error);
     }
   };
 
@@ -562,7 +566,7 @@ export default function SkillsView() {
         await window.goodvibes.deleteSkill(id);
         loadSkills();
       } catch (error) {
-        console.error('Failed to delete skill:', error);
+        logger.error('Failed to delete skill:', error);
       }
     }
   };

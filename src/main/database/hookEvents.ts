@@ -8,10 +8,71 @@
 //
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import { Logger } from '../services/logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 
 const logger = new Logger('HookEventsDB');
+
+// ============================================================================
+// DATABASE ROW TYPES (Raw SQLite rows before mapping)
+// ============================================================================
+
+/** Raw row from hook_events table */
+interface HookEventRow {
+  id: number;
+  event_type: string;
+  session_id: string | null;
+  project_path: string | null;
+  tool_name: string | null;
+  tool_input: string | null;
+  tool_result: string | null;
+  blocked: number;
+  block_reason: string | null;
+  duration_ms: number;
+  timestamp: string;
+}
+
+/** Raw row from budgets table */
+interface BudgetRow {
+  id: number;
+  project_path: string | null;
+  session_id: string | null;
+  limit_usd: number;
+  spent_usd: number;
+  warning_threshold: number;
+  hard_stop_enabled: number;
+  reset_period: 'session' | 'daily' | 'weekly' | 'monthly';
+  last_reset: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Raw row from approval_queue table */
+interface ApprovalQueueRow {
+  id: number;
+  session_id: string;
+  request_type: string;
+  request_details: string;
+  status: 'pending' | 'approved' | 'denied' | 'expired';
+  policy_id: number | null;
+  decided_at: string | null;
+  decided_by: 'user' | 'policy' | null;
+  created_at: string;
+}
+
+/** Raw row from approval_policies table */
+interface ApprovalPolicyRow {
+  id: number;
+  name: string;
+  matcher: string;
+  action: 'auto-approve' | 'auto-deny' | 'queue';
+  priority: number;
+  conditions: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
 
 // ============================================================================
 // TYPES
@@ -228,7 +289,7 @@ export function recordHookEvent(event: Omit<HookEventRecord, 'id'>): HookEventRe
     event.blocked ? 1 : 0,
     event.blockReason,
     event.durationMs,
-    event.timestamp || new Date().toISOString()
+    event.timestamp || formatTimestamp()
   );
 
   return {
@@ -247,7 +308,7 @@ export function getHookEventsBySession(sessionId: string, limit = 100): HookEven
     WHERE session_id = ?
     ORDER BY timestamp DESC
     LIMIT ?
-  `).all(sessionId, limit) as any[];
+  `).all(sessionId, limit) as HookEventRow[];
 
   return rows.map(mapRowToHookEvent);
 }
@@ -261,7 +322,7 @@ export function getRecentHookEvents(limit = 100): HookEventRecord[] {
     SELECT * FROM hook_events
     ORDER BY timestamp DESC
     LIMIT ?
-  `).all(limit) as any[];
+  `).all(limit) as HookEventRow[];
 
   return rows.map(mapRowToHookEvent);
 }
@@ -279,7 +340,7 @@ export function getHookEventsByType(
     WHERE event_type = ?
     ORDER BY timestamp DESC
     LIMIT ?
-  `).all(eventType, limit) as any[];
+  `).all(eventType, limit) as HookEventRow[];
 
   return rows.map(mapRowToHookEvent);
 }
@@ -343,7 +404,7 @@ export function cleanupOldHookEvents(maxAgeHours = 24): number {
   return result.changes;
 }
 
-function mapRowToHookEvent(row: any): HookEventRecord {
+function mapRowToHookEvent(row: HookEventRow): HookEventRecord {
   return {
     id: row.id,
     eventType: row.event_type as ExtendedHookEventType,
@@ -400,7 +461,11 @@ export function upsertBudget(budget: Omit<BudgetRecord, 'id' | 'createdAt' | 'up
       existing.id
     );
 
-    return getBudget(existing.id)!;
+    const updated = getBudget(existing.id);
+    if (!updated) {
+      throw new Error(`Failed to retrieve updated budget with id ${existing.id}`);
+    }
+    return updated;
   } else {
     const result = db.prepare(`
       INSERT INTO budgets (
@@ -418,7 +483,11 @@ export function upsertBudget(budget: Omit<BudgetRecord, 'id' | 'createdAt' | 'up
       budget.lastReset
     );
 
-    return getBudget(result.lastInsertRowid as number)!;
+    const inserted = getBudget(result.lastInsertRowid as number);
+    if (!inserted) {
+      throw new Error(`Failed to retrieve inserted budget with id ${result.lastInsertRowid}`);
+    }
+    return inserted;
   }
 }
 
@@ -427,7 +496,7 @@ export function upsertBudget(budget: Omit<BudgetRecord, 'id' | 'createdAt' | 'up
  */
 export function getBudget(id: number): BudgetRecord | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as BudgetRow | undefined;
   return row ? mapRowToBudget(row) : null;
 }
 
@@ -444,7 +513,7 @@ export function getBudgetForScope(
   if (sessionId) {
     const sessionBudget = db.prepare(
       'SELECT * FROM budgets WHERE session_id = ?'
-    ).get(sessionId) as any;
+    ).get(sessionId) as BudgetRow | undefined;
     if (sessionBudget) return mapRowToBudget(sessionBudget);
   }
 
@@ -452,14 +521,14 @@ export function getBudgetForScope(
   if (projectPath) {
     const projectBudget = db.prepare(
       'SELECT * FROM budgets WHERE project_path = ? AND session_id IS NULL'
-    ).get(projectPath) as any;
+    ).get(projectPath) as BudgetRow | undefined;
     if (projectBudget) return mapRowToBudget(projectBudget);
   }
 
   // Finally try global budget
   const globalBudget = db.prepare(
     'SELECT * FROM budgets WHERE project_path IS NULL AND session_id IS NULL'
-  ).get() as any;
+  ).get() as BudgetRow | undefined;
 
   return globalBudget ? mapRowToBudget(globalBudget) : null;
 }
@@ -482,11 +551,11 @@ export function updateBudgetSpent(id: number, additionalCost: number): void {
  */
 export function getAllBudgets(): BudgetRecord[] {
   const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM budgets ORDER BY created_at DESC').all() as any[];
+  const rows = db.prepare('SELECT * FROM budgets ORDER BY created_at DESC').all() as BudgetRow[];
   return rows.map(mapRowToBudget);
 }
 
-function mapRowToBudget(row: any): BudgetRecord {
+function mapRowToBudget(row: BudgetRow): BudgetRecord {
   return {
     id: row.id,
     projectPath: row.project_path,
@@ -519,7 +588,11 @@ export function addToApprovalQueue(
     VALUES (?, ?, ?)
   `).run(item.sessionId, item.requestType, item.requestDetails);
 
-  return getApprovalQueueItem(result.lastInsertRowid as number)!;
+  const inserted = getApprovalQueueItem(result.lastInsertRowid as number);
+  if (!inserted) {
+    throw new Error(`Failed to retrieve inserted approval queue item with id ${result.lastInsertRowid}`);
+  }
+  return inserted;
 }
 
 /**
@@ -527,7 +600,7 @@ export function addToApprovalQueue(
  */
 export function getApprovalQueueItem(id: number): ApprovalQueueItem | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM approval_queue WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM approval_queue WHERE id = ?').get(id) as ApprovalQueueRow | undefined;
   return row ? mapRowToApprovalQueueItem(row) : null;
 }
 
@@ -538,7 +611,7 @@ export function getPendingApprovals(sessionId?: string): ApprovalQueueItem[] {
   const db = getDatabase();
 
   let query = 'SELECT * FROM approval_queue WHERE status = ?';
-  const params: any[] = ['pending'];
+  const params: string[] = ['pending'];
 
   if (sessionId) {
     query += ' AND session_id = ?';
@@ -547,7 +620,7 @@ export function getPendingApprovals(sessionId?: string): ApprovalQueueItem[] {
 
   query += ' ORDER BY created_at ASC';
 
-  const rows = db.prepare(query).all(...params) as any[];
+  const rows = db.prepare(query).all(...params) as ApprovalQueueRow[];
   return rows.map(mapRowToApprovalQueueItem);
 }
 
@@ -571,7 +644,7 @@ export function updateApprovalStatus(
   `).run(status, decidedBy, policyId ?? null, id);
 }
 
-function mapRowToApprovalQueueItem(row: any): ApprovalQueueItem {
+function mapRowToApprovalQueueItem(row: ApprovalQueueRow): ApprovalQueueItem {
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -609,7 +682,11 @@ export function createApprovalPolicy(
     policy.enabled ? 1 : 0
   );
 
-  return getApprovalPolicy(result.lastInsertRowid as number)!;
+  const inserted = getApprovalPolicy(result.lastInsertRowid as number);
+  if (!inserted) {
+    throw new Error(`Failed to retrieve inserted approval policy with id ${result.lastInsertRowid}`);
+  }
+  return inserted;
 }
 
 /**
@@ -617,7 +694,7 @@ export function createApprovalPolicy(
  */
 export function getApprovalPolicy(id: number): ApprovalPolicy | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM approval_policies WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM approval_policies WHERE id = ?').get(id) as ApprovalPolicyRow | undefined;
   return row ? mapRowToApprovalPolicy(row) : null;
 }
 
@@ -628,7 +705,7 @@ export function getEnabledApprovalPolicies(): ApprovalPolicy[] {
   const db = getDatabase();
   const rows = db.prepare(
     'SELECT * FROM approval_policies WHERE enabled = 1 ORDER BY priority DESC'
-  ).all() as any[];
+  ).all() as ApprovalPolicyRow[];
   return rows.map(mapRowToApprovalPolicy);
 }
 
@@ -639,7 +716,7 @@ export function getAllApprovalPolicies(): ApprovalPolicy[] {
   const db = getDatabase();
   const rows = db.prepare(
     'SELECT * FROM approval_policies ORDER BY priority DESC'
-  ).all() as any[];
+  ).all() as ApprovalPolicyRow[];
   return rows.map(mapRowToApprovalPolicy);
 }
 
@@ -682,7 +759,7 @@ export function deleteApprovalPolicy(id: number): void {
   db.prepare('DELETE FROM approval_policies WHERE id = ?').run(id);
 }
 
-function mapRowToApprovalPolicy(row: any): ApprovalPolicy {
+function mapRowToApprovalPolicy(row: ApprovalPolicyRow): ApprovalPolicy {
   return {
     id: row.id,
     name: row.name,

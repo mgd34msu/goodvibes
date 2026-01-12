@@ -74,7 +74,7 @@ function loadOAuthCredentials(): { clientId: string | null; clientSecret: string
         }
       }
     }
-  } catch (error) {
+  } catch {
     logger.debug('No bundled OAuth config found');
   }
 

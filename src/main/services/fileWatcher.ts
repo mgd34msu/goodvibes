@@ -295,7 +295,9 @@ class FileWatcherService extends EventEmitter {
     if (!existsSync(claudeDir)) {
       logger.warn(`Claude directory not found: ${claudeDir}`);
       // Create it so we can watch for future sessions
-      fs.mkdir(claudeDir, { recursive: true }).catch(() => {});
+      fs.mkdir(claudeDir, { recursive: true }).catch((error) => {
+        logger.error(`Failed to create Claude sessions directory: ${claudeDir}`, error);
+      });
     }
 
     const watchId = this.watch({

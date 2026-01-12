@@ -2,8 +2,8 @@
 // MENU CONFIGURATION
 // ============================================================================
 
-import { Menu, shell, MenuItemConstructorOptions, globalShortcut, app } from 'electron';
-import { getMainWindow, sendToRenderer } from './window.js';
+import { Menu, shell, MenuItemConstructorOptions } from 'electron';
+import { sendToRenderer } from './window.js';
 
 export function createMenu(): void {
   const template: MenuItemConstructorOptions[] = [

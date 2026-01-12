@@ -2,7 +2,7 @@
 // COLLECTION DATABASE OPERATIONS
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import type { Collection, SmartCollection, SmartCollectionRule, Session } from '../../shared/types/index.js';
 import {
   mapRowToSession,

@@ -10,6 +10,9 @@ import type { AppSettings } from '../../../shared/types';
 import { toast } from '../../stores/toastStore';
 import type { GitHubAuthState } from '../../../shared/types/github';
 import { useConfirm } from '../overlays/ConfirmModal';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('SettingsView');
 
 export default function SettingsView() {
   const settings = useSettingsStore((s) => s.settings);
@@ -658,7 +661,7 @@ function RecalculateCostsButton() {
       } else {
         toast.error(result.error || 'Failed to recalculate costs');
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to recalculate costs');
     } finally {
       setIsRecalculating(false);
@@ -710,7 +713,7 @@ function GitHubConnectionStatus() {
       const state = await window.goodvibes.githubGetAuthState();
       setAuthState(state);
     } catch (err) {
-      console.error('Failed to load GitHub auth state:', err);
+      logger.error('Failed to load GitHub auth state:', err);
     }
   };
 
@@ -719,7 +722,7 @@ function GitHubConnectionStatus() {
       const config = await window.goodvibes.githubGetOAuthConfig();
       setOauthConfig(config);
     } catch (err) {
-      console.error('Failed to load OAuth config:', err);
+      logger.error('Failed to load OAuth config:', err);
     }
   };
 
@@ -764,7 +767,7 @@ function GitHubConnectionStatus() {
       });
       toast.success('Disconnected from GitHub');
     } catch (err) {
-      console.error('Logout failed:', err);
+      logger.error('Logout failed:', err);
       toast.error('Failed to disconnect from GitHub');
     } finally {
       setIsLoading(false);

@@ -2,8 +2,50 @@
 // SEARCH DATABASE OPERATIONS
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import type { Session, SearchOptions, SavedSearch } from '../../shared/types/index.js';
+
+/**
+ * Database row type for sessions table
+ */
+interface SessionRow {
+  id: string;
+  project_name: string;
+  file_path: string;
+  start_time: string;
+  end_time: string | null;
+  message_count: number | null;
+  token_count: number | null;
+  cost: number | null;
+  status: string | null;
+  tags: string | null;
+  notes: string | null;
+  favorite: number;
+  archived: number;
+  collection_id: number | null;
+  summary: string | null;
+  custom_title: string | null;
+  rating: number | null;
+  outcome: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_write_tokens: number | null;
+  cache_read_tokens: number | null;
+  file_mtime: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Database row type for saved_searches table
+ */
+interface SavedSearchRow {
+  id: number;
+  name: string;
+  query: string;
+  filters: string;
+  created_at: string;
+}
 
 export function searchSessions(query: string): Session[] {
   const database = getDatabase();
@@ -13,7 +55,7 @@ export function searchSessions(query: string): Session[] {
     LEFT JOIN messages m ON s.id = m.session_id
     WHERE s.project_name LIKE ? OR m.content LIKE ?
     ORDER BY s.end_time DESC
-  `).all(searchTerm, searchTerm);
+  `).all(searchTerm, searchTerm) as SessionRow[];
   return rows.map(mapRowToSession);
 }
 
@@ -75,7 +117,7 @@ export function searchSessionsAdvanced(options: SearchOptions): Session[] {
     params.push(options.limit);
   }
 
-  const rows = database.prepare(sql).all(...params);
+  const rows = database.prepare(sql).all(...params) as SessionRow[];
   return rows.map(mapRowToSession);
 }
 
@@ -94,7 +136,7 @@ export function saveSearch(name: string, query: string, filters?: Record<string,
 
 export function getAllSavedSearches(): SavedSearch[] {
   const database = getDatabase();
-  const rows = database.prepare('SELECT * FROM saved_searches ORDER BY created_at DESC').all();
+  const rows = database.prepare('SELECT * FROM saved_searches ORDER BY created_at DESC').all() as SavedSearchRow[];
   return rows.map(mapRowToSavedSearch);
 }
 
@@ -103,7 +145,7 @@ export function deleteSavedSearch(id: number): void {
   database.prepare('DELETE FROM saved_searches WHERE id = ?').run(id);
 }
 
-function mapRowToSession(row: any): Session {
+function mapRowToSession(row: SessionRow): Session {
   return {
     id: row.id,
     projectName: row.project_name,
@@ -133,7 +175,7 @@ function mapRowToSession(row: any): Session {
   };
 }
 
-function mapRowToSavedSearch(row: any): SavedSearch {
+function mapRowToSavedSearch(row: SavedSearchRow): SavedSearch {
   return {
     id: row.id,
     name: row.name,

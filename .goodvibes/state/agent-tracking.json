@@ -1,72 +1,62 @@
 {
-  "a1337b5": {
-    "agent_id": "a1337b5",
-    "agent_type": "general-purpose",
-    "session_id": "e44578d9-edbd-4dc6-a042-e93b48b40183",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "74e61dc",
-    "started_at": "2026-01-11T05:48:50.127Z"
-  },
-  "a013c1c": {
-    "agent_id": "a013c1c",
-    "agent_type": "fullstack-developer",
-    "session_id": "e44578d9-edbd-4dc6-a042-e93b48b40183",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "a3d3c64",
-    "started_at": "2026-01-11T06:02:09.808Z"
-  },
-  "ac83581": {
-    "agent_id": "ac83581",
+  "cycle": 1,
+  "agents": [
+    {
+      "id": "a4a7568",
+      "type": "test-engineer",
+      "task": "Fix test mocks and skipped tests",
+      "status": "running"
+    },
+    {
+      "id": "a37c97f",
+      "type": "backend-engineer",
+      "task": "Fix circular deps and swallowed error",
+      "status": "running"
+    },
+    {
+      "id": "a664dc4",
+      "type": "frontend-architect",
+      "task": "Split TerminalView component",
+      "status": "running"
+    },
+    {
+      "id": "aaeeb45",
+      "type": "code-architect",
+      "task": "Create ESLint config and fix any types",
+      "status": "running"
+    },
+    {
+      "id": "a9f8bb1",
+      "type": "devops-deployer",
+      "task": "Fix security vulns and update deps",
+      "status": "running"
+    },
+    {
+      "id": "afd4051",
+      "type": "fullstack-integrator",
+      "task": "Add logger and README",
+      "status": "running"
+    }
+  ],
+  "startTime": "2026-01-12T06:32:00Z",
+  "ae407ec": {
+    "agent_id": "ae407ec",
     "agent_type": "goodvibes:fullstack-integrator",
-    "session_id": "e44578d9-edbd-4dc6-a042-e93b48b40183",
+    "session_id": "94b0bd74-b3bf-48ae-99b2-f03d097d578e",
     "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
     "project_name": "clausitron",
     "git_branch": "main",
-    "git_commit": "a3d3c64",
-    "started_at": "2026-01-11T06:30:28.181Z"
+    "git_commit": "0fb8f95",
+    "started_at": "2026-01-12T14:31:46.611Z"
   },
-  "a1075f8": {
-    "agent_id": "a1075f8",
-    "agent_type": "Bash",
-    "session_id": "b5df6ac5-13de-4c3a-aba6-ad477017e3d3",
+  "a85099b": {
+    "agent_id": "a85099b",
+    "agent_type": "goodvibes:code-architect",
+    "session_id": "94b0bd74-b3bf-48ae-99b2-f03d097d578e",
     "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
     "project_name": "clausitron",
     "git_branch": "main",
-    "git_commit": "a3d3c64",
-    "started_at": "2026-01-11T18:29:20.007Z"
-  },
-  "a13e78c": {
-    "agent_id": "a13e78c",
-    "agent_type": "Plan",
-    "session_id": "10d68d33-ea08-4f0b-b09c-c85c3050c2b3",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "9baffaf",
-    "started_at": "2026-01-11T19:19:17.104Z"
-  },
-  "a2c6e8f": {
-    "agent_id": "a2c6e8f",
-    "agent_type": "Plan",
-    "session_id": "9ae8026c-32f6-4972-87c6-3015d26470b6",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "9baffaf",
-    "started_at": "2026-01-11T19:22:40.571Z"
-  },
-  "a5be656": {
-    "agent_id": "a5be656",
-    "agent_type": "Plan",
-    "session_id": "1aaa86b4-08e2-4469-9a89-c835ca3e88d5",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "9baffaf",
-    "started_at": "2026-01-11T19:29:50.461Z"
+    "git_commit": "0fb8f95",
+    "started_at": "2026-01-12T14:31:48.542Z"
   }
 }

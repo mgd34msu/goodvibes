@@ -16,6 +16,9 @@ import {
   Home,
   ArrowLeft,
 } from 'lucide-react';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('ErrorRecovery');
 
 // ============================================================================
 // Error Categories
@@ -263,7 +266,7 @@ export class ErrorRecovery extends Component<ErrorRecoveryProps, ErrorRecoverySt
     this.setState({ error: categorizedError });
     this.props.onError?.(categorizedError, errorInfo);
 
-    console.error('ErrorRecovery caught:', {
+    logger.error('ErrorRecovery caught:', {
       category: categorizedError.category,
       message: categorizedError.userMessage,
       technical: categorizedError.technicalDetails,

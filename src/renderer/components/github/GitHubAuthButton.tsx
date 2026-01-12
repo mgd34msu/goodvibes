@@ -5,6 +5,9 @@
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
 import type { GitHubUser, GitHubAuthState } from '../../../shared/types/github';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('GitHubAuth');
 
 interface GitHubAuthButtonProps {
   onAuthChange?: (isAuthenticated: boolean, user: GitHubUser | null) => void;
@@ -29,6 +32,7 @@ export default function GitHubAuthButton({
   // Load auth state on mount
   useEffect(() => {
     loadAuthState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadAuthState = async () => {
@@ -37,7 +41,7 @@ export default function GitHubAuthButton({
       setAuthState(state);
       onAuthChange?.(state.isAuthenticated, state.user);
     } catch (err) {
-      console.error('Failed to load GitHub auth state:', err);
+      logger.error('Failed to load GitHub auth state:', err);
     }
   };
 
@@ -79,7 +83,7 @@ export default function GitHubAuthButton({
       });
       onAuthChange?.(false, null);
     } catch (err) {
-      console.error('Logout failed:', err);
+      logger.error('Logout failed:', err);
     } finally {
       setIsLoading(false);
     }

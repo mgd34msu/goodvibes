@@ -16,6 +16,9 @@
 
 import { create } from 'zustand';
 import type { TerminalInfo, TerminalStartResult } from '../../shared/types';
+import { createLogger } from '../../shared/logger';
+
+const logger = createLogger('TerminalStore');
 
 interface TerminalInstance extends TerminalInfo {
   isLoading: boolean;
@@ -68,8 +71,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
 
       if (result.id !== undefined) {
+        const terminalId = result.id;
         const terminal: TerminalInstance = {
-          id: result.id,
+          id: terminalId,
           name: result.name || 'Terminal',
           cwd: result.cwd || cwd || '',
           startTime: new Date(),
@@ -80,7 +84,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
         set((state) => {
           const newMap = new Map(state.terminals);
-          newMap.set(result.id!, terminal);
+          newMap.set(terminalId, terminal);
           return { terminals: newMap, activeTerminalId: result.id };
         });
       }
@@ -103,8 +107,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
 
       if (result.id !== undefined) {
+        const terminalId = result.id;
         const terminal: TerminalInstance = {
-          id: result.id,
+          id: terminalId,
           name: result.name || 'Terminal',
           cwd: result.cwd || cwd || '',
           startTime: new Date(),
@@ -114,7 +119,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
         set((state) => {
           const newMap = new Map(state.terminals);
-          newMap.set(result.id!, terminal);
+          newMap.set(terminalId, terminal);
           return { terminals: newMap, activeTerminalId: result.id };
         });
       }
@@ -164,7 +169,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     try {
       await window.goodvibes.killTerminal(id);
     } catch (error) {
-      console.error('Failed to kill terminal:', error);
+      logger.error('Failed to kill terminal:', error);
     }
 
     set((state) => {

@@ -3,8 +3,6 @@
 // ============================================================================
 
 import { spawn, ChildProcess } from 'child_process';
-import fs from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { EventEmitter } from 'events';
@@ -15,7 +13,6 @@ import {
   getTaskDefinition,
   getAllTaskDefinitions,
   recordTaskRun,
-  type TaskDefinition,
 } from '../database/primitives.js';
 
 const logger = new Logger('HeadlessRunner');

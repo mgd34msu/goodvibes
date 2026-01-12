@@ -19,10 +19,10 @@
 import http from 'http';
 import { EventEmitter } from 'events';
 import { Logger } from './logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 import { getMainWindow } from '../window.js';
 import {
   recordHookEvent,
-  getHookEventsBySession,
   type HookEventRecord,
   type ExtendedHookEventType,
 } from '../database/hookEvents.js';
@@ -39,7 +39,6 @@ import {
   findAgentBySession,
   upsertAgent,
   updateAgentStatus,
-  cleanupGarbageAgents,
   getAgent,
   getAllAgents,
   type AgentStatus,
@@ -184,7 +183,8 @@ class HookServerService extends EventEmitter {
     if (!this.sessionStacks.has(workingDirectory)) {
       this.sessionStacks.set(workingDirectory, []);
     }
-    const stack = this.sessionStacks.get(workingDirectory)!;
+    const stack = this.sessionStacks.get(workingDirectory);
+    if (!stack) return;
     // Avoid duplicates - only push if not already on stack
     if (!stack.includes(sessionId)) {
       stack.push(sessionId);
@@ -251,8 +251,9 @@ class HookServerService extends EventEmitter {
       return;
     }
 
+    const serverToClose = this.server;
     return new Promise((resolve) => {
-      this.server!.close(() => {
+      serverToClose.close(() => {
         this.isRunning = false;
         this.server = null;
         logger.info('Hook server stopped');
@@ -422,7 +423,7 @@ class HookServerService extends EventEmitter {
       blocked: false,
       blockReason: null,
       durationMs: 0,
-      timestamp: new Date().toISOString(),
+      timestamp: formatTimestamp(),
     };
 
     return recordHookEvent(event);

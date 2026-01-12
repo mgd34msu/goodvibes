@@ -14,7 +14,7 @@ import { initTerminalManager, closeAllTerminals, getTerminalCount } from './serv
 import { registerAllIpcHandlers } from './ipc/index.js';
 import { loadRecentProjects } from './services/recentProjects.js';
 import { Logger } from './services/logger.js';
-import { handleOAuthCallback, setPendingOAuthCallback, initializeGitHub } from './services/github.js';
+import { handleOAuthCallback, initializeGitHub } from './services/github.js';
 import { initAgentRegistry, shutdownAgentRegistry, getAgentRegistry } from './services/agentRegistry.js';
 import { getPTYStreamAnalyzer, shutdownPTYStreamAnalyzer } from './services/ptyStreamAnalyzer.js';
 import { startHookServer, stopHookServer, getHookServer } from './services/hookServer.js';
@@ -111,7 +111,7 @@ if (!gotTheLock) {
   registerProtocol();
 
   // Handle second instance (Windows/Linux protocol handling)
-  app.on('second-instance', (event, commandLine, workingDirectory) => {
+  app.on('second-instance', (_event, commandLine, _workingDirectory) => {
     logger.info('Second instance detected', { commandLine });
 
     // Find the protocol URL in the command line arguments
@@ -254,7 +254,10 @@ async function initializeApp(): Promise<void> {
         if (!terminalToAgents.has(terminalId)) {
           terminalToAgents.set(terminalId, new Set());
         }
-        terminalToAgents.get(terminalId)!.add(agent.id);
+        const terminalAgents = terminalToAgents.get(terminalId);
+        if (terminalAgents) {
+          terminalAgents.add(agent.id);
+        }
 
         // Mark as active since we detected it running
         agentRegistry.markActive(agent.id);

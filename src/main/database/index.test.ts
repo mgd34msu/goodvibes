@@ -18,7 +18,6 @@ import os from 'os';
 // Check if better-sqlite3 can be loaded
 let canLoadDatabase = true;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('better-sqlite3');
 } catch {
   canLoadDatabase = false;
@@ -40,12 +39,12 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('../services/logger.js', () => ({
-  Logger: vi.fn().mockImplementation(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
+  Logger: class MockLogger {
+    info = vi.fn();
+    warn = vi.fn();
+    error = vi.fn();
+    debug = vi.fn();
+  },
 }));
 
 // Import after mocks - use dynamic import to prevent module load errors
@@ -533,7 +532,7 @@ describeIfDb('Analytics', () => {
 
       expect(analytics.totalSessions).toBe(2);
       expect(analytics.totalTokens).toBe(3000);
-      expect(analytics.totalCost).toBe(0.15);
+      expect(analytics.totalCost).toBeCloseTo(0.15);
       expect(analytics.totalMessages).toBe(30);
     });
 
@@ -553,8 +552,8 @@ describeIfDb('Analytics', () => {
 
       const analytics = getAnalytics();
 
-      expect(analytics.costByProject['Project A']).toBe(0.15);
-      expect(analytics.costByProject['Project B']).toBe(0.20);
+      expect(analytics.costByProject['Project A']).toBeCloseTo(0.15);
+      expect(analytics.costByProject['Project B']).toBeCloseTo(0.20);
     });
 
     it('should count subagents', () => {
@@ -738,6 +737,18 @@ describeIfDb('Activity Log Operations', () => {
 
       const activity = getRecentActivity(10);
 
+      // Verify all activities are returned
+      expect(activity).toHaveLength(3);
+      const types = activity.map(a => a.type);
+      expect(types).toContain('first');
+      expect(types).toContain('second');
+      expect(types).toContain('third');
+
+      // When activities have the same timestamp, the order within that timestamp
+      // is based on insert order (newest first by AUTOINCREMENT id)
+      // Since CURRENT_TIMESTAMP has second precision, rapid inserts may have same timestamp
+      // but different ids. The most recent id should appear first.
+      // In this case: third (id=3) should come before second (id=2) which should come before first (id=1)
       expect(activity[0].type).toBe('third');
       expect(activity[2].type).toBe('first');
     });

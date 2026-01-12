@@ -22,13 +22,8 @@ import { getMainWindow } from '../window.js';
 import {
   searchIndexedAgents,
   searchIndexedSkills,
-  getAllIndexedAgents,
-  getAllIndexedSkills,
   getPopularAgents,
   getPopularSkills,
-  type IndexedAgent,
-  type IndexedSkill,
-  type SearchResult,
 } from '../database/agencyIndex.js';
 import {
   createRecommendationsTables,
@@ -40,9 +35,7 @@ import {
   type RecommendationType,
   type RecommendationAction,
   type RecommendationSource,
-  type RecommendationRecord,
   type RecommendationStats,
-  type ItemSuccessRate,
 } from '../database/recommendations.js';
 
 const logger = new Logger('RecommendationEngine');

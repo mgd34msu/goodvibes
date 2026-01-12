@@ -7,10 +7,53 @@
 //
 // ============================================================================
 
-import { getDatabase } from './index.js';
+import { getDatabase } from './connection.js';
 import { Logger } from '../services/logger.js';
+import { formatTimestamp } from '../../shared/dateUtils.js';
 
 const logger = new Logger('SessionSummariesDB');
+
+// ============================================================================
+// DATABASE ROW TYPES (Raw SQLite rows before mapping)
+// ============================================================================
+
+/** Raw row from session_summaries table */
+interface SessionSummaryRow {
+  id: number;
+  session_id: string;
+  project_path: string;
+  title: string;
+  description: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number;
+  status: 'completed' | 'aborted' | 'error';
+  tool_calls: number;
+  files_modified: number;
+  files_created: number;
+  tests_run: number;
+  tests_passed: number;
+  tests_failed: number;
+  tokens_used: number;
+  cost_usd: number;
+  active_agent_ids: string;
+  injected_skill_ids: string;
+  key_topics: string;
+  file_changes: string;
+  last_prompt: string | null;
+  context_snapshot: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Raw row from session_checkpoints table */
+interface SessionCheckpointRow {
+  id: number;
+  session_id: string;
+  checkpoint_name: string;
+  context: string;
+  created_at: string;
+}
 
 // ============================================================================
 // TYPES
@@ -146,7 +189,7 @@ export function createSessionSummariesTables(): void {
         tokenize='porter unicode61'
       )
     `);
-  } catch (e) {
+  } catch {
     logger.debug('Session summaries FTS table already exists');
   }
 
@@ -174,7 +217,7 @@ export function createSessionSummariesTables(): void {
         VALUES (new.id, new.title, new.description, new.key_topics, new.last_prompt);
       END
     `);
-  } catch (e) {
+  } catch {
     logger.debug('Session summaries FTS triggers already exist');
   }
 
@@ -273,7 +316,11 @@ export function upsertSessionSummary(
       summary.contextSnapshot,
       existing.id
     );
-    return getSessionSummary(existing.id)!;
+    const updated = getSessionSummary(existing.id);
+    if (!updated) {
+      throw new Error(`Failed to retrieve updated session summary with id ${existing.id}`);
+    }
+    return updated;
   } else {
     const result = db.prepare(`
       INSERT INTO session_summaries (
@@ -310,7 +357,11 @@ export function upsertSessionSummary(
       summary.lastPrompt,
       summary.contextSnapshot
     );
-    return getSessionSummary(result.lastInsertRowid as number)!;
+    const inserted = getSessionSummary(result.lastInsertRowid as number);
+    if (!inserted) {
+      throw new Error(`Failed to retrieve inserted session summary with id ${result.lastInsertRowid}`);
+    }
+    return inserted;
   }
 }
 
@@ -319,7 +370,7 @@ export function upsertSessionSummary(
  */
 export function getSessionSummary(id: number): SessionSummary | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM session_summaries WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM session_summaries WHERE id = ?').get(id) as SessionSummaryRow | undefined;
   return row ? mapRowToSessionSummary(row) : null;
 }
 
@@ -328,7 +379,7 @@ export function getSessionSummary(id: number): SessionSummary | null {
  */
 export function getSessionSummaryBySessionId(sessionId: string): SessionSummary | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM session_summaries WHERE session_id = ?').get(sessionId) as any;
+  const row = db.prepare('SELECT * FROM session_summaries WHERE session_id = ?').get(sessionId) as SessionSummaryRow | undefined;
   return row ? mapRowToSessionSummary(row) : null;
 }
 
@@ -345,7 +396,7 @@ export function getRecentSessionsForProject(
     WHERE project_path = ?
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(projectPath, limit) as any[];
+  `).all(projectPath, limit) as SessionSummaryRow[];
   return rows.map(mapRowToSessionSummary);
 }
 
@@ -358,7 +409,7 @@ export function getRecentSessions(limit: number = 50): SessionSummary[] {
     SELECT * FROM session_summaries
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(limit) as any[];
+  `).all(limit) as SessionSummaryRow[];
   return rows.map(mapRowToSessionSummary);
 }
 
@@ -377,7 +428,7 @@ export function searchSessions(
     JOIN session_summaries_fts fts ON ss.id = fts.rowid
     WHERE session_summaries_fts MATCH ?
   `;
-  const params: any[] = [query];
+  const params: (string | number)[] = [query];
 
   if (projectPath) {
     sql += ' AND ss.project_path = ?';
@@ -387,7 +438,7 @@ export function searchSessions(
   sql += ' ORDER BY fts.rank LIMIT ?';
   params.push(limit);
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = db.prepare(sql).all(...params) as SessionSummaryRow[];
   return rows.map(mapRowToSessionSummary);
 }
 
@@ -405,7 +456,7 @@ export function findSessionsByFile(
     SELECT * FROM session_summaries
     WHERE file_changes LIKE ?
   `;
-  const params: any[] = [`%"${filePath}"%`];
+  const params: (string | number)[] = [`%"${filePath}"%`];
 
   if (projectPath) {
     sql += ' AND project_path = ?';
@@ -415,7 +466,7 @@ export function findSessionsByFile(
   sql += ' ORDER BY started_at DESC LIMIT ?';
   params.push(limit);
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = db.prepare(sql).all(...params) as SessionSummaryRow[];
   return rows.map(mapRowToSessionSummary);
 }
 
@@ -435,7 +486,7 @@ export function updateSessionMetrics(
   if (!existing) return;
 
   const updates: string[] = [];
-  const params: any[] = [];
+  const params: (string | number)[] = [];
 
   if (metrics.toolCalls !== undefined) {
     updates.push('tool_calls = ?');
@@ -489,7 +540,7 @@ export function endSession(
   status: 'completed' | 'aborted' | 'error'
 ): void {
   const db = getDatabase();
-  const now = new Date().toISOString();
+  const now = formatTimestamp();
 
   const existing = getSessionSummaryBySessionId(sessionId);
   if (!existing) return;
@@ -559,7 +610,7 @@ export function addFileChange(
   `).run(JSON.stringify(changes), sessionId);
 }
 
-function mapRowToSessionSummary(row: any): SessionSummary {
+function mapRowToSessionSummary(row: SessionSummaryRow): SessionSummary {
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -608,7 +659,11 @@ export function createCheckpoint(
     VALUES (?, ?, ?)
   `).run(sessionId, name, JSON.stringify(context));
 
-  return getCheckpoint(result.lastInsertRowid as number)!;
+  const inserted = getCheckpoint(result.lastInsertRowid as number);
+  if (!inserted) {
+    throw new Error(`Failed to retrieve created checkpoint with id ${result.lastInsertRowid}`);
+  }
+  return inserted;
 }
 
 /**
@@ -616,7 +671,7 @@ export function createCheckpoint(
  */
 export function getCheckpoint(id: number): SessionCheckpoint | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM session_checkpoints WHERE id = ?').get(id) as any;
+  const row = db.prepare('SELECT * FROM session_checkpoints WHERE id = ?').get(id) as SessionCheckpointRow | undefined;
   return row ? mapRowToCheckpoint(row) : null;
 }
 
@@ -629,7 +684,7 @@ export function getSessionCheckpoints(sessionId: string): SessionCheckpoint[] {
     SELECT * FROM session_checkpoints
     WHERE session_id = ?
     ORDER BY created_at DESC
-  `).all(sessionId) as any[];
+  `).all(sessionId) as SessionCheckpointRow[];
   return rows.map(mapRowToCheckpoint);
 }
 
@@ -641,7 +696,7 @@ export function deleteCheckpoint(id: number): void {
   db.prepare('DELETE FROM session_checkpoints WHERE id = ?').run(id);
 }
 
-function mapRowToCheckpoint(row: any): SessionCheckpoint {
+function mapRowToCheckpoint(row: SessionCheckpointRow): SessionCheckpoint {
   return {
     id: row.id,
     sessionId: row.session_id,

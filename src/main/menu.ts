@@ -61,9 +61,9 @@ export function createMenu(): void {
           click: () => sendToRenderer('switch-view', 'analytics'),
         },
         {
-          label: 'Notes',
+          label: 'Tasks',
           accelerator: 'CmdOrCtrl+4',
-          click: () => sendToRenderer('switch-view', 'notes'),
+          click: () => sendToRenderer('switch-view', 'tasks'),
         },
         { type: 'separator' },
         {

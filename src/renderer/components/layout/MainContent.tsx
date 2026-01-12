@@ -12,7 +12,7 @@ import type { ViewName } from '../../../shared/constants';
 const TerminalView = lazy(() => import('../views/TerminalView'));
 const SessionsView = lazy(() => import('../views/SessionsView'));
 const AnalyticsView = lazy(() => import('../views/AnalyticsView'));
-const NotesView = lazy(() => import('../views/NotesView'));
+const TasksView = lazy(() => import('../views/TasksView'));
 const KnowledgeView = lazy(() => import('../views/KnowledgeView'));
 const SettingsView = lazy(() => import('../views/SettingsView'));
 const HooksView = lazy(() => import('../views/HooksView'));
@@ -27,7 +27,7 @@ const VIEW_COMPONENTS: Record<ViewName, React.LazyExoticComponent<() => React.JS
   terminal: TerminalView,
   sessions: SessionsView,
   analytics: AnalyticsView,
-  notes: NotesView,
+  tasks: TasksView,
   knowledge: KnowledgeView,
   settings: SettingsView,
   hooks: HooksView,

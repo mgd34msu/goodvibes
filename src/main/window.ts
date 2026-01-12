@@ -59,12 +59,24 @@ export function createWindow(): BrowserWindow {
   // Setup CSP before creating window
   setupContentSecurityPolicy();
 
+  // Get icon path based on platform
+  // In dev: resources folder is at project root
+  // In prod: resources folder is at app root (same level as app.asar)
+  const resourcesPath = app.isPackaged
+    ? path.join(process.resourcesPath, '..')
+    : path.join(__dirname, '..', '..');
+
+  const iconPath = process.platform === 'win32'
+    ? path.join(resourcesPath, 'resources', 'icon.ico')
+    : path.join(resourcesPath, 'resources', 'icon.png');
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#1a1a2e',
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

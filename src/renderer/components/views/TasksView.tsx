@@ -1,5 +1,5 @@
 // ============================================================================
-// NOTES VIEW COMPONENT
+// TASKS VIEW COMPONENT
 // ============================================================================
 
 import { useState } from 'react';
@@ -9,7 +9,7 @@ import type { QuickNote } from '../../../shared/types';
 import { formatRelativeTime } from '../../../shared/utils';
 import { toast } from '../../stores/toastStore';
 
-export default function NotesView() {
+export default function TasksView() {
   const [filter, setFilter] = useState<'active' | 'completed' | 'all'>('active');
   const [newNoteContent, setNewNoteContent] = useState('');
   const queryClient = useQueryClient();
@@ -24,7 +24,7 @@ export default function NotesView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       setNewNoteContent('');
-      toast.success('Note created');
+      toast.success('Task created');
     },
   });
 
@@ -40,7 +40,7 @@ export default function NotesView() {
     mutationFn: (id: number) => window.goodvibes.deleteQuickNote(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
-      toast.info('Note deleted');
+      toast.info('Task deleted');
     },
   });
 
@@ -56,17 +56,17 @@ export default function NotesView() {
         {/* Header */}
         <div className="page-header">
           <div>
-            <h1 className="text-xl font-semibold text-surface-100">Quick Notes</h1>
-            <p className="text-sm text-surface-500 mt-1">Capture thoughts and tasks</p>
+            <h1 className="text-xl font-semibold text-surface-100">Task List</h1>
+            <p className="text-sm text-surface-500 mt-1">Track your To-Dos and Tasks</p>
           </div>
         </div>
 
-        {/* New Note Input */}
+        {/* New Task Input */}
         <div className="card-elevated rounded-xl overflow-hidden">
           <textarea
             value={newNoteContent}
             onChange={(e) => setNewNoteContent(e.target.value)}
-            placeholder="What's on your mind?"
+            placeholder="Enter new task ..."
             className="w-full bg-transparent text-surface-100 placeholder:text-surface-500 resize-none outline-none p-4 min-h-[100px] text-sm leading-relaxed"
             rows={3}
             onKeyDown={(e) => {
@@ -87,7 +87,7 @@ export default function NotesView() {
               disabled={!newNoteContent.trim() || createMutation.isPending}
               className="btn btn-primary btn-sm"
             >
-              {createMutation.isPending ? 'Saving...' : 'Save Note'}
+              {createMutation.isPending ? 'Saving...' : 'Add Task'}
             </button>
           </div>
         </div>
@@ -110,7 +110,7 @@ export default function NotesView() {
           ))}
         </div>
 
-        {/* Notes List */}
+        {/* Tasks List */}
         {isLoading ? (
           <LoadingSkeleton />
         ) : notes.length === 0 ? (
@@ -118,9 +118,9 @@ export default function NotesView() {
         ) : (
           <div className="space-y-3">
             {notes.map((note) => (
-              <NoteCard
+              <TaskCard
                 key={note.id}
-                note={note}
+                task={note}
                 onStatusChange={(status) => statusMutation.mutate({ id: note.id, status })}
                 onDelete={() => deleteMutation.mutate(note.id)}
               />
@@ -133,17 +133,17 @@ export default function NotesView() {
 }
 
 // ============================================================================
-// NOTE CARD
+// TASK CARD
 // ============================================================================
 
-interface NoteCardProps {
-  note: QuickNote;
+interface TaskCardProps {
+  task: QuickNote;
   onStatusChange: (status: string) => void;
   onDelete: () => void;
 }
 
-function NoteCard({ note, onStatusChange, onDelete }: NoteCardProps) {
-  const isCompleted = note.status === 'completed';
+function TaskCard({ task, onStatusChange, onDelete }: TaskCardProps) {
+  const isCompleted = task.status === 'completed';
 
   return (
     <div className={clsx(
@@ -173,17 +173,17 @@ function NoteCard({ note, onStatusChange, onDelete }: NoteCardProps) {
             'text-sm text-surface-200 leading-relaxed',
             isCompleted && 'line-through text-surface-500'
           )}>
-            {note.content}
+            {task.content}
           </p>
           <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-            <span className="text-xs text-surface-500">{formatRelativeTime(note.createdAt)}</span>
-            {note.projectName && (
+            <span className="text-xs text-surface-500">{formatRelativeTime(task.createdAt)}</span>
+            {task.projectName && (
               <>
                 <span className="text-surface-600">&#8226;</span>
-                <span className="text-xs font-medium text-primary-400">{note.projectName}</span>
+                <span className="text-xs font-medium text-primary-400">{task.projectName}</span>
               </>
             )}
-            {note.priority === 'high' && (
+            {task.priority === 'high' && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-error-500/15 text-error-400 border border-error-500/20">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -197,7 +197,7 @@ function NoteCard({ note, onStatusChange, onDelete }: NoteCardProps) {
         <button
           onClick={onDelete}
           className="p-1.5 rounded-lg text-surface-500 hover:text-error-400 hover:bg-error-500/10 transition-all duration-150 opacity-0 group-hover:opacity-100"
-          aria-label="Delete note"
+          aria-label="Delete task"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -216,20 +216,20 @@ function EmptyState({ filter }: { filter: string }) {
   const config = {
     active: {
       icon: '📝',
-      title: 'No active notes',
-      description: 'Capture your thoughts and ideas above to get started'
+      title: 'No active tasks',
+      description: 'Create new tasks to get started'
     },
     completed: {
       icon: '✓',
-      title: 'No completed notes',
-      description: 'Completed notes will appear here'
+      title: 'No completed tasks',
+      description: 'Completed tasks will appear here'
     },
     all: {
       icon: '📋',
-      title: 'No notes yet',
-      description: 'Start adding notes to keep track of your thoughts'
+      title: 'No tasks yet',
+      description: 'Start adding tasks to keep track of your work'
     }
-  }[filter] || { icon: '📝', title: 'No notes', description: 'Add a note above' };
+  }[filter] || { icon: '📝', title: 'No tasks', description: 'Add a task above' };
 
   return (
     <div className="empty-state-pro">

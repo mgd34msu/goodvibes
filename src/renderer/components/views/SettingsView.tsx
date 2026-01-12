@@ -79,16 +79,24 @@ export default function SettingsView() {
             label="Font Size"
             description="Terminal font size in pixels"
           >
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min="10"
-                max="20"
-                value={settings.fontSize}
-                onChange={(e) => handleChange('fontSize', parseInt(e.target.value))}
-                className="w-32"
-              />
-              <span className="text-sm text-surface-400 w-12">{settings.fontSize}px</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleChange('fontSize', Math.max(10, settings.fontSize - 1))}
+                disabled={settings.fontSize <= 10}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-800 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed text-surface-300 transition-colors"
+                aria-label="Decrease font size"
+              >
+                −
+              </button>
+              <span className="text-sm text-surface-200 w-12 text-center font-medium">{settings.fontSize}px</span>
+              <button
+                onClick={() => handleChange('fontSize', Math.min(24, settings.fontSize + 1))}
+                disabled={settings.fontSize >= 24}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-800 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed text-surface-300 transition-colors"
+                aria-label="Increase font size"
+              >
+                +
+              </button>
             </div>
           </SettingRow>
         </SettingsSection>

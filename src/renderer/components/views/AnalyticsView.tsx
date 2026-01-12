@@ -98,10 +98,17 @@ export default function AnalyticsView() {
 
         {/* Charts Row */}
         <div className="grid lg:grid-cols-2 gap-6">
-          {/* Cost Over Time */}
-          <div className="card p-6 overflow-visible">
-            <h3 className="text-sm font-medium text-surface-100 mb-4">Cost Over Time (Last 30 Days)</h3>
-            <CostChart data={analytics?.sessionsOverTime ?? []} />
+          {/* Left Column - Two stacked charts */}
+          <div className="flex flex-col gap-4">
+            {/* Cost Over Time */}
+            <div className="card p-4 overflow-visible">
+              <CostChart data={analytics?.sessionsOverTime ?? []} />
+            </div>
+
+            {/* Sessions Over Time */}
+            <div className="card p-4 overflow-visible">
+              <SessionsChart data={analytics?.sessionsOverTime ?? []} />
+            </div>
           </div>
 
           {/* Cost by Project */}
@@ -149,72 +156,175 @@ function StatCard({ title, value, icon }: { title: string; value: string; icon: 
 }
 
 // ============================================================================
-// COST CHART
+// COST CHART - Improved with purple gradient and summary
 // ============================================================================
 
 function CostChart({ data }: { data: Array<{ date: string; cost: number }> }) {
   const [tooltip, setTooltip] = React.useState<{ date: string; cost: number; x: number; y: number } | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
-  if (data.length === 0) {
-    return <EmptyChartState message="No data available" />;
+  const last30 = data.slice(-30);
+
+  if (last30.length === 0) {
+    return <EmptyChartState message="No cost data available" />;
   }
 
-  const maxCost = Math.max(...data.map(d => d.cost), 0.01);
+  const maxCost = Math.max(...last30.map(d => d.cost), 0.01);
+  const totalCost = last30.reduce((sum, d) => sum + d.cost, 0);
+  const avgCost = totalCost / last30.length;
 
   const handleMouseEnter = (day: { date: string; cost: number }, e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (rect) {
-      setTooltip({
-        date: day.date,
-        cost: day.cost,
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
+      setTooltip({ date: day.date, cost: day.cost, x: e.clientX - rect.left, y: e.clientY - rect.top });
     }
   };
 
-  const handleMouseLeave = () => {
-    setTooltip(null);
-  };
+  const handleMouseLeave = () => setTooltip(null);
 
   const handleMouseMove = (day: { date: string; cost: number }, e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (rect) {
-      setTooltip({
-        date: day.date,
-        cost: day.cost,
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
+      setTooltip({ date: day.date, cost: day.cost, x: e.clientX - rect.left, y: e.clientY - rect.top });
     }
   };
 
   return (
-    <div ref={containerRef} className="h-48 flex items-end gap-1 relative overflow-visible">
-      {data.slice(-30).map((day) => (
-        <div
-          key={day.date}
-          className="flex-1 bg-primary-500/20 hover:bg-primary-500/40 rounded-t transition-colors cursor-pointer"
-          style={{ height: `${(day.cost / maxCost) * 100}%`, minHeight: '4px' }}
-          onMouseEnter={(e) => handleMouseEnter(day, e)}
-          onMouseMove={(e) => handleMouseMove(day, e)}
-          onMouseLeave={handleMouseLeave}
-        />
-      ))}
-      {tooltip && (
-        <div
-          className="absolute pointer-events-none z-[9959] px-3 py-2 bg-surface-900 border border-surface-600 rounded-lg shadow-lg text-sm whitespace-nowrap"
-          style={{
-            left: Math.min(Math.max(tooltip.x, 60), containerRef.current ? containerRef.current.clientWidth - 60 : tooltip.x),
-            top: Math.max(0, tooltip.y - 60),
-            transform: 'translateX(-50%)',
-          }}
-        >
-          <div className="text-surface-300 text-xs">{formatDate(tooltip.date)}</div>
-          <div className="text-surface-100 font-medium">{formatCost(tooltip.cost)}</div>
+    <div>
+      {/* Header with stats */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-surface-100">Cost (Last 30 Days)</h3>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="text-surface-400">Total: <span className="text-primary-400 font-medium">{formatCost(totalCost)}</span></span>
+          <span className="text-surface-400">Avg: <span className="text-surface-300 font-medium">{formatCost(avgCost)}/day</span></span>
         </div>
-      )}
+      </div>
+
+      {/* Chart */}
+      <div ref={containerRef} className="h-32 flex items-end gap-0.5 relative overflow-visible">
+        {last30.map((day) => {
+          const heightPct = (day.cost / maxCost) * 100;
+          return (
+            <div
+              key={day.date}
+              className="flex-1 rounded-t transition-all duration-150 cursor-pointer hover:opacity-80"
+              style={{
+                height: `${heightPct}%`,
+                minHeight: '2px',
+                background: `linear-gradient(to top, rgb(99, 102, 241), rgb(168, 85, 247))`,
+              }}
+              onMouseEnter={(e) => handleMouseEnter(day, e)}
+              onMouseMove={(e) => handleMouseMove(day, e)}
+              onMouseLeave={handleMouseLeave}
+            />
+          );
+        })}
+        {/* Avg line */}
+        <div
+          className="absolute left-0 right-0 border-t border-dashed border-surface-500/50 pointer-events-none"
+          style={{ bottom: `${(avgCost / maxCost) * 100}%` }}
+        />
+        {tooltip && (
+          <div
+            className="absolute pointer-events-none z-[9959] px-3 py-2 bg-surface-900 border border-surface-600 rounded-lg shadow-lg text-sm whitespace-nowrap"
+            style={{
+              left: Math.min(Math.max(tooltip.x, 60), containerRef.current ? containerRef.current.clientWidth - 60 : tooltip.x),
+              top: Math.max(0, tooltip.y - 50),
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <div className="text-surface-300 text-xs">{formatDate(tooltip.date)}</div>
+            <div className="text-surface-100 font-medium">{formatCost(tooltip.cost)}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SESSIONS CHART - Shows session count over time
+// ============================================================================
+
+function SessionsChart({ data }: { data: Array<{ date: string; count: number }> }) {
+  const [tooltip, setTooltip] = React.useState<{ date: string; count: number; x: number; y: number } | null>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const last30 = data.slice(-30);
+
+  if (last30.length === 0) {
+    return <EmptyChartState message="No session data available" />;
+  }
+
+  const maxCount = Math.max(...last30.map(d => d.count), 1);
+  const totalSessions = last30.reduce((sum, d) => sum + d.count, 0);
+  const avgSessions = totalSessions / last30.length;
+
+  const handleMouseEnter = (day: { date: string; count: number }, e: React.MouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setTooltip({ date: day.date, count: day.count, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    }
+  };
+
+  const handleMouseLeave = () => setTooltip(null);
+
+  const handleMouseMove = (day: { date: string; count: number }, e: React.MouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setTooltip({ date: day.date, count: day.count, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    }
+  };
+
+  return (
+    <div>
+      {/* Header with stats */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-surface-100">Sessions (Last 30 Days)</h3>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="text-surface-400">Total: <span className="text-success-400 font-medium">{formatNumber(totalSessions)}</span></span>
+          <span className="text-surface-400">Avg: <span className="text-surface-300 font-medium">{avgSessions.toFixed(1)}/day</span></span>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div ref={containerRef} className="h-32 flex items-end gap-0.5 relative overflow-visible">
+        {last30.map((day) => {
+          const heightPct = (day.count / maxCount) * 100;
+          return (
+            <div
+              key={day.date}
+              className="flex-1 rounded-t transition-all duration-150 cursor-pointer hover:opacity-80"
+              style={{
+                height: `${heightPct}%`,
+                minHeight: '2px',
+                background: `linear-gradient(to top, rgb(16, 185, 129), rgb(34, 197, 94))`,
+              }}
+              onMouseEnter={(e) => handleMouseEnter(day, e)}
+              onMouseMove={(e) => handleMouseMove(day, e)}
+              onMouseLeave={handleMouseLeave}
+            />
+          );
+        })}
+        {/* Avg line */}
+        <div
+          className="absolute left-0 right-0 border-t border-dashed border-surface-500/50 pointer-events-none"
+          style={{ bottom: `${(avgSessions / maxCount) * 100}%` }}
+        />
+        {tooltip && (
+          <div
+            className="absolute pointer-events-none z-[9959] px-3 py-2 bg-surface-900 border border-surface-600 rounded-lg shadow-lg text-sm whitespace-nowrap"
+            style={{
+              left: Math.min(Math.max(tooltip.x, 60), containerRef.current ? containerRef.current.clientWidth - 60 : tooltip.x),
+              top: Math.max(0, tooltip.y - 50),
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <div className="text-surface-300 text-xs">{formatDate(tooltip.date)}</div>
+            <div className="text-surface-100 font-medium">{tooltip.count} sessions</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

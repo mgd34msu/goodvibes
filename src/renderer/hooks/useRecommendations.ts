@@ -123,7 +123,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
 
   // Subscribe to new recommendations from the main process
   useEffect(() => {
-    const unsubscribe = window.clausitron.onRecommendationsNew((data) => {
+    const unsubscribe = window.goodvibes.onRecommendationsNew((data) => {
       if (!sessionId || data.sessionId === sessionId) {
         setRecommendations(data.recommendations);
       }
@@ -150,11 +150,11 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
 
     try {
       // Get analysis
-      const analysisResult = await window.clausitron.recommendationsAnalyzePrompt(prompt);
+      const analysisResult = await window.goodvibes.recommendationsAnalyzePrompt(prompt);
       setAnalysis(analysisResult);
 
       // Get recommendations
-      const recs = await window.clausitron.recommendationsGetForPrompt({
+      const recs = await window.goodvibes.recommendationsGetForPrompt({
         prompt,
         sessionId: sessionId ?? undefined,
         projectPath: projectPath ?? undefined,
@@ -184,11 +184,11 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
 
     try {
       // Get project context
-      const context = await window.clausitron.recommendationsAnalyzeProject(projectPath);
+      const context = await window.goodvibes.recommendationsAnalyzeProject(projectPath);
       setProjectContext(context);
 
       // Get recommendations
-      const recs = await window.clausitron.recommendationsGetForProject(projectPath);
+      const recs = await window.goodvibes.recommendationsGetForProject(projectPath);
       setRecommendations(recs);
       return recs;
     } catch (err) {
@@ -205,7 +205,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
    */
   const accept = useCallback(async (recommendationId: number): Promise<boolean> => {
     try {
-      const success = await window.clausitron.recommendationsAccept(recommendationId);
+      const success = await window.goodvibes.recommendationsAccept(recommendationId);
       if (success) {
         // Update local state to reflect accepted status
         setRecommendations(prev =>
@@ -226,7 +226,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
    */
   const reject = useCallback(async (recommendationId: number): Promise<boolean> => {
     try {
-      const success = await window.clausitron.recommendationsReject(recommendationId);
+      const success = await window.goodvibes.recommendationsReject(recommendationId);
       if (success) {
         setRecommendations(prev =>
           prev.filter(r => r.id !== recommendationId)
@@ -245,7 +245,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
    */
   const ignore = useCallback(async (recommendationId: number): Promise<boolean> => {
     try {
-      const success = await window.clausitron.recommendationsIgnore(recommendationId);
+      const success = await window.goodvibes.recommendationsIgnore(recommendationId);
       if (success) {
         setRecommendations(prev =>
           prev.filter(r => r.id !== recommendationId)
@@ -281,7 +281,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
    * Fetch recommendation statistics
    */
   const fetchStats = useCallback(async (): Promise<RecommendationStats> => {
-    return window.clausitron.recommendationsGetStats();
+    return window.goodvibes.recommendationsGetStats();
   }, []);
 
   // Query for stats
@@ -320,7 +320,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
 export function usePendingRecommendations(sessionId?: string) {
   return useQuery({
     queryKey: QUERY_KEYS.pending(sessionId),
-    queryFn: () => window.clausitron.recommendationsGetPending({
+    queryFn: () => window.goodvibes.recommendationsGetPending({
       sessionId,
       limit: 20,
     }),
@@ -335,7 +335,7 @@ export function usePendingRecommendations(sessionId?: string) {
 export function useTopPerformingItems(type?: 'agent' | 'skill') {
   return useQuery({
     queryKey: [...QUERY_KEYS.topPerforming, type],
-    queryFn: () => window.clausitron.recommendationsGetTopPerforming({
+    queryFn: () => window.goodvibes.recommendationsGetTopPerforming({
       type,
       minRecommendations: 3,
       limit: 10,
@@ -351,7 +351,7 @@ export function useTopPerformingItems(type?: 'agent' | 'skill') {
 export function useRecommendationStats() {
   return useQuery({
     queryKey: QUERY_KEYS.stats,
-    queryFn: () => window.clausitron.recommendationsGetStats(),
+    queryFn: () => window.goodvibes.recommendationsGetStats(),
     staleTime: 30000,
     refetchOnWindowFocus: false,
   });

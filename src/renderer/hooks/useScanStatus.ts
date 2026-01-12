@@ -18,7 +18,7 @@ export function useScanStatus() {
     };
 
     // onScanStatus returns a cleanup function
-    const cleanup = window.clausitron.onScanStatus(handleScanStatus);
+    const cleanup = window.goodvibes.onScanStatus(handleScanStatus);
 
     return cleanup;
   }, [setLoading]);

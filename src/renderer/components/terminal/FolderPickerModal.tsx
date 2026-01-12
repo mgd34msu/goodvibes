@@ -31,12 +31,12 @@ export function FolderPickerModal() {
   // Load recent projects when modal opens
   useEffect(() => {
     if (isOpen) {
-      window.clausitron.getRecentProjects().then(setRecentProjects);
+      window.goodvibes.getRecentProjects().then(setRecentProjects);
     }
   }, [isOpen]);
 
   const handleSelectFolder = async () => {
-    const folder = await window.clausitron.selectFolder();
+    const folder = await window.goodvibes.selectFolder();
     if (folder) {
       setSelectedFolder(folder);
     }

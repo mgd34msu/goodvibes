@@ -1225,7 +1225,7 @@ const api = {
 };
 
 // Expose API to renderer
-contextBridge.exposeInMainWorld('clausitron', api);
+contextBridge.exposeInMainWorld('goodvibes', api);
 
 // Type declaration for renderer
-export type ClausitronAPI = typeof api;
+export type GoodVibesAPI = typeof api;

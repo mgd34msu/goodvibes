@@ -97,7 +97,7 @@ export class Logger {
 
       // Create log file with date
       const date = new Date().toISOString().split('T')[0];
-      Logger.currentLogFile = path.join(logDir, `clausitron-${date}.log`);
+      Logger.currentLogFile = path.join(logDir, `goodvibes-${date}.log`);
 
       // Open write stream in append mode
       Logger.logStream = fs.createWriteStream(Logger.currentLogFile, { flags: 'a' });
@@ -117,7 +117,7 @@ export class Logger {
   private static rotateOldLogs(logDir: string): void {
     try {
       const files = fs.readdirSync(logDir)
-        .filter(f => f.startsWith('clausitron-') && f.endsWith('.log'))
+        .filter(f => f.startsWith('goodvibes-') && f.endsWith('.log'))
         .map(f => ({ name: f, path: path.join(logDir, f), stat: fs.statSync(path.join(logDir, f)) }))
         .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
 

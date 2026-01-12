@@ -1,5 +1,5 @@
 // ============================================================================
-// DATABASE PRIMITIVES - Schema extensions for Clausitron advanced features
+// DATABASE PRIMITIVES - Schema extensions for GoodVibes advanced features
 // ============================================================================
 
 import { getDatabase } from './index.js';

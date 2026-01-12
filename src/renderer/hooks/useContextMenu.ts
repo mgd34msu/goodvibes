@@ -36,7 +36,7 @@ export function useContextMenu() {
       // Show context menu for editable fields or when there's a selection
       if (isEditable || hasSelection) {
         e.preventDefault();
-        window.clausitron.showContextMenu({
+        window.goodvibes.showContextMenu({
           hasSelection,
           isEditable,
           isTerminal: false,

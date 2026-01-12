@@ -5,7 +5,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for Clausitron E2E tests.
+ * Playwright configuration for GoodVibes E2E tests.
  *
  * Note: E2E testing for Electron apps requires special setup.
  * Tests use the _electron fixture to launch and interact with the app.

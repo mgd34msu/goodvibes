@@ -20,7 +20,7 @@ export function AgentIntroStep() {
         </div>
         <p className="text-surface-400 max-w-lg mx-auto">
           Claude CLI can spawn autonomous sub-agents to handle complex tasks.
-          Clausitron helps you track and manage these agents.
+          GoodVibes helps you track and manage these agents.
         </p>
       </div>
 
@@ -53,7 +53,7 @@ export function AgentIntroStep() {
       {/* Features */}
       <div className="bg-surface-800/50 rounded-lg p-4 border border-surface-700">
         <h4 className="text-sm font-medium text-surface-200 mb-3">
-          What Clausitron Tracks
+          What GoodVibes Tracks
         </h4>
         <div className="grid grid-cols-2 gap-3">
           <FeatureItem

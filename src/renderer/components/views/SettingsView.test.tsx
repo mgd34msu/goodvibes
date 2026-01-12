@@ -17,14 +17,14 @@ describe('SettingsView', () => {
     });
 
     // Mock GitHub auth state
-    vi.mocked(window.clausitron.githubGetAuthState).mockResolvedValue({
+    vi.mocked(window.goodvibes.githubGetAuthState).mockResolvedValue({
       isAuthenticated: false,
       user: null,
       accessToken: null,
       tokenExpiresAt: null,
     });
 
-    vi.mocked(window.clausitron.githubGetOAuthConfig).mockResolvedValue({
+    vi.mocked(window.goodvibes.githubGetOAuthConfig).mockResolvedValue({
       isConfigured: false,
       source: 'none',
       clientId: null,
@@ -191,7 +191,7 @@ describe('SettingsView', () => {
     });
 
     it('opens folder picker when Browse is clicked', async () => {
-      vi.mocked(window.clausitron.selectFolder).mockResolvedValue('/selected/path');
+      vi.mocked(window.goodvibes.selectFolder).mockResolvedValue('/selected/path');
 
       render(<SettingsView />);
 
@@ -202,7 +202,7 @@ describe('SettingsView', () => {
       }
 
       await waitFor(() => {
-        expect(vi.mocked(window.clausitron.selectFolder)).toHaveBeenCalled();
+        expect(vi.mocked(window.goodvibes.selectFolder)).toHaveBeenCalled();
       });
     });
   });
@@ -299,7 +299,7 @@ describe('SettingsView', () => {
     });
 
     it('shows user info when authenticated', async () => {
-      vi.mocked(window.clausitron.githubGetAuthState).mockResolvedValue({
+      vi.mocked(window.goodvibes.githubGetAuthState).mockResolvedValue({
         isAuthenticated: true,
         user: {
           id: 1,
@@ -312,7 +312,7 @@ describe('SettingsView', () => {
         tokenExpiresAt: null,
       });
 
-      vi.mocked(window.clausitron.githubGetOAuthConfig).mockResolvedValue({
+      vi.mocked(window.goodvibes.githubGetOAuthConfig).mockResolvedValue({
         isConfigured: true,
         source: 'environment',
         clientId: 'test-client-id',
@@ -327,7 +327,7 @@ describe('SettingsView', () => {
     });
 
     it('shows message when OAuth is not configured', async () => {
-      vi.mocked(window.clausitron.githubGetOAuthConfig).mockResolvedValue({
+      vi.mocked(window.goodvibes.githubGetOAuthConfig).mockResolvedValue({
         isConfigured: false,
         source: 'none',
         clientId: null,
@@ -342,13 +342,13 @@ describe('SettingsView', () => {
     });
 
     it('initiates GitHub login on Connect click', async () => {
-      vi.mocked(window.clausitron.githubGetOAuthConfig).mockResolvedValue({
+      vi.mocked(window.goodvibes.githubGetOAuthConfig).mockResolvedValue({
         isConfigured: true,
         source: 'environment',
         clientId: 'test-client-id',
       });
 
-      vi.mocked(window.clausitron.githubAuth).mockResolvedValue({
+      vi.mocked(window.goodvibes.githubAuth).mockResolvedValue({
         success: true,
         user: {
           id: 1,

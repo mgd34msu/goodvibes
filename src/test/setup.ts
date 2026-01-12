@@ -7,8 +7,8 @@
 import '@testing-library/jest-dom/vitest';
 import { vi, beforeEach } from 'vitest';
 
-// Mock window.clausitron API
-const mockClausitronAPI = {
+// Mock window.goodvibes API
+const mockGoodVibesAPI = {
   // Terminal
   startClaude: vi.fn().mockResolvedValue({ id: 1 }),
   terminalInput: vi.fn().mockResolvedValue(true),
@@ -190,8 +190,8 @@ const mockClausitronAPI = {
   removeAllListeners: vi.fn(),
 };
 
-Object.defineProperty(window, 'clausitron', {
-  value: mockClausitronAPI,
+Object.defineProperty(window, 'goodvibes', {
+  value: mockGoodVibesAPI,
   writable: true,
 });
 

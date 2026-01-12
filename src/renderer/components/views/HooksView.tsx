@@ -386,7 +386,7 @@ export default function HooksView() {
   const loadHooks = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await window.clausitron.getHooks();
+      const result = await window.goodvibes.getHooks();
       setHooks(result || []);
     } catch (error) {
       console.error('Failed to load hooks:', error);
@@ -403,9 +403,9 @@ export default function HooksView() {
   const handleSave = async (hookData: Partial<Hook>) => {
     try {
       if (hookData.id) {
-        await window.clausitron.updateHook(hookData.id, hookData);
+        await window.goodvibes.updateHook(hookData.id, hookData);
       } else {
-        await window.clausitron.createHook({
+        await window.goodvibes.createHook({
           name: hookData.name || '',
           eventType: hookData.eventType || 'PostToolUse',
           matchPattern: hookData.matcher || undefined,
@@ -424,7 +424,7 @@ export default function HooksView() {
 
   const handleToggle = async (id: number, enabled: boolean) => {
     try {
-      await window.clausitron.updateHook(id, { enabled });
+      await window.goodvibes.updateHook(id, { enabled });
       loadHooks();
     } catch (error) {
       console.error('Failed to toggle hook:', error);
@@ -434,7 +434,7 @@ export default function HooksView() {
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this hook?')) {
       try {
-        await window.clausitron.deleteHook(id);
+        await window.goodvibes.deleteHook(id);
         loadHooks();
       } catch (error) {
         console.error('Failed to delete hook:', error);
@@ -456,7 +456,7 @@ export default function HooksView() {
     try {
       // Execute the hook command directly via terminal input simulation
       // This creates a temporary test execution record
-      await window.clausitron.logActivity(
+      await window.goodvibes.logActivity(
         'hook_test',
         null,
         `Testing hook: ${testingHookName}`,
@@ -464,7 +464,7 @@ export default function HooksView() {
       );
 
       // Update hook execution count and last executed in the database
-      await window.clausitron.updateHook(id, {
+      await window.goodvibes.updateHook(id, {
         executionCount: (hook.executionCount || 0) + 1,
         lastExecuted: new Date().toISOString(),
       });

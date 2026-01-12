@@ -243,8 +243,8 @@ export function TitleBar() {
     <header className="flex items-center h-[var(--titlebar-height)] bg-surface-900/95 backdrop-blur-sm border-b border-surface-800/80 relative z-[9999]">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 drag-region">
-        <img src={appIcon} alt="Clausitron" className="w-7 h-7 rounded-lg" />
-        <span className="text-sm font-semibold text-surface-100 tracking-tight">Clausitron</span>
+        <img src={appIcon} alt="GoodVibes" className="w-7 h-7 rounded-lg" />
+        <span className="text-sm font-semibold text-surface-100 tracking-tight">GoodVibes</span>
       </div>
 
       {/* Navigation dropdowns */}
@@ -289,7 +289,7 @@ function NotificationBell() {
   useEffect(() => {
     const loadCount = async () => {
       try {
-        const count = await window.clausitron.getUnreadNotificationCount();
+        const count = await window.goodvibes.getUnreadNotificationCount();
         setUnreadCount(count);
       } catch {
         // Ignore errors
@@ -305,7 +305,7 @@ function NotificationBell() {
     const loadNotifications = async () => {
       if (isOpen) {
         try {
-          const notifs = await window.clausitron.getNotifications();
+          const notifs = await window.goodvibes.getNotifications();
           setNotifications(notifs || []);
         } catch {
           setNotifications([]);
@@ -331,7 +331,7 @@ function NotificationBell() {
 
   const handleMarkAllRead = async () => {
     try {
-      await window.clausitron.markAllNotificationsRead();
+      await window.goodvibes.markAllNotificationsRead();
       setUnreadCount(0);
       setNotifications(notifications.map(n => ({ ...n, read: true })));
     } catch {
@@ -341,7 +341,7 @@ function NotificationBell() {
 
   const handleClearAll = async () => {
     try {
-      await window.clausitron.dismissAllNotifications();
+      await window.goodvibes.dismissAllNotifications();
       setNotifications([]);
       setUnreadCount(0);
     } catch {

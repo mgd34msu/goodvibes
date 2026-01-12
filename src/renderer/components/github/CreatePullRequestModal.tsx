@@ -46,7 +46,7 @@ export default function CreatePullRequestModal({
 
   const loadBranches = async () => {
     try {
-      const result = await window.clausitron.githubListBranches(owner, repo);
+      const result = await window.goodvibes.githubListBranches(owner, repo);
       if (result.success && result.data) {
         setBranches(result.data.map((b: { name: string }) => b.name));
       }
@@ -76,7 +76,7 @@ export default function CreatePullRequestModal({
         draft,
       };
 
-      const result = await window.clausitron.githubCreatePR(owner, repo, prData);
+      const result = await window.goodvibes.githubCreatePR(owner, repo, prData);
 
       if (result.success && result.data) {
         onCreated?.(result.data.number, result.data.html_url);

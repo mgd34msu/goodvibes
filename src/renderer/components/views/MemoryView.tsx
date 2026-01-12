@@ -382,7 +382,7 @@ export default function MemoryView() {
     setLoading(true);
     try {
       // Get all knowledge entries with 'claude-md' category
-      const entries = await window.clausitron.getAllKnowledgeEntries();
+      const entries = await window.goodvibes.getAllKnowledgeEntries();
       const claudeMdEntries = entries.filter(
         (e: { category?: string }) => e.category === 'claude-md'
       );
@@ -476,7 +476,7 @@ export default function MemoryView() {
     setSaving(true);
     try {
       // Get all entries to find existing one
-      const entries = await window.clausitron.getAllKnowledgeEntries();
+      const entries = await window.goodvibes.getAllKnowledgeEntries();
       const existingEntry = entries.find(
         (e: { category?: string; tags?: string }) =>
           e.category === 'claude-md' && e.tags?.includes(`scope:${selectedFile.scope}`)
@@ -487,7 +487,7 @@ export default function MemoryView() {
 
       if (existingEntry?.id) {
         // Update existing entry
-        await window.clausitron.updateKnowledgeEntry(
+        await window.goodvibes.updateKnowledgeEntry(
           existingEntry.id,
           title,
           content,
@@ -496,7 +496,7 @@ export default function MemoryView() {
         );
       } else {
         // Create new entry
-        await window.clausitron.createKnowledgeEntry(
+        await window.goodvibes.createKnowledgeEntry(
           title,
           content,
           'claude-md',

@@ -22,7 +22,7 @@ export function CompletionStep() {
           You&apos;re All Set!
         </h3>
         <p className="text-surface-400 max-w-md mx-auto">
-          Clausitron is ready to supercharge your Claude CLI experience.
+          GoodVibes is ready to supercharge your Claude CLI experience.
           Here are some things you can do next.
         </p>
       </div>
@@ -50,7 +50,7 @@ export function CompletionStep() {
         <QuickAction
           icon={<Settings className="w-5 h-5" />}
           title="Customize Settings"
-          description="Fine-tune Clausitron to your preferences"
+          description="Fine-tune GoodVibes to your preferences"
           shortcut="Ctrl+,"
         />
       </div>

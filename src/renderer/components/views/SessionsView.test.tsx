@@ -136,14 +136,14 @@ describe('SessionsView', () => {
     });
 
     // Mock API calls
-    vi.mocked(window.clausitron.getActiveSessions).mockResolvedValue(mockSessions);
-    vi.mocked(window.clausitron.getFavoriteSessions).mockResolvedValue(
+    vi.mocked(window.goodvibes.getActiveSessions).mockResolvedValue(mockSessions);
+    vi.mocked(window.goodvibes.getFavoriteSessions).mockResolvedValue(
       mockSessions.filter((s) => s.favorite)
     );
-    vi.mocked(window.clausitron.getArchivedSessions).mockResolvedValue([]);
-    vi.mocked(window.clausitron.getLiveSessions).mockResolvedValue([]);
-    vi.mocked(window.clausitron.getRecentActivity).mockResolvedValue([]);
-    vi.mocked(window.clausitron.getAnalytics).mockResolvedValue({
+    vi.mocked(window.goodvibes.getArchivedSessions).mockResolvedValue([]);
+    vi.mocked(window.goodvibes.getLiveSessions).mockResolvedValue([]);
+    vi.mocked(window.goodvibes.getRecentActivity).mockResolvedValue([]);
+    vi.mocked(window.goodvibes.getAnalytics).mockResolvedValue({
       messagesToday: 0,
       totalSessions: 0,
       totalTokens: 0,
@@ -178,7 +178,7 @@ describe('SessionsView', () => {
   describe('Loading State', () => {
     it('shows loading skeleton while fetching', async () => {
       // Delay the response
-      vi.mocked(window.clausitron.getActiveSessions).mockImplementation(
+      vi.mocked(window.goodvibes.getActiveSessions).mockImplementation(
         () => new Promise((resolve) => setTimeout(() => resolve(mockSessions), 1000))
       );
 
@@ -281,7 +281,7 @@ describe('SessionsView', () => {
       fireEvent.click(favoritesTab);
 
       await waitFor(() => {
-        expect(vi.mocked(window.clausitron.getFavoriteSessions)).toHaveBeenCalled();
+        expect(vi.mocked(window.goodvibes.getFavoriteSessions)).toHaveBeenCalled();
       });
     });
 
@@ -292,14 +292,14 @@ describe('SessionsView', () => {
       fireEvent.click(archivedTab);
 
       await waitFor(() => {
-        expect(vi.mocked(window.clausitron.getArchivedSessions)).toHaveBeenCalled();
+        expect(vi.mocked(window.goodvibes.getArchivedSessions)).toHaveBeenCalled();
       });
     });
   });
 
   describe('Session Actions', () => {
     it('toggles favorite on button click', async () => {
-      vi.mocked(window.clausitron.toggleFavorite).mockResolvedValue(true);
+      vi.mocked(window.goodvibes.toggleFavorite).mockResolvedValue(true);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 
@@ -314,13 +314,13 @@ describe('SessionsView', () => {
         fireEvent.click(favoriteButton);
 
         await waitFor(() => {
-          expect(vi.mocked(window.clausitron.toggleFavorite)).toHaveBeenCalledWith('session-1');
+          expect(vi.mocked(window.goodvibes.toggleFavorite)).toHaveBeenCalledWith('session-1');
         });
       }
     });
 
     it('toggles archive on button click', async () => {
-      vi.mocked(window.clausitron.toggleArchive).mockResolvedValue(true);
+      vi.mocked(window.goodvibes.toggleArchive).mockResolvedValue(true);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 
@@ -333,7 +333,7 @@ describe('SessionsView', () => {
         fireEvent.click(archiveButton);
 
         await waitFor(() => {
-          expect(vi.mocked(window.clausitron.toggleArchive)).toHaveBeenCalled();
+          expect(vi.mocked(window.goodvibes.toggleArchive)).toHaveBeenCalled();
         });
       }
     });
@@ -371,7 +371,7 @@ describe('SessionsView', () => {
 
   describe('Empty State', () => {
     it('shows empty state when no sessions', async () => {
-      vi.mocked(window.clausitron.getActiveSessions).mockResolvedValue([]);
+      vi.mocked(window.goodvibes.getActiveSessions).mockResolvedValue([]);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 
@@ -381,7 +381,7 @@ describe('SessionsView', () => {
     });
 
     it('shows appropriate empty state for favorites', async () => {
-      vi.mocked(window.clausitron.getFavoriteSessions).mockResolvedValue([]);
+      vi.mocked(window.goodvibes.getFavoriteSessions).mockResolvedValue([]);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 
@@ -397,7 +397,7 @@ describe('SessionsView', () => {
 
   describe('Live Sessions', () => {
     it('shows live indicator for active sessions', async () => {
-      vi.mocked(window.clausitron.getLiveSessions).mockResolvedValue([mockSessions[0]]);
+      vi.mocked(window.goodvibes.getLiveSessions).mockResolvedValue([mockSessions[0]]);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 
@@ -426,7 +426,7 @@ describe('SessionsView', () => {
     });
 
     it('shows empty activity state when no activity', async () => {
-      vi.mocked(window.clausitron.getRecentActivity).mockResolvedValue([]);
+      vi.mocked(window.goodvibes.getRecentActivity).mockResolvedValue([]);
 
       render(<SessionsView />, { wrapper: createTestWrapper() });
 

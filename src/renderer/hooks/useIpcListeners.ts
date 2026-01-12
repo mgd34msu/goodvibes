@@ -17,13 +17,13 @@ export function useIpcListeners() {
 
     // Menu commands - use store.getState() inside callbacks to always get current values
     cleanups.push(
-      window.clausitron.onNewSession(() => {
+      window.goodvibes.onNewSession(() => {
         useAppStore.getState().openFolderPicker();
       })
     );
 
     cleanups.push(
-      window.clausitron.onCloseTab(() => {
+      window.goodvibes.onCloseTab(() => {
         const { activeTerminalId } = useTerminalStore.getState();
         if (activeTerminalId !== null) {
           useTerminalStore.getState().closeTerminal(activeTerminalId);
@@ -32,44 +32,44 @@ export function useIpcListeners() {
     );
 
     cleanups.push(
-      window.clausitron.onNextTab(() => {
+      window.goodvibes.onNextTab(() => {
         useTerminalStore.getState().switchToNextTab();
       })
     );
 
     cleanups.push(
-      window.clausitron.onPrevTab(() => {
+      window.goodvibes.onPrevTab(() => {
         useTerminalStore.getState().switchToPrevTab();
       })
     );
 
     cleanups.push(
-      window.clausitron.onSwitchView((view: string) => {
+      window.goodvibes.onSwitchView((view: string) => {
         useAppStore.getState().setCurrentView(view as ViewName);
       })
     );
 
     cleanups.push(
-      window.clausitron.onOpenSettings(() => {
+      window.goodvibes.onOpenSettings(() => {
         useAppStore.getState().setCurrentView('settings');
       })
     );
 
     cleanups.push(
-      window.clausitron.onShowAbout(() => {
+      window.goodvibes.onShowAbout(() => {
         useAppStore.getState().openModal('about');
       })
     );
 
     // Session events
     cleanups.push(
-      window.clausitron.onSessionDetected(() => {
+      window.goodvibes.onSessionDetected(() => {
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
       })
     );
 
     cleanups.push(
-      window.clausitron.onSubagentSessionUpdate(() => {
+      window.goodvibes.onSubagentSessionUpdate(() => {
         queryClient.invalidateQueries({ queryKey: ['live-sessions'] });
       })
     );

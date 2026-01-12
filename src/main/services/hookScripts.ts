@@ -2,9 +2,9 @@
 // HOOK SCRIPTS - Generate and install Claude hook scripts
 // ============================================================================
 //
-// This module generates and installs hook scripts to ~/.clausitron/hooks/
+// This module generates and installs hook scripts to ~/.goodvibes/hooks/
 // These scripts are executed by Claude Code for each hook event, and they
-// forward the event data to Clausitron's HTTP server.
+// forward the event data to GoodVibes's HTTP server.
 //
 // Claude hooks work by:
 // 1. Claude spawns the hook script as a child process
@@ -28,7 +28,7 @@ const logger = new Logger('HookScripts');
 // CONSTANTS
 // ============================================================================
 
-export const HOOKS_DIR = path.join(os.homedir(), '.clausitron', 'hooks');
+export const HOOKS_DIR = path.join(os.homedir(), '.goodvibes', 'hooks');
 
 /**
  * All 12 Claude hook event types
@@ -103,12 +103,12 @@ function generateHookScript(eventType: ExtendedHookEventType): string {
 
   return `#!/usr/bin/env node
 // ============================================================================
-// Clausitron Hook Script: ${eventType}
+// GoodVibes Hook Script: ${eventType}
 // Generated automatically - do not edit manually
 // ============================================================================
 //
 // This script is executed by Claude Code for the ${eventType} hook event.
-// It reads JSON from stdin, forwards to Clausitron's HTTP server,
+// It reads JSON from stdin, forwards to GoodVibes's HTTP server,
 // and returns the decision to Claude in the CORRECT format.
 //
 // Hook Category: ${hookCategory}
@@ -126,7 +126,7 @@ const CLAUSITRON_HOST = '127.0.0.1';
 const TIMEOUT_MS = 5000;
 const HOOK_EVENT_NAME = '${eventType}';
 const HOOK_CATEGORY = '${hookCategory}';
-const LOG_FILE = path.join(os.homedir(), '.clausitron', 'hooks.log');
+const LOG_FILE = path.join(os.homedir(), '.goodvibes', 'hooks.log');
 
 // Log function - writes to file for debugging
 function logToFile(message) {
@@ -230,14 +230,14 @@ process.stdin.on('end', async () => {
     const hookData = input.trim() ? JSON.parse(input) : {};
     logToFile('Parsed hook data, keys: ' + Object.keys(hookData).join(', '));
 
-    // Forward to Clausitron's HTTP server
-    logToFile('Posting to Clausitron...');
-    const response = await postToClausitron('/api/hooks/${fileName}', {
+    // Forward to GoodVibes's HTTP server
+    logToFile('Posting to GoodVibes...');
+    const response = await postToGoodVibes('/api/hooks/${fileName}', {
       hook_event_name: '${eventType}',
       ...hookData,
       timestamp: Date.now(),
     });
-    logToFile('Clausitron response: ' + JSON.stringify(response));
+    logToFile('GoodVibes response: ' + JSON.stringify(response));
 
     // Format and output the response in Claude's expected format
     const claudeResponse = formatResponseForClaude(response);
@@ -251,9 +251,9 @@ process.stdin.on('end', async () => {
 
   } catch (err) {
     // On error, fail open (allow the action)
-    // This ensures Clausitron issues don't break Claude
+    // This ensures GoodVibes issues don't break Claude
     logToFile('ERROR: ' + err.message);
-    console.error('[Clausitron] Hook error:', err.message);
+    console.error('[GoodVibes] Hook error:', err.message);
     console.log(JSON.stringify(getDefaultAllowResponse()));
     process.exit(0);
   }
@@ -261,15 +261,15 @@ process.stdin.on('end', async () => {
 
 // Handle stdin errors
 process.stdin.on('error', (err) => {
-  console.error('[Clausitron] stdin error:', err.message);
+  console.error('[GoodVibes] stdin error:', err.message);
   console.log(JSON.stringify(getDefaultAllowResponse()));
   process.exit(0);
 });
 
 /**
- * POST data to Clausitron's HTTP server
+ * POST data to GoodVibes's HTTP server
  */
-function postToClausitron(path, data) {
+function postToGoodVibes(path, data) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(data);
 
@@ -298,7 +298,7 @@ function postToClausitron(path, data) {
     });
 
     req.on('error', (err) => {
-      // If Clausitron is not running, allow the action
+      // If GoodVibes is not running, allow the action
       resolve({ decision: 'allow' });
     });
 
@@ -320,7 +320,7 @@ function postToClausitron(path, data) {
 // ============================================================================
 
 /**
- * Install all hook scripts to ~/.clausitron/hooks/
+ * Install all hook scripts to ~/.goodvibes/hooks/
  */
 export async function installAllHookScripts(): Promise<void> {
   logger.info('Installing hook scripts...');
@@ -471,7 +471,7 @@ export const CLAUDE_SETTINGS_DIR = path.join(os.homedir(), '.claude');
 export const CLAUDE_SETTINGS_PATH = path.join(CLAUDE_SETTINGS_DIR, 'settings.json');
 
 /**
- * Configure Claude's settings.json to use Clausitron hooks
+ * Configure Claude's settings.json to use GoodVibes hooks
  * This is the critical step that tells Claude to actually run the hook scripts
  */
 export async function configureClaudeHooks(): Promise<boolean> {
@@ -498,23 +498,23 @@ export async function configureClaudeHooks(): Promise<boolean> {
     // Generate hook configurations
     const hooksConfig = generateClaudeHooksConfig();
 
-    // Merge with existing hooks (Clausitron hooks take precedence)
+    // Merge with existing hooks (GoodVibes hooks take precedence)
     const existingHooks = (settings.hooks || {}) as Record<string, unknown[]>;
     const mergedHooks: Record<string, unknown[]> = { ...existingHooks };
 
-    for (const [eventType, clausitronHooks] of Object.entries(hooksConfig)) {
-      // Get existing hooks for this event type (non-Clausitron ones)
+    for (const [eventType, goodvibesHooks] of Object.entries(hooksConfig)) {
+      // Get existing hooks for this event type (non-GoodVibes ones)
       const existingEventHooks = (existingHooks[eventType] || []).filter((hook: any) => {
         // Keep hooks that don't contain our scripts path
-        const isClausitronHook = hook?.hooks?.some?.((h: any) =>
-          h?.command?.includes?.('.clausitron/hooks/') ||
-          h?.command?.includes?.('.clausitron\\hooks\\')
+        const isGoodVibesHook = hook?.hooks?.some?.((h: any) =>
+          h?.command?.includes?.('.goodvibes/hooks/') ||
+          h?.command?.includes?.('.goodvibes\\hooks\\')
         );
-        return !isClausitronHook;
+        return !isGoodVibesHook;
       });
 
-      // Combine: existing non-Clausitron hooks + Clausitron hooks
-      mergedHooks[eventType] = [...existingEventHooks, ...clausitronHooks];
+      // Combine: existing non-GoodVibes hooks + GoodVibes hooks
+      mergedHooks[eventType] = [...existingEventHooks, ...goodvibesHooks];
     }
 
     settings.hooks = mergedHooks;
@@ -531,7 +531,7 @@ export async function configureClaudeHooks(): Promise<boolean> {
 }
 
 /**
- * Remove Clausitron hooks from Claude's settings.json
+ * Remove GoodVibes hooks from Claude's settings.json
  */
 export async function removeClaudeHooks(): Promise<boolean> {
   try {
@@ -546,15 +546,15 @@ export async function removeClaudeHooks(): Promise<boolean> {
       return true; // No hooks to remove
     }
 
-    // Filter out Clausitron hooks
+    // Filter out GoodVibes hooks
     const hooks = settings.hooks as Record<string, unknown[]>;
     for (const eventType of Object.keys(hooks)) {
       hooks[eventType] = (hooks[eventType] || []).filter((hook: any) => {
-        const isClausitronHook = hook?.hooks?.some?.((h: any) =>
-          h?.command?.includes?.('.clausitron/hooks/') ||
-          h?.command?.includes?.('.clausitron\\hooks\\')
+        const isGoodVibesHook = hook?.hooks?.some?.((h: any) =>
+          h?.command?.includes?.('.goodvibes/hooks/') ||
+          h?.command?.includes?.('.goodvibes\\hooks\\')
         );
-        return !isClausitronHook;
+        return !isGoodVibesHook;
       });
 
       // Remove empty arrays
@@ -569,7 +569,7 @@ export async function removeClaudeHooks(): Promise<boolean> {
     }
 
     await fs.writeFile(CLAUDE_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
-    logger.info('Removed Clausitron hooks from Claude settings');
+    logger.info('Removed GoodVibes hooks from Claude settings');
 
     return true;
   } catch (error) {
@@ -579,7 +579,7 @@ export async function removeClaudeHooks(): Promise<boolean> {
 }
 
 /**
- * Check if Claude's settings.json is configured with Clausitron hooks
+ * Check if Claude's settings.json is configured with GoodVibes hooks
  */
 export async function areClaudeHooksConfigured(): Promise<boolean> {
   try {
@@ -596,14 +596,14 @@ export async function areClaudeHooksConfigured(): Promise<boolean> {
 
     // Check if at least SessionStart hook is configured (our most important hook)
     const sessionStartHooks = settings.hooks.SessionStart || [];
-    const hasClausitronHook = sessionStartHooks.some((hook: any) =>
+    const hasGoodVibesHook = sessionStartHooks.some((hook: any) =>
       hook?.hooks?.some?.((h: any) =>
-        h?.command?.includes?.('.clausitron/hooks/') ||
-        h?.command?.includes?.('.clausitron\\hooks\\')
+        h?.command?.includes?.('.goodvibes/hooks/') ||
+        h?.command?.includes?.('.goodvibes\\hooks\\')
       )
     );
 
-    return hasClausitronHook;
+    return hasGoodVibesHook;
   } catch (error) {
     logger.debug('Failed to check Claude hooks configuration:', error);
     return false;
@@ -633,8 +633,8 @@ export async function validateHookScript(filePath: string): Promise<{
       return { valid: false, error: 'Missing stdin handling' };
     }
 
-    if (!content.includes('postToClausitron')) {
-      return { valid: false, error: 'Missing Clausitron communication' };
+    if (!content.includes('postToGoodVibes')) {
+      return { valid: false, error: 'Missing GoodVibes communication' };
     }
 
     if (!content.includes('process.exit')) {

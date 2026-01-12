@@ -34,7 +34,7 @@ export function ProjectSetupStep() {
 
   const handleBrowseProjectsRoot = useCallback(async () => {
     try {
-      const folder = await window.clausitron.selectFolder();
+      const folder = await window.goodvibes.selectFolder();
       if (folder) {
         setProjectsRoot(folder);
         await updateSetting('projectsRoot', folder);
@@ -47,7 +47,7 @@ export function ProjectSetupStep() {
 
   const handleBrowseDefaultCwd = useCallback(async () => {
     try {
-      const folder = await window.clausitron.selectFolder();
+      const folder = await window.goodvibes.selectFolder();
       if (folder) {
         setDefaultCwd(folder);
         await updateSetting('defaultCwd', folder);
@@ -91,7 +91,7 @@ export function ProjectSetupStep() {
           <span className="text-xs text-surface-500 ml-2">(Optional)</span>
         </label>
         <p className="text-sm text-surface-400">
-          The root folder containing all your projects. This helps Clausitron discover and organize your sessions.
+          The root folder containing all your projects. This helps GoodVibes discover and organize your sessions.
         </p>
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -191,7 +191,7 @@ export function ProjectSetupStep() {
           <StartupOption
             value="empty"
             label="Start Empty"
-            description="Open Clausitron without any terminal sessions"
+            description="Open GoodVibes without any terminal sessions"
             current={settings.startupBehavior}
             onChange={(v) => updateSetting('startupBehavior', v)}
           />

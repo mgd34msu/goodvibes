@@ -42,7 +42,7 @@ async function getOctokit(): Promise<Octokit | null> {
 
   return new Octokit({
     auth: token,
-    userAgent: 'Clausitron',
+    userAgent: 'GoodVibes',
   });
 }
 

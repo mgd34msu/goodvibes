@@ -305,7 +305,7 @@ function AgentForm({ agent, onSave, onCancel }: AgentFormProps) {
         projectPath = selectedProjectPath;
       } else {
         // No project selected, prompt for folder
-        const folderPath = await window.clausitron?.selectFolder?.();
+        const folderPath = await window.goodvibes?.selectFolder?.();
         if (!folderPath) {
           return; // User cancelled
         }
@@ -704,7 +704,7 @@ export default function AgentsView() {
   const loadAgents = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await window.clausitron.getAgentTemplates();
+      const result = await window.goodvibes.getAgentTemplates();
       setAgents(result || []);
     } catch (error) {
       console.error('Failed to load agent templates:', error);
@@ -721,12 +721,12 @@ export default function AgentsView() {
   const handleSave = async (agentData: Partial<AgentTemplate>, projectPath: string | null) => {
     try {
       if (agentData.id) {
-        await window.clausitron.updateAgentTemplate(agentData.id, {
+        await window.goodvibes.updateAgentTemplate(agentData.id, {
           ...agentData,
           cwd: projectPath || undefined,
         });
       } else {
-        await window.clausitron.createAgentTemplate({
+        await window.goodvibes.createAgentTemplate({
           name: agentData.name || '',
           description: agentData.description || undefined,
           initialPrompt: agentData.initialPrompt || undefined,
@@ -761,7 +761,7 @@ export default function AgentsView() {
   const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this agent template?')) {
       try {
-        await window.clausitron.deleteAgentTemplate(id);
+        await window.goodvibes.deleteAgentTemplate(id);
         loadAgents();
       } catch (error) {
         console.error('Failed to delete agent template:', error);

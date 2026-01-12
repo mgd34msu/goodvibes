@@ -21,7 +21,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   loadSettings: async () => {
     try {
-      const saved = await window.clausitron.getAllSettings();
+      const saved = await window.goodvibes.getAllSettings();
       const merged = { ...DEFAULT_SETTINGS };
 
       // Check settings version for migrations
@@ -64,7 +64,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         for (const key of keysToReset) {
           try {
             const defaultValue = (DEFAULT_SETTINGS as any)[key];
-            await window.clausitron.setSetting(key, defaultValue);
+            await window.goodvibes.setSetting(key, defaultValue);
           } catch (err) {
             console.error(`Failed to migrate setting ${key}:`, err);
           }
@@ -73,7 +73,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         // Always save version to prevent re-running migration endlessly
         // Even if some keys failed, we don't want to retry the whole migration
         try {
-          await window.clausitron.setSetting('_settingsVersion', SETTINGS_VERSION);
+          await window.goodvibes.setSetting('_settingsVersion', SETTINGS_VERSION);
         } catch (err) {
           console.error('Failed to save settings version:', err);
         }
@@ -88,7 +88,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   updateSetting: async (key, value) => {
     try {
-      await window.clausitron.setSetting(key, value);
+      await window.goodvibes.setSetting(key, value);
       set((state) => ({
         settings: { ...state.settings, [key]: value },
       }));
@@ -101,7 +101,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   resetSettings: async () => {
     try {
       for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-        await window.clausitron.setSetting(key, value);
+        await window.goodvibes.setSetting(key, value);
       }
       set({ settings: DEFAULT_SETTINGS });
     } catch (error) {

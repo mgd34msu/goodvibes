@@ -1,7 +1,7 @@
 {
-  "name": "clausitron",
+  "name": "goodvibes",
   "version": "2.5.0",
-  "description": "Claude CLI with extras in Electron - Enterprise Edition",
+  "description": "GoodVibes - Claude Code companion app",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -93,8 +93,8 @@
     "zustand": "^5.0.9"
   },
   "build": {
-    "appId": "com.clausitron.app",
-    "productName": "Clausitron",
+    "appId": "com.goodvibes.app",
+    "productName": "GoodVibes",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -116,9 +116,9 @@
       }
     ],
     "protocols": {
-      "name": "Clausitron",
+      "name": "GoodVibes",
       "schemes": [
-        "clausitron"
+        "goodvibes"
       ]
     },
     "win": {

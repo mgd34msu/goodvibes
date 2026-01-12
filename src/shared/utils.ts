@@ -10,8 +10,8 @@
  * @returns The decoded project name, relative to projectsRoot if provided
  *
  * Examples:
- * - decodeProjectName("C--Users-buzzkill-Documents-clausitron") => "clausitron"
- * - decodeProjectName("C--Users-buzzkill-Documents-clausitron", "C:\\Users\\buzzkill\\Documents") => "clausitron"
+ * - decodeProjectName("C--Users-buzzkill-Documents-goodvibes") => "goodvibes"
+ * - decodeProjectName("C--Users-buzzkill-Documents-goodvibes", "C:\\Users\\buzzkill\\Documents") => "goodvibes"
  * - decodeProjectName("C--Users-buzzkill-Documents-work-api", "C:\\Users\\buzzkill\\Documents") => "work/api"
  */
 export function decodeProjectName(name: string | null | undefined, projectsRoot?: string | null): string {
@@ -360,7 +360,7 @@ export function sortBy<T>(array: T[], ...keys: (keyof T)[]): T[] {
  * @returns The decoded full path (e.g., "C:/Users/buzzkill/Documents/myproject")
  *
  * Examples:
- * - decodeProjectPath("C--Users-buzzkill-Documents-clausitron") => "C:/Users/buzzkill/Documents/clausitron"
+ * - decodeProjectPath("C--Users-buzzkill-Documents-goodvibes") => "C:/Users/buzzkill/Documents/goodvibes"
  * - decodeProjectPath("home-user-projects-myapp") => "/home/user/projects/myapp"
  */
 export function decodeProjectPath(name: string | null | undefined): string | null {

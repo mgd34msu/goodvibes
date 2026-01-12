@@ -21,7 +21,7 @@ export function AboutModal() {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
-          <h2 className="text-lg font-semibold text-surface-100">About Clausitron</h2>
+          <h2 className="text-lg font-semibold text-surface-100">About GoodVibes</h2>
           <button
             onClick={closeModal}
             className="p-1 rounded-lg hover:bg-surface-800 text-surface-400"
@@ -35,7 +35,7 @@ export function AboutModal() {
         {/* Content */}
         <div className="p-6 text-center">
           <div className="text-5xl mb-4">⚡</div>
-          <h1 className="text-2xl font-bold text-surface-100 mb-1">Clausitron</h1>
+          <h1 className="text-2xl font-bold text-surface-100 mb-1">GoodVibes</h1>
           <p className="text-sm text-surface-400 mb-4">A powerful desktop companion for Claude CLI</p>
 
           <div className="space-y-3 text-sm">

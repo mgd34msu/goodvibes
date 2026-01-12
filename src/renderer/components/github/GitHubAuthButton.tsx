@@ -33,7 +33,7 @@ export default function GitHubAuthButton({
 
   const loadAuthState = async () => {
     try {
-      const state = await window.clausitron.githubGetAuthState();
+      const state = await window.goodvibes.githubGetAuthState();
       setAuthState(state);
       onAuthChange?.(state.isAuthenticated, state.user);
     } catch (err) {
@@ -46,7 +46,7 @@ export default function GitHubAuthButton({
     setError(null);
 
     try {
-      const result = await window.clausitron.githubAuth();
+      const result = await window.goodvibes.githubAuth();
 
       if (result.success && result.user) {
         setAuthState({
@@ -70,7 +70,7 @@ export default function GitHubAuthButton({
     setIsLoading(true);
 
     try {
-      await window.clausitron.githubLogout();
+      await window.goodvibes.githubLogout();
       setAuthState({
         isAuthenticated: false,
         user: null,

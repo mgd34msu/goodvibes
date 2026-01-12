@@ -111,7 +111,7 @@ class ConfigManager {
       this.config.paths = {
         userData,
         logs: path.join(userData, 'logs'),
-        database: path.join(userData, 'clausitron.db'),
+        database: path.join(userData, 'goodvibes.db'),
         sessions: this.getSessionsPath(),
       };
 

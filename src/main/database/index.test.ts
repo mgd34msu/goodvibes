@@ -29,7 +29,7 @@ const describeIfDb = canLoadDatabase ? describe : describe.skip;
 
 // We need to test the actual database module, but with a test database
 // Create a temporary directory for the test database
-const TEST_DIR = path.join(os.tmpdir(), 'clausitron-test-' + Date.now());
+const TEST_DIR = path.join(os.tmpdir(), 'goodvibes-test-' + Date.now());
 
 // Since the database module uses a global instance, we need to import it
 // and initialize it with our test path. We'll mock the app.getPath for logs.

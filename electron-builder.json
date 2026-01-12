@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.clausitron.app",
-  "productName": "Clausitron",
+  "appId": "com.goodvibes.app",
+  "productName": "GoodVibes",
   "directories": {
     "output": "release",
     "buildResources": "build"
@@ -21,8 +21,8 @@
     }
   ],
   "protocols": {
-    "name": "Clausitron",
-    "schemes": ["clausitron"]
+    "name": "GoodVibes",
+    "schemes": ["goodvibes"]
   },
   "win": {
     "target": [
@@ -37,7 +37,7 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "Clausitron"
+    "shortcutName": "GoodVibes"
   },
   "mac": {
     "target": [

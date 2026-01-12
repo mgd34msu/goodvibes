@@ -57,7 +57,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   createTerminal: async (cwd, name, resumeSessionId) => {
     try {
-      const result = await window.clausitron.startClaude({
+      const result = await window.goodvibes.startClaude({
         cwd,
         name,
         resumeSessionId,
@@ -93,7 +93,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   createPlainTerminal: async (cwd, name) => {
     try {
-      const result = await window.clausitron.startPlainTerminal({
+      const result = await window.goodvibes.startPlainTerminal({
         cwd,
         name,
       });
@@ -162,7 +162,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     try {
-      await window.clausitron.killTerminal(id);
+      await window.goodvibes.killTerminal(id);
     } catch (error) {
       console.error('Failed to kill terminal:', error);
     }

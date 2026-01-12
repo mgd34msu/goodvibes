@@ -239,7 +239,7 @@ describe('useTerminalStore', () => {
 
   describe('createTerminal', () => {
     it('calls IPC to start claude and returns result', async () => {
-      vi.mocked(window.clausitron.startClaude).mockResolvedValue({
+      vi.mocked(window.goodvibes.startClaude).mockResolvedValue({
         id: 1,
         name: 'New Terminal',
         cwd: '/home/test',
@@ -250,7 +250,7 @@ describe('useTerminalStore', () => {
 
       expect(result.id).toBe(1);
       expect(result.name).toBe('New Terminal');
-      expect(window.clausitron.startClaude).toHaveBeenCalledWith({
+      expect(window.goodvibes.startClaude).toHaveBeenCalledWith({
         cwd: '/home/test',
         name: 'New Terminal',
         resumeSessionId: undefined,
@@ -258,7 +258,7 @@ describe('useTerminalStore', () => {
     });
 
     it('handles errors gracefully', async () => {
-      vi.mocked(window.clausitron.startClaude).mockRejectedValue(new Error('Failed to start'));
+      vi.mocked(window.goodvibes.startClaude).mockRejectedValue(new Error('Failed to start'));
 
       const { createTerminal } = useTerminalStore.getState();
       const result = await createTerminal('/home/test');

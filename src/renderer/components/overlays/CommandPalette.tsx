@@ -72,9 +72,9 @@ export function CommandPalette() {
       description: 'Switch between light and dark mode',
       category: 'Settings',
       action: async () => {
-        const current = await window.clausitron.getSetting('theme');
+        const current = await window.goodvibes.getSetting('theme');
         const next = current === 'dark' ? 'light' : 'dark';
-        await window.clausitron.setSetting('theme', next);
+        await window.goodvibes.setSetting('theme', next);
         close();
       },
     },
@@ -82,7 +82,7 @@ export function CommandPalette() {
     // About
     {
       id: 'show-about',
-      label: 'About Clausitron',
+      label: 'About GoodVibes',
       description: 'Show application information',
       category: 'Help',
       action: () => {

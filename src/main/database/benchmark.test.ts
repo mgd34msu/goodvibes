@@ -28,7 +28,7 @@ try {
 const describeIfDb = canLoadDatabase ? describe : describe.skip;
 
 // Test directory
-const TEST_DIR = path.join(os.tmpdir(), 'clausitron-benchmark-' + Date.now());
+const TEST_DIR = path.join(os.tmpdir(), 'goodvibes-benchmark-' + Date.now());
 
 // Mock Electron
 vi.mock('electron', () => ({

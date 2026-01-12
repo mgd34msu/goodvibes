@@ -39,14 +39,14 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
   // Query for raw session entries
   const { data: rawEntries = [], isLoading, error, refetch } = useQuery({
     queryKey: ['session-raw-entries', sessionId],
-    queryFn: () => window.clausitron.getSessionRawEntries(sessionId),
+    queryFn: () => window.goodvibes.getSessionRawEntries(sessionId),
     refetchInterval: 2000,
   });
 
   // Query for live status
   const { data: isLive = false } = useQuery({
     queryKey: ['session-live', sessionId],
-    queryFn: () => window.clausitron.isSessionLive(sessionId),
+    queryFn: () => window.goodvibes.isSessionLive(sessionId),
     refetchInterval: 5000,
   });
 

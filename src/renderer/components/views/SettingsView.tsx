@@ -170,7 +170,7 @@ export default function SettingsView() {
               />
               <button
                 onClick={async () => {
-                  const folder = await window.clausitron.selectFolder();
+                  const folder = await window.goodvibes.selectFolder();
                   if (folder) handleChange('defaultCwd', folder);
                 }}
                 className="btn btn-secondary btn-sm"
@@ -194,7 +194,7 @@ export default function SettingsView() {
               />
               <button
                 onClick={async () => {
-                  const folder = await window.clausitron.selectFolder();
+                  const folder = await window.goodvibes.selectFolder();
                   if (folder) handleChange('projectsRoot', folder);
                 }}
                 className="btn btn-secondary btn-sm"
@@ -626,7 +626,7 @@ function RecalculateCostsButton() {
     setIsRecalculating(true);
 
     try {
-      const result = await window.clausitron.recalculateSessionCosts();
+      const result = await window.goodvibes.recalculateSessionCosts();
 
       if (result.success) {
         // Invalidate analytics queries to refresh data
@@ -686,7 +686,7 @@ function GitHubConnectionStatus() {
 
   const loadAuthState = async () => {
     try {
-      const state = await window.clausitron.githubGetAuthState();
+      const state = await window.goodvibes.githubGetAuthState();
       setAuthState(state);
     } catch (err) {
       console.error('Failed to load GitHub auth state:', err);
@@ -695,7 +695,7 @@ function GitHubConnectionStatus() {
 
   const loadOAuthConfig = async () => {
     try {
-      const config = await window.clausitron.githubGetOAuthConfig();
+      const config = await window.goodvibes.githubGetOAuthConfig();
       setOauthConfig(config);
     } catch (err) {
       console.error('Failed to load OAuth config:', err);
@@ -707,7 +707,7 @@ function GitHubConnectionStatus() {
     setError(null);
 
     try {
-      const result = await window.clausitron.githubAuth();
+      const result = await window.goodvibes.githubAuth();
 
       if (result.success && result.user) {
         setAuthState({
@@ -734,7 +734,7 @@ function GitHubConnectionStatus() {
     setIsLoading(true);
 
     try {
-      await window.clausitron.githubLogout();
+      await window.goodvibes.githubLogout();
       setAuthState({
         isAuthenticated: false,
         user: null,

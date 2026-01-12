@@ -35,7 +35,7 @@ describe('useSettingsStore', () => {
 
       const { settings } = useSettingsStore.getState();
       expect(settings.theme).toBe('light');
-      expect(window.clausitron.setSetting).toHaveBeenCalledWith('theme', 'light');
+      expect(window.goodvibes.setSetting).toHaveBeenCalledWith('theme', 'light');
     });
 
     it('updates numeric settings', async () => {
@@ -68,7 +68,7 @@ describe('useSettingsStore', () => {
         hideAgentSessions: true,
       };
 
-      vi.mocked(window.clausitron.getAllSettings).mockResolvedValue(mockSettings);
+      vi.mocked(window.goodvibes.getAllSettings).mockResolvedValue(mockSettings);
 
       const { loadSettings } = useSettingsStore.getState();
       await loadSettings();
@@ -79,7 +79,7 @@ describe('useSettingsStore', () => {
     });
 
     it('sets isLoaded state after loading', async () => {
-      vi.mocked(window.clausitron.getAllSettings).mockResolvedValue({});
+      vi.mocked(window.goodvibes.getAllSettings).mockResolvedValue({});
 
       expect(useSettingsStore.getState().isLoaded).toBe(false);
 
@@ -90,7 +90,7 @@ describe('useSettingsStore', () => {
     });
 
     it('handles load failure gracefully', async () => {
-      vi.mocked(window.clausitron.getAllSettings).mockRejectedValue(new Error('Load failed'));
+      vi.mocked(window.goodvibes.getAllSettings).mockRejectedValue(new Error('Load failed'));
 
       const { loadSettings } = useSettingsStore.getState();
       await loadSettings();

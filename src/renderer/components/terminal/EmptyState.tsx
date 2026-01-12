@@ -23,11 +23,11 @@ export function EmptyState({ onNewSession, onNewTerminal }: EmptyStateProps) {
       <div className="text-center max-w-lg mx-auto px-6">
         <img
           src={appIcon}
-          alt="Clausitron"
+          alt="GoodVibes"
           className="w-24 h-24 mx-auto mb-8"
         />
         <h2 className="text-3xl font-bold text-surface-100 mb-4">
-          Welcome to Clausitron
+          Welcome to GoodVibes
         </h2>
         <p className="text-surface-400 text-base mb-10 leading-relaxed">
           Start a new Claude Code session to begin working on your project, or open a plain terminal.

@@ -81,7 +81,7 @@ export default function GitHubPanel({
 
   const loadAuthState = async () => {
     try {
-      const state = await window.clausitron.githubGetAuthState();
+      const state = await window.goodvibes.githubGetAuthState();
       setIsAuthenticated(state.isAuthenticated);
       setUser(state.user);
 
@@ -104,7 +104,7 @@ export default function GitHubPanel({
 
     try {
       // Get remotes from git
-      const remotesResult = await window.clausitron.gitRemotes(cwd);
+      const remotesResult = await window.goodvibes.gitRemotes(cwd);
       if (!remotesResult.success || !remotesResult.remotes || remotesResult.remotes.length === 0) {
         setRepoInfo(null);
         return;
@@ -114,7 +114,7 @@ export default function GitHubPanel({
       const remote = remotesResult.remotes.find((r: { name: string }) => r.name === 'origin') || remotesResult.remotes[0];
 
       // Parse the remote URL
-      const parseResult = await window.clausitron.githubParseRemote(remote.fetchUrl);
+      const parseResult = await window.goodvibes.githubParseRemote(remote.fetchUrl);
 
       if (parseResult && parseResult.isGitHub) {
         setRepoInfo({
@@ -138,8 +138,8 @@ export default function GitHubPanel({
 
     try {
       const [checksResult, statusResult] = await Promise.all([
-        window.clausitron.githubGetChecks(repoInfo.owner, repoInfo.repo, currentBranch),
-        window.clausitron.githubGetCommitStatus(repoInfo.owner, repoInfo.repo, currentBranch),
+        window.goodvibes.githubGetChecks(repoInfo.owner, repoInfo.repo, currentBranch),
+        window.goodvibes.githubGetCommitStatus(repoInfo.owner, repoInfo.repo, currentBranch),
       ]);
 
       setCIStatus({
@@ -160,8 +160,8 @@ export default function GitHubPanel({
     setReposLoading(true);
     try {
       const [reposResult, orgsResult] = await Promise.all([
-        window.clausitron.githubListRepos({ sort: 'pushed', per_page: 100 }),
-        window.clausitron.githubListOrgs(),
+        window.goodvibes.githubListRepos({ sort: 'pushed', per_page: 100 }),
+        window.goodvibes.githubListOrgs(),
       ]);
 
       if (reposResult.success && reposResult.data) {
@@ -182,7 +182,7 @@ export default function GitHubPanel({
     setReposLoading(true);
     setSelectedOrg(org);
     try {
-      const result = await window.clausitron.githubListOrgRepos(org, { sort: 'pushed', per_page: 100 });
+      const result = await window.goodvibes.githubListOrgRepos(org, { sort: 'pushed', per_page: 100 });
       if (result.success && result.data) {
         setRepos(result.data);
       }
@@ -200,7 +200,7 @@ export default function GitHubPanel({
 
     try {
       // First check if origin remote already exists
-      const remotesResult = await window.clausitron.gitRemotes(cwd);
+      const remotesResult = await window.goodvibes.gitRemotes(cwd);
       const originExists = remotesResult.success &&
         remotesResult.remotes?.some((r: { name: string }) => r.name === 'origin');
 
@@ -212,7 +212,7 @@ export default function GitHubPanel({
       }
 
       // Add the remote
-      const result = await window.clausitron.gitRemoteAdd(cwd, 'origin', repo.clone_url);
+      const result = await window.goodvibes.gitRemoteAdd(cwd, 'origin', repo.clone_url);
 
       if (result.success) {
         // Reload repo info to pick up the new remote
@@ -606,7 +606,7 @@ function CreateRepositoryModal({
     setError(null);
 
     try {
-      const result = await window.clausitron.githubCreateRepo(name.trim(), {
+      const result = await window.goodvibes.githubCreateRepo(name.trim(), {
         description: description.trim() || undefined,
         private: isPrivate,
         auto_init: false, // Don't init since we're adding to existing project

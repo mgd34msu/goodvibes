@@ -16,11 +16,11 @@ export default function NotesView() {
 
   const { data: notes = [], isLoading } = useQuery<QuickNote[]>({
     queryKey: ['notes', filter],
-    queryFn: () => window.clausitron.getQuickNotes(filter),
+    queryFn: () => window.goodvibes.getQuickNotes(filter),
   });
 
   const createMutation = useMutation({
-    mutationFn: (content: string) => window.clausitron.createQuickNote(content),
+    mutationFn: (content: string) => window.goodvibes.createQuickNote(content),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       setNewNoteContent('');
@@ -30,14 +30,14 @@ export default function NotesView() {
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
-      window.clausitron.setQuickNoteStatus(id, status),
+      window.goodvibes.setQuickNoteStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => window.clausitron.deleteQuickNote(id),
+    mutationFn: (id: number) => window.goodvibes.deleteQuickNote(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       toast.info('Note deleted');

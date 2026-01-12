@@ -35,8 +35,8 @@ const DEFAULT_SCOPES = ['repo', 'read:user', 'read:org', 'workflow'];
 /**
  * Load OAuth credentials from environment or bundled config.
  *
- * For desktop apps like Clausitron, embedding OAuth credentials is standard practice.
- * The developer creates ONE GitHub OAuth App for the entire Clausitron application.
+ * For desktop apps like GoodVibes, embedding OAuth credentials is standard practice.
+ * The developer creates ONE GitHub OAuth App for the entire GoodVibes application.
  * End users simply click "Login with GitHub" - zero setup required.
  *
  * Credential loading priority:
@@ -129,7 +129,7 @@ interface GitHubStoreSchema {
 // Create an encrypted store for GitHub credentials
 const githubStore = new Store<GitHubStoreSchema>({
   name: 'github-auth',
-  encryptionKey: 'clausitron-github-store',
+  encryptionKey: 'goodvibes-github-store',
 });
 
 // ============================================================================
@@ -200,7 +200,7 @@ export function setPendingOAuthCallback(
 }
 
 /**
- * Handle OAuth callback from the custom protocol (clausitron://oauth/callback)
+ * Handle OAuth callback from the custom protocol (goodvibes://oauth/callback)
  * Called by the main process when it receives a protocol URL
  */
 export async function handleOAuthCallback(
@@ -372,7 +372,7 @@ export async function initializeGitHub(): Promise<void> {
 // ============================================================================
 
 // Custom protocol callback URL
-const OAUTH_CALLBACK_URL = 'clausitron://oauth/callback';
+const OAUTH_CALLBACK_URL = 'goodvibes://oauth/callback';
 
 /**
  * Authenticate with GitHub using OAuth flow
@@ -623,7 +623,7 @@ async function fetchGitHubUser(accessToken: string): Promise<GitHubUser | null> 
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Clausitron',
+        'User-Agent': 'GoodVibes',
       },
     });
 
@@ -648,7 +648,7 @@ async function verifyToken(accessToken: string): Promise<boolean> {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Clausitron',
+        'User-Agent': 'GoodVibes',
       },
     });
 

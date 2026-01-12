@@ -1,14 +1,14 @@
-# Clausitron Architecture Documentation
+# GoodVibes Architecture Documentation
 
 ## Overview
 
-Clausitron is an Electron-based desktop application that provides an enhanced interface for Claude CLI with session management, analytics, and Git integration. The application follows a standard Electron architecture with separate main and renderer processes.
+GoodVibes is an Electron-based desktop application that provides an enhanced interface for Claude CLI with session management, analytics, and Git integration. The application follows a standard Electron architecture with separate main and renderer processes.
 
 ## High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           CLAUSITRON                                     │
+│                           GOODVIBES                                     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌─────────────────┐                    ┌─────────────────────────┐     │
@@ -35,7 +35,7 @@ Clausitron is an Electron-based desktop application that provides an enhanced in
 ## Directory Structure
 
 ```
-clausitron/
+goodvibes/
 ├── src/
 │   ├── main/                    # Main process code (Node.js)
 │   │   ├── index.ts             # Application entry point
@@ -161,7 +161,7 @@ The preload script creates a secure bridge between main and renderer processes:
 
 ```typescript
 // Example IPC channel
-window.clausitron = {
+window.goodvibes = {
   // Terminal operations
   startClaude: (options) => ipcRenderer.invoke('start-claude', options),
   terminalInput: (id, data) => ipcRenderer.invoke('terminal-input', id, data),
@@ -277,7 +277,7 @@ UI Display ← React Query ← IPC ← Database Query
 
 ### OAuth Security
 - State parameter for CSRF protection
-- Custom protocol callback (clausitron://)
+- Custom protocol callback (goodvibes://)
 - Token encryption in electron-store
 
 ### Process Isolation

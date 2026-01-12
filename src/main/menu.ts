@@ -91,7 +91,7 @@ export function createMenu(): void {
           click: () => shell.openExternal('https://docs.anthropic.com/'),
         },
         {
-          label: 'About Clausitron',
+          label: 'About GoodVibes',
           click: () => sendToRenderer('show-about'),
         },
       ],

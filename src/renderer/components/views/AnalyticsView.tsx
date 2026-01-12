@@ -16,12 +16,12 @@ export default function AnalyticsView() {
 
   const { data: analytics, isLoading } = useQuery<Analytics>({
     queryKey: ['analytics'],
-    queryFn: () => window.clausitron.getAnalytics(),
+    queryFn: () => window.goodvibes.getAnalytics(),
   });
 
   const { data: toolUsage } = useQuery<ToolUsageStat[]>({
     queryKey: ['tool-usage'],
-    queryFn: () => window.clausitron.getToolUsage(),
+    queryFn: () => window.goodvibes.getToolUsage(),
   });
 
   const handleGenerateReport = async () => {
@@ -42,7 +42,7 @@ export default function AnalyticsView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `clausitron-report-${formatDate(new Date().toISOString()).replace(/[,\s]+/g, '-')}.json`;
+      a.download = `goodvibes-report-${formatDate(new Date().toISOString()).replace(/[,\s]+/g, '-')}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

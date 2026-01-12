@@ -25,11 +25,11 @@ export default function SessionsView() {
     queryFn: async () => {
       switch (filter) {
         case 'favorites':
-          return await window.clausitron.getFavoriteSessions();
+          return await window.goodvibes.getFavoriteSessions();
         case 'archived':
-          return await window.clausitron.getArchivedSessions();
+          return await window.goodvibes.getArchivedSessions();
         default:
-          return await window.clausitron.getActiveSessions();
+          return await window.goodvibes.getActiveSessions();
       }
     },
   });
@@ -37,7 +37,7 @@ export default function SessionsView() {
   // Query for live sessions to show indicator
   const { data: liveSessions = [] } = useQuery({
     queryKey: ['live-sessions'],
-    queryFn: () => window.clausitron.getLiveSessions(),
+    queryFn: () => window.goodvibes.getLiveSessions(),
     refetchInterval: 5000, // Refresh every 5 seconds
   });
 
@@ -149,19 +149,19 @@ function MonitorPanel({ projectsRoot }: MonitorPanelProps) {
 
   const { data: liveSessions = [] } = useQuery<Session[]>({
     queryKey: ['live-sessions'],
-    queryFn: () => window.clausitron.getLiveSessions(),
+    queryFn: () => window.goodvibes.getLiveSessions(),
     refetchInterval: 5000,
   });
 
   const { data: activity = [] } = useQuery<ActivityLogEntry[]>({
     queryKey: ['activity'],
-    queryFn: () => window.clausitron.getRecentActivity(15),
+    queryFn: () => window.goodvibes.getRecentActivity(15),
     refetchInterval: 10000,
   });
 
   const { data: analytics } = useQuery({
     queryKey: ['analytics'],
-    queryFn: () => window.clausitron.getAnalytics(),
+    queryFn: () => window.goodvibes.getAnalytics(),
     refetchInterval: 30000,
   });
 
@@ -493,14 +493,14 @@ function SessionCard({ session, projectsRoot, isLive, onClick }: SessionCardProp
 
   const handleToggleFavorite = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await window.clausitron.toggleFavorite(session.id);
+    await window.goodvibes.toggleFavorite(session.id);
     // Invalidate session queries to refresh the UI
     await queryClient.invalidateQueries({ queryKey: ['sessions'] });
   }, [session.id, queryClient]);
 
   const handleToggleArchive = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await window.clausitron.toggleArchive(session.id);
+    await window.goodvibes.toggleArchive(session.id);
     // Invalidate session queries to refresh the UI
     await queryClient.invalidateQueries({ queryKey: ['sessions'] });
   }, [session.id, queryClient]);

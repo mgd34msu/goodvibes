@@ -41,7 +41,7 @@ export default function TerminalView() {
     // Use projectsRoot setting if defined, or fall back to most recent project
     let cwd = projectsRoot;
     if (!cwd) {
-      const recentProjects = await window.clausitron.getRecentProjects();
+      const recentProjects = await window.goodvibes.getRecentProjects();
       if (recentProjects.length > 0) {
         cwd = recentProjects[0].path;
       }
@@ -156,7 +156,7 @@ function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: Te
     // Use projectsRoot setting if defined, or fall back to most recent project
     let cwd = projectsRoot;
     if (!cwd) {
-      const recentProjects = await window.clausitron.getRecentProjects();
+      const recentProjects = await window.goodvibes.getRecentProjects();
       if (recentProjects.length > 0) {
         cwd = recentProjects[0].path;
       }
@@ -321,7 +321,7 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
 
     const selection = terminal.getSelection();
     if (selection) {
-      window.clausitron.clipboardWrite(selection);
+      window.goodvibes.clipboardWrite(selection);
     }
   }, []);
 
@@ -330,10 +330,10 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
     const terminal = terminalRef.current;
     if (!terminal) return;
 
-    const text = await window.clausitron.clipboardRead();
+    const text = await window.goodvibes.clipboardRead();
     if (text) {
       // Send the pasted text to the terminal PTY
-      window.clausitron.terminalInput(id, text);
+      window.goodvibes.terminalInput(id, text);
     }
   }, [id]);
 
@@ -346,7 +346,7 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
     const hasSelection = terminal.hasSelection();
     const selectedText = hasSelection ? terminal.getSelection() : undefined;
 
-    const action = await window.clausitron.showTerminalContextMenu({
+    const action = await window.goodvibes.showTerminalContextMenu({
       hasSelection,
       selectedText,
     });
@@ -388,12 +388,12 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
 
     // Handle terminal input
     terminal.onData((data) => {
-      window.clausitron.terminalInput(id, data);
+      window.goodvibes.terminalInput(id, data);
     });
 
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
-      window.clausitron.terminalResize(id, cols, rows);
+      window.goodvibes.terminalResize(id, cols, rows);
     });
 
     // Detect when user scrolls manually (debounced to avoid flicker during output)
@@ -431,7 +431,7 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
     // Initial resize
     const cols = terminal.cols;
     const rows = terminal.rows;
-    window.clausitron.terminalResize(id, cols, rows);
+    window.goodvibes.terminalResize(id, cols, rows);
 
     return () => {
       if (viewportElement) {
@@ -508,7 +508,7 @@ function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
       }
     };
 
-    const cleanup = window.clausitron.onTerminalData(handleData);
+    const cleanup = window.goodvibes.onTerminalData(handleData);
     return cleanup;
   }, [id]);
 
@@ -587,8 +587,8 @@ function EmptyState({ onNewSession, onNewTerminal }: { onNewSession: () => void;
   return (
     <div className="flex-1 flex items-center justify-center bg-surface-900">
       <div className="text-center max-w-lg mx-auto px-6">
-        <img src={appIcon} alt="Clausitron" className="w-24 h-24 mx-auto mb-8" />
-        <h2 className="text-3xl font-bold text-surface-100 mb-4">Welcome to Clausitron</h2>
+        <img src={appIcon} alt="GoodVibes" className="w-24 h-24 mx-auto mb-8" />
+        <h2 className="text-3xl font-bold text-surface-100 mb-4">Welcome to GoodVibes</h2>
         <p className="text-surface-400 text-base mb-10 leading-relaxed">
           Start a new Claude Code session to begin working on your project, or open a plain terminal.
         </p>
@@ -905,7 +905,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
     if (!cwd) return;
 
     try {
-      const isRepo = await window.clausitron.gitIsRepo(cwd);
+      const isRepo = await window.goodvibes.gitIsRepo(cwd);
 
       if (!isRepo) {
         setState(prev => ({
@@ -921,17 +921,17 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       // Use gitAheadBehind separately for reliable push/pull state detection
       // Use gitBranches (simple) instead of gitBranchesWithHierarchy (slow O(n^2) git commands)
       const [detailedStatus, branchesResult, commitsResult, aheadBehindResult, stashResult, mergeInProgress, cherryPickInProgress, rebaseInProgress, tagsResult, conflictFilesResult, conventionalResult] = await Promise.all([
-        window.clausitron.gitDetailedStatus(cwd),
-        window.clausitron.gitBranches(cwd),
-        window.clausitron.gitLogDetailed(cwd, 10),
-        window.clausitron.gitAheadBehind(cwd),
-        window.clausitron.gitStashList(cwd),
-        window.clausitron.gitMergeInProgress(cwd),
-        window.clausitron.gitCherryPickInProgress(cwd),
-        window.clausitron.gitRebaseInProgress(cwd),
-        window.clausitron.gitTags(cwd),
-        window.clausitron.gitConflictFiles(cwd),
-        window.clausitron.gitConventionalPrefixes(cwd),
+        window.goodvibes.gitDetailedStatus(cwd),
+        window.goodvibes.gitBranches(cwd),
+        window.goodvibes.gitLogDetailed(cwd, 10),
+        window.goodvibes.gitAheadBehind(cwd),
+        window.goodvibes.gitStashList(cwd),
+        window.goodvibes.gitMergeInProgress(cwd),
+        window.goodvibes.gitCherryPickInProgress(cwd),
+        window.goodvibes.gitRebaseInProgress(cwd),
+        window.goodvibes.gitTags(cwd),
+        window.goodvibes.gitConflictFiles(cwd),
+        window.goodvibes.gitConventionalPrefixes(cwd),
       ]);
 
       setState(prev => ({
@@ -984,7 +984,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleStage = async (files: string[]) => {
     setState(prev => ({ ...prev, operationInProgress: 'staging' }));
     try {
-      await window.clausitron.gitStage(cwd, files);
+      await window.goodvibes.gitStage(cwd, files);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to stage files:', err);
@@ -996,7 +996,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleUnstage = async (files: string[]) => {
     setState(prev => ({ ...prev, operationInProgress: 'unstaging' }));
     try {
-      await window.clausitron.gitUnstage(cwd, files);
+      await window.goodvibes.gitUnstage(cwd, files);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to unstage files:', err);
@@ -1026,9 +1026,9 @@ function GitPanel({ cwd, position }: GitPanelProps) {
     setState(prev => ({ ...prev, operationInProgress: 'discarding' }));
     try {
       if (isUntracked) {
-        await window.clausitron.gitCleanFile(cwd, file);
+        await window.goodvibes.gitCleanFile(cwd, file);
       } else {
-        await window.clausitron.gitDiscardChanges(cwd, [file]);
+        await window.goodvibes.gitDiscardChanges(cwd, [file]);
       }
       await fetchGitInfo();
     } catch (err) {
@@ -1043,7 +1043,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, isCommitting: true }));
     try {
-      const result = await window.clausitron.gitCommit(cwd, state.commitMessage.trim());
+      const result = await window.goodvibes.gitCommit(cwd, state.commitMessage.trim());
       if (result.success) {
         setState(prev => ({ ...prev, commitMessage: '' }));
         await fetchGitInfo();
@@ -1060,7 +1060,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handlePush = async () => {
     setState(prev => ({ ...prev, isPushing: true }));
     try {
-      const result = await window.clausitron.gitPush(cwd);
+      const result = await window.goodvibes.gitPush(cwd);
       if (!result.success) {
         alert(`Push failed: ${result.error}`);
       }
@@ -1075,7 +1075,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handlePull = async () => {
     setState(prev => ({ ...prev, isPulling: true }));
     try {
-      const result = await window.clausitron.gitPull(cwd);
+      const result = await window.goodvibes.gitPull(cwd);
       if (!result.success) {
         alert(`Pull failed: ${result.error}`);
       }
@@ -1090,7 +1090,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleFetch = async () => {
     setState(prev => ({ ...prev, isFetching: true }));
     try {
-      await window.clausitron.gitFetch(cwd);
+      await window.goodvibes.gitFetch(cwd);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to fetch:', err);
@@ -1129,7 +1129,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
     }));
 
     try {
-      const result = await window.clausitron.gitCheckout(cwd, branch);
+      const result = await window.goodvibes.gitCheckout(cwd, branch);
       if (!result.success) {
         // Show error but don't corrupt state
         console.error('Checkout failed:', result.error);
@@ -1166,13 +1166,13 @@ function GitPanel({ cwd, position }: GitPanelProps) {
     try {
       // Discard all staged changes (unstage them first)
       if (state.staged.length > 0) {
-        await window.clausitron.gitUnstage(cwd, state.staged.map(f => f.file));
+        await window.goodvibes.gitUnstage(cwd, state.staged.map(f => f.file));
       }
 
       // Discard all unstaged changes
       const filesToDiscard = state.unstaged.filter(f => f.status !== 'untracked').map(f => f.file);
       if (filesToDiscard.length > 0) {
-        await window.clausitron.gitDiscardChanges(cwd, filesToDiscard);
+        await window.goodvibes.gitDiscardChanges(cwd, filesToDiscard);
       }
 
       // Now perform the checkout
@@ -1207,7 +1207,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
     setState(prev => ({ ...prev, newBranchError: null, operationInProgress: 'creating-branch' }));
 
     try {
-      const result = await window.clausitron.gitCreateBranch(cwd, branchName, true);
+      const result = await window.goodvibes.gitCreateBranch(cwd, branchName, true);
       if (result.success) {
         setState(prev => ({
           ...prev,
@@ -1251,7 +1251,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, isMerging: true, showMergeModal: false }));
     try {
-      const result = await window.clausitron.gitMerge(cwd, state.mergeBranch, state.mergeOptions);
+      const result = await window.goodvibes.gitMerge(cwd, state.mergeBranch, state.mergeOptions);
       if (!result.success) {
         // Check if it's a conflict
         if (result.error?.includes('conflict') || result.stderr?.includes('CONFLICT')) {
@@ -1285,7 +1285,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   // Abort merge
   const handleMergeAbort = async () => {
     try {
-      const result = await window.clausitron.gitMergeAbort(cwd);
+      const result = await window.goodvibes.gitMergeAbort(cwd);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Failed to abort merge: ${result.error}` }));
       }
@@ -1299,7 +1299,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleStashPush = async () => {
     setState(prev => ({ ...prev, operationInProgress: 'stashing', showStashModal: false }));
     try {
-      const result = await window.clausitron.gitStashPush(cwd, state.stashMessage || undefined);
+      const result = await window.goodvibes.gitStashPush(cwd, state.stashMessage || undefined);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Stash failed: ${result.error}` }));
       }
@@ -1314,7 +1314,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleStashPop = async (index?: number) => {
     setState(prev => ({ ...prev, operationInProgress: 'popping-stash' }));
     try {
-      const result = await window.clausitron.gitStashPop(cwd, index);
+      const result = await window.goodvibes.gitStashPop(cwd, index);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Stash pop failed: ${result.error}` }));
       }
@@ -1329,7 +1329,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleStashApply = async (index?: number) => {
     setState(prev => ({ ...prev, operationInProgress: 'applying-stash' }));
     try {
-      const result = await window.clausitron.gitStashApply(cwd, index);
+      const result = await window.goodvibes.gitStashApply(cwd, index);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Stash apply failed: ${result.error}` }));
       }
@@ -1346,7 +1346,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'dropping-stash' }));
     try {
-      const result = await window.clausitron.gitStashDrop(cwd, index);
+      const result = await window.goodvibes.gitStashDrop(cwd, index);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Stash drop failed: ${result.error}` }));
       }
@@ -1367,7 +1367,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       // Amend mode - either add staged changes or just change message
       setState(prev => ({ ...prev, isCommitting: true }));
       try {
-        const result = await window.clausitron.gitCommitAmend(cwd, {
+        const result = await window.goodvibes.gitCommitAmend(cwd, {
           message: state.commitMessage.trim() || undefined,
           noEdit: !state.commitMessage.trim(),
         });
@@ -1393,7 +1393,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'deleting-branch' }));
     try {
-      const result = await window.clausitron.gitDeleteBranch(cwd, state.branchToDelete, {
+      const result = await window.goodvibes.gitDeleteBranch(cwd, state.branchToDelete, {
         force: state.deleteBranchForce,
       });
       if (!result.success) {
@@ -1416,7 +1416,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleCherryPick = async (commit: string) => {
     setState(prev => ({ ...prev, operationInProgress: 'cherry-picking' }));
     try {
-      const result = await window.clausitron.gitCherryPick(cwd, commit);
+      const result = await window.goodvibes.gitCherryPick(cwd, commit);
       if (!result.success) {
         if (result.error?.includes('conflict') || result.stderr?.includes('CONFLICT')) {
           setState(prev => ({
@@ -1437,7 +1437,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   // Cherry-pick abort
   const handleCherryPickAbort = async () => {
     try {
-      await window.clausitron.gitCherryPickAbort(cwd);
+      await window.goodvibes.gitCherryPickAbort(cwd);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to abort cherry-pick:', err);
@@ -1448,7 +1448,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleCherryPickContinue = async () => {
     setState(prev => ({ ...prev, operationInProgress: 'cherry-pick-continue' }));
     try {
-      const result = await window.clausitron.gitCherryPickContinue(cwd);
+      const result = await window.goodvibes.gitCherryPickContinue(cwd);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Continue failed: ${result.error}` }));
       }
@@ -1465,7 +1465,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'rebasing', showRebaseModal: false }));
     try {
-      const result = await window.clausitron.gitRebase(cwd, state.rebaseBranch);
+      const result = await window.goodvibes.gitRebase(cwd, state.rebaseBranch);
       if (!result.success) {
         if (result.error?.includes('conflict') || result.stderr?.includes('CONFLICT')) {
           setState(prev => ({
@@ -1486,7 +1486,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   // Rebase abort
   const handleRebaseAbort = async () => {
     try {
-      await window.clausitron.gitRebaseAbort(cwd);
+      await window.goodvibes.gitRebaseAbort(cwd);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to abort rebase:', err);
@@ -1497,7 +1497,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleRebaseContinue = async () => {
     setState(prev => ({ ...prev, operationInProgress: 'rebase-continue' }));
     try {
-      const result = await window.clausitron.gitRebaseContinue(cwd);
+      const result = await window.goodvibes.gitRebaseContinue(cwd);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Continue failed: ${result.error}` }));
       }
@@ -1511,7 +1511,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   // Rebase skip
   const handleRebaseSkip = async () => {
     try {
-      await window.clausitron.gitRebaseSkip(cwd);
+      await window.goodvibes.gitRebaseSkip(cwd);
       await fetchGitInfo();
     } catch (err) {
       console.error('Failed to skip rebase step:', err);
@@ -1524,7 +1524,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'creating-tag' }));
     try {
-      const result = await window.clausitron.gitCreateTag(cwd, state.newTagName.trim(), {
+      const result = await window.goodvibes.gitCreateTag(cwd, state.newTagName.trim(), {
         message: state.newTagMessage.trim() || undefined,
         commit: state.newTagCommit.trim() || undefined,
       });
@@ -1551,7 +1551,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'deleting-tag' }));
     try {
-      const result = await window.clausitron.gitDeleteTag(cwd, name);
+      const result = await window.goodvibes.gitDeleteTag(cwd, name);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Failed to delete tag: ${result.error}` }));
       }
@@ -1566,7 +1566,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleResolveOurs = async (file: string) => {
     setState(prev => ({ ...prev, operationInProgress: 'resolving' }));
     try {
-      const result = await window.clausitron.gitResolveOurs(cwd, file);
+      const result = await window.goodvibes.gitResolveOurs(cwd, file);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Failed to resolve: ${result.error}` }));
       }
@@ -1581,7 +1581,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleResolveTheirs = async (file: string) => {
     setState(prev => ({ ...prev, operationInProgress: 'resolving' }));
     try {
-      const result = await window.clausitron.gitResolveTheirs(cwd, file);
+      const result = await window.goodvibes.gitResolveTheirs(cwd, file);
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Failed to resolve: ${result.error}` }));
       }
@@ -1601,7 +1601,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       isLoadingFileHistory: true,
     }));
     try {
-      const result = await window.clausitron.gitFileHistory(cwd, file);
+      const result = await window.goodvibes.gitFileHistory(cwd, file);
       if (result.success) {
         setState(prev => ({
           ...prev,
@@ -1630,7 +1630,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       isLoadingBlame: true,
     }));
     try {
-      const result = await window.clausitron.gitBlame(cwd, file);
+      const result = await window.goodvibes.gitBlame(cwd, file);
       if (result.success) {
         setState(prev => ({
           ...prev,
@@ -1658,7 +1658,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       isLoadingReflog: true,
     }));
     try {
-      const result = await window.clausitron.gitReflog(cwd);
+      const result = await window.goodvibes.gitReflog(cwd);
       if (result.success) {
         setState(prev => ({
           ...prev,
@@ -1687,7 +1687,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
 
     setState(prev => ({ ...prev, operationInProgress: 'resetting' }));
     try {
-      const result = await window.clausitron.gitResetToReflog(cwd, index, { hard });
+      const result = await window.goodvibes.gitResetToReflog(cwd, index, { hard });
       if (!result.success) {
         setState(prev => ({ ...prev, error: `Failed to reset: ${result.error}` }));
       }
@@ -1724,7 +1724,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
   const handleViewCommit = async (hash: string) => {
     setState(prev => ({ ...prev, isLoadingCommit: true, showCommitDetail: true }));
     try {
-      const result = await window.clausitron.gitShowCommit(cwd, hash);
+      const result = await window.goodvibes.gitShowCommit(cwd, hash);
       if (result.success && result.commit) {
         setState(prev => ({
           ...prev,
@@ -1765,7 +1765,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
       diffCommit: commit || null,
     }));
     try {
-      const result = await window.clausitron.gitDiffRaw(cwd, {
+      const result = await window.goodvibes.gitDiffRaw(cwd, {
         file,
         staged: isStaged,
         commit,
@@ -2027,7 +2027,7 @@ function GitPanel({ cwd, position }: GitPanelProps) {
             <div className="text-surface-400 text-sm mb-3">Not a git repository</div>
             <button
               onClick={async () => {
-                await window.clausitron.gitInit(cwd);
+                await window.goodvibes.gitInit(cwd);
                 fetchGitInfo();
               }}
               className="px-3 py-1.5 text-xs bg-primary-500 hover:bg-primary-600 text-white rounded transition-colors"
@@ -3624,12 +3624,12 @@ function FolderPickerModal() {
   // Load recent projects
   React.useEffect(() => {
     if (isOpen) {
-      window.clausitron.getRecentProjects().then(setRecentProjects);
+      window.goodvibes.getRecentProjects().then(setRecentProjects);
     }
   }, [isOpen]);
 
   const handleSelectFolder = async () => {
-    const folder = await window.clausitron.selectFolder();
+    const folder = await window.goodvibes.selectFolder();
     if (folder) {
       setSelectedFolder(folder);
     }

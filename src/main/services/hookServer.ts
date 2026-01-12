@@ -869,7 +869,7 @@ class HookServerService extends EventEmitter {
       return { decision: 'allow' };
     });
 
-    // Notification - Route to Clausitron notifications
+    // Notification - Route to GoodVibes notifications
     this.registerHandler('Notification', async (payload) => {
       const notificationType = getPayloadValue<string>(payload, 'notification_type', 'notificationType');
       const notificationMessage = getPayloadValue<string>(payload, 'notification_message', 'notificationMessage');

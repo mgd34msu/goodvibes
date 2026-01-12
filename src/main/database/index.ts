@@ -36,7 +36,7 @@ let db: Database.Database | null = null;
 // ============================================================================
 
 export async function initDatabase(userDataPath: string): Promise<void> {
-  const dbPath = path.join(userDataPath, 'clausitron.db');
+  const dbPath = path.join(userDataPath, 'goodvibes.db');
 
   // Ensure directory exists
   const dir = path.dirname(dbPath);

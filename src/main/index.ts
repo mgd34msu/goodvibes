@@ -42,7 +42,7 @@ let isShuttingDown = false;
 // CUSTOM PROTOCOL REGISTRATION
 // ============================================================================
 
-const PROTOCOL_NAME = 'clausitron';
+const PROTOCOL_NAME = 'goodvibes';
 
 /**
  * Register the custom protocol for OAuth callbacks.
@@ -62,7 +62,7 @@ function registerProtocol(): void {
 }
 
 /**
- * Handle a protocol URL (clausitron://...)
+ * Handle a protocol URL (goodvibes://...)
  * Routes to appropriate handler based on the path
  */
 function handleProtocolUrl(url: string): void {
@@ -155,7 +155,7 @@ process.on('unhandledRejection', (reason) => {
 // ============================================================================
 
 async function initializeApp(): Promise<void> {
-  logger.info('Initializing Clausitron...');
+  logger.info('Initializing GoodVibes...');
 
   try {
     // Initialize database
@@ -423,7 +423,7 @@ async function initializeApp(): Promise<void> {
       });
     }
 
-    logger.info('Clausitron initialized successfully');
+    logger.info('GoodVibes initialized successfully');
   } catch (error) {
     logger.error('Failed to initialize app', error);
     throw error;

@@ -21,12 +21,12 @@ export default function KnowledgeView() {
     queryKey: ['knowledge', search],
     queryFn: () =>
       search
-        ? window.clausitron.searchKnowledge(search)
-        : window.clausitron.getAllKnowledgeEntries(),
+        ? window.goodvibes.searchKnowledge(search)
+        : window.goodvibes.getAllKnowledgeEntries(),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => window.clausitron.deleteKnowledgeEntry(id),
+    mutationFn: (id: number) => window.goodvibes.deleteKnowledgeEntry(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       setSelectedEntry(null);
@@ -36,7 +36,7 @@ export default function KnowledgeView() {
 
   const createMutation = useMutation({
     mutationFn: (data: { title: string; content: string; category?: string }) =>
-      window.clausitron.createKnowledgeEntry(data.title, data.content, data.category),
+      window.goodvibes.createKnowledgeEntry(data.title, data.content, data.category),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       setIsNewEntryModalOpen(false);
@@ -49,7 +49,7 @@ export default function KnowledgeView() {
 
   const updateMutation = useMutation({
     mutationFn: (data: { id: number; title: string; content: string; category?: string }) =>
-      window.clausitron.updateKnowledgeEntry(data.id, data.title, data.content, data.category),
+      window.goodvibes.updateKnowledgeEntry(data.id, data.title, data.content, data.category),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
       setEditingEntry(null);

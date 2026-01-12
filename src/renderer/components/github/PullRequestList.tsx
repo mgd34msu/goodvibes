@@ -36,7 +36,7 @@ export default function PullRequestList({
     setError(null);
 
     try {
-      const result = await window.clausitron.githubListPRs(owner, repo, { state: 'open' });
+      const result = await window.goodvibes.githubListPRs(owner, repo, { state: 'open' });
 
       if (result.success && result.data) {
         setPullRequests(result.data);
@@ -57,7 +57,7 @@ export default function PullRequestList({
 
     for (const pr of prs) {
       try {
-        const result = await window.clausitron.githubGetChecks(owner, repo, pr.head.sha);
+        const result = await window.goodvibes.githubGetChecks(owner, repo, pr.head.sha);
         if (result.success && result.data) {
           statuses[pr.number] = result.data;
         }

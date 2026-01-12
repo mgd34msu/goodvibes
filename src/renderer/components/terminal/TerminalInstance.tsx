@@ -41,7 +41,7 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
 
     const selection = terminal.getSelection();
     if (selection) {
-      window.clausitron.clipboardWrite(selection);
+      window.goodvibes.clipboardWrite(selection);
     }
   }, []);
 
@@ -50,10 +50,10 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
     const terminal = terminalRef.current;
     if (!terminal) return;
 
-    const text = await window.clausitron.clipboardRead();
+    const text = await window.goodvibes.clipboardRead();
     if (text) {
       // Send the pasted text to the terminal PTY
-      window.clausitron.terminalInput(id, text);
+      window.goodvibes.terminalInput(id, text);
     }
   }, [id]);
 
@@ -66,7 +66,7 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
     const hasSelection = terminal.hasSelection();
     const selectedText = hasSelection ? terminal.getSelection() : undefined;
 
-    const action = await window.clausitron.showTerminalContextMenu({
+    const action = await window.goodvibes.showTerminalContextMenu({
       hasSelection,
       selectedText,
     });
@@ -107,12 +107,12 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
 
     // Handle terminal input
     terminal.onData((data) => {
-      window.clausitron.terminalInput(id, data);
+      window.goodvibes.terminalInput(id, data);
     });
 
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
-      window.clausitron.terminalResize(id, cols, rows);
+      window.goodvibes.terminalResize(id, cols, rows);
     });
 
     // Detect when user scrolls manually (debounced to avoid flicker during output)
@@ -150,7 +150,7 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
     // Initial resize
     const cols = terminal.cols;
     const rows = terminal.rows;
-    window.clausitron.terminalResize(id, cols, rows);
+    window.goodvibes.terminalResize(id, cols, rows);
 
     return () => {
       if (viewportElement) {
@@ -225,7 +225,7 @@ export function TerminalInstance({ id, zoomLevel }: TerminalInstanceProps) {
       }
     };
 
-    const cleanup = window.clausitron.onTerminalData(handleData);
+    const cleanup = window.goodvibes.onTerminalData(handleData);
     return cleanup;
   }, [id]);
 

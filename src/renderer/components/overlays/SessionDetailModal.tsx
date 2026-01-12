@@ -36,14 +36,14 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
 
   const { data: messages = [], isLoading: messagesLoading } = useQuery({
     queryKey: ['session-messages', session.id],
-    queryFn: () => window.clausitron.getSessionMessages(session.id),
+    queryFn: () => window.goodvibes.getSessionMessages(session.id),
     enabled: activeTab === 'messages',
   });
 
   // Fetch fresh session data with token stats immediately on modal open
   const { data: refreshedSession } = useQuery({
     queryKey: ['session-refresh', session.id],
-    queryFn: () => window.clausitron.refreshSession(session.id),
+    queryFn: () => window.goodvibes.refreshSession(session.id),
     staleTime: 0, // Always refetch on mount
   });
 
@@ -163,13 +163,13 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
               Resume Session
             </button>
             <button
-              onClick={() => window.clausitron.exportSession(session.id, 'markdown')}
+              onClick={() => window.goodvibes.exportSession(session.id, 'markdown')}
               className="btn btn-secondary text-sm"
             >
               Export Markdown
             </button>
             <button
-              onClick={() => window.clausitron.exportSession(session.id, 'json')}
+              onClick={() => window.goodvibes.exportSession(session.id, 'json')}
               className="btn btn-secondary text-sm"
             >
               Export JSON
@@ -290,7 +290,7 @@ function MessagesTab({ messages, loading }: { messages: SessionMessage[]; loadin
   const sessionId = messages.length > 0 ? messages[0]?.sessionId : null;
   const { data: rawEntries = [] } = useQuery({
     queryKey: ['session-raw-entries-modal', sessionId],
-    queryFn: () => sessionId ? window.clausitron.getSessionRawEntries(sessionId) : Promise.resolve([]),
+    queryFn: () => sessionId ? window.goodvibes.getSessionRawEntries(sessionId) : Promise.resolve([]),
     enabled: !!sessionId && !loading,
   });
 

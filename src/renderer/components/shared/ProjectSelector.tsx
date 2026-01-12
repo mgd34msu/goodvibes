@@ -48,7 +48,7 @@ function AddProjectModal({ isOpen, onClose, onProjectAdded }: AddProjectModalPro
 
   const handleSelectFolder = async () => {
     try {
-      const selectedPath = await window.clausitron?.selectFolder?.();
+      const selectedPath = await window.goodvibes?.selectFolder?.();
       if (selectedPath) {
         setPath(selectedPath);
         // Auto-fill name from folder name if empty
@@ -73,7 +73,7 @@ function AddProjectModal({ isOpen, onClose, onProjectAdded }: AddProjectModalPro
     setError(null);
 
     try {
-      const result = await window.clausitron?.projectRegister?.({
+      const result = await window.goodvibes?.projectRegister?.({
         path: path.trim(),
         name: name.trim() || undefined,
         description: description.trim() || undefined,
@@ -267,7 +267,7 @@ export default function ProjectSelector({
 
   const loadProjects = useCallback(async () => {
     try {
-      const result = await window.clausitron?.projectGetAll?.();
+      const result = await window.goodvibes?.projectGetAll?.();
       setProjects(result || []);
     } catch (error) {
       console.error('Failed to load projects:', error);

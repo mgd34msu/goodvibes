@@ -253,7 +253,7 @@ export class ContextInjectionService extends EventEmitter {
   private generateInitialClaudeMd(): string {
     return `# Project Configuration
 
-This file is managed by Clausitron.
+This file is managed by GoodVibes.
 
 ${SECTION_MARKERS.AGENT_START}
 <!-- Active agent configurations will be injected here -->

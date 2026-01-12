@@ -79,7 +79,7 @@ import {
 } from './git.js';
 
 // Get absolute path to test git directory - use a unique temp directory
-const TEST_GIT_DIR = path.join(tmpdir(), `clausitron-git-test-${process.pid}`);
+const TEST_GIT_DIR = path.join(tmpdir(), `goodvibes-git-test-${process.pid}`);
 
 // Helper to run git commands directly (for test setup/cleanup)
 function runGit(cwd: string, args: string[]): string {
@@ -110,8 +110,8 @@ async function createTestRepository(): Promise<void> {
   runGit(TEST_GIT_DIR, ['init', '-b', 'main']);
 
   // Configure git user for commits (required for commits to work)
-  runGit(TEST_GIT_DIR, ['config', 'user.email', 'test@clausitron.test']);
-  runGit(TEST_GIT_DIR, ['config', 'user.name', 'Clausitron Test']);
+  runGit(TEST_GIT_DIR, ['config', 'user.email', 'test@goodvibes.test']);
+  runGit(TEST_GIT_DIR, ['config', 'user.name', 'GoodVibes Test']);
 
   // Create initial test file
   const testFilePath = path.join(TEST_GIT_DIR, 'test-git-enhancements.txt');

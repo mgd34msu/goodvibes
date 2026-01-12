@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // This module defines the preload API methods for Phase 5-8 features.
-// These are merged into the main clausitron API in preload.ts.
+// These are merged into the main goodvibes API in preload.ts.
 //
 // ============================================================================
 

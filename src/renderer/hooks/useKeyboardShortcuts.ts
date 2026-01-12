@@ -98,7 +98,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
       // Persist to localStorage
       try {
         const stored = Object.fromEntries(newBindings);
-        localStorage.setItem('clausitron-shortcuts', JSON.stringify(stored));
+        localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
       } catch (e) {
         console.error('Failed to save shortcuts:', e);
       }
@@ -113,7 +113,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
       // Persist to localStorage
       try {
         const stored = Object.fromEntries(newBindings);
-        localStorage.setItem('clausitron-shortcuts', JSON.stringify(stored));
+        localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
       } catch (e) {
         console.error('Failed to save shortcuts:', e);
       }
@@ -124,7 +124,7 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
   resetAllBindings: () => {
     set({ customBindings: new Map() });
     try {
-      localStorage.removeItem('clausitron-shortcuts');
+      localStorage.removeItem('goodvibes-shortcuts');
     } catch (e) {
       console.error('Failed to clear shortcuts:', e);
     }
@@ -275,7 +275,7 @@ export function useKeyboardShortcuts() {
   // Load custom bindings from localStorage
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('clausitron-shortcuts');
+      const stored = localStorage.getItem('goodvibes-shortcuts');
       if (stored) {
         const parsed = JSON.parse(stored) as Record<string, KeyBinding>;
         const bindings = new Map(Object.entries(parsed));

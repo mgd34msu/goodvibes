@@ -44,9 +44,9 @@ export interface PreparedWorkspace {
 // CONSTANTS
 // ============================================================================
 
-const CONTEXT_DIR_NAME = '.clausitron-context';
+const CONTEXT_DIR_NAME = '.goodvibes-context';
 const CLAUDE_MD_FILENAME = 'CLAUDE.md';
-const BACKUP_SUFFIX = '.clausitron-backup';
+const BACKUP_SUFFIX = '.goodvibes-backup';
 
 // ============================================================================
 // WORKSPACE PREPARATION SERVICE

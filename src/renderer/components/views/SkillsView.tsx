@@ -196,7 +196,7 @@ function SkillForm({ skill, onSave, onCancel }: SkillFormProps) {
         projectPath = selectedProjectPath;
       } else {
         // No project selected, prompt for folder
-        const folderPath = await window.clausitron?.selectFolder?.();
+        const folderPath = await window.goodvibes?.selectFolder?.();
         if (!folderPath) {
           return; // User cancelled
         }
@@ -486,7 +486,7 @@ export default function SkillsView() {
   const loadSkills = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await window.clausitron.getSkills();
+      const result = await window.goodvibes.getSkills();
       // Map API response to Skill interface
       const mappedSkills: Skill[] = (result || []).map((s: Record<string, unknown>) => ({
         id: s.id as number,
@@ -517,7 +517,7 @@ export default function SkillsView() {
   const handleSave = async (skillData: Partial<Skill>, projectPath: string | null) => {
     try {
       if (skillData.id) {
-        await window.clausitron.updateSkill(skillData.id, {
+        await window.goodvibes.updateSkill(skillData.id, {
           name: skillData.name,
           description: skillData.description,
           promptTemplate: skillData.content,
@@ -526,7 +526,7 @@ export default function SkillsView() {
           projectPath: projectPath || undefined,
         });
       } else {
-        await window.clausitron.createSkill({
+        await window.goodvibes.createSkill({
           name: skillData.name || '',
           description: skillData.description || undefined,
           promptTemplate: skillData.content || '',
@@ -559,7 +559,7 @@ export default function SkillsView() {
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this skill?')) {
       try {
-        await window.clausitron.deleteSkill(id);
+        await window.goodvibes.deleteSkill(id);
         loadSkills();
       } catch (error) {
         console.error('Failed to delete skill:', error);

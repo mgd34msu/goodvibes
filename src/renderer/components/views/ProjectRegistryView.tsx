@@ -91,7 +91,7 @@ export default function ProjectRegistryView() {
       loadData();
     };
 
-    const cleanup = window.clausitron?.onProjectEvent?.(handleProjectEvent);
+    const cleanup = window.goodvibes?.onProjectEvent?.(handleProjectEvent);
     return () => cleanup?.();
   }, []);
 
@@ -99,8 +99,8 @@ export default function ProjectRegistryView() {
     setIsLoading(true);
     try {
       const [projectsResult, templatesResult] = await Promise.all([
-        window.clausitron?.projectGetAll?.(),
-        window.clausitron?.templateGetAll?.(),
+        window.goodvibes?.projectGetAll?.(),
+        window.goodvibes?.templateGetAll?.(),
       ]);
 
       setProjects(projectsResult || []);
@@ -110,7 +110,7 @@ export default function ProjectRegistryView() {
       if (projectsResult?.length) {
         const analyticsMap = new Map<number, ProjectAnalytics>();
         for (const project of projectsResult) {
-          const analytics = await window.clausitron?.projectGetAnalytics?.(project.id);
+          const analytics = await window.goodvibes?.projectGetAnalytics?.(project.id);
           if (analytics) {
             analyticsMap.set(project.id, analytics);
           }
@@ -125,16 +125,16 @@ export default function ProjectRegistryView() {
   }
 
   async function handleRegisterProject() {
-    const path = await window.clausitron?.selectFolder?.();
+    const path = await window.goodvibes?.selectFolder?.();
     if (path) {
-      await window.clausitron?.projectRegister?.({ path });
+      await window.goodvibes?.projectRegister?.({ path });
       loadData();
     }
   }
 
   async function handleRemoveProject(projectId: number) {
     if (confirm('Are you sure you want to remove this project from the registry?')) {
-      await window.clausitron?.projectRemove?.(projectId);
+      await window.goodvibes?.projectRemove?.(projectId);
       if (selectedProject?.id === projectId) {
         setSelectedProject(null);
       }
@@ -143,19 +143,19 @@ export default function ProjectRegistryView() {
   }
 
   async function handleSwitchProject(projectId: number) {
-    await window.clausitron?.projectSwitch?.(projectId);
+    await window.goodvibes?.projectSwitch?.(projectId);
     loadData();
   }
 
   async function handleSaveSettings(projectId: number, settings: ProjectSettings) {
-    await window.clausitron?.projectUpdateSettings?.(projectId, settings as unknown as Record<string, unknown>);
+    await window.goodvibes?.projectUpdateSettings?.(projectId, settings as unknown as Record<string, unknown>);
     setShowSettings(false);
     loadData();
   }
 
   async function handleCreateTemplate(name: string, description: string) {
     if (selectedProject) {
-      await window.clausitron?.templateCreateFromProject?.({
+      await window.goodvibes?.templateCreateFromProject?.({
         projectId: selectedProject.id,
         templateName: name,
         description,
@@ -166,13 +166,13 @@ export default function ProjectRegistryView() {
   }
 
   async function handleApplyTemplate(projectId: number, templateId: number) {
-    await window.clausitron?.templateApply?.(projectId, templateId);
+    await window.goodvibes?.templateApply?.(projectId, templateId);
     loadData();
   }
 
   async function handleDeleteTemplate(templateId: number) {
     if (confirm('Are you sure you want to delete this template?')) {
-      await window.clausitron?.templateDelete?.(templateId);
+      await window.goodvibes?.templateDelete?.(templateId);
       loadData();
     }
   }

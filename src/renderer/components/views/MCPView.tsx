@@ -505,7 +505,7 @@ export default function MCPView() {
   const loadServers = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await window.clausitron.getMCPServers();
+      const result = await window.goodvibes.getMCPServers();
       setServers(result || []);
     } catch (error) {
       console.error('Failed to load MCP servers:', error);
@@ -522,9 +522,9 @@ export default function MCPView() {
   const handleSave = async (serverData: Partial<MCPServer>) => {
     try {
       if (serverData.id) {
-        await window.clausitron.updateMCPServer(serverData.id, serverData);
+        await window.goodvibes.updateMCPServer(serverData.id, serverData);
       } else {
-        await window.clausitron.createMCPServer({
+        await window.goodvibes.createMCPServer({
           name: serverData.name || '',
           transport: serverData.transport || 'stdio',
           command: serverData.command || undefined,
@@ -544,7 +544,7 @@ export default function MCPView() {
 
   const handleStart = async (id: number) => {
     try {
-      await window.clausitron.setMCPServerStatus(id, 'connected');
+      await window.goodvibes.setMCPServerStatus(id, 'connected');
       loadServers();
     } catch (error) {
       console.error('Failed to start MCP server:', error);
@@ -553,7 +553,7 @@ export default function MCPView() {
 
   const handleStop = async (id: number) => {
     try {
-      await window.clausitron.setMCPServerStatus(id, 'disconnected');
+      await window.goodvibes.setMCPServerStatus(id, 'disconnected');
       loadServers();
     } catch (error) {
       console.error('Failed to stop MCP server:', error);
@@ -562,9 +562,9 @@ export default function MCPView() {
 
   const handleRestart = async (id: number) => {
     try {
-      await window.clausitron.setMCPServerStatus(id, 'disconnected');
+      await window.goodvibes.setMCPServerStatus(id, 'disconnected');
       setTimeout(async () => {
-        await window.clausitron.setMCPServerStatus(id, 'connected');
+        await window.goodvibes.setMCPServerStatus(id, 'connected');
         loadServers();
       }, 500);
     } catch (error) {
@@ -575,7 +575,7 @@ export default function MCPView() {
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this MCP server?')) {
       try {
-        await window.clausitron.deleteMCPServer(id);
+        await window.goodvibes.deleteMCPServer(id);
         loadServers();
       } catch (error) {
         console.error('Failed to delete MCP server:', error);
@@ -585,7 +585,7 @@ export default function MCPView() {
 
   const handleInstall = async (server: MarketplaceServer) => {
     try {
-      await window.clausitron.createMCPServer({
+      await window.goodvibes.createMCPServer({
         name: server.name,
         transport: server.transport,
         command: server.npmPackage ? `npx ${server.npmPackage}` : server.command,

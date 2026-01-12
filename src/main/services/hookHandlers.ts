@@ -210,10 +210,10 @@ async function handlePermissionRequest(payload: HookPayload): Promise<HookRespon
 
   if (decision.queueItem) {
     // Permission queued for manual review
-    // For now, we'll block and require the user to approve in Clausitron
+    // For now, we'll block and require the user to approve in GoodVibes
     return {
       decision: 'block',
-      message: 'Permission requires approval in Clausitron. Check the approval queue.',
+      message: 'Permission requires approval in GoodVibes. Check the approval queue.',
     };
   }
 

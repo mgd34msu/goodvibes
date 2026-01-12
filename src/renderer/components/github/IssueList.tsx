@@ -34,7 +34,7 @@ export default function IssueList({
     setError(null);
 
     try {
-      const result = await window.clausitron.githubListIssues(owner, repo, {
+      const result = await window.goodvibes.githubListIssues(owner, repo, {
         state: 'open',
         sort: 'updated',
         per_page: maxItems,

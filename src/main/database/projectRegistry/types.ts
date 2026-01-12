@@ -194,7 +194,7 @@ export interface ProjectTemplate {
 export interface TemplateAgent {
   agentId: number;
   priority: number;
-  settings: ProjectAgentSettings;
+  settings?: ProjectAgentSettings;
 }
 
 /**

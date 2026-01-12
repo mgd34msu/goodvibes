@@ -23,7 +23,10 @@ import {
 import { useAppStore } from '../../stores/appStore';
 import { NAV_GROUPS, type ViewName, type NavGroup } from '../../../shared/constants';
 import { toast } from '../../stores/toastStore';
+import { createLogger } from '../../../shared/logger';
 import appIcon from '../../assets/icon.png';
+
+const logger = createLogger('TitleBar');
 
 const ICON_SIZE = 16;
 const ICON_CLASS = "w-4 h-4 flex-shrink-0";
@@ -294,7 +297,7 @@ function NotificationBell() {
         setUnreadCount(count);
       } catch (err) {
         // Only show error toast once per session to avoid spam
-        console.error('Failed to load notification count:', err);
+        logger.error('Failed to load notification count:', err);
       }
     };
 
@@ -310,7 +313,7 @@ function NotificationBell() {
           const notifs = await window.goodvibes.getNotifications();
           setNotifications(notifs || []);
         } catch (err) {
-          console.error('Failed to load notifications:', err);
+          logger.error('Failed to load notifications:', err);
           toast.error('Failed to load notifications');
           setNotifications([]);
         }
@@ -339,7 +342,7 @@ function NotificationBell() {
       setUnreadCount(0);
       setNotifications(notifications.map(n => ({ ...n, read: true })));
     } catch (err) {
-      console.error('Failed to mark notifications as read:', err);
+      logger.error('Failed to mark notifications as read:', err);
       toast.error('Failed to mark notifications as read');
     }
   };
@@ -350,7 +353,7 @@ function NotificationBell() {
       setNotifications([]);
       setUnreadCount(0);
     } catch (err) {
-      console.error('Failed to clear notifications:', err);
+      logger.error('Failed to clear notifications:', err);
       toast.error('Failed to clear notifications');
     }
   };

@@ -38,25 +38,5 @@
       "status": "running"
     }
   ],
-  "startTime": "2026-01-12T06:32:00Z",
-  "ad909e4": {
-    "agent_id": "ad909e4",
-    "agent_type": "goodvibes:frontend-architect",
-    "session_id": "94b0bd74-b3bf-48ae-99b2-f03d097d578e",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "98de159",
-    "started_at": "2026-01-12T20:12:14.382Z"
-  },
-  "a0ec684": {
-    "agent_id": "a0ec684",
-    "agent_type": "goodvibes:brutally-honest-reviewer",
-    "session_id": "94b0bd74-b3bf-48ae-99b2-f03d097d578e",
-    "project": "C:\\Users\\buzzkill\\Documents\\clausitron",
-    "project_name": "clausitron",
-    "git_branch": "main",
-    "git_commit": "98de159",
-    "started_at": "2026-01-12T20:12:14.337Z"
-  }
+  "startTime": "2026-01-12T06:32:00Z"
 }

@@ -318,7 +318,7 @@ export class SessionManagerInstance {
           id: index,
           sessionId,
           messageIndex: index,
-          role: (msg.role as 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'system') ?? 'unknown',
+          role: msg.role ?? 'unknown',
           content: msg.content ?? '',
           timestamp: msg.timestamp ?? null,
           tokenCount: msg.tokenCount ?? 0,

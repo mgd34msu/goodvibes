@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { getDatabase } from './connection.js';
-import type { Session, SearchOptions, SavedSearch } from '../../shared/types/index.js';
+import type { Session, SearchOptions, SavedSearch, SessionStatus, SessionOutcome } from '../../shared/types/index.js';
 
 /**
  * Database row type for sessions table
@@ -155,7 +155,7 @@ function mapRowToSession(row: SessionRow): Session {
     messageCount: row.message_count ?? 0,
     tokenCount: row.token_count ?? 0,
     cost: row.cost ?? 0,
-    status: row.status ?? 'unknown',
+    status: (row.status as SessionStatus) ?? 'unknown',
     tags: row.tags,
     notes: row.notes,
     favorite: Boolean(row.favorite),
@@ -164,12 +164,12 @@ function mapRowToSession(row: SessionRow): Session {
     summary: row.summary,
     customTitle: row.custom_title,
     rating: row.rating,
-    outcome: row.outcome,
+    outcome: row.outcome as SessionOutcome | null,
     inputTokens: row.input_tokens ?? 0,
     outputTokens: row.output_tokens ?? 0,
     cacheWriteTokens: row.cache_write_tokens ?? 0,
     cacheReadTokens: row.cache_read_tokens ?? 0,
-    fileMtime: row.file_mtime,
+    fileMtime: row.file_mtime ? Number(row.file_mtime) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

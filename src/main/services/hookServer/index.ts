@@ -8,6 +8,9 @@ import { HookServerService } from './service.js';
 export type { HookPayload, HookResponse, HookHandler } from './types.js';
 export { HOOK_SERVER_PORT, getPayloadValue } from './types.js';
 
+// Import for local use
+import { HOOK_SERVER_PORT as DEFAULT_PORT } from './types.js';
+
 // Re-export the service class
 export { HookServerService };
 
@@ -36,5 +39,5 @@ export async function stopHookServer(): Promise<void> {
 }
 
 export function getHookServerStatus(): { running: boolean; port: number } {
-  return hookServer?.getStatus() ?? { running: false, port: HOOK_SERVER_PORT };
+  return hookServer?.getStatus() ?? { running: false, port: DEFAULT_PORT };
 }

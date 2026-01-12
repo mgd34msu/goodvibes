@@ -64,9 +64,9 @@ function mapRowToQuickNote(row: QuickNoteRow): QuickNote {
     id: row.id,
     content: row.content,
     sessionId: row.session_id,
-    status: row.status,
-    priority: row.priority,
-    projectName: row.project_name,
+    status: row.status as 'active' | 'completed' | 'archived',
+    priority: row.priority as 'low' | 'normal' | 'high',
+    projectName: row.project_name ?? undefined,
     createdAt: row.created_at,
   };
 }

@@ -81,7 +81,7 @@ function mapRowToNotification(row: NotificationRow): AppNotification {
     type: row.type,
     title: row.title,
     message: row.message,
-    priority: row.priority,
+    priority: row.priority as 'low' | 'normal' | 'high',
     read: Boolean(row.read),
     dismissed: Boolean(row.dismissed),
     sessionId: row.session_id,

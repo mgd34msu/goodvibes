@@ -56,3 +56,6 @@ coverage/
 .external-docs/
 CLAUDE.md
 nul
+
+# Project planning (local only)
+project-ideas.md

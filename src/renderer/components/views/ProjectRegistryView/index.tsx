@@ -92,16 +92,6 @@ export default function ProjectRegistryView() {
     }).catch(console.error);
   }, []);
 
-  const handleLoadSession = useCallback((sessionId: string, projectPath: string) => {
-    // Resume the selected session
-    window.goodvibes?.startClaude?.({
-      cwd: projectPath,
-      resumeSessionId: sessionId,
-    }).catch(console.error);
-    setShowPreviousSessions(false);
-    setPreviousSessionsProject(null);
-  }, []);
-
   function formatDate(dateString: string): string {
     return new Date(dateString).toLocaleDateString(undefined, {
       month: 'short',
@@ -246,7 +236,6 @@ export default function ProjectRegistryView() {
         {showPreviousSessions && previousSessionsProject && (
           <PreviousSessionsModal
             project={previousSessionsProject}
-            onLoadSession={(sessionId) => handleLoadSession(sessionId, previousSessionsProject.path)}
             onClose={() => {
               setShowPreviousSessions(false);
               setPreviousSessionsProject(null);

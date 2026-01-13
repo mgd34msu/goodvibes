@@ -8,8 +8,45 @@ import { withContext } from '../utils.js';
 import { getSessionManager } from '../../services/sessionManager.js';
 import * as db from '../../database/index.js';
 import * as sessionSummaries from '../../database/sessionSummaries/index.js';
+import { getDatabase } from '../../database/connection.js';
+import { type SessionRow } from '../../database/mappers.js';
 
 const logger = new Logger('IPC:Sessions');
+
+// Helper to get sessions from the main sessions table for a project
+function getSessionsFromMainTable(projectPath: string, limit: number) {
+  const database = getDatabase();
+
+  // Convert project path to the format stored in sessions.project_name
+  // e.g., "C:\Users\buzzkill\Documents\clausitron" -> "C--Users-buzzkill-Documents-clausitron"
+  const normalizedProjectName = projectPath
+    .replace(/\\/g, '-')
+    .replace(/:/g, '-')
+    .replace(/\//g, '-');
+
+  // Query sessions table by project_name (stored as path with dashes)
+  // Filter to only user sessions (not agent sessions which start with 'agent-')
+  const rows = database.prepare(`
+    SELECT * FROM sessions
+    WHERE project_name = ?
+      AND (archived = 0 OR archived IS NULL)
+      AND id NOT LIKE 'agent-%'
+      AND message_count > 0
+    ORDER BY start_time DESC
+    LIMIT ?
+  `).all(normalizedProjectName, limit) as SessionRow[];
+
+  // Map to the format expected by the modal
+  return rows.map(row => ({
+    sessionId: row.id,
+    cwd: projectPath,
+    messageCount: row.message_count ?? 0,
+    costUsd: row.cost ?? 0,
+    startedAt: row.start_time ?? new Date().toISOString(),
+    lastActive: row.end_time ?? row.start_time ?? new Date().toISOString(),
+    firstPrompt: row.summary ?? undefined,
+  }));
+}
 
 export function registerSessionHandlers(): void {
   ipcMain.handle('get-sessions', withContext('get-sessions', async () => {
@@ -97,7 +134,27 @@ export function registerSessionHandlers(): void {
   }));
 
   ipcMain.handle('session:getForProject', withContext('session:getForProject', async (_, projectPath: string, limit?: number) => {
-    return sessionSummaries.getRecentSessionsForProject(projectPath, limit ?? 5);
+    // First try session_summaries table
+    try {
+      const summaries = sessionSummaries.getRecentSessionsForProject(projectPath, limit ?? 5);
+      if (summaries.length > 0) {
+        // Map session summaries to the expected format
+        return summaries.map(s => ({
+          sessionId: s.sessionId,
+          cwd: s.projectPath,
+          messageCount: s.toolCalls ?? 0,
+          costUsd: s.costUsd ?? 0,
+          startedAt: s.startedAt,
+          lastActive: s.endedAt ?? s.startedAt,
+          firstPrompt: s.title ?? s.lastPrompt ?? undefined,
+        }));
+      }
+    } catch (error) {
+      logger.debug('session_summaries table not available, using fallback', { error });
+    }
+
+    // Fallback to main sessions table
+    return getSessionsFromMainTable(projectPath, limit ?? 5);
   }));
 
   ipcMain.handle('session:search', withContext('session:search', async (_, query: string, projectPath?: string, limit?: number) => {

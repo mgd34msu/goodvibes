@@ -3,7 +3,9 @@
 // ============================================================================
 
 import { useState, useEffect } from 'react';
-import { X, MessageSquare, Clock, DollarSign, Loader2 } from 'lucide-react';
+import { X, MessageSquare, Clock, DollarSign, Loader2, Eye, Terminal } from 'lucide-react';
+import { useAppStore } from '../../../stores/appStore';
+import { useTerminalStore } from '../../../stores/terminalStore';
 import type { RegisteredProject } from './types';
 
 interface SessionSummary {
@@ -18,17 +20,17 @@ interface SessionSummary {
 
 interface PreviousSessionsModalProps {
   project: RegisteredProject;
-  onLoadSession: (sessionId: string) => void;
   onClose: () => void;
   formatCurrency: (value: number) => string;
 }
 
 export function PreviousSessionsModal({
   project,
-  onLoadSession,
   onClose,
   formatCurrency,
 }: PreviousSessionsModalProps) {
+  const { setCurrentView } = useAppStore();
+  const { createPreviewTerminal, createTerminal } = useTerminalStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,9 +102,19 @@ export function PreviousSessionsModal({
     return `${hours}h ${mins}m`;
   };
 
-  const handleLoad = () => {
+  const handleLoadPreview = () => {
     if (selectedSession) {
-      onLoadSession(selectedSession);
+      createPreviewTerminal(selectedSession, project.name, project.path);
+      setCurrentView('terminal');
+      onClose();
+    }
+  };
+
+  const handleLoadInCLI = async () => {
+    if (selectedSession) {
+      await createTerminal(project.path, project.name, selectedSession);
+      setCurrentView('terminal');
+      onClose();
     }
   };
 
@@ -203,11 +215,20 @@ export function PreviousSessionsModal({
             Cancel
           </button>
           <button
-            onClick={handleLoad}
+            onClick={handleLoadPreview}
             disabled={!selectedSession || isLoading}
-            className="btn btn-primary"
+            className="btn btn-secondary flex items-center gap-1.5"
           >
-            Load Session
+            <Eye className="w-4 h-4" />
+            Load Preview
+          </button>
+          <button
+            onClick={handleLoadInCLI}
+            disabled={!selectedSession || isLoading}
+            className="btn btn-primary flex items-center gap-1.5"
+          >
+            <Terminal className="w-4 h-4" />
+            Load in CLI
           </button>
         </div>
       </div>

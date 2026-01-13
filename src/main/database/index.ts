@@ -20,6 +20,7 @@ import {
 } from './mappers.js';
 import { createPrimitiveTables } from './primitives.js';
 import { createAgencyIndexTables } from './agencyIndex.js';
+import { createSessionSummariesTables } from './sessionSummaries/index.js';
 import {
   getDatabase,
   setDatabaseInstance,
@@ -93,6 +94,9 @@ export async function initDatabase(userDataPath: string): Promise<void> {
 
   // Create agency index tables (indexed agents, skills, active agents, queued skills)
   createAgencyIndexTables();
+
+  // Create session summaries tables (for cross-session search and resumption)
+  createSessionSummariesTables();
 
   logger.info(`Database initialized at ${dbPath}`);
 }

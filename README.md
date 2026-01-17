@@ -14,6 +14,17 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 - **Project Registry**: Multi-project management with per-project settings
 - **Memory Management**: Edit CLAUDE.md files for persistent context injection
 
+## GoodVibes Plugin
+
+For the best experience, we recommend using GoodVibes alongside the **GoodVibes Plugin** for Claude Code. The plugin provides:
+
+- **Specialized Agents**: Pre-configured agents for frontend, backend, testing, DevOps, and more
+- **Skills Library**: Reusable slash commands for common workflows (security audits, code reviews, etc.)
+- **MCP Tools**: Extended tooling via Model Context Protocol for code intelligence, validation, and automation
+- **Output Styles**: Different interaction modes including autonomous "JustVibes" mode
+
+**Get the plugin:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
+
 ## Prerequisites
 
 - **Node.js**: v18.0.0 or higher (v20+ recommended)

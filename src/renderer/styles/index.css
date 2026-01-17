@@ -422,10 +422,10 @@ header nav button svg {
 }
 
 .xterm-viewport {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
   /* Match terminal background to prevent flash during scroll/resize */
   background-color: #020617 !important;
+  /* Reserve space for scrollbar so text doesn't bleed under it */
+  scrollbar-gutter: stable;
 }
 
 .xterm .xterm-screen {

@@ -2,7 +2,7 @@
 // PROJECT CARD COMPONENT - Premium Glass Morphism Design
 // ============================================================================
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
 import {
   Plus,
@@ -51,12 +51,29 @@ export function ProjectCard({
 }: ProjectCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+        setShowTemplateMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
 
   return (
     <div
       className={clsx(
         'card-hover cursor-pointer',
-        isSelected && 'card-selected'
+        isSelected && 'card-selected',
+        showMenu && 'z-[9950]'
       )}
       onClick={onSelect}
     >
@@ -129,7 +146,7 @@ export function ProjectCard({
           >
             <History className="w-4 h-4" />
           </button>
-          <div className="relative dropdown-container">
+          <div className="relative dropdown-container" ref={menuRef}>
             <button
               onClick={() => setShowMenu(!showMenu)}
               className="card-action-btn"

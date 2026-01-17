@@ -95,7 +95,7 @@ export default function TerminalView() {
       />
 
       {/* Terminal Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-x-clip overflow-y-auto">
         {hasTerminals ? (
           <>
             {/* Git Panel - Left Position */}
@@ -104,7 +104,7 @@ export default function TerminalView() {
             )}
 
             {/* Main Terminal Area */}
-            <div className="flex-1 min-w-0 relative bg-surface-950 overflow-hidden">
+            <div className="flex-1 min-w-0 relative bg-surface-950 flex-wrap">
               {terminals.map((terminal) => (
                 <div
                   key={terminal.id}

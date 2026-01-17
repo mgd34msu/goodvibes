@@ -121,10 +121,10 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       fontFamily: "'CaskaydiaMonoNerdFontMono', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
       fontSize: 14,
       lineHeight: 1.2,
-      cursorBlink: false,
-      cursorStyle: 'bar',
+      cursorBlink: true,
+      cursorStyle: 'block',
       cursorWidth: 1,
-      cursorInactiveStyle: 'none',
+      cursorInactiveStyle: 'bar',
       theme: xtermTheme,
       allowProposedApi: true,
       scrollOnUserInput: true,
@@ -303,7 +303,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   }, [isActive]);
 
   return (
-    <div className="relative h-full w-full p-4" onContextMenu={handleContextMenu}>
+    <div className="relative h-full w-full p-2" onContextMenu={handleContextMenu}>
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );

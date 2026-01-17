@@ -6,6 +6,7 @@ import { ipcMain } from 'electron';
 import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import * as git from '../../services/git/index.js';
+import { getGitWatcher } from '../../services/gitWatcher.js';
 
 const logger = new Logger('IPC:Git');
 
@@ -174,6 +175,19 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle('git-commit-template', withContext('git-commit-template', async (_, cwd: string) => git.gitCommitTemplate(cwd)));
   ipcMain.handle('git-conventional-prefixes', withContext('git-conventional-prefixes', async (_, cwd: string) => git.gitConventionalPrefixes(cwd)));
+
+  // ============================================================================
+  // GIT WATCHER
+  // ============================================================================
+
+  ipcMain.handle('git-watch', withContext('git-watch', async (_, cwd: string) => {
+    return getGitWatcher().watchRepo(cwd);
+  }));
+
+  ipcMain.handle('git-unwatch', withContext('git-unwatch', async (_, cwd: string) => {
+    getGitWatcher().unwatchRepo(cwd);
+    return true;
+  }));
 
   logger.info('Git handlers registered');
 }

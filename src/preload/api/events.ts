@@ -119,6 +119,15 @@ export const eventsApi = {
   },
 
   // ============================================================================
+  // GIT EVENTS
+  // ============================================================================
+  onGitChanged: (callback: (data: { path: string }) => void): (() => void) => {
+    const handler = (_: unknown, data: { path: string }) => callback(data);
+    ipcRenderer.on('git-changed', handler);
+    return () => { ipcRenderer.removeListener('git-changed', handler); };
+  },
+
+  // ============================================================================
   // SERVICE EVENTS
   // ============================================================================
   onMCPServerStatus: (callback: (data: { id: string; status: string; error?: string }) => void): (() => void) => {

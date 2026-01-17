@@ -226,4 +226,12 @@ export const gitApi = {
     ipcRenderer.invoke('git-commit-template', cwd),
   gitConventionalPrefixes: (cwd: string) =>
     ipcRenderer.invoke('git-conventional-prefixes', cwd),
+
+  // ============================================================================
+  // GIT WATCHER
+  // ============================================================================
+  gitWatch: (cwd: string) =>
+    ipcRenderer.invoke('git-watch', cwd),
+  gitUnwatch: (cwd: string) =>
+    ipcRenderer.invoke('git-unwatch', cwd),
 };

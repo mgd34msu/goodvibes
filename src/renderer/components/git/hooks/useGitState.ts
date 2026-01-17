@@ -126,10 +126,26 @@ export function useGitState(cwd: string) {
     await fetchRemoteGitInfo();
   }, [fetchLocalGitInfo, fetchRemoteGitInfo]);
 
-  // Initial fetch
+  // Initial fetch and setup git watcher
   useEffect(() => {
     fetchGitInfo();
-  }, [fetchGitInfo]);
+
+    // Start watching for git changes
+    window.goodvibes.gitWatch(cwd);
+
+    // Listen for git-changed events
+    const unsubscribe = window.goodvibes.onGitChanged((data) => {
+      // Only refresh if the change is for our repo
+      if (data.path === cwd) {
+        fetchLocalGitInfo();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      window.goodvibes.gitUnwatch(cwd);
+    };
+  }, [cwd, fetchGitInfo, fetchLocalGitInfo]);
 
   // Poll REMOTE info only (ahead/behind) every 5 minutes when window is focused
   useEffect(() => {

@@ -1249,6 +1249,7 @@
       inset 0 2px 4px rgba(0, 0, 0, 0.1),
       inset 0 1px 1px rgba(0, 0, 0, 0.05);
     appearance: none;
+    -webkit-appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right var(--space-3) center;
@@ -1257,6 +1258,26 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     overflow: hidden;
+    /* Chromium dropdown popup styling */
+    --select-popup-bg: rgb(22, 24, 38);
+    --select-popup-border: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Chromium select popup styling */
+  .select::-webkit-scrollbar,
+  select::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .select::-webkit-scrollbar-track,
+  select::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .select::-webkit-scrollbar-thumb,
+  select::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
   }
 
   .select:hover:not(:focus):not(:disabled),
@@ -6193,24 +6214,36 @@
     width: 100%;
   }
 
-  /* Ensure native select option dropdown has proper colors */
+  /* Native select dropdown styling - improved for Electron/Chromium */
   .select option,
   select option {
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-    padding: var(--space-2);
+    background: rgb(22, 24, 38);
+    color: var(--color-text-secondary);
+    padding: var(--space-2-5) var(--space-3);
+    border-radius: var(--radius-md);
+    margin: 2px 4px;
   }
 
+  /* Hover state - subtle highlight, readable text */
   .select option:hover,
-  select option:hover,
+  select option:hover {
+    background: rgba(99, 102, 241, 0.15) !important;
+    color: var(--color-text-primary) !important;
+  }
+
+  /* Selected/checked state - distinct but not overwhelming */
   .select option:checked,
   select option:checked {
-    background: linear-gradient(
-      90deg,
-      rgba(99, 102, 241, 0.2) 0%,
-      rgba(99, 102, 241, 0.1) 100%
-    );
-    color: var(--color-text-primary);
+    background: rgba(139, 92, 246, 0.25) !important;
+    color: white !important;
+    font-weight: 500;
+  }
+
+  /* When hovering over the currently selected item */
+  .select option:checked:hover,
+  select option:checked:hover {
+    background: rgba(139, 92, 246, 0.35) !important;
+    color: white !important;
   }
 }
 

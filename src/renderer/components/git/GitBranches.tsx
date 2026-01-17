@@ -48,30 +48,41 @@ export function GitBranches({
   const localBranches = branches.filter(b => !b.isRemote);
 
   return (
-    <div className="relative" ref={branchDropdownRef}>
+    <div className="relative dropdown-container" ref={branchDropdownRef}>
       <button
         onClick={onToggleDropdown}
-        className="w-full flex items-center gap-2 px-2 py-1.5 bg-surface-800 hover:bg-surface-700 rounded text-sm transition-colors"
+        aria-expanded={showBranchDropdown}
+        aria-haspopup="listbox"
+        className={clsx(
+          'w-full flex items-center gap-2 px-2 py-2 rounded text-sm transition-all duration-200',
+          'leading-normal',
+          showBranchDropdown
+            ? 'bg-gradient-to-b from-primary-500/10 to-primary-600/5 border border-primary-500/50'
+            : 'bg-surface-800 hover:bg-surface-700 border border-transparent'
+        )}
       >
         <svg className="w-3.5 h-3.5 text-success-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18V6M6 6a3 3 0 100-6 3 3 0 000 6zm12 12a3 3 0 100-6 3 3 0 000 6zm0 0V9a3 3 0 00-3-3H9" />
         </svg>
-        <span className="text-surface-100 font-mono truncate flex-1 text-left">{branch}</span>
+        <span className="text-surface-100 font-mono truncate flex-1 text-left min-w-0">{branch}</span>
         {(ahead > 0 || behind > 0) && (
-          <span className="text-xs text-surface-400">
+          <span className="text-xs text-surface-400 flex-shrink-0">
             {ahead > 0 && <span className="text-success-400">{ahead}+</span>}
             {ahead > 0 && behind > 0 && ' '}
             {behind > 0 && <span className="text-warning-400">{behind}-</span>}
           </span>
         )}
-        <svg className="w-3 h-3 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={clsx(
+          'w-3 h-3 transition-transform duration-200 flex-shrink-0',
+          showBranchDropdown ? 'rotate-180 text-primary-400' : 'text-surface-400'
+        )} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {/* Branch Dropdown */}
       {showBranchDropdown && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9959] max-h-64 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9960] max-h-64 overflow-y-auto">
           {/* New Branch Input */}
           {showNewBranchInput ? (
             <div className="p-2 border-b border-surface-700">

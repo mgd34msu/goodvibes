@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { useState } from 'react';
+import { clsx } from 'clsx';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { DEFAULT_TEMPLATES, type MemoryTemplate } from './types';
 
@@ -14,14 +15,21 @@ export function TemplateSelector({ onSelect }: TemplateSelectorProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="border border-surface-700 rounded-lg overflow-hidden">
+    <div className="border border-surface-700 rounded-lg">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-surface-800 text-surface-200 hover:bg-surface-700 transition-colors"
+        aria-expanded={expanded}
+        className={clsx(
+          'w-full flex items-center justify-between px-4 py-3 text-surface-200 transition-all duration-200',
+          'rounded-t-lg',
+          expanded
+            ? 'bg-gradient-to-b from-primary-500/10 to-primary-600/5 border-b border-surface-700'
+            : 'bg-surface-800 hover:bg-surface-700 rounded-b-lg'
+        )}
       >
-        <span className="font-medium">Insert Template</span>
+        <span className="font-medium leading-normal">Insert Template</span>
         {expanded ? (
-          <ChevronDown className="w-4 h-4" />
+          <ChevronDown className="w-4 h-4 text-primary-400" />
         ) : (
           <ChevronRight className="w-4 h-4" />
         )}

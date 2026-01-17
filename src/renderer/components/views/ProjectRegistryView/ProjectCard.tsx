@@ -129,47 +129,54 @@ export function ProjectCard({
           >
             <History className="w-4 h-4" />
           </button>
-          <div className="relative">
+          <div className="relative dropdown-container">
             <button
               onClick={() => setShowMenu(!showMenu)}
               className="card-action-btn"
               title="More options"
+              aria-expanded={showMenu}
+              aria-haspopup="menu"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>
             {showMenu && (
               <div
-                className="absolute right-0 top-full mt-1 w-48 card p-1 z-[9959]"
+                className="absolute right-0 top-full mt-1 w-48 card p-1 z-[9960]"
                 onClick={e => e.stopPropagation()}
+                role="menu"
               >
                 <button
                   onClick={() => { onOpenSettings(); setShowMenu(false); }}
-                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors leading-normal"
+                  role="menuitem"
                 >
-                  <Settings className="w-4 h-4" />
+                  <Settings className="w-4 h-4 flex-shrink-0" />
                   Settings
                 </button>
                 <button
                   onClick={() => { onCreateTemplate(); setShowMenu(false); }}
-                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors leading-normal"
+                  role="menuitem"
                 >
-                  <FileText className="w-4 h-4" />
+                  <FileText className="w-4 h-4 flex-shrink-0" />
                   Create Template
                 </button>
                 {templates.length > 0 && (
-                  <div className="relative">
+                  <div className="relative dropdown-container">
                     <button
                       onClick={() => setShowTemplateMenu(!showTemplateMenu)}
-                      className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center justify-between transition-colors"
+                      className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center justify-between transition-colors leading-normal"
+                      aria-expanded={showTemplateMenu}
+                      aria-haspopup="menu"
                     >
                       <span className="flex items-center gap-2">
-                        <FileText className="w-4 h-4" />
+                        <FileText className="w-4 h-4 flex-shrink-0" />
                         Apply Template
                       </span>
                       <span className="text-text-muted">&#8250;</span>
                     </button>
                     {showTemplateMenu && (
-                      <div className="absolute left-full top-0 w-48 card p-1">
+                      <div className="absolute left-full top-0 w-48 card p-1 z-[9970]" role="menu">
                         {templates.map(template => (
                           <button
                             key={template.id}
@@ -178,7 +185,8 @@ export function ProjectCard({
                               setShowTemplateMenu(false);
                               setShowMenu(false);
                             }}
-                            className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary transition-colors"
+                            className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary transition-colors leading-normal"
+                            role="menuitem"
                           >
                             {template.name}
                           </button>
@@ -190,9 +198,10 @@ export function ProjectCard({
                 <div className="card-divider my-1" />
                 <button
                   onClick={() => { onRemove(); setShowMenu(false); }}
-                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-error-500/10 text-error-400 flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-error-500/10 text-error-400 flex items-center gap-2 transition-colors leading-normal"
+                  role="menuitem"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4 flex-shrink-0" />
                   Remove
                 </button>
               </div>

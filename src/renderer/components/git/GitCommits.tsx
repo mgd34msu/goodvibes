@@ -70,12 +70,12 @@ export function GitCommits({
               />
             </div>
             {showConventionalDropdown && (
-              <div className="absolute top-full left-0 mt-1 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9959] max-h-40 overflow-y-auto">
+              <div className="absolute top-full left-0 mt-1 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9960] max-h-40 overflow-y-auto">
                 {conventionalPrefixes.map(prefix => (
                   <button
                     key={prefix}
                     onClick={() => onConventionalPrefix(prefix)}
-                    className="w-full px-3 py-1.5 text-xs text-left text-surface-300 hover:bg-surface-700"
+                    className="w-full px-3 py-2 text-xs text-left text-surface-300 hover:bg-surface-700 leading-normal"
                   >
                     {prefix}:
                   </button>

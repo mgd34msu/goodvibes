@@ -36,20 +36,33 @@ export function RepoSelector({
   onCreateNewRepo,
 }: RepoSelectorProps) {
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative dropdown-container" ref={dropdownRef}>
       <button
         onClick={onOpenDropdown}
         disabled={addingRemote}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg hover:border-surface-600 transition-colors"
+        aria-expanded={showRepoDropdown}
+        aria-haspopup="listbox"
+        className={clsx(
+          'w-full flex items-center justify-between px-3 py-2.5 text-sm',
+          'bg-surface-800 border border-surface-700 rounded-lg',
+          'transition-all duration-200',
+          'leading-normal',
+          showRepoDropdown
+            ? 'border-primary-500/50 bg-gradient-to-b from-primary-500/10 to-primary-600/5 shadow-md'
+            : 'hover:border-surface-600'
+        )}
       >
-        <span className="text-surface-300">
+        <span className="text-surface-300 truncate">
           {addingRemote ? 'Adding remote...' : 'Select repository'}
         </span>
-        <ChevronDownIcon className="w-4 h-4 text-surface-400" />
+        <ChevronDownIcon className={clsx(
+          'w-4 h-4 text-surface-400 transition-transform duration-200 flex-shrink-0 ml-2',
+          showRepoDropdown && 'rotate-180 text-primary-400'
+        )} />
       </button>
 
       {showRepoDropdown && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-[9959] max-h-80 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-[9960] max-h-80 overflow-hidden">
           {/* Create new repo option */}
           <button
             onClick={onCreateNewRepo}
@@ -73,7 +86,7 @@ export function RepoSelector({
               Your Repos
             </button>
             {orgs.length > 0 && (
-              <div className="flex-1 relative group">
+              <div className="flex-1 relative group dropdown-container">
                 <button
                   className={clsx(
                     'w-full px-3 py-2 text-xs font-medium transition-colors',
@@ -84,22 +97,22 @@ export function RepoSelector({
                 >
                   Organizations
                 </button>
-                <div className="hidden group-hover:block absolute top-full left-0 right-0 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9959]">
+                <div className="hidden group-hover:block absolute top-full left-0 right-0 bg-surface-800 border border-surface-700 rounded shadow-lg z-[9970]">
                   {orgs.map((org) => (
                     <button
                       key={org.id}
                       onClick={() => onSelectOrg(org.login)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-300 hover:bg-surface-700"
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-surface-300 hover:bg-surface-700 leading-normal"
                     >
                       <img
                         src={org.avatar_url}
                         alt={org.login}
-                        className="w-4 h-4 rounded bg-surface-600"
+                        className="w-4 h-4 rounded bg-surface-600 flex-shrink-0"
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}
                       />
-                      {org.login}
+                      <span className="truncate">{org.login}</span>
                     </button>
                   ))}
                 </div>
@@ -122,16 +135,16 @@ export function RepoSelector({
                 <button
                   key={repo.id}
                   onClick={() => onSelectRepo(repo)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-300 hover:bg-surface-700"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-surface-300 hover:bg-surface-700 leading-normal"
                 >
                   {repo.private ? (
                     <LockIcon className="w-4 h-4 text-surface-500 flex-shrink-0" />
                   ) : (
                     <RepoIcon className="w-4 h-4 text-surface-500 flex-shrink-0" />
                   )}
-                  <span className="truncate">{repo.full_name}</span>
+                  <span className="truncate min-w-0 flex-1">{repo.full_name}</span>
                   {repo.language && (
-                    <span className="ml-auto text-xs text-surface-500">
+                    <span className="ml-auto text-xs text-surface-500 flex-shrink-0">
                       {repo.language}
                     </span>
                   )}

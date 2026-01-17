@@ -27,10 +27,10 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   const fitAddonRef = useRef<FitAddon | null>(null);
   const theme = useSettingsStore((s) => s.settings.theme);
 
-  // Track if user has scrolled up (for showing scroll-to-bottom button)
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
-  const isUserScrolledUpRef = useRef(false); // Ref for immediate access in callbacks
-  const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track scroll state for auto-scroll behavior
+  const [showScrollButton, setShowScrollButton] = useState(false); // Show button when 10%+ scrolled up
+  const autoScrollEnabledRef = useRef(true); // Auto-scroll enabled until user scrolls up
+  const lastScrollTopRef = useRef(0); // Track scroll direction
 
   // Copy selected text from terminal
   const copySelection = useCallback(() => {
@@ -125,12 +125,25 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       const viewport = terminal.element?.querySelector('.xterm-viewport');
       if (!viewport) return;
 
-      // Check if scrolled to bottom (with small tolerance for rounding)
-      const isAtBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 5;
+      const currentScrollTop = viewport.scrollTop;
+      const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+      const scrollPercentFromBottom = maxScroll > 0 ? (maxScroll - currentScrollTop) / maxScroll : 0;
 
-      // Update both ref (for immediate callback access) and state (for UI)
-      isUserScrolledUpRef.current = !isAtBottom;
-      setIsUserScrolledUp(!isAtBottom);
+      // Detect scroll direction - if scrolling up, disable auto-scroll
+      if (currentScrollTop < lastScrollTopRef.current) {
+        autoScrollEnabledRef.current = false;
+      }
+      lastScrollTopRef.current = currentScrollTop;
+
+      // Check if at bottom (with small tolerance)
+      const isAtBottom = maxScroll - currentScrollTop < 5;
+      if (isAtBottom) {
+        // Re-enable auto-scroll when user scrolls to bottom
+        autoScrollEnabledRef.current = true;
+      }
+
+      // Show button when scrolled up at least 10%
+      setShowScrollButton(scrollPercentFromBottom >= 0.1);
     };
 
     if (viewportElement) {
@@ -148,9 +161,6 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
     return () => {
       if (viewportElement) {
         viewportElement.removeEventListener('scroll', handleScroll);
-      }
-      if (scrollDebounceRef.current) {
-        clearTimeout(scrollDebounceRef.current);
       }
       terminal.dispose();
       terminalRef.current = null;
@@ -213,7 +223,10 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       if (data.id === id && terminalRef.current) {
         const terminal = terminalRef.current;
         terminal.write(data.data);
-        // XTerm handles scroll position automatically - no manual scrollToBottom needed
+        // Auto-scroll to bottom if enabled (user hasn't scrolled up)
+        if (autoScrollEnabledRef.current) {
+          terminal.scrollToBottom();
+        }
       }
     };
 
@@ -301,16 +314,16 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   const handleScrollToBottom = useCallback(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollToBottom();
-      isUserScrolledUpRef.current = false;
-      setIsUserScrolledUp(false);
+      autoScrollEnabledRef.current = true; // Re-enable auto-scroll
+      setShowScrollButton(false);
     }
   }, []);
 
   return (
     <div className="relative h-full w-full p-2" onContextMenu={handleContextMenu}>
       <div ref={containerRef} className="h-full w-full" />
-      {/* Scroll to bottom button - shown when user has scrolled up */}
-      {isUserScrolledUp && (
+      {/* Scroll to bottom button - shown when scrolled up at least 10% */}
+      {showScrollButton && (
         <button
           onClick={handleScrollToBottom}
           className="absolute bottom-4 right-4 p-2 bg-surface-700 hover:bg-surface-600 text-surface-200 rounded-full shadow-lg transition-all duration-200 opacity-80 hover:opacity-100 z-10"

@@ -29,6 +29,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
 
   // Track if user has scrolled up (for showing scroll-to-bottom button)
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const isUserScrolledUpRef = useRef(false); // Ref for immediate access in callbacks
   const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Copy selected text from terminal
@@ -127,7 +128,8 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       // Check if scrolled to bottom (with small tolerance for rounding)
       const isAtBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 5;
 
-      // Set scroll state immediately - no debounce, so auto-scroll is disabled instantly on user scroll
+      // Update both ref (for immediate callback access) and state (for UI)
+      isUserScrolledUpRef.current = !isAtBottom;
       setIsUserScrolledUp(!isAtBottom);
     };
 
@@ -212,8 +214,8 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
         const terminal = terminalRef.current;
         terminal.write(data.data);
         // Only auto-scroll if user hasn't manually scrolled up
-        // This prevents cursor jumping during status line updates
-        if (!isUserScrolledUp) {
+        // Use ref for immediate access without re-subscribing
+        if (!isUserScrolledUpRef.current) {
           terminal.scrollToBottom();
         }
       }
@@ -221,7 +223,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
 
     const cleanup = window.goodvibes.onTerminalData(handleData);
     return cleanup;
-  }, [id, isUserScrolledUp]);
+  }, [id]);
 
   // Handle resize with debounce to prevent cursor jumping during rapid resizes
   useEffect(() => {
@@ -303,6 +305,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   const handleScrollToBottom = useCallback(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollToBottom();
+      isUserScrolledUpRef.current = false;
       setIsUserScrolledUp(false);
     }
   }, []);

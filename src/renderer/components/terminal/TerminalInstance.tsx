@@ -320,8 +320,8 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   }, []);
 
   return (
-    <div className="relative h-full w-full p-2" onContextMenu={handleContextMenu}>
-      <div ref={containerRef} className="h-full w-full" />
+    <div className="relative h-full w-full" onContextMenu={handleContextMenu}>
+      <div ref={containerRef} className="absolute inset-2" />
       {/* Scroll to bottom button - shown when scrolled up at least 10% */}
       {showScrollButton && (
         <button

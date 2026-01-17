@@ -1,11 +1,12 @@
 // ============================================================================
 // SESSION DETAIL MODAL COMPONENT
-// Main modal component for viewing session details
+// Premium cinematic modal for viewing session details
 // ============================================================================
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
+import { X, Eye, Play, FileText, FileJson, Star, Archive } from 'lucide-react';
 import { decodeProjectName, decodeProjectPath } from '../../../../shared/utils';
 import { useAppStore } from '../../../stores/appStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -52,53 +53,46 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
     : null;
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-surface-950/80 backdrop-blur-sm"
-      onClick={onClose}
-    >
+    <div className="modal-backdrop-premium" onClick={onClose}>
       <div
-        className="w-full max-w-4xl max-h-[85vh] bg-surface-900 border border-surface-700 rounded-xl shadow-elevation-5 overflow-hidden flex flex-col"
+        className="modal-panel-premium modal-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
+        <div className="modal-header-premium">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-surface-100 truncate">
-                {displayName}
-              </h2>
+              <h2 className="truncate">{displayName}</h2>
               {currentSession.favorite && (
-                <span className="text-warning-400">&#9733;</span>
+                <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
               )}
               {currentSession.archived && (
-                <span className="badge text-surface-500 bg-surface-700 text-xs">Archived</span>
+                <span className="px-2 py-0.5 text-[10px] font-medium rounded-md bg-slate-500/20 text-slate-400 border border-slate-500/30 flex items-center gap-1">
+                  <Archive className="w-3 h-3" />
+                  Archived
+                </span>
               )}
             </div>
-            <p className="text-sm text-surface-400 mt-0.5">
-              Session ID: <span className="font-mono text-surface-500">{session.id}</span>
+            <p className="modal-subtitle">
+              Session ID: <span className="font-mono">{session.id}</span>
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-surface-800 text-surface-400"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <button onClick={onClose} className="modal-close-premium">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-2 px-6 py-2 border-b border-surface-700 bg-surface-850">
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.06] bg-white/[0.01]">
           {(['overview', 'messages', 'tokens'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={clsx(
-                'px-4 py-1.5 text-sm rounded-lg transition-colors',
+                'px-4 py-1.5 text-sm rounded-lg transition-all',
                 activeTab === tab
-                  ? 'bg-primary-500/20 text-primary-400'
-                  : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                  : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200 border border-transparent'
               )}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -107,7 +101,7 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="modal-body-premium">
           {activeTab === 'overview' && (
             <OverviewTab session={currentSession} duration={duration} displayName={displayName} />
           )}
@@ -120,22 +114,17 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-surface-700">
+        <div className="modal-footer-premium modal-footer-split">
           <div className="flex items-center gap-2">
             <button
               onClick={handleOpenPreview}
               className="btn btn-secondary text-sm"
             >
-              <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              Open Preview
+              <Eye className="w-4 h-4 mr-1.5" />
+              Preview
             </button>
             <button
               onClick={async () => {
-                // Resume session in a new terminal using the store action
-                // This ensures the terminal is properly added to the store and displayed
                 const cwd = decodeProjectPath(session.projectName) || undefined;
                 await createTerminal(cwd, displayName, session.id);
                 setCurrentView('terminal');
@@ -143,22 +132,21 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
               }}
               className="btn btn-primary text-sm"
             >
-              <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Resume Session
+              <Play className="w-4 h-4 mr-1.5" />
+              Resume
             </button>
             <button
               onClick={() => window.goodvibes.exportSession(session.id, 'markdown')}
               className="btn btn-secondary text-sm"
             >
-              Export Markdown
+              <FileText className="w-4 h-4 mr-1.5" />
+              Export MD
             </button>
             <button
               onClick={() => window.goodvibes.exportSession(session.id, 'json')}
               className="btn btn-secondary text-sm"
             >
+              <FileJson className="w-4 h-4 mr-1.5" />
               Export JSON
             </button>
           </div>

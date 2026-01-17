@@ -1,11 +1,12 @@
 // ============================================================================
 // CONFIRM MODAL COMPONENT
+// Premium cinematic modal for confirmation dialogs
 // ============================================================================
 
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { FocusTrap } from '../common/FocusTrap';
 
 interface ConfirmModalProps {
@@ -14,7 +15,7 @@ interface ConfirmModalProps {
   message: string;
   confirmText?: string;
   cancelText?: string;
-  variant?: 'danger' | 'warning' | 'default';
+  variant?: 'danger' | 'warning' | 'default' | 'success';
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -33,7 +34,7 @@ export function ConfirmModal({
 
   useEffect(() => {
     if (isOpen) {
-      // Focus the cancel button by default for destructive actions
+      // Focus the confirm button when modal opens
       confirmButtonRef.current?.focus();
     }
   }, [isOpen]);
@@ -56,43 +57,70 @@ export function ConfirmModal({
     danger: 'btn-danger',
     warning: 'btn-warning',
     default: 'btn-primary',
+    success: 'btn-success',
+  };
+
+  const panelVariantClass = {
+    danger: 'modal-danger',
+    warning: 'modal-warning',
+    default: '',
+    success: 'modal-success',
+  };
+
+  const iconContainerClass = {
+    danger: 'icon-danger',
+    warning: 'icon-warning',
+    default: 'icon-info',
+    success: 'icon-success',
+  };
+
+  const iconColorClass = {
+    danger: 'text-red-400',
+    warning: 'text-amber-400',
+    default: 'text-violet-400',
+    success: 'text-emerald-400',
+  };
+
+  const renderIcon = () => {
+    const iconProps = { className: `w-7 h-7 ${iconColorClass[variant]}`, strokeWidth: 1.5 };
+    switch (variant) {
+      case 'danger':
+        return <AlertTriangle {...iconProps} />;
+      case 'warning':
+        return <AlertTriangle {...iconProps} />;
+      case 'success':
+        return <CheckCircle2 {...iconProps} />;
+      default:
+        return <Info {...iconProps} />;
+    }
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onCancel}
-        aria-hidden="true"
-      />
-
-      {/* Modal */}
+    <div className="modal-backdrop-premium" onClick={onCancel}>
+      {/* Modal Panel */}
       <FocusTrap>
         <div
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="confirm-modal-title"
           aria-describedby="confirm-modal-message"
-          className="relative z-10 w-full max-w-md mx-4 bg-surface-800 rounded-lg shadow-xl"
+          className={clsx(
+            'modal-panel-premium modal-sm',
+            panelVariantClass[variant]
+          )}
+          onClick={(e) => e.stopPropagation()}
         >
-          <div className="p-6">
+          {/* Content */}
+          <div className="modal-body-premium text-center">
             {/* Icon */}
-            {variant === 'danger' && (
-              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-error-500/20 flex items-center justify-center">
-                <AlertTriangle className="w-6 h-6 text-error-500" size={24} />
-              </div>
-            )}
-            {variant === 'warning' && (
-              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-warning-500/20 flex items-center justify-center">
-                <AlertTriangle className="w-6 h-6 text-warning-500" size={24} />
-              </div>
-            )}
+            <div className={clsx('modal-icon-container', iconContainerClass[variant])}>
+              {renderIcon()}
+            </div>
 
             {/* Title */}
             <h2
               id="confirm-modal-title"
-              className="text-lg font-semibold text-surface-100 text-center"
+              className="text-xl font-semibold text-slate-100 mb-2"
             >
               {title}
             </h2>
@@ -100,23 +128,23 @@ export function ConfirmModal({
             {/* Message */}
             <p
               id="confirm-modal-message"
-              className="mt-2 text-sm text-surface-400 text-center"
+              className="text-sm text-slate-400 leading-relaxed max-w-sm mx-auto"
             >
               {message}
             </p>
 
             {/* Actions */}
-            <div className="mt-6 flex gap-3 justify-center">
+            <div className="mt-8 flex gap-3 justify-center">
               <button
                 onClick={onCancel}
-                className="btn btn-secondary"
+                className="btn btn-secondary min-w-[100px]"
               >
                 {cancelText}
               </button>
               <button
                 ref={confirmButtonRef}
                 onClick={onConfirm}
-                className={clsx('btn', variantStyles[variant])}
+                className={clsx('btn min-w-[100px]', variantStyles[variant])}
               >
                 {confirmText}
               </button>

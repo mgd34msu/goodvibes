@@ -344,33 +344,76 @@ export function GitPanel({ cwd, position }: GitPanelProps) {
   const handleInitRepo = useCallback(async () => { await window.goodvibes.gitInit(cwd); fetchGitInfo(); }, [cwd, fetchGitInfo]);
 
   return (
-    <div className={clsx('w-72 flex-shrink-0 bg-surface-900 overflow-hidden flex flex-col', position === 'left' ? 'border-r border-surface-800' : 'border-l border-surface-800')}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-surface-800">
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18V6M6 6a3 3 0 100-6 3 3 0 000 6zm12 12a3 3 0 100-6 3 3 0 000 6zm0 0V9a3 3 0 00-3-3H9" /></svg>
-          <span className="text-sm font-medium text-surface-200">Source Control</span>
-          {totalChanges > 0 && <span className="px-1.5 py-0.5 text-xs bg-primary-500/20 text-primary-400 rounded-full">{totalChanges}</span>}
+    <div className={clsx(
+      'w-72 flex-shrink-0 sidebar-premium overflow-hidden flex flex-col',
+      position === 'left' ? 'border-r' : 'border-l'
+    )}>
+      {/* Header - Premium Glass Style */}
+      <div className="panel-header flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-primary-500/10">
+            <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18V6M6 6a3 3 0 100-6 3 3 0 000 6zm12 12a3 3 0 100-6 3 3 0 000 6zm0 0V9a3 3 0 00-3-3H9" />
+            </svg>
+          </div>
+          <span className="text-sm font-semibold text-surface-100">Source Control</span>
+          {totalChanges > 0 && (
+            <span className="badge-premium ml-1">{totalChanges}</span>
+          )}
         </div>
-        <button onClick={fetchGitInfo} className="p-1 rounded hover:bg-surface-800 text-surface-400 hover:text-surface-200 transition-colors" title="Refresh" disabled={state.isLoading}>
-          <svg className={clsx('w-3.5 h-3.5', state.isLoading && 'animate-spin')} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+        <button
+          onClick={fetchGitInfo}
+          className="btn-premium-ghost p-1.5 text-surface-400 hover:text-surface-200"
+          title="Refresh"
+          disabled={state.isLoading}
+        >
+          <svg className={clsx('w-4 h-4 transition-transform duration-300', state.isLoading && 'animate-spin')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Content - Premium Scrollable Area */}
+      <div className="flex-1 overflow-y-auto scrollbar-premium scroll-fade-bottom">
         {state.isLoading ? (
-          <div className="flex items-center justify-center py-8"><div className="animate-spin w-5 h-5 border-2 border-surface-600 border-t-primary-500 rounded-full" /></div>
+          <div className="flex items-center justify-center py-12">
+            <div className="relative">
+              <div className="animate-spin w-8 h-8 border-2 border-surface-700 border-t-primary-500 rounded-full" />
+              <div className="absolute inset-0 animate-ping w-8 h-8 border border-primary-500/20 rounded-full" />
+            </div>
+          </div>
         ) : state.error ? (
-          <div className="text-xs text-error-400 p-3 m-2 bg-error-500/10 rounded">{state.error}</div>
+          <div className="mx-3 my-4 p-3 rounded-lg bg-error-500/10 border border-error-500/20">
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-error-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-xs text-error-300">{state.error}</span>
+            </div>
+          </div>
         ) : !state.isRepo ? (
-          <div className="text-center py-8 px-4">
-            <div className="text-4xl mb-3">{'</>'}</div>
-            <div className="text-surface-400 text-sm mb-3">Not a git repository</div>
-            <button onClick={handleInitRepo} className="px-3 py-1.5 text-xs bg-primary-500 hover:bg-primary-600 text-white rounded transition-colors">Initialize Repository</button>
+          <div className="empty-state-premium text-center py-12 px-6">
+            <div className="relative inline-block mb-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-surface-700/50 to-surface-800/50 flex items-center justify-center border border-surface-600/30">
+                <svg className="w-8 h-8 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18V6M6 6a3 3 0 100-6 3 3 0 000 6zm12 12a3 3 0 100-6 3 3 0 000 6zm0 0V9a3 3 0 00-3-3H9" />
+                </svg>
+              </div>
+            </div>
+            <div className="text-surface-300 text-sm font-medium mb-2">Not a Git Repository</div>
+            <div className="text-surface-500 text-xs mb-5">Initialize version control for this project</div>
+            <button
+              onClick={handleInitRepo}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 rounded-lg transition-all duration-200 shadow-lg shadow-primary-500/20 hover:shadow-primary-500/30"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Initialize Repository
+            </button>
           </div>
         ) : (
-          <div className="p-2 space-y-2">
+          <div className="p-3 space-y-3">
             <GitBranches branch={state.branch} ahead={state.ahead} behind={state.behind} branches={localBranches} showBranchDropdown={state.showBranchDropdown} showNewBranchInput={state.showNewBranchInput} newBranchName={state.newBranchName} newBranchError={state.newBranchError} operationInProgress={state.operationInProgress} branchDropdownRef={branchDropdownRef} onToggleDropdown={() => setState(prev => ({ ...prev, showBranchDropdown: !prev.showBranchDropdown }))} onCheckout={handleCheckout} onCreateBranch={handleCreateBranch} onCancelNewBranch={handleCancelNewBranch} onShowNewBranchInput={() => setState(prev => ({ ...prev, showNewBranchInput: true, newBranchError: null }))} onNewBranchNameChange={(name) => setState(prev => ({ ...prev, newBranchName: name, newBranchError: null }))} onShowDeleteBranchModal={(branch) => setState(prev => ({ ...prev, showDeleteBranchModal: true, branchToDelete: branch }))} />
             <GitRemote hasRemote={state.hasRemote} ahead={state.ahead} behind={state.behind} isPushing={state.isPushing} isPulling={state.isPulling} isFetching={state.isFetching} isMerging={state.isMerging} mergeInProgress={state.mergeInProgress} onPush={handlePush} onPull={handlePull} onFetch={handleFetch} onShowMergeModal={() => setState(prev => ({ ...prev, showMergeModal: true }))} />
             <GitMerge cwd={cwd} branch={state.branch} mergeInProgress={state.mergeInProgress} cherryPickInProgress={state.cherryPickInProgress} localBranches={localBranches} showMergeModal={state.showMergeModal} mergeBranch={state.mergeBranch} mergeOptions={state.mergeOptions} onMergeBranchChange={(branch) => setState(prev => ({ ...prev, mergeBranch: branch }))} onMergeOptionsChange={(options) => setState(prev => ({ ...prev, mergeOptions: options }))} onMerge={handleMerge} onMergeAbort={handleMergeAbort} onCloseMergeModal={() => setState(prev => ({ ...prev, showMergeModal: false, mergeBranch: null }))} onCherryPickContinue={handleCherryPickContinue} onCherryPickAbort={handleCherryPickAbort} />
@@ -380,7 +423,12 @@ export function GitPanel({ cwd, position }: GitPanelProps) {
             <GitStash stashes={state.stashes} expandedSections={state.expandedSections} showStashModal={state.showStashModal} stashMessage={state.stashMessage} hasChangesToStash={state.staged.length > 0 || state.unstaged.length > 0} stagedCount={state.staged.length} unstagedCount={state.unstaged.length} toggleSection={toggleSection} onStashMessageChange={(msg) => setState(prev => ({ ...prev, stashMessage: msg }))} onShowStashModal={() => setState(prev => ({ ...prev, showStashModal: true }))} onCloseStashModal={() => setState(prev => ({ ...prev, showStashModal: false, stashMessage: '' }))} onStashPush={handleStashPush} onStashPop={handleStashPop} onStashApply={handleStashApply} onStashDrop={handleStashDrop} />
             <GitTags tags={state.tags} expandedSections={state.expandedSections} showTagModal={state.showTagModal} newTagName={state.newTagName} newTagMessage={state.newTagMessage} newTagCommit={state.newTagCommit} toggleSection={toggleSection} onTagNameChange={(name) => setState(prev => ({ ...prev, newTagName: name }))} onTagMessageChange={(msg) => setState(prev => ({ ...prev, newTagMessage: msg }))} onTagCommitChange={(commit) => setState(prev => ({ ...prev, newTagCommit: commit }))} onShowTagModal={() => setState(prev => ({ ...prev, showTagModal: true }))} onCloseTagModal={() => setState(prev => ({ ...prev, showTagModal: false, newTagName: '', newTagMessage: '', newTagCommit: '' }))} onCreateTag={handleCreateTag} onDeleteTag={handleDeleteTag} />
             <GitRebase branch={state.branch} rebaseInProgress={state.rebaseInProgress} localBranches={localBranches} showRebaseModal={state.showRebaseModal} rebaseBranch={state.rebaseBranch} showReflogModal={state.showReflogModal} reflogEntries={state.reflogEntries} isLoadingReflog={state.isLoadingReflog} formatRelativeTime={formatRelativeTime} onRebaseBranchChange={(branch) => setState(prev => ({ ...prev, rebaseBranch: branch }))} onShowRebaseModal={() => setState(prev => ({ ...prev, showRebaseModal: true }))} onCloseRebaseModal={() => setState(prev => ({ ...prev, showRebaseModal: false, rebaseBranch: null }))} onRebase={handleRebase} onRebaseAbort={handleRebaseAbort} onRebaseContinue={handleRebaseContinue} onRebaseSkip={handleRebaseSkip} onViewReflog={handleViewReflog} onCloseReflogModal={() => setState(prev => ({ ...prev, showReflogModal: false }))} onResetToReflog={handleResetToReflog} />
-            {githubEnabled && githubShowInGitPanel && <div className="border-t border-surface-700 pt-3 mt-3"><GitHubPanel cwd={cwd} currentBranch={state.branch} className="h-auto max-h-96" /></div>}
+            {githubEnabled && githubShowInGitPanel && (
+              <div className="mt-4 pt-4 relative">
+                <div className="divider-glow absolute top-0 left-3 right-3" />
+                <GitHubPanel cwd={cwd} currentBranch={state.branch} className="h-auto max-h-96" />
+              </div>
+            )}
           </div>
         )}
       </div>

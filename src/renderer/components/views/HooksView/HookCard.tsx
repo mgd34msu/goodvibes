@@ -1,5 +1,5 @@
 // ============================================================================
-// HOOK CARD COMPONENT
+// HOOK CARD COMPONENT - Premium Glass Morphism Design
 // ============================================================================
 
 import { useState } from 'react';
@@ -11,8 +11,8 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ChevronDown,
   ChevronRight,
+  Terminal,
 } from 'lucide-react';
 import { EVENT_TYPES, EVENT_TYPE_ICONS, type Hook } from './types';
 
@@ -27,145 +27,160 @@ interface HookCardProps {
 export function HookCard({ hook, onToggle, onEdit, onDelete, onTest }: HookCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const getResultIcon = () => {
+  const getResultBadge = () => {
     switch (hook.lastResult) {
       case 'success':
-        return <CheckCircle className="w-4 h-4 text-green-400" />;
+        return (
+          <span className="card-badge card-badge-success">
+            <CheckCircle className="w-3 h-3" />
+            Success
+          </span>
+        );
       case 'failure':
-        return <XCircle className="w-4 h-4 text-red-400" />;
+        return (
+          <span className="card-badge card-badge-error">
+            <XCircle className="w-3 h-3" />
+            Failed
+          </span>
+        );
       case 'timeout':
-        return <Clock className="w-4 h-4 text-yellow-400" />;
+        return (
+          <span className="card-badge card-badge-warning">
+            <Clock className="w-3 h-3" />
+            Timeout
+          </span>
+        );
       default:
         return null;
     }
   };
 
   return (
-    <div
-      className={`bg-surface-900 rounded-lg border transition-colors ${
-        hook.enabled ? 'border-surface-700' : 'border-surface-800 opacity-60'
-      }`}
-    >
-      <div className="p-4">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-3">
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="mt-1 text-surface-400 hover:text-surface-200 transition-colors"
-            >
-              {expanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </button>
+    <div className={`card-hover group ${!hook.enabled ? 'card-disabled' : ''}`}>
+      {/* Main Content */}
+      <div className="flex items-start justify-between gap-4">
+        {/* Left Section: Expand + Icon + Info */}
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          {/* Expand Button */}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className={`card-expand-btn mt-0.5 ${expanded ? 'expanded' : ''}`}
+            aria-label={expanded ? 'Collapse' : 'Expand'}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
 
-            <div>
-              <div className="flex items-center gap-2">
-                {EVENT_TYPE_ICONS[hook.eventType]}
-                <h3 className="font-medium text-surface-100">{hook.name}</h3>
-                <span className="text-xs px-2 py-0.5 bg-surface-700 rounded text-surface-400">
-                  {hook.scope}
+          {/* Icon */}
+          <div className={`card-icon ${hook.enabled ? '' : 'opacity-50'}`}>
+            {EVENT_TYPE_ICONS[hook.eventType]}
+          </div>
+
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="card-title-gradient text-base">{hook.name}</h3>
+              <span className="card-badge">
+                {hook.scope}
+              </span>
+              {hook.executionCount > 0 && getResultBadge()}
+            </div>
+            <p className="card-description">
+              {EVENT_TYPES.find((t) => t.value === hook.eventType)?.label}
+              {hook.matcher && hook.matcher !== '*' && (
+                <span className="ml-2 font-mono text-xs text-text-muted">
+                  ({hook.matcher})
+                </span>
+              )}
+            </p>
+            {hook.executionCount > 0 && (
+              <div className="card-meta mt-3">
+                <span className="card-meta-item">
+                  {hook.executionCount} executions
                 </span>
               </div>
+            )}
+          </div>
+        </div>
 
-              <p className="text-sm text-surface-400 mt-1">
-                {EVENT_TYPES.find((t) => t.value === hook.eventType)?.label}
-                {hook.matcher && hook.matcher !== '*' && (
-                  <span className="ml-2 font-mono text-xs text-surface-500">
-                    ({hook.matcher})
-                  </span>
-                )}
+        {/* Right Section: Actions */}
+        <div className="card-actions">
+          <button
+            onClick={() => onToggle(hook.id, !hook.enabled)}
+            className={`card-action-btn ${
+              hook.enabled
+                ? 'card-action-btn-success text-success-400'
+                : ''
+            }`}
+            title={hook.enabled ? 'Disable' : 'Enable'}
+          >
+            {hook.enabled ? (
+              <Play className="w-4 h-4" />
+            ) : (
+              <Pause className="w-4 h-4" />
+            )}
+          </button>
+          <button
+            onClick={() => onEdit(hook)}
+            className="card-action-btn card-action-btn-primary"
+            title="Edit"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onDelete(hook.id)}
+            className="card-action-btn card-action-btn-danger"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded Content */}
+      {expanded && (
+        <div className="card-expandable-content mt-4 pt-4 space-y-4">
+          <div className="card-divider -mx-5" />
+
+          <div>
+            <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
+              Command
+            </span>
+            <div className="card-code-block mt-2 flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-text-muted flex-shrink-0" />
+              {hook.command}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div className="card p-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider">Timeout</span>
+              <p className="text-sm text-text-primary font-medium mt-1">{hook.timeout}ms</p>
+            </div>
+            <div className="card p-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider">Executions</span>
+              <p className="text-sm text-text-primary font-medium mt-1">{hook.executionCount}</p>
+            </div>
+            <div className="card p-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider">Last Run</span>
+              <p className="text-sm text-text-primary font-medium mt-1">
+                {hook.lastExecuted
+                  ? new Date(hook.lastExecuted).toLocaleString()
+                  : 'Never'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {hook.executionCount > 0 && (
-              <div className="flex items-center gap-1 text-xs text-surface-500">
-                {getResultIcon()}
-                <span>{hook.executionCount}x</span>
-              </div>
-            )}
-
+          <div className="flex justify-end">
             <button
-              onClick={() => onToggle(hook.id, !hook.enabled)}
-              className={`p-1.5 rounded transition-colors ${
-                hook.enabled
-                  ? 'text-green-400 hover:bg-green-400/10'
-                  : 'text-surface-500 hover:bg-surface-700'
-              }`}
-              title={hook.enabled ? 'Disable' : 'Enable'}
+              onClick={() => onTest(hook.id)}
+              className="card-action-primary"
             >
-              {hook.enabled ? (
-                <Play className="w-4 h-4" />
-              ) : (
-                <Pause className="w-4 h-4" />
-              )}
-            </button>
-
-            <button
-              onClick={() => onEdit(hook)}
-              className="p-1.5 text-surface-400 hover:text-surface-200 hover:bg-surface-700 rounded transition-colors"
-              title="Edit"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => onDelete(hook.id)}
-              className="p-1.5 text-surface-400 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"
-              title="Delete"
-            >
-              <Trash2 className="w-4 h-4" />
+              <Play className="w-3.5 h-3.5" />
+              Test Hook
             </button>
           </div>
         </div>
-
-        {expanded && (
-          <div className="mt-4 pt-4 border-t border-surface-700">
-            <div className="space-y-3">
-              <div>
-                <span className="text-xs text-surface-500 uppercase tracking-wider">
-                  Command
-                </span>
-                <p className="mt-1 font-mono text-sm text-surface-300 bg-surface-800 p-2 rounded">
-                  {hook.command}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <span className="text-surface-500">Timeout:</span>
-                  <span className="ml-2 text-surface-300">{hook.timeout}ms</span>
-                </div>
-                <div>
-                  <span className="text-surface-500">Executions:</span>
-                  <span className="ml-2 text-surface-300">{hook.executionCount}</span>
-                </div>
-                <div>
-                  <span className="text-surface-500">Last Run:</span>
-                  <span className="ml-2 text-surface-300">
-                    {hook.lastExecuted
-                      ? new Date(hook.lastExecuted).toLocaleString()
-                      : 'Never'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  onClick={() => onTest(hook.id)}
-                  className="px-3 py-1.5 text-sm bg-surface-700 text-surface-200 rounded hover:bg-surface-600 transition-colors flex items-center gap-2"
-                >
-                  <Play className="w-3 h-3" />
-                  Test Hook
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

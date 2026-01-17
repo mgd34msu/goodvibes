@@ -1,13 +1,15 @@
 // ============================================================================
 // COMMAND PALETTE COMPONENT
+// Premium cinematic command palette with glass morphism
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
+import { Search, Command } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { VIEWS } from '../../../shared/constants';
 
-interface Command {
+interface CommandItem {
   id: string;
   label: string;
   description?: string;
@@ -27,7 +29,7 @@ export function CommandPalette() {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   // Define commands
-  const commands = useMemo<Command[]>(() => [
+  const commands = useMemo<CommandItem[]>(() => [
     // View commands
     ...VIEWS.map((view, i) => ({
       id: `view-${view}`,
@@ -152,38 +154,36 @@ export function CommandPalette() {
       categoryGroup.push(cmd);
     }
     return groups;
-  }, {} as Record<string, Command[]>);
+  }, {} as Record<string, CommandItem[]>);
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh] bg-surface-950/80 backdrop-blur-sm"
+      className="modal-backdrop-premium items-start pt-[15vh]"
       onClick={close}
     >
       <div
-        className="w-full max-w-lg bg-surface-900 border border-surface-700 rounded-xl shadow-elevation-5 overflow-hidden"
+        className="modal-palette-premium"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-surface-700">
-          <svg className="w-5 h-5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+        <div className="modal-search-premium">
+          <Command className="w-5 h-5 search-icon" />
           <input
             type="text"
             placeholder="Type a command..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent text-surface-100 placeholder:text-surface-500 outline-none"
             autoFocus
           />
+          <kbd className="kbd-premium">esc</kbd>
         </div>
 
         {/* Commands list */}
-        <div className="max-h-80 overflow-y-auto">
+        <div className="modal-list-premium">
           {Object.entries(groupedCommands).map(([category, cmds]) => (
             <div key={category}>
-              <div className="px-4 py-2 text-xs font-medium text-surface-500 uppercase tracking-wide">
+              <div className="modal-category-header">
                 {category}
               </div>
               {cmds.map((cmd) => {
@@ -193,20 +193,21 @@ export function CommandPalette() {
                     key={cmd.id}
                     onClick={cmd.action}
                     className={clsx(
-                      'w-full flex items-center justify-between px-4 py-2 text-left transition-colors',
-                      globalIndex === selectedIndex
-                        ? 'bg-primary-500/20 text-surface-100'
-                        : 'text-surface-300 hover:bg-surface-800'
+                      'modal-list-item-premium',
+                      globalIndex === selectedIndex && 'selected'
                     )}
                   >
-                    <div>
-                      <div className="text-sm">{cmd.label}</div>
+                    <div className="item-icon">
+                      <Command className="w-4 h-4" />
+                    </div>
+                    <div className="item-content">
+                      <div className="item-title">{cmd.label}</div>
                       {cmd.description && (
-                        <div className="text-xs text-surface-500">{cmd.description}</div>
+                        <div className="item-subtitle">{cmd.description}</div>
                       )}
                     </div>
                     {cmd.shortcut && (
-                      <kbd className="text-xs text-surface-500 bg-surface-800 px-2 py-0.5 rounded">
+                      <kbd className="kbd-premium">
                         {cmd.shortcut}
                       </kbd>
                     )}
@@ -217,19 +218,31 @@ export function CommandPalette() {
           ))}
 
           {filteredCommands.length === 0 && (
-            <div className="px-4 py-8 text-center text-surface-500">
-              No commands found
+            <div className="py-12 text-center">
+              <Search className="w-10 h-10 mx-auto mb-3 text-slate-600" />
+              <p className="text-slate-500">No commands found</p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-surface-700 text-xs text-surface-500">
-          <div className="flex gap-4">
-            <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">↑↓</kbd> Navigate</span>
-            <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">Enter</kbd> Execute</span>
+        <div className="modal-footer-hints">
+          <div className="hint-group">
+            <span className="hint">
+              <kbd className="kbd-premium">↑</kbd>
+              <kbd className="kbd-premium">↓</kbd>
+              <span className="ml-1">Navigate</span>
+            </span>
+            <span className="hint">
+              <kbd className="kbd-premium">Enter</kbd>
+              <span className="ml-1">Execute</span>
+            </span>
           </div>
-          <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">Esc</kbd> Close</span>
+          <span className="hint">
+            <kbd className="kbd-premium">Ctrl</kbd>
+            <kbd className="kbd-premium">K</kbd>
+            <span className="ml-1">Toggle</span>
+          </span>
         </div>
       </div>
     </div>

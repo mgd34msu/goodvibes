@@ -1,8 +1,10 @@
 // ============================================================================
 // SLASH COMMAND PALETTE - Quick access to Claude Code slash commands
+// Premium cinematic palette with glass morphism
 // ============================================================================
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { clsx } from 'clsx';
 import {
   Command,
   Search,
@@ -280,18 +282,18 @@ export function SlashCommandPalette() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh]">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={() => setIsOpen(false)}
-      />
-
+    <div
+      className="modal-backdrop-premium items-start pt-[15vh]"
+      onClick={() => setIsOpen(false)}
+    >
       {/* Palette */}
-      <div className="relative w-full max-w-lg bg-surface-900 rounded-xl border border-surface-700 shadow-2xl overflow-hidden">
+      <div
+        className="modal-palette-premium"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-surface-700">
-          <Command className="w-5 h-5 text-surface-400" />
+        <div className="modal-search-premium">
+          <Command className="w-5 h-5 search-icon" />
           <input
             ref={inputRef}
             type="text"
@@ -302,28 +304,23 @@ export function SlashCommandPalette() {
             }}
             onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
-            className="flex-1 bg-transparent text-surface-100 placeholder-surface-500 outline-none"
           />
-          <kbd className="text-xs text-surface-500 bg-surface-800 px-1.5 py-0.5 rounded">
-            esc
-          </kbd>
+          <kbd className="kbd-premium">esc</kbd>
         </div>
 
         {/* Command list */}
-        <div ref={listRef} className="max-h-80 overflow-y-auto p-2">
+        <div ref={listRef} className="modal-list-premium">
           {filteredCommands.length === 0 ? (
-            <div className="py-8 text-center text-surface-500">
-              <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>No commands found</p>
+            <div className="py-12 text-center">
+              <Search className="w-10 h-10 mx-auto mb-3 text-slate-600" />
+              <p className="text-slate-500">No commands found</p>
             </div>
           ) : (
             <>
               {/* Skills */}
               {(groupedCommands.skill?.length ?? 0) > 0 && (
                 <div className="mb-2">
-                  <div className="px-2 py-1 text-xs font-medium text-surface-500 uppercase tracking-wider">
-                    Skills
-                  </div>
+                  <div className="modal-category-header">Skills</div>
                   {groupedCommands.skill?.map((cmd) => {
                     const globalIdx = flatCommands.indexOf(cmd);
                     return (
@@ -342,9 +339,7 @@ export function SlashCommandPalette() {
               {/* Navigation */}
               {(groupedCommands.navigation?.length ?? 0) > 0 && (
                 <div className="mb-2">
-                  <div className="px-2 py-1 text-xs font-medium text-surface-500 uppercase tracking-wider">
-                    Navigation
-                  </div>
+                  <div className="modal-category-header">Navigation</div>
                   {groupedCommands.navigation?.map((cmd) => {
                     const globalIdx = flatCommands.indexOf(cmd);
                     return (
@@ -363,9 +358,7 @@ export function SlashCommandPalette() {
               {/* Actions */}
               {(groupedCommands.action?.length ?? 0) > 0 && (
                 <div className="mb-2">
-                  <div className="px-2 py-1 text-xs font-medium text-surface-500 uppercase tracking-wider">
-                    Actions
-                  </div>
+                  <div className="modal-category-header">Actions</div>
                   {groupedCommands.action?.map((cmd) => {
                     const globalIdx = flatCommands.indexOf(cmd);
                     return (
@@ -385,22 +378,22 @@ export function SlashCommandPalette() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-surface-700 flex items-center justify-between text-xs text-surface-500">
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1">
-              <kbd className="bg-surface-800 px-1 rounded">↑</kbd>
-              <kbd className="bg-surface-800 px-1 rounded">↓</kbd>
-              navigate
+        <div className="modal-footer-hints">
+          <div className="hint-group">
+            <span className="hint">
+              <kbd className="kbd-premium">↑</kbd>
+              <kbd className="kbd-premium">↓</kbd>
+              <span className="ml-1">navigate</span>
             </span>
-            <span className="flex items-center gap-1">
-              <kbd className="bg-surface-800 px-1 rounded">↵</kbd>
-              select
+            <span className="hint">
+              <kbd className="kbd-premium">Enter</kbd>
+              <span className="ml-1">select</span>
             </span>
           </div>
-          <span className="flex items-center gap-1">
-            <kbd className="bg-surface-800 px-1.5 rounded">Ctrl</kbd>
-            <kbd className="bg-surface-800 px-1 rounded">/</kbd>
-            to toggle
+          <span className="hint">
+            <kbd className="kbd-premium">Ctrl</kbd>
+            <kbd className="kbd-premium">/</kbd>
+            <span className="ml-1">toggle</span>
           </span>
         </div>
       </div>
@@ -423,28 +416,23 @@ function CommandItem({ command, isSelected, onSelect, onHover }: CommandItemProp
   return (
     <button
       data-selected={isSelected}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-        isSelected
-          ? 'bg-accent-purple/20 text-surface-100'
-          : 'text-surface-300 hover:bg-surface-800'
-      }`}
+      className={clsx(
+        'modal-list-item-premium',
+        isSelected && 'selected'
+      )}
       onClick={onSelect}
       onMouseEnter={onHover}
     >
-      <span
-        className={`flex-shrink-0 ${
-          isSelected ? 'text-accent-purple' : 'text-surface-400'
-        }`}
-      >
+      <div className="item-icon">
         {command.icon}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="font-medium">/{command.name}</div>
-        <div className="text-xs text-surface-500 truncate">{command.description}</div>
+      </div>
+      <div className="item-content">
+        <div className="item-title font-medium">/{command.name}</div>
+        <div className="item-subtitle">{command.description}</div>
       </div>
       {isSelected && (
-        <kbd className="text-xs bg-accent-purple/20 text-accent-purple px-1.5 py-0.5 rounded">
-          ↵
+        <kbd className="kbd-premium bg-violet-500/20 text-violet-300 border-violet-500/30">
+          Enter
         </kbd>
       )}
     </button>

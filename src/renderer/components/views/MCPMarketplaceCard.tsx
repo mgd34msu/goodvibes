@@ -1,5 +1,5 @@
 // ============================================================================
-// MCP MARKETPLACE CARD - Marketplace server card component
+// MCP MARKETPLACE CARD - Premium Glass Morphism Design
 // ============================================================================
 
 import React from 'react';
@@ -10,6 +10,8 @@ import {
   Database,
   MessageSquare,
   Wrench,
+  CheckCircle,
+  Download,
 } from 'lucide-react';
 
 // ============================================================================
@@ -34,12 +36,32 @@ export interface MarketplaceServer {
 // CONSTANTS
 // ============================================================================
 
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  productivity: <Zap className="w-4 h-4" />,
-  devops: <Wrench className="w-4 h-4" />,
-  communication: <MessageSquare className="w-4 h-4" />,
-  database: <Database className="w-4 h-4" />,
-  custom: <Package className="w-4 h-4" />,
+interface CategoryConfig {
+  icon: React.ReactNode;
+  iconClass: string;
+}
+
+const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
+  productivity: {
+    icon: <Zap className="w-5 h-5" />,
+    iconClass: 'card-icon',
+  },
+  devops: {
+    icon: <Wrench className="w-5 h-5" />,
+    iconClass: 'card-icon',
+  },
+  communication: {
+    icon: <MessageSquare className="w-5 h-5" />,
+    iconClass: 'card-icon',
+  },
+  database: {
+    icon: <Database className="w-5 h-5" />,
+    iconClass: 'card-icon',
+  },
+  custom: {
+    icon: <Package className="w-5 h-5" />,
+    iconClass: 'card-icon',
+  },
 };
 
 // Mock marketplace data
@@ -133,53 +155,70 @@ interface MarketplaceCardProps {
   onInstall: (server: MarketplaceServer) => void;
 }
 
+const DEFAULT_CATEGORY: CategoryConfig = {
+  icon: <Package className="w-5 h-5" />,
+  iconClass: 'card-icon',
+};
+
 export function MCPMarketplaceCard({ server, installed, onInstall }: MarketplaceCardProps) {
+  const categoryConfig: CategoryConfig = CATEGORY_CONFIG[server.category] ?? DEFAULT_CATEGORY;
+
   return (
-    <div className="bg-surface-900 rounded-lg border border-surface-700 p-4">
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 bg-surface-700 rounded-lg flex items-center justify-center text-surface-300">
-            {CATEGORY_ICONS[server.category]}
+    <div className={`card-hover group ${installed ? 'card-selected' : ''}`}>
+      {/* Main Content */}
+      <div className="flex items-start justify-between gap-4">
+        {/* Left Section: Icon + Info */}
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          {/* Icon */}
+          <div className={categoryConfig.iconClass}>
+            {categoryConfig.icon}
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium text-surface-100">{server.name}</h3>
+
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="card-title-gradient text-base">{server.name}</h3>
               {server.popular && (
-                <span className="text-xs px-2 py-0.5 bg-accent-purple/20 text-accent-purple rounded">
+                <span className="card-badge card-badge-primary card-badge-pulse">
                   Popular
                 </span>
               )}
             </div>
-            <p className="text-sm text-surface-400 mt-1">{server.description}</p>
+            <p className="card-description line-clamp-2">{server.description}</p>
             {server.requiredEnv && server.requiredEnv.length > 0 && (
-              <p className="text-xs text-surface-500 mt-2">
-                Requires: {server.requiredEnv.join(', ')}
-              </p>
+              <div className="card-meta mt-3">
+                <span className="card-meta-item text-warning-400">
+                  Requires: {server.requiredEnv.join(', ')}
+                </span>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right Section: Actions */}
+        <div className="card-actions">
           {server.documentation && (
             <a
               href={server.documentation}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-1.5 text-surface-400 hover:text-surface-200 hover:bg-surface-700 rounded transition-colors"
+              className="card-action-btn card-action-btn-primary"
               title="Documentation"
             >
               <ExternalLink className="w-4 h-4" />
             </a>
           )}
           {installed ? (
-            <span className="px-3 py-1.5 text-sm bg-green-400/20 text-green-400 rounded">
+            <span className="card-badge card-badge-success">
+              <CheckCircle className="w-3 h-3" />
               Installed
             </span>
           ) : (
             <button
               onClick={() => onInstall(server)}
-              className="px-3 py-1.5 text-sm bg-accent-purple text-white rounded hover:bg-accent-purple/80 transition-colors"
+              className="card-action-primary"
             >
+              <Download className="w-3.5 h-3.5" />
               Install
             </button>
           )}

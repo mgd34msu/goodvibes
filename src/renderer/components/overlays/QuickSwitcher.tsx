@@ -1,9 +1,11 @@
 // ============================================================================
 // QUICK SWITCHER COMPONENT
+// Premium cinematic terminal switcher with glass morphism
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
+import { Terminal, Search } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { useTerminalStore } from '../../stores/terminalStore';
 
@@ -73,31 +75,29 @@ export function QuickSwitcher() {
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh] bg-surface-950/80 backdrop-blur-sm"
+      className="modal-backdrop-premium items-start pt-[15vh]"
       onClick={close}
     >
       <div
-        className="w-full max-w-md bg-surface-900 border border-surface-700 rounded-xl shadow-elevation-5 overflow-hidden"
+        className="modal-palette-premium max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-surface-700">
-          <svg className="w-5 h-5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
+        <div className="modal-search-premium">
+          <Terminal className="w-5 h-5 search-icon" />
           <input
             type="text"
             placeholder="Search terminals..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent text-surface-100 placeholder:text-surface-500 outline-none"
             autoFocus
           />
+          <kbd className="kbd-premium">esc</kbd>
         </div>
 
         {/* Terminals list */}
-        <div className="max-h-64 overflow-y-auto">
+        <div className="modal-list-premium max-h-72">
           {filteredTerminals.map((terminal, index) => (
             <button
               key={terminal.id}
@@ -107,46 +107,53 @@ export function QuickSwitcher() {
                 close();
               }}
               className={clsx(
-                'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors',
-                index === selectedIndex
-                  ? 'bg-primary-500/20'
-                  : 'hover:bg-surface-800'
+                'modal-list-item-premium',
+                index === selectedIndex && 'selected'
               )}
             >
-              <div className="w-8 h-8 rounded-lg bg-surface-700 flex items-center justify-center text-surface-400">
-                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M6 9l3-3-3-3-.7.7L7.6 6 5.3 8.3z" />
-                  <path d="M9 10h4v1H9z" />
-                </svg>
+              <div className="item-icon">
+                <Terminal className="w-4 h-4" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-surface-100 truncate">
-                  {terminal.name}
-                </div>
-                <div className="text-xs text-surface-500 truncate">
-                  {terminal.cwd}
-                </div>
+              <div className="item-content">
+                <div className="item-title">{terminal.name}</div>
+                <div className="item-subtitle">{terminal.cwd}</div>
               </div>
               {terminal.sessionType === 'subagent' && (
-                <span className="badge badge-primary">Subagent</span>
+                <span className="px-2 py-0.5 text-xs font-medium rounded-md bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                  Subagent
+                </span>
               )}
             </button>
           ))}
 
           {filteredTerminals.length === 0 && (
-            <div className="px-4 py-8 text-center text-surface-500">
-              {terminals.length === 0 ? 'No terminals open' : 'No matching terminals'}
+            <div className="py-12 text-center">
+              <Search className="w-10 h-10 mx-auto mb-3 text-slate-600" />
+              <p className="text-slate-500">
+                {terminals.length === 0 ? 'No terminals open' : 'No matching terminals'}
+              </p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-surface-700 text-xs text-surface-500">
-          <div className="flex gap-4">
-            <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">↑↓</kbd> Navigate</span>
-            <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">Enter</kbd> Select</span>
+        <div className="modal-footer-hints">
+          <div className="hint-group">
+            <span className="hint">
+              <kbd className="kbd-premium">↑</kbd>
+              <kbd className="kbd-premium">↓</kbd>
+              <span className="ml-1">Navigate</span>
+            </span>
+            <span className="hint">
+              <kbd className="kbd-premium">Enter</kbd>
+              <span className="ml-1">Select</span>
+            </span>
           </div>
-          <span><kbd className="px-1.5 py-0.5 bg-surface-800 rounded">Esc</kbd> Close</span>
+          <span className="hint">
+            <kbd className="kbd-premium">Ctrl</kbd>
+            <kbd className="kbd-premium">Tab</kbd>
+            <span className="ml-1">Toggle</span>
+          </span>
         </div>
       </div>
     </div>

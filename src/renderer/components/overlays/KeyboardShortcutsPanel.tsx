@@ -1,6 +1,6 @@
 // ============================================================================
 // KEYBOARD SHORTCUTS PANEL
-// Overlay showing all keyboard shortcuts with search and customization
+// Premium cinematic overlay with glass morphism
 // ============================================================================
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
@@ -143,76 +143,64 @@ export function KeyboardShortcutsPanel() {
     <>
     <ConfirmDialog />
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      className="modal-backdrop-premium"
       role="dialog"
       aria-modal="true"
       aria-labelledby="shortcuts-title"
+      onClick={closeHelp}
     >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={closeHelp}
-        aria-hidden="true"
-      />
-
       {/* Panel */}
       <FocusTrap active>
-        <div className="relative w-full max-w-2xl max-h-[80vh] mx-4 bg-surface-900 rounded-xl shadow-2xl border border-surface-700 flex flex-col overflow-hidden">
+        <div
+          className="modal-panel-premium modal-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-surface-800">
+          <div className="modal-header-premium">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary-500/10 flex items-center justify-center">
-                <Keyboard className="w-5 h-5 text-primary-400" />
+              <div className="modal-icon-container icon-info" style={{ width: 44, height: 44, margin: 0 }}>
+                <Keyboard className="w-5 h-5 text-violet-400" />
               </div>
               <div>
-                <h2 id="shortcuts-title" className="text-lg font-semibold text-surface-100">
-                  Keyboard Shortcuts
-                </h2>
-                <p className="text-xs text-surface-500">
+                <h2 id="shortcuts-title">Keyboard Shortcuts</h2>
+                <p className="modal-subtitle">
                   {shortcutsByCategory.size > 0
                     ? `${Array.from(shortcutsByCategory.values()).reduce((a, b) => a + b.length, 0)} shortcuts available`
                     : 'Loading shortcuts...'}
                 </p>
               </div>
             </div>
-            <button
-              onClick={closeHelp}
-              className="p-2 rounded-lg text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition-colors"
-              aria-label="Close shortcuts panel"
-            >
-              <X className="w-5 h-5" />
+            <button onClick={closeHelp} className="modal-close-premium">
+              <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Search */}
-          <div className="px-6 py-3 border-b border-surface-800">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search shortcuts..."
-                className="input w-full pl-10 pr-4 py-2 text-sm"
-                aria-label="Search shortcuts"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded text-surface-500 hover:text-surface-300"
-                  aria-label="Clear search"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+          <div className="modal-search-premium border-b border-white/[0.06]">
+            <Search className="w-4 h-4 search-icon" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search shortcuts..."
+              aria-label="Search shortcuts"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
           {/* Conflicts Warning */}
           {hasConflicts && (
-            <div className="px-6 py-2 bg-warning-500/10 border-b border-warning-500/20">
-              <div className="flex items-center gap-2 text-sm text-warning-400">
+            <div className="px-6 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
+              <div className="flex items-center gap-2 text-sm text-amber-400">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                 <span>
                   {conflicts.length} shortcut conflict{conflicts.length > 1 ? 's' : ''} detected
@@ -222,12 +210,12 @@ export function KeyboardShortcutsPanel() {
           )}
 
           {/* Shortcuts List */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="modal-body-premium p-0">
             {filteredCategories.size === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Search className="w-10 h-10 text-surface-600 mb-3" />
-                <p className="text-surface-400">No shortcuts found</p>
-                <p className="text-sm text-surface-500">
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <Search className="w-12 h-12 text-slate-600 mb-4" />
+                <p className="text-slate-400 font-medium">No shortcuts found</p>
+                <p className="text-sm text-slate-500 mt-1">
                   Try a different search term
                 </p>
               </div>
@@ -254,14 +242,14 @@ export function KeyboardShortcutsPanel() {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-6 py-3 border-t border-surface-800 bg-surface-900/50">
-            <div className="text-xs text-surface-500">
-              Press <kbd className="px-1.5 py-0.5 rounded bg-surface-700 font-mono">Esc</kbd> to close
+          <div className="modal-footer-premium modal-footer-split">
+            <div className="text-xs text-slate-500">
+              Press <kbd className="kbd-premium">Esc</kbd> to close
             </div>
             {hasCustomizations && (
               <button
                 onClick={handleResetAll}
-                className="flex items-center gap-1.5 text-sm text-surface-400 hover:text-surface-200"
+                className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Reset All
@@ -311,23 +299,23 @@ function CategorySection({
       {/* Category Header */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-6 py-2 text-left hover:bg-surface-800/50 transition-colors"
+        className="w-full flex items-center gap-2 px-6 py-2.5 text-left hover:bg-white/[0.03] transition-colors"
         aria-expanded={isExpanded}
       >
         {isExpanded ? (
-          <ChevronDown className="w-4 h-4 text-surface-500" />
+          <ChevronDown className="w-4 h-4 text-slate-500" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-surface-500" />
+          <ChevronRight className="w-4 h-4 text-slate-500" />
         )}
-        <span className="text-sm font-medium text-surface-300">
+        <span className="text-sm font-medium text-slate-300">
           {CATEGORY_LABELS[category]}
         </span>
-        <span className="text-xs text-surface-600">({shortcuts.length})</span>
+        <span className="text-xs text-slate-600">({shortcuts.length})</span>
       </button>
 
       {/* Shortcuts */}
       {isExpanded && (
-        <div className="px-6 pb-2">
+        <div className="px-4 pb-2">
           {shortcuts.map((shortcut) => (
             <ShortcutRow
               key={shortcut.id}
@@ -441,25 +429,26 @@ function ShortcutRow({
   return (
     <div
       className={clsx(
-        'flex items-center justify-between py-2 pl-6 pr-2 rounded-lg',
-        isEditing && 'bg-surface-800',
-        hasConflict && !isEditing && 'bg-warning-500/5'
+        'group flex items-center justify-between py-2.5 px-4 rounded-xl transition-colors',
+        isEditing && 'bg-violet-500/10 border border-violet-500/20',
+        hasConflict && !isEditing && 'bg-amber-500/5',
+        !isEditing && !hasConflict && 'hover:bg-white/[0.03]'
       )}
     >
       {/* Label and Description */}
       <div className="flex-1 min-w-0 mr-4">
         <div className="flex items-center gap-2">
-          <span className="text-sm text-surface-200">{shortcut.label}</span>
+          <span className="text-sm text-slate-200">{shortcut.label}</span>
           {isCustom && !isEditing && (
-            <span className="px-1.5 py-0.5 text-xs rounded bg-primary-500/20 text-primary-400">
+            <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">
               Custom
             </span>
           )}
           {hasConflict && !isEditing && (
-            <AlertTriangle className="w-3.5 h-3.5 text-warning-400" />
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
           )}
         </div>
-        <p className="text-xs text-surface-500 truncate">{shortcut.description}</p>
+        <p className="text-xs text-slate-500 truncate mt-0.5">{shortcut.description}</p>
       </div>
 
       {/* Binding */}
@@ -472,19 +461,19 @@ function ShortcutRow({
               readOnly
               value={bindingToDisplayString(displayBinding)}
               onKeyDown={handleKeyDown}
-              className="w-40 px-3 py-1.5 text-sm text-center bg-surface-700 border border-surface-600 rounded focus:outline-none focus:border-primary-500"
+              className="w-40 px-3 py-1.5 text-sm text-center bg-white/[0.05] border border-violet-500/30 rounded-lg focus:outline-none focus:border-violet-500 text-slate-200"
               placeholder="Press keys..."
             />
             <button
               onClick={handleConfirm}
-              className="p-1.5 rounded text-success-400 hover:bg-success-500/20"
+              className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/20 transition-colors"
               title="Confirm"
             >
               <Check className="w-4 h-4" />
             </button>
             <button
               onClick={handleCancel}
-              className="p-1.5 rounded text-surface-400 hover:bg-surface-700"
+              className="p-1.5 rounded-lg text-slate-400 hover:bg-white/[0.05] transition-colors"
               title="Cancel"
             >
               <X className="w-4 h-4" />
@@ -492,12 +481,12 @@ function ShortcutRow({
           </>
         ) : (
           <>
-            <kbd className="px-2 py-1 text-sm font-mono bg-surface-800 border border-surface-700 rounded text-surface-300">
+            <kbd className="kbd-premium">
               {bindingToDisplayString(displayBinding)}
             </kbd>
             <button
               onClick={onStartEdit}
-              className="p-1.5 rounded text-surface-500 hover:text-surface-300 hover:bg-surface-800 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/[0.05] opacity-0 group-hover:opacity-100 transition-all"
               title="Edit shortcut"
             >
               <Edit2 className="w-3.5 h-3.5" />
@@ -505,7 +494,7 @@ function ShortcutRow({
             {isCustom && (
               <button
                 onClick={onReset}
-                className="p-1.5 rounded text-surface-500 hover:text-surface-300 hover:bg-surface-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/[0.05] transition-colors"
                 title="Reset to default"
               >
                 <RotateCcw className="w-3.5 h-3.5" />

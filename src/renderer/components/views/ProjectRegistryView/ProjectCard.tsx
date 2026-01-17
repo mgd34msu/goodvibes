@@ -1,10 +1,21 @@
 // ============================================================================
-// PROJECT CARD COMPONENT
+// PROJECT CARD COMPONENT - Premium Glass Morphism Design
 // ============================================================================
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Plus, History } from 'lucide-react';
+import {
+  Plus,
+  History,
+  MoreHorizontal,
+  Settings,
+  FileText,
+  Trash2,
+  FolderOpen,
+  Hash,
+  Coins,
+  Calendar,
+} from 'lucide-react';
 import type { RegisteredProject, ProjectTemplate, ProjectAnalytics } from './types';
 
 interface ProjectCardProps {
@@ -44,98 +55,121 @@ export function ProjectCard({
   return (
     <div
       className={clsx(
-        'card p-4 transition-all cursor-pointer',
-        isSelected && 'ring-2 ring-primary-500'
+        'card-hover cursor-pointer',
+        isSelected && 'card-selected'
       )}
       onClick={onSelect}
     >
+      {/* Main Content */}
       <div className="flex items-start gap-4">
-        {/* Project Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-surface-100">{project.name}</h3>
-            {project.settings.tags?.map((tag, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 bg-surface-700 rounded text-xs text-surface-400"
-              >
-                {tag}
-              </span>
-            ))}
+        {/* Left Section: Icon + Info */}
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          {/* Icon */}
+          <div className="card-icon">
+            <FolderOpen className="w-5 h-5" />
           </div>
-          <div className="text-sm text-surface-500 truncate mt-1">{project.path}</div>
-          {project.description && (
-            <p className="text-sm text-surface-400 mt-2">{project.description}</p>
-          )}
 
-          {/* Quick Stats */}
-          <div className="flex items-center gap-4 mt-3 text-xs text-surface-500">
-            <div>Last opened: {formatDate(project.lastOpened)}</div>
-            {analytics && (
-              <>
-                <div>{(analytics.totalSessions ?? 0).toLocaleString()} sessions</div>
-                <div>{formatCurrency(analytics.totalCostUsd ?? 0)} spent</div>
-                <div title={`Input: ${(analytics.inputTokens ?? 0).toLocaleString()} | Output: ${(analytics.outputTokens ?? 0).toLocaleString()} | Cache Read: ${(analytics.cacheReadTokens ?? 0).toLocaleString()} | Cache Write: ${(analytics.cacheWriteTokens ?? 0).toLocaleString()}`}>
-                  {(analytics.totalTokens ?? 0).toLocaleString()} tokens
-                </div>
-              </>
+          {/* Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="card-title-gradient text-base">{project.name}</h3>
+              {project.settings.tags?.map((tag, i) => (
+                <span key={i} className="card-badge">
+                  {tag}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-text-muted truncate mt-1 font-mono">{project.path}</p>
+            {project.description && (
+              <p className="card-description line-clamp-2 mt-2">{project.description}</p>
             )}
+
+            {/* Quick Stats */}
+            <div className="card-meta mt-3">
+              <span className="card-meta-item">
+                <Calendar className="w-3 h-3" />
+                {formatDate(project.lastOpened)}
+              </span>
+              {analytics && (
+                <>
+                  <span className="card-meta-item">
+                    <Hash className="w-3 h-3" />
+                    {(analytics.totalSessions ?? 0).toLocaleString()} sessions
+                  </span>
+                  <span className="card-meta-item">
+                    <Coins className="w-3 h-3" />
+                    {formatCurrency(analytics.totalCostUsd ?? 0)}
+                  </span>
+                  <span
+                    className="card-meta-item"
+                    title={`Input: ${(analytics.inputTokens ?? 0).toLocaleString()} | Output: ${(analytics.outputTokens ?? 0).toLocaleString()} | Cache Read: ${(analytics.cacheReadTokens ?? 0).toLocaleString()} | Cache Write: ${(analytics.cacheWriteTokens ?? 0).toLocaleString()}`}
+                  >
+                    {(analytics.totalTokens ?? 0).toLocaleString()} tokens
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2">
+        {/* Right Section: Actions */}
+        <div className="card-actions" onClick={e => e.stopPropagation()}>
           <button
-            onClick={e => { e.stopPropagation(); onNewSession(); }}
-            className="btn btn-sm btn-primary flex items-center gap-1.5"
+            onClick={onNewSession}
+            className="card-action-primary"
             title="Start a new Claude session for this project"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             New Session
           </button>
           <button
-            onClick={e => { e.stopPropagation(); onOpenPreviousSession(); }}
-            className="btn btn-sm btn-secondary flex items-center gap-1.5"
+            onClick={onOpenPreviousSession}
+            className="card-action-btn card-action-btn-primary"
             title="Open a previous session"
           >
             <History className="w-4 h-4" />
-            Previous
           </button>
           <div className="relative">
             <button
-              onClick={e => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              className="btn btn-sm btn-ghost"
+              onClick={() => setShowMenu(!showMenu)}
+              className="card-action-btn"
+              title="More options"
             >
-              ...
+              <MoreHorizontal className="w-4 h-4" />
             </button>
             {showMenu && (
               <div
-                className="absolute right-0 top-full mt-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-[9959]"
+                className="absolute right-0 top-full mt-1 w-48 card p-1 z-[9959]"
                 onClick={e => e.stopPropagation()}
               >
                 <button
                   onClick={() => { onOpenSettings(); setShowMenu(false); }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 text-surface-300"
+                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors"
                 >
+                  <Settings className="w-4 h-4" />
                   Settings
                 </button>
                 <button
                   onClick={() => { onCreateTemplate(); setShowMenu(false); }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 text-surface-300"
+                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors"
                 >
+                  <FileText className="w-4 h-4" />
                   Create Template
                 </button>
                 {templates.length > 0 && (
                   <div className="relative">
                     <button
                       onClick={() => setShowTemplateMenu(!showTemplateMenu)}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 text-surface-300 flex items-center justify-between"
+                      className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center justify-between transition-colors"
                     >
-                      Apply Template
-                      <span>&gt;</span>
+                      <span className="flex items-center gap-2">
+                        <FileText className="w-4 h-4" />
+                        Apply Template
+                      </span>
+                      <span className="text-text-muted">&#8250;</span>
                     </button>
                     {showTemplateMenu && (
-                      <div className="absolute left-full top-0 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg">
+                      <div className="absolute left-full top-0 w-48 card p-1">
                         {templates.map(template => (
                           <button
                             key={template.id}
@@ -144,7 +178,7 @@ export function ProjectCard({
                               setShowTemplateMenu(false);
                               setShowMenu(false);
                             }}
-                            className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 text-surface-300"
+                            className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary transition-colors"
                           >
                             {template.name}
                           </button>
@@ -153,11 +187,12 @@ export function ProjectCard({
                     )}
                   </div>
                 )}
-                <div className="border-t border-surface-700 my-1" />
+                <div className="card-divider my-1" />
                 <button
                   onClick={() => { onRemove(); setShowMenu(false); }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 text-red-400"
+                  className="w-full px-3 py-2 text-left text-sm rounded-lg hover:bg-error-500/10 text-error-400 flex items-center gap-2 transition-colors"
                 >
+                  <Trash2 className="w-4 h-4" />
                   Remove
                 </button>
               </div>

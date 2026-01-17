@@ -1,5 +1,5 @@
 // ============================================================================
-// TERMINAL VIEW - Main orchestrator component (<200 lines)
+// TERMINAL VIEW - Premium main orchestrator component
 // ============================================================================
 
 import { useCallback, useMemo, useState } from 'react';
@@ -53,7 +53,7 @@ export default function TerminalView() {
   }, [createPlainTerminal, projectsRoot]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-surface-950">
       {/* Terminal Header */}
       <TerminalHeader
         showGitPanel={showGitPanel}
@@ -70,13 +70,14 @@ export default function TerminalView() {
               <GitPanel cwd={activeTerminal.cwd} position="left" />
             )}
 
-            <div className="flex-1 relative bg-[#1a1a2e]">
+            {/* Main Terminal Area */}
+            <div className="flex-1 relative bg-surface-950">
               {terminals.map((terminal) => (
                 <div
                   key={terminal.id}
                   className={clsx(
-                    'absolute inset-0',
-                    terminal.id === activeTerminalId ? 'block' : 'hidden'
+                    'absolute inset-0 transition-opacity duration-150',
+                    terminal.id === activeTerminalId ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                   )}
                 >
                   {terminal.isPreview && terminal.previewSessionId ? (

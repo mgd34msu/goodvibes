@@ -103,7 +103,8 @@ export function useCIStatus(repoInfo: GitHubRemoteInfo | null, currentBranch?: s
   const [ciLoading, setCILoading] = useState(false);
 
   const loadCIStatus = useCallback(async () => {
-    if (!repoInfo || !currentBranch) return;
+    // Don't make API calls if branch is missing or invalid
+    if (!repoInfo || !currentBranch || currentBranch === 'unknown') return;
 
     setCILoading(true);
 
@@ -125,7 +126,7 @@ export function useCIStatus(repoInfo: GitHubRemoteInfo | null, currentBranch?: s
   }, [repoInfo, currentBranch]);
 
   useEffect(() => {
-    if (repoInfo && currentBranch) {
+    if (repoInfo && currentBranch && currentBranch !== 'unknown') {
       loadCIStatus();
     }
   }, [repoInfo, currentBranch, loadCIStatus]);

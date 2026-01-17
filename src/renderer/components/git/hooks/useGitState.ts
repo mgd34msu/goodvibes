@@ -110,12 +110,41 @@ export function useGitState(cwd: string) {
     fetchGitInfo();
   }, [fetchGitInfo]);
 
-  // Auto-refresh (every 3 seconds when panel is open)
+  // Auto-refresh (every 30 seconds when panel is open and window is focused)
   useEffect(() => {
     if (!gitAutoRefresh || !state.isRepo) return;
 
-    const interval = setInterval(fetchGitInfo, 3000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const startInterval = () => {
+      if (interval) clearInterval(interval);
+      interval = setInterval(fetchGitInfo, 30000); // 30 seconds, not 3
+    };
+
+    const stopInterval = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    // Only refresh when window is focused
+    const handleFocus = () => startInterval();
+    const handleBlur = () => stopInterval();
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+
+    // Start if window is already focused
+    if (document.hasFocus()) {
+      startInterval();
+    }
+
+    return () => {
+      stopInterval();
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
   }, [fetchGitInfo, gitAutoRefresh, state.isRepo]);
 
   // Base props for hooks

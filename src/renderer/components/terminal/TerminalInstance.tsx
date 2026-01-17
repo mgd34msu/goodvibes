@@ -84,11 +84,15 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       fontFamily: "'CaskaydiaMonoNerdFontMono', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
       fontSize: 14,
       lineHeight: 1.2,
-      cursorBlink: true,
+      cursorBlink: false,
       cursorStyle: 'bar',
-      cursorWidth: 2,
+      cursorWidth: 1,
       cursorInactiveStyle: 'none',
-      theme: TERMINAL_THEMES[theme],
+      theme: {
+        ...TERMINAL_THEMES[theme],
+        cursor: 'transparent',
+        cursorAccent: 'transparent',
+      },
       allowProposedApi: true,
       scrollOnUserInput: true,
     });
@@ -288,7 +292,11 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   // Handle theme change
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.options.theme = TERMINAL_THEMES[theme];
+      terminalRef.current.options.theme = {
+        ...TERMINAL_THEMES[theme],
+        cursor: 'transparent',
+        cursorAccent: 'transparent',
+      };
     }
   }, [theme]);
 

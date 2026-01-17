@@ -447,10 +447,12 @@ header nav button svg {
   animation: none !important;
 }
 
-/* Ensure XTerm cursor is always visible and not affected by external styles */
-.xterm-cursor {
-  will-change: auto !important;
-  transform: none !important;
+/* Hide XTerm cursor - Claude Code provides its own input feedback */
+/* The cursor jumps around during status line updates which is distracting */
+.xterm-cursor,
+.xterm-cursor-layer {
+  opacity: 0 !important;
+  visibility: hidden !important;
 }
 
 /* The hidden textarea XTerm uses for input must have no transitions */

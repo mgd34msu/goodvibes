@@ -5943,6 +5943,19 @@
     padding: var(--space-4) !important;
   }
 
+  /*
+   * Ensure XTerm.js cursor behavior is not affected by global CSS transitions.
+   * This fixes erratic/jumpy cursor and spacebar not advancing cursor issues.
+   */
+  .xterm-container .xterm,
+  .xterm-container .xterm *,
+  .xterm-container .xterm-cursor,
+  .xterm-container .xterm-cursor-layer,
+  .xterm-container .xterm-helper-textarea {
+    transition: none !important;
+    animation: none !important;
+  }
+
   .code-block {
     padding: var(--space-4) !important;
     border-radius: var(--radius-md);

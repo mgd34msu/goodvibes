@@ -425,6 +425,42 @@ header nav button svg {
   height: 100%;
 }
 
+/*
+ * CRITICAL: Disable all CSS transitions and animations on XTerm.js elements.
+ * Global transitions (e.g., "transition: all 0.15s ease" on inputs) can interfere
+ * with XTerm's cursor rendering, causing erratic/jumpy cursor behavior and
+ * preventing proper cursor movement (e.g., spacebar not advancing cursor).
+ */
+.xterm,
+.xterm *,
+.xterm-viewport,
+.xterm-screen,
+.xterm-rows,
+.xterm-cursor,
+.xterm-cursor-layer,
+.xterm-text-layer,
+.xterm-selection-layer,
+.xterm-link-layer,
+.xterm-decoration-container,
+.xterm-helper-textarea {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Ensure XTerm cursor is always visible and not affected by external styles */
+.xterm-cursor {
+  will-change: auto !important;
+  transform: none !important;
+}
+
+/* The hidden textarea XTerm uses for input must have no transitions */
+.xterm-helper-textarea {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+}
+
 /* ============================================================================
    ANIMATIONS
    ============================================================================ */

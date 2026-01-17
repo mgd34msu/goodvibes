@@ -76,7 +76,9 @@ export default function TerminalView() {
                 <div
                   key={terminal.id}
                   className={clsx(
-                    'absolute inset-0 transition-opacity duration-150',
+                    'absolute inset-0',
+                    // Note: Removed transition-opacity to prevent any interference with XTerm.js cursor rendering.
+                    // Transitions on parent containers can cause layout thrashing that affects terminal cursor behavior.
                     terminal.id === activeTerminalId ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                   )}
                 >

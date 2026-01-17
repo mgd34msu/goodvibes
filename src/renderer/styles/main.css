@@ -738,8 +738,14 @@
     user-drag: none;
   }
 
-  /* Smooth transitions */
-  button, .btn, .tab, input, select, textarea, a {
+  /* Smooth transitions - exclude XTerm.js elements to prevent cursor issues */
+  button:not(.xterm *):not(.xterm-helper-textarea),
+  .btn:not(.xterm *),
+  .tab:not(.xterm *),
+  input:not(.xterm *):not(.xterm-helper-textarea),
+  select:not(.xterm *),
+  textarea:not(.xterm *):not(.xterm-helper-textarea),
+  a:not(.xterm *) {
     transition: all 0.15s ease;
   }
 }

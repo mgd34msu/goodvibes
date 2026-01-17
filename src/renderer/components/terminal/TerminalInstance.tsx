@@ -213,11 +213,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
       if (data.id === id && terminalRef.current) {
         const terminal = terminalRef.current;
         terminal.write(data.data);
-        // Only auto-scroll if user hasn't manually scrolled up
-        // Use ref for immediate access without re-subscribing
-        if (!isUserScrolledUpRef.current) {
-          terminal.scrollToBottom();
-        }
+        // XTerm handles scroll position automatically - no manual scrollToBottom needed
       }
     };
 

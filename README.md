@@ -26,8 +26,8 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/goodvibes.git
-   cd goodvibes
+   git clone https://github.com/mgd34msu/clausitron.git
+   cd clausitron
    ```
 
 2. **Install dependencies**

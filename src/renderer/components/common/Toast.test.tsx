@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { ToastContainer } from './Toast';
 import { useToastStore, toast } from '../../stores/toastStore';
 
@@ -55,7 +55,7 @@ describe('ToastContainer', () => {
     expect(toasts).toHaveLength(4);
   });
 
-  it('removes toast when dismiss button clicked', () => {
+  it('removes toast when dismiss button clicked', async () => {
     act(() => {
       toast.success('Dismissible toast');
     });
@@ -65,7 +65,10 @@ describe('ToastContainer', () => {
     const dismissButton = screen.getByRole('button');
     fireEvent.click(dismissButton);
 
-    expect(screen.queryByText('Dismissible toast')).toBeNull();
+    // Toast has a 200ms exit animation before removal
+    await waitFor(() => {
+      expect(screen.queryByText('Dismissible toast')).toBeNull();
+    }, { timeout: 500 });
   });
 });
 

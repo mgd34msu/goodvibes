@@ -60,3 +60,12 @@ nul
 
 # Project planning (local only)
 project-ideas.md
+
+# Development utility scripts
+recalculate-*.mjs
+recalculate-*.ps1
+
+# Analysis notes
+*-analysis.md
+*-review.md
+enhanced-findings-*.md

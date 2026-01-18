@@ -267,15 +267,54 @@ export async function startPlainTerminal(options: TerminalStartOptions): Promise
   }
 }
 
+// Chunk size for large pastes (4KB is safe for most terminals)
+const PASTE_CHUNK_SIZE = 4096;
+// Delay between chunks in milliseconds
+const PASTE_CHUNK_DELAY_MS = 10;
+
 export function writeToTerminal(id: number, data: string): void {
   const terminal = terminals.get(id);
-  if (terminal) {
-    try {
+  if (!terminal) return;
+
+  try {
+    // For small data, write directly
+    if (data.length <= PASTE_CHUNK_SIZE) {
       terminal.pty.write(data);
-    } catch (error) {
-      logger.error(`Failed to write to terminal ${id}`, error);
+      return;
     }
+
+    // For large data, chunk it to prevent buffer overflow
+    writeChunked(terminal.pty, data);
+  } catch (error) {
+    logger.error(`Failed to write to terminal ${id}`, error);
   }
+}
+
+/**
+ * Write large data in chunks with delays to prevent buffer overflow.
+ * This is necessary because node-pty and terminals have buffer size limits.
+ */
+function writeChunked(ptyProc: pty.IPty, data: string): void {
+  let offset = 0;
+
+  const writeNextChunk = () => {
+    if (offset >= data.length) return;
+
+    const chunk = data.slice(offset, offset + PASTE_CHUNK_SIZE);
+    offset += PASTE_CHUNK_SIZE;
+
+    try {
+      ptyProc.write(chunk);
+
+      if (offset < data.length) {
+        setTimeout(writeNextChunk, PASTE_CHUNK_DELAY_MS);
+      }
+    } catch (error) {
+      logger.error('Failed to write chunk to terminal', error);
+    }
+  };
+
+  writeNextChunk();
 }
 
 export function resizeTerminal(id: number, cols: number, rows: number): void {

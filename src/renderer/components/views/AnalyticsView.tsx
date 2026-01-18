@@ -62,7 +62,7 @@ export default function AnalyticsView() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-6 py-4 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-surface-100">Analytics Dashboard</h1>
@@ -99,7 +99,7 @@ export default function AnalyticsView() {
         </div>
 
         {/* Charts Row */}
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-2 gap-4">
           {/* Left Column - Two stacked charts */}
           <div className="flex flex-col gap-4">
             {/* Cost Over Time */}
@@ -114,22 +114,22 @@ export default function AnalyticsView() {
           </div>
 
           {/* Cost by Project */}
-          <div className="card p-6">
+          <div className="card p-4">
             <h3 className="text-sm font-medium text-surface-100 mb-4">Cost by Project</h3>
             <CostByProject data={analytics?.costByProject ?? {}} projectsRoot={settings.projectsRoot} />
           </div>
         </div>
 
         {/* Tool Usage & Activity Heatmap Row - Tool usage expands, heatmap is compact */}
-        <div className="flex gap-6">
+        <div className="flex gap-4">
           {/* Tool Usage - takes remaining space */}
-          <div className="card p-6 flex-1 min-w-0">
+          <div className="card p-4 flex-1 min-w-0">
             <h3 className="text-sm font-medium text-surface-100 mb-4">Tool Usage</h3>
             <ToolUsageGrid data={toolUsage ?? []} />
           </div>
 
           {/* Activity Heatmap - compact width to fit content */}
-          <div className="card p-6 shrink-0">
+          <div className="card p-4 shrink-0">
             <h3 className="text-sm font-medium text-surface-100 mb-4">Activity Heatmap (Last 12 Weeks)</h3>
             <ActivityHeatmap data={analytics?.sessionsOverTime ?? []} />
           </div>

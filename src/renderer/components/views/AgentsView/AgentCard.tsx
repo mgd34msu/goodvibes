@@ -11,19 +11,21 @@ import {
   Play,
   ChevronRight,
   Zap,
+  Download,
 } from 'lucide-react';
 import type { AgentCardAgent } from './types';
 import { AGENT_ICONS } from './constants';
 
 interface AgentCardProps {
   agent: AgentCardAgent;
-  onUse: () => void;
+  onUse?: () => void;
+  onInstall?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onCopy: () => void;
 }
 
-export function AgentCard({ agent, onUse, onEdit, onDelete, onCopy }: AgentCardProps) {
+export function AgentCard({ agent, onUse, onInstall, onEdit, onDelete, onCopy }: AgentCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in agent;
@@ -89,13 +91,23 @@ export function AgentCard({ agent, onUse, onEdit, onDelete, onCopy }: AgentCardP
 
         {/* Right Section: Actions */}
         <div className="card-actions">
-          <button
-            onClick={onUse}
-            className="card-action-primary"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Use
-          </button>
+          {isBuiltIn ? (
+            <button
+              onClick={onInstall}
+              className="card-action-primary"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Install
+            </button>
+          ) : (
+            <button
+              onClick={onUse}
+              className="card-action-primary"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Use
+            </button>
+          )}
           <button
             onClick={handleCopy}
             className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}

@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   Play,
+  Download,
   Star,
   Clock,
   ChevronRight,
@@ -18,13 +19,14 @@ import type { SkillCardSkill } from './types';
 
 interface SkillCardProps {
   skill: SkillCardSkill;
-  onUse: () => void;
+  onUse?: () => void;
+  onInstall?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onCopy: () => void;
 }
 
-export function SkillCard({ skill, onUse, onEdit, onDelete, onCopy }: SkillCardProps) {
+export function SkillCard({ skill, onUse, onInstall, onEdit, onDelete, onCopy }: SkillCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in skill;
@@ -92,13 +94,23 @@ export function SkillCard({ skill, onUse, onEdit, onDelete, onCopy }: SkillCardP
 
         {/* Right Section: Actions */}
         <div className="card-actions">
-          <button
-            onClick={onUse}
-            className="card-action-primary"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Use
-          </button>
+          {isBuiltIn ? (
+            <button
+              onClick={onInstall}
+              className="card-action-primary"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Install
+            </button>
+          ) : (
+            <button
+              onClick={onUse}
+              className="card-action-primary"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Use
+            </button>
+          )}
           <button
             onClick={handleCopy}
             className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}

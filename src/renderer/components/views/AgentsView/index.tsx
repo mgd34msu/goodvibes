@@ -7,15 +7,17 @@ import { Users, Plus, Settings } from 'lucide-react';
 import { AgentForm } from './AgentForm';
 import { AgentList } from './AgentList';
 import { AgentFilters } from './AgentFilters';
+import { InstallAgentModal } from './InstallAgentModal';
 import { useAgents, useAgentFilters } from './hooks';
 import { useConfirm } from '../../overlays/ConfirmModal';
 import { BUILT_IN_AGENTS } from './constants';
-import type { AgentTemplate } from './types';
+import type { AgentTemplate, BuiltInAgent } from './types';
 
 export default function AgentsView() {
   const { agents, loading, saveAgent, deleteAgent, copyToClipboard } = useAgents();
   const [showForm, setShowForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentTemplate | undefined>();
+  const [installAgent, setInstallAgent] = useState<BuiltInAgent | null>(null);
 
   const { confirm: confirmDelete, ConfirmDialog } = useConfirm({
     title: 'Delete Agent Template',
@@ -66,6 +68,27 @@ export default function AgentsView() {
     setShowForm(false);
     setEditingAgent(undefined);
   };
+
+  const handleInstallAgent = useCallback(
+    async (agent: BuiltInAgent, scope: 'user' | 'project', projectPath: string | null) => {
+      // Create agent template from built-in agent data
+      const agentData: Partial<AgentTemplate> = {
+        name: agent.name,
+        description: agent.description,
+        initialPrompt: agent.initialPrompt,
+        claudeMdContent: agent.claudeMdContent,
+        flags: agent.flags,
+        model: agent.model,
+        permissionMode: agent.permissionMode,
+        allowedTools: agent.allowedTools,
+        deniedTools: agent.deniedTools,
+        cwd: scope === 'project' ? projectPath : null,
+      };
+
+      await saveAgent(agentData, scope === 'project' ? projectPath : null);
+    },
+    [saveAgent]
+  );
 
   return (
     <>
@@ -126,6 +149,7 @@ export default function AgentsView() {
             builtInAgents={filteredBuiltIn.map((a) => ({ ...a, isBuiltIn: true as const }))}
             showBuiltIn={showBuiltIn}
             onUseAgent={handleUse}
+            onInstallAgent={(agent) => setInstallAgent(agent)}
             onEditAgent={handleEdit}
             onDeleteAgent={handleDelete}
             onCopyPrompt={handleCopy}
@@ -154,6 +178,16 @@ export default function AgentsView() {
         </div>
       </div>
     </div>
+
+    {/* Install Agent Modal */}
+    {installAgent && (
+      <InstallAgentModal
+        agent={installAgent}
+        isOpen={!!installAgent}
+        onClose={() => setInstallAgent(null)}
+        onInstall={handleInstallAgent}
+      />
+    )}
     </>
   );
 }

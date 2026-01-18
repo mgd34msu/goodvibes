@@ -2,7 +2,7 @@
 // MEMORY VIEW - CLAUDE.md Editor and Context Management
 // ============================================================================
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useConfirm } from '../../overlays/ConfirmModal';
 import {
   Brain,
@@ -11,12 +11,21 @@ import {
   Copy,
   Check,
   AlertCircle,
+  User,
+  FolderOpen,
 } from 'lucide-react';
 import { FileTree } from './FileTree';
 import { TemplateSelector } from './TemplateSelector';
 import { MarkdownEditor } from './MarkdownEditor';
 import { useMemoryFiles } from './useMemoryFiles';
-import type { MemoryTemplate } from './types';
+import ProjectSelector from '../../shared/ProjectSelector';
+import type { MemoryTemplate, ClaudeMdFile } from './types';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+type ScopeFilter = 'all' | 'user' | 'project';
 
 // ============================================================================
 // MAIN MEMORY VIEW
@@ -24,6 +33,10 @@ import type { MemoryTemplate } from './types';
 
 export default function MemoryView() {
   const [copied, setCopied] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  // Project path stored for future use when loading project-specific CLAUDE.md files
+  const [_selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
 
   // Confirm dialog for unsaved changes
   const { confirm: confirmDiscard, ConfirmDialog } = useConfirm({
@@ -46,6 +59,24 @@ export default function MemoryView() {
     handleSelectFile,
     handleSave,
   } = useMemoryFiles(confirmDiscard);
+
+  // Filter files based on scope selection
+  const filteredFiles = useMemo((): ClaudeMdFile[] => {
+    if (scopeFilter === 'all') {
+      return files;
+    }
+    if (scopeFilter === 'user') {
+      return files.filter((f) => f.scope === 'user');
+    }
+    // 'project' scope shows both project and local files
+    return files.filter((f) => f.scope === 'project' || f.scope === 'local');
+  }, [files, scopeFilter]);
+
+  const handleProjectChange = (projectId: number | null, projectPath: string | null): void => {
+    setSelectedProjectId(projectId);
+    setSelectedProjectPath(projectPath);
+    // Future: Reload CLAUDE.md files for the selected project
+  };
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -107,6 +138,55 @@ export default function MemoryView() {
               </button>
             </div>
           </div>
+
+          {/* Scope Filter */}
+          <div className="flex items-center gap-4 mt-4">
+            <div className="flex items-center gap-1 bg-surface-800 rounded-lg p-1">
+              <button
+                onClick={() => setScopeFilter('all')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center gap-1.5 ${
+                  scopeFilter === 'all'
+                    ? 'bg-accent-purple text-white'
+                    : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setScopeFilter('user')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center gap-1.5 ${
+                  scopeFilter === 'user'
+                    ? 'bg-accent-purple text-white'
+                    : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                User
+              </button>
+              <button
+                onClick={() => setScopeFilter('project')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors flex items-center gap-1.5 ${
+                  scopeFilter === 'project'
+                    ? 'bg-accent-purple text-white'
+                    : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700'
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                Project
+              </button>
+            </div>
+
+            {/* Project Selector - shown when project scope is selected */}
+            {scopeFilter === 'project' && (
+              <div className="flex-1 max-w-xs">
+                <ProjectSelector
+                  scope="project"
+                  selectedProjectId={selectedProjectId}
+                  onProjectChange={handleProjectChange}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Content */}
@@ -114,10 +194,11 @@ export default function MemoryView() {
           {/* Sidebar */}
           <div className="w-64 flex-shrink-0 border-r border-surface-800 p-4 overflow-y-auto">
             <FileTree
-              files={files}
+              files={filteredFiles}
               selectedPath={selectedFile?.path || null}
               onSelect={handleSelectFile}
               onRefresh={loadFiles}
+              scopeFilter={scopeFilter}
             />
 
             <div className="mt-6">

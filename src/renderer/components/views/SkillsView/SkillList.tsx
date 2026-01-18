@@ -11,6 +11,7 @@ interface SkillListProps {
   builtInSkills: (BuiltInSkill & { isBuiltIn: true })[];
   showBuiltIn: boolean;
   onUseSkill: (name: string) => void;
+  onInstallSkill?: (skill: BuiltInSkill & { isBuiltIn: true }) => void;
   onEditSkill: (skill: Skill) => void;
   onDeleteSkill: (id: number) => void;
   onCopyContent: (content: string) => void;
@@ -23,6 +24,7 @@ export function SkillList({
   builtInSkills,
   showBuiltIn,
   onUseSkill,
+  onInstallSkill,
   onEditSkill,
   onDeleteSkill,
   onCopyContent,
@@ -91,7 +93,7 @@ export function SkillList({
               <SkillCard
                 key={skill.name}
                 skill={skill}
-                onUse={() => onUseSkill(skill.name)}
+                onInstall={() => onInstallSkill?.(skill)}
                 onCopy={() => onCopyContent(skill.content)}
               />
             ))}

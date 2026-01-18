@@ -7,15 +7,17 @@ import { Sparkles, Plus, Settings } from 'lucide-react';
 import { SkillForm } from './SkillForm';
 import { SkillList } from './SkillList';
 import { SkillFilters } from './SkillFilters';
+import { InstallSkillModal } from './InstallSkillModal';
 import { useSkills, useSkillFilters } from './hooks';
 import { useConfirm } from '../../overlays/ConfirmModal';
 import { BUILT_IN_SKILLS } from './constants';
-import type { Skill } from './types';
+import type { Skill, BuiltInSkill } from './types';
 
 export default function SkillsView() {
   const { skills, loading, saveSkill, deleteSkill, copyToClipboard } = useSkills();
   const [showForm, setShowForm] = useState(false);
   const [editingSkill, setEditingSkill] = useState<Skill | undefined>();
+  const [installSkill, setInstallSkill] = useState<BuiltInSkill | null>(null);
 
   const { confirm: confirmDelete, ConfirmDialog } = useConfirm({
     title: 'Delete Skill',
@@ -66,9 +68,40 @@ export default function SkillsView() {
     setEditingSkill(undefined);
   };
 
+  const handleOpenInstallModal = (skill: BuiltInSkill & { isBuiltIn: true }) => {
+    // Remove isBuiltIn flag when storing in state
+    const { isBuiltIn, ...skillData } = skill;
+    setInstallSkill(skillData);
+  };
+
+  const handleInstallSkill = async (
+    skill: BuiltInSkill,
+    scope: 'user' | 'project',
+    projectPath: string | null
+  ) => {
+    const skillData: Partial<Skill> = {
+      name: skill.name,
+      description: skill.description,
+      content: skill.content,
+      allowedTools: skill.allowedTools,
+      scope,
+    };
+
+    await saveSkill(skillData, projectPath);
+    setInstallSkill(null);
+  };
+
   return (
     <>
     <ConfirmDialog />
+    {installSkill && (
+      <InstallSkillModal
+        skill={installSkill}
+        isOpen={installSkill !== null}
+        onClose={() => setInstallSkill(null)}
+        onInstall={handleInstallSkill}
+      />
+    )}
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-surface-800">
@@ -125,6 +158,7 @@ export default function SkillsView() {
             builtInSkills={filteredBuiltIn.map((s) => ({ ...s, isBuiltIn: true as const }))}
             showBuiltIn={showBuiltIn}
             onUseSkill={handleUse}
+            onInstallSkill={handleOpenInstallModal}
             onEditSkill={handleEdit}
             onDeleteSkill={handleDelete}
             onCopyContent={handleCopy}

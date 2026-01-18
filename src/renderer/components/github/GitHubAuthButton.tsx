@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { clsx } from 'clsx';
 import type { GitHubUser, GitHubAuthState } from '../../../shared/types/github';
 import { createLogger } from '../../../shared/logger';
+import { DeviceFlowLogin } from './DeviceFlowLogin';
 
 const logger = createLogger('GitHubAuth');
 
@@ -13,12 +14,18 @@ interface GitHubAuthButtonProps {
   onAuthChange?: (isAuthenticated: boolean, user: GitHubUser | null) => void;
   className?: string;
   showUserInfo?: boolean;
+  /** Use device flow for authentication (recommended for desktop apps) */
+  useDeviceFlow?: boolean;
+  /** Show device flow in compact mode */
+  compact?: boolean;
 }
 
 export default function GitHubAuthButton({
   onAuthChange,
   className,
   showUserInfo = true,
+  useDeviceFlow = true,
+  compact = false,
 }: GitHubAuthButtonProps) {
   const [authState, setAuthState] = useState<GitHubAuthState>({
     isAuthenticated: false,
@@ -28,6 +35,7 @@ export default function GitHubAuthButton({
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDeviceFlow, setShowDeviceFlow] = useState(false);
   const isMountedRef = useRef(true);
   const onAuthChangeRef = useRef(onAuthChange);
 
@@ -58,6 +66,11 @@ export default function GitHubAuthButton({
   }, [loadAuthState]);
 
   const handleLogin = async () => {
+    if (useDeviceFlow) {
+      setShowDeviceFlow(true);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -100,6 +113,42 @@ export default function GitHubAuthButton({
       setIsLoading(false);
     }
   };
+
+  const handleDeviceFlowSuccess = useCallback((user: GitHubUser) => {
+    setShowDeviceFlow(false);
+    setAuthState({
+      isAuthenticated: true,
+      user,
+      accessToken: null,
+      tokenExpiresAt: null,
+    });
+    onAuthChange?.(true, user);
+  }, [onAuthChange]);
+
+  const handleDeviceFlowError = useCallback((errorMsg: string) => {
+    setError(errorMsg);
+    // Keep device flow visible so user can retry
+  }, []);
+
+  const handleDeviceFlowCancel = useCallback(() => {
+    setShowDeviceFlow(false);
+    setError(null);
+  }, []);
+
+  // Render device flow login if active
+  if (showDeviceFlow && !authState.isAuthenticated) {
+    return (
+      <div className={clsx('flex flex-col gap-4', className)}>
+        <DeviceFlowLogin
+          onAuthSuccess={handleDeviceFlowSuccess}
+          onAuthError={handleDeviceFlowError}
+          onCancel={handleDeviceFlowCancel}
+          compact={compact}
+          autoOpenBrowser={true}
+        />
+      </div>
+    );
+  }
 
   if (authState.isAuthenticated && authState.user) {
     return (

@@ -16,7 +16,7 @@ import { getDatabase } from '../../database/connection.js';
 import { type SessionRow } from '../../database/mappers.js';
 import {
   sessionIdSchema,
-  paginationLimitSchema,
+  sessionPaginationLimitSchema,
   projectPathSchema,
   sessionSearchQuerySchema,
 } from '../schemas/sessions.js';
@@ -339,7 +339,7 @@ export function registerSessionHandlers(): void {
 
   ipcMain.handle('session:getRecent', withContext('session:getRecent', async (_, limit?: number) => {
     // Validate limit
-    const result = paginationLimitSchema.safeParse(limit);
+    const result = sessionPaginationLimitSchema.safeParse(limit);
     if (!result.success) {
       logger.warn('session:getRecent: Invalid limit', { limit, errors: result.error.issues });
       throw new Error(createValidationError(result.error).error);
@@ -357,7 +357,7 @@ export function registerSessionHandlers(): void {
     }
 
     // Validate limit
-    const limitResult = paginationLimitSchema.safeParse(limit ?? 5);
+    const limitResult = sessionPaginationLimitSchema.safeParse(limit ?? 5);
     if (!limitResult.success) {
       logger.warn('session:getForProject: Invalid limit', { limit, errors: limitResult.error.issues });
       throw new Error(createValidationError(limitResult.error).error);
@@ -409,7 +409,7 @@ export function registerSessionHandlers(): void {
     }
 
     // Validate limit
-    const limitResult = paginationLimitSchema.safeParse(limit ?? 20);
+    const limitResult = sessionPaginationLimitSchema.safeParse(limit ?? 20);
     if (!limitResult.success) {
       logger.warn('session:search: Invalid limit', { limit, errors: limitResult.error.issues });
       throw new Error(createValidationError(limitResult.error).error);

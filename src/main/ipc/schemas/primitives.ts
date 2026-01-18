@@ -102,6 +102,16 @@ export const numericIdSchema = z.number()
   .int('ID must be an integer')
   .positive('ID must be positive');
 
+/**
+ * Pagination limit schema - positive integer with reasonable max
+ * Use .default(N) when importing to set a context-specific default
+ */
+export const paginationLimitSchema = z.number()
+  .int('Limit must be an integer')
+  .positive('Limit must be positive')
+  .max(1000, 'Limit cannot exceed 1000')
+  .optional();
+
 // ============================================================================
 // FILE PATH SCHEMAS
 // ============================================================================

@@ -3,20 +3,16 @@
 // ============================================================================
 
 import { z } from 'zod';
-import { sessionIdSchema, projectPathSchema as baseProjectPathSchema } from './primitives.js';
+import { sessionIdSchema, projectPathSchema as baseProjectPathSchema, paginationLimitSchema as basePaginationLimitSchema } from './primitives.js';
 
 // Re-export sessionIdSchema for convenience
 export { sessionIdSchema };
 
 /**
- * Pagination limit schema - positive integer with reasonable max
+ * Session-specific pagination limit with default of 50
+ * Note: For agency handlers, use paginationLimitSchema from primitives directly
  */
-export const paginationLimitSchema = z.number()
-  .int('Limit must be an integer')
-  .positive('Limit must be positive')
-  .max(1000, 'Limit cannot exceed 1000')
-  .optional()
-  .default(50);
+export const sessionPaginationLimitSchema = basePaginationLimitSchema.default(50);
 
 /**
  * Project path schema - re-export from primitives with path traversal protection
@@ -35,7 +31,7 @@ export const sessionSearchQuerySchema = z.string()
  */
 export const getSessionsForProjectSchema = z.object({
   projectPath: projectPathSchema,
-  limit: paginationLimitSchema,
+  limit: sessionPaginationLimitSchema,
 });
 
 /**
@@ -44,14 +40,14 @@ export const getSessionsForProjectSchema = z.object({
 export const sessionSearchSchema = z.object({
   query: sessionSearchQuerySchema,
   projectPath: projectPathSchema.optional(),
-  limit: paginationLimitSchema,
+  limit: sessionPaginationLimitSchema,
 });
 
 /**
  * Schema for session:getRecent handler
  */
 export const getRecentSessionsSchema = z.object({
-  limit: paginationLimitSchema,
+  limit: sessionPaginationLimitSchema,
 }).optional();
 
 // Type exports for use in handlers

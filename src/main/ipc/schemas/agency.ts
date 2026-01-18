@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { z } from 'zod';
-import { numericIdSchema, sessionIdSchema, filePathSchema } from './primitives.js';
+import { numericIdSchema, sessionIdSchema, filePathSchema, paginationLimitSchema } from './primitives.js';
 
 // ============================================================================
 // BASIC TYPES
@@ -36,14 +36,8 @@ export const searchQuerySchema = z.string()
   .min(1, 'Search query is required')
   .max(500, 'Search query too long');
 
-/**
- * Pagination limit schema
- */
-export const paginationLimitSchema = z.number()
-  .int('Limit must be an integer')
-  .positive('Limit must be positive')
-  .max(1000, 'Limit too large')
-  .optional();
+// Note: paginationLimitSchema is imported from primitives and used internally
+// Do not re-export here - export comes from primitives.ts via index.ts
 
 /**
  * Priority schema for agent/skill ordering

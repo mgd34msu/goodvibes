@@ -1637,7 +1637,7 @@ describe('useAgentFilters hook', () => {
     });
 
     expect(result.current.filteredAgents).toHaveLength(1);
-    expect(result.current.filteredAgents[0].name).toBe('project-agent');
+    expect(result.current.filteredAgents[0]?.name).toBe('project-agent');
   });
 
   it('filters built-in agents by search query', () => {
@@ -1648,7 +1648,7 @@ describe('useAgentFilters hook', () => {
     });
 
     expect(result.current.filteredBuiltIn).toHaveLength(1);
-    expect(result.current.filteredBuiltIn[0].name).toBe('explore');
+    expect(result.current.filteredBuiltIn[0]?.name).toBe('explore');
   });
 
   it('filters by description text', () => {
@@ -1659,7 +1659,7 @@ describe('useAgentFilters hook', () => {
     });
 
     expect(result.current.filteredAgents).toHaveLength(1);
-    expect(result.current.filteredAgents[0].name).toBe('test-agent');
+    expect(result.current.filteredAgents[0]?.name).toBe('test-agent');
   });
 
   it('toggles showBuiltIn state', () => {
@@ -1682,6 +1682,6 @@ describe('useAgentFilters hook', () => {
     });
 
     expect(result.current.filteredAgents).toHaveLength(1);
-    expect(result.current.filteredAgents[0].name).toBe('test-agent');
+    expect(result.current.filteredAgents[0]?.name).toBe('test-agent');
   });
 });

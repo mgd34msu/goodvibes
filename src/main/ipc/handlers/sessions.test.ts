@@ -124,7 +124,7 @@ import * as sessionSummaries from '../../database/sessionSummaries/index.js';
 import { getSessionManager } from '../../services/sessionManager.js';
 import {
   sessionIdSchema,
-  paginationLimitSchema,
+  sessionPaginationLimitSchema,
   projectPathSchema,
   sessionSearchQuerySchema,
 } from '../schemas/sessions.js';
@@ -259,7 +259,7 @@ describe('Session Schema Validation', () => {
     });
   });
 
-  describe('paginationLimitSchema', () => {
+  describe('sessionPaginationLimitSchema', () => {
     describe('valid limits', () => {
       const validLimits = [
         { value: undefined, expected: 50, reason: 'undefined (default)' },
@@ -272,7 +272,7 @@ describe('Session Schema Validation', () => {
 
       validLimits.forEach(({ value, expected, reason }) => {
         it(`accepts ${reason}: ${value} -> ${expected}`, () => {
-          const result = paginationLimitSchema.safeParse(value);
+          const result = sessionPaginationLimitSchema.safeParse(value);
           expect(result.success).toBe(true);
           if (result.success) {
             expect(result.data).toBe(expected);
@@ -299,7 +299,7 @@ describe('Session Schema Validation', () => {
 
       invalidLimits.forEach(({ value, reason }) => {
         it(`rejects ${reason}`, () => {
-          const result = paginationLimitSchema.safeParse(value);
+          const result = sessionPaginationLimitSchema.safeParse(value);
           expect(result.success).toBe(false);
         });
       });

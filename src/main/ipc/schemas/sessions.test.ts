@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sessionIdSchema,
-  paginationLimitSchema,
+  sessionPaginationLimitSchema,
   projectPathSchema,
   sessionSearchQuerySchema,
   getSessionsForProjectSchema,
@@ -98,7 +98,7 @@ describe('sessionIdSchema', () => {
 // PAGINATION LIMIT SCHEMA TESTS
 // ============================================================================
 
-describe('paginationLimitSchema', () => {
+describe('sessionPaginationLimitSchema', () => {
   describe('valid limits', () => {
     const validLimits = [
       { value: undefined, expected: 50, reason: 'undefined (default)' },
@@ -111,7 +111,7 @@ describe('paginationLimitSchema', () => {
 
     validLimits.forEach(({ value, expected, reason }) => {
       it(`accepts ${reason}: ${value} -> ${expected}`, () => {
-        const result = paginationLimitSchema.safeParse(value);
+        const result = sessionPaginationLimitSchema.safeParse(value);
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.data).toBe(expected);
@@ -138,7 +138,7 @@ describe('paginationLimitSchema', () => {
 
     invalidLimits.forEach(({ value, reason }) => {
       it(`rejects ${reason}`, () => {
-        const result = paginationLimitSchema.safeParse(value);
+        const result = sessionPaginationLimitSchema.safeParse(value);
         expect(result.success).toBe(false);
       });
     });
@@ -511,7 +511,7 @@ describe('Security edge cases', () => {
     });
 
     it('rejects object with valueOf for limit', () => {
-      const result = paginationLimitSchema.safeParse({ valueOf: () => 10 });
+      const result = sessionPaginationLimitSchema.safeParse({ valueOf: () => 10 });
       expect(result.success).toBe(false);
     });
   });

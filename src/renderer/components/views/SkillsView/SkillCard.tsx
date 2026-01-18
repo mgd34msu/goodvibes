@@ -39,16 +39,18 @@ export function SkillCard({ skill, onUse, onEdit, onDelete, onCopy }: SkillCardP
     <div className="card-hover group">
       {/* Main Content */}
       <div className="flex items-start justify-between gap-4">
-        {/* Left Section: Expand + Icon + Info */}
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          {/* Expand Button */}
-          <button
-            onClick={() => setExpanded(!expanded)}
+        {/* Left Section: Expand + Icon + Info (clickable to expand/collapse) */}
+        <div
+          className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {/* Expand Indicator */}
+          <div
             className={`card-expand-btn mt-0.5 ${expanded ? 'expanded' : ''}`}
-            aria-label={expanded ? 'Collapse' : 'Expand'}
+            aria-hidden="true"
           >
             <ChevronRight className="w-4 h-4" />
-          </button>
+          </div>
 
           {/* Icon */}
           <div className="card-icon">

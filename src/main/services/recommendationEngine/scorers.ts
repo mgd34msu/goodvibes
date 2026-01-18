@@ -177,8 +177,13 @@ export async function searchAgentsForPrompt(
           });
         }
       }
-    } catch {
-      // Ignore fallback errors
+    } catch (fallbackError) {
+      // Popular agents fallback also failed - database may be unavailable or corrupted.
+      // Log at debug level since primary search already logged and caller handles empty results.
+      logger.debug('Agent fallback search also failed', {
+        operation: 'searchAgentsForPrompt',
+        errorMessage: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      });
     }
   }
 
@@ -294,8 +299,13 @@ export async function searchSkillsForPrompt(
           });
         }
       }
-    } catch {
-      // Ignore fallback errors
+    } catch (fallbackError) {
+      // Popular skills fallback also failed - database may be unavailable or corrupted.
+      // Log at debug level since primary search already logged and caller handles empty results.
+      logger.debug('Skill fallback search also failed', {
+        operation: 'searchSkillsForPrompt',
+        errorMessage: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      });
     }
   }
 

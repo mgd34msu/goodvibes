@@ -121,14 +121,19 @@ export async function startStdioServer(
         logger.debug(`MCP ${server.name} stdout: ${output}`);
 
         // Try to parse as JSON to detect tools
+        // Note: MCP servers emit both JSON and non-JSON output, so parse errors
+        // are expected and intentionally silenced - this is NOT an error condition
         try {
           const json = JSON.parse(output);
           if (json.tools) {
             serverInfo.tools = json.tools;
             updateMCPServer(server.id, { toolCount: json.tools.length });
+            logger.debug(`MCP ${server.name} registered ${json.tools.length} tools`);
           }
         } catch {
-          // Not JSON, ignore
+          // Expected: Not JSON output (e.g., status messages, logs). MCP servers
+          // commonly emit non-JSON output alongside JSON tool registrations.
+          // This is normal operation, not an error condition.
         }
 
         // Mark as connected on first output

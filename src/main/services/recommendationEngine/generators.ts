@@ -200,8 +200,13 @@ export async function analyzeProjectContext(
         // TypeScript
         if (depLower === 'typescript') context.hasTypeScript = true;
       }
-    } catch {
-      // No package.json or parse error
+    } catch (error) {
+      // package.json may not exist or may be malformed - this is expected for
+      // non-Node.js projects. Log at debug level for debugging purposes.
+      logger.debug('Could not read package.json', {
+        projectPath,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
 
     // Check for TypeScript config
@@ -210,7 +215,8 @@ export async function analyzeProjectContext(
       context.hasTypeScript = true;
       context.technologies.push('typescript');
     } catch {
-      // No tsconfig
+      // tsconfig.json not found - project does not use TypeScript configuration.
+      // This is expected for JavaScript-only projects.
     }
 
     // Check for Docker
@@ -219,12 +225,14 @@ export async function analyzeProjectContext(
       context.hasDocker = true;
       context.technologies.push('docker');
     } catch {
+      // Dockerfile not found, check for docker-compose.yml as fallback
       try {
         await fs.access(path.join(projectPath, 'docker-compose.yml'));
         context.hasDocker = true;
         context.technologies.push('docker');
       } catch {
-        // No Docker
+        // Neither Dockerfile nor docker-compose.yml found - project does not use Docker.
+        // This is expected for non-containerized projects.
       }
     }
 
@@ -239,7 +247,8 @@ export async function analyzeProjectContext(
             break;
           }
         } catch {
-          // Dir doesn't exist
+          // Test directory not found at this path - continue checking other common locations.
+          // This is expected as most projects only have one of these directories.
         }
       }
     }

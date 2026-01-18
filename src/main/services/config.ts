@@ -116,13 +116,26 @@ class ConfigManager {
       };
 
       // Load user config if exists
-      await this.loadConfig();
+      const loadResult = await this.loadConfig();
 
       // Apply environment overrides
       this.applyEnvironmentOverrides();
 
       this.initialized = true;
-      logger.info('Configuration initialized', { configPath: this.configPath });
+
+      // Log initialization result with config load status
+      if (loadResult.success) {
+        logger.info('Configuration initialized', {
+          configPath: this.configPath,
+          usingDefaults: loadResult.usingDefaults,
+        });
+      } else {
+        // Config loaded with fallback to defaults due to error
+        logger.info('Configuration initialized with defaults due to config load error', {
+          configPath: this.configPath,
+          configLoadError: loadResult.error?.message,
+        });
+      }
     } catch (error) {
       logger.error('Failed to initialize config', error);
       throw error;
@@ -149,16 +162,36 @@ class ConfigManager {
     return possiblePaths[0];
   }
 
-  private async loadConfig(): Promise<void> {
+  /**
+   * Loads user configuration from disk.
+   * @returns Object indicating success status and whether defaults are being used
+   */
+  private async loadConfig(): Promise<{ success: boolean; usingDefaults: boolean; error?: Error }> {
+    if (!fs.existsSync(this.configPath)) {
+      logger.debug('No user config file found, using defaults', { configPath: this.configPath });
+      return { success: true, usingDefaults: true };
+    }
+
     try {
-      if (fs.existsSync(this.configPath)) {
-        const content = await fs.promises.readFile(this.configPath, 'utf-8');
-        const userConfig = JSON.parse(content);
-        this.config = this.mergeConfig(this.config, userConfig);
-        logger.debug('Loaded user config');
-      }
+      const content = await fs.promises.readFile(this.configPath, 'utf-8');
+      const userConfig = JSON.parse(content);
+      this.config = this.mergeConfig(this.config, userConfig);
+      logger.debug('Loaded user config successfully', { configPath: this.configPath });
+      return { success: true, usingDefaults: false };
     } catch (error) {
-      logger.warn('Failed to load user config, using defaults', error);
+      const configError = error instanceof Error ? error : new Error(String(error));
+
+      // Determine error type for better logging context
+      const errorType = error instanceof SyntaxError ? 'JSON_PARSE_ERROR' : 'FILE_READ_ERROR';
+
+      logger.warn('Failed to load user config, using defaults', configError, {
+        configPath: this.configPath,
+        errorType,
+        errorMessage: configError.message,
+      });
+
+      // Return result indicating partial failure - caller knows defaults are being used due to error
+      return { success: false, usingDefaults: true, error: configError };
     }
   }
 

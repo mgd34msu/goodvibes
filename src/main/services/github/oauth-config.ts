@@ -57,8 +57,13 @@ export function getOAuthConfig(): OAuthConfigStatus {
         }
       }
     }
-  } catch {
-    // Ignore errors
+  } catch (error) {
+    // Bundled config read/parse errors are logged at debug level since this
+    // is a fallback configuration source and may not exist in all deployments.
+    logger.debug('Failed to read bundled OAuth config', {
+      operation: 'getOAuthConfig',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
   }
 
   // Check legacy user-saved credentials

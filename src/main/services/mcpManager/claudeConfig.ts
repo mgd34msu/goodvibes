@@ -18,20 +18,29 @@ const logger = new Logger('MCPManager');
 
 /**
  * Read .mcp.json from project
+ * @returns The parsed config, or null if the file doesn't exist
+ * @throws Error if the file exists but cannot be read or parsed
  */
 export async function readMCPConfig(projectPath: string): Promise<MCPProjectConfig | null> {
   const configPath = path.join(projectPath, '.mcp.json');
 
-  if (existsSync(configPath)) {
-    try {
-      const content = await fs.readFile(configPath, 'utf-8');
-      return JSON.parse(content);
-    } catch (error) {
-      logger.warn(`Failed to read .mcp.json: ${configPath}`, error);
-    }
+  if (!existsSync(configPath)) {
+    // File doesn't exist - this is a normal condition, not an error
+    return null;
   }
 
-  return null;
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    // File exists but couldn't be read or parsed - this IS an error
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to read .mcp.json: ${configPath}`, error, {
+      operation: 'readMCPConfig',
+      configPath,
+    });
+    throw new Error(`Failed to read MCP config at ${configPath}: ${errorMessage}`);
+  }
 }
 
 /**
@@ -52,20 +61,29 @@ export async function writeMCPConfig(
 
 /**
  * Read user's claude.json
+ * @returns The parsed config, or null if the file doesn't exist
+ * @throws Error if the file exists but cannot be read or parsed
  */
 export async function readUserClaudeConfig(): Promise<Record<string, unknown> | null> {
   const configPath = path.join(os.homedir(), '.claude.json');
 
-  if (existsSync(configPath)) {
-    try {
-      const content = await fs.readFile(configPath, 'utf-8');
-      return JSON.parse(content);
-    } catch (error) {
-      logger.warn(`Failed to read .claude.json`, error);
-    }
+  if (!existsSync(configPath)) {
+    // File doesn't exist - this is a normal condition, not an error
+    return null;
   }
 
-  return null;
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    // File exists but couldn't be read or parsed - this IS an error
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to read user claude config at ${configPath}`, error, {
+      operation: 'readUserClaudeConfig',
+      configPath,
+    });
+    throw new Error(`Failed to read user claude config at ${configPath}: ${errorMessage}`);
+  }
 }
 
 // ============================================================================
@@ -74,6 +92,7 @@ export async function readUserClaudeConfig(): Promise<Record<string, unknown> | 
 
 /**
  * Sync database servers to Claude config files
+ * @throws Error if reading or writing config files fails
  */
 export async function syncToClaudeConfig(projectPath?: string): Promise<void> {
   const servers = getAllMCPServers();
@@ -113,15 +132,36 @@ export async function syncToClaudeConfig(projectPath?: string): Promise<void> {
 
   // Write user config
   if (Object.keys(userServers).length > 0) {
-    const userConfig = await readUserClaudeConfig() || {};
-    userConfig.mcpServers = userServers;
     const userConfigPath = path.join(os.homedir(), '.claude.json');
-    await fs.writeFile(userConfigPath, JSON.stringify(userConfig, null, 2), 'utf-8');
-    logger.info('Updated user MCP config');
+    try {
+      // readUserClaudeConfig returns null if file doesn't exist, throws on errors
+      const userConfig = await readUserClaudeConfig() ?? {};
+      userConfig.mcpServers = userServers;
+      await fs.writeFile(userConfigPath, JSON.stringify(userConfig, null, 2), 'utf-8');
+      logger.info('Updated user MCP config');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to sync user MCP config to ${userConfigPath}`, error, {
+        operation: 'syncToClaudeConfig',
+        configPath: userConfigPath,
+        serverCount: Object.keys(userServers).length,
+      });
+      throw new Error(`Failed to sync user MCP config: ${errorMessage}`);
+    }
   }
 
   // Write project config
   if (projectPath && Object.keys(projectServers).length > 0) {
-    await writeMCPConfig(projectPath, { mcpServers: projectServers });
+    try {
+      await writeMCPConfig(projectPath, { mcpServers: projectServers });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to sync project MCP config to ${projectPath}`, error, {
+        operation: 'syncToClaudeConfig',
+        projectPath,
+        serverCount: Object.keys(projectServers).length,
+      });
+      throw new Error(`Failed to sync project MCP config: ${errorMessage}`);
+    }
   }
 }

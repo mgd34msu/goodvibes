@@ -201,8 +201,10 @@ export class Logger {
       } else if (typeof entry.data === 'object') {
         try {
           output += `\n  ${JSON.stringify(entry.data, null, 2)}`;
-        } catch {
-          output += `\n  [Unserializable data]`;
+        } catch (serializationError) {
+          // Object contains circular references or non-serializable values
+          // Log a fallback message - we can't use the logger here to avoid recursion
+          output += `\n  [Unserializable data: ${serializationError instanceof Error ? serializationError.message : 'unknown error'}]`;
         }
       } else {
         output += ` ${entry.data}`;

@@ -245,7 +245,12 @@ export class HookServerService extends EventEmitter {
           response.message = result.message;
         }
       } catch (error) {
-        logger.error(`Handler error for ${eventType}`, error);
+        logger.error(`Handler error for ${eventType}`, error, {
+          sessionId: payload.session_id || payload.sessionId,
+          toolName: payload.tool_name || payload.toolName,
+          workingDirectory: payload.working_directory || payload.workingDirectory,
+        });
+        // Continue to next handler - one failing handler shouldn't block others
       }
     }
 

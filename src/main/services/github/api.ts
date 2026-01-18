@@ -91,8 +91,17 @@ export async function verifyToken(accessToken: string): Promise<boolean> {
       },
     });
 
+    if (!response.ok) {
+      logger.debug('Token verification failed', { status: response.status });
+    }
     return response.ok;
-  } catch {
+  } catch (error) {
+    // Network errors during token verification indicate connectivity issues or invalid tokens.
+    // Log at debug level since this is a common scenario during offline/network transitions.
+    logger.debug('Token verification error', {
+      operation: 'verifyToken',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

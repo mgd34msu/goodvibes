@@ -91,7 +91,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       return result;
     } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Unknown error' };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to create terminal', {
+        cwd,
+        name,
+        resumeSessionId,
+        error: errorMessage,
+      });
+      return { error: errorMessage };
     }
   },
 
@@ -126,7 +133,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       return result;
     } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Unknown error' };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to create plain terminal', {
+        cwd,
+        name,
+        error: errorMessage,
+      });
+      return { error: errorMessage };
     }
   },
 

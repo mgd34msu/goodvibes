@@ -74,9 +74,14 @@ function isValidShellPath(shellPath: string): boolean {
         return false;
       }
       return true;
-    } catch {
+    } catch (error) {
       // File doesn't exist or can't be accessed
-      logger.warn('Shell path does not exist or is not accessible', { shellPath });
+      const errorCode = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : 'UNKNOWN';
+      logger.warn('Shell path does not exist or is not accessible', {
+        shellPath,
+        errorCode,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }
@@ -115,8 +120,13 @@ function isValidWorkingDirectory(cwd: string): boolean {
       return false;
     }
     return true;
-  } catch {
-    logger.warn('Working directory does not exist', { cwd });
+  } catch (error) {
+    const errorCode = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : 'UNKNOWN';
+    logger.warn('Working directory does not exist or is not accessible', {
+      cwd,
+      errorCode,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

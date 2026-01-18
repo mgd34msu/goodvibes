@@ -100,8 +100,11 @@ export async function configureClaudeHooks(): Promise<boolean> {
         const content = await fs.readFile(CLAUDE_SETTINGS_PATH, 'utf-8');
         settings = JSON.parse(content);
         logger.debug('Read existing Claude settings.json');
-      } catch {
-        logger.warn('Failed to parse existing Claude settings.json, starting fresh');
+      } catch (error) {
+        logger.warn('Failed to parse existing Claude settings.json, starting fresh', {
+          error: error instanceof Error ? error.message : String(error),
+          path: CLAUDE_SETTINGS_PATH,
+        });
         settings = {};
       }
     }

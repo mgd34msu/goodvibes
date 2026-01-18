@@ -110,14 +110,18 @@ class HeadlessRunnerService extends EventEmitter {
               logger.info(`Detected Claude CLI at: ${cmdPath}`);
               resolve();
             } else {
-              reject();
+              reject(new Error(`Claude CLI at ${cmdPath} exited with code ${code}`));
             }
           });
           result.on('error', reject);
         });
         break;
-      } catch {
-        // Try next path
+      } catch (error) {
+        // Log the failure at debug level and try the next path
+        // This is expected behavior as we're probing multiple locations
+        logger.debug(`Claude CLI not found at: ${cmdPath}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

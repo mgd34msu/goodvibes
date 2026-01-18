@@ -75,7 +75,17 @@ export function createSessionSummariesTables(): void {
       )
     `);
   } catch (error) {
-    logger.debug('Session summaries FTS table already exists or creation failed', { error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // FTS5 tables don't support IF NOT EXISTS properly in all SQLite versions
+    // "already exists" is expected on subsequent runs, other errors are real problems
+    if (errorMessage.includes('already exists')) {
+      logger.debug('Session summaries FTS table already exists');
+    } else {
+      logger.error('Failed to create session summaries FTS table', error, {
+        tableName: 'session_summaries_fts',
+      });
+      // Don't throw - FTS is optional functionality, app can work without it
+    }
   }
 
   // Create triggers for FTS
@@ -103,7 +113,17 @@ export function createSessionSummariesTables(): void {
       END
     `);
   } catch (error) {
-    logger.debug('Session summaries FTS triggers already exist or creation failed', { error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Triggers use IF NOT EXISTS, but some SQLite versions may still error
+    // "already exists" is expected on subsequent runs, other errors are real problems
+    if (errorMessage.includes('already exists')) {
+      logger.debug('Session summaries FTS triggers already exist');
+    } else {
+      logger.error('Failed to create session summaries FTS triggers', error, {
+        triggers: ['session_summaries_ai', 'session_summaries_ad', 'session_summaries_au'],
+      });
+      // Don't throw - FTS triggers are optional, app can work without them
+    }
   }
 
   // Create indexes

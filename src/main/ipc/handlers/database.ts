@@ -189,8 +189,9 @@ export function registerDatabaseHandlers(): void {
     const validation = validateInput(createTagSchema, data, 'create-tag');
     if (!validation.success) return validation.error;
     const { name, color } = validation.data;
-    db.createTag(name, color);
-    return true;
+    // Returns true if tag was created, false if it already exists
+    // Throws on actual database errors
+    return db.createTag(name, color);
   }));
 
   ipcMain.handle('delete-tag', withContext('delete-tag', async (_, id: unknown) => {
@@ -204,8 +205,9 @@ export function registerDatabaseHandlers(): void {
     const validation = validateInput(sessionTagSchema, data, 'add-tag-to-session');
     if (!validation.success) return validation.error;
     const { sessionId, tagId } = validation.data;
-    db.addTagToSession(sessionId, tagId);
-    return true;
+    // Returns true if association was created, false if it already exists
+    // Throws on actual database errors
+    return db.addTagToSession(sessionId, tagId);
   }));
 
   ipcMain.handle('remove-tag-from-session', withContext('remove-tag-from-session', async (_, data: unknown) => {

@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createLogger } from '../../../../shared/logger';
 import { formatTimestamp } from '../../../../shared/dateUtils';
+import { toast } from '../../../stores/toastStore';
 import type { ClaudeMdFile } from './types';
 
 const logger = createLogger('MemoryView');
@@ -102,6 +103,7 @@ export function useMemoryFiles(
       }
     } catch (error) {
       logger.error('Failed to load CLAUDE.md files:', error);
+      toast.error('Failed to load memory files');
       // Set default empty files on error
       const defaultFiles: ClaudeMdFile[] = [
         {
@@ -198,8 +200,10 @@ export function useMemoryFiles(
             : f
         )
       );
+      toast.success('Memory file saved');
     } catch (error) {
       logger.error('Failed to save CLAUDE.md:', error);
+      toast.error('Failed to save memory file');
     } finally {
       setSaving(false);
     }

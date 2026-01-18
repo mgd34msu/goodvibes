@@ -8,6 +8,10 @@ import { clsx } from 'clsx';
 import { Search, Command } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { VIEWS } from '../../../shared/constants';
+import { toast } from '../../stores/toastStore';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('CommandPalette');
 
 interface CommandItem {
   id: string;
@@ -74,10 +78,15 @@ export function CommandPalette(): React.JSX.Element | null {
       description: 'Switch between light and dark mode',
       category: 'Settings',
       action: async () => {
-        const current = await window.goodvibes.getSetting('theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        await window.goodvibes.setSetting('theme', next);
-        close();
+        try {
+          const current = await window.goodvibes.getSetting('theme');
+          const next = current === 'dark' ? 'light' : 'dark';
+          await window.goodvibes.setSetting('theme', next);
+          close();
+        } catch (error) {
+          logger.error('Failed to toggle theme:', error);
+          toast.error('Failed to toggle theme');
+        }
       },
     },
 

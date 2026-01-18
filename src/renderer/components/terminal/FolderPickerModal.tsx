@@ -7,6 +7,10 @@ import { clsx } from 'clsx';
 import { Folder } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { useTerminalStore } from '../../stores/terminalStore';
+import { toast } from '../../stores/toastStore';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('FolderPickerModal');
 
 // ============================================================================
 // TYPES
@@ -32,24 +36,46 @@ export function FolderPickerModal(): React.JSX.Element | null {
   // Load recent projects when modal opens
   useEffect(() => {
     if (isOpen) {
-      window.goodvibes.getRecentProjects().then(setRecentProjects);
+      window.goodvibes.getRecentProjects()
+        .then(setRecentProjects)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          logger.error('Failed to load recent projects', { error: message });
+          toast.error('Failed to load recent projects', { title: 'File Error' });
+        });
     }
   }, [isOpen]);
 
   const handleSelectFolder = async () => {
-    const folder = await window.goodvibes.selectFolder();
-    if (folder) {
-      setSelectedFolder(folder);
+    try {
+      const folder = await window.goodvibes.selectFolder();
+      if (folder) {
+        setSelectedFolder(folder);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to open folder dialog', { error: message });
+      toast.error('Failed to open folder', { title: 'File Error' });
     }
   };
 
   const handleStart = async () => {
     if (!selectedFolder) return;
 
-    const name = selectedFolder.split(/[/\\]/).pop() || 'Terminal';
-    await createTerminal(selectedFolder, name);
-    setSelectedFolder(null);
-    close();
+    try {
+      const name = selectedFolder.split(/[/\\]/).pop() || 'Terminal';
+      const result = await createTerminal(selectedFolder, name);
+      if (result.error) {
+        // Error toast is already shown by terminalStore
+        return;
+      }
+      setSelectedFolder(null);
+      close();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to start terminal session', { error: message, folder: selectedFolder });
+      toast.error('Failed to start session', { title: 'Session Error' });
+    }
   };
 
   const handleClose = () => {

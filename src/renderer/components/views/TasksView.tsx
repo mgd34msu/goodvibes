@@ -26,6 +26,9 @@ export default function TasksView() {
       setNewNoteContent('');
       toast.success('Task created');
     },
+    onError: () => {
+      toast.error('Failed to create task');
+    },
   });
 
   const statusMutation = useMutation({
@@ -34,6 +37,9 @@ export default function TasksView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
     },
+    onError: () => {
+      toast.error('Failed to update task status');
+    },
   });
 
   const deleteMutation = useMutation({
@@ -41,6 +47,9 @@ export default function TasksView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       toast.info('Task deleted');
+    },
+    onError: () => {
+      toast.error('Failed to delete task');
     },
   });
 

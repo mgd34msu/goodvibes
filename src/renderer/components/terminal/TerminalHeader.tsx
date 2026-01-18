@@ -7,7 +7,11 @@ import { clsx } from 'clsx';
 import { useTerminalStore } from '../../stores/terminalStore';
 import { useAppStore } from '../../stores/appStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { toast } from '../../stores/toastStore';
+import { createLogger } from '../../../shared/logger';
 import type { TerminalHeaderProps } from './types';
+
+const logger = createLogger('TerminalHeader');
 
 interface RecentSession {
   sessionId: string;
@@ -55,8 +59,10 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
           firstPrompt: session.firstPrompt,
         });
       }
-    }).catch(() => {
-      // Ignore errors
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to load most recent session', { error: message });
+      // Don't show toast for this - it's background loading, not user-initiated
     });
   }, []);
 
@@ -67,16 +73,34 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
 
   const handleNewTerminal = useCallback(async () => {
     setIsDropdownOpen(false);
-    // Use projectsRoot setting if defined, or fall back to most recent project
-    let cwd = projectsRoot;
-    if (!cwd) {
-      const recentProjects = await window.goodvibes.getRecentProjects();
-      if (recentProjects.length > 0) {
-        cwd = recentProjects[0].path;
+    try {
+      // Use projectsRoot setting if defined, or fall back to most recent project
+      let cwd = projectsRoot;
+      if (!cwd) {
+        try {
+          const recentProjects = await window.goodvibes.getRecentProjects();
+          if (recentProjects.length > 0) {
+            cwd = recentProjects[0].path;
+          }
+        } catch (recentError: unknown) {
+          const message = recentError instanceof Error ? recentError.message : 'Unknown error';
+          logger.error('Failed to get recent projects', { error: message });
+          toast.error('Failed to get recent projects', { title: 'File Error' });
+          return;
+        }
       }
-    }
-    if (cwd) {
-      await createPlainTerminal(cwd);
+      if (cwd) {
+        const result = await createPlainTerminal(cwd);
+        if (result.error) {
+          toast.error('Failed to create terminal', { title: 'Terminal Error' });
+        }
+      } else {
+        toast.warning('No project folder available. Please open a folder first.', { title: 'No Folder' });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to create new terminal', { error: message });
+      toast.error('Failed to create terminal', { title: 'Terminal Error' });
     }
   }, [createPlainTerminal, projectsRoot]);
 
@@ -88,7 +112,17 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
   const handleQuickRestart = useCallback(async () => {
     setIsDropdownOpen(false);
     if (recentSession) {
-      await createTerminal(recentSession.cwd, undefined, recentSession.sessionId);
+      try {
+        const result = await createTerminal(recentSession.cwd, undefined, recentSession.sessionId);
+        if (result.error) {
+          // Toast already shown by terminalStore
+          return;
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('Failed to restart session', { error: message, sessionId: recentSession.sessionId });
+        toast.error('Failed to restart session', { title: 'Session Error' });
+      }
     }
   }, [createTerminal, recentSession]);
 

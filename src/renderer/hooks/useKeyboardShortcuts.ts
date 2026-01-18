@@ -1,6 +1,7 @@
 // ============================================================================
 // KEYBOARD SHORTCUTS HOOK
-// Global shortcut registry with conflict detection and customization
+// Global shortcut registry with conflict detection, customization, and
+// error-resilient persistence
 // ============================================================================
 
 import { useEffect, useCallback, useMemo } from 'react';
@@ -9,6 +10,13 @@ import { useAppStore } from '../stores/appStore';
 import { useTerminalStore } from '../stores/terminalStore';
 import { VIEWS, type ViewName } from '../../shared/constants';
 import { createLogger } from '../../shared/logger';
+import {
+  type PersistenceSchema,
+  loadFromLocalStorage,
+  saveToLocalStorage,
+  removeFromLocalStorage,
+  validators,
+} from '../utils/persistenceRecovery';
 
 const logger = createLogger('KeyboardShortcuts');
 
@@ -48,6 +56,118 @@ export interface ShortcutConflict {
   shortcutId: string;
   conflictingId: string;
   binding: KeyBinding;
+}
+
+// ============================================================================
+// PERSISTENCE SCHEMA AND HELPERS
+// ============================================================================
+
+/**
+ * Type for persisted custom bindings (Record format for JSON serialization)
+ */
+interface PersistedBindings {
+  [shortcutId: string]: KeyBinding;
+}
+
+/**
+ * Validator for KeyBinding objects
+ */
+function isValidKeyBinding(value: unknown): value is KeyBinding {
+  if (!validators.isObject(value)) return false;
+  const obj = value as Record<string, unknown>;
+
+  // key is required and must be a string
+  if (!validators.isString(obj.key)) return false;
+
+  // Optional modifier keys must be booleans if present
+  if (obj.ctrlKey !== undefined && !validators.isBoolean(obj.ctrlKey)) return false;
+  if (obj.shiftKey !== undefined && !validators.isBoolean(obj.shiftKey)) return false;
+  if (obj.altKey !== undefined && !validators.isBoolean(obj.altKey)) return false;
+  if (obj.metaKey !== undefined && !validators.isBoolean(obj.metaKey)) return false;
+
+  return true;
+}
+
+/**
+ * Schema for persisted shortcut bindings with validation
+ */
+const shortcutsSchema: PersistenceSchema<PersistedBindings> = {
+  name: 'KeyboardShortcuts',
+  defaults: {},
+  // Custom validation handled in validatePersistedBindings
+};
+
+/**
+ * Storage options for shortcuts
+ */
+const shortcutsStorageOptions = {
+  key: 'goodvibes-shortcuts',
+  useSessionStorage: false,
+};
+
+/**
+ * Validate and recover persisted bindings.
+ * Invalid bindings are silently dropped (recovered to no binding).
+ */
+function validatePersistedBindings(data: unknown): Map<string, KeyBinding> {
+  const validBindings = new Map<string, KeyBinding>();
+
+  if (!validators.isObject(data)) {
+    logger.warn('Persisted shortcuts data is not an object, using empty bindings');
+    return validBindings;
+  }
+
+  const obj = data as Record<string, unknown>;
+  let recoveredCount = 0;
+
+  for (const [id, binding] of Object.entries(obj)) {
+    if (!validators.isString(id) || id.length === 0) {
+      recoveredCount++;
+      continue;
+    }
+
+    if (isValidKeyBinding(binding)) {
+      validBindings.set(id, binding);
+    } else {
+      logger.debug(`Invalid binding for shortcut '${id}', skipping`, { binding });
+      recoveredCount++;
+    }
+  }
+
+  if (recoveredCount > 0) {
+    logger.info(`Recovered ${recoveredCount} invalid shortcut bindings`);
+  }
+
+  return validBindings;
+}
+
+/**
+ * Convert Map to Record for persistence
+ */
+function bindingsMapToRecord(bindings: Map<string, KeyBinding>): PersistedBindings {
+  return Object.fromEntries(bindings);
+}
+
+/**
+ * Load shortcuts from localStorage with error recovery
+ */
+function loadShortcutsFromStorage(): Map<string, KeyBinding> {
+  const result = loadFromLocalStorage(shortcutsStorageOptions, shortcutsSchema);
+
+  if (result.error) {
+    logger.warn('Error loading shortcuts:', result.error);
+  }
+
+  // Validate each binding individually
+  return validatePersistedBindings(result.data);
+}
+
+/**
+ * Save shortcuts to localStorage
+ */
+function saveShortcutsToStorage(bindings: Map<string, KeyBinding>): boolean {
+  const record = bindingsMapToRecord(bindings);
+  return saveToLocalStorage(shortcutsStorageOptions, record, shortcutsSchema);
 }
 
 // ============================================================================
@@ -98,13 +218,13 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
     set((state) => {
       const newBindings = new Map(state.customBindings);
       newBindings.set(id, binding);
-      // Persist to localStorage
-      try {
-        const stored = Object.fromEntries(newBindings);
-        localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
-      } catch (e) {
-        logger.error('Failed to save shortcuts:', e);
+
+      // Persist to localStorage with error recovery
+      const saved = saveShortcutsToStorage(newBindings);
+      if (!saved) {
+        logger.error('Failed to save shortcuts - changes may not persist across sessions');
       }
+
       return { customBindings: newBindings };
     });
   },
@@ -113,23 +233,24 @@ export const useShortcutRegistry = create<ShortcutRegistryState>((set, get) => (
     set((state) => {
       const newBindings = new Map(state.customBindings);
       newBindings.delete(id);
-      // Persist to localStorage
-      try {
-        const stored = Object.fromEntries(newBindings);
-        localStorage.setItem('goodvibes-shortcuts', JSON.stringify(stored));
-      } catch (e) {
-        logger.error('Failed to save shortcuts:', e);
+
+      // Persist to localStorage with error recovery
+      const saved = saveShortcutsToStorage(newBindings);
+      if (!saved) {
+        logger.error('Failed to save shortcuts - changes may not persist across sessions');
       }
+
       return { customBindings: newBindings };
     });
   },
 
   resetAllBindings: () => {
     set({ customBindings: new Map() });
-    try {
-      localStorage.removeItem('goodvibes-shortcuts');
-    } catch (e) {
-      logger.error('Failed to clear shortcuts:', e);
+
+    // Remove from localStorage with error handling
+    const removed = removeFromLocalStorage(shortcutsStorageOptions);
+    if (!removed) {
+      logger.error('Failed to clear shortcuts from storage');
     }
   },
 
@@ -275,18 +396,10 @@ export function useKeyboardShortcuts(): void {
 
   const { register, shortcuts, customBindings, toggleHelp } = useShortcutRegistry();
 
-  // Load custom bindings from localStorage
+  // Load custom bindings from localStorage with error recovery
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('goodvibes-shortcuts');
-      if (stored) {
-        const parsed = JSON.parse(stored) as Record<string, KeyBinding>;
-        const bindings = new Map(Object.entries(parsed));
-        useShortcutRegistry.setState({ customBindings: bindings });
-      }
-    } catch (e) {
-      logger.error('Failed to load shortcuts:', e);
-    }
+    const bindings = loadShortcutsFromStorage();
+    useShortcutRegistry.setState({ customBindings: bindings });
   }, []);
 
   // Register all shortcuts
@@ -413,7 +526,12 @@ export function useKeyboardShortcuts(): void {
     // Register all
     shortcutsToRegister.forEach(register);
 
-    // Cleanup not needed as shortcuts persist
+    // Cleanup: unregister all shortcuts when dependencies change or hook unmounts
+    // This prevents memory leaks from stale action closures and orphaned shortcuts
+    return () => {
+      const { unregister } = useShortcutRegistry.getState();
+      shortcutsToRegister.forEach((shortcut) => unregister(shortcut.id));
+    };
   }, [
     register,
     openFolderPicker,

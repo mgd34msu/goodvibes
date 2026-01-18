@@ -9,7 +9,58 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { TerminalColors } from '../../../shared/types/theme-types';
+import { createLogger } from '../../../shared/logger';
+import { toast } from '../../stores/toastStore';
 import '@xterm/xterm/css/xterm.css';
+
+const logger = createLogger('TerminalInstance');
+
+// Debounce tracking for terminal error toasts to prevent spam
+let lastInputErrorToastTime = 0;
+let lastResizeErrorToastTime = 0;
+const ERROR_TOAST_DEBOUNCE_MS = 5000; // Only show error toast once per 5 seconds
+
+/**
+ * Handles terminal input with error handling and debounced toast notifications.
+ * Logs all errors but only shows toasts at most once per debounce period.
+ */
+async function handleTerminalInput(id: number, data: string): Promise<void> {
+  try {
+    await window.goodvibes.terminalInput(id, data);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to send terminal input', { id, error: errorMessage });
+
+    const now = Date.now();
+    if (now - lastInputErrorToastTime > ERROR_TOAST_DEBOUNCE_MS) {
+      lastInputErrorToastTime = now;
+      toast.error('Failed to send input to terminal', {
+        title: 'Terminal Error',
+      });
+    }
+  }
+}
+
+/**
+ * Handles terminal resize with error handling and debounced toast notifications.
+ * Logs all errors but only shows toasts at most once per debounce period.
+ */
+async function handleTerminalResize(id: number, cols: number, rows: number): Promise<void> {
+  try {
+    await window.goodvibes.terminalResize(id, cols, rows);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to resize terminal', { id, cols, rows, error: errorMessage });
+
+    const now = Date.now();
+    if (now - lastResizeErrorToastTime > ERROR_TOAST_DEBOUNCE_MS) {
+      lastResizeErrorToastTime = now;
+      toast.error('Failed to resize terminal', {
+        title: 'Terminal Error',
+      });
+    }
+  }
+}
 
 // ============================================================================
 // TYPES
@@ -82,7 +133,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
     terminal.refresh(0, terminal.rows - 1);
 
     // 3. Send resize to PTY
-    window.goodvibes.terminalResize(id, terminal.cols, terminal.rows);
+    handleTerminalResize(id, terminal.cols, terminal.rows);
 
     // 4. Focus the terminal
     terminal.focus();
@@ -110,7 +161,7 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
     const text = await window.goodvibes.clipboardRead();
     if (text) {
       // Send the pasted text to the terminal PTY
-      window.goodvibes.terminalInput(id, text);
+      handleTerminalInput(id, text);
     }
   }, [id]);
 
@@ -166,12 +217,12 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
 
     // Handle terminal input
     terminal.onData((data) => {
-      window.goodvibes.terminalInput(id, data);
+      handleTerminalInput(id, data);
     });
 
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
-      window.goodvibes.terminalResize(id, cols, rows);
+      handleTerminalResize(id, cols, rows);
     });
 
     terminalRef.current = terminal;
@@ -179,11 +230,13 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
 
     // Run full reinit (fit, refresh, resize, focus, scroll)
     // Use setTimeout to ensure DOM is ready
-    setTimeout(() => {
+    const initTimeoutId = setTimeout(() => {
       reinitTerminal();
     }, 0);
 
     return () => {
+      // Clean up initialization timeout to prevent memory leaks
+      clearTimeout(initTimeoutId);
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -330,16 +383,24 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
   useEffect(() => {
     if (!isActive) return;
 
-    const handleWindowFocus = () => {
+    // Track timeout for proper cleanup to prevent memory leaks
+    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const handleWindowFocus = (): void => {
+      // Clear any pending timeout before setting a new one
+      if (focusTimeoutId) {
+        clearTimeout(focusTimeoutId);
+      }
       // Small delay to let the DOM settle after focus change
-      setTimeout(() => {
+      focusTimeoutId = setTimeout(() => {
         if (isActive && terminalRef.current) {
           terminalRef.current.focus();
         }
+        focusTimeoutId = null;
       }, 50);
     };
 
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'visible') {
         handleWindowFocus();
       }
@@ -349,8 +410,13 @@ export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstancePr
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      // Clean up event listeners
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      // Clean up any pending timeout to prevent memory leaks
+      if (focusTimeoutId) {
+        clearTimeout(focusTimeoutId);
+      }
     };
   }, [isActive]);
 

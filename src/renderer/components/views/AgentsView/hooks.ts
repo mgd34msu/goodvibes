@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AgentTemplate } from './types';
 import { createLogger } from '../../../../shared/logger';
+import { toast } from '../../../stores/toastStore';
 
 const logger = createLogger('AgentsView');
 
@@ -28,6 +29,7 @@ export function useAgents(): UseAgentsReturn {
       setAgents(result || []);
     } catch (error) {
       logger.error('Failed to load agent templates:', error);
+      toast.error('Failed to load agent templates');
       setAgents([]);
     } finally {
       setLoading(false);
@@ -39,6 +41,8 @@ export function useAgents(): UseAgentsReturn {
   }, [loadAgents]);
 
   const saveAgent = async (agentData: Partial<AgentTemplate>, projectPath: string | null) => {
+    const isUpdate = Boolean(agentData.id);
+    const agentName = agentData.name || 'agent';
     try {
       if (agentData.id) {
         await window.goodvibes.updateAgentTemplate(agentData.id, {
@@ -58,9 +62,11 @@ export function useAgents(): UseAgentsReturn {
         });
       }
       await loadAgents();
+      toast.success(isUpdate ? `Updated ${agentName}` : `Created ${agentName}`);
       return { success: true };
     } catch (error) {
       logger.error('Failed to save agent template:', error);
+      toast.error(isUpdate ? 'Failed to update agent template' : 'Failed to create agent template');
       return { success: false, error };
     }
   };
@@ -69,9 +75,11 @@ export function useAgents(): UseAgentsReturn {
     try {
       await window.goodvibes.deleteAgentTemplate(id);
       await loadAgents();
+      toast.success('Agent template deleted');
       return { success: true };
     } catch (error) {
       logger.error('Failed to delete agent template:', error);
+      toast.error('Failed to delete agent template');
       return { success: false, error };
     }
   };
@@ -79,9 +87,11 @@ export function useAgents(): UseAgentsReturn {
   const copyToClipboard = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      toast.success('Copied to clipboard');
       return { success: true };
     } catch (error) {
       logger.error('Failed to copy to clipboard:', error);
+      toast.error('Failed to copy to clipboard');
       return { success: false, error };
     }
   };

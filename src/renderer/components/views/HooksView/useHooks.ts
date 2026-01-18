@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createLogger } from '../../../../shared/logger';
 import { formatTimestamp } from '../../../../shared/dateUtils';
+import { toast } from '../../../stores/toastStore';
 import type { Hook, HookEventType } from './types';
 import type { BuiltinHook } from './builtinHooks';
 
@@ -32,6 +33,7 @@ export function useHooks(): UseHooksReturn {
       setHooks(result || []);
     } catch (error) {
       logger.error('Failed to load hooks:', error);
+      toast.error('Failed to load hooks');
       setHooks([]);
     } finally {
       setLoading(false);
@@ -44,6 +46,8 @@ export function useHooks(): UseHooksReturn {
 
   const handleSave = useCallback(
     async (hookData: Partial<Hook>): Promise<boolean> => {
+      const isUpdate = Boolean(hookData.id);
+      const hookName = hookData.name || 'hook';
       try {
         if (hookData.id) {
           await window.goodvibes.updateHook(hookData.id, hookData);
@@ -60,9 +64,11 @@ export function useHooks(): UseHooksReturn {
           });
         }
         await loadHooks();
+        toast.success(isUpdate ? `Updated ${hookName}` : `Created ${hookName}`);
         return true;
       } catch (error) {
         logger.error('Failed to save hook:', error);
+        toast.error(isUpdate ? 'Failed to update hook' : 'Failed to create hook');
         return false;
       }
     },
@@ -74,8 +80,10 @@ export function useHooks(): UseHooksReturn {
       try {
         await window.goodvibes.updateHook(id, { enabled });
         await loadHooks();
+        toast.success(enabled ? 'Hook enabled' : 'Hook disabled');
       } catch (error) {
         logger.error('Failed to toggle hook:', error);
+        toast.error('Failed to toggle hook');
       }
     },
     [loadHooks]
@@ -86,8 +94,10 @@ export function useHooks(): UseHooksReturn {
       try {
         await window.goodvibes.deleteHook(id);
         await loadHooks();
+        toast.success('Hook deleted');
       } catch (error) {
         logger.error('Failed to delete hook:', error);
+        toast.error('Failed to delete hook');
       }
     },
     [loadHooks]
@@ -99,6 +109,7 @@ export function useHooks(): UseHooksReturn {
       const hook = hooks.find((h) => h.id === id);
       if (!hook) {
         logger.error('Hook not found:', id);
+        toast.error('Hook not found');
         return;
       }
 
@@ -123,14 +134,12 @@ export function useHooks(): UseHooksReturn {
         await loadHooks();
 
         // Show success notification
-        alert(
-          `Hook "${testingHookName}" test triggered.\n\nCommand: ${hook.command}\n\nCheck the activity log for execution details.`
-        );
+        toast.success(`Hook "${testingHookName}" test triggered`, {
+          title: 'Test Successful',
+        });
       } catch (error) {
         logger.error('Failed to test hook:', error);
-        alert(
-          `Failed to test hook "${testingHookName}": ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+        toast.error(`Failed to test hook "${testingHookName}"`);
       }
     },
     [hooks, loadHooks]

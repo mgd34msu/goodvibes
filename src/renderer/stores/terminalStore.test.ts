@@ -237,6 +237,50 @@ describe('useTerminalStore', () => {
     });
   });
 
+  describe('removeTerminal', () => {
+    it('removes a terminal from state without calling kill', () => {
+      addTerminalToStore(1, 'Test', '/');
+      addTerminalToStore(2, 'Test 2', '/');
+
+      const { removeTerminal } = useTerminalStore.getState();
+      removeTerminal(1);
+
+      expect(useTerminalStore.getState().terminals.size).toBe(1);
+      expect(useTerminalStore.getState().terminals.has(1)).toBe(false);
+      // Should NOT call killTerminal IPC
+      expect(window.goodvibes.killTerminal).not.toHaveBeenCalled();
+    });
+
+    it('updates active terminal when removing active', () => {
+      addTerminalToStore(1, 'Test 1', '/');
+      addTerminalToStore(2, 'Test 2', '/');
+      useTerminalStore.getState().setActiveTerminal(1);
+
+      const { removeTerminal } = useTerminalStore.getState();
+      removeTerminal(1);
+
+      // Should switch to remaining terminal
+      expect(useTerminalStore.getState().activeTerminalId).toBe(2);
+    });
+
+    it('sets active to null when removing last terminal', () => {
+      addTerminalToStore(1, 'Test', '/');
+
+      const { removeTerminal } = useTerminalStore.getState();
+      removeTerminal(1);
+
+      expect(useTerminalStore.getState().activeTerminalId).toBeNull();
+    });
+
+    it('handles removing non-existent terminal gracefully', () => {
+      const { removeTerminal } = useTerminalStore.getState();
+
+      // Should not throw when removing non-existent terminal
+      expect(() => removeTerminal(999)).not.toThrow();
+      expect(useTerminalStore.getState().terminals.size).toBe(0);
+    });
+  });
+
   describe('createTerminal', () => {
     it('calls IPC to start claude and returns result', async () => {
       vi.mocked(window.goodvibes.startClaude).mockResolvedValue({

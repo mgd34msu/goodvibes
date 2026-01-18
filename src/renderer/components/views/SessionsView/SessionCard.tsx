@@ -24,6 +24,10 @@ import {
 } from '../../../../shared/utils';
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { useAppStore } from '../../../stores/appStore';
+import { toast } from '../../../stores/toastStore';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('SessionCard');
 
 export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionCardProps): React.JSX.Element {
   const { createPreviewTerminal, createTerminal } = useTerminalStore();
@@ -33,8 +37,13 @@ export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionC
   const handleToggleFavorite = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      await window.goodvibes.toggleFavorite(session.id);
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      try {
+        await window.goodvibes.toggleFavorite(session.id);
+        await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      } catch (err) {
+        logger.error('Failed to toggle favorite:', err);
+        toast.error('Failed to update favorite status');
+      }
     },
     [session.id, queryClient]
   );
@@ -42,8 +51,13 @@ export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionC
   const handleToggleArchive = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      await window.goodvibes.toggleArchive(session.id);
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      try {
+        await window.goodvibes.toggleArchive(session.id);
+        await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      } catch (err) {
+        logger.error('Failed to toggle archive:', err);
+        toast.error('Failed to update archive status');
+      }
     },
     [session.id, queryClient]
   );

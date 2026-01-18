@@ -32,6 +32,9 @@ export default function KnowledgeView() {
       setSelectedEntry(null);
       toast.info('Entry deleted');
     },
+    onError: () => {
+      toast.error('Failed to delete entry');
+    },
   });
 
   const createMutation = useMutation({

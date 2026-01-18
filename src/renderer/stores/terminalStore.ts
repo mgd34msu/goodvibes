@@ -17,6 +17,7 @@
 import { create } from 'zustand';
 import type { TerminalInfo, TerminalStartResult } from '../../shared/types';
 import { createLogger } from '../../shared/logger';
+import { toast } from './toastStore';
 
 const logger = createLogger('TerminalStore');
 
@@ -40,6 +41,7 @@ interface TerminalState {
   createPreviewTerminal: (sessionId: string, name: string, cwd?: string) => number;
   closeTerminal: (id: number) => Promise<void>;
   closePreviewTerminal: (id: number) => void;
+  removeTerminal: (id: number) => void;
   setActiveTerminal: (id: number | null) => void;
   switchToNextTab: () => void;
   switchToPrevTab: () => void;
@@ -67,6 +69,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       });
 
       if (result.error) {
+        logger.error('Failed to create terminal', { cwd, name, resumeSessionId, error: result.error });
+        toast.error('Failed to create terminal', {
+          title: 'Terminal Error',
+        });
         return result;
       }
 
@@ -98,6 +104,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         resumeSessionId,
         error: errorMessage,
       });
+      toast.error('Failed to create terminal', {
+        title: 'Terminal Error',
+      });
       return { error: errorMessage };
     }
   },
@@ -110,6 +119,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       });
 
       if (result.error) {
+        logger.error('Failed to create plain terminal', { cwd, name, error: result.error });
+        toast.error('Failed to create terminal', {
+          title: 'Terminal Error',
+        });
         return result;
       }
 
@@ -138,6 +151,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         cwd,
         name,
         error: errorMessage,
+      });
+      toast.error('Failed to create terminal', {
+        title: 'Terminal Error',
       });
       return { error: errorMessage };
     }
@@ -182,7 +198,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     try {
       await window.goodvibes.killTerminal(id);
     } catch (error) {
-      logger.error('Failed to kill terminal:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to close terminal', { id, error: errorMessage });
+      toast.error('Failed to close terminal', {
+        title: 'Terminal Error',
+      });
     }
 
     set((state) => {
@@ -206,6 +226,31 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       newMap.delete(id);
 
       // Select next terminal if active was closed
+      let newActiveId: number | null = state.activeTerminalId;
+      if (state.activeTerminalId === id) {
+        const ids = Array.from(newMap.keys());
+        newActiveId = ids.length > 0 ? ids[ids.length - 1] ?? null : null;
+      }
+
+      return { terminals: newMap, activeTerminalId: newActiveId };
+    });
+  },
+
+  // Remove a terminal from state without calling kill (used when terminal exits on its own)
+  removeTerminal: (id) => {
+    const terminal = get().terminals.get(id);
+    if (!terminal) {
+      logger.debug('Attempted to remove non-existent terminal', { id });
+      return;
+    }
+
+    logger.info('Removing terminal from state', { id, name: terminal.name });
+
+    set((state) => {
+      const newMap = new Map(state.terminals);
+      newMap.delete(id);
+
+      // Select next terminal if active was removed
       let newActiveId: number | null = state.activeTerminalId;
       if (state.activeTerminalId === id) {
         const ids = Array.from(newMap.keys());

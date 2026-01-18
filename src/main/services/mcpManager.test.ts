@@ -140,6 +140,76 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
+// Mock inputSanitizer - must be defined before imports use it
+vi.mock('./inputSanitizer.js', () => ({
+  validateCommandName: vi.fn((command: string) => {
+    // Simulate real validation behavior
+    if (!command || typeof command !== 'string') {
+      return { valid: false, error: 'Command must be a non-empty string' };
+    }
+    const trimmed = command.trim();
+    if (trimmed.length === 0) {
+      return { valid: false, error: 'Command cannot be empty' };
+    }
+    // Path traversal check
+    if (/\.\.[/\\]/.test(trimmed)) {
+      return { valid: false, error: 'Command contains path traversal characters' };
+    }
+    // Valid command pattern - alphanumeric, dots, hyphens, underscores, path separators
+    if (!/^[\w.\-/\\:]+$/.test(trimmed)) {
+      return { valid: false, error: 'Command contains invalid characters' };
+    }
+    return { valid: true, sanitized: trimmed };
+  }),
+  validateCommandArguments: vi.fn((args: string[]) => {
+    if (!Array.isArray(args)) {
+      return { valid: false, error: 'Arguments must be an array' };
+    }
+    const shellMetacharacters = /[;&|`$(){}[\]<>!\n\r\\'"]/;
+    const cmdSubstitution = /\$\(|\$\{|`/;
+    for (let i = 0; i < args.length; i++) {
+      const arg = String(args[i]);
+      if (shellMetacharacters.test(arg)) {
+        return { valid: false, error: `Invalid argument at index ${i}: Argument contains potentially dangerous characters` };
+      }
+      if (cmdSubstitution.test(arg)) {
+        return { valid: false, error: `Invalid argument at index ${i}: Argument contains command substitution pattern` };
+      }
+    }
+    return { valid: true };
+  }),
+  validatePath: vi.fn((pathStr: string) => {
+    if (!pathStr || typeof pathStr !== 'string') {
+      return { valid: false, error: 'Path must be a non-empty string' };
+    }
+    const trimmed = pathStr.trim();
+    if (trimmed.includes('\0')) {
+      return { valid: false, error: 'Path contains null byte' };
+    }
+    if (/\.\.[/\\]/.test(trimmed)) {
+      return { valid: false, error: 'Path contains directory traversal' };
+    }
+    return { valid: true, sanitized: trimmed };
+  }),
+  validateEnvironment: vi.fn((env: Record<string, string>) => {
+    if (!env || typeof env !== 'object') {
+      return { valid: false, error: 'Environment must be an object' };
+    }
+    const cmdSubstitution = /\$\(|\$\{|`/;
+    for (const [name, value] of Object.entries(env)) {
+      // Env var names should start with letter or underscore
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        return { valid: false, error: `Invalid env var name '${name}': Invalid environment variable name format` };
+      }
+      if (cmdSubstitution.test(String(value))) {
+        return { valid: false, error: `Invalid env var value for '${name}': Value contains command substitution pattern` };
+      }
+    }
+    return { valid: true };
+  }),
+  logSecurityEvent: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
@@ -868,13 +938,13 @@ describe('MCPManager Service', () => {
         expect(fs.readFile).not.toHaveBeenCalled();
       });
 
-      it('should return null if file is invalid JSON', async () => {
+      it('should throw error if file is invalid JSON', async () => {
         vi.mocked(existsSync).mockReturnValue(true);
         vi.mocked(fs.readFile).mockResolvedValue('invalid json');
 
-        const result = await manager.readMCPConfig('/path/to/project');
-
-        expect(result).toBeNull();
+        await expect(manager.readMCPConfig('/path/to/project')).rejects.toThrow(
+          /Failed to read MCP config/
+        );
       });
     });
 
@@ -1197,6 +1267,543 @@ describe('Module Exports', () => {
     it('should shutdown existing manager', () => {
       getMCPManager();
       expect(() => shutdownMCPManager()).not.toThrow();
+    });
+  });
+});
+
+// ============================================================================
+// SECURITY VALIDATION TESTS
+// ============================================================================
+
+describe('Security Validations', () => {
+  let manager: MCPManagerService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockChildProcess = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(mockChildProcess as unknown as ChildProcess);
+    shutdownMCPManager();
+    manager = getMCPManager();
+  });
+
+  afterEach(() => {
+    shutdownMCPManager();
+  });
+
+  describe('Command Name Validation', () => {
+    it('should reject server with invalid command containing shell metacharacters', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx; rm -rf /',
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+
+    it('should reject server with command substitution pattern', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: '$(whoami)',
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+
+    it('should reject server with path traversal in command', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: '../../../etc/passwd',
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+  });
+
+  describe('Arguments Validation', () => {
+    it('should reject server with dangerous arguments', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        args: ['@test/server', '; rm -rf /'],
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+
+    it('should reject server with command substitution in arguments', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        args: ['@test/server', '$(cat /etc/passwd)'],
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+
+    it('should reject server with backtick command substitution in arguments', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        args: ['@test/server', '`whoami`'],
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+  });
+
+  describe('Path Validation', () => {
+    it('should reject server with path traversal in projectPath', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        projectPath: '/home/user/../../../etc',
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+  });
+
+  describe('Environment Validation', () => {
+    it('should reject server with invalid env var names', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        env: { '123INVALID': 'value' },
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+
+    it('should reject server with command substitution in env value', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'stdio',
+        command: 'npx',
+        env: { SAFE_NAME: '$(whoami)' },
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        expect.stringContaining('Security')
+      );
+    });
+  });
+});
+
+// ============================================================================
+// ADDITIONAL EDGE CASE TESTS
+// ============================================================================
+
+describe('Additional Edge Cases', () => {
+  let manager: MCPManagerService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockChildProcess = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(mockChildProcess as unknown as ChildProcess);
+    shutdownMCPManager();
+    manager = getMCPManager();
+  });
+
+  afterEach(() => {
+    shutdownMCPManager();
+  });
+
+  describe('Transport Types', () => {
+    it('should return false for unknown transport type', async () => {
+      const server = createMockServer({
+        id: 1,
+        transport: 'websocket' as 'stdio', // Force invalid transport
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('Stderr Output', () => {
+    it('should handle stderr output without affecting connection status', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const startPromise = manager.startServer(1);
+
+      // Emit stderr first
+      setTimeout(() => {
+        mockChildProcess.stderr.emit('data', Buffer.from('Warning: something'));
+      }, 5);
+
+      // Then emit stdout to trigger connection
+      setTimeout(() => {
+        mockChildProcess.stdout.emit('data', Buffer.from('Ready'));
+      }, 10);
+
+      const result = await startPromise;
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Tool Discovery', () => {
+    it('should handle JSON with inputSchema in tools', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const startPromise = manager.startServer(1);
+
+      setTimeout(() => {
+        const toolsJson = JSON.stringify({
+          tools: [
+            {
+              name: 'read_file',
+              description: 'Read a file',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string', description: 'File path' },
+                },
+                required: ['path'],
+              },
+            },
+          ],
+        });
+        mockChildProcess.stdout.emit('data', Buffer.from(toolsJson));
+      }, 10);
+
+      await startPromise;
+
+      expect(primitives.updateMCPServer).toHaveBeenCalledWith(1, { toolCount: 1 });
+    });
+
+    it('should handle partial JSON output gracefully', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const startPromise = manager.startServer(1);
+
+      // First emit partial JSON (should fail parse silently)
+      setTimeout(() => {
+        mockChildProcess.stdout.emit('data', Buffer.from('{"tools":'));
+      }, 5);
+
+      // Then emit valid ready message
+      setTimeout(() => {
+        mockChildProcess.stdout.emit('data', Buffer.from('Server is ready'));
+      }, 10);
+
+      const result = await startPromise;
+
+      expect(result).toBe(true);
+    });
+
+    it('should handle non-JSON stdout output', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const startPromise = manager.startServer(1);
+
+      setTimeout(() => {
+        mockChildProcess.stdout.emit('data', Buffer.from('MCP Server v1.0 starting...'));
+      }, 10);
+
+      const result = await startPromise;
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Marketplace Categories', () => {
+    it('should filter by communication category', () => {
+      const servers = manager.getServersByCategory('communication');
+
+      expect(Array.isArray(servers)).toBe(true);
+      expect(servers.every(s => s.category === 'communication')).toBe(true);
+    });
+
+    it('should filter by custom category (empty result)', () => {
+      const servers = manager.getServersByCategory('custom');
+
+      expect(Array.isArray(servers)).toBe(true);
+      // Custom category may be empty if no custom servers defined
+    });
+  });
+
+  describe('Marketplace Installation', () => {
+    it('should install server with npm package specified', async () => {
+      // filesystem has an npmPackage specified
+      const result = await manager.installMarketplaceServer(
+        'filesystem',
+        {},
+        'user'
+      );
+
+      expect(result).toBeDefined();
+      expect(primitives.createMCPServer).toHaveBeenCalled();
+    });
+
+    it('should install server with multiple env vars', async () => {
+      // postgres requires DATABASE_URL
+      const result = await manager.installMarketplaceServer(
+        'postgres',
+        { DATABASE_URL: 'postgres://localhost/test' },
+        'project',
+        '/my/project'
+      );
+
+      expect(result).toBeDefined();
+      expect(primitives.createMCPServer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: { DATABASE_URL: 'postgres://localhost/test' },
+          scope: 'project',
+          projectPath: '/my/project',
+        })
+      );
+    });
+
+    it('should throw when missing required env for github server', async () => {
+      await expect(
+        manager.installMarketplaceServer('github', {})
+      ).rejects.toThrow('Missing required environment variable: GITHUB_TOKEN');
+    });
+
+    it('should throw when missing required env for slack server', async () => {
+      await expect(
+        manager.installMarketplaceServer('slack', {})
+      ).rejects.toThrow('Missing required environment variable: SLACK_BOT_TOKEN');
+    });
+  });
+
+  describe('Event Emission', () => {
+    it('should emit server:connected event on successful stdio start', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const connectedListener = vi.fn();
+      manager.on('server:connected', connectedListener);
+
+      const startPromise = manager.startServer(1);
+
+      setTimeout(() => {
+        mockChildProcess.stdout.emit('data', Buffer.from('Ready'));
+      }, 10);
+
+      await startPromise;
+
+      expect(connectedListener).toHaveBeenCalledWith(server);
+    });
+
+    it('should emit server:connected event on successful HTTP start', async () => {
+      const server = createMockServer({
+        transport: 'http',
+        url: 'http://localhost:3000',
+        command: null,
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      global.fetch = vi.fn().mockResolvedValue({ ok: true });
+
+      const connectedListener = vi.fn();
+      manager.on('server:connected', connectedListener);
+
+      await manager.startServer(1);
+
+      expect(connectedListener).toHaveBeenCalledWith(server);
+    });
+  });
+
+  describe('Spawn Error Handling', () => {
+    it('should handle spawn throwing synchronously', async () => {
+      const server = createMockServer({ transport: 'stdio', command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+      vi.mocked(spawn).mockImplementation(() => {
+        throw new Error('Command not found');
+      });
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        'Command not found'
+      );
+    });
+  });
+
+  describe('HTTP Server Edge Cases', () => {
+    it('should handle HTTP timeout', async () => {
+      const server = createMockServer({
+        transport: 'http',
+        url: 'http://localhost:3000',
+        command: null,
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const timeoutError = new Error('Timeout');
+      timeoutError.name = 'TimeoutError';
+      global.fetch = vi.fn().mockRejectedValue(timeoutError);
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(
+        1,
+        'error',
+        'Timeout'
+      );
+    });
+
+    it('should handle HTTP 401 unauthorized', async () => {
+      const server = createMockServer({
+        transport: 'http',
+        url: 'http://localhost:3000',
+        command: null,
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+      });
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(1, 'error', 'HTTP 401');
+    });
+
+    it('should handle HTTP 503 service unavailable', async () => {
+      const server = createMockServer({
+        transport: 'http',
+        url: 'http://localhost:3000',
+        command: null,
+      });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+      });
+
+      const result = await manager.startServer(1);
+
+      expect(result).toBe(false);
+      expect(primitives.updateMCPServerStatus).toHaveBeenCalledWith(1, 'error', 'HTTP 503');
+    });
+  });
+
+  describe('Config Sync Error Handling', () => {
+    it('should throw error when reading corrupted .claude.json', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFile).mockResolvedValue('not valid json {{{');
+
+      await expect(manager.readUserClaudeConfig()).rejects.toThrow(
+        /Failed to read user claude config/
+      );
+    });
+  });
+
+  describe('Multiple Server Operations', () => {
+    it('should handle stopping non-existent server gracefully', () => {
+      // Stopping a server that was never started should not throw
+      expect(() => manager.stopServer(999)).not.toThrow();
+    });
+
+    it('should handle restart of non-running server', async () => {
+      const server = createMockServer({ id: 1, command: 'npx' });
+      vi.mocked(primitives.getMCPServer).mockReturnValue(server);
+
+      const restartProcess = createMockChildProcess();
+      vi.mocked(spawn).mockReturnValue(restartProcess as unknown as ChildProcess);
+
+      const restartPromise = manager.restartServer(1);
+
+      setTimeout(() => {
+        restartProcess.stdout.emit('data', Buffer.from('Ready'));
+      }, 600);
+
+      const result = await restartPromise;
+
+      expect(result).toBe(true);
     });
   });
 });

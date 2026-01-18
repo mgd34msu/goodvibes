@@ -72,26 +72,47 @@ Hooks are shell commands or LLM prompts that execute automatically at specific p
 
 ### Quick Reference Table
 
-| Hook | When It Fires | Matcher Support | Can Block | Exit Code 2 Behavior |
-|------|---------------|-----------------|-----------|---------------------|
-| **PreToolUse** | Before tool executes | ✅ Tool name | ✅ Deny | Blocks tool, shows stderr to Claude |
-| **PermissionRequest** | Permission dialog shown | ✅ Tool name | ✅ Deny | Denies permission, shows stderr to Claude |
-| **PostToolUse** | After tool succeeds | ✅ Tool name | ✅ Feedback | Shows stderr to Claude |
-| **PostToolUseFailure** | After tool fails | ✅ Tool name | ✅ Feedback | Shows stderr to Claude |
-| **Notification** | System notification | ✅ Notification type | ❌ | Shows stderr to user only |
-| **UserPromptSubmit** | User submits prompt | ❌ | ✅ Block | Blocks prompt, shows stderr to user |
-| **Stop** | Main agent finishes | ❌ | ✅ Force continue | Blocks stop, shows stderr to Claude |
-| **SubagentStart** | Subagent spawns | ✅ Subagent name | ❌ | Shows stderr to user only |
-| **SubagentStop** | Subagent finishes | ❌ | ✅ Force continue | Blocks stop, shows stderr to subagent |
-| **PreCompact** | Before compaction | ✅ manual/auto | ❌ | Shows stderr to user only |
-| **SessionStart** | Session begins | ✅ Source type | ❌ | Shows stderr to user only |
-| **SessionEnd** | Session ends | ❌ | ❌ | Shows stderr to user only |
+| Hook | When It Fires | Matcher Field | Matcher Values | Can Block |
+|------|---------------|---------------|----------------|-----------|
+| **PreToolUse** | Before tool executes | `tool_name` | Tool names | ✅ Exit 2 |
+| **PostToolUse** | After tool succeeds | `tool_name` | Tool names | ✅ Exit 2 |
+| **PostToolUseFailure** | After tool fails | `tool_name` | Tool names | ✅ Exit 2 |
+| **PermissionRequest** | Permission dialog shown | `tool_name` | Tool names | ✅ JSON decision |
+| **Notification** | System notification | `notification_type` | `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog` | ❌ |
+| **UserPromptSubmit** | User submits prompt | ❌ | N/A | ✅ Exit 2 |
+| **Stop** | Main agent finishes | ❌ | N/A | ✅ Exit 2 |
+| **SubagentStart** | Subagent spawns | `agent_type` | Agent type names | ❌ |
+| **SubagentStop** | Subagent finishes | ❌ | N/A | ✅ Exit 2 |
+| **PreCompact** | Before compaction | `trigger` | `manual`, `auto` | ✅ Exit 2 |
+| **SessionStart** | Session begins | `source` | `startup`, `resume`, `clear`, `compact` | ❌ |
+| **SessionEnd** | Session ends | `reason` | `clear`, `logout`, `prompt_input_exit`, `other` | ❌ |
+| **Setup** | Repo setup | `trigger` | `init`, `maintenance` | ❌ |
+
+### Exit Code Reference
+
+| Hook | Exit 0 | Exit 2 | Other Exit Codes |
+|------|--------|--------|------------------|
+| **PreToolUse** | stdout/stderr not shown | Show stderr to model, block tool call | Show stderr to user only, continue with tool call |
+| **PostToolUse** | stdout shown in transcript mode (Ctrl+O) | Show stderr to model immediately | Show stderr to user only |
+| **PostToolUseFailure** | stdout shown in transcript mode (Ctrl+O) | Show stderr to model immediately | Show stderr to user only |
+| **PermissionRequest** | Use hook decision if provided | N/A | Show stderr to user only |
+| **Notification** | stdout/stderr not shown | N/A | Show stderr to user only |
+| **UserPromptSubmit** | stdout shown to Claude | Block processing, erase original prompt, show stderr to user only | Show stderr to user only |
+| **Stop** | stdout/stderr not shown | Show stderr to model, continue conversation | Show stderr to user only |
+| **SubagentStart** | stdout shown to subagent | Blocking errors ignored | Show stderr to user only |
+| **SubagentStop** | stdout/stderr not shown | Show stderr to subagent, continue having it run | Show stderr to user only |
+| **PreCompact** | stdout appended as custom compact instructions | Block compaction | Show stderr to user only, continue with compaction |
+| **SessionStart** | stdout shown to Claude | Blocking errors ignored | Show stderr to user only |
+| **SessionEnd** | Command completes successfully | N/A | Show stderr to user only |
+| **Setup** | stdout shown to Claude | Blocking errors ignored | Show stderr to user only |
 
 ---
 
 ### 1. PreToolUse
 
-**When it fires:** After Claude creates tool parameters, before the tool executes.
+**When it fires:** Before tool execution.
+
+**Input:** JSON of tool call arguments.
 
 **Use cases:**
 - Block dangerous operations (rm -rf, .env access)
@@ -161,14 +182,18 @@ Hooks are shell commands or LLM prompts that execute automatically at specific p
 
 ### 2. PermissionRequest
 
-**When it fires:** When the user is shown a permission dialog (before they respond).
+**When it fires:** When a permission dialog is displayed.
+
+**Input:** JSON with `tool_name`, `tool_input`, and `tool_use_id`.
+
+**Output:** JSON with `hookSpecificOutput` containing decision to allow or deny.
 
 **Use cases:**
 - Auto-approve permissions programmatically
 - Implement custom permission logic
 - Deny permissions based on context
 
-**Matchers:** Same as PreToolUse (tool names)
+**Matchers:** Tool names (same as PreToolUse)
 
 **Example:**
 ```json
@@ -222,7 +247,9 @@ For deny:
 
 ### 3. PostToolUse
 
-**When it fires:** Immediately after a tool completes successfully.
+**When it fires:** After tool execution succeeds.
+
+**Input:** JSON with fields `inputs` (tool call arguments) and `response` (tool call response).
 
 **Use cases:**
 - Run linters/formatters after file edits
@@ -230,7 +257,7 @@ For deny:
 - Log tool results for auditing
 - Trigger downstream workflows
 
-**Matchers:** Same as PreToolUse (tool names)
+**Matchers:** Tool names (same as PreToolUse)
 
 **Example:**
 ```json
@@ -242,7 +269,7 @@ For deny:
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path' | xargs -I {} sh -c 'if echo {} | grep -qE \"\\.(ts|tsx)$\"; then npx prettier --write {}; fi'"
+            "command": "jq -r '.inputs.file_path' | xargs -I {} sh -c 'if echo {} | grep -qE \"\\.(ts|tsx)$\"; then npx prettier --write {}; fi'"
           }
         ]
       }
@@ -267,7 +294,9 @@ For deny:
 
 ### 4. PostToolUseFailure
 
-**When it fires:** After a tool fails (as opposed to PostToolUse which fires on success).
+**When it fires:** After tool execution fails.
+
+**Input:** JSON with `tool_name`, `tool_input`, `tool_use_id`, `error`, `error_type`, `is_interrupt`, and `is_timeout`.
 
 **Use cases:**
 - Custom error handling and recovery
@@ -275,7 +304,7 @@ For deny:
 - Retry logic implementation
 - Error analysis and reporting
 
-**Matchers:** Same as PreToolUse (tool names)
+**Matchers:** Tool names (same as PreToolUse)
 
 **Example:**
 ```json
@@ -300,7 +329,9 @@ For deny:
 
 ### 5. Notification
 
-**When it fires:** When Claude Code sends notifications to the user.
+**When it fires:** When notifications are sent.
+
+**Input:** JSON with notification message and type.
 
 **Notification types (matchers):**
 | Type | Description |
@@ -348,7 +379,9 @@ For deny:
 
 ### 6. UserPromptSubmit
 
-**When it fires:** When the user submits a prompt, before Claude processes it.
+**When it fires:** When the user submits a prompt.
+
+**Input:** JSON with original user prompt text.
 
 **Use cases:**
 - Inject dynamic context (git status, TODOs, sprint info)
@@ -356,7 +389,10 @@ For deny:
 - Block certain types of requests
 - Add security filtering
 
-**Special behavior:** `stdout` is added to conversation context (not shown to Claude otherwise).
+**Exit code behavior:**
+- Exit 0: stdout shown to Claude
+- Exit 2: Block processing, erase original prompt, show stderr to user only
+- Other: Show stderr to user only
 
 **Example:**
 ```json
@@ -418,13 +454,18 @@ sys.exit(0)
 
 ### 7. Stop
 
-**When it fires:** When the main Claude Code agent finishes responding. Does NOT fire on user interrupt.
+**When it fires:** Right before Claude concludes its response.
 
 **Use cases:**
 - Force Claude to continue working
 - Run cleanup tasks
 - Send completion notifications
 - Ensure all tasks are complete before stopping
+
+**Exit code behavior:**
+- Exit 0: stdout/stderr not shown
+- Exit 2: Show stderr to model and continue conversation
+- Other: Show stderr to user only
 
 **Important:** Check `stop_hook_active` to prevent infinite loops.
 
@@ -477,7 +518,11 @@ sys.exit(0)
 
 ### 8. SubagentStart
 
-**When it fires:** When a subagent is spawned via the Task tool.
+**When it fires:** When a subagent (Task tool call) is started.
+
+**Input:** JSON with `agent_id` and `agent_type`.
+
+**Matchers:** Agent type names (matches on `agent_type` field)
 
 **Use cases:**
 - Set up resources before subagent runs
@@ -485,7 +530,10 @@ sys.exit(0)
 - Configure environment for specific subagents
 - Inject subagent-specific context
 
-**Matchers:** Subagent names
+**Exit code behavior:**
+- Exit 0: stdout shown to subagent
+- Blocking errors are ignored
+- Other: Show stderr to user only
 
 **Example:**
 ```json
@@ -519,13 +567,18 @@ sys.exit(0)
 
 ### 9. SubagentStop
 
-**When it fires:** When a Claude Code subagent (Task tool call) finishes responding.
+**When it fires:** Right before a subagent (Task tool call) concludes its response.
 
 **Use cases:**
 - Ensure subagent tasks complete properly
 - Clean up resources after subagent finishes
 - Validate subagent output
 - Coordinate between parallel agents
+
+**Exit code behavior:**
+- Exit 0: stdout/stderr not shown
+- Exit 2: Show stderr to subagent and continue having it run
+- Other: Show stderr to user only
 
 **Example:**
 ```json
@@ -565,13 +618,13 @@ sys.exit(0)
 }
 ```
 
-**Decision control:** Same as Stop hook.
-
 ---
 
 ### 10. PreCompact
 
-**When it fires:** Before Claude Code runs a compaction operation (context window management).
+**When it fires:** Before conversation compaction.
+
+**Input:** JSON with compaction details.
 
 **Matchers:**
 | Value | Trigger |
@@ -582,8 +635,13 @@ sys.exit(0)
 **Use cases:**
 - Backup transcripts before compaction
 - Preserve important context
-- Log pre-compaction state
-- Export conversation data
+- Append custom compact instructions
+- Block compaction if conditions not met
+
+**Exit code behavior:**
+- Exit 0: stdout appended as custom compact instructions
+- Exit 2: Block compaction
+- Other: Show stderr to user only, continue with compaction
 
 **Example:**
 ```json
@@ -608,7 +666,9 @@ sys.exit(0)
 
 ### 11. SessionStart
 
-**When it fires:** When Claude Code starts a new session or resumes an existing one.
+**When it fires:** When a new session is started.
+
+**Input:** JSON with session start source.
 
 **Matchers:**
 | Value | Trigger |
@@ -623,6 +683,11 @@ sys.exit(0)
 - Install dependencies
 - Set up environment variables
 - Initialize project state
+
+**Exit code behavior:**
+- Exit 0: stdout shown to Claude
+- Blocking errors are ignored
+- Other: Show stderr to user only
 
 **Special behavior:** Can write to `$CLAUDE_ENV_FILE` to persist environment variables.
 
@@ -675,9 +740,11 @@ exit 0
 
 ### 12. SessionEnd
 
-**When it fires:** When a Claude Code session ends.
+**When it fires:** When a session is ending.
 
-**Reason values in input:**
+**Input:** JSON with session end reason.
+
+**Matchers (reason values):**
 | Value | Trigger |
 |-------|---------|
 | `clear` | `/clear` command |
@@ -697,10 +764,64 @@ exit 0
   "hooks": {
     "SessionEnd": [
       {
+        "matcher": "prompt_input_exit",
         "hooks": [
           {
             "type": "command",
             "command": "./scripts/session-cleanup.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 13. Setup
+
+**When it fires:** Repo setup hooks for init and maintenance.
+
+**Input:** JSON with trigger (`init` or `maintenance`).
+
+**Matchers:**
+| Value | Trigger |
+|-------|---------|
+| `init` | Initial repository setup |
+| `maintenance` | Maintenance operations |
+
+**Use cases:**
+- Initialize project dependencies
+- Run database migrations
+- Set up development environment
+- Perform routine maintenance tasks
+
+**Exit code behavior:**
+- Exit 0: stdout shown to Claude
+- Blocking errors are ignored
+- Other: Show stderr to user only
+
+**Example:**
+```json
+{
+  "hooks": {
+    "Setup": [
+      {
+        "matcher": "init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/init-project.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "maintenance",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/run-maintenance.sh"
           }
         ]
       }
@@ -735,14 +856,11 @@ All hooks receive JSON via stdin with common fields plus event-specific data.
 | `permission_mode` | Current mode: `default`, `plan`, `acceptEdits`, `bypassPermissions` |
 | `hook_event_name` | The hook event type |
 
-### PreToolUse / PostToolUse Input
+### PreToolUse Input
 
 ```json
 {
   "session_id": "abc123",
-  "transcript_path": "...",
-  "cwd": "...",
-  "permission_mode": "default",
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
@@ -752,14 +870,54 @@ All hooks receive JSON via stdin with common fields plus event-specific data.
 }
 ```
 
-PostToolUse additionally includes:
+### PostToolUse Input
+
 ```json
 {
-  "tool_response": {
+  "session_id": "abc123",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "inputs": {
+    "command": "npm run test"
+  },
+  "response": {
     "stdout": "All tests passed",
     "stderr": "",
     "exit_code": 0
-  }
+  },
+  "tool_use_id": "toolu_01ABC123..."
+}
+```
+
+### PostToolUseFailure Input
+
+```json
+{
+  "session_id": "abc123",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm run test"
+  },
+  "tool_use_id": "toolu_01ABC123...",
+  "error": "Command failed with exit code 1",
+  "error_type": "execution_error",
+  "is_interrupt": false,
+  "is_timeout": false
+}
+```
+
+### PermissionRequest Input
+
+```json
+{
+  "session_id": "abc123",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rm -rf node_modules"
+  },
+  "tool_use_id": "toolu_01ABC123..."
 }
 ```
 
@@ -793,6 +951,16 @@ PostToolUse additionally includes:
 
 **Important:** `stop_hook_active` is `true` when Claude is already continuing due to a stop hook. Check this to prevent infinite loops.
 
+### SubagentStart Input
+
+```json
+{
+  "hook_event_name": "SubagentStart",
+  "agent_id": "agent_abc123",
+  "agent_type": "db-agent"
+}
+```
+
 ### PreCompact Input
 
 ```json
@@ -821,17 +989,26 @@ PostToolUse additionally includes:
 }
 ```
 
+### Setup Input
+
+```json
+{
+  "hook_event_name": "Setup",
+  "trigger": "init"
+}
+```
+
 ---
 
 ## Output & Decision Control
 
-### Exit Codes
+### Exit Codes Summary
 
-| Exit Code | Effect |
-|-----------|--------|
-| **0** | Success. `stdout` processed (shown in verbose mode or added to context for UserPromptSubmit/SessionStart) |
-| **2** | Blocking error. `stderr` fed to Claude. JSON in `stdout` is ignored. |
-| **Other** | Non-blocking error. `stderr` shown to user in verbose mode. |
+| Exit Code | General Behavior |
+|-----------|-----------------|
+| **0** | Success. Output handling varies by hook type (see Exit Code Reference table above) |
+| **2** | Blocking action. Behavior varies by hook type (block tool, show to model, block prompt, etc.) |
+| **Other** | Non-blocking error. stderr shown to user only in most cases |
 
 ### JSON Output Structure
 
@@ -865,6 +1042,7 @@ Return structured JSON to `stdout` for sophisticated control:
 | UserPromptSubmit | `block` + `reason`, `additionalContext` |
 | Stop / SubagentStop | `block` + `reason` |
 | SessionStart | `additionalContext` only |
+| PreCompact | stdout appended as custom instructions |
 
 ---
 
@@ -914,21 +1092,21 @@ mcp__playwright__browser_click
 
 ### Do
 
-- ✅ **Validate and sanitize inputs** - Never trust input data blindly
-- ✅ **Always quote shell variables** - Use `"$VAR"` not `$VAR`
-- ✅ **Use absolute paths** - Use `$CLAUDE_PROJECT_DIR` for project scripts
-- ✅ **Check `stop_hook_active`** - Prevent infinite loops in Stop hooks
-- ✅ **Test hooks manually first** - Run commands in isolation before configuring
-- ✅ **Use specific matchers** - Target specific tools rather than `*` for performance
-- ✅ **Handle errors gracefully** - Provide clear error messages
+- **Validate and sanitize inputs** - Never trust input data blindly
+- **Always quote shell variables** - Use `"$VAR"` not `$VAR`
+- **Use absolute paths** - Use `$CLAUDE_PROJECT_DIR` for project scripts
+- **Check `stop_hook_active`** - Prevent infinite loops in Stop hooks
+- **Test hooks manually first** - Run commands in isolation before configuring
+- **Use specific matchers** - Target specific tools rather than `*` for performance
+- **Handle errors gracefully** - Provide clear error messages
 
 ### Don't
 
-- ❌ **Block path traversal** - Check for `..` in file paths
-- ❌ **Touch sensitive files** - Skip `.env`, `.git/`, keys, credentials
-- ❌ **Run expensive operations on every tool** - Scope matchers precisely
-- ❌ **Forget timeout configuration** - Long-running hooks can slow everything down
-- ❌ **Ignore exit codes** - Use appropriate codes for your intent
+- **Block path traversal** - Check for `..` in file paths
+- **Touch sensitive files** - Skip `.env`, `.git/`, keys, credentials
+- **Run expensive operations on every tool** - Scope matchers precisely
+- **Forget timeout configuration** - Long-running hooks can slow everything down
+- **Ignore exit codes** - Use appropriate codes for your intent
 
 ### Performance Tips
 
@@ -982,6 +1160,17 @@ claude --debug
 ```json
 {
   "hooks": {
+    "Setup": [
+      {
+        "matcher": "init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/init-project.sh"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup",
@@ -1014,6 +1203,17 @@ claude --debug
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-reads.sh"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
@@ -1021,6 +1221,17 @@ claude --debug
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/format-and-lint.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/log-failure.sh"
           }
         ]
       }
@@ -1082,6 +1293,7 @@ claude --debug
     ],
     "SessionEnd": [
       {
+        "matcher": "prompt_input_exit",
         "hooks": [
           {
             "type": "command",

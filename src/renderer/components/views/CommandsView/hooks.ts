@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Command, BuiltInCommand } from './types';
 import { createLogger } from '../../../../shared/logger';
 import { formatTimestamp } from '../../../../shared/dateUtils';
+import { toast } from '../../../stores/toastStore';
 
 const logger = createLogger('CommandsView');
 
@@ -43,6 +44,7 @@ export function useCommands(): UseCommandsReturn {
       setCommands(mappedCommands);
     } catch (error) {
       logger.error('Failed to load commands:', error);
+      toast.error('Failed to load commands');
       setCommands([]);
     } finally {
       setLoading(false);
@@ -54,6 +56,8 @@ export function useCommands(): UseCommandsReturn {
   }, [loadCommands]);
 
   const saveCommand = async (commandData: Partial<Command>, projectPath: string | null) => {
+    const isUpdate = Boolean(commandData.id);
+    const commandName = commandData.name || 'command';
     try {
       if (commandData.id) {
         await window.goodvibes.updateSkill(commandData.id, {
@@ -75,9 +79,11 @@ export function useCommands(): UseCommandsReturn {
         });
       }
       await loadCommands();
+      toast.success(isUpdate ? `Updated ${commandName}` : `Created ${commandName}`);
       return { success: true };
     } catch (error) {
       logger.error('Failed to save command:', error);
+      toast.error(isUpdate ? 'Failed to update command' : 'Failed to create command');
       return { success: false, error };
     }
   };
@@ -86,9 +92,11 @@ export function useCommands(): UseCommandsReturn {
     try {
       await window.goodvibes.deleteSkill(id);
       await loadCommands();
+      toast.success('Command deleted');
       return { success: true };
     } catch (error) {
       logger.error('Failed to delete command:', error);
+      toast.error('Failed to delete command');
       return { success: false, error };
     }
   };
@@ -96,9 +104,11 @@ export function useCommands(): UseCommandsReturn {
   const copyToClipboard = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      toast.success('Copied to clipboard');
       return { success: true };
     } catch (error) {
       logger.error('Failed to copy to clipboard:', error);
+      toast.error('Failed to copy to clipboard');
       return { success: false, error };
     }
   };

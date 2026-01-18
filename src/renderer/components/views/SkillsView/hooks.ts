@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { AgentSkill, BuiltInAgentSkill } from './types';
 import { createLogger } from '../../../../shared/logger';
 import { formatTimestamp } from '../../../../shared/dateUtils';
+import { toast } from '../../../stores/toastStore';
 
 const logger = createLogger('AgentSkillsView');
 
@@ -49,6 +50,7 @@ export function useAgentSkills(): UseAgentSkillsReturn {
       setSkills(mappedSkills);
     } catch (error) {
       logger.error('Failed to load agent skills:', error);
+      toast.error('Failed to load skills');
       setSkills([]);
     } finally {
       setLoading(false);
@@ -63,6 +65,8 @@ export function useAgentSkills(): UseAgentSkillsReturn {
     skillData: Partial<AgentSkill>,
     projectPath: string | null
   ) => {
+    const isUpdate = Boolean(skillData.id);
+    const skillName = skillData.name || 'skill';
     try {
       if (skillData.id) {
         await window.goodvibes.updateSkill(skillData.id, {
@@ -85,9 +89,11 @@ export function useAgentSkills(): UseAgentSkillsReturn {
         });
       }
       await loadSkills();
+      toast.success(isUpdate ? `Updated ${skillName}` : `Created ${skillName}`);
       return { success: true };
     } catch (error) {
       logger.error('Failed to save agent skill:', error);
+      toast.error(isUpdate ? 'Failed to update skill' : 'Failed to create skill');
       return { success: false, error };
     }
   };
@@ -96,9 +102,11 @@ export function useAgentSkills(): UseAgentSkillsReturn {
     try {
       await window.goodvibes.deleteSkill(id);
       await loadSkills();
+      toast.success('Skill deleted');
       return { success: true };
     } catch (error) {
       logger.error('Failed to delete agent skill:', error);
+      toast.error('Failed to delete skill');
       return { success: false, error };
     }
   };
@@ -106,9 +114,11 @@ export function useAgentSkills(): UseAgentSkillsReturn {
   const copyToClipboard = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      toast.success('Copied to clipboard');
       return { success: true };
     } catch (error) {
       logger.error('Failed to copy to clipboard:', error);
+      toast.error('Failed to copy to clipboard');
       return { success: false, error };
     }
   };

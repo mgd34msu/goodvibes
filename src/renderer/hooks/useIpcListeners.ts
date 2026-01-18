@@ -61,6 +61,15 @@ export function useIpcListeners(): void {
       })
     );
 
+    // Terminal events
+    cleanups.push(
+      window.goodvibes.onTerminalExit((data: { id: number; exitCode: number }) => {
+        // Remove the terminal from the store when it exits
+        // This prevents memory leaks from zombie terminal entries
+        useTerminalStore.getState().removeTerminal(data.id);
+      })
+    );
+
     // Session events
     cleanups.push(
       window.goodvibes.onSessionDetected(() => {

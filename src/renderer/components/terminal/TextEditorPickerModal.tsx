@@ -8,6 +8,10 @@ import { Folder, FileText } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { useTerminalStore } from '../../stores/terminalStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { toast } from '../../stores/toastStore';
+import { createLogger } from '../../../shared/logger';
+
+const logger = createLogger('TextEditorPickerModal');
 
 // ============================================================================
 // TYPES
@@ -35,57 +39,101 @@ export function TextEditorPickerModal(): React.JSX.Element | null {
   // Load recent projects when modal opens
   useEffect(() => {
     if (isOpen) {
-      window.goodvibes.getRecentProjects().then(setRecentProjects);
+      window.goodvibes.getRecentProjects()
+        .then(setRecentProjects)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          logger.error('Failed to load recent projects', { error: message });
+          toast.error('Failed to load recent projects', { title: 'File Error' });
+        });
       setSelectedPath(null);
       setIsFile(false);
     }
   }, [isOpen]);
 
   const handleSelectFolder = async () => {
-    const folder = await window.goodvibes.selectFolder();
-    if (folder) {
-      setSelectedPath(folder);
-      setIsFile(false);
+    try {
+      const folder = await window.goodvibes.selectFolder();
+      if (folder) {
+        setSelectedPath(folder);
+        setIsFile(false);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to open folder dialog', { error: message });
+      toast.error('Failed to open folder', { title: 'File Error' });
     }
   };
 
   const handleSelectFile = async () => {
-    const file = await window.goodvibes.selectFile();
-    if (file) {
-      setSelectedPath(file);
-      setIsFile(true);
+    try {
+      const file = await window.goodvibes.selectFile();
+      if (file) {
+        setSelectedPath(file);
+        setIsFile(true);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to open file dialog', { error: message });
+      toast.error('Failed to open file', { title: 'File Error' });
     }
   };
 
   const handleStart = async () => {
     if (!selectedPath) return;
 
-    // Get the working directory (use file's directory if a file was selected)
-    const cwd = isFile ? selectedPath.substring(0, selectedPath.lastIndexOf(selectedPath.includes('/') ? '/' : '\\')) : selectedPath;
+    try {
+      // Get the working directory (use file's directory if a file was selected)
+      const cwd = isFile ? selectedPath.substring(0, selectedPath.lastIndexOf(selectedPath.includes('/') ? '/' : '\\')) : selectedPath;
 
-    // Start a plain terminal in the selected folder
-    const result = await createPlainTerminal(cwd);
-    if (result.id !== undefined) {
-      // Get the preferred editor or default
-      let editor = preferredTextEditor;
-      if (!editor) {
-        editor = await window.goodvibes.getDefaultEditor();
+      // Start a plain terminal in the selected folder
+      const result = await createPlainTerminal(cwd);
+      if (result.error) {
+        // Error already logged by terminalStore, show user-friendly toast
+        toast.error('Failed to open editor', { title: 'Editor Error' });
+        return;
       }
-      if (editor) {
-        // Build the editor command
-        let command = editor;
-        if (isFile) {
-          // Open the specific file
-          command = `${editor} "${selectedPath}"`;
+
+      if (result.id !== undefined) {
+        // Get the preferred editor or default
+        let editor = preferredTextEditor;
+        if (!editor) {
+          try {
+            editor = await window.goodvibes.getDefaultEditor();
+          } catch (editorError: unknown) {
+            const message = editorError instanceof Error ? editorError.message : 'Unknown error';
+            logger.error('Failed to get default editor', { error: message });
+            toast.error('Failed to detect text editor', { title: 'Editor Error' });
+            return;
+          }
         }
-        // Send the editor command to the terminal
-        await window.goodvibes.terminalInput(result.id, `${command}\r`);
+        if (editor) {
+          try {
+            // Build the editor command
+            let command = editor;
+            if (isFile) {
+              // Open the specific file
+              command = `${editor} "${selectedPath}"`;
+            }
+            // Send the editor command to the terminal
+            await window.goodvibes.terminalInput(result.id, `${command}\r`);
+          } catch (inputError: unknown) {
+            const message = inputError instanceof Error ? inputError.message : 'Unknown error';
+            logger.error('Failed to send editor command', { error: message, editor, path: selectedPath });
+            toast.error('Failed to launch editor', { title: 'Editor Error' });
+            return;
+          }
+        }
       }
-    }
 
-    setSelectedPath(null);
-    setIsFile(false);
-    close();
+      setSelectedPath(null);
+      setIsFile(false);
+      close();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to open editor', { error: message, path: selectedPath });
+      toast.error('Failed to open editor', { title: 'Editor Error' });
+    }
   };
 
   const handleClose = () => {

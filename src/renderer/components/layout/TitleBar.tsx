@@ -44,6 +44,7 @@ const VIEW_ICONS: Record<ViewName, React.ReactNode> = {
   agents: <Users className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   memory: <Brain className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   skills: <Sparkles className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
+  commands: <Terminal className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   // Phase 9-12 views
   projects: <FolderKanban className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
 };
@@ -60,6 +61,7 @@ const VIEW_LABELS: Record<ViewName, string> = {
   agents: 'Agents',
   memory: 'Memory',
   skills: 'Skills',
+  commands: 'Commands',
   // Phase 9-12 views
   projects: 'Projects',
 };

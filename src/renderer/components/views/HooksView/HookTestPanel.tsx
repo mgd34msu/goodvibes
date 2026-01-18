@@ -50,7 +50,7 @@ function generateSampleInput(
   const sampleOverrides: Record<string, unknown> = {
     session_id: 'test-session-123',
     transcript_path: '/tmp/test-transcript.json',
-    cwd: process.cwd?.() || '/project/directory',
+    cwd: '/project/directory',
     permission_mode: 'default',
   };
 

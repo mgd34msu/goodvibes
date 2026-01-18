@@ -9,7 +9,7 @@ import { Terminal, Search } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { useTerminalStore } from '../../stores/terminalStore';
 
-export function QuickSwitcher() {
+export function QuickSwitcher(): React.JSX.Element | null {
   const isOpen = useAppStore((s) => s.isQuickSwitcherOpen);
   const close = useAppStore((s) => s.closeQuickSwitcher);
 

@@ -13,7 +13,7 @@ interface AgentFormProps {
   onCancel: () => void;
 }
 
-export function AgentForm({ agent, onSave, onCancel }: AgentFormProps) {
+export function AgentForm({ agent, onSave, onCancel }: AgentFormProps): React.JSX.Element {
   const [name, setName] = useState(agent?.name || '');
   const [description, setDescription] = useState(agent?.description || '');
   const [scope, setScope] = useState<'user' | 'project'>(agent?.cwd ? 'project' : 'user');

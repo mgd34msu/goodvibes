@@ -7,7 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '../../../stores/toastStore';
 import { SettingsSection, SettingRow } from './components';
 
-export function MaintenanceSettings() {
+export function MaintenanceSettings(): React.JSX.Element {
   return (
     <SettingsSection title="Maintenance">
       <RecalculateCostsButton />

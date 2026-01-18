@@ -21,7 +21,7 @@ import { useTerminalStore } from '../../../stores/terminalStore';
 // MONITOR PANEL
 // ============================================================================
 
-export function MonitorPanel({ projectsRoot }: MonitorPanelProps) {
+export function MonitorPanel({ projectsRoot }: MonitorPanelProps): React.JSX.Element {
   const terminalCount = useTerminalStore((s) => s.terminals.size);
   const appUptime = useAppUptime();
 

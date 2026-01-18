@@ -321,7 +321,7 @@ export function useRecommendations(options: UseRecommendationsOptions = {}): Use
 /**
  * Hook to get pending recommendations
  */
-export function usePendingRecommendations(sessionId?: string) {
+export function usePendingRecommendations(sessionId?: string): ReturnType<typeof useQuery<Recommendation[]>> {
   return useQuery({
     queryKey: QUERY_KEYS.pending(sessionId),
     queryFn: () => window.goodvibes.recommendationsGetPending({
@@ -333,10 +333,20 @@ export function usePendingRecommendations(sessionId?: string) {
   });
 }
 
+export interface TopPerformingItem {
+  itemId: number;
+  itemSlug: string;
+  itemName: string;
+  type: 'agent' | 'skill';
+  acceptedCount: number;
+  recommendedCount: number;
+  acceptanceRate: number;
+}
+
 /**
  * Hook to get top performing items
  */
-export function useTopPerformingItems(type?: 'agent' | 'skill') {
+export function useTopPerformingItems(type?: 'agent' | 'skill'): ReturnType<typeof useQuery<TopPerformingItem[]>> {
   return useQuery({
     queryKey: [...QUERY_KEYS.topPerforming, type],
     queryFn: () => window.goodvibes.recommendationsGetTopPerforming({
@@ -352,7 +362,7 @@ export function useTopPerformingItems(type?: 'agent' | 'skill') {
 /**
  * Hook to get recommendation statistics
  */
-export function useRecommendationStats() {
+export function useRecommendationStats(): ReturnType<typeof useQuery<RecommendationStats>> {
   return useQuery({
     queryKey: QUERY_KEYS.stats,
     queryFn: () => window.goodvibes.recommendationsGetStats(),

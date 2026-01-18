@@ -19,7 +19,7 @@ interface RecentSession {
 // COMPONENT
 // ============================================================================
 
-export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: TerminalHeaderProps) {
+export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSession }: TerminalHeaderProps): React.JSX.Element {
   const terminalsMap = useTerminalStore((s) => s.terminals);
   const terminals = useMemo(() => Array.from(terminalsMap.values()), [terminalsMap]);
   const activeTerminalId = useTerminalStore((s) => s.activeTerminalId);

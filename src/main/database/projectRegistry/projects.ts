@@ -30,8 +30,8 @@ export function registerProject(
   `).run(
     path,
     name,
-    description || null,
-    JSON.stringify(settings || {})
+    description ?? null,
+    JSON.stringify(settings ?? {})
   );
 
   const inserted = getRegisteredProject(result.lastInsertRowid as number);
@@ -156,7 +156,7 @@ export function mapRowToProject(row: RegisteredProjectRow): RegisteredProject {
     name: row.name,
     description: row.description,
     lastOpened: row.last_opened,
-    settings: JSON.parse(row.settings || '{}'),
+    settings: JSON.parse(row.settings ?? '{}'),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

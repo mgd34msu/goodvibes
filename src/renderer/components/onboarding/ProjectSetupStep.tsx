@@ -15,7 +15,7 @@ const logger = createLogger('ProjectSetupStep');
 // Component
 // ============================================================================
 
-export function ProjectSetupStep() {
+export function ProjectSetupStep(): React.JSX.Element {
   const settings = useSettingsStore((s) => s.settings);
   const updateSetting = useSettingsStore((s) => s.updateSetting);
 

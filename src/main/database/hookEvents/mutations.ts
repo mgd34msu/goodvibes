@@ -40,7 +40,7 @@ export function recordHookEvent(event: Omit<HookEventRecord, 'id'>): HookEventRe
     event.blocked ? 1 : 0,
     event.blockReason,
     event.durationMs,
-    event.timestamp || formatTimestamp()
+    event.timestamp ?? formatTimestamp()
   );
 
   return {

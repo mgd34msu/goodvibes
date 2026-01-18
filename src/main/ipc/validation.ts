@@ -613,3 +613,128 @@ export function validateGitParams(params: unknown): { cwd: string } & Record<str
     cwd: validatePath(obj.cwd, 'cwd'),
   };
 }
+
+// ============================================================================
+// ZOD VALIDATION UTILITIES
+// ============================================================================
+
+import { z, type ZodSchema, ZodError } from 'zod';
+
+/**
+ * Result type for Zod validation
+ */
+export type ZodValidationResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string; issues: z.ZodIssue[] };
+
+/**
+ * Validates input against a Zod schema with detailed error messages
+ * @param schema - The Zod schema to validate against
+ * @param input - The input to validate
+ * @param context - Optional context for error logging
+ * @returns Validation result with data or error information
+ */
+export function validateWithZod<T>(
+  schema: ZodSchema<T>,
+  input: unknown,
+  context?: string
+): ZodValidationResult<T> {
+  const result = schema.safeParse(input);
+
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+
+  const errorMessage = formatZodError(result.error);
+
+  if (context) {
+    logger.warn(`Validation failed for ${context}`, {
+      error: errorMessage,
+      issues: result.error.issues.map(i => ({
+        path: i.path.join('.'),
+        message: i.message,
+        code: i.code,
+      })),
+    });
+  }
+
+  return {
+    success: false,
+    error: errorMessage,
+    issues: result.error.issues,
+  };
+}
+
+/**
+ * Validates input against a Zod schema, throwing on failure
+ * @param schema - The Zod schema to validate against
+ * @param input - The input to validate
+ * @param context - Optional context for error messages
+ * @returns The validated and typed data
+ * @throws ValidationError if validation fails
+ */
+export function validateWithZodOrThrow<T>(
+  schema: ZodSchema<T>,
+  input: unknown,
+  context?: string
+): T {
+  const result = validateWithZod(schema, input, context);
+
+  if (!result.success) {
+    throw new ValidationError(result.error, context || 'input', input);
+  }
+
+  return result.data;
+}
+
+/**
+ * Formats Zod errors into a human-readable string
+ * @param error - The ZodError to format
+ * @returns Formatted error string
+ */
+export function formatZodError(error: ZodError): string {
+  const issues = error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
+    return `${path}${issue.message}`;
+  });
+
+  return issues.join('; ');
+}
+
+/**
+ * Creates an IPC error response for validation failures
+ * @param error - The validation error message
+ * @param code - Optional error code (default: 'VALIDATION_ERROR')
+ * @returns Standardized error response object
+ */
+export function createValidationErrorResponse(
+  error: string,
+  code: string = 'VALIDATION_ERROR'
+): { success: false; error: string; code: string } {
+  return {
+    success: false,
+    error,
+    code,
+  };
+}
+
+/**
+ * Higher-order function that wraps an IPC handler with Zod validation
+ * @param schema - The Zod schema to validate input against
+ * @param handler - The handler function to wrap
+ * @returns Wrapped handler that validates input before calling the original handler
+ */
+export function withZodValidation<TInput, TOutput>(
+  schema: ZodSchema<TInput>,
+  handler: (validatedInput: TInput) => Promise<TOutput>
+): (input: unknown) => Promise<TOutput | { success: false; error: string; code: string }> {
+  return async (input: unknown) => {
+    const result = validateWithZod(schema, input);
+
+    if (!result.success) {
+      return createValidationErrorResponse(result.error);
+    }
+
+    return handler(result.data);
+  };
+}

@@ -19,7 +19,7 @@ interface VisuallyHiddenProps {
  * - Additional context for screen readers
  * - Form labels that are visually represented elsewhere
  */
-export function VisuallyHidden({ children, id, as = 'span' }: VisuallyHiddenProps) {
+export function VisuallyHidden({ children, id, as = 'span' }: VisuallyHiddenProps): React.JSX.Element {
   const Component = as;
   return (
     <Component

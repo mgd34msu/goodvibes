@@ -6,6 +6,7 @@ import { ipcMain } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { ZodError } from 'zod';
 import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import { getSessionManager } from '../../services/sessionManager.js';
@@ -13,8 +14,34 @@ import * as db from '../../database/index.js';
 import * as sessionSummaries from '../../database/sessionSummaries/index.js';
 import { getDatabase } from '../../database/connection.js';
 import { type SessionRow } from '../../database/mappers.js';
+import {
+  sessionIdSchema,
+  paginationLimitSchema,
+  projectPathSchema,
+  sessionSearchQuerySchema,
+} from '../schemas/sessions.js';
 
 const logger = new Logger('IPC:Sessions');
+
+/**
+ * Creates a validation error response with detailed field information.
+ */
+function createValidationError(error: ZodError): { error: string; details: Record<string, string[]> } {
+  const details: Record<string, string[]> = {};
+
+  for (const issue of error.issues) {
+    const path = issue.path.join('.') || 'input';
+    if (!details[path]) {
+      details[path] = [];
+    }
+    details[path].push(issue.message);
+  }
+
+  return {
+    error: 'Validation failed',
+    details,
+  };
+}
 
 // Helper to find the most recent session from the user's ~/.claude/projects/ directory
 interface ClaudeSessionFile {
@@ -173,13 +200,27 @@ export function registerSessionHandlers(): void {
   }));
 
   ipcMain.handle('get-session', withContext('get-session', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('get-session: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
     const sessionManager = getSessionManager();
-    return sessionManager?.getSession(id) ?? null;
+    return sessionManager?.getSession(result.data) ?? null;
   }));
 
   ipcMain.handle('get-session-messages', withContext('get-session-messages', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('get-session-messages: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
     const sessionManager = getSessionManager();
-    return await sessionManager?.getSessionMessages(id) ?? [];
+    return await sessionManager?.getSessionMessages(result.data) ?? [];
   }));
 
   ipcMain.handle('get-active-sessions', withContext('get-active-sessions', async () => {
@@ -195,17 +236,38 @@ export function registerSessionHandlers(): void {
   }));
 
   ipcMain.handle('toggle-favorite', withContext('toggle-favorite', async (_, id: string) => {
-    db.toggleFavorite(id);
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('toggle-favorite: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    db.toggleFavorite(result.data);
     return true;
   }));
 
   ipcMain.handle('toggle-archive', withContext('toggle-archive', async (_, id: string) => {
-    db.toggleArchive(id);
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('toggle-archive: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    db.toggleArchive(result.data);
     return true;
   }));
 
   ipcMain.handle('delete-session', withContext('delete-session', async (_, id: string) => {
-    db.deleteSession(id);
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('delete-session: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    db.deleteSession(result.data);
     return true;
   }));
 
@@ -215,18 +277,39 @@ export function registerSessionHandlers(): void {
   }));
 
   ipcMain.handle('get-session-raw-entries', withContext('get-session-raw-entries', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('get-session-raw-entries: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
     const sessionManager = getSessionManager();
-    return await sessionManager?.getSessionRawEntries(id) ?? [];
+    return await sessionManager?.getSessionRawEntries(result.data) ?? [];
   }));
 
   ipcMain.handle('refresh-session', withContext('refresh-session', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('refresh-session: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
     const sessionManager = getSessionManager();
-    return await sessionManager?.refreshSessionTokens(id) ?? null;
+    return await sessionManager?.refreshSessionTokens(result.data) ?? null;
   }));
 
   ipcMain.handle('is-session-live', withContext('is-session-live', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('is-session-live: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
     const sessionManager = getSessionManager();
-    return sessionManager?.isSessionLive(id) ?? false;
+    return sessionManager?.isSessionLive(result.data) ?? false;
   }));
 
   ipcMain.handle('recalculate-session-costs', withContext('recalculate-session-costs', async () => {
@@ -244,17 +327,48 @@ export function registerSessionHandlers(): void {
 
   // Session summary handlers (for phase5to8Api)
   ipcMain.handle('session:get', withContext('session:get', async (_, sessionId: string) => {
-    return sessionSummaries.getSessionSummaryBySessionId(sessionId);
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(sessionId);
+    if (!result.success) {
+      logger.warn('session:get: Invalid session ID', { sessionId, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    return sessionSummaries.getSessionSummaryBySessionId(result.data);
   }));
 
   ipcMain.handle('session:getRecent', withContext('session:getRecent', async (_, limit?: number) => {
-    return sessionSummaries.getRecentSessions(limit ?? 50);
+    // Validate limit
+    const result = paginationLimitSchema.safeParse(limit);
+    if (!result.success) {
+      logger.warn('session:getRecent: Invalid limit', { limit, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    return sessionSummaries.getRecentSessions(result.data);
   }));
 
   ipcMain.handle('session:getForProject', withContext('session:getForProject', async (_, projectPath: string, limit?: number) => {
+    // Validate project path
+    const pathResult = projectPathSchema.safeParse(projectPath);
+    if (!pathResult.success) {
+      logger.warn('session:getForProject: Invalid project path', { projectPath, errors: pathResult.error.issues });
+      throw new Error(createValidationError(pathResult.error).error);
+    }
+
+    // Validate limit
+    const limitResult = paginationLimitSchema.safeParse(limit ?? 5);
+    if (!limitResult.success) {
+      logger.warn('session:getForProject: Invalid limit', { limit, errors: limitResult.error.issues });
+      throw new Error(createValidationError(limitResult.error).error);
+    }
+
+    const validatedPath = pathResult.data;
+    const validatedLimit = limitResult.data;
+
     // First try session_summaries table
     try {
-      const summaries = sessionSummaries.getRecentSessionsForProject(projectPath, limit ?? 5);
+      const summaries = sessionSummaries.getRecentSessionsForProject(validatedPath, validatedLimit);
       if (summaries.length > 0) {
         // Map session summaries to the expected format
         return summaries.map(s => ({
@@ -272,11 +386,36 @@ export function registerSessionHandlers(): void {
     }
 
     // Fallback to main sessions table
-    return getSessionsFromMainTable(projectPath, limit ?? 5);
+    return getSessionsFromMainTable(validatedPath, validatedLimit);
   }));
 
   ipcMain.handle('session:search', withContext('session:search', async (_, query: string, projectPath?: string, limit?: number) => {
-    return sessionSummaries.searchSessions(query, projectPath, limit ?? 20);
+    // Validate search query
+    const queryResult = sessionSearchQuerySchema.safeParse(query);
+    if (!queryResult.success) {
+      logger.warn('session:search: Invalid query', { query, errors: queryResult.error.issues });
+      throw new Error(createValidationError(queryResult.error).error);
+    }
+
+    // Validate optional project path
+    let validatedProjectPath: string | undefined = undefined;
+    if (projectPath !== undefined) {
+      const pathResult = projectPathSchema.safeParse(projectPath);
+      if (!pathResult.success) {
+        logger.warn('session:search: Invalid project path', { projectPath, errors: pathResult.error.issues });
+        throw new Error(createValidationError(pathResult.error).error);
+      }
+      validatedProjectPath = pathResult.data;
+    }
+
+    // Validate limit
+    const limitResult = paginationLimitSchema.safeParse(limit ?? 20);
+    if (!limitResult.success) {
+      logger.warn('session:search: Invalid limit', { limit, errors: limitResult.error.issues });
+      throw new Error(createValidationError(limitResult.error).error);
+    }
+
+    return sessionSummaries.searchSessions(queryResult.data, validatedProjectPath, limitResult.data);
   }));
 
   // Get most recent session for quick restart

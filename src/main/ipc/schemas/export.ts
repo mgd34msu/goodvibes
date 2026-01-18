@@ -35,3 +35,8 @@ export const logActivitySchema = z.object({
   description: z.string().min(1).max(5000),
   metadata: z.unknown().optional(),
 });
+
+/**
+ * Activity limit schema
+ */
+export const activityLimitSchema = z.number().int().positive().max(1000).optional();

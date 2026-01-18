@@ -11,7 +11,7 @@ interface GitHubSettingsProps {
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
-export function GitHubSettings({ settings, onChange }: GitHubSettingsProps) {
+export function GitHubSettings({ settings, onChange }: GitHubSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="GitHub Integration">
       <GitHubConnectionStatus />

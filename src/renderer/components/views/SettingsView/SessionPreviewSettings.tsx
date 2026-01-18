@@ -10,7 +10,7 @@ interface SessionPreviewSettingsProps {
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
-export function SessionPreviewVisibilitySettings({ settings, onChange }: SessionPreviewSettingsProps) {
+export function SessionPreviewVisibilitySettings({ settings, onChange }: SessionPreviewSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Session Preview">
       <div className="p-4">
@@ -72,7 +72,7 @@ export function SessionPreviewVisibilitySettings({ settings, onChange }: Session
   );
 }
 
-export function SessionPreviewExpandSettings({ settings, onChange }: SessionPreviewSettingsProps) {
+export function SessionPreviewExpandSettings({ settings, onChange }: SessionPreviewSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Default Expand States">
       <div className="p-4">

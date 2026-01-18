@@ -11,7 +11,7 @@ interface AppearanceSettingsProps {
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
-export function AppearanceSettings({ settings, onChange }: AppearanceSettingsProps) {
+export function AppearanceSettings({ settings, onChange }: AppearanceSettingsProps): React.JSX.Element {
   return (
     <>
       {/* Theme Settings - prominently placed first */}

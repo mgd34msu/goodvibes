@@ -164,7 +164,7 @@ const DEFAULT_CATEGORY: CategoryConfig = {
   iconClass: 'card-icon',
 };
 
-export function MCPMarketplaceCard({ server, installed, onInstall }: MarketplaceCardProps) {
+export function MCPMarketplaceCard({ server, installed, onInstall }: MarketplaceCardProps): React.JSX.Element {
   const categoryConfig: CategoryConfig = CATEGORY_CONFIG[server.category] ?? DEFAULT_CATEGORY;
   const isFeatured = server.featured;
 

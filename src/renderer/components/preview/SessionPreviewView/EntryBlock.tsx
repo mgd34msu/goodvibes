@@ -24,7 +24,7 @@ interface EntryBlockProps {
   globalExpanded: boolean | null;
 }
 
-export function EntryBlock({ entry, settings, globalExpanded }: EntryBlockProps) {
+export function EntryBlock({ entry, settings, globalExpanded }: EntryBlockProps): React.JSX.Element {
   const config = getTypeConfig(entry.type);
 
   // Determine default expand state from settings

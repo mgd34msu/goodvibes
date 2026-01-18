@@ -9,7 +9,7 @@ import { PartyPopper, Terminal, FolderKanban, Bot, Settings, Keyboard, Rocket } 
 // Component
 // ============================================================================
 
-export function CompletionStep() {
+export function CompletionStep(): React.JSX.Element {
   return (
     <div className="space-y-8">
       {/* Success Message */}

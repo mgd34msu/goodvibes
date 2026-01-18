@@ -27,7 +27,7 @@ import type { GitPanelProps } from './types';
 
 const logger = createLogger('GitPanel');
 
-export function GitPanel({ cwd, position }: GitPanelProps) {
+export function GitPanel({ cwd, position }: GitPanelProps): React.JSX.Element {
   const githubEnabled = useSettingsStore((s) => s.settings.githubEnabled);
   const githubShowInGitPanel = useSettingsStore((s) => s.settings.githubShowInGitPanel);
 

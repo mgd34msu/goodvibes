@@ -11,7 +11,7 @@ interface TabButtonProps {
   children: React.ReactNode;
 }
 
-export function TabButton({ active, onClick, children }: TabButtonProps) {
+export function TabButton({ active, onClick, children }: TabButtonProps): React.JSX.Element {
   return (
     <button
       onClick={onClick}

@@ -25,7 +25,7 @@ interface AgentCardProps {
   onCopy: () => void;
 }
 
-export function AgentCard({ agent, onUse, onInstall, onEdit, onDelete, onCopy }: AgentCardProps) {
+export function AgentCard({ agent, onUse, onInstall, onEdit, onDelete, onCopy }: AgentCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in agent;

@@ -262,7 +262,7 @@ export const CATEGORY_ORDER: ShortcutCategory[] = [
 // Main Hook
 // ============================================================================
 
-export function useKeyboardShortcuts() {
+export function useKeyboardShortcuts(): void {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
   const toggleQuickSwitcher = useAppStore((s) => s.toggleQuickSwitcher);
@@ -467,7 +467,7 @@ function formatViewName(view: ViewName): string {
 // Hook for Registering Custom Shortcuts
 // ============================================================================
 
-export function useRegisterShortcut(shortcut: ShortcutDefinition) {
+export function useRegisterShortcut(shortcut: ShortcutDefinition): void {
   const { register, unregister } = useShortcutRegistry();
 
   useEffect(() => {
@@ -480,7 +480,22 @@ export function useRegisterShortcut(shortcut: ShortcutDefinition) {
 // Hook for Shortcut State
 // ============================================================================
 
-export function useShortcutState() {
+export interface ShortcutState {
+  shortcuts: Map<string, ShortcutDefinition>;
+  customBindings: Map<string, KeyBinding>;
+  shortcutsByCategory: Map<ShortcutCategory, ShortcutDefinition[]>;
+  conflicts: ShortcutConflict[];
+  isHelpOpen: boolean;
+  openHelp: () => void;
+  closeHelp: () => void;
+  toggleHelp: () => void;
+  setCustomBinding: (id: string, binding: KeyBinding) => void;
+  resetBinding: (id: string) => void;
+  resetAllBindings: () => void;
+  getEffectiveBinding: (id: string) => KeyBinding | undefined;
+}
+
+export function useShortcutState(): ShortcutState {
   const shortcuts = useShortcutRegistry((s) => s.shortcuts);
   const customBindings = useShortcutRegistry((s) => s.customBindings);
   const isHelpOpen = useShortcutRegistry((s) => s.isHelpOpen);

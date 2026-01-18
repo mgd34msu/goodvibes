@@ -5,8 +5,49 @@
 import { ipcMain, clipboard, Menu, BrowserWindow } from 'electron';
 import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
+import {
+  clipboardWriteSchema,
+  contextMenuOptionsSchema,
+  terminalContextMenuOptionsSchema,
+} from '../schemas/window.js';
+import type { ZodError } from 'zod';
 
 const logger = new Logger('IPC:Clipboard');
+
+// ============================================================================
+// VALIDATION HELPERS
+// ============================================================================
+
+/**
+ * Standard error response for IPC validation failures.
+ */
+interface ValidationErrorResponse {
+  success: false;
+  error: string;
+  code: 'VALIDATION_ERROR';
+  details?: Array<{ path: string; message: string }>;
+}
+
+/**
+ * Format Zod validation errors into a structured response
+ */
+function formatValidationError(error: ZodError): ValidationErrorResponse {
+  const details = error.errors.map(e => ({
+    path: e.path.join('.'),
+    message: e.message,
+  }));
+
+  return {
+    success: false,
+    error: `Validation failed: ${details.map(d => d.message).join(', ')}`,
+    code: 'VALIDATION_ERROR',
+    details,
+  };
+}
+
+// ============================================================================
+// HANDLERS
+// ============================================================================
 
 export function registerClipboardHandlers(): void {
   // ============================================================================
@@ -17,27 +58,38 @@ export function registerClipboardHandlers(): void {
     return clipboard.readText();
   }));
 
-  ipcMain.handle('clipboard-write', withContext('clipboard-write', async (_, text: string) => {
-    clipboard.writeText(text);
-    return true;
+  ipcMain.handle('clipboard-write', withContext('clipboard-write', async (_, text: unknown) => {
+    // Validate input with Zod
+    const validation = clipboardWriteSchema.safeParse(text);
+    if (!validation.success) {
+      logger.warn('clipboard-write validation failed', { error: validation.error.message });
+      return formatValidationError(validation.error);
+    }
+
+    clipboard.writeText(validation.data);
+    return { success: true };
   }));
 
   // ============================================================================
   // CONTEXT MENU HANDLERS
   // ============================================================================
 
-  ipcMain.handle('show-context-menu', withContext('show-context-menu', async (event, options: {
-    hasSelection: boolean;
-    isEditable: boolean;
-    isTerminal?: boolean;
-  }) => {
+  ipcMain.handle('show-context-menu', withContext('show-context-menu', async (event, options: unknown) => {
+    // Validate input with Zod
+    const validation = contextMenuOptionsSchema.safeParse(options);
+    if (!validation.success) {
+      logger.warn('show-context-menu validation failed', { error: validation.error.message });
+      return formatValidationError(validation.error);
+    }
+
+    const validatedOptions = validation.data;
     const window = BrowserWindow.fromWebContents(event.sender);
-    if (!window) return;
+    if (!window) return { success: false, error: 'Window not found', code: 'WINDOW_NOT_FOUND' };
 
     const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
 
     // Cut - only for editable fields with selection
-    if (options.isEditable && options.hasSelection) {
+    if (validatedOptions.isEditable && validatedOptions.hasSelection) {
       menuTemplate.push({
         label: 'Cut',
         accelerator: 'CmdOrCtrl+X',
@@ -46,7 +98,7 @@ export function registerClipboardHandlers(): void {
     }
 
     // Copy - for any selection
-    if (options.hasSelection) {
+    if (validatedOptions.hasSelection) {
       menuTemplate.push({
         label: 'Copy',
         accelerator: 'CmdOrCtrl+C',
@@ -55,7 +107,7 @@ export function registerClipboardHandlers(): void {
     }
 
     // Paste - for editable fields or terminal
-    if (options.isEditable || options.isTerminal) {
+    if (validatedOptions.isEditable || validatedOptions.isTerminal) {
       menuTemplate.push({
         label: 'Paste',
         accelerator: 'CmdOrCtrl+V',
@@ -64,7 +116,7 @@ export function registerClipboardHandlers(): void {
     }
 
     // Select All - for editable fields
-    if (options.isEditable) {
+    if (validatedOptions.isEditable) {
       if (menuTemplate.length > 0) {
         menuTemplate.push({ type: 'separator' });
       }
@@ -80,27 +132,33 @@ export function registerClipboardHandlers(): void {
       const menu = Menu.buildFromTemplate(menuTemplate);
       menu.popup({ window });
     }
+
+    return { success: true };
   }));
 
   // Terminal-specific context menu with clipboard access via IPC
-  ipcMain.handle('show-terminal-context-menu', withContext('show-terminal-context-menu', async (event, options: {
-    hasSelection: boolean;
-    selectedText?: string;
-  }) => {
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (!window) return null;
+  ipcMain.handle('show-terminal-context-menu', withContext('show-terminal-context-menu', async (event, options: unknown) => {
+    // Validate input with Zod
+    const validation = terminalContextMenuOptionsSchema.safeParse(options);
+    if (!validation.success) {
+      logger.warn('show-terminal-context-menu validation failed', { error: validation.error.message });
+      return formatValidationError(validation.error);
+    }
 
-    return new Promise<string | null>((resolve) => {
+    const validatedOptions = validation.data;
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return { success: false, error: 'Window not found', code: 'WINDOW_NOT_FOUND' };
+
+    return new Promise<string | { success: false; error: string; code: string } | null>((resolve) => {
       const menuTemplate: Electron.MenuItemConstructorOptions[] = [];
 
-      if (options.hasSelection && options.selectedText) {
+      if (validatedOptions.hasSelection && validatedOptions.selectedText) {
+        const textToCopy = validatedOptions.selectedText;
         menuTemplate.push({
           label: 'Copy',
           accelerator: 'CmdOrCtrl+C',
           click: () => {
-            if (options.selectedText) {
-              clipboard.writeText(options.selectedText);
-            }
+            clipboard.writeText(textToCopy);
             resolve('copy');
           },
         });

@@ -8,7 +8,7 @@ import { useTerminalStore } from '../stores/terminalStore';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ViewName } from '../../shared/constants';
 
-export function useIpcListeners() {
+export function useIpcListeners(): void {
   const queryClient = useQueryClient();
 
   useEffect(() => {

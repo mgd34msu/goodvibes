@@ -10,7 +10,7 @@ import { useTerminalStore } from '../../stores/terminalStore';
 // COMPONENT
 // ============================================================================
 
-export function TerminalFooter() {
+export function TerminalFooter(): React.JSX.Element {
   const terminalsMap = useTerminalStore((s) => s.terminals);
   const activeTerminalId = useTerminalStore((s) => s.activeTerminalId);
   const activeTerminal = useMemo(

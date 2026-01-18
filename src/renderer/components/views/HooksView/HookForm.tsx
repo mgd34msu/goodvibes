@@ -18,7 +18,7 @@ interface HookFormProps {
   onCancel: () => void;
 }
 
-export function HookForm({ hook, onSave, onCancel }: HookFormProps) {
+export function HookForm({ hook, onSave, onCancel }: HookFormProps): React.JSX.Element {
   const [name, setName] = useState(hook?.name || '');
   const [eventType, setEventType] = useState<HookEventType>(
     hook?.eventType || 'PostToolUse'

@@ -87,10 +87,10 @@ export function compareSessions(
   if (!session1 || !session2) return null;
 
   const files1 = new Set<string>(
-    JSON.parse(session1.fileChanges).map((c: { filePath: string }) => c.filePath)
+    JSON.parse(session1.fileChanges ?? '[]').map((c: { filePath: string }) => c.filePath)
   );
   const files2 = new Set<string>(
-    JSON.parse(session2.fileChanges).map((c: { filePath: string }) => c.filePath)
+    JSON.parse(session2.fileChanges ?? '[]').map((c: { filePath: string }) => c.filePath)
   );
 
   const commonFiles: string[] = [];

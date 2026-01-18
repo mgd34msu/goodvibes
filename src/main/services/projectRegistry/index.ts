@@ -442,7 +442,18 @@ function emitEvent(event: string, data: Record<string, unknown>): void {
 // SINGLETON ACCESSOR
 // ============================================================================
 
-let instance: {
+// Wrapper to inject updateProjectContext
+function startProjectSessionWrapper(
+  sessionId: string,
+  projectId: number,
+  agentSessionId?: string,
+  metadata?: Record<string, unknown>
+) {
+  return startProjectSession(sessionId, projectId, agentSessionId, metadata, updateProjectContext);
+}
+
+/** Type for the ProjectRegistry singleton instance */
+export type ProjectRegistryInstance = {
   init: typeof initProjectRegistry;
   addProject: typeof addProject;
   updateProject: typeof updateProject;
@@ -488,19 +499,11 @@ let instance: {
   cleanup: typeof cleanup;
   getStatus: typeof getStatus;
   getEventEmitter: typeof getProjectEventEmitter;
-} | null = null;
+};
 
-// Wrapper to inject updateProjectContext
-function startProjectSessionWrapper(
-  sessionId: string,
-  projectId: number,
-  agentSessionId?: string,
-  metadata?: Record<string, unknown>
-) {
-  return startProjectSession(sessionId, projectId, agentSessionId, metadata, updateProjectContext);
-}
+let instance: ProjectRegistryInstance | null = null;
 
-export function getProjectRegistry() {
+export function getProjectRegistry(): ProjectRegistryInstance {
   if (!instance) {
     instance = {
       init: initProjectRegistry,

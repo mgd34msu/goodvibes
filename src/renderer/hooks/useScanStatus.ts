@@ -5,7 +5,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 
-export function useScanStatus() {
+export function useScanStatus(): void {
   const setLoading = useAppStore((s) => s.setLoading);
 
   useEffect(() => {

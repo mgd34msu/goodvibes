@@ -8,7 +8,15 @@ import type { AppSettings } from '../../../../shared/types';
 import { toast } from '../../../stores/toastStore';
 import { useConfirm } from '../../overlays/ConfirmModal';
 
-export function useSettings() {
+export interface UseSettingsReturn {
+  settings: AppSettings;
+  handleChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => Promise<void>;
+  handleResetSettings: () => Promise<void>;
+  isResetting: boolean;
+  ResetConfirmDialog: React.FC;
+}
+
+export function useSettings(): UseSettingsReturn {
   const settings = useSettingsStore((s) => s.settings);
   const updateSetting = useSettingsStore((s) => s.updateSetting);
   const resetSettings = useSettingsStore((s) => s.resetSettings);

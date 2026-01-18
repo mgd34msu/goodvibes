@@ -16,7 +16,7 @@ interface ServerFormProps {
   onCancel: () => void;
 }
 
-export function MCPServerForm({ server, onSave, onCancel }: ServerFormProps) {
+export function MCPServerForm({ server, onSave, onCancel }: ServerFormProps): React.JSX.Element {
   const [name, setName] = useState(server?.name || '');
   const [description, setDescription] = useState(server?.description || '');
   const [transport, setTransport] = useState<'stdio' | 'http'>(server?.transport || 'stdio');

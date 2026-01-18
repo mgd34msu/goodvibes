@@ -153,7 +153,7 @@ interface TerminalSettingsProps {
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
-export function TerminalSettings({ settings, onChange }: TerminalSettingsProps) {
+export function TerminalSettings({ settings, onChange }: TerminalSettingsProps): React.JSX.Element {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [platform, setPlatform] = useState<NodeJS.Platform>('win32');
   const [availableEditors, setAvailableEditors] = useState<TextEditorInfo[]>([]);

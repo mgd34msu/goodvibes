@@ -66,7 +66,7 @@ interface PluginCardProps {
   onToggle?: (plugin: Plugin) => void;
 }
 
-export function PluginCard({ plugin, installed, onInstall, onToggle }: PluginCardProps) {
+export function PluginCard({ plugin, installed, onInstall, onToggle }: PluginCardProps): React.JSX.Element {
   const categoryConfig: CategoryConfig = CATEGORY_CONFIG[plugin.category] ?? DEFAULT_CATEGORY;
   const isFeatured = plugin.featured;
 

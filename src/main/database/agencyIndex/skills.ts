@@ -162,7 +162,7 @@ export function searchIndexedSkills(query: string, limit: number = 50): SearchRe
 
   return rows.map(row => ({
     item: mapRowToIndexedSkill(row),
-    score: -(row.rank ?? 0),
+    score: -((row as IndexedSkillRow & { rank?: number }).rank ?? 0),
     matchedFields: ['name', 'description', 'content', 'triggers'],
   }));
 }
@@ -205,8 +205,8 @@ function mapRowToIndexedSkill(row: IndexedSkillRow): IndexedSkill {
     categoryPath: row.category_path,
     filePath: row.file_path,
     agentSlug: row.agent_slug,
-    triggers: JSON.parse(row.triggers || '[]'),
-    tags: JSON.parse(row.tags || '[]'),
+    triggers: JSON.parse(row.triggers ?? '[]'),
+    tags: JSON.parse(row.tags ?? '[]'),
     useCount: row.use_count,
     lastUsed: row.last_used,
     lastIndexed: row.last_indexed,

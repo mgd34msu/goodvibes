@@ -3,6 +3,8 @@
 // ============================================================================
 
 import * as pty from 'node-pty';
+import * as fs from 'fs';
+import * as path from 'path';
 import { sendToRenderer } from '../window.js';
 import { getSetting, logActivity } from '../database/index.js';
 import { addRecentProject } from './recentProjects.js';
@@ -11,6 +13,113 @@ import { getPTYStreamAnalyzer } from './ptyStreamAnalyzer.js';
 import type { TerminalInfo, TerminalStartOptions, TerminalStartResult } from '../../shared/types/index.js';
 
 const logger = new Logger('TerminalManager');
+
+// ============================================================================
+// INPUT VALIDATION - Security against command injection
+// ============================================================================
+
+/**
+ * Validate session ID format to prevent command injection.
+ * Claude session IDs follow a specific format (alphanumeric with hyphens).
+ */
+function isValidSessionId(sessionId: string): boolean {
+  // Session IDs should be alphanumeric with hyphens, typically UUID format
+  // Max length prevents buffer overflow attacks
+  return /^[a-zA-Z0-9-]+$/.test(sessionId) && sessionId.length > 0 && sessionId.length <= 128;
+}
+
+/**
+ * Validate shell path to prevent command injection.
+ * Only allows paths that:
+ * 1. Contain no shell metacharacters
+ * 2. Are absolute paths or known shell names
+ * 3. Actually exist on the filesystem (for absolute paths)
+ */
+function isValidShellPath(shellPath: string): boolean {
+  if (!shellPath || shellPath.length === 0 || shellPath.length > 1024) {
+    return false;
+  }
+
+  // Known safe shell names (for PATH lookup)
+  const knownShells = [
+    'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'tcsh', 'csh',
+    'cmd.exe', 'powershell.exe', 'pwsh.exe', 'pwsh',
+    'cmd', 'powershell',
+  ];
+
+  // If it's a known shell name (no path), allow it
+  if (knownShells.includes(shellPath) || knownShells.includes(path.basename(shellPath))) {
+    // For simple names, ensure no shell metacharacters
+    if (/^[\w.-]+$/.test(shellPath)) {
+      return true;
+    }
+  }
+
+  // For absolute paths, validate the path format and check existence
+  if (path.isAbsolute(shellPath)) {
+    // Prevent shell metacharacters in the path
+    // Allow: alphanumeric, path separators, dots, dashes, underscores, spaces (quoted in spawn)
+    // Disallow: ; | & $ ` ( ) { } < > ! ? * [ ] \ (except as path sep on Windows)
+    const dangerousChars = /[;|&$`(){}<>!?*[\]]/;
+    if (dangerousChars.test(shellPath)) {
+      logger.warn('Shell path contains dangerous characters', { shellPath });
+      return false;
+    }
+
+    // Check if the file exists and is executable
+    try {
+      const stats = fs.statSync(shellPath);
+      if (!stats.isFile()) {
+        logger.warn('Shell path is not a file', { shellPath });
+        return false;
+      }
+      return true;
+    } catch {
+      // File doesn't exist or can't be accessed
+      logger.warn('Shell path does not exist or is not accessible', { shellPath });
+      return false;
+    }
+  }
+
+  // For relative paths or unknown formats, be strict
+  // Only allow simple executable names without metacharacters
+  if (/^[\w.-]+$/.test(shellPath)) {
+    return true;
+  }
+
+  logger.warn('Shell path validation failed', { shellPath });
+  return false;
+}
+
+/**
+ * Validate working directory path.
+ * Prevents directory traversal and ensures the path exists.
+ */
+function isValidWorkingDirectory(cwd: string): boolean {
+  if (!cwd || cwd.length === 0 || cwd.length > 4096) {
+    return false;
+  }
+
+  // Prevent shell metacharacters
+  const dangerousChars = /[;|&$`(){}<>!?*[\]]/;
+  if (dangerousChars.test(cwd)) {
+    logger.warn('Working directory contains dangerous characters', { cwd });
+    return false;
+  }
+
+  // Check if directory exists
+  try {
+    const stats = fs.statSync(cwd);
+    if (!stats.isDirectory()) {
+      logger.warn('Working directory is not a directory', { cwd });
+      return false;
+    }
+    return true;
+  } catch {
+    logger.warn('Working directory does not exist', { cwd });
+    return false;
+  }
+}
 
 interface InternalTerminal {
   id: number;
@@ -53,6 +162,13 @@ export function getActiveTerminalIds(): Set<number> {
 export async function startTerminal(options: TerminalStartOptions): Promise<TerminalStartResult> {
   try {
     const workingDir = options.cwd || process.cwd();
+
+    // Validate working directory to prevent injection attacks
+    if (!isValidWorkingDirectory(workingDir)) {
+      logger.error('Invalid working directory', { cwd: workingDir });
+      return { error: 'Invalid working directory path' };
+    }
+
     const terminalId = ++terminalIdCounter;
 
     // Find claude executable path
@@ -68,8 +184,13 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
       args.push('--dangerously-skip-permissions');
     }
 
-    // Add resume flag if resuming a session
+    // Add resume flag if resuming a session (with validation)
     if (options.resumeSessionId) {
+      // Validate session ID to prevent command injection
+      if (!isValidSessionId(options.resumeSessionId)) {
+        logger.error('Invalid session ID format', { sessionId: options.resumeSessionId });
+        return { error: 'Invalid session ID format' };
+      }
       args.push('--resume', options.resumeSessionId);
       logger.info(`Resuming session: ${options.resumeSessionId}, type: ${options.sessionType || 'user'}`);
     } else {
@@ -178,13 +299,39 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
 export async function startPlainTerminal(options: TerminalStartOptions): Promise<TerminalStartResult> {
   try {
     const workingDir = options.cwd || process.cwd();
+
+    // Validate working directory to prevent injection attacks
+    if (!isValidWorkingDirectory(workingDir)) {
+      logger.error('Invalid working directory for plain terminal', { cwd: workingDir });
+      return { error: 'Invalid working directory path' };
+    }
+
     const terminalId = ++terminalIdCounter;
 
     // Determine shell based on user preference or platform defaults
     const customShell = getSetting<string>('preferredShell');
-    const shell = customShell || (process.platform === 'win32'
+    const defaultShell = process.platform === 'win32'
       ? process.env.COMSPEC || 'cmd.exe'
-      : process.env.SHELL || '/bin/bash');
+      : process.env.SHELL || '/bin/bash';
+
+    // Use custom shell only if it's valid, otherwise fall back to default
+    let shell = defaultShell;
+    if (customShell) {
+      if (isValidShellPath(customShell)) {
+        shell = customShell;
+      } else {
+        logger.warn('Custom shell path is invalid, using default', {
+          customShell,
+          defaultShell,
+        });
+      }
+    }
+
+    // Final validation of the shell path
+    if (!isValidShellPath(shell)) {
+      logger.error('Shell path validation failed', { shell });
+      return { error: 'Invalid shell configuration' };
+    }
 
     logger.info(`Starting plain terminal with shell: ${shell} (custom: ${!!customShell}) in ${workingDir}`);
 

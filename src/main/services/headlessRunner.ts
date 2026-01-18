@@ -14,6 +14,12 @@ import {
   getAllTaskDefinitions,
   recordTaskRun,
 } from '../database/primitives.js';
+import {
+  validateCommandName,
+  validatePath,
+  validateEnvironment,
+  logSecurityEvent,
+} from './inputSanitizer.js';
 
 const logger = new Logger('HeadlessRunner');
 
@@ -118,9 +124,17 @@ class HeadlessRunnerService extends EventEmitter {
 
   /**
    * Set custom Claude command path
+   * Security: Validates the command path before accepting it
    */
-  setClaudeCommand(command: string): void {
-    this.claudeCommand = command;
+  setClaudeCommand(command: string): boolean {
+    const validation = validateCommandName(command);
+    if (!validation.valid) {
+      logger.error(`Invalid Claude command path: ${validation.error}`);
+      logSecurityEvent('headless-runner-set-command', command, [], validation.error || 'Invalid command');
+      return false;
+    }
+    this.claudeCommand = validation.sanitized || command;
+    return true;
   }
 
   // ============================================================================
@@ -177,6 +191,62 @@ class HeadlessRunnerService extends EventEmitter {
       const startTime = Date.now();
       const timeoutMs = config.timeoutMs ?? 5 * 60 * 1000; // 5 minute default
 
+      // Security: Validate the claude command
+      const cmdValidation = validateCommandName(this.claudeCommand);
+      if (!cmdValidation.valid) {
+        logger.error(`Invalid Claude command: ${cmdValidation.error}`);
+        logSecurityEvent('headless-task', this.claudeCommand, [], cmdValidation.error || 'Invalid command');
+        resolve({
+          taskId,
+          success: false,
+          exitCode: null,
+          output: '',
+          error: `Security: ${cmdValidation.error}`,
+          durationMs: Date.now() - startTime,
+          startTime,
+          endTime: Date.now(),
+        });
+        return;
+      }
+
+      // Security: Validate the cwd
+      const cwdValidation = validatePath(config.cwd);
+      if (!cwdValidation.valid) {
+        logger.error(`Invalid task cwd: ${cwdValidation.error}`);
+        logSecurityEvent('headless-task', this.claudeCommand, [config.cwd], cwdValidation.error || 'Invalid cwd');
+        resolve({
+          taskId,
+          success: false,
+          exitCode: null,
+          output: '',
+          error: `Security: ${cwdValidation.error}`,
+          durationMs: Date.now() - startTime,
+          startTime,
+          endTime: Date.now(),
+        });
+        return;
+      }
+
+      // Security: Validate custom environment variables
+      if (config.env && Object.keys(config.env).length > 0) {
+        const envValidation = validateEnvironment(config.env);
+        if (!envValidation.valid) {
+          logger.error(`Invalid task environment: ${envValidation.error}`);
+          logSecurityEvent('headless-task', this.claudeCommand, [], envValidation.error || 'Invalid environment');
+          resolve({
+            taskId,
+            success: false,
+            exitCode: null,
+            output: '',
+            error: `Security: ${envValidation.error}`,
+            durationMs: Date.now() - startTime,
+            startTime,
+            endTime: Date.now(),
+          });
+          return;
+        }
+      }
+
       // Build command arguments
       const args = this.buildClaudeArgs(config);
 
@@ -186,9 +256,13 @@ class HeadlessRunnerService extends EventEmitter {
         ...config.env,
       };
 
+      // Use validated values
+      const safeCommand = cmdValidation.sanitized || this.claudeCommand;
+      const safeCwd = cwdValidation.sanitized || config.cwd;
+
       // Spawn Claude process
-      const child = spawn(this.claudeCommand, args, {
-        cwd: config.cwd,
+      const child = spawn(safeCommand, args, {
+        cwd: safeCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

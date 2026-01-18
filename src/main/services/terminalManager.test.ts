@@ -54,6 +54,24 @@ vi.mock('./ptyStreamAnalyzer.js', () => ({
   })),
 }));
 
+// Mock fs module for directory/file existence checks
+vi.mock('fs', () => ({
+  statSync: vi.fn((pathArg: string) => {
+    // For security test paths with injection characters, simulate "not found"
+    if (/[;|&$`(){}<>!?*[\]]/.test(pathArg)) {
+      const error = new Error('ENOENT: no such file or directory');
+      (error as NodeJS.ErrnoException).code = 'ENOENT';
+      throw error;
+    }
+    // For normal test paths, simulate they exist as directories
+    return {
+      isDirectory: () => true,
+      isFile: () => false,
+    };
+  }),
+  existsSync: vi.fn(() => true),
+}));
+
 // Import after mocks are set up
 import * as pty from 'node-pty';
 import { sendToRenderer } from '../window.js';
@@ -495,6 +513,142 @@ describe('TerminalManager Service', () => {
 
       const spawnOptions = vi.mocked(pty.spawn).mock.calls[0][2] as { useConpty?: boolean };
       expect(spawnOptions?.useConpty).toBe(true);
+    });
+  });
+
+  // ============================================================================
+  // SECURITY TESTS - Command Injection Prevention
+  // ============================================================================
+
+  describe('Security: Command Injection Prevention', () => {
+    describe('Session ID Validation', () => {
+      it('should accept valid UUID session IDs', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: '550e8400-e29b-41d4-a716-446655440000',
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(pty.spawn).toHaveBeenCalled();
+      });
+
+      it('should accept valid alphanumeric session IDs', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'session-abc123-def456',
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(pty.spawn).toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with shell metacharacters - semicolon', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'valid-id; rm -rf /',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with pipe operator', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'id | cat /etc/passwd',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with command substitution', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: '$(whoami)',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with backtick substitution', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: '`id`',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with ampersand', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'id && cat /etc/shadow',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject excessively long session IDs', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'a'.repeat(200), // Over 128 char limit
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject session IDs with newlines', async () => {
+        const result = await startTerminal({
+          cwd: '/test/path',
+          resumeSessionId: 'id\nmalicious-command',
+        });
+
+        expect(result.error).toBe('Invalid session ID format');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('Working Directory Validation', () => {
+      it('should reject cwd with semicolon injection', async () => {
+        const result = await startTerminal({
+          cwd: '/tmp; rm -rf /',
+        });
+
+        expect(result.error).toBe('Invalid working directory path');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject cwd with pipe injection', async () => {
+        const result = await startTerminal({
+          cwd: '/tmp | cat /etc/passwd',
+        });
+
+        expect(result.error).toBe('Invalid working directory path');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject cwd with command substitution', async () => {
+        const result = await startTerminal({
+          cwd: '/$(whoami)',
+        });
+
+        expect(result.error).toBe('Invalid working directory path');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
+
+      it('should reject cwd with backtick substitution', async () => {
+        const result = await startTerminal({
+          cwd: '/`id`',
+        });
+
+        expect(result.error).toBe('Invalid working directory path');
+        expect(pty.spawn).not.toHaveBeenCalled();
+      });
     });
   });
 });

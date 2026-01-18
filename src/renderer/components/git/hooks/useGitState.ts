@@ -21,11 +21,14 @@ import { useGitUI } from './useGitUI';
 // Re-export formatRelativeTime for backward compatibility
 export { formatRelativeTime };
 
+// Forward-declared type - defined after the function
+export type UseGitStateReturn = ReturnType<typeof useGitStateImpl>;
+
 /**
  * Custom hook for managing Git panel state and operations
  * Composes multiple focused hooks together
  */
-export function useGitState(cwd: string) {
+function useGitStateImpl(cwd: string) {
   const gitAutoRefresh = useSettingsStore((s) => s.settings.gitAutoRefresh);
   const [state, setState] = useState<GitPanelState>(initialGitPanelState);
   const lastRemoteFetchRef = useRef<number>(0);
@@ -282,4 +285,9 @@ export function useGitState(cwd: string) {
   };
 }
 
-export type UseGitStateReturn = ReturnType<typeof useGitState>;
+/**
+ * Main hook export with explicit return type
+ */
+export function useGitState(cwd: string): UseGitStateReturn {
+  return useGitStateImpl(cwd);
+}

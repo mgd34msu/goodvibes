@@ -9,7 +9,7 @@ import { Sparkles, Terminal, FolderOpen, Settings, Zap } from 'lucide-react';
 // Component
 // ============================================================================
 
-export function WelcomeStep() {
+export function WelcomeStep(): React.JSX.Element {
   return (
     <div className="space-y-8">
       {/* Hero */}

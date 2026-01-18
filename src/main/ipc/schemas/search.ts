@@ -36,3 +36,10 @@ export const saveSearchSchema = z.object({
   query: z.string().max(1000),
   filters: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * Knowledge search term schema
+ */
+export const knowledgeSearchTermSchema = z.string()
+  .max(500, 'Search term too long')
+  .transform((val) => val.trim());

@@ -6,7 +6,7 @@
 import { X, Zap } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 
-export function AboutModal() {
+export function AboutModal(): React.JSX.Element | null {
   const activeModal = useAppStore((s) => s.activeModal);
   const closeModal = useAppStore((s) => s.closeModal);
 

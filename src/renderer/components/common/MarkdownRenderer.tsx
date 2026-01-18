@@ -21,7 +21,7 @@ interface MarkdownRendererProps {
   content: string;
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content }: MarkdownRendererProps): React.JSX.Element {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -121,7 +121,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 // TOOL RESULT MARKDOWN RENDERER (Alias for backwards compatibility)
 // ============================================================================
 
-export function ToolResultMarkdownRenderer({ content }: { content: string }) {
+export function ToolResultMarkdownRenderer({ content }: { content: string }): React.JSX.Element {
   return <MarkdownRenderer content={content} />;
 }
 

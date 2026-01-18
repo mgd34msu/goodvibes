@@ -13,7 +13,7 @@ interface SkillFormProps {
   onCancel: () => void;
 }
 
-export function SkillForm({ skill, onSave, onCancel }: SkillFormProps) {
+export function SkillForm({ skill, onSave, onCancel }: SkillFormProps): React.JSX.Element {
   const [name, setName] = useState(skill?.name || '');
   const [description, setDescription] = useState(skill?.description || '');
   const [content, setContent] = useState(

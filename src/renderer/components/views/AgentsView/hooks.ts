@@ -8,7 +8,16 @@ import { createLogger } from '../../../../shared/logger';
 
 const logger = createLogger('AgentsView');
 
-export function useAgents() {
+export interface UseAgentsReturn {
+  agents: AgentTemplate[];
+  loading: boolean;
+  loadAgents: () => Promise<void>;
+  saveAgent: (agentData: Partial<AgentTemplate>, projectPath: string | null) => Promise<{ success: boolean; error?: unknown }>;
+  deleteAgent: (id: string) => Promise<{ success: boolean; error?: unknown }>;
+  copyToClipboard: (content: string) => Promise<{ success: boolean; error?: unknown }>;
+}
+
+export function useAgents(): UseAgentsReturn {
   const [agents, setAgents] = useState<AgentTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 

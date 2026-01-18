@@ -46,7 +46,7 @@ const VIEW_COMPONENTS: Record<ViewName, React.LazyExoticComponent<() => React.JS
   projects: ProjectRegistryView,
 };
 
-export function MainContent() {
+export function MainContent(): React.JSX.Element {
   const currentView = useAppStore((s) => s.currentView);
   const ViewComponent = VIEW_COMPONENTS[currentView];
 

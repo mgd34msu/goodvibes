@@ -10,7 +10,7 @@ import { clsx } from 'clsx';
 // Component
 // ============================================================================
 
-export function AgentIntroStep() {
+export function AgentIntroStep(): React.JSX.Element {
   return (
     <div className="space-y-6">
       {/* Introduction */}

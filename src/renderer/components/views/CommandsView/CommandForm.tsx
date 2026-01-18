@@ -13,7 +13,7 @@ interface CommandFormProps {
   onCancel: () => void;
 }
 
-export function CommandForm({ command, onSave, onCancel }: CommandFormProps) {
+export function CommandForm({ command, onSave, onCancel }: CommandFormProps): React.JSX.Element {
   const [name, setName] = useState(command?.name || '');
   const [description, setDescription] = useState(command?.description || '');
   const [content, setContent] = useState(command?.content || '');

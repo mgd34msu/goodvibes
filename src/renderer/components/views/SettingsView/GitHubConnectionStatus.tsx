@@ -9,7 +9,7 @@ import { createLogger } from '../../../../shared/logger';
 
 const logger = createLogger('SettingsView');
 
-export function GitHubConnectionStatus() {
+export function GitHubConnectionStatus(): React.JSX.Element {
   const [authState, setAuthState] = useState<GitHubAuthState>({
     isAuthenticated: false,
     user: null,

@@ -57,7 +57,7 @@ export function getSessionAnalytics(sessionId: string): SessionAnalytics | null 
     toolEfficiency: row.tool_efficiency,
     contextUsagePeak: row.context_usage_peak,
     estimatedRoi: row.estimated_roi,
-    tagsAuto: JSON.parse(row.tags_auto || '[]'),
+    tagsAuto: JSON.parse(row.tags_auto ?? '[]'),
     outcomeAnalysis: row.outcome_analysis,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

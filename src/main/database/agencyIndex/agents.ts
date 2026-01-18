@@ -149,7 +149,7 @@ export function searchIndexedAgents(query: string, limit: number = 50): SearchRe
 
   return rows.map(row => ({
     item: mapRowToIndexedAgent(row),
-    score: -(row.rank ?? 0), // FTS5 rank is negative, lower is better
+    score: -((row as IndexedAgentRow & { rank?: number }).rank ?? 0), // FTS5 rank is negative, lower is better
     matchedFields: ['name', 'description', 'content'], // Simplified
   }));
 }
@@ -191,8 +191,8 @@ function mapRowToIndexedAgent(row: IndexedAgentRow): IndexedAgent {
     categoryId: row.category_id,
     categoryPath: row.category_path,
     filePath: row.file_path,
-    skills: JSON.parse(row.skills || '[]'),
-    tags: JSON.parse(row.tags || '[]'),
+    skills: JSON.parse(row.skills ?? '[]'),
+    tags: JSON.parse(row.tags ?? '[]'),
     useCount: row.use_count,
     lastUsed: row.last_used,
     lastIndexed: row.last_indexed,

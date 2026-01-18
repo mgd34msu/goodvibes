@@ -13,8 +13,28 @@ import {
   clearRecentProjects,
   pinProject,
 } from '../../services/recentProjects.js';
+import {
+  openInExplorerInputSchema,
+  addRecentProjectInputSchema,
+  removeRecentProjectInputSchema,
+  pinProjectInputSchema,
+  validateInput,
+} from '../schemas/index.js';
 
 const logger = new Logger('IPC:Projects');
+
+/**
+ * Custom error class for IPC validation failures
+ */
+class IPCValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string = 'VALIDATION_ERROR'
+  ) {
+    super(message);
+    this.name = 'IPCValidationError';
+  }
+}
 
 export function registerProjectsHandlers(): void {
   // ============================================================================
@@ -49,8 +69,15 @@ export function registerProjectsHandlers(): void {
     return null;
   }));
 
-  ipcMain.handle('open-in-explorer', withContext('open-in-explorer', async (_, folderPath: string) => {
-    shell.showItemInFolder(folderPath);
+  ipcMain.handle('open-in-explorer', withContext('open-in-explorer', async (_, folderPath: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(openInExplorerInputSchema, folderPath);
+    if (!validation.success) {
+      logger.warn('open-in-explorer validation failed', { error: validation.error, input: folderPath });
+      throw new IPCValidationError(`Invalid folder path: ${validation.error}`);
+    }
+
+    shell.showItemInFolder(validation.data);
     return true;
   }));
 
@@ -62,18 +89,39 @@ export function registerProjectsHandlers(): void {
     return getRecentProjects();
   }));
 
-  ipcMain.handle('add-recent-project', withContext('add-recent-project', async (_, { path: projectPath, name }: { path: string; name?: string }) => {
-    addRecentProject(projectPath, name);
+  ipcMain.handle('add-recent-project', withContext('add-recent-project', async (_, data: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(addRecentProjectInputSchema, data);
+    if (!validation.success) {
+      logger.warn('add-recent-project validation failed', { error: validation.error });
+      throw new IPCValidationError(`Invalid project data: ${validation.error}`);
+    }
+
+    addRecentProject(validation.data.path, validation.data.name);
     return true;
   }));
 
-  ipcMain.handle('remove-recent-project', withContext('remove-recent-project', async (_, projectPath: string) => {
-    removeRecentProject(projectPath);
+  ipcMain.handle('remove-recent-project', withContext('remove-recent-project', async (_, projectPath: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(removeRecentProjectInputSchema, projectPath);
+    if (!validation.success) {
+      logger.warn('remove-recent-project validation failed', { error: validation.error, input: projectPath });
+      throw new IPCValidationError(`Invalid project path: ${validation.error}`);
+    }
+
+    removeRecentProject(validation.data);
     return true;
   }));
 
-  ipcMain.handle('pin-project', withContext('pin-project', async (_, projectPath: string) => {
-    return pinProject(projectPath);
+  ipcMain.handle('pin-project', withContext('pin-project', async (_, projectPath: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(pinProjectInputSchema, projectPath);
+    if (!validation.success) {
+      logger.warn('pin-project validation failed', { error: validation.error, input: projectPath });
+      throw new IPCValidationError(`Invalid project path: ${validation.error}`);
+    }
+
+    return pinProject(validation.data);
   }));
 
   ipcMain.handle('clear-recent-projects', withContext('clear-recent-projects', async () => {

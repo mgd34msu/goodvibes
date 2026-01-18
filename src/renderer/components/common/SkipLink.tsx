@@ -18,7 +18,7 @@ interface SkipLinkProps {
  *
  * Uses sr-only pattern: visually hidden until focused, then visible.
  */
-export function SkipLink({ targetId, children = 'Skip to main content' }: SkipLinkProps) {
+export function SkipLink({ targetId, children = 'Skip to main content' }: SkipLinkProps): React.JSX.Element {
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
     const target = document.getElementById(targetId);

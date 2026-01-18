@@ -347,7 +347,7 @@ export function addFileChange(
   const existing = getSessionSummaryBySessionId(sessionId);
   if (!existing) return;
 
-  const changes = JSON.parse(existing.fileChanges) as typeof change[];
+  const changes = JSON.parse(existing.fileChanges ?? '[]') as typeof change[];
   changes.push(change);
 
   db.prepare(`

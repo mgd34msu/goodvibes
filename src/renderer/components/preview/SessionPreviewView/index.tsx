@@ -11,7 +11,7 @@ import { parseAllEntries } from './utils';
 import { EntryBlock } from './EntryBlock';
 import { CountBadge } from './CountBadge';
 
-export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewViewProps) {
+export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewViewProps): React.JSX.Element {
   const { settings } = useSettingsStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);

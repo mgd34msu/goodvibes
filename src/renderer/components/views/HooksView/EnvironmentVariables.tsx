@@ -61,7 +61,7 @@ function VariableRow({ name, description }: EnvVariable) {
 // MAIN COMPONENT
 // ============================================================================
 
-export function EnvironmentVariables({ eventType }: EnvironmentVariablesProps) {
+export function EnvironmentVariables({ eventType }: EnvironmentVariablesProps): React.JSX.Element {
   const isSessionStart = eventType === 'SessionStart';
 
   return (

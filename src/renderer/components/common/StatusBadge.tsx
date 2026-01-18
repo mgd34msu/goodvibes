@@ -166,7 +166,7 @@ interface PresetBadgeProps {
   className?: string;
 }
 
-export function LiveBadge({ size = 'sm', variant = 'glow', className }: PresetBadgeProps) {
+export function LiveBadge({ size = 'sm', variant = 'glow', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="live" size={size} variant={variant} dot pulse className={className}>
       Live
@@ -174,7 +174,7 @@ export function LiveBadge({ size = 'sm', variant = 'glow', className }: PresetBa
   );
 }
 
-export function OnlineBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps) {
+export function OnlineBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="success" size={size} variant={variant} dot className={className}>
       Online
@@ -182,7 +182,7 @@ export function OnlineBadge({ size = 'sm', variant = 'soft', className }: Preset
   );
 }
 
-export function OfflineBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps) {
+export function OfflineBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="neutral" size={size} variant={variant} dot className={className}>
       Offline
@@ -190,7 +190,7 @@ export function OfflineBadge({ size = 'sm', variant = 'soft', className }: Prese
   );
 }
 
-export function PendingBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps) {
+export function PendingBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="warning" size={size} variant={variant} dot pulse className={className}>
       Pending
@@ -198,7 +198,7 @@ export function PendingBadge({ size = 'sm', variant = 'soft', className }: Prese
   );
 }
 
-export function ErrorBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps) {
+export function ErrorBadge({ size = 'sm', variant = 'soft', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge
       status="error"
@@ -216,7 +216,7 @@ export function ErrorBadge({ size = 'sm', variant = 'soft', className }: PresetB
   );
 }
 
-export function NewBadge({ size = 'xs', variant = 'solid', className }: PresetBadgeProps) {
+export function NewBadge({ size = 'xs', variant = 'solid', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="info" size={size} variant={variant} className={className}>
       New
@@ -224,7 +224,7 @@ export function NewBadge({ size = 'xs', variant = 'solid', className }: PresetBa
   );
 }
 
-export function BetaBadge({ size = 'xs', variant = 'outline', className }: PresetBadgeProps) {
+export function BetaBadge({ size = 'xs', variant = 'outline', className }: PresetBadgeProps): React.JSX.Element {
   return (
     <StatusBadge status="warning" size={size} variant={variant} className={className}>
       Beta

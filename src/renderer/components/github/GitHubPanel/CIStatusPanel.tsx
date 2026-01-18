@@ -13,7 +13,7 @@ interface CIStatusPanelProps {
   onRefresh: () => void;
 }
 
-export function CIStatusPanel({ checks, loading, onRefresh }: CIStatusPanelProps) {
+export function CIStatusPanel({ checks, loading, onRefresh }: CIStatusPanelProps): React.JSX.Element {
   if (loading) {
     return (
       <div className="p-4">

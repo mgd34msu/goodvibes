@@ -106,7 +106,7 @@ interface SkeletonGroupProps {
   staggerDelay?: number;
 }
 
-export function SkeletonGroup({ children, className, staggerDelay = 50 }: SkeletonGroupProps) {
+export function SkeletonGroup({ children, className, staggerDelay = 50 }: SkeletonGroupProps): React.JSX.Element {
   return (
     <div
       className={clsx('skeleton-group', className)}
@@ -121,7 +121,7 @@ export function SkeletonGroup({ children, className, staggerDelay = 50 }: Skelet
 // PRE-BUILT SKELETON PATTERNS
 // ============================================================================
 
-export function SessionCardSkeleton() {
+export function SessionCardSkeleton(): React.JSX.Element {
   return (
     <div className="card-glass p-4 space-y-3">
       {/* Header with title and icon */}
@@ -149,7 +149,7 @@ export function SessionCardSkeleton() {
   );
 }
 
-export function AnalyticsCardSkeleton() {
+export function AnalyticsCardSkeleton(): React.JSX.Element {
   return (
     <div className="card-glass p-5 space-y-3">
       {/* Label */}
@@ -167,7 +167,7 @@ export function AnalyticsCardSkeleton() {
   );
 }
 
-export function TerminalTabSkeleton() {
+export function TerminalTabSkeleton(): React.JSX.Element {
   return (
     <div className="flex items-center gap-2.5 px-4 py-2.5">
       <Skeleton variant="circular" width={18} height={18} />
@@ -176,7 +176,7 @@ export function TerminalTabSkeleton() {
   );
 }
 
-export function ListItemSkeleton() {
+export function ListItemSkeleton(): React.JSX.Element {
   return (
     <div className="flex items-center gap-3 p-3">
       <Skeleton variant="circular" width={40} height={40} />
@@ -189,7 +189,7 @@ export function ListItemSkeleton() {
   );
 }
 
-export function TableRowSkeleton({ columns = 4 }: { columns?: number }) {
+export function TableRowSkeleton({ columns = 4 }: { columns?: number }): React.JSX.Element {
   return (
     <div className="flex items-center gap-4 p-3 border-b border-surface-800/50">
       {Array.from({ length: columns }).map((_, i) => (
@@ -205,7 +205,7 @@ export function TableRowSkeleton({ columns = 4 }: { columns?: number }) {
   );
 }
 
-export function MessageSkeleton({ isUser = false }: { isUser?: boolean }) {
+export function MessageSkeleton({ isUser = false }: { isUser?: boolean }): React.JSX.Element {
   return (
     <div className={clsx('flex gap-3 p-4', isUser && 'flex-row-reverse')}>
       <Skeleton variant="circular" width={36} height={36} />
@@ -222,7 +222,7 @@ export function MessageSkeleton({ isUser = false }: { isUser?: boolean }) {
   );
 }
 
-export function CodeBlockSkeleton({ lines = 6 }: { lines?: number }) {
+export function CodeBlockSkeleton({ lines = 6 }: { lines?: number }): React.JSX.Element {
   return (
     <div className="bg-surface-900/80 rounded-xl p-4 space-y-2 font-mono border border-surface-700/30">
       {/* Header bar */}

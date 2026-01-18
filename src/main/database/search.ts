@@ -169,7 +169,7 @@ function mapRowToSession(row: SessionRow): Session {
     outputTokens: row.output_tokens ?? 0,
     cacheWriteTokens: row.cache_write_tokens ?? 0,
     cacheReadTokens: row.cache_read_tokens ?? 0,
-    fileMtime: row.file_mtime ? Number(row.file_mtime) : null,
+    fileMtime: row.file_mtime != null ? Number(row.file_mtime) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -25,7 +25,7 @@ import {
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { useAppStore } from '../../../stores/appStore';
 
-export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionCardProps) {
+export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionCardProps): React.JSX.Element {
   const { createPreviewTerminal, createTerminal } = useTerminalStore();
   const { setCurrentView } = useAppStore();
   const queryClient = useQueryClient();

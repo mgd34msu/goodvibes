@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 
 // Import all git functions
@@ -66,10 +66,22 @@ import {
 // Get absolute path to test git directory - use a unique temp directory
 const TEST_GIT_DIR = path.join(tmpdir(), `goodvibes-git-test-${process.pid}`);
 
-// Helper to run git commands directly (for test setup/cleanup)
+/**
+ * Helper to run git commands directly (for test setup/cleanup).
+ * Uses spawnSync with array-form arguments to prevent shell injection.
+ * SECURITY: Never use string interpolation for command execution.
+ */
 function runGit(cwd: string, args: string[]): string {
   try {
-    return execSync(`git ${args.join(' ')}`, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    // Use spawnSync with array args instead of execSync with string interpolation
+    // This prevents shell injection vulnerabilities
+    const result = spawnSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    return (result.stdout?.toString() || '').trim();
   } catch (e: unknown) {
     const err = e as { stdout?: Buffer | string; stderr?: Buffer | string };
     return err.stdout?.toString() || err.stderr?.toString() || '';

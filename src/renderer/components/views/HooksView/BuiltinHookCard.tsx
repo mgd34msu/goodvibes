@@ -17,7 +17,7 @@ interface BuiltinHookCardProps {
   onInstall: (hook: BuiltinHook) => void;
 }
 
-export function BuiltinHookCard({ hook, onInstall }: BuiltinHookCardProps) {
+export function BuiltinHookCard({ hook, onInstall }: BuiltinHookCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
 
   return (

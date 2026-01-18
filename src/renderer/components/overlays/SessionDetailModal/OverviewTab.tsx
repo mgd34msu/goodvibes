@@ -12,7 +12,7 @@ interface OverviewTabProps {
   displayName: string;
 }
 
-export function OverviewTab({ session, duration, displayName }: OverviewTabProps) {
+export function OverviewTab({ session, duration, displayName }: OverviewTabProps): React.JSX.Element {
   return (
     <div className="space-y-6">
       {/* Summary */}

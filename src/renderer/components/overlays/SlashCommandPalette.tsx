@@ -40,7 +40,7 @@ interface SlashCommand {
 // MAIN COMPONENT
 // ============================================================================
 
-export function SlashCommandPalette() {
+export function SlashCommandPalette(): React.JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);

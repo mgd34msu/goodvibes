@@ -21,7 +21,7 @@ interface RecentProject {
 // COMPONENT
 // ============================================================================
 
-export function FolderPickerModal() {
+export function FolderPickerModal(): React.JSX.Element | null {
   const isOpen = useAppStore((s) => s.isFolderPickerOpen);
   const close = useAppStore((s) => s.closeFolderPicker);
   const createTerminal = useTerminalStore((s) => s.createTerminal);

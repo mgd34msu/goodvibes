@@ -91,7 +91,7 @@ const DEFAULT_STATUS: StatusConfig = {
   icon: <AlertCircle className="w-5 h-5" />,
 };
 
-export function MCPServerCard({ server, onStart, onStop, onRestart, onEdit, onDelete }: ServerCardProps) {
+export function MCPServerCard({ server, onStart, onStop, onRestart, onEdit, onDelete }: ServerCardProps): React.JSX.Element {
   const statusConfig: StatusConfig = STATUS_CONFIG[server.status] ?? DEFAULT_STATUS;
 
   return (

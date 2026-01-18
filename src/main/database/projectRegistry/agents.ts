@@ -115,7 +115,7 @@ export function mapRowToProjectAgent(row: ProjectAgentRow): ProjectAgent {
     projectId: row.project_id,
     agentId: row.agent_id,
     priority: row.priority,
-    settings: JSON.parse(row.settings || '{}'),
+    settings: JSON.parse(row.settings ?? '{}'),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

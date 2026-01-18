@@ -16,7 +16,7 @@ import { MessagesTab } from './MessagesTab';
 import { TokensTab } from './TokensTab';
 import type { SessionDetailModalProps } from './types';
 
-export function SessionDetailModal({ session, onClose }: SessionDetailModalProps) {
+export function SessionDetailModal({ session, onClose }: SessionDetailModalProps): React.JSX.Element {
   const { setCurrentView } = useAppStore();
   const { settings } = useSettingsStore();
   const { createPreviewTerminal, createTerminal } = useTerminalStore();

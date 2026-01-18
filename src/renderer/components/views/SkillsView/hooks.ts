@@ -9,10 +9,19 @@ import { formatTimestamp } from '../../../../shared/dateUtils';
 
 const logger = createLogger('AgentSkillsView');
 
+export interface UseAgentSkillsReturn {
+  skills: AgentSkill[];
+  loading: boolean;
+  loadSkills: () => Promise<void>;
+  saveSkill: (skillData: Partial<AgentSkill>, projectPath: string | null) => Promise<{ success: boolean; error?: unknown }>;
+  deleteSkill: (id: number) => Promise<{ success: boolean; error?: unknown }>;
+  copyToClipboard: (content: string) => Promise<{ success: boolean; error?: unknown }>;
+}
+
 /**
  * Hook for managing agent skills CRUD operations
  */
-export function useAgentSkills() {
+export function useAgentSkills(): UseAgentSkillsReturn {
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [loading, setLoading] = useState(true);
 

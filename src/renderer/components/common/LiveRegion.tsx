@@ -13,7 +13,7 @@ const LiveRegionContext = createContext<LiveRegionContextValue | null>(null);
 /**
  * Hook to announce messages to screen readers
  */
-export function useAnnounce() {
+export function useAnnounce(): (message: string, priority?: 'polite' | 'assertive') => void {
   const context = useContext(LiveRegionContext);
   if (!context) {
     throw new Error('useAnnounce must be used within a LiveRegionProvider');
@@ -29,7 +29,7 @@ interface LiveRegionProviderProps {
  * Provider that creates live regions for screen reader announcements.
  * Wrap your app with this to enable announcements.
  */
-export function LiveRegionProvider({ children }: LiveRegionProviderProps) {
+export function LiveRegionProvider({ children }: LiveRegionProviderProps): React.JSX.Element {
   const [politeMessage, setPoliteMessage] = useState('');
   const [assertiveMessage, setAssertiveMessage] = useState('');
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);

@@ -13,7 +13,22 @@ import type {
 
 const logger = createLogger('ProjectRegistryView');
 
-export function useProjectRegistry() {
+export interface UseProjectRegistryReturn {
+  projects: RegisteredProject[];
+  templates: ProjectTemplate[];
+  projectAnalytics: Map<number, ProjectAnalytics>;
+  isLoading: boolean;
+  loadData: () => Promise<void>;
+  registerProject: () => Promise<void>;
+  removeProject: (projectId: number) => Promise<void>;
+  switchProject: (projectId: number) => Promise<void>;
+  saveSettings: (projectId: number, settings: ProjectSettings) => Promise<void>;
+  createTemplate: (projectId: number, name: string, description: string) => Promise<void>;
+  applyTemplate: (projectId: number, templateId: number) => Promise<void>;
+  deleteTemplate: (templateId: number) => Promise<void>;
+}
+
+export function useProjectRegistry(): UseProjectRegistryReturn {
   const [projects, setProjects] = useState<RegisteredProject[]>([]);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [projectAnalytics, setProjectAnalytics] = useState<Map<number, ProjectAnalytics>>(new Map());
@@ -125,7 +140,13 @@ export function useProjectRegistry() {
   };
 }
 
-export function useProjectFilters(projects: RegisteredProject[]) {
+export interface UseProjectFiltersReturn {
+  filteredProjects: RegisteredProject[];
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+}
+
+export function useProjectFilters(projects: RegisteredProject[]): UseProjectFiltersReturn {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredProjects = searchQuery

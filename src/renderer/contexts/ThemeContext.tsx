@@ -127,7 +127,7 @@ interface ThemeProviderProps {
  * </ThemeProvider>
  * ```
  */
-export function ThemeProvider({ children }: ThemeProviderProps) {
+export function ThemeProvider({ children }: ThemeProviderProps): React.JSX.Element {
   const settings = useSettingsStore((s) => s.settings);
   const updateSetting = useSettingsStore((s) => s.updateSetting);
   const isLoaded = useSettingsStore((s) => s.isLoaded);

@@ -9,7 +9,16 @@ import { formatTimestamp } from '../../../../shared/dateUtils';
 
 const logger = createLogger('CommandsView');
 
-export function useCommands() {
+export interface UseCommandsReturn {
+  commands: Command[];
+  loading: boolean;
+  loadCommands: () => Promise<void>;
+  saveCommand: (commandData: Partial<Command>, projectPath: string | null) => Promise<{ success: boolean; error?: unknown }>;
+  deleteCommand: (id: number) => Promise<{ success: boolean; error?: unknown }>;
+  copyToClipboard: (content: string) => Promise<{ success: boolean; error?: unknown }>;
+}
+
+export function useCommands(): UseCommandsReturn {
   const [commands, setCommands] = useState<Command[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -104,7 +113,16 @@ export function useCommands() {
   };
 }
 
-export function useCommandFilters(commands: Command[], builtInCommands: BuiltInCommand[]) {
+export interface UseCommandFiltersReturn {
+  filteredCommands: Command[];
+  filteredBuiltIn: BuiltInCommand[];
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  showBuiltIn: boolean;
+  setShowBuiltIn: (show: boolean) => void;
+}
+
+export function useCommandFilters(commands: Command[], builtInCommands: BuiltInCommand[]): UseCommandFiltersReturn {
   const [searchQuery, setSearchQuery] = useState('');
   const [showBuiltIn, setShowBuiltIn] = useState(true);
 

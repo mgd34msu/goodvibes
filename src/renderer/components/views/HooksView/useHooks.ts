@@ -147,8 +147,14 @@ export function useHooks(): UseHooksReturn {
   };
 }
 
+export interface UseHookFiltersReturn {
+  filter: HookEventType | 'all';
+  setFilter: (filter: HookEventType | 'all') => void;
+  filteredHooks: Hook[];
+}
+
 // Filter hooks utility
-export function useHookFilters(hooks: Hook[]) {
+export function useHookFilters(hooks: Hook[]): UseHookFiltersReturn {
   const [filter, setFilter] = useState<HookEventType | 'all'>('all');
 
   const filteredHooks = filter === 'all' ? hooks : hooks.filter((h) => h.eventType === filter);

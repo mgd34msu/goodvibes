@@ -139,7 +139,7 @@ function highlightLine(line: string): React.ReactNode {
 // COMPONENT
 // ============================================================================
 
-export function InputSchemaPreview({ eventType }: InputSchemaPreviewProps) {
+export function InputSchemaPreview({ eventType }: InputSchemaPreviewProps): React.JSX.Element | null {
   const eventMetadata = useMemo(
     () => EVENT_TYPES.find((e) => e.value === eventType),
     [eventType]

@@ -28,7 +28,7 @@ interface MessagesTabProps {
   loading: boolean;
 }
 
-export function MessagesTab({ messages, loading }: MessagesTabProps) {
+export function MessagesTab({ messages, loading }: MessagesTabProps): React.JSX.Element {
   const { settings } = useSettingsStore();
   const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null);
 

@@ -32,7 +32,7 @@ import {
 // Component
 // ============================================================================
 
-export function KeyboardShortcutsPanel() {
+export function KeyboardShortcutsPanel(): React.JSX.Element | null {
   const {
     shortcutsByCategory,
     customBindings,

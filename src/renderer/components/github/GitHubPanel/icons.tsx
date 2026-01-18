@@ -2,7 +2,7 @@
 // GITHUB PANEL - ICON COMPONENTS
 // ============================================================================
 
-export function GitHubIcon({ className }: { className?: string }) {
+export function GitHubIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg
       className={className}
@@ -19,7 +19,7 @@ export function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-export function SpinnerIcon({ className }: { className?: string }) {
+export function SpinnerIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="currentColor">
       <path d="M8 2a6 6 0 00-6 6h1.5a4.5 4.5 0 014.5-4.5V2z" />
@@ -27,7 +27,7 @@ export function SpinnerIcon({ className }: { className?: string }) {
   );
 }
 
-export function ChevronDownIcon({ className }: { className?: string }) {
+export function ChevronDownIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -35,7 +35,7 @@ export function ChevronDownIcon({ className }: { className?: string }) {
   );
 }
 
-export function PlusIcon({ className }: { className?: string }) {
+export function PlusIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -43,7 +43,7 @@ export function PlusIcon({ className }: { className?: string }) {
   );
 }
 
-export function LockIcon({ className }: { className?: string }) {
+export function LockIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -51,7 +51,7 @@ export function LockIcon({ className }: { className?: string }) {
   );
 }
 
-export function RepoIcon({ className }: { className?: string }) {
+export function RepoIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -59,7 +59,7 @@ export function RepoIcon({ className }: { className?: string }) {
   );
 }
 
-export function XIcon({ className }: { className?: string }) {
+export function XIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

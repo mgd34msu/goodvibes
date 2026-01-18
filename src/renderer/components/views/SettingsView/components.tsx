@@ -105,7 +105,7 @@ interface SettingRowProps {
   children: React.ReactNode;
 }
 
-export function SettingRow({ label, description, children }: SettingRowProps) {
+export function SettingRow({ label, description, children }: SettingRowProps): React.JSX.Element {
   return (
     <div className="flex items-center justify-between px-5 py-4 hover:bg-surface-800/30 transition-colors">
       <div className="flex-1 min-w-0 pr-4">
@@ -128,7 +128,7 @@ interface ToggleSwitchProps {
   onChange: (value: boolean) => void;
 }
 
-export function ToggleSwitch({ checked, onChange }: ToggleSwitchProps) {
+export function ToggleSwitch({ checked, onChange }: ToggleSwitchProps): React.JSX.Element {
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -167,7 +167,7 @@ interface ShortcutRowProps {
   shortcut: string;
 }
 
-export function ShortcutRow({ action, shortcut }: ShortcutRowProps) {
+export function ShortcutRow({ action, shortcut }: ShortcutRowProps): React.JSX.Element {
   return (
     <div className="flex items-center justify-between py-2.5 px-1 hover:bg-surface-800/20 rounded-lg transition-colors -mx-1">
       <span className="text-sm text-surface-300">{action}</span>

@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Session, SessionFilter } from './types';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
-export function useSessions(filter: SessionFilter) {
+export function useSessions(filter: SessionFilter): { sessions: Session[]; isLoading: boolean; error: Error | null } {
   const { data: sessions = [], isLoading, error } = useQuery({
     queryKey: ['sessions', filter],
     queryFn: async () => {
@@ -25,7 +25,7 @@ export function useSessions(filter: SessionFilter) {
   return { sessions, isLoading, error };
 }
 
-export function useLiveSessions() {
+export function useLiveSessions(): { liveSessions: Session[]; liveSessionIds: Set<string> } {
   const { data: liveSessions = [] } = useQuery({
     queryKey: ['live-sessions'],
     queryFn: () => window.goodvibes.getLiveSessions(),
@@ -41,7 +41,7 @@ export function useLiveSessions() {
   return { liveSessions, liveSessionIds };
 }
 
-export function useSessionFilters(sessions: Session[], search: string) {
+export function useSessionFilters(sessions: Session[], search: string): { filteredSessions: Session[] } {
   const { settings } = useSettingsStore();
 
   const filteredSessions = useMemo(() => {
@@ -69,7 +69,7 @@ export function useSessionFilters(sessions: Session[], search: string) {
   return { filteredSessions };
 }
 
-export function useAppUptime() {
+export function useAppUptime(): number {
   const [appUptime, setAppUptime] = useState(0);
 
   useEffect(() => {

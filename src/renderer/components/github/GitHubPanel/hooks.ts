@@ -8,7 +8,16 @@ import { createLogger } from '../../../../shared/logger';
 
 const logger = createLogger('GitHubPanel');
 
-export function useGitHubAuth(_cwd: string) {
+export interface UseGitHubAuthReturn {
+  isAuthenticated: boolean;
+  user: GitHubUser | null;
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  loadAuthState: () => Promise<boolean>;
+  handleAuthChange: (authenticated: boolean, authUser: GitHubUser | null) => void;
+}
+
+export function useGitHubAuth(_cwd: string): UseGitHubAuthReturn {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,7 +55,15 @@ export function useGitHubAuth(_cwd: string) {
   };
 }
 
-export function useRepoInfo(cwd: string, isAuthenticated: boolean) {
+export interface UseRepoInfoReturn {
+  repoInfo: GitHubRemoteInfo | null;
+  error: string | null;
+  setError: (error: string | null) => void;
+  loadRepoInfo: () => Promise<void>;
+  setRepoInfo: (info: GitHubRemoteInfo | null) => void;
+}
+
+export function useRepoInfo(cwd: string, isAuthenticated: boolean): UseRepoInfoReturn {
   const [repoInfo, setRepoInfo] = useState<GitHubRemoteInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,7 +112,16 @@ export function useRepoInfo(cwd: string, isAuthenticated: boolean) {
   };
 }
 
-export function useCIStatus(repoInfo: GitHubRemoteInfo | null, currentBranch?: string) {
+export interface UseCIStatusReturn {
+  ciStatus: {
+    checks: GitHubCheckRun[];
+    combined: GitHubCombinedStatus | null;
+  };
+  ciLoading: boolean;
+  loadCIStatus: () => Promise<void>;
+}
+
+export function useCIStatus(repoInfo: GitHubRemoteInfo | null, currentBranch?: string): UseCIStatusReturn {
   const [ciStatus, setCIStatus] = useState<{
     checks: GitHubCheckRun[];
     combined: GitHubCombinedStatus | null;

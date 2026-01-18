@@ -22,7 +22,7 @@ interface RecentProject {
 // COMPONENT
 // ============================================================================
 
-export function TextEditorPickerModal() {
+export function TextEditorPickerModal(): React.JSX.Element | null {
   const isOpen = useAppStore((s) => s.isTextEditorPickerOpen);
   const close = useAppStore((s) => s.closeTextEditorPicker);
   const createPlainTerminal = useTerminalStore((s) => s.createPlainTerminal);

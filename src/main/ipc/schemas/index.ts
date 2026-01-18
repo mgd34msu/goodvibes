@@ -32,6 +32,9 @@ export * from './knowledge.js';
 // Search
 export * from './search.js';
 
+// Database (activity logs, analytics)
+export * from './database.js';
+
 // Git
 export * from './git.js';
 
@@ -49,3 +52,21 @@ export * from './export.js';
 
 // Clipboard
 export * from './clipboard.js';
+
+// Window (clipboard and context menu operations)
+export * from './window.js';
+
+// Sessions
+export * from './sessions.js';
+
+// Project Config
+export * from './projectConfig.js';
+
+// Projects (file dialogs, recent projects)
+export * from './projects.js';
+
+// Agency (agent/skill indexing, context injection)
+export * from './agency.js';
+
+// Theme (theme validation schemas)
+export * from './theme.js';

@@ -304,7 +304,7 @@ export function mapRowToSmartCollection(row: SmartCollectionRow): SmartCollectio
     name: row.name,
     color: row.color,
     icon: row.icon,
-    rules: JSON.parse(row.rules || '[]'),
+    rules: JSON.parse(row.rules ?? '[]'),
     matchMode: (row.match_mode ?? 'all') as SmartCollection['matchMode'],
     createdAt: row.created_at,
     updatedAt: row.updated_at,

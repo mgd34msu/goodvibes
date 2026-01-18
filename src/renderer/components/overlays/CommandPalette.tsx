@@ -18,7 +18,7 @@ interface CommandItem {
   action: () => void;
 }
 
-export function CommandPalette() {
+export function CommandPalette(): React.JSX.Element | null {
   const isOpen = useAppStore((s) => s.isCommandPaletteOpen);
   const close = useAppStore((s) => s.closeCommandPalette);
   const setCurrentView = useAppStore((s) => s.setCurrentView);

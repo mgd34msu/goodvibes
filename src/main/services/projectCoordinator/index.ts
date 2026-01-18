@@ -177,7 +177,8 @@ export function cleanup(): void {
 // SINGLETON ACCESSOR
 // ============================================================================
 
-let instance: {
+/** Type for the ProjectCoordinator singleton instance */
+export type ProjectCoordinatorInstance = {
   init: typeof initProjectCoordinator;
   getEventEmitter: typeof getCoordinatorEventEmitter;
   registerCrossProjectAgent: typeof registerCrossProjectAgent;
@@ -204,9 +205,11 @@ let instance: {
   markEventHandled: typeof markEventHandled;
   getStatus: typeof getCoordinationStatus;
   cleanup: typeof cleanup;
-} | null = null;
+};
 
-export function getProjectCoordinator() {
+let instance: ProjectCoordinatorInstance | null = null;
+
+export function getProjectCoordinator(): ProjectCoordinatorInstance {
   if (!instance) {
     instance = {
       init: initProjectCoordinator,

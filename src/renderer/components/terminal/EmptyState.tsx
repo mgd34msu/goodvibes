@@ -25,7 +25,7 @@ interface RecentSession {
 // COMPONENT
 // ============================================================================
 
-export function EmptyState({ onNewSession, onNewTerminal, onOpenTextEditor, onQuickRestart }: EmptyStateProps) {
+export function EmptyState({ onNewSession, onNewTerminal, onOpenTextEditor, onQuickRestart }: EmptyStateProps): React.JSX.Element {
   const [recentSession, setRecentSession] = useState<RecentSession | null>(null);
 
   useEffect(() => {

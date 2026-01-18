@@ -25,7 +25,7 @@ interface HookCardProps {
   onTest: (id: number) => void;
 }
 
-export function HookCard({ hook, onToggle, onEdit, onDelete, onTest }: HookCardProps) {
+export function HookCard({ hook, onToggle, onEdit, onDelete, onTest }: HookCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
 
   const getResultBadge = () => {

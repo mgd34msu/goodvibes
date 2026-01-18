@@ -178,8 +178,8 @@ function mapRowToTemplate(row: ProjectTemplateRow): ProjectTemplate {
     id: row.id,
     name: row.name,
     description: row.description,
-    settings: JSON.parse(row.settings || '{}'),
-    agents: JSON.parse(row.agents || '[]'),
+    settings: JSON.parse(row.settings ?? '{}'),
+    agents: JSON.parse(row.agents ?? '[]'),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

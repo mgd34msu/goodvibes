@@ -4,7 +4,7 @@
 
 import type { FallbackProps } from 'react-error-boundary';
 
-export function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+export function ErrorFallback({ error, resetErrorBoundary }: FallbackProps): React.JSX.Element {
   return (
     <div className="flex items-center justify-center min-h-screen bg-surface-950 p-8">
       <div className="max-w-md w-full text-center">

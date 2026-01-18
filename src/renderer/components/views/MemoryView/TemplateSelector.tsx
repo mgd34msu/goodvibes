@@ -11,7 +11,7 @@ interface TemplateSelectorProps {
   onSelect: (template: MemoryTemplate) => void;
 }
 
-export function TemplateSelector({ onSelect }: TemplateSelectorProps) {
+export function TemplateSelector({ onSelect }: TemplateSelectorProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
 
   return (

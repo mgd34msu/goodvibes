@@ -102,7 +102,7 @@ function mapRowToAgentTemplate(row: AgentTemplateRow): AgentTemplate {
     cwd: row.cwd,
     initialPrompt: row.initial_prompt,
     claudeMdContent: row.claude_md_content,
-    flags: JSON.parse(row.flags || '[]'),
+    flags: JSON.parse(row.flags ?? '[]'),
     model: row.model,
     permissionMode: row.permission_mode,
     allowedTools: row.allowed_tools ? JSON.parse(row.allowed_tools) : null,

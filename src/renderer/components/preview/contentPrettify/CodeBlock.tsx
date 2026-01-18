@@ -1,10 +1,12 @@
 // ============================================================================
 // SYNTAX HIGHLIGHTED CODE COMPONENT
+// Uses safe React-based rendering instead of dangerouslySetInnerHTML
 // ============================================================================
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { hljs } from './hljs-config';
-import { escapeHtml, getLanguageDisplayLabel } from './utils';
+import { getLanguageDisplayLabel } from './utils';
+import { parseHighlightedCode, splitHighlightedLines } from './SafeHighlight';
 import type { SyntaxHighlightedCodeProps } from './types';
 
 export function SyntaxHighlightedCode({
@@ -15,17 +17,29 @@ export function SyntaxHighlightedCode({
 }: SyntaxHighlightedCodeProps) {
   const [copied, setCopied] = useState(false);
 
-  // Highlight the code
-  let highlighted: string;
-  try {
-    if (language && hljs.getLanguage(language)) {
-      highlighted = hljs.highlight(code, { language }).value;
-    } else {
-      highlighted = hljs.highlightAuto(code).value;
+  // Highlight the code and convert to safe React elements
+  const { highlightedElements, highlightedLines } = useMemo(() => {
+    let htmlOutput: string;
+    try {
+      if (language && hljs.getLanguage(language)) {
+        htmlOutput = hljs.highlight(code, { language }).value;
+      } else {
+        htmlOutput = hljs.highlightAuto(code).value;
+      }
+    } catch {
+      // Fallback: return plain text (React will escape it safely)
+      const plainLines = code.split('\n').map(line => [line || '\u00A0']);
+      return {
+        highlightedElements: [code],
+        highlightedLines: plainLines,
+      };
     }
-  } catch {
-    highlighted = escapeHtml(code);
-  }
+
+    return {
+      highlightedElements: parseHighlightedCode(htmlOutput),
+      highlightedLines: splitHighlightedLines(htmlOutput),
+    };
+  }, [code, language]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code);
@@ -35,8 +49,6 @@ export function SyntaxHighlightedCode({
 
   // Determine the display label - use custom label or generate from language
   const displayLabel = copyLabel || getLanguageDisplayLabel(language);
-
-  const lines = highlighted.split('\n');
 
   return (
     <div className="relative group rounded-lg overflow-hidden bg-surface-950 border border-surface-700">
@@ -70,23 +82,19 @@ export function SyntaxHighlightedCode({
         <pre className="p-3">
           {showLineNumbers ? (
             <code className="text-sm font-mono">
-              {lines.map((line, i) => (
+              {highlightedLines.map((lineElements, i) => (
                 <div key={i} className="flex">
                   <span className="select-none text-surface-500 text-right pr-4 min-w-[3rem]">
                     {i + 1}
                   </span>
-                  <span
-                    className="flex-1"
-                    dangerouslySetInnerHTML={{ __html: line || '&nbsp;' }}
-                  />
+                  <span className="flex-1">{lineElements}</span>
                 </div>
               ))}
             </code>
           ) : (
-            <code
-              className="text-sm font-mono text-surface-200 hljs"
-              dangerouslySetInnerHTML={{ __html: highlighted }}
-            />
+            <code className="text-sm font-mono text-surface-200 hljs">
+              {highlightedElements}
+            </code>
           )}
         </pre>
       </div>

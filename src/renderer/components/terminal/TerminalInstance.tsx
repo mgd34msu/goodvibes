@@ -56,7 +56,7 @@ function terminalColorsToXtermTheme(colors: TerminalColors): ITheme {
 // COMPONENT
 // ============================================================================
 
-export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps) {
+export function TerminalInstance({ id, zoomLevel, isActive }: TerminalInstanceProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);

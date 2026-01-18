@@ -4,7 +4,7 @@
 
 import { SettingsSection, ShortcutRow } from './components';
 
-export function KeyboardSettings() {
+export function KeyboardSettings(): React.JSX.Element {
   return (
     <SettingsSection title="Keyboard Shortcuts">
       <div className="space-y-2">

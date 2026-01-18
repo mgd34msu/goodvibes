@@ -218,7 +218,7 @@ export function LoadingSpinner({
 }
 
 // Inline loading indicator for text
-export function InlineLoader({ className }: { className?: string }) {
+export function InlineLoader({ className }: { className?: string }): React.JSX.Element {
   return (
     <span className={clsx('inline-flex items-center gap-0.5', className)}>
       {[0, 1, 2].map((i) => (

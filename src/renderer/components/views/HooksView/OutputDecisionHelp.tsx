@@ -51,25 +51,93 @@ const DECISION_DESCRIPTIONS: Record<string, string> = {
 };
 
 // ============================================================================
-// SYNTAX HIGHLIGHTING HELPER
-// Simple JSON syntax highlighting without external dependencies
+// SAFE JSON SYNTAX HIGHLIGHTING
+// React-based JSON rendering without dangerouslySetInnerHTML
 // ============================================================================
 
-function highlightJson(obj: Record<string, unknown>): string {
-  const json = JSON.stringify(obj, null, 2);
-  return json
-    .replace(/"([^"]+)":/g, '<span class="text-purple-400">"$1"</span>:')
-    .replace(/: "([^"]*)"/g, ': <span class="text-green-400">"$1"</span>')
-    .replace(/: (true|false)/g, ': <span class="text-amber-400">$1</span>')
-    .replace(/: (\d+)/g, ': <span class="text-info-400">$1</span>')
-    .replace(/: (null)/g, ': <span class="text-surface-500">$1</span>');
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+interface JsonTokenProps {
+  value: JsonValue;
+  indent?: number;
+}
+
+function JsonToken({ value, indent = 0 }: JsonTokenProps) {
+  const indentStr = '  '.repeat(indent);
+
+  if (value === null) {
+    return <span className="text-surface-500">null</span>;
+  }
+
+  if (typeof value === 'boolean') {
+    return <span className="text-amber-400">{value.toString()}</span>;
+  }
+
+  if (typeof value === 'number') {
+    return <span className="text-info-400">{value}</span>;
+  }
+
+  if (typeof value === 'string') {
+    return <span className="text-green-400">"{value}"</span>;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span>{'[]'}</span>;
+    }
+    return (
+      <>
+        {'[\n'}
+        {value.map((item, i) => (
+          <span key={i}>
+            {indentStr}{'  '}
+            <JsonToken value={item as JsonValue} indent={indent + 1} />
+            {i < value.length - 1 ? ',\n' : '\n'}
+          </span>
+        ))}
+        {indentStr}{']'}
+      </>
+    );
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return <span>{'{}'}</span>;
+    }
+    return (
+      <>
+        {'{\n'}
+        {entries.map(([key, val], i) => (
+          <span key={key}>
+            {indentStr}{'  '}
+            <span className="text-purple-400">"{key}"</span>
+            {': '}
+            <JsonToken value={val as JsonValue} indent={indent + 1} />
+            {i < entries.length - 1 ? ',\n' : '\n'}
+          </span>
+        ))}
+        {indentStr}{'}'}
+      </>
+    );
+  }
+
+  return <span>{String(value)}</span>;
+}
+
+function SafeJsonHighlight({ data }: { data: Record<string, unknown> }) {
+  return (
+    <code className="text-xs font-mono text-surface-200">
+      <JsonToken value={data as JsonValue} />
+    </code>
+  );
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function OutputDecisionHelp({ eventType }: OutputDecisionHelpProps) {
+export function OutputDecisionHelp({ eventType }: OutputDecisionHelpProps): React.JSX.Element | null {
   const eventMetadata = EVENT_TYPES.find((e) => e.value === eventType);
 
   if (!eventMetadata) {
@@ -183,12 +251,7 @@ export function OutputDecisionHelp({ eventType }: OutputDecisionHelpProps) {
               </div>
               <div className="overflow-x-auto">
                 <pre className="p-3">
-                  <code
-                    className="text-xs font-mono text-surface-200"
-                    dangerouslySetInnerHTML={{
-                      __html: highlightJson(outputSchemaExample),
-                    }}
-                  />
+                  <SafeJsonHighlight data={outputSchemaExample} />
                 </pre>
               </div>
             </div>

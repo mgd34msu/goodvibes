@@ -12,7 +12,7 @@ import { useEffect } from 'react';
  * For the terminal, context menu is handled separately in TerminalView.tsx
  * because it needs special handling for xterm.js selection.
  */
-export function useContextMenu() {
+export function useContextMenu(): void {
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement;

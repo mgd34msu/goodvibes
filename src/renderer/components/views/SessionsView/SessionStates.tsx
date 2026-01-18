@@ -8,7 +8,7 @@ import { SessionCardSkeleton } from '../../common/Skeleton';
 // LOADING SKELETON
 // ============================================================================
 
-export function LoadingSkeleton() {
+export function LoadingSkeleton(): React.JSX.Element {
   return (
     <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
       {Array.from({ length: 8 }).map((_, i) => (
@@ -27,7 +27,7 @@ interface EmptyStateProps {
   search: string;
 }
 
-export function EmptyState({ filter, search }: EmptyStateProps) {
+export function EmptyState({ filter, search }: EmptyStateProps): React.JSX.Element {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center max-w-md">
@@ -57,7 +57,7 @@ interface ErrorStateProps {
   error: unknown;
 }
 
-export function ErrorState({ error }: ErrorStateProps) {
+export function ErrorState({ error }: ErrorStateProps): React.JSX.Element {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center max-w-md">

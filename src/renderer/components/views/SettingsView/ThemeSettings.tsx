@@ -136,7 +136,7 @@ function CollapsedThemePreview({ theme }: { theme: Theme }) {
  * - Variant badges (dark/light)
  * - Selection indicator
  */
-export function ThemeSettings({ settings, onChange }: ThemeSettingsProps) {
+export function ThemeSettings({ settings, onChange }: ThemeSettingsProps): React.JSX.Element {
   const { dark: darkThemes, light: lightThemes } = getThemesByVariant();
   const currentThemeId = settings.colorTheme;
   const currentTheme = getAllThemes().find((t) => t.id === currentThemeId);

@@ -270,7 +270,7 @@ function NavDropdown({ group, currentView, onSelectView }: NavDropdownProps) {
 // TITLE BAR COMPONENT
 // ============================================================================
 
-export function TitleBar() {
+export function TitleBar(): React.JSX.Element {
   const currentView = useAppStore((s) => s.currentView);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
 

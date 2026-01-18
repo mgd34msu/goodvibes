@@ -77,7 +77,7 @@ function ColorGroup({
  * - Semantic colors (success, warning, error, info)
  * - Text and background samples
  */
-export function ThemePreview({ theme, compact = false }: ThemePreviewProps) {
+export function ThemePreview({ theme, compact = false }: ThemePreviewProps): React.JSX.Element {
   const { colors } = theme;
 
   if (compact) {

@@ -302,9 +302,9 @@ function mapRowToProjectConfig(row: ProjectConfigRow): ProjectConfig {
   return {
     projectPath: row.project_path,
     defaultTemplateId: row.default_template_id,
-    settings: JSON.parse(row.settings || '{}'),
-    hooks: JSON.parse(row.hooks || '[]') as HookConfig[],
-    mcpServers: JSON.parse(row.mcp_servers || '[]'),
+    settings: JSON.parse(row.settings ?? '{}'),
+    hooks: JSON.parse(row.hooks ?? '[]') as HookConfig[],
+    mcpServers: JSON.parse(row.mcp_servers ?? '[]'),
     claudeMdOverride: row.claude_md_override,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

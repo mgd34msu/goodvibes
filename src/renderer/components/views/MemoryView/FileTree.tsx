@@ -15,7 +15,7 @@ interface FileTreeProps {
   scopeFilter?: ScopeFilter;
 }
 
-export function FileTree({ files, selectedPath, onSelect, onRefresh, scopeFilter = 'all' }: FileTreeProps) {
+export function FileTree({ files, selectedPath, onSelect, onRefresh, scopeFilter = 'all' }: FileTreeProps): React.JSX.Element {
   const groupedFiles = {
     user: files.filter((f) => f.scope === 'user'),
     project: files.filter((f) => f.scope === 'project'),

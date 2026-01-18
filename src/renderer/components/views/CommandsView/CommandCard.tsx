@@ -26,7 +26,7 @@ interface CommandCardProps {
   onCopy: () => void;
 }
 
-export function CommandCard({ command, onUse, onInstall, onEdit, onDelete, onCopy }: CommandCardProps) {
+export function CommandCard({ command, onUse, onInstall, onEdit, onDelete, onCopy }: CommandCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in command;

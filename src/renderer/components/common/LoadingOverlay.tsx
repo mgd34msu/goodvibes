@@ -12,7 +12,7 @@ interface LoadingOverlayProps {
   variant?: 'default' | 'minimal' | 'fullscreen';
 }
 
-export function LoadingOverlay({ message, variant = 'default' }: LoadingOverlayProps) {
+export function LoadingOverlay({ message, variant = 'default' }: LoadingOverlayProps): React.JSX.Element {
   const progress = useAppStore((s) => s.loadingProgress);
   const percentage = progress ? Math.round((progress.current / progress.total) * 100) : null;
 

@@ -15,7 +15,6 @@ import {
   Zap,
   Database,
   Layout,
-  Terminal,
   Workflow,
 } from 'lucide-react';
 import type { BuiltInAgent } from './types';

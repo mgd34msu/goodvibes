@@ -14,7 +14,7 @@ const logger = createLogger('HookSetupStep');
 // Component
 // ============================================================================
 
-export function HookSetupStep() {
+export function HookSetupStep(): React.JSX.Element {
   return (
     <div className="space-y-6">
       {/* Introduction */}

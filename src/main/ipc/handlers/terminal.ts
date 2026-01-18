@@ -3,7 +3,6 @@
 // ============================================================================
 
 import { ipcMain } from 'electron';
-import { execSync } from 'child_process';
 import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import {
@@ -14,6 +13,47 @@ import {
   killTerminal,
   getAllTerminals,
 } from '../../services/terminalManager.js';
+import { commandExists } from '../../services/safeExec.js';
+import {
+  terminalStartOptionsSchema,
+  plainTerminalStartOptionsSchema,
+  terminalInputSchema,
+  terminalResizeSchema,
+  terminalIdSchema,
+} from '../schemas/terminal.js';
+import type { ZodError } from 'zod';
+
+// ============================================================================
+// VALIDATION HELPERS
+// ============================================================================
+
+/**
+ * Standard error response for IPC validation failures.
+ * Returns a structured error that the renderer can handle.
+ */
+interface ValidationErrorResponse {
+  success: false;
+  error: string;
+  code: 'VALIDATION_ERROR';
+  details?: Array<{ path: string; message: string }>;
+}
+
+/**
+ * Format Zod validation errors into a structured response
+ */
+function formatValidationError(error: ZodError): ValidationErrorResponse {
+  const details = error.errors.map(e => ({
+    path: e.path.join('.'),
+    message: e.message,
+  }));
+
+  return {
+    success: false,
+    error: `Validation failed: ${details.map(d => d.message).join(', ')}`,
+    code: 'VALIDATION_ERROR',
+    details,
+  };
+}
 
 // ============================================================================
 // TEXT EDITOR DETECTION
@@ -35,15 +75,13 @@ const TEXT_EDITORS: Array<{ name: string; command: string; windowsCommands?: str
   { name: 'Micro', command: 'micro', windowsCommands: ['micro', 'micro.exe'] },
 ];
 
+/**
+ * Check if a command exists on the system.
+ * Uses the centralized safeExec utility which validates inputs
+ * and uses array-form arguments to prevent command injection.
+ */
 function checkCommandExists(command: string): boolean {
-  try {
-    const isWindows = process.platform === 'win32';
-    const checkCmd = isWindows ? `where ${command}` : `which ${command}`;
-    execSync(checkCmd, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandExists(command);
 }
 
 function detectAvailableEditors(): TextEditorInfo[] {
@@ -82,43 +120,104 @@ function getDefaultEditor(): string | null {
 const logger = new Logger('IPC:Terminal');
 
 export function registerTerminalHandlers(): void {
-  ipcMain.handle('start-claude', withContext('start-claude', async (_, options: { cwd?: string; name?: string; resumeSessionId?: string; sessionType?: 'user' | 'subagent' }) => {
+  // ============================================================================
+  // START-CLAUDE HANDLER
+  // Starts a Claude terminal session with validated options
+  // ============================================================================
+  ipcMain.handle('start-claude', withContext('start-claude', async (_, options: unknown) => {
+    const result = terminalStartOptionsSchema.safeParse(options);
+    if (!result.success) {
+      logger.warn('start-claude validation failed', { errors: result.error.errors });
+      return formatValidationError(result.error);
+    }
+
+    const validatedOptions = result.data;
     logger.info('IPC: start-claude received', {
-      cwd: options.cwd,
-      name: options.name,
-      resumeSessionId: options.resumeSessionId,
-      sessionType: options.sessionType
+      cwd: validatedOptions.cwd,
+      name: validatedOptions.name,
+      resumeSessionId: validatedOptions.resumeSessionId,
+      sessionType: validatedOptions.sessionType
     });
-    return startTerminal(options);
+    return startTerminal(validatedOptions);
   }));
 
-  ipcMain.handle('start-plain-terminal', withContext('start-plain-terminal', async (_, options: { cwd?: string; name?: string }) => {
+  // ============================================================================
+  // START-PLAIN-TERMINAL HANDLER
+  // Starts a plain terminal without Claude
+  // ============================================================================
+  ipcMain.handle('start-plain-terminal', withContext('start-plain-terminal', async (_, options: unknown) => {
+    const result = plainTerminalStartOptionsSchema.safeParse(options);
+    if (!result.success) {
+      logger.warn('start-plain-terminal validation failed', { errors: result.error.errors });
+      return formatValidationError(result.error);
+    }
+
+    const validatedOptions = result.data;
     logger.info('IPC: start-plain-terminal received', {
-      cwd: options.cwd,
-      name: options.name
+      cwd: validatedOptions.cwd,
+      name: validatedOptions.name
     });
-    return startPlainTerminal(options);
+    return startPlainTerminal(validatedOptions);
   }));
 
-  ipcMain.handle('terminal-input', withContext('terminal-input', async (_, { id, data }) => {
+  // ============================================================================
+  // TERMINAL-INPUT HANDLER
+  // Writes data to a terminal - critical for security as this can execute commands
+  // ============================================================================
+  ipcMain.handle('terminal-input', withContext('terminal-input', async (_, input: unknown) => {
+    const result = terminalInputSchema.safeParse(input);
+    if (!result.success) {
+      logger.warn('terminal-input validation failed', { errors: result.error.errors });
+      return formatValidationError(result.error);
+    }
+
+    const { id, data } = result.data;
     writeToTerminal(id, data);
-    return true;
+    return { success: true };
   }));
 
-  ipcMain.handle('terminal-resize', withContext('terminal-resize', async (_, { id, cols, rows }) => {
+  // ============================================================================
+  // TERMINAL-RESIZE HANDLER
+  // Resizes a terminal - validates cols/rows are within safe bounds
+  // ============================================================================
+  ipcMain.handle('terminal-resize', withContext('terminal-resize', async (_, input: unknown) => {
+    const result = terminalResizeSchema.safeParse(input);
+    if (!result.success) {
+      logger.warn('terminal-resize validation failed', { errors: result.error.errors });
+      return formatValidationError(result.error);
+    }
+
+    const { id, cols, rows } = result.data;
     resizeTerminal(id, cols, rows);
-    return true;
+    return { success: true };
   }));
 
-  ipcMain.handle('kill-terminal', withContext('kill-terminal', async (_, id) => {
-    return killTerminal(id);
+  // ============================================================================
+  // KILL-TERMINAL HANDLER
+  // Terminates a terminal session by ID
+  // ============================================================================
+  ipcMain.handle('kill-terminal', withContext('kill-terminal', async (_, id: unknown) => {
+    const result = terminalIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('kill-terminal validation failed', { errors: result.error.errors });
+      return formatValidationError(result.error);
+    }
+
+    return killTerminal(result.data);
   }));
 
+  // ============================================================================
+  // GET-TERMINALS HANDLER
+  // Returns all active terminals - no input validation needed
+  // ============================================================================
   ipcMain.handle('get-terminals', withContext('get-terminals', async () => {
     return getAllTerminals();
   }));
 
-  // Text editor detection
+  // ============================================================================
+  // TEXT EDITOR DETECTION HANDLERS
+  // These handlers have no user input to validate
+  // ============================================================================
   ipcMain.handle('get-available-editors', withContext('get-available-editors', async () => {
     return detectAvailableEditors();
   }));

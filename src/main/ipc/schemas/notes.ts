@@ -29,3 +29,8 @@ export const setQuickNoteStatusSchema = z.object({
   id: numericIdSchema,
   status: z.enum(['active', 'completed', 'archived']),
 });
+
+/**
+ * Quick note status query schema (for filtering)
+ */
+export const noteStatusQuerySchema = z.enum(['active', 'completed', 'archived']);

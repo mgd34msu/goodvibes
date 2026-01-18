@@ -64,7 +64,7 @@ const PROGRESS_COLORS: Record<ToastVariant, string> = {
   info: 'bg-gradient-to-r from-indigo-500 to-indigo-400',
 };
 
-export function ToastContainer() {
+export function ToastContainer(): React.JSX.Element | null {
   const toasts = useToastStore((s) => s.toasts);
   const removeToast = useToastStore((s) => s.removeToast);
 

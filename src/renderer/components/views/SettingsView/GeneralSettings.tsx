@@ -10,7 +10,7 @@ interface GeneralSettingsProps {
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 }
 
-export function StartupSettings({ settings, onChange }: GeneralSettingsProps) {
+export function StartupSettings({ settings, onChange }: GeneralSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Startup Behavior">
       <SettingRow
@@ -61,7 +61,7 @@ export function StartupSettings({ settings, onChange }: GeneralSettingsProps) {
   );
 }
 
-export function ClaudeSettings({ settings, onChange }: GeneralSettingsProps) {
+export function ClaudeSettings({ settings, onChange }: GeneralSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Claude CLI Options">
       <SettingRow
@@ -138,7 +138,7 @@ export function ClaudeSettings({ settings, onChange }: GeneralSettingsProps) {
   );
 }
 
-export function GitSettings({ settings, onChange }: GeneralSettingsProps) {
+export function GitSettings({ settings, onChange }: GeneralSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Git Integration">
       <SettingRow
@@ -178,7 +178,7 @@ export function GitSettings({ settings, onChange }: GeneralSettingsProps) {
   );
 }
 
-export function BudgetSettings({ settings, onChange }: GeneralSettingsProps) {
+export function BudgetSettings({ settings, onChange }: GeneralSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Budget Alerts">
       <SettingRow
@@ -224,7 +224,7 @@ export function BudgetSettings({ settings, onChange }: GeneralSettingsProps) {
   );
 }
 
-export function BackupSettings({ settings, onChange }: GeneralSettingsProps) {
+export function BackupSettings({ settings, onChange }: GeneralSettingsProps): React.JSX.Element {
   return (
     <SettingsSection title="Data & Backup">
       <SettingRow

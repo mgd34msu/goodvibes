@@ -11,7 +11,7 @@ interface TokensTabProps {
   session: Session;
 }
 
-export function TokensTab({ session }: TokensTabProps) {
+export function TokensTab({ session }: TokensTabProps): React.JSX.Element {
   const tokenBreakdown = [
     { label: 'Input Tokens', value: session.inputTokens, color: 'bg-primary-500' },
     { label: 'Output Tokens', value: session.outputTokens, color: 'bg-success-500' },

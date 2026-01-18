@@ -10,8 +10,26 @@ import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import * as db from '../../database/index.js';
 import type { Session, SessionMessage } from '../../../shared/types/index.js';
+import {
+  exportSessionSchema,
+  bulkExportSchema,
+  validateInput,
+} from '../schemas/index.js';
 
 const logger = new Logger('IPC:Export');
+
+/**
+ * Custom error class for IPC validation failures
+ */
+class IPCValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string = 'VALIDATION_ERROR'
+  ) {
+    super(message);
+    this.name = 'IPCValidationError';
+  }
+}
 
 // ============================================================================
 // FORMATTERS
@@ -84,7 +102,16 @@ function escapeHtml(str: string): string {
 // ============================================================================
 
 export function registerExportHandlers(): void {
-  ipcMain.handle('export-session', withContext('export-session', async (_, { sessionId, format }: { sessionId: string; format: string }) => {
+  ipcMain.handle('export-session', withContext('export-session', async (_, data: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(exportSessionSchema, data);
+    if (!validation.success) {
+      logger.warn('export-session validation failed', { error: validation.error });
+      throw new IPCValidationError(`Invalid export data: ${validation.error}`);
+    }
+
+    const { sessionId, format } = validation.data;
+
     const session = db.getSession(sessionId);
     if (!session) return { success: false, error: 'Session not found' };
 
@@ -113,7 +140,16 @@ export function registerExportHandlers(): void {
     return { success: true, path: result.filePath };
   }));
 
-  ipcMain.handle('bulk-export', withContext('bulk-export', async (_, sessionIds: string[]) => {
+  ipcMain.handle('bulk-export', withContext('bulk-export', async (_, sessionIds: unknown) => {
+    // Validate input using Zod schema
+    const validation = validateInput(bulkExportSchema, sessionIds);
+    if (!validation.success) {
+      logger.warn('bulk-export validation failed', { error: validation.error });
+      throw new IPCValidationError(`Invalid session IDs: ${validation.error}`);
+    }
+
+    const validatedSessionIds = validation.data;
+
     const result = await dialog.showSaveDialog({
       title: 'Export Sessions as ZIP',
       defaultPath: `sessions-export-${Date.now()}.zip`,
@@ -148,7 +184,7 @@ export function registerExportHandlers(): void {
 
       archive.pipe(output);
 
-      for (const sessionId of sessionIds) {
+      for (const sessionId of validatedSessionIds) {
         const session = db.getSession(sessionId);
         if (session) {
           const messages = db.getSessionMessages(sessionId);

@@ -11,6 +11,13 @@ import {
   updateMCPServerStatus,
   type MCPServer,
 } from '../../database/primitives.js';
+import {
+  validateCommandName,
+  validateCommandArguments,
+  validatePath,
+  validateEnvironment,
+  logSecurityEvent,
+} from '../inputSanitizer.js';
 import type { MCPServerInfo } from './types.js';
 
 const logger = new Logger('MCPManager');
@@ -33,15 +40,60 @@ export async function startStdioServer(
     return false;
   }
 
+  // Security: Validate command name
+  const commandValidation = validateCommandName(server.command);
+  if (!commandValidation.valid) {
+    logger.error(`Invalid command for MCP server ${server.name}: ${commandValidation.error}`);
+    logSecurityEvent('mcp-server-start', server.command, server.args || [], commandValidation.error || 'Invalid command');
+    updateMCPServerStatus(server.id, 'error', `Security: ${commandValidation.error}`);
+    return false;
+  }
+
+  // Security: Validate arguments
+  if (server.args && server.args.length > 0) {
+    const argsValidation = validateCommandArguments(server.args);
+    if (!argsValidation.valid) {
+      logger.error(`Invalid arguments for MCP server ${server.name}: ${argsValidation.error}`);
+      logSecurityEvent('mcp-server-start', server.command, server.args, argsValidation.error || 'Invalid arguments');
+      updateMCPServerStatus(server.id, 'error', `Security: ${argsValidation.error}`);
+      return false;
+    }
+  }
+
+  // Security: Validate cwd path
+  const cwd = server.projectPath || process.cwd();
+  const cwdValidation = validatePath(cwd);
+  if (!cwdValidation.valid) {
+    logger.error(`Invalid cwd for MCP server ${server.name}: ${cwdValidation.error}`);
+    logSecurityEvent('mcp-server-start', server.command, [cwd], cwdValidation.error || 'Invalid cwd');
+    updateMCPServerStatus(server.id, 'error', `Security: ${cwdValidation.error}`);
+    return false;
+  }
+
+  // Security: Validate custom environment variables
+  if (server.env && Object.keys(server.env).length > 0) {
+    const envValidation = validateEnvironment(server.env);
+    if (!envValidation.valid) {
+      logger.error(`Invalid environment for MCP server ${server.name}: ${envValidation.error}`);
+      logSecurityEvent('mcp-server-start', server.command, [], envValidation.error || 'Invalid environment');
+      updateMCPServerStatus(server.id, 'error', `Security: ${envValidation.error}`);
+      return false;
+    }
+  }
+
   try {
     const env = {
       ...process.env,
       ...server.env,
     };
 
-    const child = spawn(server.command, server.args, {
+    // Use validated values
+    const safeCommand = commandValidation.sanitized || server.command;
+    const safeCwd = cwdValidation.sanitized || cwd;
+
+    const child = spawn(safeCommand, server.args || [], {
       env,
-      cwd: server.projectPath || process.cwd(),
+      cwd: safeCwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

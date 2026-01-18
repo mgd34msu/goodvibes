@@ -8,6 +8,7 @@ import { useConfirm } from '../../overlays/ConfirmModal';
 import { HookForm } from './HookForm';
 import { HookCard } from './HookCard';
 import { BuiltinHookCard } from './BuiltinHookCard';
+import { InstallHookModal } from './InstallHookModal';
 import { useHooks, useHookFiltersWithBuiltIn } from './useHooks';
 import { EVENT_TYPES, EVENT_TYPE_ICONS, type Hook } from './types';
 import { BUILT_IN_HOOKS, CATEGORY_COLORS, CATEGORY_LABELS, type BuiltinHook } from './builtinHooks';
@@ -19,6 +20,7 @@ import { BUILT_IN_HOOKS, CATEGORY_COLORS, CATEGORY_LABELS, type BuiltinHook } fr
 export default function HooksView() {
   const [showForm, setShowForm] = useState(false);
   const [editingHook, setEditingHook] = useState<Hook | undefined>();
+  const [hookToInstall, setHookToInstall] = useState<BuiltinHook | null>(null);
 
   const { confirm: confirmDeleteHook, ConfirmDialog: DeleteHookDialog } = useConfirm({
     title: 'Delete Hook',
@@ -64,25 +66,34 @@ export default function HooksView() {
     setShowForm(true);
   };
 
-  // Install a built-in hook by copying it to user's hooks
-  const handleInstallBuiltIn = async (builtinHook: BuiltinHook) => {
-    const hookData: Partial<Hook> = {
-      name: builtinHook.name,
-      eventType: builtinHook.eventType,
-      matcher: builtinHook.matcher,
-      command: builtinHook.command,
-      hookType: builtinHook.hookType,
-      prompt: builtinHook.prompt,
-      timeout: builtinHook.timeout,
-      enabled: true,
-    };
+  // Open install modal for built-in hook
+  const handleOpenInstallModal = useCallback((builtinHook: BuiltinHook) => {
+    setHookToInstall(builtinHook);
+  }, []);
 
-    const success = await handleSave(hookData);
-    if (success) {
-      // Could show a toast notification here
-      alert(`Hook "${builtinHook.name}" installed successfully!`);
-    }
-  };
+  // Install a built-in hook with selected scope and project
+  const handleInstallBuiltIn = useCallback(
+    async (builtinHook: BuiltinHook, scope: 'user' | 'project', projectPath: string | null) => {
+      const hookData: Partial<Hook> = {
+        name: builtinHook.name,
+        eventType: builtinHook.eventType,
+        matcher: builtinHook.matcher,
+        command: builtinHook.command,
+        hookType: builtinHook.hookType,
+        prompt: builtinHook.prompt,
+        timeout: builtinHook.timeout,
+        scope,
+        projectPath,
+        enabled: true,
+      };
+
+      const success = await handleSave(hookData);
+      if (success) {
+        setHookToInstall(null);
+      }
+    },
+    [handleSave]
+  );
 
   const hasNoResults =
     filteredHooks.length === 0 && (!showBuiltIn || filteredBuiltIn.length === 0);
@@ -270,7 +281,7 @@ export default function HooksView() {
                     <BuiltinHookCard
                       key={hook.id}
                       hook={hook}
-                      onInstall={handleInstallBuiltIn}
+                      onInstall={handleOpenInstallModal}
                     />
                   ))}
                 </div>
@@ -303,6 +314,16 @@ export default function HooksView() {
         </div>
       </div>
       <DeleteHookDialog />
+
+      {/* Install Hook Modal */}
+      {hookToInstall && (
+        <InstallHookModal
+          hook={hookToInstall}
+          isOpen={hookToInstall !== null}
+          onClose={() => setHookToInstall(null)}
+          onInstall={handleInstallBuiltIn}
+        />
+      )}
     </div>
   );
 }

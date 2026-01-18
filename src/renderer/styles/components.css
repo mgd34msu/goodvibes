@@ -2489,6 +2489,178 @@
   }
 
   /* ========================================
+     FEATURED CARD - Rainbow/Gradient Special Treatment
+     ======================================== */
+  .card-featured {
+    position: relative;
+    background: linear-gradient(
+      135deg,
+      rgba(24, 24, 31, 0.95) 0%,
+      rgba(17, 17, 24, 0.9) 100%
+    );
+    border: 1px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .card-featured::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      #6366f1 0%,
+      #8b5cf6 25%,
+      #a855f7 50%,
+      #ec4899 75%,
+      #f43f5e 100%
+    );
+    background-size: 200% 200%;
+    animation: rainbow-border 4s ease infinite;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    z-index: -1;
+  }
+
+  .card-featured:hover::before {
+    animation: rainbow-border 2s ease infinite;
+  }
+
+  @keyframes rainbow-border {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  .card-icon-featured {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(
+      135deg,
+      rgba(99, 102, 241, 0.3) 0%,
+      rgba(168, 85, 247, 0.3) 50%,
+      rgba(236, 72, 153, 0.3) 100%
+    );
+    color: #a78bfa;
+    flex-shrink: 0;
+    animation: icon-shimmer 3s ease infinite;
+  }
+
+  @keyframes icon-shimmer {
+    0%, 100% { color: #a78bfa; }
+    33% { color: #c084fc; }
+    66% { color: #f472b6; }
+  }
+
+  .card-title-rainbow {
+    font-weight: 600;
+    background: linear-gradient(
+      135deg,
+      #818cf8 0%,
+      #a78bfa 25%,
+      #c084fc 50%,
+      #f472b6 75%,
+      #fb7185 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: rainbow-text 4s ease infinite;
+  }
+
+  @keyframes rainbow-text {
+    0%, 100% { background-position: 0% center; }
+    50% { background-position: 100% center; }
+  }
+
+  .card-badge-rainbow {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2-5);
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    background: linear-gradient(
+      135deg,
+      rgba(99, 102, 241, 0.25) 0%,
+      rgba(168, 85, 247, 0.25) 50%,
+      rgba(236, 72, 153, 0.25) 100%
+    );
+    color: #e879f9;
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    text-transform: capitalize;
+    animation: badge-glow 2s ease infinite;
+  }
+
+  @keyframes badge-glow {
+    0%, 100% { box-shadow: 0 0 8px rgba(168, 85, 247, 0.3); }
+    50% { box-shadow: 0 0 16px rgba(236, 72, 153, 0.4); }
+  }
+
+  .card-action-rainbow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1-5);
+    padding: var(--space-1-5) var(--space-3);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    background: linear-gradient(
+      135deg,
+      #6366f1 0%,
+      #8b5cf6 25%,
+      #a855f7 50%,
+      #ec4899 75%,
+      #f43f5e 100%
+    );
+    background-size: 200% 200%;
+    animation: rainbow-bg 4s ease infinite;
+    color: white;
+    border: none;
+    cursor: pointer;
+    box-shadow:
+      0 2px 12px rgba(139, 92, 246, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition:
+      transform 0.2s var(--ease-spring),
+      box-shadow 0.2s var(--ease-out);
+  }
+
+  @keyframes rainbow-bg {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  .card-action-rainbow:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 4px 20px rgba(139, 92, 246, 0.5),
+      0 0 30px rgba(236, 72, 153, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    animation: rainbow-bg 2s ease infinite;
+  }
+
+  .card-action-rainbow:active {
+    transform: translateY(0);
+    box-shadow:
+      0 1px 4px rgba(139, 92, 246, 0.3),
+      inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  .card-action-rainbow svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* ========================================
      CARD DIVIDER
      ======================================== */
   .card-divider {

@@ -12,6 +12,7 @@ import {
   Wrench,
   CheckCircle,
   Download,
+  Sparkles,
 } from 'lucide-react';
 
 // ============================================================================
@@ -29,7 +30,10 @@ export interface MarketplaceServer {
   args?: string[];
   requiredEnv?: string[];
   documentation?: string;
+  repository?: string;
   popular?: boolean;
+  featured?: boolean;
+  vibes?: 'good' | 'great' | 'immaculate';
 }
 
 // ============================================================================
@@ -64,8 +68,21 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
   },
 };
 
-// Mock marketplace data
+// Marketplace data
 export const MARKETPLACE_SERVERS: MarketplaceServer[] = [
+  {
+    id: 'goodvibes',
+    name: 'GoodVibes',
+    description: 'Supercharge Claude Code with intelligent context injection, persistent memory, smart error recovery, automated quality gates, and 170+ development skills.',
+    category: 'productivity',
+    transport: 'stdio',
+    command: 'node',
+    args: ['plugins/goodvibes/mcp-server/index.js'],
+    documentation: 'https://goodvibes.sh/',
+    repository: 'https://github.com/mgd34msu/goodvibes-plugin',
+    featured: true,
+    vibes: 'immaculate',
+  },
   {
     id: 'notion',
     name: 'Notion',
@@ -162,23 +179,46 @@ const DEFAULT_CATEGORY: CategoryConfig = {
 
 export function MCPMarketplaceCard({ server, installed, onInstall }: MarketplaceCardProps) {
   const categoryConfig: CategoryConfig = CATEGORY_CONFIG[server.category] ?? DEFAULT_CATEGORY;
+  const isFeatured = server.featured;
+
+  // Featured card gets special rainbow treatment
+  const cardClasses = isFeatured
+    ? `card-hover card-featured group ${installed ? 'card-selected' : ''}`
+    : `card-hover group ${installed ? 'card-selected' : ''}`;
+
+  // Featured items use sparkles icon with special styling
+  const iconElement = isFeatured ? (
+    <div className="card-icon card-icon-featured">
+      <Sparkles className="w-5 h-5" />
+    </div>
+  ) : (
+    <div className={categoryConfig.iconClass}>
+      {categoryConfig.icon}
+    </div>
+  );
 
   return (
-    <div className={`card-hover group ${installed ? 'card-selected' : ''}`}>
+    <div className={cardClasses}>
       {/* Main Content */}
       <div className="flex items-start justify-between gap-4">
         {/* Left Section: Icon + Info */}
         <div className="flex items-start gap-3 flex-1 min-w-0">
           {/* Icon */}
-          <div className={categoryConfig.iconClass}>
-            {categoryConfig.icon}
-          </div>
+          {iconElement}
 
           {/* Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="card-title-gradient text-base">{server.name}</h3>
-              {server.popular && (
+              <h3 className={isFeatured ? "card-title-rainbow text-base" : "card-title-gradient text-base"}>
+                {server.name}
+              </h3>
+              {isFeatured && server.vibes && (
+                <span className="card-badge card-badge-rainbow">
+                  <Sparkles className="w-3 h-3" />
+                  {server.vibes} vibes
+                </span>
+              )}
+              {server.popular && !isFeatured && (
                 <span className="card-badge card-badge-primary card-badge-pulse">
                   Popular
                 </span>
@@ -216,7 +256,7 @@ export function MCPMarketplaceCard({ server, installed, onInstall }: Marketplace
           ) : (
             <button
               onClick={() => onInstall(server)}
-              className="card-action-primary"
+              className={isFeatured ? "card-action-rainbow" : "card-action-primary"}
             >
               <Download className="w-3.5 h-3.5" />
               Install

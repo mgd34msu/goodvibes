@@ -20,6 +20,7 @@ import {
   Sparkles,
   FolderKanban,
   ChevronDown,
+  Puzzle,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { NAV_GROUPS, type ViewName, type NavGroup } from '../../../shared/constants';
@@ -41,6 +42,7 @@ const VIEW_ICONS: Record<ViewName, React.ReactNode> = {
   settings: <Settings className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   hooks: <Webhook className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   mcp: <Server className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
+  plugins: <Puzzle className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   agents: <Users className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   memory: <Brain className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   skills: <Sparkles className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
@@ -58,6 +60,7 @@ const VIEW_LABELS: Record<ViewName, string> = {
   settings: 'Settings',
   hooks: 'Hooks',
   mcp: 'MCP',
+  plugins: 'Plugins',
   agents: 'Agents',
   memory: 'Memory',
   skills: 'Skills',

@@ -71,19 +71,6 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
 // Marketplace data
 export const MARKETPLACE_SERVERS: MarketplaceServer[] = [
   {
-    id: 'goodvibes',
-    name: 'GoodVibes',
-    description: 'Supercharge Claude Code with intelligent context injection, persistent memory, smart error recovery, automated quality gates, and 170+ development skills.',
-    category: 'productivity',
-    transport: 'stdio',
-    command: 'node',
-    args: ['plugins/goodvibes/mcp-server/index.js'],
-    documentation: 'https://goodvibes.sh/',
-    repository: 'https://github.com/mgd34msu/goodvibes-plugin',
-    featured: true,
-    vibes: 'immaculate',
-  },
-  {
     id: 'notion',
     name: 'Notion',
     description: 'Access and manage Notion workspaces, pages, and databases',

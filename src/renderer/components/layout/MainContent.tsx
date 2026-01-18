@@ -24,6 +24,7 @@ const AgentsView = lazy(() => import('../views/AgentsView'));
 const MemoryView = lazy(() => import('../views/MemoryView'));
 const SkillsView = lazy(() => import('../views/SkillsView/index'));
 const CommandsView = lazy(() => import('../views/CommandsView/index'));
+const PluginsView = lazy(() => import('../views/PluginsView/index'));
 // Phase 9-12 views
 const ProjectRegistryView = lazy(() => import('../views/ProjectRegistryView/index'));
 
@@ -36,6 +37,7 @@ const VIEW_COMPONENTS: Record<ViewName, React.LazyExoticComponent<() => React.JS
   settings: SettingsView,
   hooks: HooksView,
   mcp: MCPView,
+  plugins: PluginsView,
   agents: AgentsView,
   memory: MemoryView,
   skills: SkillsView,

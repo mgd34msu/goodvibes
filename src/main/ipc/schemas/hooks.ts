@@ -26,7 +26,7 @@ export const hookEventTypeSchema = z.enum([
 ]);
 
 /**
- * Extended hook event type schema - all 12 Claude hook events
+ * Extended hook event type schema - all 13 Claude hook events
  */
 export const extendedHookEventTypeSchema = z.enum([
   'PreToolUse',
@@ -41,6 +41,7 @@ export const extendedHookEventTypeSchema = z.enum([
   'SubagentStop',
   'PreCompact',
   'Notification',
+  'Setup',
 ]);
 
 // ============================================================================

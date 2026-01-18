@@ -11,10 +11,14 @@ import { vi, beforeEach } from 'vitest';
 const mockGoodVibesAPI = {
   // Terminal
   startClaude: vi.fn().mockResolvedValue({ id: 1 }),
+  startPlainTerminal: vi.fn().mockResolvedValue({ id: 1, name: 'Terminal', cwd: '/test/path' }),
   terminalInput: vi.fn().mockResolvedValue(true),
   terminalResize: vi.fn().mockResolvedValue(true),
   killTerminal: vi.fn().mockResolvedValue(true),
   getTerminals: vi.fn().mockResolvedValue([]),
+  showTerminalContextMenu: vi.fn().mockResolvedValue(null),
+  clipboardRead: vi.fn().mockResolvedValue(''),
+  clipboardWrite: vi.fn().mockResolvedValue(true),
 
   // Sessions
   getSessions: vi.fn().mockResolvedValue([]),
@@ -27,6 +31,7 @@ const mockGoodVibesAPI = {
   toggleArchive: vi.fn().mockResolvedValue(true),
   deleteSession: vi.fn().mockResolvedValue(true),
   getLiveSessions: vi.fn().mockResolvedValue([]),
+  getMostRecentSession: vi.fn().mockResolvedValue(null),
 
   // Analytics
   getAnalytics: vi.fn().mockResolvedValue({
@@ -114,8 +119,10 @@ const mockGoodVibesAPI = {
 
   // File/Folder
   selectFolder: vi.fn().mockResolvedValue(null),
+  selectFile: vi.fn().mockResolvedValue(null),
   createFolder: vi.fn().mockResolvedValue(null),
   openInExplorer: vi.fn().mockResolvedValue(true),
+  getDefaultEditor: vi.fn().mockResolvedValue('nvim'),
 
   // Recent Projects
   getRecentProjects: vi.fn().mockResolvedValue([]),
@@ -132,6 +139,7 @@ const mockGoodVibesAPI = {
   getAppVersion: vi.fn().mockResolvedValue('1.0.0'),
   getAppPath: vi.fn().mockResolvedValue('/tmp'),
   getPlatform: vi.fn().mockReturnValue('win32'),
+  getAvailableEditors: vi.fn().mockResolvedValue([]),
 
   // Maintenance
   recalculateSessionCosts: vi.fn().mockResolvedValue({ updated: 0 }),
@@ -177,6 +185,15 @@ const mockGoodVibesAPI = {
   githubListBranches: vi.fn().mockResolvedValue([]),
   githubParseRemote: vi.fn().mockResolvedValue(null),
   githubIsGitHubRemote: vi.fn().mockResolvedValue(false),
+
+  // MCP Servers
+  getMCPServers: vi.fn().mockResolvedValue([]),
+  getMCPServer: vi.fn().mockResolvedValue(null),
+  createMCPServer: vi.fn().mockResolvedValue({ id: 1, name: 'Test Server' }),
+  updateMCPServer: vi.fn().mockResolvedValue(true),
+  deleteMCPServer: vi.fn().mockResolvedValue(true),
+  setMCPServerStatus: vi.fn().mockResolvedValue(true),
+  onMCPServerStatus: vi.fn().mockReturnValue(() => {}),
 
   // Event Listeners
   onTerminalData: vi.fn(),

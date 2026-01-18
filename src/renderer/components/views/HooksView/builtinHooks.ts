@@ -14,7 +14,7 @@ export interface BuiltinHook {
   hookType: 'command' | 'prompt';
   prompt: string | null;
   timeout: number;
-  category: 'safety' | 'automation' | 'notifications' | 'workflow';
+  category: 'safety' | 'automation' | 'notifications' | 'workflow' | 'setup';
   tags: string[];
 }
 
@@ -24,6 +24,7 @@ export const CATEGORY_COLORS: Record<BuiltinHook['category'], string> = {
   automation: 'bg-green-500/10 text-green-400 border-green-500/20',
   notifications: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
   workflow: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  setup: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
 };
 
 export const CATEGORY_LABELS: Record<BuiltinHook['category'], string> = {
@@ -31,6 +32,7 @@ export const CATEGORY_LABELS: Record<BuiltinHook['category'], string> = {
   automation: 'Automation',
   notifications: 'Notifications',
   workflow: 'Workflow',
+  setup: 'Setup',
 };
 
 export const BUILT_IN_HOOKS: BuiltinHook[] = [
@@ -1825,5 +1827,329 @@ exit 0`,
     timeout: 10000,
     category: 'workflow',
     tags: ['archive', 'logs', 'session', 'end'],
+  },
+
+  // ============================================================================
+  // SETUP HOOKS - Repo initialization and maintenance (5)
+  // ============================================================================
+  {
+    id: 'setup-install-dependencies',
+    name: 'Install Dependencies on Init',
+    description: 'Automatically installs project dependencies when initializing a repo',
+    eventType: 'Setup',
+    matcher: 'init',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+echo "[Setup] Checking for dependencies to install..."
+
+# Node.js projects
+if [ -f "package.json" ] && [ ! -d "node_modules" ]; then
+  echo "[Setup] Installing npm dependencies..."
+  if [ -f "package-lock.json" ]; then
+    npm ci 2>&1
+  elif [ -f "yarn.lock" ]; then
+    yarn install --frozen-lockfile 2>&1
+  elif [ -f "pnpm-lock.yaml" ]; then
+    pnpm install --frozen-lockfile 2>&1
+  else
+    npm install 2>&1
+  fi
+  echo "[Setup] npm dependencies installed"
+fi
+
+# Python projects
+if [ -f "requirements.txt" ] && [ ! -d "venv" ] && [ ! -d ".venv" ]; then
+  echo "[Setup] Installing Python dependencies..."
+  python3 -m venv venv 2>/dev/null
+  source venv/bin/activate 2>/dev/null
+  pip install -r requirements.txt 2>&1
+  echo "[Setup] Python dependencies installed"
+fi
+
+# Go projects
+if [ -f "go.mod" ]; then
+  echo "[Setup] Downloading Go modules..."
+  go mod download 2>&1
+  echo "[Setup] Go modules downloaded"
+fi
+
+# Rust projects
+if [ -f "Cargo.toml" ]; then
+  echo "[Setup] Building Rust project..."
+  cargo build 2>&1
+  echo "[Setup] Rust project built"
+fi
+
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 300000,
+    category: 'setup',
+    tags: ['dependencies', 'install', 'init', 'npm', 'pip', 'go', 'rust'],
+  },
+  {
+    id: 'setup-run-migrations',
+    name: 'Run Database Migrations',
+    description: 'Runs database migrations on repo initialization',
+    eventType: 'Setup',
+    matcher: 'init',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+echo "[Setup] Checking for database migrations..."
+
+# Prisma
+if [ -f "prisma/schema.prisma" ]; then
+  echo "[Setup] Running Prisma migrations..."
+  npx prisma migrate dev --skip-generate 2>&1 || npx prisma db push 2>&1
+  npx prisma generate 2>&1
+  echo "[Setup] Prisma migrations complete"
+fi
+
+# Drizzle
+if [ -f "drizzle.config.ts" ] || [ -f "drizzle.config.js" ]; then
+  echo "[Setup] Running Drizzle migrations..."
+  npx drizzle-kit push 2>&1 || npx drizzle-kit migrate 2>&1
+  echo "[Setup] Drizzle migrations complete"
+fi
+
+# Django
+if [ -f "manage.py" ]; then
+  echo "[Setup] Running Django migrations..."
+  python manage.py migrate 2>&1
+  echo "[Setup] Django migrations complete"
+fi
+
+# Rails
+if [ -f "Gemfile" ] && [ -d "db/migrate" ]; then
+  echo "[Setup] Running Rails migrations..."
+  bundle exec rails db:migrate 2>&1
+  echo "[Setup] Rails migrations complete"
+fi
+
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 120000,
+    category: 'setup',
+    tags: ['database', 'migrations', 'prisma', 'drizzle', 'django', 'rails'],
+  },
+  {
+    id: 'setup-generate-env',
+    name: 'Generate .env from Template',
+    description: 'Creates .env file from .env.example if it does not exist',
+    eventType: 'Setup',
+    matcher: 'init',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+echo "[Setup] Checking environment configuration..."
+
+# Copy .env.example to .env if .env doesn't exist
+if [ -f ".env.example" ] && [ ! -f ".env" ]; then
+  cp .env.example .env
+  echo "[Setup] Created .env from .env.example"
+  echo "[Setup] Please update .env with your actual values"
+elif [ -f ".env.template" ] && [ ! -f ".env" ]; then
+  cp .env.template .env
+  echo "[Setup] Created .env from .env.template"
+  echo "[Setup] Please update .env with your actual values"
+elif [ -f ".env.sample" ] && [ ! -f ".env" ]; then
+  cp .env.sample .env
+  echo "[Setup] Created .env from .env.sample"
+  echo "[Setup] Please update .env with your actual values"
+elif [ -f ".env" ]; then
+  echo "[Setup] .env file already exists"
+else
+  echo "[Setup] No .env template found"
+fi
+
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 5000,
+    category: 'setup',
+    tags: ['env', 'environment', 'config', 'template', 'init'],
+  },
+  {
+    id: 'setup-maintenance-cleanup',
+    name: 'Cleanup Stale Files',
+    description: 'Removes stale cache files and temporary data during maintenance',
+    eventType: 'Setup',
+    matcher: 'maintenance',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+echo "[Maintenance] Running cleanup tasks..."
+
+# Clean npm cache
+if [ -d "node_modules/.cache" ]; then
+  rm -rf node_modules/.cache
+  echo "[Maintenance] Cleared node_modules/.cache"
+fi
+
+# Clean Next.js cache
+if [ -d ".next" ]; then
+  rm -rf .next/cache
+  echo "[Maintenance] Cleared .next/cache"
+fi
+
+# Clean Vite cache
+if [ -d "node_modules/.vite" ]; then
+  rm -rf node_modules/.vite
+  echo "[Maintenance] Cleared Vite cache"
+fi
+
+# Clean Python cache
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+find . -type f -name "*.pyc" -delete 2>/dev/null
+echo "[Maintenance] Cleared Python cache"
+
+# Clean old log files (older than 7 days)
+if [ -d ".claude-logs" ]; then
+  find .claude-logs -type f -mtime +7 -delete 2>/dev/null
+  echo "[Maintenance] Cleaned old log files"
+fi
+
+echo "[Maintenance] Cleanup complete"
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 60000,
+    category: 'setup',
+    tags: ['maintenance', 'cleanup', 'cache', 'temp'],
+  },
+  {
+    id: 'setup-validate-project',
+    name: 'Validate Project Structure',
+    description: 'Validates that required project files and directories exist',
+    eventType: 'Setup',
+    matcher: 'init',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+echo "[Setup] Validating project structure..."
+
+WARNINGS=0
+
+# Check for README
+if [ ! -f "README.md" ] && [ ! -f "readme.md" ]; then
+  echo "[Warning] No README.md found"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
+# Check for .gitignore
+if [ ! -f ".gitignore" ]; then
+  echo "[Warning] No .gitignore found"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
+# Check for license
+if [ ! -f "LICENSE" ] && [ ! -f "LICENSE.md" ] && [ ! -f "license" ]; then
+  echo "[Warning] No LICENSE file found"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
+# Node.js specific checks
+if [ -f "package.json" ]; then
+  # Check for lock file
+  if [ ! -f "package-lock.json" ] && [ ! -f "yarn.lock" ] && [ ! -f "pnpm-lock.yaml" ]; then
+    echo "[Warning] No lock file found (package-lock.json, yarn.lock, or pnpm-lock.yaml)"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  # Check for TypeScript config
+  if grep -q "typescript" package.json 2>/dev/null && [ ! -f "tsconfig.json" ]; then
+    echo "[Warning] TypeScript detected but no tsconfig.json found"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+fi
+
+if [ $WARNINGS -eq 0 ]; then
+  echo "[Setup] Project structure looks good!"
+else
+  echo "[Setup] Found $WARNINGS warning(s)"
+fi
+
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 10000,
+    category: 'setup',
+    tags: ['validation', 'structure', 'init', 'check'],
+  },
+  {
+    id: 'setup-git-hooks',
+    name: 'Install Git Hooks',
+    description: 'Sets up git hooks (husky, pre-commit) on repo initialization',
+    eventType: 'Setup',
+    matcher: 'init',
+    command: `#!/bin/bash
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+
+cd "$CWD" 2>/dev/null || exit 0
+
+# Check if in a git repo
+if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  echo "[Setup] Not a git repository, skipping git hooks setup"
+  exit 0
+fi
+
+echo "[Setup] Setting up git hooks..."
+
+# Husky (Node.js)
+if [ -f "package.json" ] && grep -q '"husky"' package.json 2>/dev/null; then
+  if [ ! -d ".husky" ]; then
+    echo "[Setup] Initializing Husky..."
+    npx husky install 2>&1 || npx husky init 2>&1
+    echo "[Setup] Husky initialized"
+  else
+    echo "[Setup] Husky already configured"
+  fi
+fi
+
+# pre-commit (Python)
+if [ -f ".pre-commit-config.yaml" ]; then
+  if command -v pre-commit &> /dev/null; then
+    echo "[Setup] Installing pre-commit hooks..."
+    pre-commit install 2>&1
+    echo "[Setup] pre-commit hooks installed"
+  else
+    echo "[Setup] pre-commit not found, skipping (install with: pip install pre-commit)"
+  fi
+fi
+
+# lefthook
+if [ -f "lefthook.yml" ] || [ -f ".lefthook.yml" ]; then
+  if command -v lefthook &> /dev/null; then
+    echo "[Setup] Installing lefthook..."
+    lefthook install 2>&1
+    echo "[Setup] lefthook installed"
+  fi
+fi
+
+exit 0`,
+    hookType: 'command',
+    prompt: null,
+    timeout: 30000,
+    category: 'setup',
+    tags: ['git', 'hooks', 'husky', 'pre-commit', 'init'],
   },
 ];

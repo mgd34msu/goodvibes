@@ -1,14 +1,128 @@
 // ============================================================================
 // TERMINAL VIEW COMPONENT TESTS
 // ============================================================================
+//
+// This file tests the TerminalView component as exported from views directory.
+// For comprehensive terminal component tests, see:
+// src/renderer/components/terminal/__tests__/TerminalView.test.tsx
+//
+// ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useTerminalStore } from '../../stores/terminalStore';
 import { useAppStore } from '../../stores/appStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import TerminalView from './TerminalView';
+import { DEFAULT_SETTINGS } from '../../../shared/types';
+
+// ============================================================================
+// MOCK XTERM.JS
+// ============================================================================
+
+// Mock XTerm.js and its addons to prevent DOM issues in tests
+vi.mock('@xterm/xterm', () => {
+  const MockTerminal = class {
+    open = vi.fn();
+    write = vi.fn();
+    clear = vi.fn();
+    focus = vi.fn();
+    blur = vi.fn();
+    dispose = vi.fn();
+    refresh = vi.fn();
+    scrollToBottom = vi.fn();
+    loadAddon = vi.fn();
+    onData = vi.fn().mockReturnValue(vi.fn());
+    onResize = vi.fn().mockReturnValue(vi.fn());
+    cols = 80;
+    rows = 24;
+    options = {
+      fontSize: 14,
+      theme: {},
+    };
+    getSelection = vi.fn().mockReturnValue('');
+    hasSelection = vi.fn().mockReturnValue(false);
+  };
+  return { Terminal: MockTerminal };
+});
+
+vi.mock('@xterm/addon-fit', () => {
+  const MockFitAddon = class {
+    fit = vi.fn();
+    proposeDimensions = vi.fn().mockReturnValue({ cols: 80, rows: 24 });
+  };
+  return { FitAddon: MockFitAddon };
+});
+
+vi.mock('@xterm/addon-web-links', () => {
+  const MockWebLinksAddon = class {};
+  return { WebLinksAddon: MockWebLinksAddon };
+});
+
+vi.mock('@xterm/addon-search', () => {
+  const MockSearchAddon = class {
+    findNext = vi.fn();
+    findPrevious = vi.fn();
+  };
+  return { SearchAddon: MockSearchAddon };
+});
+
+// Mock the ThemeContext
+vi.mock('../../contexts/ThemeContext', () => ({
+  useTheme: vi.fn().mockReturnValue({
+    theme: {
+      id: 'goodvibes-classic',
+      name: 'GoodVibes Classic',
+      type: 'dark',
+      colors: {
+        terminal: {
+          background: '#1a1a2e',
+          foreground: '#e4e4e7',
+          cursor: '#f472b6',
+          selectionBackground: 'rgba(244, 114, 182, 0.3)',
+          black: '#1a1a2e',
+          red: '#ef4444',
+          green: '#10b981',
+          yellow: '#f59e0b',
+          blue: '#3b82f6',
+          magenta: '#f472b6',
+          cyan: '#06b6d4',
+          white: '#e4e4e7',
+          brightBlack: '#52525b',
+          brightRed: '#f87171',
+          brightGreen: '#34d399',
+          brightYellow: '#fbbf24',
+          brightBlue: '#60a5fa',
+          brightMagenta: '#f9a8d4',
+          brightCyan: '#22d3ee',
+          brightWhite: '#fafafa',
+        },
+      },
+    },
+    themeId: 'goodvibes-classic',
+    setTheme: vi.fn(),
+    availableThemes: [],
+  }),
+}));
+
+// Mock GitPanel to avoid git-related API calls
+vi.mock('../git', () => ({
+  GitPanel: vi.fn(() => <div data-testid="git-panel">Git Panel Mock</div>),
+}));
+
+// Mock SessionPreviewView
+vi.mock('../preview/SessionPreviewView', () => ({
+  SessionPreviewView: vi.fn(({ sessionId, sessionName }) => (
+    <div data-testid="session-preview">
+      Preview: {sessionName} ({sessionId})
+    </div>
+  )),
+}));
+
+// ============================================================================
+// TEST HELPERS
+// ============================================================================
 
 // Create a wrapper with QueryClient for tests
 function createTestWrapper() {
@@ -29,40 +143,60 @@ function createTestWrapper() {
   };
 }
 
+async function renderTerminalView() {
+  let result: ReturnType<typeof render>;
+
+  await act(async () => {
+    result = render(<TerminalView />, { wrapper: createTestWrapper() });
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+
+  return result!;
+}
+
+function resetStores(): void {
+  useTerminalStore.setState({
+    terminals: new Map(),
+    activeTerminalId: null,
+    zoomLevel: 100,
+    nextPreviewId: -1,
+  });
+
+  useAppStore.setState({
+    currentView: 'terminal',
+    isFolderPickerOpen: false,
+    isTextEditorPickerOpen: false,
+  });
+
+  useSettingsStore.setState({
+    settings: { ...DEFAULT_SETTINGS },
+    isLoaded: true,
+  });
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
 describe('TerminalView', () => {
   beforeEach(() => {
-    // Reset stores to initial state
-    useTerminalStore.setState({
-      terminals: new Map(),
-      activeTerminalId: null,
-      zoomLevel: 100,
-      nextPreviewId: -1,
-    });
-
-    useAppStore.setState({
-      currentView: 'terminal',
-    });
-
+    resetStores();
     vi.clearAllMocks();
+
+    vi.mocked(window.goodvibes.getMostRecentSession).mockResolvedValue(null);
+    vi.mocked(window.goodvibes.getRecentProjects).mockResolvedValue([]);
   });
 
   describe('Empty State', () => {
-    it('renders empty state when no terminals exist', () => {
-      const { container } = render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders empty state when no terminals exist', async () => {
+      await renderTerminalView();
 
-      // Verify the component renders with its main structure
-      // The TerminalView should render a container even when empty
-      expect(container.firstChild).toBeInTheDocument();
-      // Look for empty state content - buttons to start a session or terminal
-      const startButton = screen.queryByLabelText(/start a claude session/i) ||
-        screen.queryByLabelText(/open new terminal/i);
-      expect(startButton).toBeInTheDocument();
+      expect(screen.getByText('Welcome to GoodVibes')).toBeInTheDocument();
     });
 
-    it('renders new terminal button', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders new terminal button', async () => {
+      await renderTerminalView();
 
-      // The empty state shows buttons to start Claude session or open terminal
       const newButton = screen.getByLabelText(/open new terminal/i);
       expect(newButton).toBeInTheDocument();
     });
@@ -70,7 +204,6 @@ describe('TerminalView', () => {
 
   describe('With Terminals', () => {
     beforeEach(() => {
-      // Set up a terminal in the store
       const terminal = {
         id: 1,
         name: 'Test Terminal',
@@ -85,18 +218,16 @@ describe('TerminalView', () => {
       });
     });
 
-    it('renders terminal tabs when terminals exist', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders terminal tabs when terminals exist', async () => {
+      await renderTerminalView();
 
-      // Should show terminal name in tab - use getByText which will fail if not found
       const terminalTab = screen.getByText('Test Terminal');
       expect(terminalTab).toBeInTheDocument();
     });
 
-    it('shows close button on tab hover', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('shows close button on tab hover', async () => {
+      await renderTerminalView();
 
-      // Look for close button by aria-label - matches "Close terminal Test Terminal"
       const closeButton = screen.getByLabelText(/close terminal test terminal/i);
       expect(closeButton).toBeInTheDocument();
     });
@@ -115,10 +246,9 @@ describe('TerminalView', () => {
       });
     });
 
-    it('renders multiple terminal tabs', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders multiple terminal tabs', async () => {
+      await renderTerminalView();
 
-      // Both terminal tabs should be visible - use getByText which fails if not found
       const tab1 = screen.getByText('Terminal 1');
       const tab2 = screen.getByText('Terminal 2');
 
@@ -126,14 +256,12 @@ describe('TerminalView', () => {
       expect(tab2).toBeInTheDocument();
     });
 
-    it('switches active terminal on tab click', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('switches active terminal on tab click', async () => {
+      await renderTerminalView();
 
-      // Use getByText to ensure the tab exists
       const tab2 = screen.getByText('Terminal 2');
       fireEvent.click(tab2);
 
-      // Check the store was updated
       const state = useTerminalStore.getState();
       expect(state.activeTerminalId).toBe(2);
     });
@@ -157,17 +285,14 @@ describe('TerminalView', () => {
       });
     });
 
-    it('renders preview terminal with different indicator', () => {
-      const { container } = render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders preview terminal with different indicator', async () => {
+      const { container } = await renderTerminalView();
 
-      // Preview terminals should show the preview name in the tab
       const previewTab = screen.getByText('Preview: Test Session');
       expect(previewTab).toBeInTheDocument();
 
-      // Preview terminals should have a visual indicator (purple dot class)
-      // Look for the indicator element near the tab
-      const indicator = container.querySelector('[class*="bg-purple"]') ||
-        container.querySelector('[class*="preview"]');
+      // Preview terminals should have accent/purple indicator
+      const indicator = container.querySelector('[class*="bg-accent"]');
       expect(indicator || previewTab).toBeInTheDocument();
     });
   });
@@ -189,25 +314,23 @@ describe('TerminalView', () => {
 
       useSettingsStore.setState({
         settings: {
-          ...useSettingsStore.getState().settings,
+          ...DEFAULT_SETTINGS,
           gitPanelPosition: 'right',
         },
+        isLoaded: true,
       });
     });
 
-    it('renders git panel toggle button for active terminal', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('renders git panel toggle button for active terminal', async () => {
+      await renderTerminalView();
 
-      // Use getByLabelText which will fail if the element is not found
-      // The git toggle button has aria-label "Show Git Panel" or "Hide Git Panel"
       const gitToggle = screen.getByLabelText(/(show|hide) git panel/i);
       expect(gitToggle).toBeInTheDocument();
     });
 
-    it('toggles git panel visibility', () => {
-      render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('toggles git panel visibility', async () => {
+      await renderTerminalView();
 
-      // Use getByLabelText to ensure the toggle exists
       const gitToggle = screen.getByLabelText(/(show|hide) git panel/i);
       const initialPressed = gitToggle.getAttribute('aria-pressed');
       fireEvent.click(gitToggle);
@@ -234,14 +357,12 @@ describe('TerminalView', () => {
       });
     });
 
-    it('applies zoom level from store', () => {
-      const { container } = render(<TerminalView />, { wrapper: createTestWrapper() });
+    it('applies zoom level from store', async () => {
+      const { container } = await renderTerminalView();
 
-      // Verify the terminal tab renders (indicating component loaded correctly with zoom level)
       const terminalTab = screen.getByText('Test Terminal');
       expect(terminalTab).toBeInTheDocument();
 
-      // The zoom level should be applied to the terminal container
       // Verify the component structure exists
       expect(container.firstChild).toBeInTheDocument();
     });
@@ -250,13 +371,7 @@ describe('TerminalView', () => {
 
 describe('Terminal Store Integration', () => {
   beforeEach(() => {
-    useTerminalStore.setState({
-      terminals: new Map(),
-      activeTerminalId: null,
-      zoomLevel: 100,
-      nextPreviewId: -1,
-    });
-
+    resetStores();
     vi.clearAllMocks();
   });
 
@@ -276,12 +391,11 @@ describe('Terminal Store Integration', () => {
   it('switches between tabs correctly', () => {
     const store = useTerminalStore.getState();
 
-    // Create preview terminals
     const id1 = store.createPreviewTerminal('session-1', 'Session 1', '/path1');
     const id2 = store.createPreviewTerminal('session-2', 'Session 2', '/path2');
 
     let state = useTerminalStore.getState();
-    expect(state.activeTerminalId).toBe(id2); // Last created is active
+    expect(state.activeTerminalId).toBe(id2);
 
     state.setActiveTerminal(id1);
     state = useTerminalStore.getState();
@@ -310,20 +424,16 @@ describe('Terminal Store Integration', () => {
   it('switches to next and previous tabs', () => {
     const store = useTerminalStore.getState();
 
-    // Create multiple preview terminals
     const id1 = store.createPreviewTerminal('session-1', 'Session 1');
     const id2 = store.createPreviewTerminal('session-2', 'Session 2');
     store.createPreviewTerminal('session-3', 'Session 3');
 
-    // Set active to first
     useTerminalStore.getState().setActiveTerminal(id1);
     expect(useTerminalStore.getState().activeTerminalId).toBe(id1);
 
-    // Switch to next
     useTerminalStore.getState().switchToNextTab();
     expect(useTerminalStore.getState().activeTerminalId).toBe(id2);
 
-    // Switch back
     useTerminalStore.getState().switchToPrevTab();
     expect(useTerminalStore.getState().activeTerminalId).toBe(id1);
   });

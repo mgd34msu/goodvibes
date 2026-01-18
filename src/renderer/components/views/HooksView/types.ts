@@ -16,6 +16,7 @@ import {
   Users,
   UserMinus,
   Archive,
+  Settings,
 } from 'lucide-react';
 
 export interface Hook {
@@ -64,7 +65,8 @@ export type HookEventType =
   | 'SubagentStop'
   | 'PreCompact'
   | 'SessionStart'
-  | 'SessionEnd';
+  | 'SessionEnd'
+  | 'Setup';
 
 export const EVENT_TYPES: EventTypeMetadata[] = [
   {
@@ -421,9 +423,9 @@ export const EVENT_TYPES: EventTypeMetadata[] = [
     description: 'When a session ends',
     canBlock: false,
     exitCode2Behavior: 'Shows stderr to user only',
-    supportsMatcher: false,
-    matcherType: 'none',
-    matcherExamples: [],
+    supportsMatcher: true,
+    matcherType: 'session',
+    matcherExamples: ['clear', 'logout', 'prompt_input_exit', 'other'],
     commonUseCases: [
       'Cleanup tasks',
       'Log statistics',
@@ -437,6 +439,32 @@ export const EVENT_TYPES: EventTypeMetadata[] = [
       permission_mode: 'default',
       hook_event_name: 'SessionEnd',
       reason: 'logout',
+    },
+    outputSchemaExample: null,
+    availableDecisions: null,
+  },
+  {
+    value: 'Setup',
+    label: 'Setup',
+    description: 'Repo setup hooks for init and maintenance',
+    canBlock: false,
+    exitCode2Behavior: 'Blocking errors ignored',
+    supportsMatcher: true,
+    matcherType: 'trigger',
+    matcherExamples: ['init', 'maintenance'],
+    commonUseCases: [
+      'Initialize project dependencies',
+      'Run database migrations',
+      'Set up development environment',
+      'Perform routine maintenance',
+    ],
+    inputSchemaExample: {
+      session_id: 'abc123',
+      transcript_path: '/path/to/transcript.json',
+      cwd: '/project/directory',
+      permission_mode: 'default',
+      hook_event_name: 'Setup',
+      trigger: 'init',
     },
     outputSchemaExample: null,
     availableDecisions: null,
@@ -456,4 +484,5 @@ export const EVENT_TYPE_ICONS: Record<HookEventType, React.ReactNode> = {
   PreCompact: React.createElement(Archive, { className: 'w-4 h-4 text-gray-400' }),
   SessionStart: React.createElement(Play, { className: 'w-4 h-4 text-green-400' }),
   SessionEnd: React.createElement(Pause, { className: 'w-4 h-4 text-gray-400' }),
+  Setup: React.createElement(Settings, { className: 'w-4 h-4 text-teal-400' }),
 };

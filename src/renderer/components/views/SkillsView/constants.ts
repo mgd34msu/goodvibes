@@ -1,454 +1,245 @@
 // ============================================================================
-// SKILLS VIEW - CONSTANTS AND BUILT-IN SKILLS
+// AGENT SKILLS VIEW - CONSTANTS AND BUILT-IN SKILLS
+// ============================================================================
+//
+// These are agent-callable skills designed for programmatic invocation
+// via the Skill tool. Each skill has proper SKILL.md frontmatter format.
 // ============================================================================
 
-import type { BuiltInSkill } from './types';
+import type { BuiltInAgentSkill } from './types';
 
-export const BUILT_IN_SKILLS: BuiltInSkill[] = [
+export const BUILT_IN_AGENT_SKILLS: BuiltInAgentSkill[] = [
   // -------------------------------------------------------------------------
-  // /commit - Git commit with conventional commit format
+  // code-review - Thorough code review with security, performance, best practices
   // -------------------------------------------------------------------------
   {
-    name: 'commit',
-    description: 'Create a git commit with conventional commit message format',
-    content: `You are creating a git commit. Follow this workflow:
+    name: 'code-review',
+    description:
+      'Performs thorough code review with security, performance, and best practices analysis',
+    content: `---
+name: code-review
+description: Performs thorough code review with security, performance, and best practices analysis
+allowed-tools: Read, Grep, Glob, Bash
+---
 
-## 1. Explore Changes
-- Run \`git status\` to see all modified, added, and deleted files
-- Run \`git diff --staged\` to review staged changes in detail
-- If nothing is staged, run \`git diff\` to see unstaged changes
-- Read modified files to understand the full context of changes
+# Code Review Skill
 
-## 2. Analyze and Categorize
-Determine the type of change:
-- **feat**: New feature or capability
-- **fix**: Bug fix
-- **docs**: Documentation only
-- **style**: Formatting, whitespace (no code change)
-- **refactor**: Code restructuring (no behavior change)
-- **perf**: Performance improvement
-- **test**: Adding or updating tests
-- **chore**: Build process, dependencies, tooling
+You are performing a comprehensive code review. This skill is invoked programmatically by agents to analyze code quality.
 
-Identify the scope (component, module, or area affected).
+## Review Dimensions
 
-## 3. Write Commit Message
-Follow conventional commits format:
+### 1. Correctness
+- Verify logic matches intent
+- Check edge cases and boundary conditions
+- Validate error handling completeness
+- Confirm null/undefined safety
 
-\`\`\`
-type(scope): concise description in imperative mood
+### 2. Security Analysis
+- Input validation and sanitization
+- Authentication and authorization checks
+- Injection vulnerabilities (SQL, XSS, command)
+- Secrets and credential exposure
+- CORS and CSP configuration
 
-[optional body]
-- Explain WHAT changed and WHY (not how)
-- Wrap at 72 characters
-- Use bullet points for multiple changes
+### 3. Performance Assessment
+- Algorithm complexity (Big O)
+- Database query efficiency (N+1, missing indexes)
+- Memory management and leaks
+- Unnecessary re-renders (React)
+- Bundle size impact
 
-[optional footer]
-BREAKING CHANGE: description (if applicable)
-Fixes #issue-number (if applicable)
-\`\`\`
+### 4. Best Practices
+- SOLID principles adherence
+- DRY - no unnecessary duplication
+- Appropriate abstraction levels
+- Clear naming conventions
+- Consistent code style
 
-## 4. Execute
-- Stage files if needed: \`git add <files>\` or \`git add -p\` for partial staging
-- Commit: \`git commit -m "message"\`
-- Verify with \`git log -1\` to confirm
+### 5. Maintainability
+- Code readability
+- Documentation quality
+- Test coverage adequacy
+- Modular architecture
 
-## Rules
-- First line max 72 characters
-- Use present tense imperative ("Add" not "Added" or "Adds")
-- No period at end of subject line
-- Separate subject from body with blank line`,
-    allowedTools: ['Bash', 'Read', 'Grep', 'Glob'],
+## Output Format
+
+Provide findings in structured format:
+
+**Critical Issues** (must fix):
+- [Issue with file:line and remediation]
+
+**Recommendations** (should fix):
+- [Improvement with rationale]
+
+**Notes** (optional improvements):
+- [Minor suggestions]
+
+**Summary**:
+- Overall quality assessment
+- Key strengths identified
+- Priority action items`,
+    allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /pr - Create a pull request with proper description
+  // test-generation - Generate comprehensive test suites
   // -------------------------------------------------------------------------
   {
-    name: 'pr',
-    description: 'Create a pull request with comprehensive description',
-    content: `You are creating a pull request. Follow this workflow:
+    name: 'test-generation',
+    description: 'Generates comprehensive test suites for code with edge cases and mocks',
+    content: `---
+name: test-generation
+description: Generates comprehensive test suites for code with edge cases and mocks
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+---
 
-## 1. Explore Current State
-- Run \`git status\` to check working tree state
-- Run \`git log main..HEAD --oneline\` to see commits to be included
-- Run \`git diff main...HEAD\` to see all changes vs main branch
-- Identify the base branch (usually main or develop)
+# Test Generation Skill
 
-## 2. Analyze Changes
-Review all commits and changes to understand:
-- What feature/fix is being delivered
-- What files are affected
-- What tests were added or modified
-- Any breaking changes or migration needs
-- Dependencies added or updated
+You are generating comprehensive tests for code. This skill creates test suites following project conventions.
 
-## 3. Create PR Description
-Structure your PR with these sections:
+## Test Generation Process
 
-\`\`\`markdown
-## Summary
-Brief description of what this PR does and why.
+### 1. Analyze Target Code
+- Read the function/component/module thoroughly
+- Identify inputs, outputs, and side effects
+- Map all code paths and branches
+- Note dependencies requiring mocks
 
-## Changes
-- Bullet point list of specific changes
-- Group by feature area if many changes
+### 2. Discover Testing Patterns
+- Find existing tests: \`**/*.test.{ts,tsx,js,jsx}\` or \`**/*.spec.*\`
+- Match project test framework (Jest, Vitest, Mocha, etc.)
+- Follow established assertion patterns
+- Use project's mocking conventions
 
-## Testing
-- How was this tested?
-- Steps to verify the changes work
-- Any edge cases considered
+### 3. Test Case Categories
 
-## Screenshots (if UI changes)
-Before/after if applicable.
-
-## Checklist
-- [ ] Tests pass locally
-- [ ] Code follows project style
-- [ ] Documentation updated (if needed)
-- [ ] No console.log or debug code left
-\`\`\`
-
-## 4. Execute
-- Push branch if not already pushed: \`git push -u origin <branch>\`
-- Create PR: \`gh pr create --title "type: description" --body "..."\`
-- Or open in browser: \`gh pr create --web\`
-
-## Rules
-- PR title follows conventional commit format
-- Link related issues with "Fixes #123" or "Relates to #123"
-- Request appropriate reviewers
-- Add relevant labels`,
-    allowedTools: ['Bash', 'Read', 'Grep', 'Glob'],
-    scope: 'user',
-    projectPath: null,
-  },
-
-  // -------------------------------------------------------------------------
-  // /review - Code review workflow
-  // -------------------------------------------------------------------------
-  {
-    name: 'review',
-    description: 'Perform a thorough code review with actionable feedback',
-    content: `You are performing a code review. Follow this systematic workflow:
-
-## 1. Explore the Changes
-- Identify what is being reviewed (PR, branch, specific files)
-- Run \`git diff\` or \`gh pr diff\` to see all changes
-- Read the PR description or commit messages for context
-- Understand the purpose and scope of changes
-
-## 2. Review Checklist
-
-### Correctness
-- Does the code do what it claims to do?
-- Are edge cases handled?
-- Are there off-by-one errors, null checks, bounds checks?
-- Is error handling complete and appropriate?
-
-### Security
-- Input validation present?
-- SQL injection, XSS, CSRF risks?
-- Secrets or credentials exposed?
-- Auth/authz properly implemented?
-
-### Performance
-- N+1 queries or unnecessary loops?
-- Large data structures handled efficiently?
-- Caching opportunities missed?
-- Memory leaks possible?
-
-### Maintainability
-- Code is readable and self-documenting?
-- Follows project patterns and conventions?
-- DRY - no unnecessary duplication?
-- Appropriate abstractions?
-
-### Testing
-- New code has tests?
-- Tests cover happy path AND edge cases?
-- Tests are meaningful (not just coverage)?
-- Integration points tested?
-
-## 3. Provide Feedback
-Structure feedback clearly:
-
-**Critical (must fix):**
-- Security issues
-- Bugs that will cause failures
-- Data loss risks
-
-**Suggested (should fix):**
-- Performance improvements
-- Better patterns available
-- Missing edge case handling
-
-**Nit (optional):**
-- Style preferences
-- Minor refactoring ideas
-
-## 4. Summarize
-- Overall assessment: Approve, Request Changes, or Comment
-- Highlight what was done well
-- Prioritize feedback items`,
-    allowedTools: ['Bash', 'Read', 'Grep', 'Glob'],
-    scope: 'user',
-    projectPath: null,
-  },
-
-  // -------------------------------------------------------------------------
-  // /debug - Systematic debugging workflow
-  // -------------------------------------------------------------------------
-  {
-    name: 'debug',
-    description: 'Systematic debugging workflow to find and fix issues',
-    content: `You are debugging an issue. Follow this systematic workflow:
-
-## 1. Understand the Problem
-Before touching any code:
-- What is the EXPECTED behavior?
-- What is the ACTUAL behavior?
-- What are the exact steps to reproduce?
-- When did it start happening? What changed?
-- Does it happen consistently or intermittently?
-
-## 2. Gather Evidence
-Collect all available information:
-- Read error messages and stack traces CAREFULLY
-- Check application logs for context
-- Review recent git commits: \`git log --oneline -20\`
-- Check environment differences (dev vs prod)
-- Look for related issues or past fixes
-
-## 3. Isolate the Problem
-Narrow down the cause:
-- Identify the specific file(s) and function(s) involved
-- Find the exact line where behavior diverges from expected
-- Create minimal reproduction case if possible
-- Use binary search on commits if needed: \`git bisect\`
-
-## 4. Form Hypotheses
-Based on evidence, list possible causes:
-1. Most likely: [specific hypothesis based on error]
-2. Possible: [alternative explanation]
-3. Less likely: [edge case]
-
-## 5. Test Each Hypothesis
-For each hypothesis:
-- Add targeted logging or debugging
-- Make ONE change at a time
-- Verify the change fixes the issue
-- Check for regressions
-
-## 6. Implement Fix
-- Fix the root cause, not just symptoms
-- Add test to prevent regression
-- Document the fix in commit message
-- Consider if similar bugs exist elsewhere
-
-## 7. Verify
-- Reproduction steps no longer show bug
-- All existing tests pass
-- No new warnings or errors
-- Fix works in all relevant environments
-
-## Anti-Patterns to Avoid
-- Random changes hoping something works
-- Fixing symptoms without understanding cause
-- Removing error handling to hide errors
-- Adding sleep/delays as "fixes"`,
-    allowedTools: null,
-    scope: 'user',
-    projectPath: null,
-  },
-
-  // -------------------------------------------------------------------------
-  // /test - Test writing workflow
-  // -------------------------------------------------------------------------
-  {
-    name: 'test',
-    description: 'Write comprehensive tests for code',
-    content: `You are writing tests. Follow this workflow:
-
-## 1. Explore the Code Under Test
-- Read the function/component/module to be tested
-- Understand its purpose, inputs, outputs, and side effects
-- Identify dependencies that may need mocking
-- Find existing tests for patterns: \`find . -name "*.test.*"\`
-
-## 2. Identify Test Cases
-
-### Happy Path
+**Happy Path Tests**:
 - Normal expected usage
 - Valid inputs produce correct outputs
-- Success scenarios
+- Success scenarios with typical data
 
-### Edge Cases
+**Edge Case Tests**:
 - Empty inputs (null, undefined, [], "")
-- Boundary values (0, -1, MAX_INT)
+- Boundary values (0, -1, MAX_VALUE)
 - Single item vs multiple items
-- First and last items
+- First and last element handling
 
-### Error Cases
-- Invalid inputs
-- Missing required data
-- Network/service failures
+**Error Case Tests**:
+- Invalid input types
+- Missing required parameters
+- Network/API failures
 - Timeout scenarios
-- Permission denied
+- Permission denied cases
 
-### Integration Points
-- API calls behave correctly
-- Database operations work
-- Event handlers fire properly
+**Integration Tests**:
+- Component interactions
+- API call verification
+- State management flows
+- Event handler chains
 
-## 3. Write Tests
-Follow this structure:
+### 4. Test Structure
 
 \`\`\`typescript
-describe('ComponentOrFunction', () => {
-  // Setup shared between tests
+describe('ModuleName', () => {
   beforeEach(() => {
-    // Reset state, create mocks
+    // Setup: reset state, create mocks
   });
 
-  describe('methodName', () => {
+  afterEach(() => {
+    // Cleanup: restore mocks, clear timers
+  });
+
+  describe('functionName', () => {
     it('should [expected behavior] when [condition]', () => {
-      // Arrange - set up test data
-      // Act - call the function
-      // Assert - verify the result
+      // Arrange
+      const input = createTestInput();
+
+      // Act
+      const result = functionName(input);
+
+      // Assert
+      expect(result).toMatchExpected();
     });
   });
 });
 \`\`\`
 
-## 4. Test Quality Checklist
-- [ ] Tests are independent (can run in any order)
-- [ ] Tests are deterministic (same result every time)
-- [ ] Tests are fast (mock external dependencies)
-- [ ] Test names describe the scenario clearly
-- [ ] Assertions are specific and meaningful
-- [ ] No logic in tests (no if/else/loops)
-- [ ] Tests fail for the right reason
-
-## 5. Run and Verify
-- Run tests: \`npm test\` or project equivalent
-- Check coverage: \`npm test -- --coverage\`
-- Ensure new tests actually fail when code is broken
-
-## Anti-Patterns to Avoid
-- Testing implementation details instead of behavior
-- \`expect(true).toBe(true)\` or meaningless assertions
-- Massive test files with no organization
-- Flaky tests that sometimes pass
-- Tests that depend on other tests`,
-    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
+### 5. Quality Requirements
+- Tests are independent (run in any order)
+- Tests are deterministic (same result every time)
+- Tests are fast (mock external dependencies)
+- Test names describe scenarios clearly
+- Assertions are specific and meaningful
+- No logic in tests (no if/else/loops)`,
+    allowedTools: ['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /refactor - Safe refactoring workflow
+  // documentation - Generate or improve code documentation
   // -------------------------------------------------------------------------
   {
-    name: 'refactor',
-    description: 'Safely refactor code while preserving behavior',
-    content: `You are refactoring code. Follow this safety-first workflow:
+    name: 'documentation',
+    description: 'Generates or improves code documentation including JSDoc, README, and API docs',
+    content: `---
+name: documentation
+description: Generates or improves code documentation including JSDoc, README, and API docs
+allowed-tools: Read, Edit, Write, Grep, Glob
+---
 
-## 1. Explore and Understand
-- Read the code to be refactored thoroughly
-- Understand its current behavior and purpose
-- Find all usages: \`grep -r "functionName" src/\`
-- Check existing test coverage
-- Identify what "working correctly" means
+# Documentation Generation Skill
 
-## 2. Ensure Safety Net
-Before changing anything:
-- Run existing tests: \`npm test\`
-- If coverage is insufficient, ADD TESTS FIRST
-- Document current behavior if unclear
-- Create a checkpoint: \`git commit -m "checkpoint before refactor"\`
+You are generating or improving documentation. This skill creates clear, comprehensive documentation.
 
-## 3. Plan the Refactoring
-Common refactoring patterns:
-- **Extract Function**: Move code block to named function
-- **Inline Function**: Replace function call with body
-- **Rename**: Improve clarity of names
-- **Extract Variable**: Name complex expressions
-- **Remove Duplication**: DRY principle
-- **Simplify Conditionals**: Reduce nesting, use early returns
-- **Replace Magic Numbers**: Use named constants
+## Documentation Types
 
-## 4. Execute Incrementally
-- Make ONE small change at a time
-- Run tests after EACH change
-- Commit working states frequently
-- If tests fail, revert and try smaller steps
+### 1. Code Comments (JSDoc/TSDoc)
 
-## 5. Refactoring Sequence
-1. Rename for clarity (safe, no behavior change)
-2. Extract/inline to improve structure
-3. Simplify logic
-4. Remove duplication
-5. Improve types/interfaces
-
-## 6. Verify
-- [ ] ALL tests pass
-- [ ] No new warnings or errors
-- [ ] Behavior is identical to before
-- [ ] Code is measurably better (more readable, less complex)
-- [ ] Performance is not degraded
-
-## Anti-Patterns to Avoid
-- Changing behavior during refactoring
-- Large changes without intermediate commits
-- Refactoring without tests
-- Over-engineering simple code
-- Premature abstraction
-
-## Remember
-**Refactoring = changing structure WITHOUT changing behavior**
-If you want to change behavior, that's a different task.`,
-    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
-    scope: 'user',
-    projectPath: null,
-  },
-
-  // -------------------------------------------------------------------------
-  // /doc - Documentation generation
-  // -------------------------------------------------------------------------
-  {
-    name: 'doc',
-    description: 'Generate or improve documentation for code',
-    content: `You are generating documentation. Follow this workflow:
-
-## 1. Explore What Needs Documentation
-- Identify the target: function, module, API, or project
-- Read the code thoroughly to understand it
-- Check existing documentation for patterns
-- Identify the audience (developers, users, API consumers)
-
-## 2. Documentation Types
-
-### Code Comments (JSDoc/TSDoc)
 \`\`\`typescript
 /**
- * Brief description of what it does.
+ * Brief description of what the function does.
  *
- * Longer description if needed, explaining behavior,
- * important details, or context.
+ * Detailed explanation of behavior, important edge cases,
+ * and any non-obvious implementation details.
  *
- * @param paramName - Description of parameter
+ * @param paramName - Description of the parameter
+ * @param options - Configuration options
+ * @param options.timeout - Request timeout in milliseconds
  * @returns Description of return value
- * @throws {ErrorType} When this condition occurs
+ * @throws {ValidationError} When input fails validation
  * @example
- * const result = myFunction('input');
- * // result: 'expected output'
+ * const result = await processData({ id: 123 });
+ * // Returns: { status: 'success', data: {...} }
  */
 \`\`\`
 
-### README Structure
+### 2. Module Documentation
+
+\`\`\`typescript
+/**
+ * @module ModuleName
+ * @description
+ * High-level description of module purpose and responsibilities.
+ *
+ * ## Usage
+ * Import and use the module:
+ * \`\`\`ts
+ * import { feature } from './module';
+ * feature.doSomething();
+ * \`\`\`
+ *
+ * ## Architecture
+ * Explain how this module fits into the larger system.
+ */
+\`\`\`
+
+### 3. README Structure
+
 \`\`\`markdown
 # Project Name
 
@@ -457,593 +248,943 @@ Brief description of what this project does.
 ## Installation
 Step-by-step setup instructions.
 
-## Usage
-Basic usage examples with code.
+## Quick Start
+Minimal example to get running.
 
 ## API Reference
-Document public functions/methods.
+Document public functions and methods.
 
 ## Configuration
-Environment variables, options, settings.
+Environment variables and options.
+
+## Examples
+Real-world usage examples.
 
 ## Contributing
 How to contribute to the project.
+
+## License
+License information.
 \`\`\`
 
-### API Documentation
-- Endpoint URL and method
-- Request parameters and body
-- Response format and codes
+### 4. API Documentation
+- Endpoint URL and HTTP method
+- Request parameters (path, query, body)
+- Request/response schemas
 - Authentication requirements
-- Example requests and responses
+- Example requests with curl
+- Response codes and meanings
 
-## 3. Writing Guidelines
-- Start with WHY, then WHAT, then HOW
-- Use concrete examples
-- Keep it concise but complete
-- Use consistent formatting
-- Include code examples that actually work
-- Document edge cases and limitations
+## Documentation Guidelines
 
-## 4. Generate Documentation
-- Add JSDoc comments to public functions
-- Update README if project-level changes
-- Create or update API docs for endpoints
-- Add inline comments for complex logic only
-
-## 5. Verify
-- Code examples actually work
-- Links are not broken
-- Formatting renders correctly
-- Documentation matches current code behavior
-
-## Anti-Patterns to Avoid
-- Documenting obvious things: \`// increment i\`
-- Outdated documentation (worse than none)
-- Generated docs with no human review
-- Documentation that repeats the code`,
-    allowedTools: ['Read', 'Edit', 'Grep', 'Glob'],
+1. **Start with WHY** - Explain purpose before details
+2. **Use examples** - Concrete examples beat abstract descriptions
+3. **Keep it current** - Documentation must match code
+4. **Be concise** - No unnecessary verbosity
+5. **Document edge cases** - Note limitations and gotchas`,
+    allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /security - Security audit
+  // refactoring - Safely refactor code while preserving behavior
   // -------------------------------------------------------------------------
   {
-    name: 'security',
-    description: 'Perform a security audit of the codebase',
-    content: `You are performing a security audit. Follow this systematic workflow:
+    name: 'refactoring',
+    description: 'Safely refactors code while preserving behavior using incremental changes',
+    content: `---
+name: refactoring
+description: Safely refactors code while preserving behavior using incremental changes
+allowed-tools: Read, Edit, Bash, Grep, Glob
+---
 
-## 1. Explore the Attack Surface
-- Identify all entry points: APIs, forms, file uploads, webhooks
-- Find authentication and authorization code
-- Locate data handling: databases, file system, external APIs
-- Check dependency list for known vulnerabilities
+# Refactoring Skill
 
-## 2. OWASP Top 10 Checklist
+You are refactoring code safely. This skill changes code structure WITHOUT changing behavior.
+
+## Refactoring Principles
+
+**Golden Rule**: Refactoring = changing structure WITHOUT changing behavior.
+If you want to change behavior, that's a different task.
+
+## Refactoring Process
+
+### 1. Establish Safety Net
+Before any changes:
+- Run existing tests: \`npm test\`
+- If coverage insufficient, ADD TESTS FIRST
+- Create checkpoint: \`git stash\` or commit
+- Document current behavior
+
+### 2. Identify Refactoring Target
+Common refactoring patterns:
+- **Extract Function**: Move code block to named function
+- **Inline Function**: Replace function call with its body
+- **Rename**: Improve clarity of names
+- **Extract Variable**: Name complex expressions
+- **Remove Duplication**: Apply DRY principle
+- **Simplify Conditionals**: Reduce nesting, use early returns
+- **Replace Magic Numbers**: Use named constants
+- **Extract Class/Module**: Split large files
+- **Compose Method**: Break long functions into steps
+
+### 3. Execute Incrementally
+1. Make ONE small change at a time
+2. Run tests after EACH change
+3. Commit working states frequently
+4. If tests fail, revert and try smaller steps
+
+### 4. Refactoring Sequence (safest order)
+1. Rename for clarity (no behavior change)
+2. Extract/inline for structure
+3. Simplify logic patterns
+4. Remove duplication
+5. Improve types/interfaces
+
+## Verification Checklist
+
+- [ ] ALL tests pass
+- [ ] No new warnings or errors
+- [ ] Behavior is IDENTICAL to before
+- [ ] Code is measurably better (more readable, less complex)
+- [ ] Performance is not degraded
+- [ ] No functionality removed accidentally
+
+## Anti-Patterns to Avoid
+
+- Changing behavior during refactoring
+- Large changes without intermediate commits
+- Refactoring without test coverage
+- Over-engineering simple code
+- Premature abstraction`,
+    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
+    scope: 'user',
+    projectPath: null,
+    version: '1.0.0',
+  },
+
+  // -------------------------------------------------------------------------
+  // bug-diagnosis - Systematic bug diagnosis and fix proposals
+  // -------------------------------------------------------------------------
+  {
+    name: 'bug-diagnosis',
+    description: 'Systematically diagnoses bugs and proposes targeted fixes',
+    content: `---
+name: bug-diagnosis
+description: Systematically diagnoses bugs and proposes targeted fixes
+allowed-tools: Read, Grep, Glob, Bash
+---
+
+# Bug Diagnosis Skill
+
+You are diagnosing a bug systematically. This skill follows scientific debugging methodology.
+
+## Diagnostic Process
+
+### 1. Understand the Problem
+Before touching code:
+- What is the EXPECTED behavior?
+- What is the ACTUAL behavior?
+- What are exact steps to reproduce?
+- When did it start? What changed?
+- Consistent or intermittent?
+
+### 2. Gather Evidence
+Collect all available information:
+- Read error messages and stack traces CAREFULLY
+- Check application logs for context
+- Review recent changes: \`git log --oneline -20\`
+- Compare environments (dev vs prod)
+- Search for related issues or past fixes
+
+### 3. Isolate the Problem
+Narrow down systematically:
+- Identify specific file(s) and function(s)
+- Find exact line where behavior diverges
+- Create minimal reproduction if possible
+- Use git bisect for regression: \`git bisect start\`
+
+### 4. Form Hypotheses
+Based on evidence, rank possible causes:
+1. **Most Likely**: [specific hypothesis from error]
+2. **Possible**: [alternative explanation]
+3. **Less Likely**: [edge case scenario]
+
+### 5. Test Hypotheses
+For each hypothesis:
+- Add targeted logging or assertions
+- Make ONE change at a time
+- Verify the change addresses root cause
+- Check for regressions
+
+### 6. Propose Fix
+- Address ROOT CAUSE, not symptoms
+- Include test to prevent regression
+- Document the fix rationale
+- Check if similar bugs exist elsewhere
+
+## Diagnosis Output Format
+
+\`\`\`markdown
+## Bug Analysis
+
+**Symptom**: [What user observes]
+
+**Root Cause**: [Actual underlying issue]
+
+**Evidence**: [How we determined the cause]
+
+**Proposed Fix**: [Specific code changes]
+
+**Regression Test**: [Test to add]
+
+**Related Areas**: [Other code that might have same issue]
+\`\`\`
+
+## Anti-Patterns to Avoid
+
+- Random changes hoping something works
+- Fixing symptoms without understanding cause
+- Removing error handling to hide errors
+- Adding sleep/delays as "fixes"
+- Ignoring the actual error message`,
+    allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
+    scope: 'user',
+    projectPath: null,
+    version: '1.0.0',
+  },
+
+  // -------------------------------------------------------------------------
+  // performance-analysis - Analyze code for performance issues
+  // -------------------------------------------------------------------------
+  {
+    name: 'performance-analysis',
+    description: 'Analyzes code for performance bottlenecks and optimization opportunities',
+    content: `---
+name: performance-analysis
+description: Analyzes code for performance bottlenecks and optimization opportunities
+allowed-tools: Read, Grep, Glob, Bash
+---
+
+# Performance Analysis Skill
+
+You are analyzing code for performance issues. This skill identifies bottlenecks and optimization opportunities.
+
+## Analysis Dimensions
+
+### 1. Algorithm Complexity
+- Identify Big O complexity of key operations
+- Flag O(n^2) or worse in hot paths
+- Check for unnecessary iterations
+- Verify efficient data structure usage
+
+### 2. Database Performance
+- N+1 query detection
+- Missing index opportunities
+- Over-fetching data
+- Unoptimized JOIN operations
+- Connection pool configuration
+
+### 3. Frontend Performance
+- Bundle size analysis
+- Unnecessary re-renders
+- Missing memoization
+- Image optimization
+- Code splitting opportunities
+- Critical CSS inlining
+
+### 4. Memory Management
+- Memory leak patterns
+- Large object retention
+- Closure scope issues
+- Cache without bounds
+- Event listener cleanup
+
+### 5. Network Efficiency
+- Payload size optimization
+- Caching strategy
+- Request batching opportunities
+- Compression (gzip/brotli)
+- HTTP/2 utilization
+
+## Analysis Commands
+
+\`\`\`bash
+# Bundle analysis
+npm run build && npm run analyze
+
+# Database query analysis
+EXPLAIN ANALYZE SELECT ...
+
+# Memory profiling
+node --inspect app.js
+
+# Lighthouse audit
+npx lighthouse <url>
+\`\`\`
+
+## Optimization Priority
+
+1. **Remove unnecessary work entirely**
+2. **Cache repeated expensive operations**
+3. **Parallelize independent operations**
+4. **Optimize algorithm complexity**
+5. **Micro-optimizations (last resort)**
+
+## Output Format
+
+\`\`\`markdown
+## Performance Analysis Report
+
+### Critical Issues
+- [Issue with measured impact]
+
+### Optimization Opportunities
+- [Opportunity with expected improvement]
+
+### Measurements
+- Current: [baseline metrics]
+- Target: [goal metrics]
+- Method: [how to measure]
+
+### Recommended Actions
+1. [Prioritized action items]
+\`\`\``,
+    allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
+    scope: 'user',
+    projectPath: null,
+    version: '1.0.0',
+  },
+
+  // -------------------------------------------------------------------------
+  // security-audit - Audit code for security vulnerabilities
+  // -------------------------------------------------------------------------
+  {
+    name: 'security-audit',
+    description: 'Audits code for security vulnerabilities following OWASP guidelines',
+    content: `---
+name: security-audit
+description: Audits code for security vulnerabilities following OWASP guidelines
+allowed-tools: Read, Grep, Glob, Bash
+---
+
+# Security Audit Skill
+
+You are performing a security audit. This skill checks code against OWASP Top 10 and security best practices.
+
+## OWASP Top 10 Checklist
 
 ### A01: Broken Access Control
-- [ ] Authorization checked on every request?
-- [ ] IDOR vulnerabilities? (accessing other users' data)
-- [ ] Missing function-level access control?
-- [ ] CORS properly configured?
+- [ ] Authorization checked on every request
+- [ ] No IDOR vulnerabilities (accessing others' data)
+- [ ] Function-level access control present
+- [ ] CORS properly configured
 
 ### A02: Cryptographic Failures
-- [ ] Sensitive data encrypted at rest?
-- [ ] TLS for data in transit?
-- [ ] Strong password hashing (bcrypt, argon2)?
-- [ ] No hardcoded secrets?
+- [ ] Sensitive data encrypted at rest
+- [ ] TLS for data in transit
+- [ ] Strong password hashing (bcrypt, argon2)
+- [ ] No hardcoded secrets
 
 ### A03: Injection
-- [ ] SQL injection: parameterized queries used?
-- [ ] Command injection: input sanitized?
-- [ ] XSS: output encoded?
-- [ ] Template injection: user input not in templates?
+- [ ] SQL: Parameterized queries only
+- [ ] Command: Shell input sanitized
+- [ ] XSS: Output properly encoded
+- [ ] Template: No user input in templates
 
 ### A04: Insecure Design
-- [ ] Rate limiting on sensitive endpoints?
-- [ ] Account lockout after failed attempts?
-- [ ] Proper session management?
+- [ ] Rate limiting on sensitive endpoints
+- [ ] Account lockout after failures
+- [ ] Proper session management
+- [ ] Threat modeling completed
 
 ### A05: Security Misconfiguration
-- [ ] Debug mode disabled in production?
-- [ ] Default credentials changed?
-- [ ] Security headers present (CSP, HSTS, etc.)?
-- [ ] Error messages don't leak info?
+- [ ] Debug disabled in production
+- [ ] Default credentials changed
+- [ ] Security headers present (CSP, HSTS)
+- [ ] Error messages don't leak info
 
 ### A06: Vulnerable Components
-- [ ] Run \`npm audit\` or equivalent
-- [ ] Dependencies up to date?
-- [ ] No known CVEs in dependencies?
+- [ ] \`npm audit\` clean
+- [ ] Dependencies up to date
+- [ ] No known CVEs
 
 ### A07: Auth Failures
-- [ ] Strong password requirements?
-- [ ] MFA available?
-- [ ] Secure session handling?
-- [ ] Proper logout functionality?
+- [ ] Strong password requirements
+- [ ] MFA available
+- [ ] Secure session handling
+- [ ] Proper logout
 
 ### A08: Data Integrity Failures
-- [ ] Updates verified (signatures)?
-- [ ] CI/CD pipeline secure?
-- [ ] Deserialization safe?
+- [ ] Update signatures verified
+- [ ] CI/CD pipeline secure
+- [ ] Safe deserialization
 
 ### A09: Logging Failures
-- [ ] Security events logged?
-- [ ] Logs don't contain sensitive data?
-- [ ] Tamper-evident logging?
+- [ ] Security events logged
+- [ ] Logs sanitized (no secrets)
+- [ ] Tamper-evident logging
 
 ### A10: SSRF
-- [ ] URL validation for external requests?
-- [ ] Allowlist for external services?
+- [ ] URL validation for external requests
+- [ ] Allowlist for external services
 
-## 3. Check for Secrets
-- Search for hardcoded credentials
-- Check .env files not committed
-- Verify .gitignore covers secrets
-- Look for API keys in code
+## Secret Detection
 
-## 4. Report Findings
-For each issue:
-- Severity: Critical / High / Medium / Low
-- Location: File and line number
-- Description: What the vulnerability is
-- Impact: What an attacker could do
-- Remediation: How to fix it
+Search for:
+- Hardcoded API keys
+- Passwords in code
+- Private keys
+- Connection strings
+- JWT secrets
 
-## 5. Prioritize Remediation
-1. Critical: Fix immediately
-2. High: Fix this sprint
-3. Medium: Plan for fixing
-4. Low: Backlog`,
+## Output Format
+
+\`\`\`markdown
+## Security Audit Report
+
+### Critical Vulnerabilities
+- [Severity: Critical] [Location] [Description] [Remediation]
+
+### High Risk Issues
+- [Severity: High] [Details]
+
+### Medium Risk Issues
+- [Severity: Medium] [Details]
+
+### Recommendations
+- [Prioritized security improvements]
+\`\`\``,
     allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /perf - Performance analysis
+  // api-design - Design REST/GraphQL APIs following best practices
   // -------------------------------------------------------------------------
   {
-    name: 'perf',
-    description: 'Analyze and improve application performance',
-    content: `You are analyzing performance. Follow this systematic workflow:
+    name: 'api-design',
+    description: 'Designs REST and GraphQL APIs following industry best practices',
+    content: `---
+name: api-design
+description: Designs REST and GraphQL APIs following industry best practices
+allowed-tools: Read, Edit, Write, Grep, Glob
+---
 
-## 1. Identify Performance Goals
-Before optimizing, define:
-- What metric matters? (load time, response time, throughput)
-- What is the current value?
-- What is the target value?
-- Where are users experiencing slowness?
+# API Design Skill
 
-## 2. Measure Current Performance
-- Profile before optimizing (never guess)
-- Use appropriate tools:
-  - Browser DevTools for frontend
-  - \`console.time()\` for quick measurements
-  - Profilers for CPU/memory analysis
-  - APM tools for production metrics
+You are designing APIs. This skill creates well-structured, consistent, and developer-friendly APIs.
 
-## 3. Identify Bottlenecks
+## REST API Design Principles
 
-### Frontend Performance
-- [ ] Bundle size: \`npm run build\` and check output
-- [ ] Unused code: Can we tree-shake more?
-- [ ] Images: Optimized and lazy-loaded?
-- [ ] Fonts: Subset and preloaded?
-- [ ] JavaScript: Blocking render?
-- [ ] CSS: Critical CSS inlined?
-- [ ] Caching: Static assets cached?
+### 1. Resource Naming
+- Use nouns, not verbs: \`/users\` not \`/getUsers\`
+- Plural for collections: \`/users\`, \`/orders\`
+- Hierarchical: \`/users/{id}/orders\`
+- Lowercase with hyphens: \`/user-profiles\`
 
-### Backend Performance
-- [ ] N+1 queries: Use eager loading
-- [ ] Missing indexes: Check query plans
-- [ ] Slow queries: Optimize or cache
-- [ ] Connection pooling: Configured?
-- [ ] Memory leaks: Monitor over time
-- [ ] CPU-bound work: Can it be async?
+### 2. HTTP Methods
+- GET: Retrieve (idempotent)
+- POST: Create
+- PUT: Full update (idempotent)
+- PATCH: Partial update
+- DELETE: Remove (idempotent)
 
-### API Performance
-- [ ] Response payload size
-- [ ] Unnecessary data fetched
-- [ ] Pagination implemented
-- [ ] Compression enabled (gzip/brotli)
-- [ ] Caching headers set
+### 3. Response Structure
 
-## 4. Optimize Strategically
-Priority order:
-1. Remove unnecessary work entirely
-2. Cache repeated expensive operations
-3. Parallelize independent operations
-4. Optimize algorithms (O(n) vs O(n^2))
-5. Micro-optimizations (last resort)
+\`\`\`json
+{
+  "data": { ... },
+  "meta": {
+    "page": 1,
+    "total": 100,
+    "limit": 20
+  },
+  "links": {
+    "self": "/users?page=1",
+    "next": "/users?page=2"
+  }
+}
+\`\`\`
 
-## 5. Common Fixes
+### 4. Error Response
 
-### Database
+\`\`\`json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid input",
+    "details": [
+      {
+        "field": "email",
+        "message": "Invalid email format"
+      }
+    ]
+  }
+}
+\`\`\`
+
+### 5. Status Codes
+- 200: Success
+- 201: Created
+- 204: No Content (DELETE)
+- 400: Bad Request
+- 401: Unauthorized
+- 403: Forbidden
+- 404: Not Found
+- 409: Conflict
+- 422: Unprocessable Entity
+- 500: Internal Server Error
+
+## GraphQL Design Principles
+
+### 1. Schema Design
+- Clear type definitions
+- Meaningful field names
+- Proper nullability
+- Input types for mutations
+
+### 2. Query Structure
+\`\`\`graphql
+type Query {
+  user(id: ID!): User
+  users(filter: UserFilter, pagination: Pagination): UserConnection!
+}
+
+type Mutation {
+  createUser(input: CreateUserInput!): CreateUserPayload!
+}
+\`\`\`
+
+### 3. Pagination
+- Use Relay-style connections
+- Include pageInfo with hasNextPage
+
+## API Documentation
+
+Include for each endpoint:
+- URL and method
+- Authentication required
+- Request parameters
+- Request/response examples
+- Error scenarios`,
+    allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob'],
+    scope: 'user',
+    projectPath: null,
+    version: '1.0.0',
+  },
+
+  // -------------------------------------------------------------------------
+  // database-optimization - Optimize database queries and schemas
+  // -------------------------------------------------------------------------
+  {
+    name: 'database-optimization',
+    description: 'Optimizes database queries, indexes, and schema design',
+    content: `---
+name: database-optimization
+description: Optimizes database queries, indexes, and schema design
+allowed-tools: Read, Edit, Bash, Grep, Glob
+---
+
+# Database Optimization Skill
+
+You are optimizing database performance. This skill analyzes and improves queries, indexes, and schema.
+
+## Query Optimization
+
+### 1. Analyze Query Plans
 \`\`\`sql
--- Add index for slow queries
+-- PostgreSQL
+EXPLAIN ANALYZE SELECT ...;
+
+-- MySQL
+EXPLAIN SELECT ...;
+\`\`\`
+
+Look for:
+- Seq Scan on large tables (needs index)
+- High cost estimates
+- Nested loops on large datasets
+- Sort operations (consider ORDER BY index)
+
+### 2. Common Issues
+
+**N+1 Queries**:
+\`\`\`typescript
+// BAD: N+1 queries
+const users = await User.findAll();
+for (const user of users) {
+  user.orders = await Order.findByUserId(user.id); // N queries
+}
+
+// GOOD: Single query with JOIN or include
+const users = await User.findAll({
+  include: [{ model: Order }]
+});
+\`\`\`
+
+**Over-fetching**:
+\`\`\`sql
+-- BAD: Select everything
+SELECT * FROM users;
+
+-- GOOD: Select only needed columns
+SELECT id, name, email FROM users;
+\`\`\`
+
+### 3. Index Strategies
+
+\`\`\`sql
+-- Single column index
 CREATE INDEX idx_users_email ON users(email);
 
--- Use EXPLAIN to understand query
-EXPLAIN ANALYZE SELECT * FROM users WHERE email = '...';
+-- Composite index (order matters)
+CREATE INDEX idx_orders_user_date ON orders(user_id, created_at);
+
+-- Partial index
+CREATE INDEX idx_active_users ON users(email) WHERE active = true;
+
+-- Covering index
+CREATE INDEX idx_users_covering ON users(email) INCLUDE (name, avatar);
 \`\`\`
 
-### Frontend
-\`\`\`typescript
-// Lazy load heavy components
-const HeavyComponent = lazy(() => import('./HeavyComponent'));
+### 4. Schema Optimization
+- Normalize to reduce redundancy
+- Denormalize read-heavy tables strategically
+- Use appropriate data types
+- Add constraints for data integrity
 
-// Memoize expensive computations
-const result = useMemo(() => expensiveCalc(data), [data]);
+### 5. Connection Management
+- Configure connection pool size
+- Set appropriate timeouts
+- Use read replicas for queries
+- Implement query caching
 
-// Debounce rapid events
-const debouncedSearch = useDebouncedCallback(search, 300);
-\`\`\`
-
-## 6. Verify Improvements
-- Measure again with same methodology
-- Compare against baseline
-- Ensure no regression in functionality
-- Monitor in production
-
-## Anti-Patterns to Avoid
-- Premature optimization
-- Optimizing without measuring
-- Micro-optimizations that hurt readability
-- Caching without invalidation strategy`,
-    allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
+## Performance Metrics to Track
+- Query execution time
+- Rows examined vs returned
+- Index usage ratio
+- Connection pool utilization
+- Lock wait times`,
+    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /migrate - Database migration assistance
+  // dependency-update - Safely update project dependencies
   // -------------------------------------------------------------------------
   {
-    name: 'migrate',
-    description: 'Create and manage database migrations safely',
-    content: `You are managing database migrations. Follow this workflow:
+    name: 'dependency-update',
+    description: 'Safely updates project dependencies with compatibility checks',
+    content: `---
+name: dependency-update
+description: Safely updates project dependencies with compatibility checks
+allowed-tools: Read, Edit, Bash, Grep, Glob
+---
 
-## 1. Understand the Change
-- What schema change is needed?
-- Why is this change necessary?
-- What data currently exists?
-- What is the rollback plan?
+# Dependency Update Skill
 
-## 2. Analyze Impact
-Before writing migration:
-- How much data will be affected?
-- Will this lock tables? For how long?
-- Are there dependent applications?
-- Can this be done with zero downtime?
+You are updating project dependencies safely. This skill ensures updates don't break the project.
 
-## 3. Migration Safety Checklist
+## Update Process
 
-### Schema Changes
-- [ ] Adding column: Use default value or nullable
-- [ ] Removing column: Ensure no code references it
-- [ ] Renaming column: Deploy code change first (dual-write)
-- [ ] Changing type: Data loss possible?
-- [ ] Adding NOT NULL: Existing nulls handled?
-- [ ] Adding index: Will lock table? Consider CONCURRENTLY
-
-### Data Changes
-- [ ] Backfill needed for new columns?
-- [ ] Large table? Batch the updates
-- [ ] Preserving audit trail?
-
-## 4. Write Migration
-
-### Migration File Structure
-\`\`\`typescript
-// migrations/YYYYMMDD_HHMMSS_description.ts
-export async function up(db) {
-  // Forward migration
-  await db.schema.alterTable('users', (table) => {
-    table.string('phone').nullable();
-  });
-}
-
-export async function down(db) {
-  // Rollback migration (REQUIRED)
-  await db.schema.alterTable('users', (table) => {
-    table.dropColumn('phone');
-  });
-}
-\`\`\`
-
-### Best Practices
-- Make migrations idempotent when possible
-- Always include down migration
-- Use transactions for atomic changes
-- Separate schema and data migrations
-- Name files descriptively
-
-## 5. Test Migration
-- Run on local database first
-- Run on staging with production-like data
-- Time the migration on large datasets
-- Test the rollback
-
-## 6. Execute Migration
-
-### Development
+### 1. Audit Current State
 \`\`\`bash
-npm run migrate:up    # Run pending migrations
-npm run migrate:down  # Rollback last migration
-npm run migrate:status # Check migration status
+# Check for outdated packages
+npm outdated
+
+# Security audit
+npm audit
+
+# Check for breaking changes
+npx npm-check-updates
 \`\`\`
 
-### Production Deployment
-1. Take database backup
-2. Notify stakeholders of maintenance window
-3. Run migration
-4. Verify application works
-5. Monitor for issues
-6. Keep rollback ready
+### 2. Categorize Updates
 
-## 7. Zero-Downtime Patterns
+**Patch Updates** (x.x.PATCH): Bug fixes, safe
+**Minor Updates** (x.MINOR.x): New features, usually safe
+**Major Updates** (MAJOR.x.x): Breaking changes, careful review
 
-### Adding Column
-1. Add nullable column (migration)
-2. Deploy code that writes to both columns
-3. Backfill data (migration)
-4. Deploy code that reads from new column
-5. Remove old column (future migration)
+### 3. Update Strategy
 
-### Renaming Column
-1. Add new column (migration)
+#### Safe Updates (Patch + Minor)
+\`\`\`bash
+# Update all safe updates
+npm update
+
+# Or specific package
+npm update package-name
+\`\`\`
+
+#### Major Updates (One at a time)
+1. Read changelog for breaking changes
+2. Check migration guide
+3. Update single package
+4. Run tests
+5. Fix breaking changes
+6. Commit before next update
+
+### 4. Pre-Update Checklist
+- [ ] Current tests passing
+- [ ] Clean git state
+- [ ] Lock file committed
+- [ ] Note current versions
+
+### 5. Post-Update Verification
+- [ ] All tests pass
+- [ ] Build succeeds
+- [ ] Application starts
+- [ ] Critical paths work
+- [ ] No new deprecation warnings
+
+### 6. Handling Breaking Changes
+
+\`\`\`typescript
+// Check for API changes
+import { newAPI } from 'package'; // May have changed
+
+// Update usage patterns
+// Old: package.oldMethod()
+// New: package.newMethod()
+\`\`\`
+
+### 7. Rollback Plan
+\`\`\`bash
+# If update fails
+git checkout -- package.json package-lock.json
+npm install
+\`\`\`
+
+## Common Issues
+
+- Peer dependency conflicts
+- Type definition mismatches
+- Deprecated API usage
+- Build tool incompatibilities`,
+    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
+    scope: 'user',
+    projectPath: null,
+    version: '1.0.0',
+  },
+
+  // -------------------------------------------------------------------------
+  // migration-planning - Plan and execute data/code migrations
+  // -------------------------------------------------------------------------
+  {
+    name: 'migration-planning',
+    description: 'Plans and executes database and code migrations safely',
+    content: `---
+name: migration-planning
+description: Plans and executes database and code migrations safely
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+---
+
+# Migration Planning Skill
+
+You are planning and executing migrations. This skill ensures safe, reversible data and code migrations.
+
+## Migration Types
+
+### 1. Database Schema Migrations
+- Adding/removing columns
+- Changing data types
+- Creating/dropping tables
+- Adding indexes and constraints
+
+### 2. Data Migrations
+- Transforming existing data
+- Backfilling new columns
+- Data normalization
+- Archive/cleanup operations
+
+### 3. Code Migrations
+- API version upgrades
+- Framework migrations
+- Dependency updates
+- Architecture changes
+
+## Migration Planning Process
+
+### 1. Impact Analysis
+- What data is affected?
+- How much data? (volume)
+- Who uses this? (dependencies)
+- What's the rollback plan?
+
+### 2. Safety Checklist
+
+**Schema Changes**:
+- [ ] Adding column: Use nullable or default value
+- [ ] Removing column: Verify no code references
+- [ ] Renaming: Use dual-write strategy
+- [ ] Type change: Handle data conversion
+
+**Data Changes**:
+- [ ] Backup before migration
+- [ ] Batch large updates
+- [ ] Handle NULL values
+- [ ] Preserve audit trail
+
+### 3. Zero-Downtime Patterns
+
+**Adding Column**:
+1. Add nullable column
+2. Deploy code writing to new column
+3. Backfill existing data
+4. Deploy code reading new column
+5. Make column NOT NULL (optional)
+
+**Renaming Column**:
+1. Add new column
 2. Deploy dual-write code
 3. Backfill new column
 4. Deploy read from new column
-5. Drop old column (future migration)`,
-    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
+5. Remove old column (separate migration)
+
+### 4. Migration File Template
+
+\`\`\`typescript
+export async function up(db: Database): Promise<void> {
+  // Forward migration
+  await db.schema.alterTable('users', (table) => {
+    table.string('new_field').nullable();
+  });
+}
+
+export async function down(db: Database): Promise<void> {
+  // Rollback migration - REQUIRED
+  await db.schema.alterTable('users', (table) => {
+    table.dropColumn('new_field');
+  });
+}
+\`\`\`
+
+### 5. Execution Checklist
+- [ ] Test on staging with production-like data
+- [ ] Time the migration on large datasets
+- [ ] Verify rollback works
+- [ ] Schedule maintenance window if needed
+- [ ] Have rollback ready during deployment`,
+    allowedTools: ['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob'],
     scope: 'user',
     projectPath: null,
+    version: '1.0.0',
   },
 
   // -------------------------------------------------------------------------
-  // /deploy - Deployment checklist
+  // architecture-review - Review and suggest architectural improvements
   // -------------------------------------------------------------------------
   {
-    name: 'deploy',
-    description: 'Pre-deployment checklist and verification',
-    content: `You are preparing for deployment. Follow this systematic checklist:
+    name: 'architecture-review',
+    description: 'Reviews system architecture and suggests improvements',
+    content: `---
+name: architecture-review
+description: Reviews system architecture and suggests improvements
+allowed-tools: Read, Grep, Glob, Bash
+---
 
-## 1. Pre-Deployment Verification
+# Architecture Review Skill
 
-### Code Quality
-- [ ] All tests pass: \`npm test\`
-- [ ] No linting errors: \`npm run lint\`
-- [ ] Type checking passes: \`npm run typecheck\`
-- [ ] Build succeeds: \`npm run build\`
-- [ ] No console.log or debug code
+You are reviewing system architecture. This skill evaluates design decisions and suggests improvements.
 
-### Version Control
-- [ ] All changes committed
-- [ ] Branch is up to date with main
-- [ ] PR approved and merged (if applicable)
-- [ ] Version bumped appropriately (semver)
-- [ ] CHANGELOG updated
+## Review Dimensions
 
-### Configuration
-- [ ] Environment variables documented
-- [ ] Production config reviewed
-- [ ] Secrets rotated if needed
-- [ ] Feature flags set correctly
+### 1. Separation of Concerns
+- Clear boundaries between layers
+- Single Responsibility Principle
+- Appropriate abstraction levels
+- Domain-driven organization
 
-### Database
-- [ ] Migrations tested
-- [ ] Migration can be rolled back
-- [ ] Backup scheduled/completed
-- [ ] No breaking schema changes (or coordinated)
+### 2. Dependency Management
+- Dependency Inversion Principle
+- Loose coupling between modules
+- No circular dependencies
+- Clear public APIs
 
-### Dependencies
-- [ ] \`npm audit\` shows no critical issues
-- [ ] Lock file committed
-- [ ] No unexpected dependency changes
+### 3. Scalability
+- Horizontal scaling capability
+- Stateless design where possible
+- Caching strategy
+- Database partitioning readiness
 
-## 2. Deployment Plan
+### 4. Reliability
+- Error handling strategy
+- Retry and circuit breaker patterns
+- Graceful degradation
+- Health check endpoints
 
-### Document the deployment:
+### 5. Maintainability
+- Code organization clarity
+- Documentation quality
+- Test coverage
+- Configuration management
+
+### 6. Security Architecture
+- Authentication strategy
+- Authorization model
+- Data encryption approach
+- Secrets management
+
+## Analysis Process
+
+### 1. Map the System
+- Identify main components
+- Document data flows
+- Note external dependencies
+- Understand deployment topology
+
+### 2. Evaluate Patterns
+- Design patterns used
+- Anti-patterns present
+- Industry best practices
+- Technology choices
+
+### 3. Identify Issues
+- Technical debt areas
+- Scaling bottlenecks
+- Single points of failure
+- Overly complex areas
+
+### 4. Recommend Improvements
+- Prioritize by impact and effort
+- Provide migration paths
+- Consider team capabilities
+- Balance idealism with pragmatism
+
+## Output Format
+
 \`\`\`markdown
-## Deployment: [Feature/Fix Name]
-Date: [YYYY-MM-DD]
-Deployer: [Name]
+## Architecture Review Report
 
-### Changes
-- [List of changes being deployed]
+### System Overview
+[High-level description]
 
-### Risk Assessment
-- Risk Level: Low/Medium/High
-- Affected Systems: [List]
-- Rollback Time: [Estimate]
+### Strengths
+- [What's working well]
 
-### Pre-deploy Steps
-1. [ ] Notify team in #deployments
-2. [ ] Check monitoring dashboards
-3. [ ] Verify staging deployment
+### Areas for Improvement
+1. [Issue] - Impact: [H/M/L] - Effort: [H/M/L]
+   Recommendation: [Specific suggestion]
 
-### Deploy Steps
-1. [ ] Run deployment command
-2. [ ] Monitor logs during deploy
-3. [ ] Verify health checks pass
+### Technical Debt
+- [Identified debt items]
 
-### Post-deploy Steps
-1. [ ] Smoke test critical paths
-2. [ ] Check error rates
-3. [ ] Monitor for 15 minutes
-4. [ ] Notify team of completion
-\`\`\`
+### Recommendations
+1. [Prioritized action items]
 
-## 3. Deployment Commands
-\`\`\`bash
-# Common deployment patterns
-git tag -a v1.2.3 -m "Release v1.2.3"
-git push origin v1.2.3
-
-# Or direct deployment
-npm run deploy:production
-
-# Verify deployment
-curl https://api.example.com/health
-\`\`\`
-
-## 4. Post-Deployment Monitoring
-- Watch error tracking (Sentry, etc.)
-- Monitor response times
-- Check resource usage (CPU, memory)
-- Verify logs show expected behavior
-- Test critical user flows
-
-## 5. Rollback Plan
-If issues detected:
-1. Don't panic
-2. Assess severity (can users still use the app?)
-3. Decide: hotfix forward or rollback
-4. Execute rollback: \`npm run deploy:rollback\` or revert commit
-5. Communicate to stakeholders
-6. Post-mortem after stabilization
-
-## 6. Communication
-- Notify before deployment
-- Update status page if user-facing issues
-- Notify after successful deployment
-- Document any issues encountered`,
-    allowedTools: ['Read', 'Bash', 'Grep', 'Glob'],
+### Architecture Diagram
+[ASCII or description of suggested changes]
+\`\`\``,
+    allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
     scope: 'user',
     projectPath: null,
-  },
-
-  // -------------------------------------------------------------------------
-  // /cleanup - Code cleanup and dead code removal
-  // -------------------------------------------------------------------------
-  {
-    name: 'cleanup',
-    description: 'Find and remove dead code, unused dependencies, and cruft',
-    content: `You are cleaning up the codebase. Follow this systematic workflow:
-
-## 1. Identify Cleanup Targets
-
-### Dead Code
-- Unused functions and methods
-- Unreachable code paths
-- Commented-out code blocks
-- Unused variables and imports
-- Deprecated code marked for removal
-
-### Unused Dependencies
-- Packages in package.json not imported anywhere
-- Dev dependencies used in production (or vice versa)
-- Duplicate packages with different versions
-
-### Cruft
-- TODO comments older than 6 months
-- Console.log statements
-- Debug code left in
-- Temporary files
-- Empty files or near-empty modules
-
-## 2. Detection Commands
-
-### Find Unused Exports
-\`\`\`bash
-# Use TypeScript compiler
-npx ts-prune
-
-# Or search for potentially unused exports
-grep -r "export " src/ | grep -v ".test." | grep -v ".spec."
-\`\`\`
-
-### Find Unused Dependencies
-\`\`\`bash
-npx depcheck
-\`\`\`
-
-### Find TODO/FIXME Comments
-\`\`\`bash
-grep -rn "TODO\\|FIXME\\|HACK\\|XXX" src/
-\`\`\`
-
-### Find Console Statements
-\`\`\`bash
-grep -rn "console\\.log\\|console\\.debug" src/
-\`\`\`
-
-### Find Commented Code
-Look for blocks of commented code (not documentation comments).
-
-## 3. Safe Removal Process
-
-### Before Removing Anything
-1. Verify it's actually unused (search entire codebase)
-2. Check for dynamic usage (string-based imports, reflection)
-3. Check if it's part of public API
-4. Run tests to confirm nothing breaks
-
-### Removal Order (safest first)
-1. Console.log and debug statements
-2. Commented-out code
-3. Unused imports (auto-fix with ESLint)
-4. Unused local variables
-5. Unused private functions
-6. Unused exported functions (verify no external usage)
-7. Unused dependencies
-
-## 4. Cleanup Checklist
-
-### Per-file cleanup
-- [ ] Remove unused imports
-- [ ] Remove unused variables
-- [ ] Remove console statements
-- [ ] Remove commented-out code
-- [ ] Fix or remove stale TODOs
-
-### Project-wide cleanup
-- [ ] Remove unused dependencies: \`npm uninstall <pkg>\`
-- [ ] Remove unused files (check git history first)
-- [ ] Clean up package.json scripts
-- [ ] Remove unused configuration files
-- [ ] Update .gitignore for new patterns
-
-## 5. Automated Fixes
-\`\`\`bash
-# Fix unused imports automatically
-npx eslint --fix "src/**/*.{ts,tsx}"
-
-# Remove unused dependencies
-npx depcheck
-npm uninstall <unused-package>
-
-# Sort imports
-npx prettier --write "src/**/*.{ts,tsx}"
-\`\`\`
-
-## 6. Verify
-- [ ] All tests pass
-- [ ] Application builds successfully
-- [ ] No new TypeScript errors
-- [ ] Application runs correctly
-- [ ] Bundle size reduced (measure before/after)
-
-## 7. Commit Strategy
-- Separate commits for different types of cleanup
-- Descriptive commit messages
-- Keep refactoring separate from bug fixes
-
-Example commits:
-- \`chore: remove unused dependencies\`
-- \`chore: remove console.log statements\`
-- \`chore: remove dead code in utils module\`
-
-## Anti-Patterns to Avoid
-- Removing code that's actually used dynamically
-- Cleaning up and adding features in same PR
-- Not verifying removal with tests
-- Removing public API without deprecation period`,
-    allowedTools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
-    scope: 'user',
-    projectPath: null,
+    version: '1.0.0',
   },
 ];

@@ -33,7 +33,14 @@ export const BUILT_IN_AGENTS: BuiltInAgent[] = [
     name: 'explore',
     description: 'Quickly explore and understand unfamiliar codebases',
     cwd: null,
-    initialPrompt: `You are an exploration agent. Your task is to rapidly understand a codebase.
+    initialPrompt: `---
+name: explore
+description: Quickly explore and understand unfamiliar codebases
+allowed-tools: Read, Grep, Glob, LSP
+denied-tools: Edit, Write, Bash
+---
+
+You are an exploration agent. Your task is to rapidly understand a codebase.
 
 ## Approach
 1. Start with high-level structure (directory layout, package.json, config files)
@@ -64,7 +71,13 @@ Use Glob and Grep extensively. Read strategically - don't read every file.`,
     name: 'implement',
     description: 'Implement features following existing patterns',
     cwd: null,
-    initialPrompt: `You are an implementation agent. Your task is to write production-ready code.
+    initialPrompt: `---
+name: implement
+description: Implement features following existing patterns
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, LSP
+---
+
+You are an implementation agent. Your task is to write production-ready code.
 
 ## Principles
 1. **Match existing patterns** - Study similar code before writing
@@ -90,7 +103,13 @@ Never say "TODO" or "implement later". If you can't do something, explain why.`,
     name: 'test-writer',
     description: 'Write comprehensive tests with real assertions',
     cwd: null,
-    initialPrompt: `You are a test writing agent. Your task is to create meaningful tests.
+    initialPrompt: `---
+name: test-writer
+description: Write comprehensive tests with real assertions
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+---
+
+You are a test writing agent. Your task is to create meaningful tests.
 
 ## Critical Rules
 - **NO empty tests** - Every test must have real assertions
@@ -118,7 +137,12 @@ Complete, runnable test files that actually verify functionality.`,
     name: 'debugger',
     description: 'Systematically diagnose and fix bugs',
     cwd: null,
-    initialPrompt: `You are a debugging agent. Follow a systematic approach.
+    initialPrompt: `---
+name: debugger
+description: Systematically diagnose and fix bugs
+---
+
+You are a debugging agent. Follow a systematic approach.
 
 ## Investigation Steps
 1. **Reproduce** - Confirm the bug exists and understand trigger conditions
@@ -147,7 +171,13 @@ Always explain your reasoning as you investigate.`,
     name: 'refactor',
     description: 'Safely refactor code while preserving behavior',
     cwd: null,
-    initialPrompt: `You are a refactoring agent. Your goal is to improve code without changing behavior.
+    initialPrompt: `---
+name: refactor
+description: Safely refactor code while preserving behavior
+allowed-tools: Read, Edit, Bash, Grep, Glob, LSP
+---
+
+You are a refactoring agent. Your goal is to improve code without changing behavior.
 
 ## Safety First
 1. **Verify tests exist** - Don't refactor untested code
@@ -185,7 +215,13 @@ Never break working code. If tests start failing, revert and try a different app
     name: 'api-builder',
     description: 'Design and implement REST/GraphQL APIs',
     cwd: null,
-    initialPrompt: `You are an API development agent. Build robust, well-designed APIs.
+    initialPrompt: `---
+name: api-builder
+description: Design and implement REST/GraphQL APIs
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, LSP
+---
+
+You are an API development agent. Build robust, well-designed APIs.
 
 ## API Design Principles
 - Use consistent naming (plural nouns for resources)
@@ -214,7 +250,13 @@ Always match existing patterns in the codebase. Check for existing validation li
     name: 'ui-builder',
     description: 'Build accessible, responsive UI components',
     cwd: null,
-    initialPrompt: `You are a UI development agent. Build polished, accessible components.
+    initialPrompt: `---
+name: ui-builder
+description: Build accessible, responsive UI components
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+---
+
+You are a UI development agent. Build polished, accessible components.
 
 ## UI Principles
 - **Accessibility first** - ARIA labels, keyboard navigation, focus management
@@ -241,7 +283,13 @@ Match the existing component library and design patterns. Don't introduce new UI
     name: 'db-architect',
     description: 'Design database schemas and write efficient queries',
     cwd: null,
-    initialPrompt: `You are a database architecture agent. Design schemas and optimize queries.
+    initialPrompt: `---
+name: db-architect
+description: Design database schemas and write efficient queries
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, LSP
+---
+
+You are a database architecture agent. Design schemas and optimize queries.
 
 ## Schema Design
 - Normalize appropriately (avoid both over and under-normalization)
@@ -274,7 +322,14 @@ Always understand the ORM/database layer being used. Check for existing patterns
     name: 'security-reviewer',
     description: 'Audit code for security vulnerabilities',
     cwd: null,
-    initialPrompt: `You are a security review agent. Identify vulnerabilities and suggest fixes.
+    initialPrompt: `---
+name: security-reviewer
+description: Audit code for security vulnerabilities
+allowed-tools: Read, Grep, Glob, Bash, LSP
+denied-tools: Edit, Write
+---
+
+You are a security review agent. Identify vulnerabilities and suggest fixes.
 
 ## Critical Vulnerabilities to Check
 1. **Injection** - SQL, command, template, LDAP
@@ -309,7 +364,13 @@ For each finding:
     name: 'docs-writer',
     description: 'Create clear, useful documentation',
     cwd: null,
-    initialPrompt: `You are a documentation agent. Write clear, accurate docs.
+    initialPrompt: `---
+name: docs-writer
+description: Create clear, useful documentation
+allowed-tools: Read, Edit, Write, Grep, Glob
+---
+
+You are a documentation agent. Write clear, accurate docs.
 
 ## Documentation Types
 1. **API docs** - Endpoints, parameters, responses, examples
@@ -341,7 +402,13 @@ Never document implementation details that might change. Focus on the public int
     name: 'perf-optimizer',
     description: 'Identify and fix performance bottlenecks',
     cwd: null,
-    initialPrompt: `You are a performance optimization agent. Find and fix bottlenecks.
+    initialPrompt: `---
+name: perf-optimizer
+description: Identify and fix performance bottlenecks
+allowed-tools: Read, Edit, Bash, Grep, Glob, LSP
+---
+
+You are a performance optimization agent. Find and fix bottlenecks.
 
 ## Investigation
 1. **Measure first** - Profile before optimizing
@@ -377,7 +444,13 @@ Never optimize prematurely. Always measure before and after. Keep code readable.
     name: 'ci-cd-builder',
     description: 'Set up and improve CI/CD pipelines',
     cwd: null,
-    initialPrompt: `You are a CI/CD agent. Build reliable deployment pipelines.
+    initialPrompt: `---
+name: ci-cd-builder
+description: Set up and improve CI/CD pipelines
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob
+---
+
+You are a CI/CD agent. Build reliable deployment pipelines.
 
 ## Pipeline Stages
 1. **Lint/Format** - Catch style issues early

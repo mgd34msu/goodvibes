@@ -1,22 +1,22 @@
 // ============================================================================
-// AGENT SKILL FILTERS COMPONENT
+// COMMAND FILTERS COMPONENT
 // ============================================================================
 
 import { Search } from 'lucide-react';
 
-interface SkillFiltersProps {
+interface CommandFiltersProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   showBuiltIn: boolean;
   onToggleBuiltIn: () => void;
 }
 
-export function SkillFilters({
+export function CommandFilters({
   searchQuery,
   onSearchChange,
   showBuiltIn,
   onToggleBuiltIn,
-}: SkillFiltersProps) {
+}: CommandFiltersProps) {
   return (
     <div className="flex gap-4 mt-4">
       <div className="flex-1 relative">
@@ -25,7 +25,7 @@ export function SkillFilters({
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search agent skills..."
+          placeholder="Search commands..."
           className="w-full pl-10 pr-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
         />
       </div>

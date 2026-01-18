@@ -1,57 +1,30 @@
 // ============================================================================
-// AGENT SKILL FORM COMPONENT
+// COMMAND FORM COMPONENT
 // ============================================================================
 
 import React, { useState } from 'react';
 import { Save } from 'lucide-react';
 import ProjectSelector from '../../shared/ProjectSelector';
-import type { AgentSkill } from './types';
+import type { Command } from './types';
 
-interface SkillFormProps {
-  skill?: AgentSkill;
-  onSave: (skill: Partial<AgentSkill>, projectPath: string | null) => void;
+interface CommandFormProps {
+  command?: Command;
+  onSave: (command: Partial<Command>, projectPath: string | null) => void;
   onCancel: () => void;
 }
 
-export function SkillForm({ skill, onSave, onCancel }: SkillFormProps) {
-  const [name, setName] = useState(skill?.name || '');
-  const [description, setDescription] = useState(skill?.description || '');
-  const [content, setContent] = useState(
-    skill?.content ||
-      `---
-name: ${name || 'my-skill'}
-description: Describe what this skill does
-allowed-tools: Read, Edit, Bash, Grep, Glob
----
-
-# Skill Name
-
-Detailed instructions for the agent when this skill is invoked.
-
-## Process
-
-1. First step
-2. Second step
-3. Third step
-
-## Output Format
-
-Describe expected output format.
-`
-  );
+export function CommandForm({ command, onSave, onCancel }: CommandFormProps) {
+  const [name, setName] = useState(command?.name || '');
+  const [description, setDescription] = useState(command?.description || '');
+  const [content, setContent] = useState(command?.content || '');
   const [allowedToolsString, setAllowedToolsString] = useState(
-    skill?.allowedTools?.join(', ') || ''
+    command?.allowedTools?.join(', ') || ''
   );
-  const [scope, setScope] = useState<'user' | 'project'>(skill?.scope || 'user');
+  const [scope, setScope] = useState<'user' | 'project'>(command?.scope || 'user');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
-    skill?.projectPath || null
-  );
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(command?.projectPath || null);
 
-  const handleProjectChange = (
-    projectId: number | null,
-    projectPath: string | null
-  ) => {
+  const handleProjectChange = (projectId: number | null, projectPath: string | null) => {
     setSelectedProjectId(projectId);
     setSelectedProjectPath(projectPath);
   };
@@ -79,31 +52,15 @@ Describe expected output format.
       }
     }
 
-    onSave(
-      {
-        id: skill?.id,
-        name,
-        description: description || '',
-        content,
-        allowedTools: allowedTools.length > 0 ? allowedTools : null,
-        scope,
-        projectPath,
-      },
-      projectPath
-    );
-  };
-
-  // Update frontmatter when name changes
-  const handleNameChange = (newName: string) => {
-    setName(newName);
-    // Update frontmatter in content if it exists
-    if (content.startsWith('---')) {
-      const updatedContent = content.replace(
-        /^---\nname:\s*.*/m,
-        `---\nname: ${newName || 'my-skill'}`
-      );
-      setContent(updatedContent);
-    }
+    onSave({
+      id: command?.id,
+      name,
+      description: description || null,
+      content,
+      allowedTools: allowedTools.length > 0 ? allowedTools : null,
+      scope,
+      projectPath,
+    }, projectPath);
   };
 
   return (
@@ -114,20 +71,19 @@ Describe expected output format.
       <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium text-surface-300 mb-1">
-            Skill Name
+            Command Name
           </label>
           <input
             type="text"
             value={name}
-            onChange={(e) => handleNameChange(e.target.value)}
-            placeholder="code-review"
+            onChange={(e) => setName(e.target.value)}
+            placeholder="my-command"
             pattern="[a-z0-9-]+"
-            maxLength={64}
             className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
             required
           />
           <p className="text-xs text-surface-500 mt-1">
-            Lowercase letters, numbers, and hyphens only (max 64 chars)
+            Lowercase letters, numbers, and hyphens only
           </p>
         </div>
 
@@ -167,29 +123,23 @@ Describe expected output format.
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Performs thorough code review with security analysis..."
+          placeholder="What this command does..."
           className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
         />
-        <p className="text-xs text-surface-500 mt-1">
-          Brief description of what this skill does (shown in listings)
-        </p>
       </div>
 
       <div>
         <label className="block text-sm font-medium text-surface-300 mb-1">
-          Skill Content (SKILL.md with Frontmatter)
+          Command Content (SKILL.md)
         </label>
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="---&#10;name: skill-name&#10;description: What the skill does&#10;allowed-tools: Tool1, Tool2&#10;---&#10;&#10;# Skill Instructions..."
-          rows={16}
+          placeholder="# Command Instructions&#10;&#10;Provide detailed instructions for this command..."
+          rows={12}
           className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-surface-100 font-mono text-sm focus:ring-2 focus:ring-accent-purple focus:border-transparent"
           required
         />
-        <p className="text-xs text-surface-500 mt-1">
-          Include YAML frontmatter with name, description, and allowed-tools
-        </p>
       </div>
 
       <div>
@@ -200,11 +150,11 @@ Describe expected output format.
           type="text"
           value={allowedToolsString}
           onChange={(e) => setAllowedToolsString(e.target.value)}
-          placeholder="Read, Edit, Bash, Grep, Glob"
+          placeholder="Bash, Read, Edit, Grep"
           className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
         />
         <p className="text-xs text-surface-500 mt-1">
-          Leave empty to allow all tools. This overrides frontmatter if set.
+          Leave empty to allow all tools
         </p>
       </div>
 
@@ -221,7 +171,7 @@ Describe expected output format.
           className="px-4 py-2 bg-accent-purple text-white rounded-md hover:bg-accent-purple/80 transition-colors flex items-center gap-2"
         >
           <Save className="w-4 h-4" />
-          {skill ? 'Update Skill' : 'Create Skill'}
+          {command ? 'Update Command' : 'Create Command'}
         </button>
       </div>
     </form>

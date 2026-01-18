@@ -1,54 +1,48 @@
 // ============================================================================
-// INSTALL AGENT SKILL MODAL
-// Modal for selecting scope and project when installing built-in agent skills
+// INSTALL COMMAND MODAL
+// Modal for selecting scope and project when installing built-in commands
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Download, Globe, FolderOpen, Sparkles, Wrench, Tag } from 'lucide-react';
+import { X, Download, Globe, FolderOpen, Zap, Wrench } from 'lucide-react';
 import { FocusTrap } from '../../common/FocusTrap';
 import ProjectSelector from '../../shared/ProjectSelector';
-import type { BuiltInAgentSkill } from './types';
+import type { BuiltInCommand } from './types';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-interface InstallSkillModalProps {
-  skill: BuiltInAgentSkill;
+interface InstallCommandModalProps {
+  command: BuiltInCommand;
   isOpen: boolean;
   onClose: () => void;
-  onInstall: (
-    skill: BuiltInAgentSkill,
-    scope: 'user' | 'project',
-    projectPath: string | null
-  ) => void;
+  onInstall: (command: BuiltInCommand, scope: 'user' | 'project', projectPath: string | null) => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export function InstallSkillModal({
-  skill,
+export function InstallCommandModal({
+  command,
   isOpen,
   onClose,
   onInstall,
-}: InstallSkillModalProps) {
+}: InstallCommandModalProps) {
   const [scope, setScope] = useState<'user' | 'project'>('user');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
-    null
-  );
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
 
-  // Reset state when modal opens with a new skill
+  // Reset state when modal opens with a new command
   useEffect(() => {
     if (isOpen) {
       setScope('user');
       setSelectedProjectId(null);
       setSelectedProjectPath(null);
     }
-  }, [isOpen, skill.name]);
+  }, [isOpen, command.name]);
 
   // Handle ESC key
   useEffect(() => {
@@ -63,13 +57,10 @@ export function InstallSkillModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  const handleProjectChange = useCallback(
-    (projectId: number | null, projectPath: string | null) => {
-      setSelectedProjectId(projectId);
-      setSelectedProjectPath(projectPath);
-    },
-    []
-  );
+  const handleProjectChange = useCallback((projectId: number | null, projectPath: string | null) => {
+    setSelectedProjectId(projectId);
+    setSelectedProjectPath(projectPath);
+  }, []);
 
   const handleInstall = useCallback(async () => {
     let projectPath: string | null = null;
@@ -87,9 +78,9 @@ export function InstallSkillModal({
       }
     }
 
-    onInstall(skill, scope, projectPath);
+    onInstall(command, scope, projectPath);
     onClose();
-  }, [skill, scope, selectedProjectPath, onInstall, onClose]);
+  }, [command, scope, selectedProjectPath, onInstall, onClose]);
 
   // Install button is enabled if:
   // - scope is 'user' (no project needed)
@@ -98,8 +89,8 @@ export function InstallSkillModal({
 
   if (!isOpen) return null;
 
-  // Format skill invocation for display
-  const invocationText = `Skill skill: "${skill.name}"`;
+  // Format command name with / prefix if not already present
+  const displayName = command.name.startsWith('/') ? command.name : `/${command.name}`;
 
   return createPortal(
     <div
@@ -110,7 +101,7 @@ export function InstallSkillModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-labelledby="install-skill-modal-title"
+          aria-labelledby="install-command-modal-title"
           className="bg-surface-900 border border-surface-700 rounded-lg shadow-2xl w-full max-w-lg mx-4 animate-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
@@ -122,12 +113,12 @@ export function InstallSkillModal({
               </div>
               <div>
                 <h2
-                  id="install-skill-modal-title"
+                  id="install-command-modal-title"
                   className="text-lg font-medium text-surface-100"
                 >
-                  Install Agent Skill
+                  Install Command
                 </h2>
-                <p className="text-sm text-surface-400 font-mono">{skill.name}</p>
+                <p className="text-sm text-surface-400 font-mono">{displayName}</p>
               </div>
             </div>
             <button
@@ -159,14 +150,10 @@ export function InstallSkillModal({
                       : 'border-surface-700 bg-surface-800/50 text-surface-300 hover:border-surface-600 hover:bg-surface-800'
                   }`}
                 >
-                  <Globe
-                    className={`w-5 h-5 ${scope === 'user' ? 'text-accent-purple' : 'text-surface-500'}`}
-                  />
+                  <Globe className={`w-5 h-5 ${scope === 'user' ? 'text-accent-purple' : 'text-surface-500'}`} />
                   <div className="text-left">
                     <div className="font-medium">User (Global)</div>
-                    <div className="text-xs text-surface-500">
-                      Available in all projects
-                    </div>
+                    <div className="text-xs text-surface-500">Available in all projects</div>
                   </div>
                 </button>
 
@@ -179,14 +166,10 @@ export function InstallSkillModal({
                       : 'border-surface-700 bg-surface-800/50 text-surface-300 hover:border-surface-600 hover:bg-surface-800'
                   }`}
                 >
-                  <FolderOpen
-                    className={`w-5 h-5 ${scope === 'project' ? 'text-accent-purple' : 'text-surface-500'}`}
-                  />
+                  <FolderOpen className={`w-5 h-5 ${scope === 'project' ? 'text-accent-purple' : 'text-surface-500'}`} />
                   <div className="text-left">
                     <div className="font-medium">Project</div>
-                    <div className="text-xs text-surface-500">
-                      Only in specific project
-                    </div>
+                    <div className="text-xs text-surface-500">Only in specific project</div>
                   </div>
                 </button>
               </div>
@@ -203,69 +186,49 @@ export function InstallSkillModal({
               </div>
             )}
 
-            {/* Skill Preview */}
+            {/* Command Preview */}
             <div className="bg-surface-800/50 rounded-lg p-4 border border-surface-700">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xs text-surface-500 uppercase tracking-wider font-medium">
-                  Skill Preview
+                  Command Preview
                 </span>
               </div>
 
               <div className="space-y-3">
-                {/* Name with icon */}
+                {/* Name with / prefix */}
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-accent-purple" />
-                  <span className="font-medium text-surface-200">{skill.name}</span>
-                  {skill.version && (
-                    <span className="inline-flex items-center px-2 py-0.5 bg-surface-900 text-surface-400 rounded text-xs">
-                      <Tag className="w-3 h-3 mr-1" />
-                      v{skill.version}
-                    </span>
-                  )}
+                  <Zap className="w-4 h-4 text-accent-yellow" />
+                  <span className="font-medium text-surface-200 font-mono">{displayName}</span>
                 </div>
 
                 {/* Description */}
-                {skill.description && (
-                  <p className="text-sm text-surface-400">{skill.description}</p>
+                {command.description && (
+                  <p className="text-sm text-surface-400">{command.description}</p>
                 )}
 
-                {/* Agent Invocation */}
-                <div className="pt-2">
-                  <span className="text-xs text-surface-500 block mb-2">
-                    Agent Invocation
-                  </span>
-                  <div className="bg-surface-900/50 rounded p-3">
-                    <code className="text-sm text-accent-purple font-mono">
-                      {invocationText}
-                    </code>
-                  </div>
-                </div>
-
                 {/* Content Preview */}
-                {skill.content && (
+                {command.content && (
                   <div className="pt-2">
-                    <span className="text-xs text-surface-500 block mb-2">
-                      Content Preview
-                    </span>
+                    <span className="text-xs text-surface-500 block mb-2">Content Preview</span>
                     <div className="bg-surface-900/50 rounded p-3 max-h-32 overflow-y-auto">
                       <pre className="text-xs text-surface-400 whitespace-pre-wrap font-mono">
-                        {skill.content.length > 300
-                          ? `${skill.content.slice(0, 300)}...`
-                          : skill.content}
+                        {command.content.length > 300
+                          ? `${command.content.slice(0, 300)}...`
+                          : command.content}
                       </pre>
                     </div>
                   </div>
                 )}
 
                 {/* Allowed Tools */}
-                {skill.allowedTools && skill.allowedTools.length > 0 && (
+                {command.allowedTools && command.allowedTools.length > 0 && (
                   <div className="pt-2">
                     <div className="flex items-center gap-2 mb-2">
                       <Wrench className="w-3.5 h-3.5 text-surface-500" />
                       <span className="text-xs text-surface-500">Allowed Tools</span>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      {skill.allowedTools.slice(0, 5).map((tool) => (
+                      {command.allowedTools.slice(0, 4).map((tool) => (
                         <span
                           key={tool}
                           className="inline-flex items-center px-2 py-0.5 bg-surface-900 text-surface-400 rounded text-xs font-mono"
@@ -273,9 +236,9 @@ export function InstallSkillModal({
                           {tool}
                         </span>
                       ))}
-                      {skill.allowedTools.length > 5 && (
+                      {command.allowedTools.length > 4 && (
                         <span className="text-xs text-surface-600">
-                          +{skill.allowedTools.length - 5} more
+                          +{command.allowedTools.length - 4} more
                         </span>
                       )}
                     </div>
@@ -301,7 +264,7 @@ export function InstallSkillModal({
               <Download className="w-4 h-4" />
               {scope === 'project' && !selectedProjectPath
                 ? 'Choose Folder & Install'
-                : 'Install Skill'}
+                : 'Install Command'}
             </button>
           </div>
         </div>

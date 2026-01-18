@@ -1,18 +1,18 @@
 // ============================================================================
-// SKILL LIST COMPONENT
+// AGENT SKILL LIST COMPONENT
 // ============================================================================
 
 import { Sparkles } from 'lucide-react';
 import { SkillCard } from './SkillCard';
-import type { Skill, BuiltInSkill } from './types';
+import type { AgentSkill, BuiltInAgentSkill } from './types';
 
 interface SkillListProps {
-  customSkills: Skill[];
-  builtInSkills: (BuiltInSkill & { isBuiltIn: true })[];
+  customSkills: AgentSkill[];
+  builtInSkills: (BuiltInAgentSkill & { isBuiltIn: true })[];
   showBuiltIn: boolean;
   onUseSkill: (name: string) => void;
-  onInstallSkill?: (skill: BuiltInSkill & { isBuiltIn: true }) => void;
-  onEditSkill: (skill: Skill) => void;
+  onInstallSkill?: (skill: BuiltInAgentSkill & { isBuiltIn: true }) => void;
+  onEditSkill: (skill: AgentSkill) => void;
   onDeleteSkill: (id: number) => void;
   onCopyContent: (content: string) => void;
   onCreateNew: () => void;
@@ -40,19 +40,19 @@ export function SkillList({
       <div className="text-center py-12">
         <Sparkles className="w-12 h-12 text-surface-600 mx-auto mb-4" />
         <h3 className="text-lg font-medium text-surface-300">
-          {searchQuery ? 'No skills match your search' : 'No custom skills yet'}
+          {searchQuery ? 'No skills match your search' : 'No custom agent skills yet'}
         </h3>
         <p className="text-surface-500 mt-2">
           {searchQuery
             ? 'Try a different search term'
-            : 'Create skills to automate common workflows'}
+            : 'Create agent skills for programmatic invocation by AI agents'}
         </p>
         {!searchQuery && (
           <button
             onClick={onCreateNew}
             className="mt-4 px-4 py-2 bg-surface-700 text-surface-200 rounded-lg hover:bg-surface-600 transition-colors"
           >
-            Create your first skill
+            Create your first agent skill
           </button>
         )}
       </div>
@@ -65,7 +65,7 @@ export function SkillList({
       {hasCustomSkills && (
         <div>
           <h2 className="text-sm font-medium text-surface-400 mb-3">
-            Custom Skills ({customSkills.length})
+            Custom Agent Skills ({customSkills.length})
           </h2>
           <div className="space-y-3">
             {customSkills.map((skill) => (
@@ -75,7 +75,7 @@ export function SkillList({
                 onUse={() => onUseSkill(skill.name)}
                 onEdit={() => onEditSkill(skill)}
                 onDelete={() => onDeleteSkill(skill.id)}
-                onCopy={() => onCopyContent(skill.content)}
+                onCopy={() => onCopyContent(`Skill skill: "${skill.name}"`)}
               />
             ))}
           </div>
@@ -86,7 +86,7 @@ export function SkillList({
       {showBuiltIn && hasBuiltInSkills && (
         <div>
           <h2 className="text-sm font-medium text-surface-400 mb-3">
-            Built-in Skills ({builtInSkills.length})
+            Built-in Agent Skills ({builtInSkills.length})
           </h2>
           <div className="space-y-3">
             {builtInSkills.map((skill) => (
@@ -94,7 +94,7 @@ export function SkillList({
                 key={skill.name}
                 skill={skill}
                 onInstall={() => onInstallSkill?.(skill)}
-                onCopy={() => onCopyContent(skill.content)}
+                onCopy={() => onCopyContent(`Skill skill: "${skill.name}"`)}
               />
             ))}
           </div>

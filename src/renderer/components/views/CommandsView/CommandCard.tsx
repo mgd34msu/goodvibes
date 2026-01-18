@@ -1,10 +1,10 @@
 // ============================================================================
-// AGENT SKILL CARD COMPONENT - Premium Glass Morphism Design
+// COMMAND CARD COMPONENT - Premium Glass Morphism Design
 // ============================================================================
 
 import { useState } from 'react';
 import {
-  Sparkles,
+  Terminal,
   Edit2,
   Trash2,
   Copy,
@@ -14,13 +14,11 @@ import {
   Star,
   Clock,
   ChevronRight,
-  Wrench,
-  Tag,
 } from 'lucide-react';
-import type { SkillCardSkill } from './types';
+import type { CommandCardCommand } from './types';
 
-interface SkillCardProps {
-  skill: SkillCardSkill;
+interface CommandCardProps {
+  command: CommandCardCommand;
   onUse?: () => void;
   onInstall?: () => void;
   onEdit?: () => void;
@@ -28,26 +26,16 @@ interface SkillCardProps {
   onCopy: () => void;
 }
 
-export function SkillCard({
-  skill,
-  onUse,
-  onInstall,
-  onEdit,
-  onDelete,
-  onCopy,
-}: SkillCardProps) {
+export function CommandCard({ command, onUse, onInstall, onEdit, onDelete, onCopy }: CommandCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const isBuiltIn = 'isBuiltIn' in skill;
+  const isBuiltIn = 'isBuiltIn' in command;
 
   const handleCopy = () => {
     onCopy();
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  // Format skill invocation for display
-  const invocationText = `Skill skill: "${skill.name}"`;
 
   return (
     <div className="card-hover group">
@@ -68,37 +56,35 @@ export function SkillCard({
 
           {/* Icon */}
           <div className="card-icon">
-            <Sparkles className="w-5 h-5" />
+            <Terminal className="w-5 h-5" />
           </div>
 
           {/* Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="card-title-gradient text-base">{skill.name}</h3>
+              <h3 className="card-title-gradient text-base">/{command.name}</h3>
               {isBuiltIn && (
-                <span className="card-badge card-badge-primary">Built-in</span>
-              )}
-              <span className="card-badge">{skill.scope}</span>
-              {skill.version && (
-                <span className="card-badge">
-                  <Tag className="w-3 h-3 mr-1" />
-                  v{skill.version}
+                <span className="card-badge card-badge-primary">
+                  Built-in
                 </span>
               )}
+              <span className="card-badge">
+                {command.scope}
+              </span>
             </div>
-            {skill.description && (
-              <p className="card-description line-clamp-2">{skill.description}</p>
+            {command.description && (
+              <p className="card-description line-clamp-2">{command.description}</p>
             )}
-            {!isBuiltIn && 'useCount' in skill && skill.useCount > 0 && (
+            {!isBuiltIn && 'useCount' in command && command.useCount > 0 && (
               <div className="card-meta mt-3">
                 <span className="card-meta-item">
                   <Star className="w-3 h-3" />
-                  Used {skill.useCount} times
+                  Used {command.useCount} times
                 </span>
-                {skill.lastUsed && (
+                {command.lastUsed && (
                   <span className="card-meta-item">
                     <Clock className="w-3 h-3" />
-                    Last: {new Date(skill.lastUsed).toLocaleDateString()}
+                    Last: {new Date(command.lastUsed).toLocaleDateString()}
                   </span>
                 )}
               </div>
@@ -109,12 +95,18 @@ export function SkillCard({
         {/* Right Section: Actions */}
         <div className="card-actions">
           {isBuiltIn ? (
-            <button onClick={onInstall} className="card-action-primary">
+            <button
+              onClick={onInstall}
+              className="card-action-primary"
+            >
               <Download className="w-3.5 h-3.5" />
               Install
             </button>
           ) : (
-            <button onClick={onUse} className="card-action-primary">
+            <button
+              onClick={onUse}
+              className="card-action-primary"
+            >
               <Play className="w-3.5 h-3.5" />
               Use
             </button>
@@ -122,7 +114,7 @@ export function SkillCard({
           <button
             onClick={handleCopy}
             className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}
-            title="Copy skill invocation"
+            title="Copy"
           >
             {copied ? (
               <Check className="w-4 h-4" />
@@ -156,35 +148,21 @@ export function SkillCard({
         <div className="card-expandable-content mt-4 pt-4">
           <div className="card-divider -mx-5" />
 
-          {/* Invocation Example */}
-          <div className="mt-4 mb-4">
-            <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
-              Agent Invocation
-            </span>
-            <div className="mt-2 bg-surface-900/50 rounded-lg p-3 font-mono text-sm text-accent-purple">
-              {invocationText}
-            </div>
+          <div className="card-code-block mt-4">
+            {command.content}
           </div>
 
-          {/* Skill Content */}
-          <div>
-            <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
-              Skill Content (SKILL.md)
-            </span>
-            <div className="card-code-block mt-2">{skill.content}</div>
-          </div>
-
-          {skill.allowedTools && skill.allowedTools.length > 0 && (
+          {command.allowedTools && command.allowedTools.length > 0 && (
             <div className="mt-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Wrench className="w-3.5 h-3.5 text-surface-500" />
-                <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
-                  Allowed Tools
-                </span>
-              </div>
-              <div className="flex gap-1.5 flex-wrap">
-                {skill.allowedTools.map((tool) => (
-                  <span key={tool} className="card-badge">
+              <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
+                Allowed Tools
+              </span>
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                {command.allowedTools.map((tool) => (
+                  <span
+                    key={tool}
+                    className="card-badge"
+                  >
                     {tool}
                   </span>
                 ))}

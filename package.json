@@ -102,6 +102,7 @@
   "build": {
     "appId": "com.goodvibes.app",
     "productName": "GoodVibes",
+    "npmRebuild": false,
     "directories": {
       "output": "release",
       "buildResources": "build"

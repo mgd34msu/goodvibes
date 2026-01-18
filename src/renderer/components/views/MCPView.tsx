@@ -265,7 +265,7 @@ export default function MCPView() {
           <div>
             {/* Marketplace search/filter */}
             <div className="flex gap-4 mb-6">
-              <div className="flex-1 relative">
+              <div className="flex-1 relative min-w-0">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-surface-500" />
                 <input
                   type="text"
@@ -278,7 +278,7 @@ export default function MCPView() {
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                className="px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
+                className="w-48 flex-shrink-0 px-3 py-2 bg-surface-800 border border-surface-600 rounded-lg text-surface-100 focus:ring-2 focus:ring-accent-purple focus:border-transparent"
               >
                 <option value="all">All Categories</option>
                 <option value="productivity">Productivity</option>

@@ -27,6 +27,40 @@ For the best experience, we recommend using GoodVibes alongside the **GoodVibes 
 
 **Get the plugin:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
 
+## GitHub Integration
+
+GoodVibes includes GitHub integration for PR management, issue tracking, and repository operations. Authentication uses GitHub's OAuth Device Flow for secure, seamless login.
+
+### Default Configuration
+
+Out of the box, GoodVibes uses a built-in GitHub OAuth App. This works immediately with no setup required—just click "Login with GitHub" in the settings.
+
+### Custom OAuth App (Optional)
+
+For users who want full control over their GitHub integration, you can configure your own GitHub OAuth App:
+
+1. **Create a GitHub OAuth App** at [github.com/settings/developers](https://github.com/settings/developers)
+   - See GitHub's guide: [Creating an OAuth App](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+   - Use any **Application name** and **Homepage URL**
+   - Set **Authorization callback URL** to: `goodvibes://oauth/callback`
+
+2. **Configure in GoodVibes**
+   - Go to **Settings → GitHub → Custom OAuth App → Configure**
+   - Enter your **Client ID**
+   - Choose **Device Flow** (recommended) or **Authorization Code Flow**
+   - If using Authorization Code Flow, also enter your **Client Secret**
+
+### Why Use a Custom OAuth App?
+
+| Built-in App | Custom App |
+|--------------|------------|
+| Zero configuration | Full control over permissions |
+| Works immediately | Your own app in GitHub's authorized list |
+| Source code available for review | Maximum security for sensitive repos |
+| Shared OAuth App ID | Isolated from other GoodVibes users |
+
+**Note:** The GoodVibes source code is fully available for review, and the built-in OAuth App cannot perform any unauthorized access. However, creating your own OAuth App provides an additional layer of security by giving you complete ownership of the GitHub integration.
+
 ## Prerequisites
 
 - **Node.js**: v18.0.0 or higher (v20+ recommended)

@@ -17,702 +17,346 @@ export interface MemoryTemplate {
   description: string;
   content: string;
   variables: string[];
+  /** Which CLAUDE.md scope this template is best suited for */
+  scope: 'user' | 'project' | 'local';
 }
+
+// ============================================================================
+// CLAUDE.MD TEMPLATES
+// Based on best practices from claude-md-best-practices.md
+// ============================================================================
 
 export const DEFAULT_TEMPLATES: MemoryTemplate[] = [
   // ============================================================================
-  // 1. PROJECT SETUP - Basic project context
+  // USER-LEVEL TEMPLATES (~/.claude/CLAUDE.md)
+  // Personal preferences that apply across ALL projects
   // ============================================================================
   {
-    id: 'project-setup',
-    name: 'Project Setup',
-    description: 'Basic project context with tech stack and key commands',
-    content: `# {{project_name}}
-
-## Tech Stack
-- Language: {{language}}
-- Framework: {{framework}}
-- Package Manager: {{package_manager}}
-
-## Common Commands
-\`\`\`bash
-# Install dependencies
-{{install_command}}
-
-# Run development server
-{{dev_command}}
-
-# Run tests
-{{test_command}}
-
-# Build for production
-{{build_command}}
-\`\`\`
-
-## Project Structure
-- \`src/\` - Source code
-- \`tests/\` - Test files
-- \`docs/\` - Documentation
+    id: 'user-preferences',
+    name: 'Personal Preferences',
+    description: 'Code style, workflow preferences, and personal shortcuts',
+    scope: 'user',
+    content: `# Personal Preferences
 
 ## Code Style
-- Use existing patterns in the codebase
-- Run linter before committing
-- Keep functions small and focused
+- Prefer functional approaches over class-based when reasonable
+- Use descriptive variable names, avoid abbreviations
+- 2-space indentation for JS/TS, 4-space for Python
+
+## Workflow
+- Commit messages: conventional commits format (feat:, fix:, docs:, etc.)
+- Always run tests before suggesting PR is ready
+- Prefer small, focused commits over large changes
+
+## Communication
+- Be concise in explanations
+- Show code examples rather than lengthy descriptions
+- Ask clarifying questions when requirements are ambiguous
 `,
-    variables: ['project_name', 'language', 'framework', 'package_manager', 'install_command', 'dev_command', 'test_command', 'build_command'],
+    variables: [],
   },
-
-  // ============================================================================
-  // 2. TYPESCRIPT/NODE - TypeScript patterns and npm scripts
-  // ============================================================================
   {
-    id: 'typescript-node',
-    name: 'TypeScript/Node',
-    description: 'TypeScript patterns, npm scripts, and Node.js conventions',
-    content: `# TypeScript/Node Project
+    id: 'user-tooling',
+    name: 'Tooling Shortcuts',
+    description: 'Shell commands and tools you use across projects',
+    scope: 'user',
+    content: `# Tooling Shortcuts
 
-## Commands
-\`\`\`bash
-npm install          # Install dependencies
-npm run dev          # Start dev server
-npm run build        # Compile TypeScript
-npm run test         # Run tests
-npm run lint         # Lint code
-npm run typecheck    # Check types without emitting
-\`\`\`
+## Package Managers
+- Use pnpm when available, fall back to npm
+- \`pnpm i\` for install, \`pnpm add -D\` for dev dependencies
 
-## TypeScript Conventions
-- Use strict mode (strict: true in tsconfig)
-- Prefer \`interface\` over \`type\` for object shapes
-- Use \`unknown\` instead of \`any\`, validate before use
-- Export types alongside implementations
-- Use barrel exports (index.ts) for public APIs
+## Git Shortcuts
+- \`git add -p\` for interactive staging
+- \`git commit --amend --no-edit\` for quick fixes to last commit
+- \`git push -u origin HEAD\` for new branches
 
-## Error Handling
-\`\`\`typescript
-// Use typed errors
-class AppError extends Error {
-  constructor(message: string, public code: string) {
-    super(message);
-  }
-}
-
-// Always handle promise rejections
-try {
-  await operation();
-} catch (error) {
-  if (error instanceof AppError) {
-    // Handle known error
-  }
-  throw error; // Re-throw unknown errors
-}
-\`\`\`
-
-## File Organization
-- One export per file for components/classes
-- Colocate tests with source files (*.test.ts)
-- Group by feature, not by type
+## Editor
+- Format on save is enabled
+- Use project-specific formatter configs when present
 `,
     variables: [],
   },
 
   // ============================================================================
-  // 3. REACT/NEXT.JS - React patterns and component conventions
+  // PROJECT-LEVEL TEMPLATES (./CLAUDE.md)
+  // Project-specific context shared with the team via git
   // ============================================================================
   {
-    id: 'react-nextjs',
-    name: 'React/Next.js',
-    description: 'React patterns, component conventions, and Next.js specifics',
-    content: `# React/Next.js Project
+    id: 'project-minimal',
+    name: 'Minimal Project',
+    description: 'Essential commands and structure - start here',
+    scope: 'project',
+    content: `# {{project_name}}
+
+{{description}}
 
 ## Commands
 \`\`\`bash
-npm run dev          # Start dev server (localhost:3000)
-npm run build        # Production build
-npm run start        # Start production server
-npm run lint         # ESLint check
+{{package_manager}} install    # Install dependencies
+{{package_manager}} run dev    # Start development server
+{{package_manager}} run test   # Run tests
+{{package_manager}} run build  # Build for production
 \`\`\`
 
-## Component Patterns
-\`\`\`tsx
-// Use function components with TypeScript
-interface ButtonProps {
-  variant: 'primary' | 'secondary';
-  children: React.ReactNode;
-  onClick?: () => void;
-}
-
-export function Button({ variant, children, onClick }: ButtonProps) {
-  return (
-    <button className={styles[variant]} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-\`\`\`
+## Architecture
+- \`/src\` - Source code
+- \`/tests\` - Test files
 
 ## Conventions
-- Components: PascalCase (Button.tsx)
-- Hooks: camelCase with use prefix (useAuth.ts)
-- Utilities: camelCase (formatDate.ts)
-- Keep components under 200 lines
-- Extract hooks for complex state logic
-
-## Next.js App Router
-- Use Server Components by default
-- Add 'use client' only when needed (interactivity, hooks)
-- Colocate loading.tsx and error.tsx with page.tsx
-- Use route groups (folder) for layouts
-
-## State Management
-- Server state: React Query or SWR
-- Client state: useState/useReducer or Zustand
-- Avoid prop drilling beyond 2 levels
+- Follow existing patterns in the codebase
+- Run linter before committing
 `,
-    variables: [],
+    variables: ['project_name', 'description', 'package_manager'],
   },
-
-  // ============================================================================
-  // 4. API DEVELOPMENT - REST/GraphQL patterns
-  // ============================================================================
   {
-    id: 'api-development',
-    name: 'API Development',
-    description: 'REST/GraphQL patterns, validation, and error handling',
-    content: `# API Development
+    id: 'project-full',
+    name: 'Full Project Context',
+    description: 'Comprehensive project setup with architecture and gotchas',
+    scope: 'project',
+    content: `# {{project_name}}
 
-## RESTful Conventions
-- GET /resources - List all
-- GET /resources/:id - Get one
-- POST /resources - Create
-- PUT /resources/:id - Replace
-- PATCH /resources/:id - Update
-- DELETE /resources/:id - Remove
-
-## Request Validation
-\`\`\`typescript
-// Always validate input at the boundary
-import { z } from 'zod';
-
-const CreateUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100),
-});
-
-// Validate before processing
-const result = CreateUserSchema.safeParse(req.body);
-if (!result.success) {
-  return res.status(400).json({ errors: result.error.flatten() });
-}
-\`\`\`
-
-## Error Response Format
-\`\`\`json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Human-readable message",
-    "details": {}
-  }
-}
-\`\`\`
-
-## Status Codes
-- 200: Success
-- 201: Created
-- 400: Bad Request (client error)
-- 401: Unauthorized (not logged in)
-- 403: Forbidden (no permission)
-- 404: Not Found
-- 500: Server Error
-
-## API Guidelines
-- Version APIs (/v1/resources)
-- Use consistent naming (snake_case or camelCase)
-- Include pagination for lists
-- Log all requests and errors
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 5. DATABASE - ORM patterns and migrations
-  // ============================================================================
-  {
-    id: 'database',
-    name: 'Database',
-    description: 'ORM patterns, migration conventions, and query optimization',
-    content: `# Database Patterns
+{{description}}
 
 ## Commands
 \`\`\`bash
-# Prisma (adjust for your ORM)
-npx prisma migrate dev      # Run migrations in dev
-npx prisma migrate deploy   # Run migrations in prod
-npx prisma generate         # Generate client
-npx prisma studio           # Open database GUI
+{{package_manager}} install       # Install dependencies
+{{package_manager}} run dev       # Start development server
+{{package_manager}} run test      # Run tests
+{{package_manager}} run lint      # Lint code
+{{package_manager}} run typecheck # Type checking
+{{package_manager}} run build     # Build for production
 \`\`\`
 
-## Migration Guidelines
-- One migration per logical change
-- Name migrations descriptively: add_user_email_index
-- Never edit deployed migrations
-- Test migrations on a copy of prod data
-- Include rollback strategy
+## Architecture
+- \`/src/{{main_dir}}\` - {{main_description}}
+- \`/src/{{secondary_dir}}\` - {{secondary_description}}
 
-## Query Patterns
-\`\`\`typescript
-// Use transactions for related operations
-await prisma.$transaction([
-  prisma.user.update({ where: { id }, data: { balance: { decrement: amount } } }),
-  prisma.transaction.create({ data: { userId: id, amount, type: 'debit' } }),
-]);
+## Conventions
+- {{convention_1}}
+- {{convention_2}}
 
-// Select only needed fields
-const users = await prisma.user.findMany({
-  select: { id: true, name: true, email: true },
-});
+## Gotchas
+- {{gotcha_1}}
 
-// Use pagination
-const users = await prisma.user.findMany({
-  skip: page * pageSize,
-  take: pageSize,
-});
-\`\`\`
-
-## Performance
-- Add indexes for frequently queried columns
-- Use connection pooling in production
-- Avoid N+1 queries (use include/eager loading)
-- Monitor slow query logs
+## Off-Limits
+- Never modify files in \`/generated\` directly
+- Don't edit \`.env\` files without asking
 `,
-    variables: [],
+    variables: [
+      'project_name',
+      'description',
+      'package_manager',
+      'main_dir',
+      'main_description',
+      'secondary_dir',
+      'secondary_description',
+      'convention_1',
+      'convention_2',
+      'gotcha_1',
+    ],
   },
-
-  // ============================================================================
-  // 6. TESTING - Test patterns and coverage
-  // ============================================================================
   {
-    id: 'testing',
-    name: 'Testing',
-    description: 'Test patterns, coverage expectations, and testing best practices',
-    content: `# Testing Guidelines
+    id: 'project-monorepo',
+    name: 'Monorepo Project',
+    description: 'Multi-package workspace with shared dependencies',
+    scope: 'project',
+    content: `# {{project_name}}
 
-## Commands
-\`\`\`bash
-npm test                 # Run all tests
-npm test -- --watch      # Watch mode
-npm test -- --coverage   # With coverage report
-npm test -- path/to/file # Run specific file
-\`\`\`
+{{description}}
 
-## Test Structure
-\`\`\`typescript
-describe('UserService', () => {
-  describe('createUser', () => {
-    it('creates a user with valid data', async () => {
-      const user = await userService.createUser({ email: 'test@example.com' });
-      expect(user.id).toBeDefined();
-      expect(user.email).toBe('test@example.com');
-    });
-
-    it('throws on duplicate email', async () => {
-      await userService.createUser({ email: 'test@example.com' });
-      await expect(
-        userService.createUser({ email: 'test@example.com' })
-      ).rejects.toThrow('Email already exists');
-    });
-  });
-});
-\`\`\`
-
-## Testing Principles
-- Test behavior, not implementation
-- One assertion concept per test
-- Use descriptive test names
-- Avoid testing third-party code
-- Mock external dependencies, not internal modules
-
-## Coverage Targets
-- Statements: 80%+
-- Branches: 75%+
-- Functions: 80%+
-- Critical paths: 100%
-
-## Test Types
-- Unit: Isolated function/component tests
-- Integration: Multiple units working together
-- E2E: Full user flows (use sparingly)
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 7. GIT WORKFLOW - Branch naming and commit conventions
-  // ============================================================================
-  {
-    id: 'git-workflow',
-    name: 'Git Workflow',
-    description: 'Branch naming, commit conventions, and PR process',
-    content: `# Git Workflow
-
-## Branch Naming
-\`\`\`
-feature/add-user-auth      # New features
-fix/login-redirect-loop    # Bug fixes
-refactor/extract-api-client # Code improvements
-docs/update-readme         # Documentation
-chore/upgrade-deps         # Maintenance
-\`\`\`
-
-## Commit Messages
-\`\`\`
-<type>: <short description>
-
-[optional body with more detail]
-
-[optional footer with breaking changes or issue refs]
-\`\`\`
-
-Types: feat, fix, docs, style, refactor, test, chore
-
-Examples:
-\`\`\`
-feat: add password reset functionality
-fix: prevent duplicate form submissions
-docs: update API authentication section
-refactor: extract validation logic to utilities
-\`\`\`
-
-## Pull Request Process
-1. Create branch from main
-2. Make changes with atomic commits
-3. Push and open PR with description
-4. Address review feedback
-5. Squash and merge when approved
-
-## PR Description Template
-\`\`\`markdown
-## Summary
-Brief description of changes
-
-## Changes
-- Added X
-- Fixed Y
-- Updated Z
-
-## Testing
-- [ ] Unit tests pass
-- [ ] Manual testing done
-\`\`\`
-
-## Git Commands
-\`\`\`bash
-git checkout -b feature/name   # Create branch
-git add -p                     # Stage interactively
-git commit -m "type: message"  # Commit
-git push -u origin HEAD        # Push new branch
-\`\`\`
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 8. SECURITY - Security checklist and auth patterns
-  // ============================================================================
-  {
-    id: 'security',
-    name: 'Security',
-    description: 'Security checklist, authentication patterns, and common vulnerabilities',
-    content: `# Security Guidelines
-
-## Authentication
-- Use established libraries (NextAuth, Passport, Auth0)
-- Hash passwords with bcrypt (cost factor 12+)
-- Use secure session management
-- Implement proper logout (invalidate tokens)
-- Add rate limiting to auth endpoints
-
-## Input Validation
-\`\`\`typescript
-// Validate ALL user input
-// Never trust client-side validation alone
-const sanitized = validator.escape(userInput);
-const validated = schema.parse(userInput);
-\`\`\`
-
-## Security Checklist
-- [ ] HTTPS only in production
-- [ ] CORS configured restrictively
-- [ ] CSRF protection enabled
-- [ ] SQL injection prevented (parameterized queries)
-- [ ] XSS prevented (output encoding)
-- [ ] Secrets in environment variables, never in code
-- [ ] Dependencies regularly updated
-- [ ] Error messages don't leak internals
-
-## Headers (use helmet.js or equivalent)
-\`\`\`
-Content-Security-Policy: default-src 'self'
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-Strict-Transport-Security: max-age=31536000
-\`\`\`
-
-## Sensitive Data
-- Never log passwords, tokens, or PII
-- Encrypt data at rest and in transit
-- Implement proper access controls
-- Audit sensitive operations
-
-## Dependency Security
-\`\`\`bash
-npm audit              # Check for vulnerabilities
-npm audit fix          # Auto-fix where possible
-\`\`\`
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 9. PERFORMANCE - Performance guidelines and monitoring
-  // ============================================================================
-  {
-    id: 'performance',
-    name: 'Performance',
-    description: 'Performance guidelines, optimization patterns, and monitoring',
-    content: `# Performance Guidelines
-
-## Frontend Performance
-- Bundle size: Keep initial JS under 200KB gzipped
-- Images: Use modern formats (WebP, AVIF), lazy load
-- Fonts: Subset, preload critical fonts
-- Code splitting: Dynamic imports for routes
-- Caching: Leverage browser and CDN caching
-
-## React Optimization
-\`\`\`tsx
-// Memoize expensive components
-const ExpensiveList = React.memo(({ items }) => (
-  <ul>{items.map(item => <li key={item.id}>{item.name}</li>)}</ul>
-));
-
-// Memoize expensive calculations
-const sortedItems = useMemo(() =>
-  items.sort((a, b) => b.score - a.score),
-  [items]
-);
-
-// Debounce frequent updates
-const debouncedSearch = useDebouncedCallback(search, 300);
-\`\`\`
-
-## Backend Performance
-- Database: Add indexes, use connection pooling
-- Caching: Redis for frequently accessed data
-- N+1: Use eager loading or DataLoader
-- Pagination: Always paginate large lists
-
-## Monitoring
-\`\`\`bash
-# Lighthouse audit
-npx lighthouse https://example.com --view
-
-# Bundle analysis
-npm run build && npx source-map-explorer dist/**/*.js
-\`\`\`
-
-## Performance Targets
-- First Contentful Paint: < 1.8s
-- Largest Contentful Paint: < 2.5s
-- Time to Interactive: < 3.8s
-- Cumulative Layout Shift: < 0.1
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 10. DOCUMENTATION - Doc standards and JSDoc patterns
-  // ============================================================================
-  {
-    id: 'documentation',
-    name: 'Documentation',
-    description: 'Documentation standards, JSDoc patterns, and README structure',
-    content: `# Documentation Standards
-
-## Code Documentation
-\`\`\`typescript
-/**
- * Calculates the total price including tax and discounts.
- *
- * @param items - Cart items to calculate
- * @param taxRate - Tax rate as decimal (e.g., 0.08 for 8%)
- * @param discountCode - Optional discount code to apply
- * @returns Total price in cents
- * @throws {InvalidDiscountError} If discount code is invalid
- *
- * @example
- * const total = calculateTotal(items, 0.08, 'SAVE10');
- */
-function calculateTotal(
-  items: CartItem[],
-  taxRate: number,
-  discountCode?: string
-): number {
-  // Implementation
-}
-\`\`\`
-
-## When to Document
-- Public APIs and exported functions
-- Complex business logic
-- Non-obvious algorithms
-- Configuration options
-- Database schema decisions
-
-## README Structure
-\`\`\`markdown
-# Project Name
-
-Brief description (1-2 sentences)
-
-## Quick Start
-\`\`\`bash
-npm install && npm run dev
-\`\`\`
-
-## Documentation
-- [Setup Guide](docs/setup.md)
-- [API Reference](docs/api.md)
-- [Contributing](CONTRIBUTING.md)
-\`\`\`
-
-## Self-Documenting Code
-- Use descriptive variable/function names
-- Extract magic numbers to named constants
-- Keep functions small and focused
-- Let types document structure
-`,
-    variables: [],
-  },
-
-  // ============================================================================
-  // 11. MONOREPO - Workspace patterns and shared dependencies
-  // ============================================================================
-  {
-    id: 'monorepo',
-    name: 'Monorepo',
-    description: 'Workspace patterns, shared dependencies, and monorepo tooling',
-    content: `# Monorepo Structure
-
-## Commands
+## Workspace Commands
 \`\`\`bash
 # Run in specific package
-npm run dev -w packages/web
-npm run build -w packages/api
+pnpm --filter {{main_package}} dev
+pnpm --filter {{main_package}} test
 
-# Run in all packages
-npm run build --workspaces
+# Run across all packages
+pnpm run build
+pnpm run test
 
 # Add dependency to package
-npm install lodash -w packages/shared
-
-# Add shared dependency to root
-npm install typescript -D
+pnpm --filter {{main_package}} add <package>
 \`\`\`
 
 ## Structure
-\`\`\`
-/
-├── package.json          # Root with workspaces config
-├── packages/
-│   ├── web/              # Frontend app
-│   ├── api/              # Backend service
-│   ├── shared/           # Shared utilities
-│   └── ui/               # Component library
-└── tools/                # Build/dev tooling
-\`\`\`
-
-## Package References
-\`\`\`json
-// packages/web/package.json
-{
-  "dependencies": {
-    "@myorg/shared": "workspace:*",
-    "@myorg/ui": "workspace:*"
-  }
-}
-\`\`\`
+- \`/packages/{{main_package}}\` - {{main_description}}
+- \`/packages/shared\` - Shared utilities and types
 
 ## Conventions
 - Each package has its own package.json
-- Shared types in dedicated package
-- Keep packages loosely coupled
-- Version shared packages together
-- Use TypeScript project references
+- Shared types go in the shared package
+- Import from packages using workspace protocol
 
-## Build Order
-- Build shared packages first
-- Use turborepo or nx for caching
-- Define dependencies in turbo.json/nx.json
+## Important
+- Build shared packages before dependent packages
+- Keep packages loosely coupled
+`,
+    variables: ['project_name', 'description', 'main_package', 'main_description'],
+  },
+  {
+    id: 'project-api',
+    name: 'API/Backend Project',
+    description: 'REST/GraphQL API with database and auth',
+    scope: 'project',
+    content: `# {{project_name}}
+
+{{description}}
+
+## Commands
+\`\`\`bash
+{{package_manager}} run dev      # Start dev server
+{{package_manager}} run test     # Run tests
+{{package_manager}} run db:push  # Push schema changes
+{{package_manager}} run db:studio # Open database GUI
+\`\`\`
+
+## API Conventions
+- RESTful endpoints: GET/POST/PUT/DELETE
+- Validate all input with Zod schemas
+- Return consistent error format: \`{ error: { code, message } }\`
+
+## Database
+- Migrations in \`/prisma/migrations\` (or equivalent)
+- Never edit deployed migrations
+- Use transactions for related operations
+
+## Auth
+- JWT tokens for API authentication
+- Rate limiting on auth endpoints
+
+## Gotchas
+- {{gotcha}}
+`,
+    variables: ['project_name', 'description', 'package_manager', 'gotcha'],
+  },
+  {
+    id: 'project-frontend',
+    name: 'Frontend/React Project',
+    description: 'React/Next.js app with component patterns',
+    scope: 'project',
+    content: `# {{project_name}}
+
+{{description}}
+
+## Commands
+\`\`\`bash
+{{package_manager}} run dev    # Start dev server (localhost:3000)
+{{package_manager}} run build  # Production build
+{{package_manager}} run test   # Run tests
+{{package_manager}} run lint   # ESLint check
+\`\`\`
+
+## Component Patterns
+- Components: PascalCase (\`Button.tsx\`)
+- Hooks: camelCase with \`use\` prefix (\`useAuth.ts\`)
+- Keep components under 200 lines
+- Extract hooks for complex state logic
+
+## State Management
+- Server state: React Query / SWR
+- Client state: Zustand / useState
+- Avoid prop drilling beyond 2 levels
+
+## Styling
+- {{styling_approach}}
+
+## Gotchas
+- {{gotcha}}
+`,
+    variables: ['project_name', 'description', 'package_manager', 'styling_approach', 'gotcha'],
+  },
+  {
+    id: 'project-git-workflow',
+    name: 'Git Workflow Addendum',
+    description: 'Branch naming and commit conventions to add to project CLAUDE.md',
+    scope: 'project',
+    content: `## Git Workflow
+
+### Branch Naming
+- \`feature/description\` - New features
+- \`fix/description\` - Bug fixes
+- \`refactor/description\` - Code improvements
+- \`docs/description\` - Documentation
+
+### Commit Messages
+Use conventional commits:
+\`\`\`
+feat: add user authentication
+fix: prevent duplicate form submissions
+docs: update API documentation
+refactor: extract validation logic
+\`\`\`
+
+### PR Process
+1. Create branch from main
+2. Make atomic commits
+3. Open PR with description
+4. Squash and merge when approved
 `,
     variables: [],
   },
 
   // ============================================================================
-  // 12. MICROSERVICES - Service patterns and communication
+  // LOCAL-LEVEL TEMPLATES (./CLAUDE.local.md)
+  // Personal overrides that are NOT committed to git
   // ============================================================================
   {
-    id: 'microservices',
-    name: 'Microservices',
-    description: 'Service patterns, inter-service communication, and deployment',
-    content: `# Microservices Architecture
+    id: 'local-dev-env',
+    name: 'Local Dev Environment',
+    description: 'Personal dev URLs, credentials, and local overrides',
+    scope: 'local',
+    content: `# Local Development Overrides
 
-## Service Structure
-\`\`\`
-/services
-├── user-service/         # User management
-├── order-service/        # Order processing
-├── notification-service/ # Email/SMS/Push
-└── gateway/              # API gateway
-\`\`\`
+## Dev URLs
+- Local API: http://localhost:{{api_port}}
+- Local App: http://localhost:{{app_port}}
 
-## Communication Patterns
-- Sync: REST/gRPC for real-time queries
-- Async: Message queues for events (RabbitMQ, Kafka)
-- Gateway: Single entry point, routes to services
+## Test Credentials
+- Test user: {{test_email}}
+- Test password: {{test_password}}
 
-## Service Template
-\`\`\`
-/user-service
-├── src/
-│   ├── api/              # HTTP handlers
-│   ├── domain/           # Business logic
-│   ├── infrastructure/   # DB, external clients
-│   └── events/           # Event handlers
-├── Dockerfile
-└── package.json
-\`\`\`
-
-## Best Practices
-- Each service owns its data (no shared DBs)
-- Use correlation IDs for distributed tracing
-- Implement health checks (/health endpoint)
-- Design for failure (circuit breakers, retries)
-- Keep services small and focused
-
-## Docker Commands
-\`\`\`bash
-docker-compose up -d           # Start all services
-docker-compose logs -f api     # Follow service logs
-docker-compose down            # Stop all services
-\`\`\`
-
-## Environment Config
-- Use environment variables for config
-- Secrets via vault or cloud secrets manager
-- Service discovery via DNS or registry
+## Local Overrides
+- Using {{local_override}} for local development
 `,
-    variables: [],
+    variables: ['api_port', 'app_port', 'test_email', 'test_password', 'local_override'],
+  },
+  {
+    id: 'local-worktree',
+    name: 'Git Worktree Context',
+    description: 'Context specific to this worktree/branch',
+    scope: 'local',
+    content: `# Worktree: {{branch_name}}
+
+## Current Focus
+{{current_focus}}
+
+## Temporary Notes
+- {{note_1}}
+
+## Testing This Branch
+\`\`\`bash
+{{test_command}}
+\`\`\`
+`,
+    variables: ['branch_name', 'current_focus', 'note_1', 'test_command'],
+  },
+  {
+    id: 'local-experimental',
+    name: 'Experimental Instructions',
+    description: 'Test new instructions before proposing to team',
+    scope: 'local',
+    content: `# Experimental Instructions
+
+## Testing These Rules
+The following are experimental - testing before adding to project CLAUDE.md:
+
+{{experimental_rules}}
+
+## Notes
+- Added: {{date}}
+- Reason: {{reason}}
+`,
+    variables: ['experimental_rules', 'date', 'reason'],
   },
 ];

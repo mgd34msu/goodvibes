@@ -70,6 +70,20 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
 
 // Marketplace data
 export const MARKETPLACE_SERVERS: MarketplaceServer[] = [
+  // Featured MCP Servers
+  {
+    id: 'chrome-devtools-mcp',
+    name: 'Chrome DevTools',
+    description: 'Control and inspect live Chrome browsers with performance analysis, debugging, network inspection, and Puppeteer-powered automation.',
+    category: 'devops',
+    transport: 'stdio',
+    npmPackage: 'chrome-devtools-mcp',
+    documentation: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
+    repository: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
+    featured: true,
+    vibes: 'great',
+  },
+  // Popular MCP Servers
   {
     id: 'notion',
     name: 'Notion',

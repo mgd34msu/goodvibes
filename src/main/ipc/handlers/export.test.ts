@@ -633,7 +633,7 @@ describe('Export IPC Handlers', () => {
         vi.mocked(db.getSessionMessages).mockReturnValue(mockMessages as never);
         vi.mocked(dialog.showSaveDialog).mockResolvedValue({
           canceled: true,
-          filePath: undefined,
+          filePath: undefined as unknown as string,
         });
 
         const handler = handlers['export-session'];
@@ -651,7 +651,7 @@ describe('Export IPC Handlers', () => {
         vi.mocked(db.getSessionMessages).mockReturnValue(mockMessages as never);
         vi.mocked(dialog.showSaveDialog).mockResolvedValue({
           canceled: false,
-          filePath: undefined,
+          filePath: undefined as unknown as string,
         });
 
         const handler = handlers['export-session'];
@@ -933,7 +933,7 @@ describe('Export IPC Handlers', () => {
       it('returns error when user cancels dialog', async () => {
         vi.mocked(dialog.showSaveDialog).mockResolvedValue({
           canceled: true,
-          filePath: undefined,
+          filePath: undefined as unknown as string,
         });
 
         const handler = handlers['bulk-export'];
@@ -946,7 +946,7 @@ describe('Export IPC Handlers', () => {
       it('returns error when filePath is undefined', async () => {
         vi.mocked(dialog.showSaveDialog).mockResolvedValue({
           canceled: false,
-          filePath: undefined,
+          filePath: undefined as unknown as string,
         });
 
         const handler = handlers['bulk-export'];

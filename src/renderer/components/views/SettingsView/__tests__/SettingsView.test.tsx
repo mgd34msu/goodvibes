@@ -12,21 +12,18 @@
 // ============================================================================
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useSettingsStore } from '../../../../stores/settingsStore';
 import SettingsView from '../index';
-import { AppearanceSettings } from '../AppearanceSettings';
-import { StartupSettings, ClaudeSettings, GitSettings, BudgetSettings, BackupSettings } from '../GeneralSettings';
+import { BackupSettings } from '../GeneralSettings';
 import { TerminalSettings } from '../TerminalSettings';
 import { GitHubSettings } from '../GitHubSettings';
 import { GitHubConnectionStatus } from '../GitHubConnectionStatus';
 import { SessionPreviewVisibilitySettings, SessionPreviewExpandSettings } from '../SessionPreviewSettings';
 import { KeyboardSettings } from '../KeyboardSettings';
 import { MaintenanceSettings, DangerZoneSettings } from '../MaintenanceSettings';
-import { ThemeSettings } from '../ThemeSettings';
 import { SettingsSection, SettingRow, ToggleSwitch, ShortcutRow } from '../components';
 import { DEFAULT_SETTINGS } from '../../../../../shared/types';
 import type { AppSettings } from '../../../../../shared/types';

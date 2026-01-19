@@ -42,6 +42,8 @@ export function getBuiltInHooks(): BuiltinHookConfig[] {
       enabled: false,
       scope: 'user' as const,
       projectPath: null,
+      hookType: 'command' as const,
+      prompt: null,
     },
     {
       name: 'GoodVibes Session Start',
@@ -52,6 +54,8 @@ export function getBuiltInHooks(): BuiltinHookConfig[] {
       enabled: false,
       scope: 'user' as const,
       projectPath: null,
+      hookType: 'command' as const,
+      prompt: null,
     },
     {
       name: 'GoodVibes Session End',
@@ -62,6 +66,8 @@ export function getBuiltInHooks(): BuiltinHookConfig[] {
       enabled: false,
       scope: 'user' as const,
       projectPath: null,
+      hookType: 'command' as const,
+      prompt: null,
     },
   ];
 }

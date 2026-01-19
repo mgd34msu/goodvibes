@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Session } from '../types';
@@ -73,18 +73,6 @@ function createTestQueryClient(): QueryClient {
 }
 
 /**
- * Wrapper component providing necessary providers for testing
- */
-function TestWrapper({ children }: { children: React.ReactNode }) {
-  const queryClient = createTestQueryClient();
-  return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
-  );
-}
-
-/**
  * Renders a component within the test wrapper
  */
 function renderWithProviders(ui: React.ReactElement) {
@@ -104,12 +92,12 @@ function renderWithProviders(ui: React.ReactElement) {
 // ============================================================================
 
 // Store original mock implementations
-let originalGetActiveSessions: ReturnType<typeof vi.fn>;
-let originalGetFavoriteSessions: ReturnType<typeof vi.fn>;
-let originalGetArchivedSessions: ReturnType<typeof vi.fn>;
-let originalGetLiveSessions: ReturnType<typeof vi.fn>;
-let originalToggleFavorite: ReturnType<typeof vi.fn>;
-let originalToggleArchive: ReturnType<typeof vi.fn>;
+let originalGetActiveSessions: typeof window.goodvibes.getActiveSessions;
+let originalGetFavoriteSessions: typeof window.goodvibes.getFavoriteSessions;
+let originalGetArchivedSessions: typeof window.goodvibes.getArchivedSessions;
+let originalGetLiveSessions: typeof window.goodvibes.getLiveSessions;
+let originalToggleFavorite: typeof window.goodvibes.toggleFavorite;
+let originalToggleArchive: typeof window.goodvibes.toggleArchive;
 
 beforeEach(() => {
   vi.clearAllMocks();

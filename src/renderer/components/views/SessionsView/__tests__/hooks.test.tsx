@@ -192,9 +192,9 @@ describe('useSessions', () => {
         expect(result.current.sessions).toHaveLength(3);
       });
 
-      expect(result.current.sessions[0].id).toBe('session-active-1');
-      expect(result.current.sessions[1].id).toBe('session-active-2');
-      expect(result.current.sessions[2].id).toBe('session-active-3');
+      expect(result.current.sessions[0]?.id).toBe('session-active-1');
+      expect(result.current.sessions[1]?.id).toBe('session-active-2');
+      expect(result.current.sessions[2]?.id).toBe('session-active-3');
     });
   });
 
@@ -259,7 +259,7 @@ describe('useSessions', () => {
         expect(result.current.sessions).toHaveLength(1);
       });
 
-      expect(result.current.sessions[0].archived).toBe(true);
+      expect(result.current.sessions[0]?.archived).toBe(true);
     });
   });
 
@@ -438,8 +438,8 @@ describe('useSessions', () => {
         expect(result.current.sessions).toHaveLength(1);
       });
 
-      expect(result.current.sessions[0].projectName).toBeNull();
-      expect(result.current.sessions[0].summary).toBeNull();
+      expect(result.current.sessions[0]?.projectName).toBeNull();
+      expect(result.current.sessions[0]?.summary).toBeNull();
     });
   });
 });
@@ -503,8 +503,8 @@ describe('useLiveSessions', () => {
         expect(result.current.liveSessions).toHaveLength(2);
       });
 
-      expect(result.current.liveSessions[0].id).toBe('live-1');
-      expect(result.current.liveSessions[1].id).toBe('live-2');
+      expect(result.current.liveSessions[0]?.id).toBe('live-1');
+      expect(result.current.liveSessions[1]?.id).toBe('live-2');
     });
   });
 
@@ -527,7 +527,7 @@ describe('useLiveSessions', () => {
     it('updates liveSessionIds when sessions change', async () => {
       vi.mocked(window.goodvibes.getLiveSessions).mockResolvedValue(mockLiveSessions);
 
-      const { result, rerender } = renderHook(() => useLiveSessions(), {
+      const { result } = renderHook(() => useLiveSessions(), {
         wrapper: createWrapper(),
       });
 
@@ -659,9 +659,6 @@ describe('useLiveSessions', () => {
 // ============================================================================
 
 describe('useSessionFilters', () => {
-  // Mock the settings store
-  const mockUseSettingsStore = vi.fn();
-
   beforeEach(() => {
     // Reset the settings store mock before each test
     vi.clearAllMocks();
@@ -735,7 +732,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('1');
+      expect(result.current.filteredSessions[0]?.id).toBe('1');
     });
 
     it('handles null project names gracefully', () => {
@@ -750,7 +747,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('2');
+      expect(result.current.filteredSessions[0]?.id).toBe('2');
     });
   });
 
@@ -784,7 +781,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('1');
+      expect(result.current.filteredSessions[0]?.id).toBe('1');
     });
   });
 
@@ -818,7 +815,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('2');
+      expect(result.current.filteredSessions[0]?.id).toBe('2');
     });
   });
 
@@ -939,7 +936,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('test-1');
+      expect(result.current.filteredSessions[0]?.id).toBe('test-1');
     });
 
     it('does not match when search has leading/trailing whitespace', () => {
@@ -972,7 +969,7 @@ describe('useSessionFilters', () => {
 
       // The search uses includes(), not regex, so . is literal
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('1');
+      expect(result.current.filteredSessions[0]?.id).toBe('1');
     });
 
     it('handles unicode characters in search term', () => {
@@ -989,7 +986,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('2');
+      expect(result.current.filteredSessions[0]?.id).toBe('2');
     });
 
     it('handles non-latin characters in search term', () => {
@@ -1004,7 +1001,7 @@ describe('useSessionFilters', () => {
       );
 
       expect(result.current.filteredSessions).toHaveLength(1);
-      expect(result.current.filteredSessions[0].id).toBe('1');
+      expect(result.current.filteredSessions[0]?.id).toBe('1');
     });
   });
 

@@ -565,7 +565,7 @@ describe('Projects IPC Handlers', () => {
     it('returns null when user cancels dialog', async () => {
       vi.mocked(dialog.showSaveDialog).mockResolvedValue({
         canceled: true,
-        filePath: undefined,
+        filePath: undefined as unknown as string,
       });
 
       const handler = handlers['create-folder'];
@@ -578,7 +578,7 @@ describe('Projects IPC Handlers', () => {
     it('returns null when filePath is undefined', async () => {
       vi.mocked(dialog.showSaveDialog).mockResolvedValue({
         canceled: false,
-        filePath: undefined,
+        filePath: undefined as unknown as string,
       });
 
       const handler = handlers['create-folder'];

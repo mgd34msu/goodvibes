@@ -161,7 +161,7 @@ export function registerDatabaseHandlers(): void {
     const validation = validateInput(createSmartCollectionSchema, data, 'create-smart-collection');
     if (!validation.success) return validation.error;
     const { name, rules, color, icon, matchMode } = validation.data;
-    return collections.createSmartCollection(name, rules as SmartCollectionRule[], color, icon, matchMode);
+    return collections.createSmartCollection(name, rules as unknown as SmartCollectionRule[], color, icon, matchMode);
   }));
 
   ipcMain.handle('get-smart-collection-sessions', withContext('get-smart-collection-sessions', async (_, id: unknown) => {

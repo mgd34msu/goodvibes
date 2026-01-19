@@ -235,6 +235,10 @@ describe('TerminalView', () => {
         sessionId: 'test-session-123',
         cwd: '/test/project',
         firstPrompt: 'Test prompt',
+        messageCount: 5,
+        costUsd: 0.15,
+        startedAt: '2024-01-15T10:00:00Z',
+        lastActive: '2024-01-15T11:00:00Z',
       });
 
       await renderWithProviders(<TerminalView />);
@@ -858,6 +862,10 @@ describe('EmptyState', () => {
       sessionId: 'test-123',
       cwd: '/test/path',
       firstPrompt: 'Write a test for the login component',
+      messageCount: 10,
+      costUsd: 0.25,
+      startedAt: '2024-01-15T10:00:00Z',
+      lastActive: '2024-01-15T11:00:00Z',
     });
 
     await renderWithProviders(

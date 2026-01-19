@@ -311,12 +311,12 @@ describe('MCP Server IPC Handlers', () => {
       const newServer = {
         name: 'My MCP Server',
         description: 'A great server',
-        transport: 'stdio',
+        transport: 'stdio' as const,
         command: 'npx mcp-server',
         url: null,
         args: ['--verbose'],
         env: { DEBUG: 'true' },
-        scope: 'user',
+        scope: 'user' as const,
         projectPath: null,
         enabled: true,
       };
@@ -335,12 +335,12 @@ describe('MCP Server IPC Handlers', () => {
       const newServer = {
         name: 'HTTP MCP Server',
         description: 'HTTP transport server',
-        transport: 'http',
+        transport: 'http' as const,
         command: null,
         url: 'https://mcp.example.com/api',
         args: [],
         env: {},
-        scope: 'user',
+        scope: 'user' as const,
         projectPath: null,
         enabled: true,
       };
@@ -348,7 +348,7 @@ describe('MCP Server IPC Handlers', () => {
       const createdServer = createValidMCPServer({
         ...newServer,
         id: 2,
-        transport: 'http',
+        transport: 'http' as const,
         url: 'https://mcp.example.com/api',
         command: null,
       });
@@ -365,12 +365,12 @@ describe('MCP Server IPC Handlers', () => {
       const newServer = {
         name: 'Project Server',
         description: null,
-        transport: 'stdio',
+        transport: 'stdio' as const,
         command: 'npx server',
         url: null,
         args: [],
         env: {},
-        scope: 'project',
+        scope: 'project' as const,
         projectPath: '/path/to/project',
         enabled: true,
       };
@@ -539,11 +539,11 @@ describe('MCP Server IPC Handlers', () => {
       it('handles empty args array', async () => {
         const server = {
           name: 'Empty Args',
-          transport: 'stdio',
+          transport: 'stdio' as const,
           command: 'npx server',
           args: [],
           env: {},
-          scope: 'user',
+          scope: 'user' as const,
           enabled: true,
         };
 
@@ -559,7 +559,7 @@ describe('MCP Server IPC Handlers', () => {
       it('handles complex env object', async () => {
         const server = {
           name: 'Complex Env',
-          transport: 'stdio',
+          transport: 'stdio' as const,
           command: 'npx server',
           args: [],
           env: {
@@ -567,7 +567,7 @@ describe('MCP Server IPC Handlers', () => {
             DEBUG: 'true',
             NODE_ENV: 'production',
           },
-          scope: 'user',
+          scope: 'user' as const,
           enabled: true,
         };
 
@@ -588,11 +588,11 @@ describe('MCP Server IPC Handlers', () => {
         const server = {
           name: 'Long Desc',
           description: 'x'.repeat(999),
-          transport: 'stdio',
+          transport: 'stdio' as const,
           command: 'npx server',
           args: [],
           env: {},
-          scope: 'user',
+          scope: 'user' as const,
           enabled: true,
         };
 

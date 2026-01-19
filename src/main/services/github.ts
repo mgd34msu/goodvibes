@@ -23,6 +23,14 @@ export {
   getOAuthConfig,
   clearOAuthCredentials,
   clearStoredCredentials,
+  // Device flow exports
+  startDeviceFlow,
+  waitForDeviceFlowCompletion,
+  cancelDeviceFlow,
+  getDeviceFlowState,
+  isDeviceFlowAvailable,
+  authenticateWithDeviceFlow,
+  getDeviceFlowClientId,
 } from './github/index.js';
 
 // Re-export types for backward compatibility

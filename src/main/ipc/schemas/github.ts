@@ -203,3 +203,12 @@ export const githubDeviceFlowOptionsSchema = z.object({
   scopes: z.array(z.string().max(100)).optional(),
   openBrowser: z.boolean().optional(),
 }).optional();
+
+/**
+ * GitHub set custom OAuth credentials schema
+ */
+export const githubSetCustomOAuthSchema = z.object({
+  clientId: z.string().min(1).max(100),
+  clientSecret: z.string().max(100).nullable(),
+  useDeviceFlow: z.boolean(),
+});

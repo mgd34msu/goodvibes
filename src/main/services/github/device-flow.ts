@@ -28,6 +28,7 @@ import {
 } from './types.js';
 import { fetchGitHubUser } from './api.js';
 import { storeTokensAndUser, updateAuthState } from './state.js';
+import { getCustomOAuthCredentials } from './credentials.js';
 import type {
   GitHubDeviceCodeResponse,
   DeviceFlowState,
@@ -113,18 +114,47 @@ export function getDeviceFlowState(): DeviceFlowState {
 // ============================================================================
 
 /**
- * Get the GitHub client ID from environment or use the default.
+ * Get the GitHub client ID for device flow authentication.
+ *
+ * Priority order:
+ * 1. Custom credentials (user-provided via settings)
+ * 2. Environment variables (GITHUB_CLIENT_ID)
+ * 3. Bundled default client ID
+ *
  * Device flow only needs the client ID, not the secret.
  */
 export function getDeviceFlowClientId(): string {
+  // Check custom credentials first (highest priority)
+  const customCreds = getCustomOAuthCredentials();
+  if (customCreds && customCreds.useDeviceFlow) {
+    logger.debug('Using GitHub client ID from custom credentials');
+    return customCreds.clientId;
+  }
+
+  // Check environment variable
   const envClientId = process.env.GITHUB_CLIENT_ID;
   if (envClientId) {
     logger.debug('Using GitHub client ID from environment');
     return envClientId;
   }
 
+  // Fall back to default bundled client ID
   logger.debug('Using default GitHub client ID');
   return DEFAULT_GITHUB_CLIENT_ID;
+}
+
+/**
+ * Check if device flow should be used based on current configuration.
+ * Returns true if custom credentials are set with useDeviceFlow=true,
+ * or if no custom credentials are configured (device flow is the default).
+ */
+export function shouldUseDeviceFlow(): boolean {
+  const customCreds = getCustomOAuthCredentials();
+  if (customCreds) {
+    return customCreds.useDeviceFlow;
+  }
+  // Default to device flow when no custom credentials are set
+  return true;
 }
 
 // ============================================================================

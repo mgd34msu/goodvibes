@@ -421,3 +421,27 @@ export interface DeviceFlowPollResult {
   error?: string;
   shouldRetry?: boolean;
 }
+
+// ============================================================================
+// Custom OAuth Credentials Types
+// ============================================================================
+
+/**
+ * Custom OAuth credentials provided by the user
+ */
+export interface CustomOAuthCredentials {
+  clientId: string;
+  clientSecret: string | null;
+  useDeviceFlow: boolean;
+}
+
+/**
+ * Status of custom OAuth configuration (never exposes the actual secret)
+ */
+export interface CustomOAuthConfigStatus {
+  isConfigured: boolean;
+  source: 'default' | 'custom' | 'environment';
+  clientId: string | null;
+  useDeviceFlow: boolean;
+  hasClientSecret: boolean;
+}

@@ -31,6 +31,11 @@ export {
   isDeviceFlowAvailable,
   authenticateWithDeviceFlow,
   getDeviceFlowClientId,
+  // Custom OAuth credentials
+  setCustomOAuthCredentials,
+  getCustomOAuthCredentials,
+  clearCustomOAuthCredentials,
+  getOAuthConfigStatus,
 } from './github/index.js';
 
 // Re-export types for backward compatibility

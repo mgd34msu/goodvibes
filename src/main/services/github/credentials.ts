@@ -23,6 +23,10 @@ interface GitHubStoreSchema {
   user?: GitHubUser;
   clientId?: string;
   clientSecret?: string;
+  // Custom OAuth credentials (user-provided)
+  customClientId?: string;
+  customClientSecret?: string;
+  customUseDeviceFlow?: boolean;
 }
 
 // Create an encrypted store for GitHub credentials
@@ -39,19 +43,31 @@ export const githubStore = new Store<GitHubStoreSchema>({
 let cachedCredentials: { clientId: string | null; clientSecret: string | null } | null = null;
 
 /**
- * Load OAuth credentials from environment or bundled config.
+ * Load OAuth credentials for authorization code flow (requires client secret).
  *
  * For desktop apps like GoodVibes, embedding OAuth credentials is standard practice.
  * The developer creates ONE GitHub OAuth App for the entire GoodVibes application.
  * End users simply click "Login with GitHub" - zero setup required.
  *
  * Credential loading priority:
- * 1. Environment variables (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)
- * 2. Bundled config file (for production builds)
- * 3. Previously saved user credentials (legacy fallback)
+ * 1. Custom credentials (user-provided via settings) - if not using device flow
+ * 2. Environment variables (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)
+ * 3. Bundled config file (for production builds)
+ * 4. Previously saved user credentials (legacy fallback)
  */
 export function loadOAuthCredentials(): { clientId: string | null; clientSecret: string | null } {
-  // Try environment variables first (development or custom deployment)
+  // Check custom credentials first (highest priority)
+  // Only use custom credentials for auth code flow if they have a secret and are NOT set to use device flow
+  const customClientId = githubStore.get('customClientId');
+  const customClientSecret = githubStore.get('customClientSecret');
+  const customUseDeviceFlow = githubStore.get('customUseDeviceFlow');
+
+  if (customClientId && customClientSecret && !customUseDeviceFlow) {
+    logger.debug('Using custom OAuth credentials for authorization code flow');
+    return { clientId: customClientId, clientSecret: customClientSecret };
+  }
+
+  // Try environment variables (development or custom deployment)
   const envClientId = process.env.GITHUB_CLIENT_ID;
   const envClientSecret = process.env.GITHUB_CLIENT_SECRET;
 
@@ -121,4 +137,118 @@ export function isOAuthConfigured(): boolean {
   // Device flow is always available since we have a hardcoded default client ID
   // This allows GitHub integration to work out of the box without any configuration
   return true;
+}
+
+// ============================================================================
+// CUSTOM OAUTH CREDENTIALS
+// ============================================================================
+
+/**
+ * Set custom OAuth credentials provided by the user.
+ * These take priority over environment variables and bundled config.
+ */
+export function setCustomOAuthCredentials(
+  clientId: string,
+  clientSecret: string | null,
+  useDeviceFlow: boolean
+): void {
+  logger.info('Setting custom OAuth credentials', {
+    clientIdLength: clientId.length,
+    hasClientSecret: !!clientSecret,
+    useDeviceFlow,
+  });
+
+  githubStore.set('customClientId', clientId);
+  if (clientSecret) {
+    githubStore.set('customClientSecret', clientSecret);
+  } else {
+    githubStore.delete('customClientSecret');
+  }
+  githubStore.set('customUseDeviceFlow', useDeviceFlow);
+
+  // Clear the cached credentials so they get reloaded
+  clearCredentialsCache();
+}
+
+/**
+ * Get custom OAuth credentials if configured.
+ * Returns null if no custom credentials are set.
+ */
+export function getCustomOAuthCredentials(): {
+  clientId: string;
+  clientSecret: string | null;
+  useDeviceFlow: boolean;
+} | null {
+  const customClientId = githubStore.get('customClientId');
+
+  if (!customClientId) {
+    return null;
+  }
+
+  return {
+    clientId: customClientId,
+    clientSecret: githubStore.get('customClientSecret') ?? null,
+    useDeviceFlow: githubStore.get('customUseDeviceFlow') ?? true,
+  };
+}
+
+/**
+ * Clear custom OAuth credentials.
+ * After clearing, the system falls back to environment or bundled defaults.
+ */
+export function clearCustomOAuthCredentials(): void {
+  logger.info('Clearing custom OAuth credentials');
+
+  githubStore.delete('customClientId');
+  githubStore.delete('customClientSecret');
+  githubStore.delete('customUseDeviceFlow');
+
+  // Clear the cached credentials so they get reloaded
+  clearCredentialsCache();
+}
+
+/**
+ * Get the current custom OAuth configuration status.
+ * This is safe to expose over IPC as it never returns the actual secret.
+ */
+export function getOAuthConfigStatus(): {
+  isConfigured: boolean;
+  source: 'default' | 'custom' | 'environment';
+  clientId: string | null;
+  useDeviceFlow: boolean;
+  hasClientSecret: boolean;
+} {
+  // Check custom credentials first (highest priority)
+  const customCreds = getCustomOAuthCredentials();
+  if (customCreds) {
+    return {
+      isConfigured: true,
+      source: 'custom',
+      clientId: customCreds.clientId,
+      useDeviceFlow: customCreds.useDeviceFlow,
+      hasClientSecret: !!customCreds.clientSecret,
+    };
+  }
+
+  // Check environment variables
+  const envClientId = process.env.GITHUB_CLIENT_ID;
+  const envClientSecret = process.env.GITHUB_CLIENT_SECRET;
+  if (envClientId) {
+    return {
+      isConfigured: true,
+      source: 'environment',
+      clientId: envClientId,
+      useDeviceFlow: !envClientSecret, // Use device flow if no secret
+      hasClientSecret: !!envClientSecret,
+    };
+  }
+
+  // Default configuration (bundled client ID with device flow)
+  return {
+    isConfigured: true,
+    source: 'default',
+    clientId: null, // Don't expose the default client ID
+    useDeviceFlow: true,
+    hasClientSecret: false,
+  };
 }

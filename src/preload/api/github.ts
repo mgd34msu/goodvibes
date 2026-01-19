@@ -74,6 +74,31 @@ export const githubApi = {
   },
 
   // ============================================================================
+  // CUSTOM OAUTH CREDENTIALS
+  // ============================================================================
+
+  /**
+   * Set custom OAuth credentials.
+   * Use this to configure a custom GitHub OAuth App.
+   */
+  githubSetCustomOAuth: (config: { clientId: string; clientSecret: string | null; useDeviceFlow: boolean }) =>
+    ipcRenderer.invoke('github-set-custom-oauth', config),
+
+  /**
+   * Get the current custom OAuth configuration status.
+   * Never returns the actual client secret, only whether one is configured.
+   */
+  githubGetCustomOAuthStatus: () =>
+    ipcRenderer.invoke('github-get-custom-oauth-status'),
+
+  /**
+   * Clear custom OAuth credentials.
+   * Reverts to using environment variables or the default bundled credentials.
+   */
+  githubClearCustomOAuth: () =>
+    ipcRenderer.invoke('github-clear-custom-oauth'),
+
+  // ============================================================================
   // REPOSITORY OPERATIONS
   // ============================================================================
   githubListRepos: (options?: { sort?: string; direction?: string; per_page?: number; page?: number }) =>

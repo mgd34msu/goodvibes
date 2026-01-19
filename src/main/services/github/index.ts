@@ -3,7 +3,13 @@
 // ============================================================================
 
 // Re-export credentials functions
-export { isOAuthConfigured } from './credentials.js';
+export {
+  isOAuthConfigured,
+  setCustomOAuthCredentials,
+  getCustomOAuthCredentials,
+  clearCustomOAuthCredentials,
+  getOAuthConfigStatus,
+} from './credentials.js';
 
 // Re-export auth functions (includes re-exports from other modules)
 export {

@@ -26,6 +26,7 @@ import {
   githubListBranchesSchema,
   githubRemoteUrlSchema,
   githubDeviceFlowOptionsSchema,
+  githubSetCustomOAuthSchema,
 } from '../schemas/github.js';
 // numericIdSchema import removed - not used in current handlers
 
@@ -150,6 +151,30 @@ export function registerGitHubHandlers(): void {
   ipcMain.handle('github-device-flow-client-id', withContext('github-device-flow-client-id', async () => {
     const github = await import('../../services/github.js');
     return github.getDeviceFlowClientId();
+  }));
+
+  // ============================================================================
+  // CUSTOM OAUTH CREDENTIALS
+  // ============================================================================
+
+  ipcMain.handle('github-set-custom-oauth', withContext('github-set-custom-oauth', async (_, data: unknown) => {
+    const validation = validateInput(githubSetCustomOAuthSchema, data, 'github-set-custom-oauth');
+    if (!validation.success) return validation.error;
+    const { clientId, clientSecret, useDeviceFlow } = validation.data;
+    const credentials = await import('../../services/github/credentials.js');
+    credentials.setCustomOAuthCredentials(clientId, clientSecret, useDeviceFlow);
+    return { success: true };
+  }));
+
+  ipcMain.handle('github-get-custom-oauth-status', withContext('github-get-custom-oauth-status', async () => {
+    const credentials = await import('../../services/github/credentials.js');
+    return credentials.getOAuthConfigStatus();
+  }));
+
+  ipcMain.handle('github-clear-custom-oauth', withContext('github-clear-custom-oauth', async () => {
+    const credentials = await import('../../services/github/credentials.js');
+    credentials.clearCustomOAuthCredentials();
+    return { success: true };
   }));
 
   // ============================================================================

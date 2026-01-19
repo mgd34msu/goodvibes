@@ -3,14 +3,51 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import type { GitHubAuthState, GitHubUser } from '../../../../shared/types/github';
+import type { GitHubAuthState, GitHubUser, CustomOAuthConfigStatus } from '../../../../shared/types/github';
 import { toast } from '../../../stores/toastStore';
 import { createLogger } from '../../../../shared/logger';
 import { DeviceFlowLogin } from '../../github/DeviceFlowLogin';
 
 const logger = createLogger('SettingsView');
 
-export function GitHubConnectionStatus(): React.JSX.Element {
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface GitHubConnectionStatusProps {
+  /** OAuth configuration status passed from parent */
+  oauthStatus?: CustomOAuthConfigStatus | null;
+}
+
+// ============================================================================
+// HELPER COMPONENTS
+// ============================================================================
+
+function CredentialSourceBadge({ source }: { source: CustomOAuthConfigStatus['source'] }) {
+  const labels: Record<CustomOAuthConfigStatus['source'], string> = {
+    default: 'Built-in app',
+    custom: 'Custom OAuth app',
+    environment: 'Environment credentials',
+  };
+
+  const colors: Record<CustomOAuthConfigStatus['source'], string> = {
+    default: 'bg-surface-700 text-surface-400',
+    custom: 'bg-primary-500/15 text-primary-400',
+    environment: 'bg-warning-500/15 text-warning-400',
+  };
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-2xs font-medium ${colors[source]}`}>
+      {labels[source]}
+    </span>
+  );
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+export function GitHubConnectionStatus({ oauthStatus }: GitHubConnectionStatusProps): React.JSX.Element {
   const [authState, setAuthState] = useState<GitHubAuthState>({
     isAuthenticated: false,
     user: null,
@@ -115,9 +152,17 @@ export function GitHubConnectionStatus(): React.JSX.Element {
                   Connected
                 </span>
               </div>
-              {authState.user.name && (
-                <div className="text-xs text-surface-400 mt-0.5">{authState.user.name}</div>
-              )}
+              <div className="flex items-center gap-2 mt-0.5">
+                {authState.user.name && (
+                  <span className="text-xs text-surface-400">{authState.user.name}</span>
+                )}
+                {oauthStatus && (
+                  <>
+                    {authState.user.name && <span className="text-xs text-surface-600">|</span>}
+                    <CredentialSourceBadge source={oauthStatus.source} />
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -141,7 +186,10 @@ export function GitHubConnectionStatus(): React.JSX.Element {
             <GitHubIcon className="w-5 h-5 text-surface-400" />
           </div>
           <div>
-            <div className="text-sm font-medium text-surface-200">GitHub Connection</div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-surface-200">GitHub Connection</span>
+              {oauthStatus && <CredentialSourceBadge source={oauthStatus.source} />}
+            </div>
             <div className="text-xs text-surface-500 mt-0.5">Connect to access pull requests, issues, and CI status</div>
           </div>
         </div>

@@ -257,7 +257,8 @@ describe('Security edge cases', () => {
   });
 
   describe('contextMenuOptionsSchema rejects prototype pollution', () => {
-    const pollutionAttempts = [
+    // Type annotation to avoid TypeScript's strict literal inference
+    const pollutionAttempts: Array<Record<string, unknown>> = [
       { __proto__: { isAdmin: true }, hasSelection: true, isEditable: true },
       { constructor: { prototype: {} }, hasSelection: true, isEditable: true },
       { prototype: {}, hasSelection: true, isEditable: true },

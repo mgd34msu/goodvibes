@@ -14,7 +14,6 @@ import {
   slugSchema,
   categoryPathSchema,
   searchQuerySchema,
-  paginationLimitSchema,
   prioritySchema,
   agencyInitConfigSchema,
   searchAgentsSchema,
@@ -26,6 +25,7 @@ import {
   contextInjectionSchema,
   workingDirectorySchema,
 } from './agency.js';
+import { paginationLimitSchema } from './primitives.js';
 
 // ============================================================================
 // ENTITY TYPE SCHEMA TESTS

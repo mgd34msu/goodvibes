@@ -194,7 +194,7 @@ describe('filePathSchema', () => {
     ];
 
     nullBytePaths.forEach((path) => {
-      it(`rejects null byte in: "${path.replace(/\x00/g, '\\x00')}"`, () => {
+      it(`rejects null byte in: "${path.split('\x00').join('\\x00')}"`, () => {
         expect(filePathSchema.safeParse(path).success).toBe(false);
       });
     });
@@ -484,7 +484,7 @@ describe('isPathSafe', () => {
     ];
 
     dangerousPaths.forEach((path) => {
-      it(`isPathSafe("${path.replace(/\x00/g, '\\x00')}") === false`, () => {
+      it(`isPathSafe("${path.split('\x00').join('\\x00')}") === false`, () => {
         expect(isPathSafe(path)).toBe(false);
       });
     });

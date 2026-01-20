@@ -584,7 +584,7 @@ describe('Hook Handlers', () => {
 
       // Simulate parent being on stack
       (context.getCurrentParentSession as ReturnType<typeof vi.fn>).mockReturnValue('parent-session');
-      mockFindAgentBySession.mockReturnValue(mockAgents.get('parent-agent'));
+      mockFindAgentBySession.mockReturnValue(mockAgents.get('parent-agent') ?? null);
 
       const handler = handlers.get('SubagentStart')!;
       const payload = createMockPayload({
@@ -619,7 +619,7 @@ describe('Hook Handlers', () => {
 
       mockFindAgentBySession.mockImplementation((sessionId) => {
         if (sessionId === 'explicit-parent-session') {
-          return mockAgents.get('explicit-parent');
+          return mockAgents.get('explicit-parent') ?? null;
         }
         return null;
       });
@@ -721,7 +721,7 @@ describe('Hook Handlers', () => {
         sessionPath: 'stopping-agent',
       });
 
-      mockGetAgent.mockReturnValue(mockAgents.get('stopping-agent'));
+      mockGetAgent.mockReturnValue(mockAgents.get('stopping-agent') ?? null);
 
       const handler = handlers.get('SubagentStop')!;
       const payload = createMockPayload({
@@ -761,7 +761,7 @@ describe('Hook Handlers', () => {
       });
 
       mockGetAgent.mockReturnValue(null);
-      mockFindAgentBySession.mockReturnValue(mockAgents.get('session-lookup-agent'));
+      mockFindAgentBySession.mockReturnValue(mockAgents.get('session-lookup-agent') ?? null);
 
       const handler = handlers.get('SubagentStop')!;
       const payload = createMockPayload({

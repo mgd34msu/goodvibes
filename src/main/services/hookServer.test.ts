@@ -198,10 +198,11 @@ describe('Hook Server Types', () => {
 
     it('should handle numeric values', () => {
       // Using tool_response which is an actual payload field that can contain numbers
-      const payload: HookPayload = {
+      // Cast to unknown first to bypass strict type checking for test flexibility
+      const payload = {
         hook_event_name: 'PostToolUse',
-        toolResponse: { exitCode: 2 },
-      };
+        toolResponse: { exitCode: 2, success: true, content: '' },
+      } as unknown as HookPayload;
 
       const result = getPayloadValue<{ exitCode: number }>(payload, 'tool_response', 'toolResponse');
       expect(result?.exitCode).toBe(2);
@@ -211,7 +212,7 @@ describe('Hook Server Types', () => {
       // Using a valid payload structure
       const payload: HookPayload = {
         hook_event_name: 'PostToolUse',
-        toolResponse: { success: true },
+        toolResponse: { success: true, content: '' },
       };
 
       const result = getPayloadValue<{ success: boolean }>(payload, 'tool_response', 'toolResponse');
@@ -220,10 +221,11 @@ describe('Hook Server Types', () => {
 
     it('should handle array values', () => {
       // Using a valid payload structure
-      const payload: HookPayload = {
+      // Cast to unknown first to bypass strict type checking for test flexibility
+      const payload = {
         hook_event_name: 'PostToolUse',
-        toolResponse: { files: ['file1.ts', 'file2.ts'] },
-      };
+        toolResponse: { files: ['file1.ts', 'file2.ts'], success: true, content: '' },
+      } as unknown as HookPayload;
 
       const result = getPayloadValue<{ files: string[] }>(payload, 'tool_response', 'toolResponse');
       expect(result?.files).toEqual(['file1.ts', 'file2.ts']);

@@ -155,7 +155,7 @@ export function validateCommandArguments(args: string[]): ValidationResult {
  * Allowlist of commands that are safe to execute for specific purposes.
  * This provides defense-in-depth by limiting what can be executed.
  */
-const ALLOWED_COMMANDS: Record<string, string[]> = {
+export const ALLOWED_COMMANDS: Record<string, string[]> = {
   // Commands for checking if executables exist
   existence_check: ['where', 'which'],
   // Git operations

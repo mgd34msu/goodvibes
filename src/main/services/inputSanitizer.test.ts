@@ -216,7 +216,7 @@ describe('validatePath', () => {
     ];
 
     dangerousPaths.forEach((p) => {
-      it(`rejects "${p.replace(/\x00/g, '\\x00')}"`, () => {
+      it(`rejects "${p.split('\x00').join('\\x00')}"`, () => {
         const result = validatePath(p);
         expect(result.valid).toBe(false);
       });

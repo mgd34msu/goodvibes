@@ -255,13 +255,14 @@ async function pollForToken(
           // User hasn't authorized yet, keep polling
           return { tokens: null, error: null, shouldRetry: true };
 
-        case 'slow_down':
+        case 'slow_down': {
           // GitHub is asking us to slow down, increase interval
           const newInterval = data.interval
             ? data.interval * 1000
             : DEVICE_FLOW_MIN_POLL_INTERVAL_MS * 2;
           logger.debug('GitHub requested slow down', { newInterval });
           return { tokens: null, error: null, shouldRetry: true, newInterval };
+        }
 
         case 'expired_token':
           // Device code has expired

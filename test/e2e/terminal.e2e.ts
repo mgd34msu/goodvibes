@@ -11,6 +11,10 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ============================================================================
 // TEST SETUP
@@ -20,10 +24,11 @@ let electronApp: ElectronApplication;
 let mainWindow: Page;
 
 test.beforeAll(async () => {
-  const appPath = path.join(__dirname, '../../');
+  // Launch Electron app - pass the main entry point directly
+  const mainPath = path.join(__dirname, '../../out/main/index.js');
 
   electronApp = await electron.launch({
-    args: [appPath],
+    args: [mainPath],
     env: {
       ...process.env,
       NODE_ENV: 'test',
@@ -33,12 +38,8 @@ test.beforeAll(async () => {
   mainWindow = await electronApp.firstWindow();
   await mainWindow.waitForLoadState('domcontentloaded');
 
-  // Navigate to Terminal view (should be default)
-  const terminalNav = mainWindow.locator('text=Terminal').first();
-  if (await terminalNav.isVisible()) {
-    await terminalNav.click();
-    await mainWindow.waitForTimeout(500);
-  }
+  // Terminal view is the default view - no navigation needed
+  await mainWindow.waitForTimeout(500);
 });
 
 test.afterAll(async () => {
@@ -52,31 +53,52 @@ test.afterAll(async () => {
 // ============================================================================
 
 test.describe('Terminal View Structure', () => {
+  test.beforeEach(async () => {
+    // Close any open dialogs before each test
+    await mainWindow.keyboard.press('Escape');
+    await mainWindow.waitForTimeout(200);
+  });
+
   test('should display terminal view with proper structure', async () => {
     // Terminal view should have a recognizable structure
     const rootElement = mainWindow.locator('#root');
     await expect(rootElement).toBeVisible();
 
-    // Should have either terminal content or empty state
-    const hasTerminalElements = await mainWindow.locator('[class*="terminal"], [class*="Terminal"], [class*="xterm"], canvas').count();
-    const hasEmptyState = await mainWindow.locator('text=New Session, text=Welcome, text=Get started').count();
+    // Should have either terminal content (xterm), or welcome state with action buttons
+    const hasTerminalElements = await mainWindow.locator('[class*="xterm"], canvas').count();
+    const hasWelcomeState = await mainWindow.locator('text=Welcome to GoodVibes').count();
+    const hasActionButtons = await mainWindow.locator('button:has-text("Start new Claude Code session"), button:has-text("Open new terminal")').count();
 
-    // Either terminal content or empty state should exist
-    expect(hasTerminalElements + hasEmptyState).toBeGreaterThan(0);
+    // Either terminal content or welcome state with actions should exist
+    expect(hasTerminalElements + hasWelcomeState + hasActionButtons).toBeGreaterThan(0);
   });
 
   test('should display header with tab bar area', async () => {
-    // Look for header/tab area structure
-    const headerArea = mainWindow.locator('[role="tablist"], [class*="tab"], [class*="header"]').first();
-    const hasHeader = await headerArea.isVisible().catch(() => false);
+    // The terminal header contains the tab bar and New button
+    // The tablist might be empty (zero width) when there are no tabs
+    // So we check for either the tablist OR the New button which is always visible
 
-    // Should have some header structure
-    expect(hasHeader).toBe(true);
+    // Wait for the UI to stabilize
+    await mainWindow.waitForTimeout(500);
+
+    // Check if the tablist element exists in the DOM (even if not visible due to being empty)
+    const tabListExists = await mainWindow.locator('[role="tablist"]').count() > 0;
+
+    // The New button should always be visible in the header area
+    const newButton = mainWindow.locator('button').filter({ hasText: 'New' }).first();
+    const hasNewButton = await newButton.isVisible().catch(() => false);
+
+    // Either the tablist exists in DOM or the New button is visible
+    // This confirms the terminal header area is present
+    expect(tabListExists || hasNewButton).toBe(true);
   });
 
   test('should have new terminal button accessible', async () => {
-    // Look for new terminal button with various selectors
-    const newButton = mainWindow.locator('button[title*="New"], button[aria-label*="New"], button:has(svg), [title*="Terminal"]').first();
+    // New button is in the tab area - it has text "New"
+    const newButton = mainWindow.locator('button').filter({ hasText: 'New' }).first();
+
+    // Wait for button to be visible
+    await newButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
     const hasNewButton = await newButton.isVisible().catch(() => false);
 
     // New terminal button should be accessible
@@ -84,9 +106,9 @@ test.describe('Terminal View Structure', () => {
   });
 
   test('should have footer with zoom controls', async () => {
-    // Look for footer/zoom area
-    const zoomControls = mainWindow.locator('text=%, button:has-text("+"), button:has-text("-")');
-    const hasZoomControls = await zoomControls.first().isVisible().catch(() => false);
+    // Zoom controls are in a group with aria-label="Zoom controls"
+    const zoomControls = mainWindow.getByRole('group', { name: 'Zoom controls' });
+    const hasZoomControls = await zoomControls.isVisible().catch(() => false);
 
     // Zoom controls should be visible
     expect(hasZoomControls).toBe(true);
@@ -281,23 +303,23 @@ test.describe('Terminal Interaction', () => {
 
 test.describe('Empty State', () => {
   test('should show meaningful empty state or terminal content', async () => {
-    // Either we have terminals or empty state
-    const emptyState = mainWindow.locator('text=New Session, text=Welcome, text=Get started, text=no terminals');
+    // Either we have terminals or welcome state with "Welcome to GoodVibes"
+    const welcomeHeading = mainWindow.locator('text=Welcome to GoodVibes');
     const terminalContent = mainWindow.locator('[class*="xterm"], canvas');
 
-    const hasEmptyState = await emptyState.first().isVisible().catch(() => false);
+    const hasWelcome = await welcomeHeading.isVisible().catch(() => false);
     const hasTerminal = await terminalContent.first().isVisible().catch(() => false);
 
     // One of these must exist
-    expect(hasEmptyState || hasTerminal).toBe(true);
+    expect(hasWelcome || hasTerminal).toBe(true);
   });
 
   test('should have action button in empty state', async () => {
-    const emptyState = mainWindow.locator('text=New Session, text=Welcome').first();
+    const welcomeHeading = mainWindow.locator('text=Welcome to GoodVibes');
 
-    if (await emptyState.isVisible()) {
-      // Empty state should have an action button
-      const actionButton = mainWindow.locator('button:has-text("New"), button:has-text("Session"), button:has-text("Start")').first();
+    if (await welcomeHeading.isVisible()) {
+      // Empty state should have action buttons like "Start new Claude Code session"
+      const actionButton = mainWindow.getByRole('button', { name: 'Start new Claude Code session' });
       const hasActionButton = await actionButton.isVisible().catch(() => false);
 
       expect(hasActionButton).toBe(true);
@@ -315,17 +337,36 @@ test.describe('Empty State', () => {
 // ============================================================================
 
 test.describe('Zoom Controls', () => {
-  test('should display current zoom level', async () => {
-    // Look for zoom percentage display
-    const zoomDisplay = mainWindow.locator('text=%, span:has-text("%")').first();
-    const hasZoomDisplay = await zoomDisplay.isVisible().catch(() => false);
+  test.beforeEach(async () => {
+    // Close any open dialogs before each test
+    // First try to click the Cancel button if the folder picker is open
+    const cancelButton = mainWindow.getByRole('button', { name: 'Cancel' });
+    if (await cancelButton.isVisible().catch(() => false)) {
+      await cancelButton.click();
+      await mainWindow.waitForTimeout(200);
+    }
+    // Also press Escape as a fallback
+    await mainWindow.keyboard.press('Escape');
+    await mainWindow.waitForTimeout(200);
+  });
 
+  test('should display current zoom level', async () => {
+    // Zoom controls are in a group with aria-label="Zoom controls"
+    // The zoom level is displayed as "100%" text
+    const zoomGroup = mainWindow.getByRole('group', { name: 'Zoom controls' });
+    const hasZoomGroup = await zoomGroup.isVisible().catch(() => false);
+    expect(hasZoomGroup).toBe(true);
+
+    // Within the group, there should be a percentage display
+    const zoomDisplay = zoomGroup.locator('text=/\\d+%/');
+    const hasZoomDisplay = await zoomDisplay.isVisible().catch(() => false);
     expect(hasZoomDisplay).toBe(true);
   });
 
   test('should zoom in with plus button', async () => {
-    const zoomInButton = mainWindow.locator('button:has-text("+")').first();
-    const zoomDisplay = mainWindow.locator('text=/\\d+%/').first();
+    const zoomGroup = mainWindow.getByRole('group', { name: 'Zoom controls' });
+    const zoomInButton = mainWindow.getByRole('button', { name: 'Zoom in' });
+    const zoomDisplay = zoomGroup.locator('text=/\\d+%/');
 
     if (await zoomInButton.isVisible() && await zoomDisplay.isVisible()) {
       const initialZoom = await zoomDisplay.textContent();
@@ -341,9 +382,9 @@ test.describe('Zoom Controls', () => {
         const newNum = parseInt(newZoom.replace('%', ''));
         expect(newNum).toBeGreaterThan(initialNum);
 
-        // Reset zoom
-        const resetButton = mainWindow.locator('button:has-text("Reset")').first();
-        if (await resetButton.isVisible()) {
+        // Reset zoom using proper selector
+        const resetButton = mainWindow.getByRole('button', { name: /Reset zoom/ });
+        if (await resetButton.isVisible().catch(() => false)) {
           await resetButton.click();
         }
       }
@@ -351,8 +392,9 @@ test.describe('Zoom Controls', () => {
   });
 
   test('should zoom out with minus button', async () => {
-    const zoomOutButton = mainWindow.locator('button:has-text("-")').first();
-    const zoomDisplay = mainWindow.locator('text=/\\d+%/').first();
+    const zoomGroup = mainWindow.getByRole('group', { name: 'Zoom controls' });
+    const zoomOutButton = mainWindow.getByRole('button', { name: 'Zoom out' });
+    const zoomDisplay = zoomGroup.locator('text=/\\d+%/');
 
     if (await zoomOutButton.isVisible() && await zoomDisplay.isVisible()) {
       const initialZoom = await zoomDisplay.textContent();
@@ -368,9 +410,9 @@ test.describe('Zoom Controls', () => {
         const newNum = parseInt(newZoom.replace('%', ''));
         expect(newNum).toBeLessThan(initialNum);
 
-        // Reset zoom
-        const resetButton = mainWindow.locator('button:has-text("Reset")').first();
-        if (await resetButton.isVisible()) {
+        // Reset zoom using proper selector
+        const resetButton = mainWindow.getByRole('button', { name: /Reset zoom/ });
+        if (await resetButton.isVisible().catch(() => false)) {
           await resetButton.click();
         }
       }
@@ -378,18 +420,19 @@ test.describe('Zoom Controls', () => {
   });
 
   test('should reset zoom with Reset button', async () => {
-    const resetButton = mainWindow.locator('button:has-text("Reset")').first();
-    const zoomDisplay = mainWindow.locator('text=/\\d+%/').first();
+    const zoomGroup = mainWindow.getByRole('group', { name: 'Zoom controls' });
+    const resetButton = mainWindow.getByRole('button', { name: /Reset zoom/ });
+    const zoomDisplay = zoomGroup.locator('text=/\\d+%/');
+    const zoomInButton = mainWindow.getByRole('button', { name: 'Zoom in' });
 
-    if (await resetButton.isVisible() && await zoomDisplay.isVisible()) {
-      // First change zoom
-      const zoomInButton = mainWindow.locator('button:has-text("+")').first();
-      if (await zoomInButton.isVisible()) {
-        await zoomInButton.click();
-        await mainWindow.waitForTimeout(100);
-      }
+    // First change zoom to not be at 100%
+    if (await zoomInButton.isVisible()) {
+      await zoomInButton.click();
+      await mainWindow.waitForTimeout(100);
+    }
 
-      // Then reset
+    // Then reset if the reset button is enabled
+    if (await resetButton.isVisible() && await resetButton.isEnabled().catch(() => false)) {
       await resetButton.click();
       await mainWindow.waitForTimeout(200);
 

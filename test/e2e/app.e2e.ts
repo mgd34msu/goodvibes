@@ -11,6 +11,59 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Navigation dropdown mapping - views are inside these dropdown menus
+const VIEW_TO_DROPDOWN: Record<string, string> = {
+  Terminal: 'Code',
+  Sessions: 'Code',
+  Memory: 'Features',
+  Agents: 'Features',
+  Skills: 'Features',
+  Commands: 'Features',
+  Hooks: 'Features',
+  MCP: 'Features',
+  Plugins: 'Features',
+  Knowledge: 'Organize',
+  Tasks: 'Organize',
+  Analytics: 'System',
+  Projects: 'System',
+  Settings: 'System',
+};
+
+// Helper to navigate to a view using dropdown menus
+async function navigateToView(page: Page, viewName: string): Promise<boolean> {
+  const dropdownName = VIEW_TO_DROPDOWN[viewName];
+  if (!dropdownName) return false;
+
+  try {
+    // Close any open dialogs first
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+
+    // Click the dropdown button
+    const dropdownBtn = page.getByRole('button', { name: dropdownName });
+    if (!await dropdownBtn.isVisible()) return false;
+    await dropdownBtn.click();
+    await page.waitForTimeout(200);
+
+    // Click the view menuitem
+    const menuItem = page.getByRole('menuitem', { name: viewName });
+    if (await menuItem.isVisible()) {
+      await menuItem.click();
+      await page.waitForTimeout(200);
+      return true;
+    }
+    // Close dropdown if item not found
+    await page.keyboard.press('Escape');
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 // ============================================================================
 // TEST SETUP
@@ -20,11 +73,11 @@ let electronApp: ElectronApplication;
 let mainWindow: Page;
 
 test.beforeAll(async () => {
-  // Launch Electron app
-  const appPath = path.join(__dirname, '../../');
+  // Launch Electron app - pass the main entry point directly
+  const mainPath = path.join(__dirname, '../../out/main/index.js');
 
   electronApp = await electron.launch({
-    args: [appPath],
+    args: [mainPath],
     env: {
       ...process.env,
       NODE_ENV: 'test',
@@ -83,17 +136,20 @@ test.describe('Window Management', () => {
 
 test.describe('Navigation', () => {
   test('should display navigation sidebar with expected items', async () => {
-    // Look for navigation elements - should have Terminal, Sessions, Settings at minimum
-    const terminalNav = mainWindow.locator('text=Terminal').first();
-    const sessionsNav = mainWindow.locator('text=Sessions').first();
-    const settingsNav = mainWindow.locator('text=Settings').first();
+    // Navigation uses dropdown buttons: Code, Features, Organize, System
+    // These contain the actual views in dropdown menus
+    const codeNav = mainWindow.getByRole('button', { name: 'Code' });
+    const featuresNav = mainWindow.getByRole('button', { name: 'Features' });
+    const organizeNav = mainWindow.getByRole('button', { name: 'Organize' });
+    const systemNav = mainWindow.getByRole('button', { name: 'System' });
 
-    // At least one navigation item should be visible
-    const hasTerminal = await terminalNav.isVisible().catch(() => false);
-    const hasSessions = await sessionsNav.isVisible().catch(() => false);
-    const hasSettings = await settingsNav.isVisible().catch(() => false);
+    // At least one navigation dropdown should be visible
+    const hasCode = await codeNav.isVisible().catch(() => false);
+    const hasFeatures = await featuresNav.isVisible().catch(() => false);
+    const hasOrganize = await organizeNav.isVisible().catch(() => false);
+    const hasSystem = await systemNav.isVisible().catch(() => false);
 
-    expect(hasTerminal || hasSessions || hasSettings).toBe(true);
+    expect(hasCode || hasFeatures || hasOrganize || hasSystem).toBe(true);
   });
 
   test('should navigate to Sessions view and display session content', async () => {
@@ -216,19 +272,13 @@ test.describe('Keyboard Shortcuts', () => {
 
 test.describe('Application State', () => {
   test('should preserve app state across navigation without data loss', async () => {
-    // Navigate to sessions
-    const sessionsNav = mainWindow.locator('text=Sessions').first();
-    if (await sessionsNav.isVisible()) {
-      await sessionsNav.click();
-      await mainWindow.waitForTimeout(300);
-    }
+    // Navigate to sessions using dropdown
+    await navigateToView(mainWindow, 'Sessions');
+    await mainWindow.waitForTimeout(300);
 
-    // Navigate to terminal
-    const terminalNav = mainWindow.locator('text=Terminal').first();
-    if (await terminalNav.isVisible()) {
-      await terminalNav.click();
-      await mainWindow.waitForTimeout(300);
-    }
+    // Navigate to terminal using dropdown
+    await navigateToView(mainWindow, 'Terminal');
+    await mainWindow.waitForTimeout(300);
 
     // App should still be responsive
     const isVisible = await mainWindow.isVisible('body');
@@ -265,15 +315,13 @@ test.describe('Application State', () => {
     isVisible = await mainWindow.isVisible('body');
     expect(isVisible).toBe(true);
 
-    // Navigation should still work after resize
-    const settingsNav = mainWindow.locator('text=Settings').first();
-    if (await settingsNav.isVisible()) {
-      await settingsNav.click();
-      await mainWindow.waitForTimeout(200);
+    // Navigation should still work after resize - use dropdown navigation
+    await navigateToView(mainWindow, 'Settings');
+    await mainWindow.waitForTimeout(200);
 
-      const hasSettingsContent = await mainWindow.locator('text=Appearance, text=Theme').first().isVisible().catch(() => false);
-      expect(hasSettingsContent).toBe(true);
-    }
+    // Check if settings content is visible (Theme label or Appearance section)
+    const hasSettingsContent = await mainWindow.locator('text=Theme').first().isVisible().catch(() => false);
+    expect(hasSettingsContent).toBe(true);
 
     // Restore original window size
     await window.evaluate((win, bounds) => {
@@ -282,25 +330,16 @@ test.describe('Application State', () => {
   });
 
   test('should not have memory leaks from repeated navigation', async () => {
-    // Navigate multiple times to check for stability
+    // Navigate multiple times to check for stability using dropdown navigation
     for (let i = 0; i < 5; i++) {
-      const sessionsNav = mainWindow.locator('text=Sessions').first();
-      if (await sessionsNav.isVisible()) {
-        await sessionsNav.click();
-        await mainWindow.waitForTimeout(100);
-      }
+      await navigateToView(mainWindow, 'Sessions');
+      await mainWindow.waitForTimeout(100);
 
-      const terminalNav = mainWindow.locator('text=Terminal').first();
-      if (await terminalNav.isVisible()) {
-        await terminalNav.click();
-        await mainWindow.waitForTimeout(100);
-      }
+      await navigateToView(mainWindow, 'Terminal');
+      await mainWindow.waitForTimeout(100);
 
-      const settingsNav = mainWindow.locator('text=Settings').first();
-      if (await settingsNav.isVisible()) {
-        await settingsNav.click();
-        await mainWindow.waitForTimeout(100);
-      }
+      await navigateToView(mainWindow, 'Settings');
+      await mainWindow.waitForTimeout(100);
     }
 
     // App should still be responsive after repeated navigation

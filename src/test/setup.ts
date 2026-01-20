@@ -165,6 +165,13 @@ const mockGoodVibesAPI = {
     source: 'none',
     clientId: null,
   }),
+  githubGetCustomOAuthStatus: vi.fn().mockResolvedValue({
+    isConfigured: true,
+    source: 'default',
+    clientId: null,
+    useDeviceFlow: true,
+    hasClientSecret: false,
+  }),
   // GitHub Device Flow
   githubDeviceFlowStart: vi.fn().mockResolvedValue({
     success: true,

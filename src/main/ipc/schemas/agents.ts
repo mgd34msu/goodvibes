@@ -6,6 +6,18 @@ import { z } from 'zod';
 import { numericIdSchema, filePathSchema, sessionIdSchema } from './primitives.js';
 
 // ============================================================================
+// HELPER - Transform undefined to null for DB compatibility
+// ============================================================================
+
+/**
+ * Helper to create a nullable field that transforms undefined to null.
+ * This ensures Zod output types match DB types (T | null) instead of (T | null | undefined).
+ */
+function nullableField<T extends z.ZodTypeAny>(schema: T) {
+  return schema.nullable().optional().transform((v) => v ?? null);
+}
+
+// ============================================================================
 // MCP SERVER SCHEMAS
 // ============================================================================
 
@@ -30,14 +42,14 @@ export const mcpStatusSchema = z.enum(['connected', 'disconnected', 'error', 'un
  */
 const mcpServerBaseSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  description: z.string().max(1000, 'Description too long').nullable().optional(),
+  description: nullableField(z.string().max(1000, 'Description too long')),
   transport: mcpTransportSchema,
-  command: z.string().max(1000, 'Command too long').nullable().optional(),
-  url: z.string().url('Invalid URL format').max(2000, 'URL too long').nullable().optional(),
+  command: nullableField(z.string().max(1000, 'Command too long')),
+  url: nullableField(z.string().url('Invalid URL format').max(2000, 'URL too long')),
   args: z.array(z.string().max(1000, 'Argument too long')).default([]),
   env: z.record(z.string(), z.string()).default({}),
   scope: mcpScopeSchema.default('user'),
-  projectPath: filePathSchema.nullable().optional(),
+  projectPath: nullableField(filePathSchema),
   enabled: z.boolean(),
 });
 
@@ -92,15 +104,15 @@ export const permissionModeSchema = z.enum(['default', 'plan', 'bypassPermission
 export const createAgentTemplateSchema = z.object({
   id: z.string().min(1, 'ID is required').max(100, 'ID too long'),
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  description: z.string().max(5000, 'Description too long').nullable().optional(),
-  cwd: z.string().max(1000, 'CWD too long').nullable().optional(),
-  initialPrompt: z.string().max(100000, 'Initial prompt too long').nullable().optional(),
-  claudeMdContent: z.string().max(500000, 'Claude MD content too long').nullable().optional(),
+  description: nullableField(z.string().max(5000, 'Description too long')),
+  cwd: nullableField(z.string().max(1000, 'CWD too long')),
+  initialPrompt: nullableField(z.string().max(100000, 'Initial prompt too long')),
+  claudeMdContent: nullableField(z.string().max(500000, 'Claude MD content too long')),
   flags: z.array(z.string().max(200)).default([]),
-  model: z.string().max(100, 'Model name too long').nullable().optional(),
-  permissionMode: permissionModeSchema.nullable().optional(),
-  allowedTools: z.array(z.string().max(200)).nullable().optional(),
-  deniedTools: z.array(z.string().max(200)).nullable().optional(),
+  model: nullableField(z.string().max(100, 'Model name too long')),
+  permissionMode: nullableField(permissionModeSchema),
+  allowedTools: nullableField(z.array(z.string().max(200))),
+  deniedTools: nullableField(z.array(z.string().max(200))),
 });
 
 /**
@@ -116,32 +128,49 @@ export const updateAgentTemplateSchema = z.object({
 // ============================================================================
 
 /**
+ * Project hook event type schema - matches HookEventType from primitives/types
+ */
+export const projectHookEventTypeSchema = z.enum([
+  'PreToolUse',
+  'PostToolUse',
+  'SessionStart',
+  'SessionEnd',
+  'Notification',
+  'Stop',
+]);
+
+/**
+ * Hook config schema - matches HookConfig
+ */
+export const hookConfigSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string(),
+  eventType: projectHookEventTypeSchema,
+  matcher: nullableField(z.string()),
+  command: z.string(),
+  timeout: z.number().int().positive(),
+  enabled: z.boolean(),
+  scope: z.enum(['user', 'project']),
+  projectPath: nullableField(z.string()),
+  executionCount: z.number().int().nonnegative(),
+  lastExecuted: nullableField(z.string()),
+  lastResult: nullableField(z.enum(['success', 'failure', 'timeout'])),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  hookType: z.enum(['command', 'prompt']),
+  prompt: nullableField(z.string()),
+});
+
+/**
  * Project config creation schema - matches Omit<ProjectConfig, 'createdAt' | 'updatedAt'>
  */
 export const createProjectConfigSchema = z.object({
   projectPath: filePathSchema,
-  defaultTemplateId: z.string().max(100, 'Template ID too long').nullable().optional(),
+  defaultTemplateId: nullableField(z.string().max(100, 'Template ID too long')),
   settings: z.record(z.string(), z.unknown()).default({}),
-  hooks: z.array(z.object({
-    id: z.number().int().positive(),
-    name: z.string(),
-    eventType: z.string(),
-    matcher: z.string().nullable().optional(),
-    command: z.string(),
-    timeout: z.number().int().positive(),
-    enabled: z.boolean(),
-    scope: z.enum(['user', 'project']),
-    projectPath: z.string().nullable().optional(),
-    executionCount: z.number().int().nonnegative(),
-    lastExecuted: z.string().nullable().optional(),
-    lastResult: z.enum(['success', 'failure', 'timeout']).nullable().optional(),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-    hookType: z.enum(['command', 'prompt']),
-    prompt: z.string().nullable().optional(),
-  })).default([]),
+  hooks: z.array(hookConfigSchema).default([]),
   mcpServers: z.array(z.string()).default([]),
-  claudeMdOverride: z.string().max(500000, 'Claude MD override too long').nullable().optional(),
+  claudeMdOverride: nullableField(z.string().max(500000, 'Claude MD override too long')),
 });
 
 /**
@@ -175,13 +204,13 @@ export const agentStatusSchema = z.enum([
 export const createAgentRegistryEntrySchema = z.object({
   id: z.string().min(1, 'ID is required').max(100, 'ID too long'),
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  pid: z.number().int().positive().nullable().optional(),
+  pid: nullableField(z.number().int().positive()),
   cwd: z.string().min(1, 'CWD is required').max(1000, 'CWD too long'),
-  parentId: z.string().max(100, 'Parent ID too long').nullable().optional(),
-  templateId: z.string().max(100, 'Template ID too long').nullable().optional(),
+  parentId: nullableField(z.string().max(100, 'Parent ID too long')),
+  templateId: nullableField(z.string().max(100, 'Template ID too long')),
   status: agentStatusSchema,
-  sessionPath: z.string().max(1000, 'Session path too long').nullable().optional(),
-  initialPrompt: z.string().max(100000, 'Initial prompt too long').nullable().optional(),
+  sessionPath: nullableField(z.string().max(1000, 'Session path too long')),
+  initialPrompt: nullableField(z.string().max(100000, 'Initial prompt too long')),
 });
 
 /**
@@ -204,11 +233,11 @@ export const updateAgentRegistryEntrySchema = z.object({
  */
 export const createSkillSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  description: z.string().max(5000, 'Description too long').nullable().optional(),
+  description: nullableField(z.string().max(5000, 'Description too long')),
   content: z.string().min(1, 'Content is required').max(500000, 'Content too long'),
-  allowedTools: z.array(z.string().max(200)).nullable().optional(),
+  allowedTools: nullableField(z.array(z.string().max(200))),
   scope: mcpScopeSchema.default('user'),
-  projectPath: z.string().max(1000, 'Project path too long').nullable().optional(),
+  projectPath: nullableField(z.string().max(1000, 'Project path too long')),
 });
 
 /**
@@ -228,10 +257,10 @@ export const updateSkillSchema = z.object({
  */
 export const createTaskDefinitionSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  description: z.string().max(5000, 'Description too long').nullable().optional(),
-  templateId: z.string().max(100, 'Template ID too long').nullable().optional(),
+  description: nullableField(z.string().max(5000, 'Description too long')),
+  templateId: nullableField(z.string().max(100, 'Template ID too long')),
   prompt: z.string().min(1, 'Prompt is required').max(100000, 'Prompt too long'),
-  schedule: z.string().max(200, 'Schedule too long').nullable().optional(), // cron expression
+  schedule: nullableField(z.string().max(200, 'Schedule too long')), // cron expression
   enabled: z.boolean(),
 });
 
@@ -252,13 +281,13 @@ export const updateTaskDefinitionSchema = z.object({
  */
 export const createSessionAnalyticsSchema = z.object({
   sessionId: sessionIdSchema,
-  successScore: z.number().min(0).max(1).nullable().optional(),
+  successScore: nullableField(z.number().min(0).max(1)),
   iterationCount: z.number().int().nonnegative().optional(),
-  toolEfficiency: z.number().min(0).max(1).nullable().optional(),
-  contextUsagePeak: z.number().int().nonnegative().nullable().optional(),
-  estimatedRoi: z.number().nullable().optional(),
+  toolEfficiency: nullableField(z.number().min(0).max(1)),
+  contextUsagePeak: nullableField(z.number().int().nonnegative()),
+  estimatedRoi: nullableField(z.number()),
   tagsAuto: z.array(z.string().max(100)).optional(),
-  outcomeAnalysis: z.string().max(50000, 'Outcome analysis too long').nullable().optional(),
+  outcomeAnalysis: nullableField(z.string().max(50000, 'Outcome analysis too long')),
 });
 
 /**
@@ -277,11 +306,11 @@ export const updateSessionAnalyticsSchema = z.object({
  * Record tool usage schema - matches Omit<DetailedToolUsage, 'id' | 'timestamp'>
  */
 export const recordToolUsageSchema = z.object({
-  sessionId: sessionIdSchema.nullable().optional(),
+  sessionId: nullableField(sessionIdSchema),
   toolName: z.string().min(1, 'Tool name is required').max(200, 'Tool name too long'),
-  toolInput: z.string().max(100000, 'Tool input too long').nullable().optional(),
-  toolResultPreview: z.string().max(100000, 'Tool result too long').nullable().optional(),
+  toolInput: nullableField(z.string().max(100000, 'Tool input too long')),
+  toolResultPreview: nullableField(z.string().max(100000, 'Tool result too long')),
   success: z.boolean(),
-  durationMs: z.number().int().nonnegative().nullable().optional(),
-  tokenCost: z.number().int().nonnegative().nullable().optional(),
+  durationMs: nullableField(z.number().int().nonnegative()),
+  tokenCost: nullableField(z.number().int().nonnegative()),
 });

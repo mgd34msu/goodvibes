@@ -558,7 +558,7 @@ describe('TerminalManager Service', () => {
     it('should spawn shell without claude arguments when successful', async () => {
       const result = await startPlainTerminal({ cwd: '/test/path' });
 
-      if (!result.error && pty.spawn.mock.calls.length > 0) {
+      if (!result.error && vi.mocked(pty.spawn).mock.calls.length > 0) {
         // Verify spawn was called with shell (not claude)
         const spawnCall = vi.mocked(pty.spawn).mock.calls[0];
         expect(spawnCall[0]).not.toContain('claude');
@@ -662,7 +662,7 @@ describe('TerminalManager Service', () => {
     it('should use ConPTY setting when successful', async () => {
       const result = await startPlainTerminal({ cwd: '/test/path' });
 
-      if (!result.error && pty.spawn.mock.calls.length > 0) {
+      if (!result.error && vi.mocked(pty.spawn).mock.calls.length > 0) {
         const spawnOptions = vi.mocked(pty.spawn).mock.calls[0][2] as { useConpty?: boolean };
         // useConpty should be set (true on Windows, false on other platforms)
         expect(spawnOptions).toHaveProperty('useConpty');
@@ -1135,8 +1135,8 @@ describe('TerminalManager Service', () => {
 
       // Mock fs to accept /default/cwd as valid
       const fs = await import('fs');
-      vi.mocked(fs.statSync).mockImplementation((pathArg: string) => {
-        if (pathArg === '/default/cwd') {
+      vi.mocked(fs.statSync).mockImplementation((pathArg) => {
+        if (pathArg.toString() === '/default/cwd') {
           return {
             isDirectory: () => true,
             isFile: () => false,

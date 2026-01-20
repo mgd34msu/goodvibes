@@ -138,7 +138,8 @@ function ToastItem({ toast, onClose, index }: ToastItemProps) {
   return (
     <div
       role="alert"
-      aria-live="polite"
+      aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       className={clsx(

@@ -1,8 +1,13 @@
 // ============================================================================
 // IPC SCHEMAS BARREL EXPORT
 // ============================================================================
+//
+// Note: Several files export schemas with identical names. We use explicit
+// exports to avoid naming conflicts. Primitives are the canonical source for
+// shared schemas like projectPathSchema, sessionIdSchema, hexColorSchema.
+// ============================================================================
 
-// Primitives
+// Primitives - base schemas (canonical source for common schemas)
 export * from './primitives.js';
 
 // Terminal
@@ -50,23 +55,80 @@ export * from './agents.js';
 // Export
 export * from './export.js';
 
-// Clipboard
+// Clipboard - canonical source for clipboard schemas
 export * from './clipboard.js';
 
-// Window (clipboard and context menu operations)
-export * from './window.js';
+// Window - skip to avoid duplicates with clipboard.ts
+// Use clipboard.ts for clipboardWriteSchema, contextMenuOptionsSchema, terminalContextMenuOptionsSchema
 
-// Sessions
-export * from './sessions.js';
+// Sessions - skip duplicates (sessionIdSchema, projectPathSchema from primitives)
+export {
+  sessionPaginationLimitSchema,
+  sessionSearchQuerySchema,
+  getSessionsForProjectSchema,
+  sessionSearchSchema,
+  getRecentSessionsSchema,
+  type GetSessionsForProjectInput,
+  type SessionSearchInput,
+  type GetRecentSessionsInput,
+} from './sessions.js';
 
-// Project Config
-export * from './projectConfig.js';
+// Project Config - skip projectPathSchema duplicate, use primitives version
+export {
+  getProjectConfigInputSchema,
+  deleteProjectConfigInputSchema,
+  updateProjectConfigInputSchema,
+  projectSettingsSchema,
+  createProjectConfigInputSchema,
+  type CreateProjectConfigInput,
+  type UpdateProjectConfigInput,
+} from './projectConfig.js';
 
 // Projects (file dialogs, recent projects)
 export * from './projects.js';
 
-// Agency (agent/skill indexing, context injection)
-export * from './agency.js';
+// Agency (agent/skill indexing, context injection) - skip searchQuerySchema (conflicts with search.js)
+export {
+  entityTypeSchema,
+  slugSchema,
+  categoryPathSchema,
+  prioritySchema,
+  agencyInitConfigSchema,
+  searchAgentsSchema,
+  activateAgentSchema,
+  deactivateAgentSchema,
+  searchSkillsSchema,
+  queueSkillSchema,
+  clearSkillQueueSchema,
+  contextInjectionSchema,
+  workingDirectorySchema,
+  type EntityType,
+  type AgencyInitConfig,
+  type SearchAgentsInput,
+  type ActivateAgentInput,
+  type DeactivateAgentInput,
+  type SearchSkillsInput,
+  type QueueSkillInput,
+  type ClearSkillQueueInput,
+  type ContextInjectionInput,
+} from './agency.js';
 
-// Theme (theme validation schemas)
-export * from './theme.js';
+// Theme - skip hexColorSchema duplicate (use primitives version)
+export {
+  VALID_THEME_IDS,
+  themeIdSchema,
+  themeVariantSchema,
+  rgbaColorSchema,
+  cssColorSchema,
+  setColorThemeInputSchema,
+  setThemeModeInputSchema,
+  getThemeInputSchema,
+  getThemeModeInputSchema,
+  themeSettingSchema,
+  isThemeSettingKey,
+  validateThemeSettingValue,
+  type ThemeId,
+  type ThemeVariant,
+  type SetColorThemeInput,
+  type SetThemeModeInput,
+} from './theme.js';

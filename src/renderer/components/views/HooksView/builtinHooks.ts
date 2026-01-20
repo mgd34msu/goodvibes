@@ -433,7 +433,7 @@ MESSAGE=$(echo "$INPUT" | jq -r '.message // "Claude needs your attention"')
 
 curl -s -X POST "$WEBHOOK_URL" \\
   -H "Content-Type: application/json" \\
-  -d "{\"text\": \"🤖 Claude Code: $MESSAGE\"}" \\
+  -d '{"text": "🤖 Claude Code: '"$MESSAGE"'"}' \\
   > /dev/null 2>&1
 
 exit 0`,

@@ -116,7 +116,7 @@ function highlightLine(line: string): React.ReactNode {
     }
 
     // Match structural characters and punctuation
-    const structMatch = remaining.match(/^([{}\[\],])/);
+    const structMatch = remaining.match(/^([{}[\],])/);
     if (structMatch && structMatch[1]) {
       tokens.push(
         <span key={`struct-${keyIndex++}`} className="text-surface-400">

@@ -1362,8 +1362,8 @@ describe('Terminal IPC Handlers', () => {
   describe('get-terminals handler', () => {
     it('should return all terminals from terminalManager', async () => {
       const mockTerminals = [
-        { id: 1, name: 'Terminal 1', cwd: '/path1' },
-        { id: 2, name: 'Terminal 2', cwd: '/path2', isPlainTerminal: true },
+        { id: 1, name: 'Terminal 1', cwd: '/path1', startTime: new Date(), isPlainTerminal: false },
+        { id: 2, name: 'Terminal 2', cwd: '/path2', startTime: new Date(), isPlainTerminal: true },
       ];
       vi.mocked(getAllTerminals).mockReturnValue(mockTerminals);
 

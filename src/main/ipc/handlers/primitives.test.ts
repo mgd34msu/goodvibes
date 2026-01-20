@@ -581,7 +581,7 @@ describe('MCP Server IPC Handlers', () => {
         const handler = handlers['create-mcp-server'];
         await handler(mockEvent, server);
 
-        expect(primitives.createMCPServer).toHaveBeenCalledWith(server);
+        expect(primitives.createMCPServer).toHaveBeenCalledWith(expect.objectContaining(server));
       });
 
       it('handles long description', async () => {
@@ -920,11 +920,11 @@ describe('Security Edge Cases - MCP Handlers', () => {
     it('handles SQL injection attempt in server name', async () => {
       const maliciousServer = {
         name: "'; DROP TABLE mcp_servers; --",
-        transport: 'stdio',
+        transport: 'stdio' as const,
         command: 'npx server',
         args: [],
         env: {},
-        scope: 'user',
+        scope: 'user' as const,
         enabled: true,
       };
 
@@ -938,17 +938,17 @@ describe('Security Edge Cases - MCP Handlers', () => {
       // The handler should accept the input - SQL injection prevention is handled at DB level
       await handler(mockEvent, maliciousServer);
 
-      expect(primitives.createMCPServer).toHaveBeenCalledWith(maliciousServer);
+      expect(primitives.createMCPServer).toHaveBeenCalledWith(expect.objectContaining(maliciousServer));
     });
 
     it('handles command injection attempt', async () => {
       const maliciousServer = {
         name: 'Command Injection',
-        transport: 'stdio',
+        transport: 'stdio' as const,
         command: 'npx server; rm -rf /',
         args: [],
         env: {},
-        scope: 'user',
+        scope: 'user' as const,
         enabled: true,
       };
 
@@ -1034,11 +1034,11 @@ describe('Security Edge Cases - MCP Handlers', () => {
       for (const validPath of validPaths) {
         const validServer = {
           name: 'Valid Path Server',
-          transport: 'stdio',
+          transport: 'stdio' as const,
           command: 'npx server',
           args: [],
           env: {},
-          scope: 'project',
+          scope: 'project' as const,
           projectPath: validPath,
           enabled: true,
         };
@@ -1074,12 +1074,12 @@ describe('MCP Handler Flow Integration', () => {
     const newServer = {
       name: 'Lifecycle Server',
       description: 'Testing lifecycle',
-      transport: 'stdio',
+      transport: 'stdio' as const,
       command: 'npx mcp-server',
       url: null,
       args: ['--verbose'],
       env: {},
-      scope: 'user',
+      scope: 'user' as const,
       projectPath: null,
       enabled: true,
     };
@@ -1128,11 +1128,11 @@ describe('MCP Handler Flow Integration', () => {
     // Create server
     const server = {
       name: 'Error Test Server',
-      transport: 'stdio',
+      transport: 'stdio' as const,
       command: 'npx bad-server',
       args: [],
       env: {},
-      scope: 'user',
+      scope: 'user' as const,
       enabled: true,
     };
 
@@ -2070,7 +2070,7 @@ describe('Agent Template Handler Flow Integration', () => {
       initialPrompt: 'You are a helpful assistant',
       flags: ['--verbose'],
       model: 'claude-3-opus',
-      permissionMode: 'default',
+      permissionMode: 'default' as const,
     };
 
     let createdId = '';
@@ -2089,7 +2089,7 @@ describe('Agent Template Handler Flow Integration', () => {
       createValidAgentTemplate({ ...newTemplate, id: createdId })
     );
     const getHandler = handlers['get-agent-template'];
-    const fetched = await getHandler(mockEvent, createdId);
+    const fetched = await getHandler(mockEvent, createdId) as { name: string } | null;
     expect(fetched?.name).toBe('Lifecycle Template');
 
     // 3. Update template
@@ -2109,11 +2109,11 @@ describe('Agent Template Handler Flow Integration', () => {
       createValidAgentTemplate({
         id: createdId,
         name: 'Renamed Template',
-        permissionMode: 'plan',
+        permissionMode: 'plan' as const,
       }),
     ]);
     const listHandler = handlers['get-agent-templates'];
-    const templates = await listHandler(mockEvent);
+    const templates = await listHandler(mockEvent) as Array<{ name: string }>;
     expect(templates).toHaveLength(1);
     expect(templates[0].name).toBe('Renamed Template');
 

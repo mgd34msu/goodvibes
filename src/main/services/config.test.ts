@@ -14,7 +14,7 @@
 // error handling paths and verify proper logging occurs.
 // ============================================================================
 
-import { describe, it, expect, beforeEach, vi, type MockedFunction } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockedFunction } from 'vitest';
 
 // ============================================================================
 // MOCKS - Must be defined before imports

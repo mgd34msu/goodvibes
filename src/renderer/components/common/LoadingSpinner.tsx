@@ -10,6 +10,8 @@ interface LoadingSpinnerProps {
   variant?: 'default' | 'dots' | 'pulse' | 'orbital';
   className?: string;
   color?: 'primary' | 'success' | 'warning' | 'error';
+  /** Screen reader label for accessibility */
+  label?: string;
 }
 
 const SIZE_CLASSES = {
@@ -56,6 +58,7 @@ export function LoadingSpinner({
   variant = 'default',
   className,
   color = 'primary',
+  label = 'Loading...',
 }: LoadingSpinnerProps) {
   const sizeConfig = SIZE_CLASSES[size];
   const colorConfig = COLOR_CLASSES[color];
@@ -63,9 +66,14 @@ export function LoadingSpinner({
   // Default: Gradient ring spinner with glow
   if (variant === 'default') {
     return (
-      <div className={clsx('relative', sizeConfig.container, className)}>
+      <div
+        role="status"
+        aria-live="polite"
+        className={clsx('relative', sizeConfig.container, className)}
+      >
         {/* Glow layer */}
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 rounded-full opacity-50 blur-sm animate-spin',
             sizeConfig.border,
@@ -75,6 +83,7 @@ export function LoadingSpinner({
         />
         {/* Main spinner ring */}
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 rounded-full animate-spin',
             sizeConfig.border,
@@ -84,6 +93,7 @@ export function LoadingSpinner({
         />
         {/* Inner glow dot */}
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 flex items-center justify-center'
           )}
@@ -101,6 +111,8 @@ export function LoadingSpinner({
             )}
           />
         </div>
+        {/* Screen reader only label */}
+        <span className="sr-only">{label}</span>
       </div>
     );
   }
@@ -108,10 +120,15 @@ export function LoadingSpinner({
   // Dots variant: Three bouncing dots
   if (variant === 'dots') {
     return (
-      <div className={clsx('flex items-center gap-1', className)}>
+      <div
+        role="status"
+        aria-live="polite"
+        className={clsx('flex items-center gap-1', className)}
+      >
         {[0, 1, 2].map((i) => (
           <div
             key={i}
+            aria-hidden="true"
             className={clsx(
               'rounded-full',
               colorConfig.dot,
@@ -125,6 +142,7 @@ export function LoadingSpinner({
             }}
           />
         ))}
+        <span className="sr-only">{label}</span>
       </div>
     );
   }
@@ -132,9 +150,14 @@ export function LoadingSpinner({
   // Pulse variant: Expanding ring
   if (variant === 'pulse') {
     return (
-      <div className={clsx('relative', sizeConfig.container, className)}>
+      <div
+        role="status"
+        aria-live="polite"
+        className={clsx('relative', sizeConfig.container, className)}
+      >
         {/* Pulsing rings */}
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 rounded-full',
             sizeConfig.border,
@@ -143,6 +166,7 @@ export function LoadingSpinner({
           )}
         />
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 rounded-full',
             sizeConfig.border,
@@ -152,7 +176,7 @@ export function LoadingSpinner({
           style={{ animationDelay: '300ms' }}
         />
         {/* Center dot */}
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
           <div
             className={clsx(
               'rounded-full',
@@ -162,6 +186,7 @@ export function LoadingSpinner({
             )}
           />
         </div>
+        <span className="sr-only">{label}</span>
       </div>
     );
   }
@@ -169,15 +194,20 @@ export function LoadingSpinner({
   // Orbital variant: Orbiting dots
   if (variant === 'orbital') {
     return (
-      <div className={clsx('relative', sizeConfig.container, className)}>
+      <div
+        role="status"
+        aria-live="polite"
+        className={clsx('relative', sizeConfig.container, className)}
+      >
         {/* Orbit track */}
         <div
+          aria-hidden="true"
           className={clsx(
             'absolute inset-0 rounded-full border border-surface-700/30'
           )}
         />
         {/* Orbiting dot */}
-        <div className="absolute inset-0 animate-spin" style={{ animationDuration: '1s' }}>
+        <div aria-hidden="true" className="absolute inset-0 animate-spin" style={{ animationDuration: '1s' }}>
           <div
             className={clsx(
               'absolute rounded-full',
@@ -194,6 +224,7 @@ export function LoadingSpinner({
         </div>
         {/* Second orbiting dot (opposite) */}
         <div
+          aria-hidden="true"
           className="absolute inset-0 animate-spin"
           style={{ animationDuration: '1s', animationDelay: '500ms' }}
         >
@@ -210,6 +241,7 @@ export function LoadingSpinner({
             }}
           />
         </div>
+        <span className="sr-only">{label}</span>
       </div>
     );
   }

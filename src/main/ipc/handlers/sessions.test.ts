@@ -16,7 +16,7 @@
 //
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 
 // ============================================================================
@@ -65,7 +65,7 @@ vi.mock('../../database/sessionSummaries/index.js', () => {
   };
 });
 
-// Mock session manager
+// Mock session manager - partial mock with only the methods we need
 const mockSessionManager = {
   getAllSessions: vi.fn(),
   getSession: vi.fn(),
@@ -75,7 +75,7 @@ const mockSessionManager = {
   refreshSessionTokens: vi.fn(),
   isSessionLive: vi.fn(),
   recalculateAllCosts: vi.fn(),
-};
+} as unknown as import('../../services/sessionManager.js').SessionManagerInstance;
 
 vi.mock('../../services/sessionManager.js', () => {
   return {
@@ -121,7 +121,7 @@ vi.mock('os', () => ({
 import { registerSessionHandlers } from './sessions.js';
 import * as db from '../../database/index.js';
 import * as sessionSummaries from '../../database/sessionSummaries/index.js';
-import { getSessionManager } from '../../services/sessionManager.js';
+import { getSessionManager, type Session, type SessionMessage } from '../../services/sessionManager.js';
 import {
   sessionIdSchema,
   sessionPaginationLimitSchema,
@@ -465,10 +465,10 @@ describe('Session IPC Handlers', () => {
       projectName: 'test-project',
       messageCount: 10,
       cost: 0.05,
-    };
+    } as Session;
 
     it('returns session data for valid session ID', async () => {
-      mockSessionManager.getSession.mockReturnValue(mockSession);
+      vi.mocked(mockSessionManager.getSession).mockReturnValue(mockSession);
 
       const handler = handlers['get-session'];
       expect(handler).toBeDefined();
@@ -480,7 +480,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns null for non-existent session', async () => {
-      mockSessionManager.getSession.mockReturnValue(null);
+      vi.mocked(mockSessionManager.getSession).mockReturnValue(null);
 
       const handler = handlers['get-session'];
       const result = await handler!(mockEvent, validSessionId);
@@ -489,7 +489,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('accepts agent-prefixed session IDs', async () => {
-      mockSessionManager.getSession.mockReturnValue({ id: 'agent-abc123' });
+      vi.mocked(mockSessionManager.getSession).mockReturnValue({ id: 'agent-abc123' } as Session);
 
       const handler = handlers['get-session'];
       const result = await handler!(mockEvent, 'agent-abc123');
@@ -555,10 +555,10 @@ describe('Session IPC Handlers', () => {
     const mockMessages = [
       { id: '1', role: 'human', content: 'Hello', timestamp: '2024-01-01T00:00:00Z' },
       { id: '2', role: 'assistant', content: 'Hi there!', timestamp: '2024-01-01T00:00:01Z' },
-    ];
+    ] as unknown as SessionMessage[];
 
     it('returns messages for valid session ID', async () => {
-      mockSessionManager.getSessionMessages.mockResolvedValue(mockMessages);
+      vi.mocked(mockSessionManager.getSessionMessages).mockResolvedValue(mockMessages);
 
       const handler = handlers['get-session-messages'];
       expect(handler).toBeDefined();
@@ -570,7 +570,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns empty array for session with no messages', async () => {
-      mockSessionManager.getSessionMessages.mockResolvedValue([]);
+      vi.mocked(mockSessionManager.getSessionMessages).mockResolvedValue([]);
 
       const handler = handlers['get-session-messages'];
       const result = await handler!(mockEvent, validSessionId);
@@ -579,7 +579,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('accepts agent-prefixed session IDs', async () => {
-      mockSessionManager.getSessionMessages.mockResolvedValue([]);
+      vi.mocked(mockSessionManager.getSessionMessages).mockResolvedValue([]);
 
       const handler = handlers['get-session-messages'];
       await handler!(mockEvent, 'agent-test123');
@@ -766,7 +766,7 @@ describe('Session IPC Handlers', () => {
     ];
 
     it('returns raw entries for valid session ID', async () => {
-      mockSessionManager.getSessionRawEntries.mockResolvedValue(mockRawEntries);
+      vi.mocked(mockSessionManager.getSessionRawEntries).mockResolvedValue(mockRawEntries);
 
       const handler = handlers['get-session-raw-entries'];
       expect(handler).toBeDefined();
@@ -778,7 +778,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns empty array for session with no entries', async () => {
-      mockSessionManager.getSessionRawEntries.mockResolvedValue([]);
+      vi.mocked(mockSessionManager.getSessionRawEntries).mockResolvedValue([]);
 
       const handler = handlers['get-session-raw-entries'];
       const result = await handler!(mockEvent, validSessionId);
@@ -787,7 +787,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('accepts agent-prefixed session IDs', async () => {
-      mockSessionManager.getSessionRawEntries.mockResolvedValue([]);
+      vi.mocked(mockSessionManager.getSessionRawEntries).mockResolvedValue([]);
 
       const handler = handlers['get-session-raw-entries'];
       await handler!(mockEvent, 'agent-raw123');
@@ -822,10 +822,10 @@ describe('Session IPC Handlers', () => {
       id: validSessionId,
       tokenCount: 1500,
       cost: 0.10,
-    };
+    } as Session;
 
     it('refreshes session tokens for valid session ID', async () => {
-      mockSessionManager.refreshSessionTokens.mockResolvedValue(mockRefreshedSession);
+      vi.mocked(mockSessionManager.refreshSessionTokens).mockResolvedValue(mockRefreshedSession);
 
       const handler = handlers['refresh-session'];
       expect(handler).toBeDefined();
@@ -837,7 +837,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns null for non-existent session', async () => {
-      mockSessionManager.refreshSessionTokens.mockResolvedValue(null);
+      vi.mocked(mockSessionManager.refreshSessionTokens).mockResolvedValue(null);
 
       const handler = handlers['refresh-session'];
       const result = await handler!(mockEvent, validSessionId);
@@ -846,7 +846,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('accepts agent-prefixed session IDs', async () => {
-      mockSessionManager.refreshSessionTokens.mockResolvedValue({ id: 'agent-refresh' });
+      vi.mocked(mockSessionManager.refreshSessionTokens).mockResolvedValue({ id: 'agent-refresh' } as Session);
 
       const handler = handlers['refresh-session'];
       await handler!(mockEvent, 'agent-refresh');
@@ -879,7 +879,7 @@ describe('Session IPC Handlers', () => {
     const validSessionId = '550e8400-e29b-41d4-a716-446655440000';
 
     it('returns true for live session', async () => {
-      mockSessionManager.isSessionLive.mockReturnValue(true);
+      vi.mocked(mockSessionManager.isSessionLive).mockReturnValue(true);
 
       const handler = handlers['is-session-live'];
       expect(handler).toBeDefined();
@@ -891,7 +891,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns false for non-live session', async () => {
-      mockSessionManager.isSessionLive.mockReturnValue(false);
+      vi.mocked(mockSessionManager.isSessionLive).mockReturnValue(false);
 
       const handler = handlers['is-session-live'];
       const result = await handler!(mockEvent, validSessionId);
@@ -900,7 +900,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('accepts agent-prefixed session IDs', async () => {
-      mockSessionManager.isSessionLive.mockReturnValue(true);
+      vi.mocked(mockSessionManager.isSessionLive).mockReturnValue(true);
 
       const handler = handlers['is-session-live'];
       await handler!(mockEvent, 'agent-live123');
@@ -933,10 +933,10 @@ describe('Session IPC Handlers', () => {
     const mockSessions = [
       { id: 'session-1', projectName: 'project-a' },
       { id: 'session-2', projectName: 'project-b' },
-    ];
+    ] as Session[];
 
     it('returns all sessions', async () => {
-      mockSessionManager.getAllSessions.mockReturnValue(mockSessions);
+      vi.mocked(mockSessionManager.getAllSessions).mockReturnValue(mockSessions);
 
       const handler = handlers['get-sessions'];
       const result = await handler!(mockEvent);
@@ -946,7 +946,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns empty array when no sessions exist', async () => {
-      mockSessionManager.getAllSessions.mockReturnValue([]);
+      vi.mocked(mockSessionManager.getAllSessions).mockReturnValue([]);
 
       const handler = handlers['get-sessions'];
       const result = await handler!(mockEvent);
@@ -1031,10 +1031,10 @@ describe('Session IPC Handlers', () => {
   describe('get-live-sessions handler', () => {
     const mockLiveSessions = [
       { id: 'live-1', isLive: true },
-    ];
+    ] as unknown as Session[];
 
     it('returns live sessions', async () => {
-      mockSessionManager.getLiveSessions.mockReturnValue(mockLiveSessions);
+      vi.mocked(mockSessionManager.getLiveSessions).mockReturnValue(mockLiveSessions);
 
       const handler = handlers['get-live-sessions'];
       const result = await handler!(mockEvent);
@@ -1059,7 +1059,7 @@ describe('Session IPC Handlers', () => {
 
   describe('recalculate-session-costs handler', () => {
     it('returns success with count when recalculation succeeds', async () => {
-      mockSessionManager.recalculateAllCosts.mockResolvedValue(42);
+      vi.mocked(mockSessionManager.recalculateAllCosts).mockResolvedValue(42);
 
       const handler = handlers['recalculate-session-costs'];
       const result = await handler!(mockEvent);
@@ -1069,7 +1069,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('returns error when recalculation fails', async () => {
-      mockSessionManager.recalculateAllCosts.mockRejectedValue(new Error('Database error'));
+      vi.mocked(mockSessionManager.recalculateAllCosts).mockRejectedValue(new Error('Database error'));
 
       const handler = handlers['recalculate-session-costs'];
       const result = await handler!(mockEvent);
@@ -1095,7 +1095,7 @@ describe('Session IPC Handlers', () => {
     });
 
     it('handles non-Error exceptions', async () => {
-      mockSessionManager.recalculateAllCosts.mockRejectedValue('string error');
+      vi.mocked(mockSessionManager.recalculateAllCosts).mockRejectedValue('string error');
 
       const handler = handlers['recalculate-session-costs'];
       const result = await handler!(mockEvent);
@@ -1484,11 +1484,11 @@ describe('IPC Flow Integration', () => {
     const sessionId = '550e8400-e29b-41d4-a716-446655440000';
 
     // Get session
-    mockSessionManager.getSession.mockReturnValue({
+    vi.mocked(mockSessionManager.getSession).mockReturnValue({
       id: sessionId,
       favorite: false,
       archived: false,
-    });
+    } as Session);
 
     const getSession = handlers['get-session'];
     let session = await getSession!(mockEvent, sessionId);
@@ -1515,16 +1515,16 @@ describe('IPC Flow Integration', () => {
     const mockMessages = [
       { id: '1', role: 'human', content: 'First message' },
       { id: '2', role: 'assistant', content: 'Response' },
-    ];
+    ] as unknown as SessionMessage[];
 
     // Check if session exists
-    mockSessionManager.getSession.mockReturnValue({ id: sessionId });
+    vi.mocked(mockSessionManager.getSession).mockReturnValue({ id: sessionId } as Session);
     const getSession = handlers['get-session'];
     const session = await getSession!(mockEvent, sessionId);
     expect(session).toBeDefined();
 
     // Get messages
-    mockSessionManager.getSessionMessages.mockResolvedValue(mockMessages);
+    vi.mocked(mockSessionManager.getSessionMessages).mockResolvedValue(mockMessages);
     const getMessages = handlers['get-session-messages'];
     const messages = await getMessages!(mockEvent, sessionId);
     expect(messages).toEqual(mockMessages);
@@ -1534,23 +1534,23 @@ describe('IPC Flow Integration', () => {
     const sessionId = '550e8400-e29b-41d4-a716-446655440000';
 
     // Check if live
-    mockSessionManager.isSessionLive.mockReturnValue(true);
+    vi.mocked(mockSessionManager.isSessionLive).mockReturnValue(true);
     const isLive = handlers['is-session-live'];
     const liveStatus = await isLive!(mockEvent, sessionId);
     expect(liveStatus).toBe(true);
 
     // Refresh tokens
-    mockSessionManager.refreshSessionTokens.mockResolvedValue({
+    vi.mocked(mockSessionManager.refreshSessionTokens).mockResolvedValue({
       id: sessionId,
       tokenCount: 2000,
       cost: 0.15,
-    });
+    } as Session);
     const refresh = handlers['refresh-session'];
     const refreshed = await refresh!(mockEvent, sessionId);
     expect(refreshed).toEqual({
       id: sessionId,
       tokenCount: 2000,
       cost: 0.15,
-    });
+    } as Session);
   });
 });

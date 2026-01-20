@@ -304,7 +304,8 @@ describe('Security edge cases', () => {
   });
 
   describe('createProjectConfigInputSchema rejects prototype pollution attempts', () => {
-    const pollutionAttempts = [
+    // Type annotation to avoid TypeScript's strict literal inference
+    const pollutionAttempts: Array<{ projectPath: string; settings: Record<string, unknown> }> = [
       { projectPath: '/project', settings: { '__proto__': { isAdmin: true } } },
       { projectPath: '/project', settings: { 'constructor': { prototype: {} } } },
     ];

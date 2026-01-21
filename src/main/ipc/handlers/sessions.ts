@@ -276,7 +276,7 @@ export function registerSessionHandlers(): void {
     return sessionManager?.getLiveSessions() ?? [];
   }));
 
-  ipcMain.handle('get-session-raw-entries', withContext('get-session-raw-entries', async (_, id: string) => {
+  ipcMain.handle('get-session-raw-entries', withContext('get-session-raw-entries', async (_, id: string, afterIndex?: number) => {
     // Validate session ID
     const result = sessionIdSchema.safeParse(id);
     if (!result.success) {
@@ -285,7 +285,7 @@ export function registerSessionHandlers(): void {
     }
 
     const sessionManager = getSessionManager();
-    return await sessionManager?.getSessionRawEntries(result.data) ?? [];
+    return await sessionManager?.getSessionRawEntries(result.data, afterIndex) ?? [];
   }));
 
   ipcMain.handle('refresh-session', withContext('refresh-session', async (_, id: string) => {
@@ -298,6 +298,18 @@ export function registerSessionHandlers(): void {
 
     const sessionManager = getSessionManager();
     return await sessionManager?.refreshSessionTokens(result.data) ?? null;
+  }));
+
+  ipcMain.handle('watch-session', withContext('watch-session', async (_, id: string) => {
+    // Validate session ID
+    const result = sessionIdSchema.safeParse(id);
+    if (!result.success) {
+      logger.warn('watch-session: Invalid session ID', { id, errors: result.error.issues });
+      throw new Error(createValidationError(result.error).error);
+    }
+
+    const sessionManager = getSessionManager();
+    return sessionManager?.watchSession(result.data) ?? null;
   }));
 
   ipcMain.handle('is-session-live', withContext('is-session-live', async (_, id: string) => {

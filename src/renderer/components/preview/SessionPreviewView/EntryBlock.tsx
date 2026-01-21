@@ -25,7 +25,8 @@ interface EntryBlockProps {
   globalExpanded: boolean | null;
 }
 
-export function EntryBlock({ entry, settings, globalExpanded }: EntryBlockProps): React.JSX.Element {
+// Memoized to prevent re-renders when props haven't changed
+export const EntryBlock = React.memo(function EntryBlock({ entry, settings, globalExpanded }: EntryBlockProps): React.JSX.Element {
   const config = getTypeConfig(entry.type);
 
   // Determine default expand state from settings
@@ -176,7 +177,7 @@ export function EntryBlock({ entry, settings, globalExpanded }: EntryBlockProps)
       )}
     </div>
   );
-}
+});
 
 // ============================================================================
 // ENTRY CONTENT - Uses prettification utilities for beautiful formatting

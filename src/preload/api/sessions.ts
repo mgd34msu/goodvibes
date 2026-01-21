@@ -25,12 +25,14 @@ export const sessionsApi = {
     ipcRenderer.invoke('delete-session', id),
   getLiveSessions: () =>
     ipcRenderer.invoke('get-live-sessions'),
-  getSessionRawEntries: (id: string) =>
-    ipcRenderer.invoke('get-session-raw-entries', id),
+  getSessionRawEntries: (id: string, afterIndex?: number) =>
+    ipcRenderer.invoke('get-session-raw-entries', id, afterIndex),
   refreshSession: (id: string) =>
     ipcRenderer.invoke('refresh-session', id),
   isSessionLive: (id: string) =>
     ipcRenderer.invoke('is-session-live', id),
+  watchSession: (id: string) =>
+    ipcRenderer.invoke('watch-session', id) as Promise<string | null>,
   recalculateSessionCosts: () =>
     ipcRenderer.invoke('recalculate-session-costs'),
   // Session summaries (for project-based session lookup)

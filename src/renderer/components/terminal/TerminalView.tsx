@@ -125,7 +125,7 @@ export default function TerminalView() {
       </ErrorBoundary>
 
       {/* Terminal Content */}
-      <div className="flex-1 flex" style={{ border: '20px solid purple', overflow: 'hidden' }}>
+      <div className="flex-1 flex overflow-hidden">
         {hasTerminals ? (
           <>
             {/* Git Panel - Left Position */}
@@ -134,12 +134,10 @@ export default function TerminalView() {
             )}
 
             {/* Main Terminal Area */}
-            <div className="flex-1 min-w-0 relative bg-surface-950" style={{ border: '15px solid yellow', overflow: 'hidden' }}>
+            <div className="flex-1 min-w-0 relative bg-surface-950 overflow-hidden">
               {terminals.map((terminal) => {
                 const isActive = terminal.id === activeTerminalId;
-                console.log('[TerminalView] Mapping terminal:', terminal.id, 'isActive:', isActive, 'isPreview:', terminal.isPreview, 'activeTerminalId:', activeTerminalId);
-                // CRITICAL FIX: Preview terminals should be visible when they're the only terminal
-                // or when they are actually active
+                // Preview terminals should be visible when they're the only terminal or when active
                 const shouldShow = isActive || (terminal.isPreview && terminals.length === 1);
                 return (
                 <div
@@ -150,7 +148,6 @@ export default function TerminalView() {
                     // Transitions on parent containers can cause layout thrashing that affects terminal cursor behavior.
                     shouldShow ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                   )}
-                  style={{ border: shouldShow ? '8px solid orange' : 'none' }}
                 >
                   <ErrorBoundary
                     fallbackRender={({ error, resetErrorBoundary }) => (
@@ -164,15 +161,10 @@ export default function TerminalView() {
                     resetKeys={[terminal.id]}
                   >
                     {terminal.isPreview && terminal.previewSessionId ? (
-                      <>
-                        {console.log('[TerminalView] Rendering SessionPreviewView for', terminal.id, terminal.previewSessionId)}
-                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '10px solid green' }}>
-                          <SessionPreviewView
-                            sessionId={terminal.previewSessionId}
-                            sessionName={terminal.name.replace('Preview: ', '')}
-                          />
-                        </div>
-                      </>
+                      <SessionPreviewView
+                        sessionId={terminal.previewSessionId}
+                        sessionName={terminal.name.replace('Preview: ', '')}
+                      />
                     ) : (
                       <TerminalInstance
                         id={terminal.id}

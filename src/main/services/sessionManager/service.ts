@@ -241,20 +241,27 @@ export class SessionManagerInstance {
     });
   }
 
-  private startWatchingSessionFile(filePath: string): void {
-    if (this.watchedSessions.has(filePath)) return;
+  private startWatchingSessionFile(filePath: string, sessionId?: string): void {
+    if (this.watchedSessions.has(filePath)) {
+      logger.debug('Session file already being watched', { filePath, sessionId });
+      return;
+    }
 
+    logger.info('Starting file watcher for session', { filePath, sessionId });
     let lastSize = 0;
 
     watchFile(filePath, { interval: SESSION_FILE_WATCH_INTERVAL_MS }, async () => {
       try {
         const stats = await fs.stat(filePath);
         if (stats.size !== lastSize) {
+          logger.debug('Session file changed', { filePath, sessionId, oldSize: lastSize, newSize: stats.size });
           lastSize = stats.size;
           const { messages } = await parseSessionFileWithStats(filePath);
 
+          logger.debug('Sending session update event', { filePath, sessionId, messageCount: messages.length });
           sendToRenderer('subagent-session-update', {
             path: filePath,
+            sessionId,
             messages,
             isLive: true,
           });
@@ -268,6 +275,19 @@ export class SessionManagerInstance {
     });
 
     this.watchedSessions.set(filePath, true);
+  }
+
+  /**
+   * Start watching a session for file changes.
+   * Returns the file path being watched, or null if session not found.
+   */
+  watchSession(sessionId: string): string | null {
+    const session = getSession(sessionId);
+    if (!session?.filePath || !existsSync(session.filePath)) {
+      return null;
+    }
+    this.startWatchingSessionFile(session.filePath, sessionId);
+    return session.filePath;
   }
 
   stopWatching(): void {
@@ -347,7 +367,7 @@ export class SessionManagerInstance {
     });
   }
 
-  async getSessionRawEntries(sessionId: string): Promise<unknown[]> {
+  async getSessionRawEntries(sessionId: string, afterIndex?: number): Promise<unknown[]> {
     const session = getSession(sessionId);
     if (!session?.filePath || !existsSync(session.filePath)) {
       return [];
@@ -358,13 +378,18 @@ export class SessionManagerInstance {
       const lines = content.trim().split('\n').filter(l => l.trim());
       const entries: unknown[] = [];
 
-      for (const line of lines) {
+      // If afterIndex provided, skip entries up to that index (for incremental fetching)
+      const startIndex = afterIndex !== undefined && afterIndex >= 0 ? afterIndex : 0;
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i];
         try {
           const entry = JSON.parse(line);
           entries.push(entry);
         } catch (error) {
           logger.debug('Skipped malformed JSON line in raw entries', {
             sessionId,
+            lineIndex: i,
             error: error instanceof Error ? error.message : 'Unknown error'
           });
         }

@@ -21,30 +21,32 @@ describe('SafeHighlight XSS Prevention', () => {
       expect(container.textContent).toContain('<script>alert("XSS")</script>');
     });
 
-    it('rejects malicious event handlers in attributes', () => {
-      // Attempt to inject onclick handler
+    it('rejects malicious event handlers by not creating span elements', () => {
+      // Attempt to inject onclick handler - spans with extra attributes don't match
+      // the strict hljs pattern, so they become plain text
       const xssPayload = '<span class="hljs-keyword" onclick="alert(1)">const</span>';
       const elements = parseHighlightedCode(xssPayload);
 
       const { container } = render(<>{elements}</>);
 
-      // Should only have the safe hljs-keyword class, no onclick
+      // No span elements should be created - malformed input is rejected entirely
       const span = container.querySelector('span');
-      expect(span).toBeTruthy();
-      expect(span?.getAttribute('onclick')).toBeNull();
-      expect(span?.className).toBe('hljs-keyword');
+      expect(span).toBeNull();
+      // The text should be rendered as plain text
+      expect(container.textContent).toContain('const');
     });
 
-    it('handles XSS in class attribute values', () => {
-      // Attempt to break out of class attribute
+    it('rejects XSS in class attribute values by not creating span elements', () => {
+      // Attempt to break out of class attribute - spans with extra attributes
+      // don't match the strict hljs pattern
       const xssPayload = '<span class="hljs-keyword" onmouseover="alert(1)">test</span>';
       const elements = parseHighlightedCode(xssPayload);
 
       const { container } = render(<>{elements}</>);
 
-      // The onmouseover should not be present
+      // No span elements should be created
       const span = container.querySelector('span');
-      expect(span?.getAttribute('onmouseover')).toBeNull();
+      expect(span).toBeNull();
     });
 
     it('neutralizes javascript: URLs in content', () => {

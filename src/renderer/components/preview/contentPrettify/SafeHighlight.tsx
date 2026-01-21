@@ -19,19 +19,19 @@ export function parseHighlightedCode(html: string): React.ReactNode[] {
   let currentIndex = 0;
   let keyCounter = 0;
 
-  // Regex to match hljs span tags: <span class="hljs-something">content</span>
-  // We use a non-greedy match and handle nesting by recursion
-  const spanRegex = /<span class="(hljs-[\w-]+)">([\s\S]*?)<\/span>/g;
+  // Regex pattern for hljs span tags
+  const SPAN_PATTERN = /<span class="(hljs-[\w-]+)">([\s\S]*?)<\/span>/g;
 
   function parseSegment(text: string): React.ReactNode[] {
     const result: React.ReactNode[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    // Reset regex state
-    spanRegex.lastIndex = 0;
+    // IMPORTANT: Create a new regex instance to avoid lastIndex conflicts
+    // when this function is called recursively
+    const localRegex = new RegExp(SPAN_PATTERN.source, 'g');
 
-    while ((match = spanRegex.exec(text)) !== null) {
+    while ((match = localRegex.exec(text)) !== null) {
       // Add text before this match
       if (match.index > lastIndex) {
         const textBefore = text.slice(lastIndex, match.index);
@@ -66,11 +66,11 @@ export function parseHighlightedCode(html: string): React.ReactNode[] {
     return result;
   }
 
-  // Parse the entire HTML
+  // Parse the entire HTML with a fresh regex instance
+  const mainRegex = new RegExp(SPAN_PATTERN.source, 'g');
   let match: RegExpExecArray | null;
-  spanRegex.lastIndex = 0;
 
-  while ((match = spanRegex.exec(html)) !== null) {
+  while ((match = mainRegex.exec(html)) !== null) {
     // Add text before this match
     if (match.index > currentIndex) {
       const textBefore = html.slice(currentIndex, match.index);

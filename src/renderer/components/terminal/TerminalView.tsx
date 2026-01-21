@@ -62,9 +62,8 @@ export default function TerminalView() {
     });
   }, []);
 
-  // Handle focus management on mount/unmount
+  // Handle focus management on mount
   // On mount: if terminals exist but none is active, activate the first one
-  // On unmount: clear active terminal so returning triggers a proper focus transition
   useEffect(() => {
     // On mount: activate first terminal if none is active
     if (terminals.length > 0 && activeTerminalId === null) {
@@ -73,11 +72,8 @@ export default function TerminalView() {
         setActiveTerminal(firstTerminal.id);
       }
     }
-
-    // On unmount: clear active terminal
-    return () => {
-      setActiveTerminal(null);
-    };
+    // NOTE: Removed cleanup that was setting activeTerminalId to null on unmount
+    // This was causing preview terminals to become invisible when the view switched
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasTerminals = terminals.length > 0;
@@ -129,7 +125,7 @@ export default function TerminalView() {
       </ErrorBoundary>
 
       {/* Terminal Content */}
-      <div className="flex-1 flex overflow-y-auto">
+      <div className="flex-1 flex" style={{ border: '20px solid purple', overflow: 'hidden' }}>
         {hasTerminals ? (
           <>
             {/* Git Panel - Left Position */}
@@ -138,16 +134,23 @@ export default function TerminalView() {
             )}
 
             {/* Main Terminal Area */}
-            <div className="flex-1 min-w-0 relative bg-surface-950 overflow-x-clip overflow-y-auto">
-              {terminals.map((terminal) => (
+            <div className="flex-1 min-w-0 relative bg-surface-950" style={{ border: '15px solid yellow', overflow: 'hidden' }}>
+              {terminals.map((terminal) => {
+                const isActive = terminal.id === activeTerminalId;
+                console.log('[TerminalView] Mapping terminal:', terminal.id, 'isActive:', isActive, 'isPreview:', terminal.isPreview, 'activeTerminalId:', activeTerminalId);
+                // CRITICAL FIX: Preview terminals should be visible when they're the only terminal
+                // or when they are actually active
+                const shouldShow = isActive || (terminal.isPreview && terminals.length === 1);
+                return (
                 <div
                   key={terminal.id}
                   className={clsx(
                     'absolute inset-0',
                     // Note: Removed transition-opacity to prevent any interference with XTerm.js cursor rendering.
                     // Transitions on parent containers can cause layout thrashing that affects terminal cursor behavior.
-                    terminal.id === activeTerminalId ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
+                    shouldShow ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
                   )}
+                  style={{ border: shouldShow ? '8px solid orange' : 'none' }}
                 >
                   <ErrorBoundary
                     fallbackRender={({ error, resetErrorBoundary }) => (
@@ -161,10 +164,15 @@ export default function TerminalView() {
                     resetKeys={[terminal.id]}
                   >
                     {terminal.isPreview && terminal.previewSessionId ? (
-                      <SessionPreviewView
-                        sessionId={terminal.previewSessionId}
-                        sessionName={terminal.name.replace('Preview: ', '')}
-                      />
+                      <>
+                        {console.log('[TerminalView] Rendering SessionPreviewView for', terminal.id, terminal.previewSessionId)}
+                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '10px solid green' }}>
+                          <SessionPreviewView
+                            sessionId={terminal.previewSessionId}
+                            sessionName={terminal.name.replace('Preview: ', '')}
+                          />
+                        </div>
+                      </>
                     ) : (
                       <TerminalInstance
                         id={terminal.id}
@@ -175,7 +183,8 @@ export default function TerminalView() {
                     )}
                   </ErrorBoundary>
                 </div>
-              ))}
+              );
+              })}
             </div>
 
             {/* Git Panel - Right Position */}

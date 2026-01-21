@@ -21,13 +21,22 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
   // Validate sessionId early
   const validSessionId = sessionId && typeof sessionId === 'string' && sessionId.trim().length > 0;
 
+  // Debug logging
+  console.log('[SessionPreviewView] Render:', { sessionId, sessionName, validSessionId });
+
   // Query for raw session entries
-  const { data: rawEntries = [], isLoading, error, refetch } = useQuery({
+  const { data: rawEntries = [], isLoading, error, refetch, isSuccess, isFetching } = useQuery({
     queryKey: ['session-raw-entries', sessionId],
     queryFn: async () => {
-      if (!validSessionId) return [];
+      console.log('[SessionPreviewView] queryFn called with sessionId:', sessionId);
+      if (!validSessionId) {
+        console.log('[SessionPreviewView] queryFn returning empty - invalid sessionId');
+        return [];
+      }
       try {
-        return await window.goodvibes.getSessionRawEntries(sessionId);
+        const result = await window.goodvibes.getSessionRawEntries(sessionId);
+        console.log('[SessionPreviewView] queryFn got result:', { count: result?.length ?? 0 });
+        return result;
       } catch (err) {
         console.error('[SessionPreviewView] Failed to fetch raw entries:', err);
         throw err;
@@ -37,6 +46,9 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
     refetchInterval: validSessionId ? 2000 : false,
     refetchIntervalInBackground: false,
   });
+
+  // Debug query status
+  console.log('[SessionPreviewView] Query status:', { isLoading, isFetching, isSuccess, error: error?.message, rawEntriesLength: rawEntries.length });
 
   // Query for live status
   const { data: isLive = false } = useQuery({
@@ -49,12 +61,18 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
 
   // Parse entries into structured messages
   const { entries, counts } = useMemo(() => {
-    return parseAllEntries(rawEntries as RawEntry[]);
+    const result = parseAllEntries(rawEntries as RawEntry[]);
+    console.log('[SessionPreviewView] Parsed entries:', {
+      rawCount: rawEntries.length,
+      parsedCount: result.entries.length,
+      counts: result.counts
+    });
+    return result;
   }, [rawEntries]);
 
   // Filter entries based on visibility settings
   const visibleEntries = useMemo(() => {
-    return entries.filter((entry) => {
+    const result = entries.filter((entry) => {
       switch (entry.type) {
         case 'thinking':
           return settings.showThinkingBlocks;
@@ -70,6 +88,19 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
           return true;
       }
     });
+    console.log('[SessionPreviewView] Visible entries:', {
+      inputCount: entries.length,
+      visibleCount: result.length,
+      entryTypes: entries.map(e => e.type),
+      settings: {
+        showThinkingBlocks: settings.showThinkingBlocks,
+        showToolUseBlocks: settings.showToolUseBlocks,
+        showToolResultBlocks: settings.showToolResultBlocks,
+        showSystemBlocks: settings.showSystemBlocks,
+        showSummaryBlocks: settings.showSummaryBlocks,
+      }
+    });
+    return result;
   }, [entries, settings]);
 
   // Auto-scroll to bottom when new messages arrive
@@ -105,9 +136,10 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
   }
 
   if (isLoading) {
+    console.log('[SessionPreviewView] Returning loading state');
     return (
-      <div className="flex items-center justify-center h-full bg-surface-900">
-        <div className="text-surface-400">Loading session...</div>
+      <div style={{ height: '100%', minHeight: '200px', border: '5px solid blue', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2e' }}>
+        <div style={{ color: 'white', fontSize: '20px' }}>Loading session... (DEBUG)</div>
       </div>
     );
   }
@@ -123,8 +155,11 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
     );
   }
 
+  // CRITICAL DEBUG - force visible
+  console.log('[SessionPreviewView] About to return main JSX');
+
   return (
-    <div className="flex flex-col h-full bg-surface-900 relative">
+    <div className="flex flex-col bg-surface-900 relative" style={{ height: '100%', minHeight: '200px', border: '5px solid red' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700 bg-surface-850">
         <div className="flex items-center gap-2">
@@ -184,6 +219,11 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
         {counts.summary > 0 && <CountBadge type="summary" count={counts.summary} />}
       </div>
 
+      {/* DEBUG: Test render */}
+      <div style={{ padding: '20px', backgroundColor: 'red', color: 'white', fontSize: '20px', fontWeight: 'bold' }}>
+        DEBUG: {visibleEntries.length} visible entries, {entries.length} total entries, {rawEntries.length} raw entries, isLoading={String(isLoading)}
+      </div>
+
       {/* Entries */}
       <div
         ref={containerRef}
@@ -206,14 +246,20 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
               No entries to display
             </div>
           ) : (
-            visibleEntries.map((entry) => (
-              <EntryBlock
-                key={entry.id}
-                entry={entry}
-                settings={settings}
-                globalExpanded={globalExpanded}
-              />
-            ))
+            <>
+              {console.log('[SessionPreviewView] Rendering', visibleEntries.length, 'entries')}
+              {visibleEntries.map((entry) => {
+                console.log('[SessionPreviewView] Rendering entry:', entry.id, entry.type, entry.content?.substring(0, 50));
+                return (
+                  <EntryBlock
+                    key={entry.id}
+                    entry={entry}
+                    settings={settings}
+                    globalExpanded={globalExpanded}
+                  />
+                );
+              })}
+            </>
           )}
         </ErrorBoundary>
       </div>

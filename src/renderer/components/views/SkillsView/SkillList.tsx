@@ -10,11 +10,8 @@ interface SkillListProps {
   customSkills: AgentSkill[];
   builtInSkills: (BuiltInAgentSkill & { isBuiltIn: true })[];
   showBuiltIn: boolean;
-  onUseSkill: (name: string) => void;
   onInstallSkill?: (skill: BuiltInAgentSkill & { isBuiltIn: true }) => void;
-  onEditSkill: (skill: AgentSkill) => void;
   onDeleteSkill: (id: number) => void;
-  onCopyContent: (content: string) => void;
   onCreateNew: () => void;
   searchQuery: string;
 }
@@ -23,11 +20,8 @@ export function SkillList({
   customSkills,
   builtInSkills,
   showBuiltIn,
-  onUseSkill,
   onInstallSkill,
-  onEditSkill,
   onDeleteSkill,
-  onCopyContent,
   onCreateNew,
   searchQuery,
 }: SkillListProps) {
@@ -72,10 +66,7 @@ export function SkillList({
               <SkillCard
                 key={skill.id}
                 skill={skill}
-                onUse={() => onUseSkill(skill.name)}
-                onEdit={() => onEditSkill(skill)}
                 onDelete={() => onDeleteSkill(skill.id)}
-                onCopy={() => onCopyContent(`Skill skill: "${skill.name}"`)}
               />
             ))}
           </div>
@@ -94,7 +85,6 @@ export function SkillList({
                 key={skill.name}
                 skill={skill}
                 onInstall={() => onInstallSkill?.(skill)}
-                onCopy={() => onCopyContent(`Skill skill: "${skill.name}"`)}
               />
             ))}
           </div>

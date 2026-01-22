@@ -21,8 +21,7 @@ import { BUILT_IN_AGENT_SKILLS } from './constants';
 import type { AgentSkill, BuiltInAgentSkill } from './types';
 
 export default function AgentSkillsView() {
-  const { skills, loading, saveSkill, deleteSkill, copyToClipboard } =
-    useAgentSkills();
+  const { skills, loading, saveSkill, deleteSkill } = useAgentSkills();
   const [showForm, setShowForm] = useState(false);
   const [editingSkill, setEditingSkill] = useState<AgentSkill | undefined>();
   const [installSkill, setInstallSkill] = useState<BuiltInAgentSkill | null>(null);
@@ -54,14 +53,6 @@ export default function AgentSkillsView() {
     }
   };
 
-  const handleUse = async (skillName: string) => {
-    await copyToClipboard(`Skill skill: "${skillName}"`);
-  };
-
-  const handleCopy = async (content: string) => {
-    await copyToClipboard(content);
-  };
-
   const handleDelete = useCallback(
     async (id: number) => {
       const confirmed = await confirmDelete();
@@ -71,11 +62,6 @@ export default function AgentSkillsView() {
     },
     [confirmDelete, deleteSkill]
   );
-
-  const handleEdit = (skill: AgentSkill) => {
-    setEditingSkill(skill);
-    setShowForm(true);
-  };
 
   const handleCancel = () => {
     setShowForm(false);
@@ -187,11 +173,8 @@ export default function AgentSkillsView() {
                 isBuiltIn: true as const,
               }))}
               showBuiltIn={showBuiltIn}
-              onUseSkill={handleUse}
               onInstallSkill={handleOpenInstallModal}
-              onEditSkill={handleEdit}
               onDeleteSkill={handleDelete}
-              onCopyContent={handleCopy}
               onCreateNew={() => setShowForm(true)}
               searchQuery={searchQuery}
             />

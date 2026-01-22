@@ -96,38 +96,11 @@ export function SkillCard({
               Install
             </button>
           ) : (
-            <button onClick={onUse} className="card-action-primary">
-              <Play className="w-3.5 h-3.5" />
-              Use
-            </button>
-          )}
-          <button
-            onClick={handleCopy}
-            className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}
-            title="Copy skill invocation"
-          >
-            {copied ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
-          </button>
-          {!isBuiltIn && onEdit && (
-            <button
-              onClick={onEdit}
-              className="card-action-btn card-action-btn-primary"
-              title="Edit"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-          )}
-          {!isBuiltIn && onDelete && (
             <button
               onClick={onDelete}
-              className="card-action-btn card-action-btn-danger"
-              title="Delete"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-error-500/20 text-error-400 hover:bg-error-500/30 transition-colors"
             >
-              <Trash2 className="w-4 h-4" />
+              Delete
             </button>
           )}
         </div>

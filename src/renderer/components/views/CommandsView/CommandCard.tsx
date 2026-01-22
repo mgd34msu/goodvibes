@@ -5,11 +5,6 @@
 import { useState } from 'react';
 import {
   Terminal,
-  Edit2,
-  Trash2,
-  Copy,
-  Check,
-  Play,
   Download,
   Star,
   Clock,
@@ -19,23 +14,13 @@ import type { CommandCardCommand } from './types';
 
 interface CommandCardProps {
   command: CommandCardCommand;
-  onUse?: () => void;
   onInstall?: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
-  onCopy: () => void;
 }
 
-export function CommandCard({ command, onUse, onInstall, onEdit, onDelete, onCopy }: CommandCardProps): React.JSX.Element {
+export function CommandCard({ command, onInstall, onDelete }: CommandCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in command;
-
-  const handleCopy = () => {
-    onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div className="card-hover group">
@@ -104,40 +89,10 @@ export function CommandCard({ command, onUse, onInstall, onEdit, onDelete, onCop
             </button>
           ) : (
             <button
-              onClick={onUse}
-              className="card-action-primary"
-            >
-              <Play className="w-3.5 h-3.5" />
-              Use
-            </button>
-          )}
-          <button
-            onClick={handleCopy}
-            className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}
-            title="Copy"
-          >
-            {copied ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
-          </button>
-          {!isBuiltIn && onEdit && (
-            <button
-              onClick={onEdit}
-              className="card-action-btn card-action-btn-primary"
-              title="Edit"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-          )}
-          {!isBuiltIn && onDelete && (
-            <button
               onClick={onDelete}
-              className="card-action-btn card-action-btn-danger"
-              title="Delete"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-error-500/20 text-error-400 hover:bg-error-500/30 transition-colors"
             >
-              <Trash2 className="w-4 h-4" />
+              Delete
             </button>
           )}
         </div>

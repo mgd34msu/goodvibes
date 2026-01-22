@@ -231,6 +231,16 @@ const mockGoodVibesAPI = {
   updateAgentTemplate: vi.fn().mockResolvedValue(true),
   deleteAgentTemplate: vi.fn().mockResolvedValue(true),
 
+  // Feature Installation/Uninstallation
+  installAgent: vi.fn().mockResolvedValue({ success: true }),
+  installSkill: vi.fn().mockResolvedValue({ success: true }),
+  installCommand: vi.fn().mockResolvedValue({ success: true }),
+  installHook: vi.fn().mockResolvedValue({ success: true }),
+  uninstallAgent: vi.fn().mockResolvedValue({ success: true }),
+  uninstallSkill: vi.fn().mockResolvedValue({ success: true }),
+  uninstallCommand: vi.fn().mockResolvedValue({ success: true }),
+  uninstallHook: vi.fn().mockResolvedValue({ success: true }),
+
   // Projects (for ProjectSelector)
   getProjects: vi.fn().mockResolvedValue([]),
   getProject: vi.fn().mockResolvedValue(null),

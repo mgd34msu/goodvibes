@@ -10,11 +10,8 @@ interface AgentListProps {
   customAgents: AgentTemplate[];
   builtInAgents: (BuiltInAgent & { isBuiltIn: true })[];
   showBuiltIn: boolean;
-  onUseAgent: (name: string) => void;
   onInstallAgent?: (agent: BuiltInAgent & { isBuiltIn: true }) => void;
-  onEditAgent: (agent: AgentTemplate) => void;
   onDeleteAgent: (id: string) => void;
-  onCopyPrompt: (content: string) => void;
   onCreateNew: () => void;
   searchQuery: string;
 }
@@ -23,11 +20,8 @@ export function AgentList({
   customAgents,
   builtInAgents,
   showBuiltIn,
-  onUseAgent,
   onInstallAgent,
-  onEditAgent,
   onDeleteAgent,
-  onCopyPrompt,
   onCreateNew,
   searchQuery,
 }: AgentListProps) {
@@ -46,10 +40,7 @@ export function AgentList({
               <AgentCard
                 key={agent.id}
                 agent={agent}
-                onUse={() => onUseAgent(agent.name)}
-                onEdit={() => onEditAgent(agent)}
                 onDelete={() => onDeleteAgent(agent.id)}
-                onCopy={() => onCopyPrompt(agent.initialPrompt || '')}
               />
             ))}
           </div>
@@ -68,7 +59,6 @@ export function AgentList({
                 key={agent.name}
                 agent={agent}
                 onInstall={() => onInstallAgent?.(agent)}
-                onCopy={() => onCopyPrompt(agent.initialPrompt || '')}
               />
             ))}
           </div>

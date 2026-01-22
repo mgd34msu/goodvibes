@@ -451,68 +451,6 @@ describe('AgentsView', () => {
   });
 
   // ==========================================================================
-  // EDIT AGENT TESTS
-  // ==========================================================================
-
-  describe('Edit Agent', () => {
-    it('populates form with agent data when Edit clicked', async () => {
-      vi.mocked(window.goodvibes.getAgentTemplates).mockResolvedValue([mockAgentTemplate]);
-
-      await renderAgentsView();
-
-      await waitFor(() => {
-        expect(screen.getByText('test-agent')).toBeInTheDocument();
-      });
-
-      // Find and click the Edit button
-      const editButton = screen.getByTitle('Edit');
-      await act(async () => {
-        fireEvent.click(editButton);
-      });
-
-      await waitFor(() => {
-        expect(screen.getByDisplayValue('test-agent')).toBeInTheDocument();
-        expect(screen.getByDisplayValue('A test agent for unit testing')).toBeInTheDocument();
-      });
-    });
-
-    it('calls updateAgentTemplate when editing existing agent', async () => {
-      const user = userEvent.setup();
-      vi.mocked(window.goodvibes.getAgentTemplates).mockResolvedValue([mockAgentTemplate]);
-      vi.mocked(window.goodvibes.updateAgentTemplate).mockResolvedValue(true);
-
-      await renderAgentsView();
-
-      await waitFor(() => {
-        expect(screen.getByText('test-agent')).toBeInTheDocument();
-      });
-
-      const editButton = screen.getByTitle('Edit');
-      await act(async () => {
-        fireEvent.click(editButton);
-      });
-
-      const descriptionInput = screen.getByDisplayValue('A test agent for unit testing');
-      await user.clear(descriptionInput);
-      await user.type(descriptionInput, 'Updated description');
-
-      const updateButton = screen.getByRole('button', { name: /Update Agent/i });
-      await act(async () => {
-        fireEvent.click(updateButton);
-      });
-
-      await waitFor(() => {
-        expect(vi.mocked(window.goodvibes.updateAgentTemplate)).toHaveBeenCalledWith(
-          '1',
-          expect.objectContaining({
-            description: 'Updated description',
-          })
-        );
-      });
-    });
-  });
-
-  // ==========================================================================
   // DELETE AGENT TESTS
   // ==========================================================================
 
@@ -526,7 +464,9 @@ describe('AgentsView', () => {
         expect(screen.getByText('test-agent')).toBeInTheDocument();
       });
 
-      const deleteButton = screen.getByTitle('Delete');
+      // Find the Delete button in the card (not the confirmation dialog)
+      const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+      const deleteButton = deleteButtons[0];
       await act(async () => {
         fireEvent.click(deleteButton);
       });
@@ -546,7 +486,9 @@ describe('AgentsView', () => {
         expect(screen.getByText('test-agent')).toBeInTheDocument();
       });
 
-      const deleteButton = screen.getByTitle('Delete');
+      // Find the Delete button in the card (first one)
+      const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+      const deleteButton = deleteButtons[0];
       await act(async () => {
         fireEvent.click(deleteButton);
       });
@@ -555,12 +497,12 @@ describe('AgentsView', () => {
         expect(screen.getByText('Delete Agent Template')).toBeInTheDocument();
       });
 
-      // Find the Delete button in the confirmation dialog (the second Delete button)
-      const confirmButtons = screen.getAllByRole('button', { name: /Delete/i });
-      const confirmButton = confirmButtons.find(btn => btn.textContent === 'Delete');
+      // Find the Delete button in the confirmation dialog (inside the alertdialog)
+      const dialog = screen.getByRole('alertdialog');
+      const confirmButton = within(dialog).getByRole('button', { name: /delete/i });
 
       await act(async () => {
-        fireEvent.click(confirmButton!);
+        fireEvent.click(confirmButton);
       });
 
       await waitFor(() => {
@@ -577,7 +519,9 @@ describe('AgentsView', () => {
         expect(screen.getByText('test-agent')).toBeInTheDocument();
       });
 
-      const deleteButton = screen.getByTitle('Delete');
+      // Find the Delete button in the card
+      const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+      const deleteButton = deleteButtons[0];
       await act(async () => {
         fireEvent.click(deleteButton);
       });
@@ -644,7 +588,9 @@ describe('AgentsView', () => {
         expect(screen.getByText('test-agent')).toBeInTheDocument();
       });
 
-      const deleteButton = screen.getByTitle('Delete');
+      // Find the Delete button in the card
+      const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+      const deleteButton = deleteButtons[0];
       await act(async () => {
         fireEvent.click(deleteButton);
       });
@@ -653,11 +599,12 @@ describe('AgentsView', () => {
         expect(screen.getByText('Delete Agent Template')).toBeInTheDocument();
       });
 
-      const confirmButtons = screen.getAllByRole('button', { name: /Delete/i });
-      const confirmButton = confirmButtons.find(btn => btn.textContent === 'Delete');
+      // Find the Delete button in the confirmation dialog (inside the alertdialog)
+      const dialog = screen.getByRole('alertdialog');
+      const confirmButton = within(dialog).getByRole('button', { name: /delete/i });
 
       await act(async () => {
-        fireEvent.click(confirmButton!);
+        fireEvent.click(confirmButton);
       });
 
       // Should handle error without crashing
@@ -675,10 +622,7 @@ describe('AgentsView', () => {
 describe('AgentCard', () => {
   const defaultProps = {
     agent: mockAgentTemplate as AgentCardAgent,
-    onUse: vi.fn(),
-    onEdit: vi.fn(),
     onDelete: vi.fn(),
-    onCopy: vi.fn(),
   };
 
   beforeEach(() => {
@@ -716,25 +660,14 @@ describe('AgentCard', () => {
     expect(screen.getByText('Built-in')).toBeInTheDocument();
   });
 
-  it('shows Use button for custom agents', () => {
+  it('shows Delete button for custom agents', () => {
     render(<AgentCard {...defaultProps} />);
-    expect(screen.getByText('Use')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 
   it('shows Install button for built-in agents', () => {
     render(<AgentCard {...defaultProps} agent={mockBuiltInAgent} onInstall={vi.fn()} />);
     expect(screen.getByText('Install')).toBeInTheDocument();
-  });
-
-  it('calls onUse when Use button clicked', async () => {
-    const onUse = vi.fn();
-    render(<AgentCard {...defaultProps} onUse={onUse} />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Use'));
-    });
-
-    expect(onUse).toHaveBeenCalledTimes(1);
   });
 
   it('calls onInstall when Install button clicked', async () => {
@@ -748,67 +681,20 @@ describe('AgentCard', () => {
     expect(onInstall).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onCopy when copy button clicked', async () => {
-    const onCopy = vi.fn();
-    render(<AgentCard {...defaultProps} onCopy={onCopy} />);
-
-    const copyButton = screen.getByTitle('Copy prompt');
-    await act(async () => {
-      fireEvent.click(copyButton);
-    });
-
-    expect(onCopy).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows checkmark after copy', async () => {
-    vi.useFakeTimers();
-    const onCopy = vi.fn();
-    render(<AgentCard {...defaultProps} onCopy={onCopy} />);
-
-    const copyButton = screen.getByTitle('Copy prompt');
-    await act(async () => {
-      fireEvent.click(copyButton);
-    });
-
-    // Check icon should appear
-    expect(screen.getByTitle('Copy prompt').querySelector('svg')).toBeInTheDocument();
-
-    // Advance timer to reset icon
-    await act(async () => {
-      vi.advanceTimersByTime(2000);
-    });
-
-    vi.useRealTimers();
-  });
-
-  it('calls onEdit when Edit button clicked for custom agents', async () => {
-    const onEdit = vi.fn();
-    render(<AgentCard {...defaultProps} onEdit={onEdit} />);
-
-    const editButton = screen.getByTitle('Edit');
-    await act(async () => {
-      fireEvent.click(editButton);
-    });
-
-    expect(onEdit).toHaveBeenCalledTimes(1);
-  });
-
   it('calls onDelete when Delete button clicked for custom agents', async () => {
     const onDelete = vi.fn();
     render(<AgentCard {...defaultProps} onDelete={onDelete} />);
 
-    const deleteButton = screen.getByTitle('Delete');
     await act(async () => {
-      fireEvent.click(deleteButton);
+      fireEvent.click(screen.getByRole('button', { name: /delete/i }));
     });
 
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
-  it('does not show Edit/Delete buttons for built-in agents', () => {
+  it('does not show Delete button for built-in agents', () => {
     render(<AgentCard {...defaultProps} agent={mockBuiltInAgent} onInstall={vi.fn()} />);
-    expect(screen.queryByTitle('Edit')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Delete')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
   });
 
   it('expands to show details when clicked', async () => {
@@ -1145,11 +1031,8 @@ describe('AgentList', () => {
     customAgents: [] as AgentTemplate[],
     builtInAgents: [] as (BuiltInAgent & { isBuiltIn: true })[],
     showBuiltIn: true,
-    onUseAgent: vi.fn(),
     onInstallAgent: vi.fn(),
-    onEditAgent: vi.fn(),
     onDeleteAgent: vi.fn(),
-    onCopyPrompt: vi.fn(),
     onCreateNew: vi.fn(),
     searchQuery: '',
   };
@@ -1245,34 +1128,12 @@ describe('AgentList', () => {
     expect(onCreateNew).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onUseAgent with agent name when Use clicked', async () => {
-    const onUseAgent = vi.fn();
-    render(<AgentList {...defaultProps} customAgents={[mockAgentTemplate]} onUseAgent={onUseAgent} />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Use'));
-    });
-
-    expect(onUseAgent).toHaveBeenCalledWith('test-agent');
-  });
-
-  it('calls onEditAgent with agent when Edit clicked', async () => {
-    const onEditAgent = vi.fn();
-    render(<AgentList {...defaultProps} customAgents={[mockAgentTemplate]} onEditAgent={onEditAgent} />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByTitle('Edit'));
-    });
-
-    expect(onEditAgent).toHaveBeenCalledWith(mockAgentTemplate);
-  });
-
   it('calls onDeleteAgent with agent id when Delete clicked', async () => {
     const onDeleteAgent = vi.fn();
     render(<AgentList {...defaultProps} customAgents={[mockAgentTemplate]} onDeleteAgent={onDeleteAgent} />);
 
     await act(async () => {
-      fireEvent.click(screen.getByTitle('Delete'));
+      fireEvent.click(screen.getByRole('button', { name: /delete/i }));
     });
 
     expect(onDeleteAgent).toHaveBeenCalledWith('1');

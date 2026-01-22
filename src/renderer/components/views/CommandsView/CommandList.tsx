@@ -10,11 +10,8 @@ interface CommandListProps {
   customCommands: Command[];
   builtInCommands: (BuiltInCommand & { isBuiltIn: true })[];
   showBuiltIn: boolean;
-  onUseCommand: (name: string) => void;
   onInstallCommand?: (command: BuiltInCommand & { isBuiltIn: true }) => void;
-  onEditCommand: (command: Command) => void;
   onDeleteCommand: (id: number) => void;
-  onCopyContent: (content: string) => void;
   onCreateNew: () => void;
   searchQuery: string;
 }
@@ -23,11 +20,8 @@ export function CommandList({
   customCommands,
   builtInCommands,
   showBuiltIn,
-  onUseCommand,
   onInstallCommand,
-  onEditCommand,
   onDeleteCommand,
-  onCopyContent,
   onCreateNew,
   searchQuery,
 }: CommandListProps) {
@@ -72,10 +66,7 @@ export function CommandList({
               <CommandCard
                 key={command.id}
                 command={command}
-                onUse={() => onUseCommand(command.name)}
-                onEdit={() => onEditCommand(command)}
                 onDelete={() => onDeleteCommand(command.id)}
-                onCopy={() => onCopyContent(command.content)}
               />
             ))}
           </div>
@@ -94,7 +85,6 @@ export function CommandList({
                 key={command.name}
                 command={command}
                 onInstall={() => onInstallCommand?.(command)}
-                onCopy={() => onCopyContent(command.content)}
               />
             ))}
           </div>

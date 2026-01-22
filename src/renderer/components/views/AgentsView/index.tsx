@@ -14,7 +14,7 @@ import { BUILT_IN_AGENTS } from './constants';
 import type { AgentTemplate, BuiltInAgent } from './types';
 
 export default function AgentsView() {
-  const { agents, loading, saveAgent, deleteAgent, copyToClipboard } = useAgents();
+  const { agents, loading, saveAgent, deleteAgent } = useAgents();
   const [showForm, setShowForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentTemplate | undefined>();
   const [installAgent, setInstallAgent] = useState<BuiltInAgent | null>(null);
@@ -44,25 +44,12 @@ export default function AgentsView() {
     }
   };
 
-  const handleUse = async (agentName: string) => {
-    await copyToClipboard(agentName);
-  };
-
-  const handleCopy = async (content: string) => {
-    await copyToClipboard(content);
-  };
-
   const handleDelete = useCallback(async (id: string) => {
     const confirmed = await confirmDelete();
     if (confirmed) {
       await deleteAgent(id);
     }
   }, [confirmDelete, deleteAgent]);
-
-  const handleEdit = (agent: AgentTemplate) => {
-    setEditingAgent(agent);
-    setShowForm(true);
-  };
 
   const handleCancel = () => {
     setShowForm(false);
@@ -161,11 +148,8 @@ export default function AgentsView() {
             customAgents={filteredAgents}
             builtInAgents={filteredBuiltIn.map((a) => ({ ...a, isBuiltIn: true as const }))}
             showBuiltIn={showBuiltIn}
-            onUseAgent={handleUse}
             onInstallAgent={(agent) => setInstallAgent(agent)}
-            onEditAgent={handleEdit}
             onDeleteAgent={handleDelete}
-            onCopyPrompt={handleCopy}
             onCreateNew={() => setShowForm(true)}
             searchQuery={searchQuery}
           />

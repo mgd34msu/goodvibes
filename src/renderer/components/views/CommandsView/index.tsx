@@ -14,7 +14,7 @@ import { BUILT_IN_COMMANDS } from './constants';
 import type { Command, BuiltInCommand } from './types';
 
 export default function CommandsView() {
-  const { commands, loading, saveCommand, deleteCommand, copyToClipboard } = useCommands();
+  const { commands, loading, saveCommand, deleteCommand } = useCommands();
   const [showForm, setShowForm] = useState(false);
   const [editingCommand, setEditingCommand] = useState<Command | undefined>();
   const [installCommand, setInstallCommand] = useState<BuiltInCommand | null>(null);
@@ -43,25 +43,12 @@ export default function CommandsView() {
     }
   };
 
-  const handleUse = async (commandName: string) => {
-    await copyToClipboard(`/${commandName}`);
-  };
-
-  const handleCopy = async (content: string) => {
-    await copyToClipboard(content);
-  };
-
   const handleDelete = useCallback(async (id: number) => {
     const confirmed = await confirmDelete();
     if (confirmed) {
       await deleteCommand(id);
     }
   }, [confirmDelete, deleteCommand]);
-
-  const handleEdit = (command: Command) => {
-    setEditingCommand(command);
-    setShowForm(true);
-  };
 
   const handleCancel = () => {
     setShowForm(false);
@@ -170,11 +157,8 @@ export default function CommandsView() {
             customCommands={filteredCommands}
             builtInCommands={filteredBuiltIn.map((c) => ({ ...c, isBuiltIn: true as const }))}
             showBuiltIn={showBuiltIn}
-            onUseCommand={handleUse}
             onInstallCommand={handleOpenInstallModal}
-            onEditCommand={handleEdit}
             onDeleteCommand={handleDelete}
-            onCopyContent={handleCopy}
             onCreateNew={() => setShowForm(true)}
             searchQuery={searchQuery}
           />

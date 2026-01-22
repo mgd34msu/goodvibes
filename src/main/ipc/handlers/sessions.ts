@@ -321,7 +321,8 @@ export function registerSessionHandlers(): void {
     }
 
     const sessionManager = getSessionManager();
-    return sessionManager?.isSessionLive(result.data) ?? false;
+    // Use async version to check actual file mtime, not stale DB data
+    return await sessionManager?.isSessionLiveAsync(result.data) ?? false;
   }));
 
   ipcMain.handle('recalculate-session-costs', withContext('recalculate-session-costs', async () => {

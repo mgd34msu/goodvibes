@@ -1,10 +1,12 @@
 // ============================================================================
 // SESSION PREVIEW VIEW - Read-only formatted session viewer
 // Shows ALL entry types from Claude JSONL with expand/collapse functionality
+// Uses virtualization for performance with large sessions
 // ============================================================================
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { ErrorBoundary } from '../../common/ErrorBoundary';
 import type { RawEntry, SessionPreviewViewProps } from './types';
@@ -64,12 +66,20 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
     });
   }, [entries, settings]);
 
+  // Virtual list for performance with large sessions
+  const virtualizer = useVirtualizer({
+    count: visibleEntries.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 120, // Estimated row height
+    overscan: 5, // Render 5 extra items above/below viewport
+  });
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    if (autoScroll && visibleEntries.length > 0) {
+      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: 'end' });
     }
-  }, [visibleEntries, autoScroll]);
+  }, [visibleEntries.length, autoScroll, virtualizer]);
 
   // Handle scroll to detect if user scrolled up
   const handleScroll = useCallback(() => {
@@ -176,10 +186,10 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
         {counts.summary > 0 && <CountBadge type="summary" count={counts.summary} />}
       </div>
 
-      {/* Entries */}
+      {/* Entries - Virtualized for performance */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto p-4 space-y-3"
+        className="flex-1 overflow-auto"
         onScroll={handleScroll}
       >
         <ErrorBoundary
@@ -198,25 +208,48 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
               No entries to display
             </div>
           ) : (
-            visibleEntries.map((entry) => (
-              <EntryBlock
-                key={entry.id}
-                entry={entry}
-                settings={settings}
-                globalExpanded={globalExpanded}
-              />
-            ))
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const entry = visibleEntries[virtualRow.index];
+                if (!entry) return null;
+                return (
+                  <div
+                    key={entry.id}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="p-4 pb-0"
+                  >
+                    <EntryBlock
+                      entry={entry}
+                      settings={settings}
+                      globalExpanded={globalExpanded}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           )}
         </ErrorBoundary>
       </div>
 
       {/* Scroll to bottom button */}
-      {!autoScroll && (
+      {!autoScroll && visibleEntries.length > 0 && (
         <button
           onClick={() => {
-            if (containerRef.current) {
-              containerRef.current.scrollTop = containerRef.current.scrollHeight;
-            }
+            virtualizer.scrollToIndex(visibleEntries.length - 1, { align: 'end' });
             setAutoScroll(true);
           }}
           className="absolute bottom-4 right-4 p-2 bg-primary-500 text-white rounded-full shadow-lg hover:bg-primary-600 transition-colors"

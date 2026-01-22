@@ -5,6 +5,7 @@
 import * as pty from 'node-pty';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ipcMain } from 'electron';
 import { sendToRenderer } from '../window.js';
 import { getSetting, logActivity } from '../database/index.js';
 import { addRecentProject } from './recentProjects.js';
@@ -259,13 +260,7 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
 
       // Notify main process about terminal exit for agent cleanup
       // This is sent via the internal event, not to renderer
-      import('electron').then(({ ipcMain }) => {
-        if (ipcMain?.emit) {
-          ipcMain.emit('terminal-exited', null, { terminalId });
-        }
-      }).catch((error) => {
-        logger.error('Failed to emit terminal-exited event', error);
-      });
+      ipcMain.emit('terminal-exited', null, { terminalId });
 
       terminals.delete(terminalId);
 
@@ -281,10 +276,10 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
     });
 
     // Add to recent projects
-    addRecentProject(workingDir, name);
+    void addRecentProject(workingDir, name);
 
     // Log activity for terminal start
-    logActivity(
+    void logActivity(
       'terminal_start',
       options.resumeSessionId || null,
       `Started terminal: ${name}`,
@@ -403,7 +398,7 @@ export async function startPlainTerminal(options: TerminalStartOptions): Promise
     // Note: Plain terminals do NOT add to recent projects - only Claude sessions do
 
     // Log activity for terminal start
-    logActivity(
+    void logActivity(
       'terminal_start',
       null,
       `Started plain terminal: ${name}`,

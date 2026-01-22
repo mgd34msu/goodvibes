@@ -299,7 +299,7 @@ export default function MCPView() {
                     setEditingServer(s);
                     setShowForm(true);
                   }}
-                  onDelete={handleDelete}
+                  onUninstall={handleDelete}
                 />
               ))}
             </div>

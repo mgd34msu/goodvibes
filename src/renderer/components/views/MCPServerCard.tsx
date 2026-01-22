@@ -7,7 +7,6 @@ import {
   Play,
   Square,
   RefreshCw,
-  Trash2,
   Edit2,
   CheckCircle,
   XCircle,
@@ -83,7 +82,7 @@ interface ServerCardProps {
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
   onEdit: (server: MCPServer) => void;
-  onDelete: (id: number) => void;
+  onUninstall: (id: number) => void;
 }
 
 const DEFAULT_STATUS: StatusConfig = {
@@ -92,7 +91,7 @@ const DEFAULT_STATUS: StatusConfig = {
   icon: <AlertCircle className="w-5 h-5" />,
 };
 
-export function MCPServerCard({ server, timezone = 'UTC', onStart, onStop, onRestart, onEdit, onDelete }: ServerCardProps): React.JSX.Element {
+export function MCPServerCard({ server, timezone = 'UTC', onStart, onStop, onRestart, onEdit, onUninstall }: ServerCardProps): React.JSX.Element {
   const statusConfig: StatusConfig = STATUS_CONFIG[server.status] ?? DEFAULT_STATUS;
 
   return (
@@ -176,11 +175,10 @@ export function MCPServerCard({ server, timezone = 'UTC', onStart, onStop, onRes
             <Edit2 className="w-4 h-4" />
           </button>
           <button
-            onClick={() => onDelete(server.id)}
-            className="card-action-btn card-action-btn-danger"
-            title="Delete"
+            onClick={() => onUninstall(server.id)}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-error-500/20 text-error-400 hover:bg-error-500/30 transition-colors"
           >
-            <Trash2 className="w-4 h-4" />
+            Uninstall
           </button>
         </div>
       </div>

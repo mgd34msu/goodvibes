@@ -40,7 +40,7 @@ describe('MCPServerCard', () => {
   const mockOnStop = vi.fn();
   const mockOnRestart = vi.fn();
   const mockOnEdit = vi.fn();
-  const mockOnDelete = vi.fn();
+  const mockOnUninstall = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -54,7 +54,7 @@ describe('MCPServerCard', () => {
         onStop={mockOnStop}
         onRestart={mockOnRestart}
         onEdit={mockOnEdit}
-        onDelete={mockOnDelete}
+        onUninstall={mockOnUninstall}
       />
     );
   };
@@ -215,9 +215,9 @@ describe('MCPServerCard', () => {
       expect(screen.getByTitle('Edit')).toBeInTheDocument();
     });
 
-    it('always shows Delete button', () => {
+    it('always shows Uninstall button', () => {
       renderCard();
-      expect(screen.getByTitle('Delete')).toBeInTheDocument();
+      expect(screen.getByText('Uninstall')).toBeInTheDocument();
     });
   });
 
@@ -266,14 +266,14 @@ describe('MCPServerCard', () => {
       expect(mockOnEdit).toHaveBeenCalledWith(server);
     });
 
-    it('calls onDelete with server id when Delete clicked', () => {
+    it('calls onUninstall with server id when Uninstall clicked', () => {
       const server = createMockServer();
       renderCard(server);
 
-      fireEvent.click(screen.getByTitle('Delete'));
+      fireEvent.click(screen.getByText('Uninstall'));
 
-      expect(mockOnDelete).toHaveBeenCalledTimes(1);
-      expect(mockOnDelete).toHaveBeenCalledWith(server.id);
+      expect(mockOnUninstall).toHaveBeenCalledTimes(1);
+      expect(mockOnUninstall).toHaveBeenCalledWith(server.id);
     });
   });
 

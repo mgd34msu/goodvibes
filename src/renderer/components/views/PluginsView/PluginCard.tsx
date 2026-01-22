@@ -9,7 +9,6 @@ import {
   Wrench,
   MessageSquare,
   Brain,
-  CheckCircle,
   Download,
   Sparkles,
   Power,
@@ -64,9 +63,11 @@ interface PluginCardProps {
   installed: boolean;
   onInstall?: (plugin: Plugin) => void;
   onToggle?: (plugin: Plugin) => void;
+  onUninstall?: (plugin: Plugin) => void;
+  isUninstalling?: boolean;
 }
 
-export function PluginCard({ plugin, installed, onInstall, onToggle }: PluginCardProps): React.JSX.Element {
+export function PluginCard({ plugin, installed, onInstall, onToggle, onUninstall, isUninstalling }: PluginCardProps): React.JSX.Element {
   const categoryConfig: CategoryConfig = CATEGORY_CONFIG[plugin.category] ?? DEFAULT_CATEGORY;
   const isFeatured = plugin.featured;
 
@@ -159,10 +160,19 @@ export function PluginCard({ plugin, installed, onInstall, onToggle }: PluginCar
                   {plugin.enabled ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
                 </button>
               )}
-              <span className="card-badge card-badge-success">
-                <CheckCircle className="w-3 h-3" />
-                Installed
-              </span>
+              {onUninstall && (
+                <button
+                  onClick={() => onUninstall(plugin)}
+                  disabled={isUninstalling}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                    isUninstalling
+                      ? 'bg-error-500/10 text-error-400/50 cursor-not-allowed opacity-50'
+                      : 'bg-error-500/20 text-error-400 hover:bg-error-500/30'
+                  }`}
+                >
+                  {isUninstalling ? 'Uninstalling...' : 'Uninstall'}
+                </button>
+              )}
             </div>
           ) : (
             onInstall && (

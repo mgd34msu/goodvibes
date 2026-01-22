@@ -369,13 +369,14 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     }
   }, [xtermTheme]);
 
-  // Reinit terminal when it becomes active (with 500ms delay to let DOM settle)
+  // Reinit terminal when it becomes active (use rAF for DOM-ready detection)
   useEffect(() => {
     if (isActive && terminalRef.current) {
-      const timeout = setTimeout(() => {
+      // Use requestAnimationFrame to wait for next paint, then reinit
+      const rafId = requestAnimationFrame(() => {
         reinitTerminal();
-      }, 500);
-      return () => clearTimeout(timeout);
+      });
+      return () => cancelAnimationFrame(rafId);
     }
     return undefined;
   }, [isActive, reinitTerminal]);

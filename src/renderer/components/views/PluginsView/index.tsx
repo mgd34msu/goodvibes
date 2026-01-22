@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { createLogger } from '../../../../shared/logger';
 import { toast } from '../../../stores/toastStore';
+import { useConfirm } from '../../overlays/ConfirmModal';
 import { PluginCard } from './PluginCard';
 import { BUILT_IN_PLUGINS, CATEGORY_FILTERS } from './constants';
 import type { Plugin } from './types';
@@ -25,6 +26,15 @@ export default function PluginsView() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [installedPlugins, setInstalledPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uninstallingId, setUninstallingId] = useState<string | null>(null);
+
+  const { confirm: confirmUninstall, ConfirmDialog } = useConfirm({
+    title: 'Uninstall Plugin',
+    message: 'Are you sure you want to uninstall this plugin?',
+    confirmText: 'Uninstall',
+    cancelText: 'Cancel',
+    variant: 'danger',
+  });
 
   const installedPluginIds = useMemo(() => {
     return new Set(installedPlugins.map(p => p.id));
@@ -104,7 +114,32 @@ export default function PluginsView() {
     }
   }, [loadInstalledPlugins]);
 
+  const handleUninstall = useCallback(async (plugin: Plugin) => {
+    const confirmed = await confirmUninstall();
+    if (!confirmed) return;
+
+    setUninstallingId(plugin.id);
+    try {
+      const response = await window.goodvibes.uninstallPlugin({
+        pluginId: plugin.id,
+        scope: 'user',
+      });
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to uninstall plugin');
+      }
+      await loadInstalledPlugins();
+      toast.success(`Uninstalled ${plugin.name}`);
+    } catch (error) {
+      logger.error('Failed to uninstall plugin:', error);
+      toast.error(`Failed to uninstall ${plugin.name}`);
+    } finally {
+      setUninstallingId(null);
+    }
+  }, [confirmUninstall, loadInstalledPlugins]);
+
   return (
+    <>
+    <ConfirmDialog />
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-surface-800">
@@ -174,6 +209,8 @@ export default function PluginsView() {
                   plugin={plugin}
                   installed={true}
                   onToggle={handleToggle}
+                  onUninstall={handleUninstall}
+                  isUninstalling={uninstallingId === plugin.id}
                 />
               ))}
             </div>
@@ -230,5 +267,6 @@ export default function PluginsView() {
         )}
       </div>
     </div>
+    </>
   );
 }

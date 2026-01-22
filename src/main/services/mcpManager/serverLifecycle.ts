@@ -2,7 +2,8 @@
 // MCP SERVER LIFECYCLE - Start/Stop/Restart Operations
 // ============================================================================
 
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
+import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import { Logger } from '../logger.js';
 import {
@@ -21,6 +22,39 @@ import {
 import type { MCPServerInfo } from './types.js';
 
 const logger = new Logger('MCPManager');
+const execAsync = promisify(exec);
+
+// ============================================================================
+// TOOL COUNT UPDATE VIA MCP-CLI
+// ============================================================================
+
+/**
+ * Query tools from an MCP server using mcp-cli and update the tool count
+ */
+async function updateToolCountFromMcpCli(serverId: number, serverName: string): Promise<void> {
+  try {
+    // Use mcp-cli to get tools for this server
+    // Format: mcp-cli tools <server-name>
+    const { stdout } = await execAsync(`mcp-cli tools "${serverName}"`, {
+      timeout: 10000,
+      encoding: 'utf-8',
+    });
+
+    // Parse the output - mcp-cli tools outputs lines like:
+    // server/toolname - description
+    // Count the number of tools (non-empty lines that contain a forward slash)
+    const lines = stdout.split('\n').filter(line => line.trim() && line.includes('/'));
+    const toolCount = lines.length;
+
+    if (toolCount > 0) {
+      updateMCPServer(serverId, { toolCount });
+      logger.info(`Updated tool count for ${serverName}: ${toolCount} tools`);
+    }
+  } catch (error) {
+    // Don't fail silently - log the error but don't throw
+    logger.debug(`Could not query tools for ${serverName} via mcp-cli:`, error);
+  }
+}
 
 // ============================================================================
 // STDIO SERVER LIFECYCLE
@@ -120,21 +154,8 @@ export async function startStdioServer(
         const output = data.toString();
         logger.debug(`MCP ${server.name} stdout: ${output}`);
 
-        // Try to parse as JSON to detect tools
-        // Note: MCP servers emit both JSON and non-JSON output, so parse errors
-        // are expected and intentionally silenced - this is NOT an error condition
-        try {
-          const json = JSON.parse(output);
-          if (json.tools) {
-            serverInfo.tools = json.tools;
-            updateMCPServer(server.id, { toolCount: json.tools.length });
-            logger.debug(`MCP ${server.name} registered ${json.tools.length} tools`);
-          }
-        } catch {
-          // Expected: Not JSON output (e.g., status messages, logs). MCP servers
-          // commonly emit non-JSON output alongside JSON tool registrations.
-          // This is normal operation, not an error condition.
-        }
+        // Note: Tool count is now queried via mcp-cli after connection
+        // Stdout parsing removed as MCP servers use JSON-RPC, not plain JSON
 
         // Mark as connected on first output
         if (!serverInfo.connected) {
@@ -142,6 +163,12 @@ export async function startStdioServer(
           clearTimeout(timeout);
           updateMCPServerStatus(server.id, 'connected');
           emitter.emit('server:connected', server);
+
+          // Query tools via mcp-cli and update count (non-blocking)
+          updateToolCountFromMcpCli(server.id, server.name).catch(() => {
+            // Silently ignore errors - tool count is not critical
+          });
+
           resolve(true);
         }
       });
@@ -209,6 +236,12 @@ export async function testHttpServer(
 
       runningServers.set(server.id, serverInfo);
       emitter.emit('server:connected', server);
+
+      // Query tools via mcp-cli and update count (non-blocking)
+      updateToolCountFromMcpCli(server.id, server.name).catch(() => {
+        // Silently ignore errors - tool count is not critical
+      });
+
       return true;
     } else {
       updateMCPServerStatus(server.id, 'error', `HTTP ${response.status}`);

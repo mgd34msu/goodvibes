@@ -51,6 +51,7 @@ export interface AppSettings {
   githubAutoLoadCI: boolean;
   // Session backup settings
   sessionBackupEnabled: boolean;
+  timezone: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -96,6 +97,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   githubAutoLoadCI: true,
   // Session backup settings
   sessionBackupEnabled: true,
+  timezone: 'UTC',
 };
 
 // Settings version - increment this when adding new settings that need migration
@@ -114,7 +116,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
 // Version 7: Added terminal shell settings (preferredShell, customShells)
 // Version 8: Added preferredTextEditor setting
 // Version 9: Added colorTheme setting for dynamic theming
-export const SETTINGS_VERSION = 9;
+// Version 10: Added timezone setting
+export const SETTINGS_VERSION = 10;
 
 // Settings that were added/changed in each version and need to be reset to defaults
 export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
@@ -162,6 +165,8 @@ export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
   ],
   // Version 9: Added colorTheme setting
   9: ['colorTheme'],
+  // Version 10: Added timezone setting
+  10: ['timezone'],
 };
 
 // Settings that were removed and should be cleaned up during migration

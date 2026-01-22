@@ -11,6 +11,7 @@ import {
 import { useConfirm } from '../overlays/ConfirmModal';
 import { createLogger } from '../../../shared/logger';
 import { toast } from '../../stores/toastStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { MCPServerCard, type MCPServer } from './MCPServerCard';
 import { MCPMarketplaceCard, MARKETPLACE_SERVERS, type MarketplaceServer } from './MCPMarketplaceCard';
 import { MCPServerForm } from './MCPServerForm';
@@ -32,6 +33,8 @@ export default function MCPView() {
     deleteServer,
     setServerStatus,
   } = useMcpServers({ autoFetch: true });
+
+  const { settings } = useSettingsStore();
 
   const [showForm, setShowForm] = useState(false);
   const [editingServer, setEditingServer] = useState<MCPServer | undefined>();
@@ -288,6 +291,7 @@ export default function MCPView() {
                 <MCPServerCard
                   key={server.id}
                   server={server}
+                  timezone={settings.timezone}
                   onStart={handleStart}
                   onStop={handleStop}
                   onRestart={handleRestart}

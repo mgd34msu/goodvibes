@@ -65,7 +65,7 @@ export function registerPluginHandlers(): void {
   /**
    * Get all installed plugins
    */
-  ipcMain.handle('get-installed-plugins', withContext('get-installed-plugins', async () => {
+  ipcMain.handle('plugins:getInstalledPlugins', withContext('plugins:getInstalledPlugins', async () => {
     try {
       logger.debug('Fetching installed plugins');
       const plugins = await getInstalledPlugins();
@@ -83,10 +83,10 @@ export function registerPluginHandlers(): void {
   /**
    * Install a plugin from a repository URL
    */
-  ipcMain.handle('install-plugin', withContext('install-plugin', async (_, data: unknown) => {
+  ipcMain.handle('plugins:installPlugin', withContext('plugins:installPlugin', async (_, data: unknown) => {
     const result = installPluginSchema.safeParse(data);
     if (!result.success) {
-      logger.warn('install-plugin validation failed', { errors: result.error.errors });
+      logger.warn('plugins:installPlugin validation failed', { errors: result.error.errors });
       return formatValidationError(result.error);
     }
 
@@ -115,10 +115,10 @@ export function registerPluginHandlers(): void {
   /**
    * Uninstall a plugin
    */
-  ipcMain.handle('uninstall-plugin', withContext('uninstall-plugin', async (_, data: unknown) => {
+  ipcMain.handle('plugins:uninstallPlugin', withContext('plugins:uninstallPlugin', async (_, data: unknown) => {
     const result = uninstallPluginSchema.safeParse(data);
     if (!result.success) {
-      logger.warn('uninstall-plugin validation failed', { errors: result.error.errors });
+      logger.warn('plugins:uninstallPlugin validation failed', { errors: result.error.errors });
       return formatValidationError(result.error);
     }
 
@@ -142,10 +142,10 @@ export function registerPluginHandlers(): void {
   /**
    * Enable or disable a plugin
    */
-  ipcMain.handle('enable-plugin', withContext('enable-plugin', async (_, data: unknown) => {
+  ipcMain.handle('plugins:enablePlugin', withContext('plugins:enablePlugin', async (_, data: unknown) => {
     const result = enablePluginSchema.safeParse(data);
     if (!result.success) {
-      logger.warn('enable-plugin validation failed', { errors: result.error.errors });
+      logger.warn('plugins:enablePlugin validation failed', { errors: result.error.errors });
       return formatValidationError(result.error);
     }
 

@@ -11,7 +11,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../logger.js';
-import type { PluginManifest, InstalledPlugin } from './types.js';
+import type { InstalledPlugin } from './types.js';
 import {
   getPluginsDir,
   ensureDir,

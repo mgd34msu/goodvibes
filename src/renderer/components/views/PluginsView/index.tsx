@@ -46,11 +46,15 @@ export default function PluginsView() {
   const loadInstalledPlugins = useCallback(async () => {
     setLoading(true);
     try {
-      const plugins = await window.goodvibes.getInstalledPlugins();
-      setInstalledPlugins(plugins);
+      const response = await window.goodvibes.getInstalledPlugins();
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to load plugins');
+      }
+      setInstalledPlugins(response.plugins || []);
     } catch (error) {
       logger.error('Failed to load plugins:', error);
       toast.error('Failed to load plugins');
+      setInstalledPlugins([]);
     } finally {
       setLoading(false);
     }
@@ -67,10 +71,13 @@ export default function PluginsView() {
     }
 
     try {
-      await window.goodvibes.installPlugin({
+      const response = await window.goodvibes.installPlugin({
         repository: plugin.repository,
         scope: 'user',
       });
+      if (!response.success) {
+        throw new Error(response.error || 'Installation failed');
+      }
       await loadInstalledPlugins();
       toast.success(`Installed ${plugin.name}`);
     } catch (error) {
@@ -80,13 +87,17 @@ export default function PluginsView() {
   }, [loadInstalledPlugins]);
 
   const handleToggle = useCallback(async (plugin: Plugin) => {
+    const newEnabledState = !plugin.enabled;
     try {
-      await window.goodvibes.enablePlugin({
+      const response = await window.goodvibes.enablePlugin({
         pluginId: plugin.id,
-        enabled: !plugin.enabled,
+        enabled: newEnabledState,
       });
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to toggle plugin');
+      }
       await loadInstalledPlugins();
-      toast.success(`${plugin.enabled ? 'Disabled' : 'Enabled'} ${plugin.name}`);
+      toast.success(`${newEnabledState ? 'Enabled' : 'Disabled'} ${plugin.name}`);
     } catch (error) {
       logger.error('Failed to toggle plugin:', error);
       toast.error('Failed to toggle plugin');

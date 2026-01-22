@@ -78,6 +78,7 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
 
 interface ServerCardProps {
   server: MCPServer;
+  timezone?: string;
   onStart: (id: number) => void;
   onStop: (id: number) => void;
   onRestart: (id: number) => void;
@@ -91,7 +92,7 @@ const DEFAULT_STATUS: StatusConfig = {
   icon: <AlertCircle className="w-5 h-5" />,
 };
 
-export function MCPServerCard({ server, onStart, onStop, onRestart, onEdit, onDelete }: ServerCardProps): React.JSX.Element {
+export function MCPServerCard({ server, timezone = 'UTC', onStart, onStop, onRestart, onEdit, onDelete }: ServerCardProps): React.JSX.Element {
   const statusConfig: StatusConfig = STATUS_CONFIG[server.status] ?? DEFAULT_STATUS;
 
   return (
@@ -128,7 +129,7 @@ export function MCPServerCard({ server, onStart, onStop, onRestart, onEdit, onDe
               </span>
               {server.lastConnected && (
                 <span className="card-meta-item">
-                  Last connected: {new Date(server.lastConnected).toLocaleString()}
+                  Last connected: {new Date(server.lastConnected).toLocaleString(undefined, { timeZone: timezone })}
                 </span>
               )}
             </div>

@@ -5,11 +5,6 @@
 import { useState } from 'react';
 import {
   Sparkles,
-  Edit2,
-  Trash2,
-  Copy,
-  Check,
-  Play,
   Download,
   Star,
   Clock,
@@ -21,30 +16,17 @@ import type { SkillCardSkill } from './types';
 
 interface SkillCardProps {
   skill: SkillCardSkill;
-  onUse?: () => void;
   onInstall?: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
-  onCopy: () => void;
 }
 
 export function SkillCard({
   skill,
-  onUse,
   onInstall,
-  onEdit,
   onDelete,
-  onCopy,
 }: SkillCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in skill;
-
-  const handleCopy = () => {
-    onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   // Format skill invocation for display
   const invocationText = `Skill skill: "${skill.name}"`;

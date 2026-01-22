@@ -74,22 +74,34 @@ export default function HooksView() {
   // Install a built-in hook with selected scope and project
   const handleInstallBuiltIn = useCallback(
     async (builtinHook: BuiltinHook, scope: 'user' | 'project', projectPath: string | null) => {
-      const hookData: Partial<Hook> = {
-        name: builtinHook.name,
-        eventType: builtinHook.eventType,
-        matcher: builtinHook.matcher,
-        command: builtinHook.command,
-        hookType: builtinHook.hookType,
-        prompt: builtinHook.prompt,
-        timeout: builtinHook.timeout,
-        scope,
-        projectPath,
-        enabled: true,
-      };
+      try {
+        // Install hook to .claude/hooks/ directory and update settings.json
+        await window.goodvibes.installHook({
+          name: builtinHook.name,
+          script: builtinHook.command,
+          eventType: builtinHook.eventType,
+          matcher: builtinHook.matcher || undefined,
+          scope,
+          projectPath: projectPath || undefined,
+        });
 
-      const success = await handleSave(hookData);
-      if (success) {
+        // Also save to database for UI display
+        const hookData: Partial<Hook> = {
+          name: builtinHook.name,
+          eventType: builtinHook.eventType,
+          matcher: builtinHook.matcher,
+          command: builtinHook.command,
+          hookType: builtinHook.hookType,
+          prompt: builtinHook.prompt,
+          timeout: builtinHook.timeout,
+          scope,
+          projectPath,
+          enabled: true,
+        };
+        await handleSave(hookData);
         setHookToInstall(null);
+      } catch (error) {
+        console.error('Failed to install hook:', error);
       }
     },
     [handleSave]

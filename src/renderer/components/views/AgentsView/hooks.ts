@@ -73,7 +73,31 @@ export function useAgents(): UseAgentsReturn {
 
   const deleteAgent = async (id: string) => {
     try {
+      // Find the agent to determine scope
+      const agent = agents.find((a) => a.id === id);
+      if (!agent) {
+        throw new Error('Agent not found');
+      }
+
+      // Determine scope based on cwd
+      const scope: 'user' | 'project' = agent.cwd ? 'project' : 'user';
+      const projectPath = agent.cwd || undefined;
+
+      // Delete from database
       await window.goodvibes.deleteAgentTemplate(id);
+
+      // Uninstall from .claude/agents/ directory
+      try {
+        await window.goodvibes.uninstallAgent({
+          name: agent.name,
+          scope,
+          projectPath,
+        });
+      } catch (uninstallError) {
+        // Log error but don't fail the entire operation if file doesn't exist
+        logger.warn('Failed to uninstall agent file (may not exist)', { error: uninstallError });
+      }
+
       await loadAgents();
       toast.success('Agent template deleted');
       return { success: true };

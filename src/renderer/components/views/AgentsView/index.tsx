@@ -71,21 +71,34 @@ export default function AgentsView() {
 
   const handleInstallAgent = useCallback(
     async (agent: BuiltInAgent, scope: 'user' | 'project', projectPath: string | null) => {
-      // Create agent template from built-in agent data
-      const agentData: Partial<AgentTemplate> = {
-        name: agent.name,
-        description: agent.description,
-        initialPrompt: agent.initialPrompt,
-        claudeMdContent: agent.claudeMdContent,
-        flags: agent.flags,
-        model: agent.model,
-        permissionMode: agent.permissionMode,
-        allowedTools: agent.allowedTools,
-        deniedTools: agent.deniedTools,
-        cwd: scope === 'project' ? projectPath : null,
-      };
+      // Install agent to .claude/agents/ directory
+      const content = agent.initialPrompt || agent.claudeMdContent || '';
 
-      await saveAgent(agentData, scope === 'project' ? projectPath : null);
+      try {
+        await window.goodvibes.installAgent({
+          name: agent.name,
+          content,
+          scope,
+          projectPath: projectPath || undefined,
+        });
+
+        // Also save to database for UI display
+        const agentData: Partial<AgentTemplate> = {
+          name: agent.name,
+          description: agent.description,
+          initialPrompt: agent.initialPrompt,
+          claudeMdContent: agent.claudeMdContent,
+          flags: agent.flags,
+          model: agent.model,
+          permissionMode: agent.permissionMode,
+          allowedTools: agent.allowedTools,
+          deniedTools: agent.deniedTools,
+          cwd: scope === 'project' ? projectPath : null,
+        };
+        await saveAgent(agentData, scope === 'project' ? projectPath : null);
+      } catch (error) {
+        console.error('Failed to install agent:', error);
+      }
     },
     [saveAgent]
   );

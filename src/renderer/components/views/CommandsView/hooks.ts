@@ -90,7 +90,27 @@ export function useCommands(): UseCommandsReturn {
 
   const deleteCommand = async (id: number) => {
     try {
+      // Find the command to determine scope
+      const command = commands.find((c) => c.id === id);
+      if (!command) {
+        throw new Error('Command not found');
+      }
+
+      // Delete from database
       await window.goodvibes.deleteSkill(id);
+
+      // Uninstall from .claude/commands/ directory
+      try {
+        await window.goodvibes.uninstallCommand({
+          name: command.name,
+          scope: command.scope,
+          projectPath: command.projectPath || undefined,
+        });
+      } catch (uninstallError) {
+        // Log error but don't fail the entire operation if file doesn't exist
+        logger.warn('Failed to uninstall command file (may not exist)', { error: uninstallError });
+      }
+
       await loadCommands();
       toast.success('Command deleted');
       return { success: true };

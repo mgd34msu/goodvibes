@@ -92,7 +92,28 @@ export function useHooks(): UseHooksReturn {
   const handleDelete = useCallback(
     async (id: number) => {
       try {
+        // Find the hook to determine scope and eventType
+        const hook = hooks.find((h) => h.id === id);
+        if (!hook) {
+          throw new Error('Hook not found');
+        }
+
+        // Delete from database
         await window.goodvibes.deleteHook(id);
+
+        // Uninstall from .claude/hooks/ directory and remove from settings.json
+        try {
+          await window.goodvibes.uninstallHook({
+            name: hook.name,
+            eventType: hook.eventType,
+            scope: hook.scope,
+            projectPath: hook.projectPath || undefined,
+          });
+        } catch (uninstallError) {
+          // Log error but don't fail the entire operation if file doesn't exist
+          logger.warn('Failed to uninstall hook file (may not exist)', { error: uninstallError });
+        }
+
         await loadHooks();
         toast.success('Hook deleted');
       } catch (error) {
@@ -100,7 +121,7 @@ export function useHooks(): UseHooksReturn {
         toast.error('Failed to delete hook');
       }
     },
-    [loadHooks]
+    [hooks, loadHooks]
   );
 
   const handleTest = useCallback(

@@ -79,15 +79,28 @@ export default function CommandsView() {
     scope: 'user' | 'project',
     projectPath: string | null
   ) => {
-    const commandData: Partial<Command> = {
-      name: command.name,
-      description: command.description,
-      content: command.content,
-      allowedTools: command.allowedTools,
-      scope,
-    };
+    try {
+      // Install command to .claude/commands/ directory
+      await window.goodvibes.installCommand({
+        name: command.name,
+        content: command.content,
+        scope,
+        projectPath: projectPath || undefined,
+      });
 
-    await saveCommand(commandData, projectPath);
+      // Also save to database for UI display
+      const commandData: Partial<Command> = {
+        name: command.name,
+        description: command.description || '',
+        content: command.content,
+        allowedTools: command.allowedTools,
+        scope,
+        projectPath,
+      };
+      await saveCommand(commandData, projectPath);
+    } catch (error) {
+      console.error('Failed to install command:', error);
+    }
     setInstallCommand(null);
   };
 

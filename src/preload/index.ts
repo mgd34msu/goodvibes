@@ -22,6 +22,7 @@ import { agencyApi } from './api/agency.js';
 import { eventsApi } from './api/events.js';
 import { projectRegistryApi } from './api/project-registry.js';
 import { recommendationsApi } from './api/recommendations.js';
+import { featuresApi } from './api/features.js';
 
 // Combine all APIs into single exposed object
 const api = {
@@ -63,6 +64,9 @@ const api = {
 
   // Recommendations
   ...recommendationsApi,
+
+  // Features (installation)
+  ...featuresApi,
 };
 
 // Expose API to renderer

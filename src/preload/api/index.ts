@@ -15,3 +15,4 @@ export { agencyApi } from './agency.js';
 export { eventsApi } from './events.js';
 export { projectRegistryApi } from './project-registry.js';
 export { recommendationsApi } from './recommendations.js';
+export { featuresApi } from './features.js';

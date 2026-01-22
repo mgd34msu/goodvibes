@@ -100,7 +100,27 @@ export function useAgentSkills(): UseAgentSkillsReturn {
 
   const deleteSkill = async (id: number) => {
     try {
+      // Find the skill to determine scope
+      const skill = skills.find((s) => s.id === id);
+      if (!skill) {
+        throw new Error('Skill not found');
+      }
+
+      // Delete from database
       await window.goodvibes.deleteSkill(id);
+
+      // Uninstall from .claude/skills/ directory
+      try {
+        await window.goodvibes.uninstallSkill({
+          name: skill.name,
+          scope: skill.scope,
+          projectPath: skill.projectPath || undefined,
+        });
+      } catch (uninstallError) {
+        // Log error but don't fail the entire operation if file doesn't exist
+        logger.warn('Failed to uninstall skill file (may not exist)', { error: uninstallError });
+      }
+
       await loadSkills();
       toast.success('Skill deleted');
       return { success: true };

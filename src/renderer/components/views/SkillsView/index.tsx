@@ -95,15 +95,28 @@ export default function AgentSkillsView() {
     scope: 'user' | 'project',
     projectPath: string | null
   ) => {
-    const skillData: Partial<AgentSkill> = {
-      name: skill.name,
-      description: skill.description,
-      content: skill.content,
-      allowedTools: skill.allowedTools,
-      scope,
-    };
+    try {
+      // Install skill to .claude/skills/ directory
+      await window.goodvibes.installSkill({
+        name: skill.name,
+        content: skill.content,
+        scope,
+        projectPath: projectPath || undefined,
+      });
 
-    await saveSkill(skillData, projectPath);
+      // Also save to database for UI display
+      const skillData: Partial<AgentSkill> = {
+        name: skill.name,
+        description: skill.description || '',
+        content: skill.content,
+        allowedTools: skill.allowedTools,
+        scope,
+        projectPath,
+      };
+      await saveSkill(skillData, projectPath);
+    } catch (error) {
+      console.error('Failed to install skill:', error);
+    }
     setInstallSkill(null);
   };
 

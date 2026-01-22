@@ -58,6 +58,9 @@ export * from './export.js';
 // Clipboard - canonical source for clipboard schemas
 export * from './clipboard.js';
 
+// Features - feature installation schemas
+export * from './features.js';
+
 // Window - skip to avoid duplicates with clipboard.ts
 // Use clipboard.ts for clipboardWriteSchema, contextMenuOptionsSchema, terminalContextMenuOptionsSchema
 

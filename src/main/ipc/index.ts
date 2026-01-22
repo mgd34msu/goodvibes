@@ -26,6 +26,7 @@ import {
   registerAgencyHandlers,
   registerExportHandlers,
   registerClipboardHandlers,
+  registerFeatureHandlers,
 } from './handlers/index.js';
 
 const logger = new Logger('IPC');
@@ -87,6 +88,9 @@ export function registerAllIpcHandlers(): void {
 
   // Agency index (agent & skill browser)
   registerAgencyHandlers();
+
+  // Feature installation
+  registerFeatureHandlers();
 
   // ============================================================================
   // UI HANDLERS

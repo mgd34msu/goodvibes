@@ -4,11 +4,6 @@
 
 import { useState } from 'react';
 import {
-  Edit2,
-  Trash2,
-  Copy,
-  Check,
-  Play,
   ChevronRight,
   Zap,
   Download,
@@ -18,23 +13,13 @@ import { AGENT_ICONS } from './constants';
 
 interface AgentCardProps {
   agent: AgentCardAgent;
-  onUse?: () => void;
   onInstall?: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
-  onCopy: () => void;
 }
 
-export function AgentCard({ agent, onUse, onInstall, onEdit, onDelete, onCopy }: AgentCardProps): React.JSX.Element {
+export function AgentCard({ agent, onInstall, onDelete }: AgentCardProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const isBuiltIn = 'isBuiltIn' in agent;
-
-  const handleCopy = () => {
-    onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const icon = AGENT_ICONS[agent.name] || <Zap className="w-5 h-5" />;
 
@@ -101,40 +86,10 @@ export function AgentCard({ agent, onUse, onInstall, onEdit, onDelete, onCopy }:
             </button>
           ) : (
             <button
-              onClick={onUse}
-              className="card-action-primary"
-            >
-              <Play className="w-3.5 h-3.5" />
-              Use
-            </button>
-          )}
-          <button
-            onClick={handleCopy}
-            className={`card-action-btn ${copied ? 'text-success-400' : 'card-action-btn-primary'}`}
-            title="Copy prompt"
-          >
-            {copied ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Copy className="w-4 h-4" />
-            )}
-          </button>
-          {!isBuiltIn && onEdit && (
-            <button
-              onClick={onEdit}
-              className="card-action-btn card-action-btn-primary"
-              title="Edit"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
-          )}
-          {!isBuiltIn && onDelete && (
-            <button
               onClick={onDelete}
-              className="card-action-btn card-action-btn-danger"
-              title="Delete"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-error-500/20 text-error-400 hover:bg-error-500/30 transition-colors"
             >
-              <Trash2 className="w-4 h-4" />
+              Delete
             </button>
           )}
         </div>

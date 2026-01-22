@@ -2,6 +2,8 @@
 // GIT COMMITS COMPONENT - Commit list, creation, and conventional commits
 // ============================================================================
 
+import { useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { clsx } from 'clsx';
 import type { GitCommitInfo, ExpandedSections } from './types';
 
@@ -45,6 +47,16 @@ export function GitCommits({
   formatRelativeTime,
 }: GitCommitsProps) {
   const canCommit = (commitMessage.trim() || amendMode) && (stagedCount > 0 || amendMode);
+
+  // Virtualization setup for commits list
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: commits.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 48, // Estimated row height in pixels
+    overscan: 5, // Render 5 items above and below viewport
+  });
 
   return (
     <div className="space-y-2">
@@ -123,44 +135,66 @@ export function GitCommits({
           <span className="text-xs font-medium text-surface-300">Commits</span>
         </button>
         {expandedSections.commits && (
-          <div className="max-h-48 overflow-y-auto">
+          <div ref={parentRef} className="max-h-48 overflow-y-auto">
             {commits.length === 0 ? (
               <div className="px-2 py-3 text-xs text-surface-500 text-center italic">
                 No commits yet
               </div>
             ) : (
-              commits.map((commit) => (
-                <div
-                  key={commit.hash}
-                  className="group flex items-start gap-2 px-2 py-1.5 hover:bg-surface-700/50 transition-colors"
-                >
-                  <span className="text-primary-400 font-mono text-[10px] flex-shrink-0 mt-0.5">
-                    {commit.shortHash}
-                  </span>
-                  <button
-                    onClick={() => onViewCommit(commit.hash)}
-                    className="flex-1 min-w-0 text-left"
-                    title={`Click to view commit details\n${commit.hash}\n${commit.author} <${commit.email}>\n${commit.date}`}
-                  >
-                    <div className="text-xs text-surface-200 truncate">{commit.subject}</div>
-                    <div className="text-[10px] text-surface-500">
-                      {commit.author} - {formatRelativeTime(commit.date)}
+              <div
+                style={{
+                  height: `${virtualizer.getTotalSize()}px`,
+                  position: 'relative',
+                }}
+              >
+                {virtualizer.getVirtualItems().map((virtualRow) => {
+                  const commit = commits[virtualRow.index];
+                  if (!commit) return null;
+
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '48px',
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <div className="group flex items-start gap-2 px-2 py-1.5 hover:bg-surface-700/50 transition-colors">
+                        <span className="text-primary-400 font-mono text-[10px] flex-shrink-0 mt-0.5">
+                          {commit.shortHash}
+                        </span>
+                        <button
+                          onClick={() => onViewCommit(commit.hash)}
+                          className="flex-1 min-w-0 text-left"
+                          title={`Click to view commit details\n${commit.hash}\n${commit.author} <${commit.email}>\n${commit.date}`}
+                        >
+                          <div className="text-xs text-surface-200 truncate">{commit.subject}</div>
+                          <div className="text-[10px] text-surface-500">
+                            {commit.author} - {formatRelativeTime(commit.date)}
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => onCherryPick(commit.hash)}
+                          className="p-1 rounded hover:bg-accent-500/20 text-accent-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Cherry-pick this commit"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                          </svg>
+                        </button>
+                        <svg className="w-3 h-3 text-surface-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
                     </div>
-                  </button>
-                  <button
-                    onClick={() => onCherryPick(commit.hash)}
-                    className="p-1 rounded hover:bg-accent-500/20 text-accent-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Cherry-pick this commit"
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                    </svg>
-                  </button>
-                  <svg className="w-3 h-3 text-surface-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              ))
+                  );
+                })}
+              </div>
             )}
           </div>
         )}

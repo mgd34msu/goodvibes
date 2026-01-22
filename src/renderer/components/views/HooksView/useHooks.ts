@@ -55,7 +55,7 @@ export function useHooks(): UseHooksReturn {
           await window.goodvibes.createHook({
             name: hookData.name || '',
             eventType: hookData.eventType || 'PostToolUse',
-            script: hookData.command || '',
+            command: hookData.command || '',
             enabled: hookData.enabled ?? true,
             timeout: hookData.timeout,
             projectPath: hookData.projectPath || undefined,

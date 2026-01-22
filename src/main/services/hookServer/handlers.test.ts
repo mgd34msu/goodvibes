@@ -181,6 +181,15 @@ function createMockContext(): HandlerContext {
       if (!stack || stack.length === 0) return null;
       return stack[stack.length - 1];
     }),
+    cleanupSession: vi.fn((sessionId: string) => {
+      // Remove session from all stacks
+      for (const stack of sessionStacks.values()) {
+        const index = stack.indexOf(sessionId);
+        if (index !== -1) {
+          stack.splice(index, 1);
+        }
+      }
+    }),
     emit: vi.fn((event: string, data: unknown) => {
       emittedEvents.push({ event, data });
     }),

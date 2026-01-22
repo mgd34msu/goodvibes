@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { filePathSchema } from './primitives.js';
+import { extendedHookEventTypeSchema } from './hooks.js';
 
 /**
  * Feature type - corresponds to .claude directory structure
@@ -14,25 +15,6 @@ export const featureTypeSchema = z.enum(['agents', 'skills', 'commands', 'hooks'
  * Feature scope - determines where the file is written
  */
 export const featureScopeSchema = z.enum(['user', 'project']);
-
-/**
- * Hook event type for hook installations
- */
-export const hookEventTypeSchema = z.enum([
-  'PreToolUse',
-  'PermissionRequest',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'Notification',
-  'UserPromptSubmit',
-  'Stop',
-  'SubagentStart',
-  'SubagentStop',
-  'PreCompact',
-  'SessionStart',
-  'SessionEnd',
-  'Setup',
-]);
 
 /**
  * Base feature installation schema
@@ -65,7 +47,7 @@ export const installCommandSchema = baseInstallSchema;
 export const installHookSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
   script: z.string().min(1, 'Script content is required').max(100000, 'Script too long'),
-  eventType: hookEventTypeSchema,
+  eventType: extendedHookEventTypeSchema,
   matcher: z.string().max(500, 'Matcher too long').optional(),
   scope: featureScopeSchema,
   projectPath: z.string().max(1000, 'Project path too long').optional(),
@@ -100,7 +82,7 @@ export const uninstallCommandSchema = baseUninstallSchema;
  */
 export const uninstallHookSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
-  eventType: hookEventTypeSchema,
+  eventType: extendedHookEventTypeSchema,
   scope: featureScopeSchema,
   projectPath: z.string().max(1000, 'Project path too long').optional(),
 });

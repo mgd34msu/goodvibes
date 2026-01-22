@@ -30,6 +30,7 @@ export class HookServerService extends EventEmitter {
   // Parent-child tracking
   private pendingSubagentParents: Map<string, string> = new Map();
   private sessionStacks: Map<string, string[]> = new Map();
+  private readonly MAX_MAP_SIZE = 1000;
 
   constructor() {
     super();
@@ -56,6 +57,10 @@ export class HookServerService extends EventEmitter {
    */
   private pushSession(workingDirectory: string | undefined, sessionId: string): void {
     if (!workingDirectory) return;
+
+    // Enforce size limit before adding new entry
+    this.enforceMapSizeLimit(this.sessionStacks, 'sessionStacks');
+
     if (!this.sessionStacks.has(workingDirectory)) {
       this.sessionStacks.set(workingDirectory, []);
     }
@@ -78,6 +83,51 @@ export class HookServerService extends EventEmitter {
     if (index !== -1) {
       stack.splice(index, 1);
       logger.debug(`Popped session from stack: ${sessionId} (stack depth: ${stack.length})`);
+
+      // If stack is now empty, remove the entry entirely to prevent unbounded growth
+      if (stack.length === 0) {
+        this.sessionStacks.delete(workingDirectory);
+        logger.debug(`Removed empty sessionStacks entry for ${workingDirectory}`);
+      }
+    }
+  }
+
+  /**
+   * Clean up Map entries when a session ends
+   */
+  private cleanupSession(sessionId: string): void {
+    // Clean up pendingSubagentParents entry
+    if (this.pendingSubagentParents.has(sessionId)) {
+      this.pendingSubagentParents.delete(sessionId);
+      logger.debug('Cleaned up pendingSubagentParents entry', { sessionId });
+    }
+
+    // Clean up sessionStacks entries that reference this session
+    for (const [workingDir, stack] of this.sessionStacks.entries()) {
+      const index = stack.indexOf(sessionId);
+      if (index !== -1) {
+        stack.splice(index, 1);
+        logger.debug('Removed session from sessionStacks', { sessionId, workingDir });
+
+        // Remove empty stacks
+        if (stack.length === 0) {
+          this.sessionStacks.delete(workingDir);
+          logger.debug('Removed empty sessionStacks entry', { workingDir });
+        }
+      }
+    }
+  }
+
+  /**
+   * Enforce size limits on Maps to prevent unbounded growth
+   */
+  private enforceMapSizeLimit<K, V>(map: Map<K, V>, mapName: string): void {
+    if (map.size >= this.MAX_MAP_SIZE) {
+      const firstKey = map.keys().next().value;
+      if (firstKey !== undefined) {
+        map.delete(firstKey);
+        logger.warn(`${mapName} reached max size (${this.MAX_MAP_SIZE}), removed oldest entry`);
+      }
     }
   }
 
@@ -330,6 +380,7 @@ export class HookServerService extends EventEmitter {
       pushSession: this.pushSession.bind(this),
       popSession: this.popSession.bind(this),
       getCurrentParentSession: this.getCurrentParentSession.bind(this),
+      cleanupSession: this.cleanupSession.bind(this),
       emit: this.emit.bind(this),
     };
 

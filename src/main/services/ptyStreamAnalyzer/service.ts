@@ -25,11 +25,12 @@ const ANSI_ESCAPE_REGEX = new RegExp(`${ESC}\\[[0-9;?]*[a-zA-Z]`, 'g');
 
 export class PTYStreamAnalyzerService extends EventEmitter {
   private metrics: Map<number, StreamMetrics> = new Map();
-  private activeToolCalls: Map<string, ToolCall> = new Map();
+  private activeToolCalls: Map<string, { call: ToolCall; addedAt: number }> = new Map();
   private inThinking: Set<number> = new Set();
   private outputBuffers: Map<number, string> = new Map();
   private readonly MAX_BUFFER_SIZE = 50 * 1024; // 50KB per terminal
   private readonly STALE_CLEANUP_INTERVAL_MS = 30 * 1000; // 30 seconds
+  private readonly TOOL_CALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   private activeTerminalChecker: (() => Set<number>) | null = null;
 
@@ -117,8 +118,34 @@ export class PTYStreamAnalyzerService extends EventEmitter {
       }
     }
 
+    // Cleanup abandoned tool calls (older than TOOL_CALL_TIMEOUT_MS)
+    this.cleanupAbandonedToolCalls();
+
     if (cleanedCount > 0) {
       logger.info(`Cleaned up ${cleanedCount} stale terminal entries`);
+    }
+
+    return cleanedCount;
+  }
+
+  /**
+   * Remove tool calls that have been active for longer than TOOL_CALL_TIMEOUT_MS.
+   * This prevents memory leaks from abandoned tool calls where tool_end events are never received.
+   */
+  private cleanupAbandonedToolCalls(): number {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [callId, entry] of this.activeToolCalls) {
+      if (now - entry.addedAt > this.TOOL_CALL_TIMEOUT_MS) {
+        this.activeToolCalls.delete(callId);
+        cleanedCount++;
+        logger.debug(`Cleaned up abandoned tool call ${callId} (age: ${Math.round((now - entry.addedAt) / 1000)}s)`);
+      }
+    }
+
+    if (cleanedCount > 0) {
+      logger.info(`Cleaned up ${cleanedCount} abandoned tool calls`);
     }
 
     return cleanedCount;
@@ -196,9 +223,12 @@ export class PTYStreamAnalyzerService extends EventEmitter {
         const callId = `${event.terminalId}-${toolName}-${event.timestamp}`;
 
         this.activeToolCalls.set(callId, {
-          name: toolName,
-          input: '',
-          startTime: event.timestamp,
+          call: {
+            name: toolName,
+            input: '',
+            startTime: event.timestamp,
+          },
+          addedAt: Date.now(),
         });
 
         if (metrics) metrics.toolCalls++;
@@ -209,7 +239,8 @@ export class PTYStreamAnalyzerService extends EventEmitter {
       case 'tool_end': {
         const toolName = event.data.toolName as string;
 
-        for (const [callId, call] of this.activeToolCalls) {
+        for (const [callId, entry] of this.activeToolCalls) {
+          const call = entry.call;
           if (call.name === toolName && !call.endTime) {
             call.endTime = event.timestamp;
             call.success = event.data.success as boolean;
@@ -440,16 +471,20 @@ export class PTYStreamAnalyzerService extends EventEmitter {
 
   getActiveToolCalls(terminalId: number): ToolCall[] {
     const calls: ToolCall[] = [];
-    for (const [callId, call] of this.activeToolCalls) {
+    for (const [callId, entry] of this.activeToolCalls) {
       if (callId.startsWith(`${terminalId}-`)) {
-        calls.push(call);
+        calls.push(entry.call);
       }
     }
     return calls;
   }
 
   getAllActiveToolCalls(): Map<string, ToolCall> {
-    return new Map(this.activeToolCalls);
+    const calls = new Map<string, ToolCall>();
+    for (const [callId, entry] of this.activeToolCalls) {
+      calls.set(callId, entry.call);
+    }
+    return calls;
   }
 
   hasActiveToolCalls(terminalId: number): boolean {

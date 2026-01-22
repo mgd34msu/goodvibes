@@ -378,11 +378,13 @@ function createIndexes(): void {
 
   const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)',
+    'CREATE INDEX IF NOT EXISTS idx_sessions_end_time ON sessions(end_time)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_favorite ON sessions(favorite)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived)',
     'CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_session_message ON messages(session_id, message_index)',
     'CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(role)',
     'CREATE INDEX IF NOT EXISTS idx_tool_usage_session ON tool_usage(session_id)',
     'CREATE INDEX IF NOT EXISTS idx_tool_usage_name ON tool_usage(tool_name)',

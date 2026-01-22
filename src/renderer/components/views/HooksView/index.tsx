@@ -29,7 +29,7 @@ export default function HooksView() {
     variant: 'danger',
   });
 
-  const { hooks, loading, handleSave, handleToggle, handleDelete, handleTest } = useHooks();
+  const { hooks, loading, handleSave, handleDelete } = useHooks();
   const {
     filter,
     setFilter,
@@ -60,11 +60,6 @@ export default function HooksView() {
     },
     [confirmDeleteHook, handleDelete]
   );
-
-  const handleEdit = (hook: Hook) => {
-    setEditingHook(hook);
-    setShowForm(true);
-  };
 
   // Open install modal for built-in hook
   const handleOpenInstallModal = useCallback((builtinHook: BuiltinHook) => {

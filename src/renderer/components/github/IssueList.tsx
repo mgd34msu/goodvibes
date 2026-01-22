@@ -2,7 +2,7 @@
 // ISSUE LIST COMPONENT
 // ============================================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { clsx } from 'clsx';
 import type { GitHubIssue } from '../../../shared/types/github';
 
@@ -164,7 +164,7 @@ interface IssueItemProps {
   onClick?: () => void;
 }
 
-function IssueItem({ issue, onClick }: IssueItemProps) {
+const IssueItem = memo(function IssueItem({ issue, onClick }: IssueItemProps) {
   const timeAgo = getTimeAgo(new Date(issue.updated_at));
 
   return (
@@ -222,7 +222,7 @@ function IssueItem({ issue, onClick }: IssueItemProps) {
       )}
     </button>
   );
-}
+});
 
 // ============================================================================
 // UTILITIES

@@ -107,7 +107,7 @@ export function registerPrimitivesHandlers(): void {
     const validatedServer = validateInput(createMCPServerSchema, server, 'create-mcp-server');
     const created = primitives.createMCPServer(validatedServer);
     // Sync to Claude config file after creating
-    await syncToClaudeConfig(validatedServer.projectPath);
+    await syncToClaudeConfig(validatedServer.projectPath ?? undefined);
     logger.info('MCP server created and synced to Claude config', { name: created.name });
     return created;
   }));
@@ -118,7 +118,7 @@ export function registerPrimitivesHandlers(): void {
     const server = primitives.getMCPServer(id);
     primitives.updateMCPServer(id, updates);
     // Sync to Claude config file after updating
-    await syncToClaudeConfig(server?.projectPath);
+    await syncToClaudeConfig(server?.projectPath ?? undefined);
     logger.info('MCP server updated and synced to Claude config', { id });
     return true;
   }));
@@ -129,7 +129,7 @@ export function registerPrimitivesHandlers(): void {
     const server = primitives.getMCPServer(validatedId);
     primitives.deleteMCPServer(validatedId);
     // Sync to Claude config file after deleting
-    await syncToClaudeConfig(server?.projectPath);
+    await syncToClaudeConfig(server?.projectPath ?? undefined);
     logger.info('MCP server deleted and synced to Claude config', { id: validatedId });
     return true;
   }));

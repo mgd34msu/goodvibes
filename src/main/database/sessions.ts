@@ -76,9 +76,20 @@ export function upsertSession(session: Partial<Session> & { id: string }): void 
   }
 }
 
-export function getAllSessions(): Session[] {
+export function getAllSessions(options?: { limit?: number; offset?: number }): Session[] {
   const database = getDatabase();
-  const rows = database.prepare('SELECT * FROM sessions ORDER BY end_time DESC').all() as SessionRow[];
+  const { limit, offset = 0 } = options ?? {};
+
+  let query = 'SELECT * FROM sessions ORDER BY end_time DESC';
+  const params: number[] = [];
+
+  if (limit !== undefined) {
+    query += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+  }
+
+  const stmt = database.prepare(query);
+  const rows = (params.length > 0 ? stmt.all(...params) : stmt.all()) as SessionRow[];
   return rows.map(mapRowToSession);
 }
 

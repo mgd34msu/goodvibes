@@ -89,11 +89,15 @@ export async function performGracefulShutdown(): Promise<void> {
 
     const elapsed = Date.now() - startTime;
     logger.info(`Graceful shutdown completed in ${elapsed}ms`);
+
+    // Shutdown logger last (after all logging is complete)
+    Logger.shutdown();
   } catch (error) {
     logger.error('Error during graceful shutdown', error);
     // Force close resources on error
     closeAllTerminals();
     closeDatabase();
+    Logger.shutdown();
   }
 }
 

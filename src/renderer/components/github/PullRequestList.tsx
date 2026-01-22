@@ -2,7 +2,7 @@
 // PULL REQUEST LIST COMPONENT
 // ============================================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { clsx } from 'clsx';
 import type { GitHubPullRequest, GitHubCheckRun, GitHubCheckConclusion } from '../../../shared/types/github';
 import CIStatusBadge from './CIStatusBadge';
@@ -179,7 +179,7 @@ interface PullRequestItemProps {
   onClick?: () => void;
 }
 
-function PullRequestItem({ pr, checks, isCurrentBranch, onClick }: PullRequestItemProps) {
+const PullRequestItem = memo(function PullRequestItem({ pr, checks, isCurrentBranch, onClick }: PullRequestItemProps) {
   // Calculate overall CI status
   const getCIStatus = (): { status: 'queued' | 'in_progress' | 'completed'; conclusion: GitHubCheckConclusion | null } => {
     if (!checks || checks.length === 0) {
@@ -278,7 +278,7 @@ function PullRequestItem({ pr, checks, isCurrentBranch, onClick }: PullRequestIt
       )}
     </button>
   );
-}
+});
 
 // ============================================================================
 // ICONS

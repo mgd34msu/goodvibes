@@ -50,6 +50,48 @@ function createDefaultProps(overrides: Partial<Parameters<typeof GitCommits>[0]>
 describe('GitCommits', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Mock element dimensions for virtualization in JSDOM
+    // @tanstack/react-virtual needs these to calculate visible items
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetHeight: {
+        get() {
+          // Return non-zero height for scroll containers
+          if (this.classList?.contains('max-h-48') || this.classList?.contains('overflow-y-auto')) {
+            return 192; // 48 * 4px = 192px
+          }
+          return 48; // Default row height
+        },
+        configurable: true,
+      },
+      offsetWidth: {
+        get() {
+          return 800;
+        },
+        configurable: true,
+      },
+      clientHeight: {
+        get() {
+          if (this.classList?.contains('max-h-48') || this.classList?.contains('overflow-y-auto')) {
+            return 192;
+          }
+          return 48;
+        },
+        configurable: true,
+      },
+    });
+
+    Element.prototype.getBoundingClientRect = vi.fn(() => ({
+      width: 800,
+      height: 192,
+      top: 0,
+      left: 0,
+      bottom: 192,
+      right: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }));
   });
 
   describe('Commit Form', () => {

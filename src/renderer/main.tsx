@@ -26,7 +26,7 @@ const queryClient = new QueryClient({
 });
 
 // Global error handler
-function handleError(error: Error, info: React.ErrorInfo) {
+function handleError(error: unknown, info: React.ErrorInfo) {
   logger.error('Application Error:', error);
   logger.error('Error Info:', info);
 }

@@ -34,6 +34,7 @@ export interface HandlerContext {
   pushSession: (workingDirectory: string | undefined, sessionId: string) => void;
   popSession: (workingDirectory: string | undefined, sessionId: string) => void;
   getCurrentParentSession: (workingDirectory: string | undefined) => string | null;
+  cleanupSession: (sessionId: string) => void;
   emit: (event: string, data: unknown) => void;
 }
 
@@ -193,6 +194,11 @@ export function createDefaultHandlers(context: HandlerContext): Map<string, Hook
     // Remove this session from our hierarchy stack
     if (sessionId && workingDirectory) {
       context.popSession(workingDirectory, sessionId);
+    }
+
+    // Clean up all Map entries for this session to prevent unbounded growth
+    if (sessionId) {
+      context.cleanupSession(sessionId);
     }
 
     // Mark the agent as completed

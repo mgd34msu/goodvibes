@@ -80,7 +80,7 @@ export const primitivesApi = {
     ipcRenderer.invoke('get-skills'),
   getSkill: (id: number) =>
     ipcRenderer.invoke('get-skill', id),
-  createSkill: (skill: { name: string; description?: string; category?: string; promptTemplate: string; isBuiltIn?: boolean; icon?: string; keywords?: string[]; allowedTools?: string[]; scope?: 'user' | 'project'; projectPath?: string }) =>
+  createSkill: (skill: { name: string; description?: string; content: string; allowedTools?: string[]; scope?: 'user' | 'project'; projectPath?: string }) =>
     ipcRenderer.invoke('create-skill', skill),
   updateSkill: (id: number, updates: Record<string, unknown>) =>
     ipcRenderer.invoke('update-skill', { id, updates }),

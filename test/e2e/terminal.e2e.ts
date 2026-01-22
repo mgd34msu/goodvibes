@@ -98,6 +98,7 @@ test.describe('Terminal View Structure', () => {
     const newButton = mainWindow.locator('button').filter({ hasText: 'New' }).first();
 
     // Wait for button to be visible
+    // Intentionally silent: timeout is acceptable, we check visibility on next line
     await newButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
     const hasNewButton = await newButton.isVisible().catch(() => false);
 

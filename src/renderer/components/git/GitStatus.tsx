@@ -2,6 +2,7 @@
 // GIT STATUS COMPONENT - Repository status display
 // ============================================================================
 
+import { memo } from 'react';
 import { clsx } from 'clsx';
 import type { GitFileChange, ExpandedSections } from './types';
 
@@ -26,19 +27,24 @@ interface GitStatusProps {
 }
 
 /**
+ * Status mapping for file changes
+ * Defined as a module-level constant to prevent recreation on every render
+ */
+const STATUS_MAP: Record<string, { icon: string; color: string; label: string }> = {
+  modified: { icon: 'M', color: 'text-primary-400 bg-primary-400/20', label: 'Modified' },
+  added: { icon: 'A', color: 'text-success-400 bg-success-400/20', label: 'Added' },
+  deleted: { icon: 'D', color: 'text-error-400 bg-error-400/20', label: 'Deleted' },
+  renamed: { icon: 'R', color: 'text-accent-400 bg-accent-400/20', label: 'Renamed' },
+  copied: { icon: 'C', color: 'text-info-400 bg-info-400/20', label: 'Copied' },
+  untracked: { icon: 'U', color: 'text-warning-400 bg-warning-400/20', label: 'Untracked' },
+  ignored: { icon: '!', color: 'text-surface-500 bg-surface-500/20', label: 'Ignored' },
+} as const;
+
+/**
  * Get status icon and color for a file
  */
 function getStatusDisplay(change: GitFileChange) {
-  const statusMap: Record<string, { icon: string; color: string; label: string }> = {
-    modified: { icon: 'M', color: 'text-primary-400 bg-primary-400/20', label: 'Modified' },
-    added: { icon: 'A', color: 'text-success-400 bg-success-400/20', label: 'Added' },
-    deleted: { icon: 'D', color: 'text-error-400 bg-error-400/20', label: 'Deleted' },
-    renamed: { icon: 'R', color: 'text-accent-400 bg-accent-400/20', label: 'Renamed' },
-    copied: { icon: 'C', color: 'text-info-400 bg-info-400/20', label: 'Copied' },
-    untracked: { icon: 'U', color: 'text-warning-400 bg-warning-400/20', label: 'Untracked' },
-    ignored: { icon: '!', color: 'text-surface-500 bg-surface-500/20', label: 'Ignored' },
-  };
-  return statusMap[change.status] || { icon: '?', color: 'text-surface-400 bg-surface-400/20', label: 'Unknown' };
+  return STATUS_MAP[change.status] || { icon: '?', color: 'text-surface-400 bg-surface-400/20', label: 'Unknown' };
 }
 
 interface FileChangeRowProps {
@@ -54,7 +60,7 @@ interface FileChangeRowProps {
   onViewFileHistory: (file: string) => void;
 }
 
-function FileChangeRow({
+const FileChangeRow = memo(function FileChangeRow({
   change,
   showStageButton,
   showUnstageButton,
@@ -158,7 +164,7 @@ function FileChangeRow({
       </div>
     </div>
   );
-}
+});
 
 export function GitStatus({
   staged,

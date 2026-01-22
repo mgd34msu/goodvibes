@@ -55,7 +55,7 @@ export const createHookSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
   eventType: extendedHookEventTypeSchema,
-  script: z.string().min(1).max(100000),
+  command: z.string().min(1).max(100000),
   enabled: z.boolean(),
   async: z.boolean().optional(),
   timeout: z.number().int().positive().max(300000).optional(), // 5 min max

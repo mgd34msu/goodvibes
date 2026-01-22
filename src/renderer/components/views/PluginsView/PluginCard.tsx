@@ -2,6 +2,7 @@
 // PLUGIN CARD - Premium Glass Morphism Design with Rainbow Effects
 // ============================================================================
 
+import React from 'react';
 import {
   ExternalLink,
   Package,
@@ -69,7 +70,16 @@ interface PluginCardProps {
   isToggling?: boolean;
 }
 
-export function PluginCard({ plugin, installed, onInstall, onToggle, onUninstall, isUninstalling, isInstalling, isToggling }: PluginCardProps): React.JSX.Element {
+export function PluginCard({
+  plugin,
+  installed,
+  onInstall,
+  onToggle,
+  onUninstall,
+  isUninstalling = false,
+  isInstalling = false,
+  isToggling = false,
+}: PluginCardProps): React.JSX.Element {
   const categoryConfig: CategoryConfig = CATEGORY_CONFIG[plugin.category] ?? DEFAULT_CATEGORY;
   const isFeatured = plugin.featured;
 

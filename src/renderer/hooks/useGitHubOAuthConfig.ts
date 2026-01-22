@@ -49,7 +49,7 @@ const DEFAULT_STATUS: CustomOAuthConfigStatus = {
 // ============================================================================
 
 export function useGitHubOAuthConfig(): UseGitHubOAuthConfigReturn {
-  const [oauthStatus, setOauthStatus] = useState<CustomOAuthConfigStatus | null>(null);
+  const [oauthStatus, setOauthStatus] = useState<CustomOAuthConfigStatus | null>(DEFAULT_STATUS);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -159,17 +159,16 @@ export function useGitHubOAuthConfig(): UseGitHubOAuthConfigReturn {
   }, [refresh]);
 
   // ============================================================================
-  // AUTO-FETCH ON MOUNT
+  // TRACK MOUNTED STATE (no auto-fetch - components should call refresh explicitly)
   // ============================================================================
 
   useEffect(() => {
     isMountedRef.current = true;
-    refresh();
 
     return () => {
       isMountedRef.current = false;
     };
-  }, [refresh]);
+  }, []);
 
   // ============================================================================
   // RETURN

@@ -129,17 +129,19 @@ async function persistRecoveredFields(
   recoveredFields: string[],
   settings: AppSettings
 ): Promise<void> {
-  for (const field of recoveredFields) {
-    const key = field as keyof AppSettings;
-    if (key in settings) {
+  const persistPromises = recoveredFields
+    .filter((field) => field in settings)
+    .map(async (field) => {
+      const key = field as keyof AppSettings;
       try {
         await window.goodvibes.setSetting(field, settings[key]);
         logger.info(`Persisted recovered default for field '${field}'`);
       } catch (err) {
         logger.warn(`Failed to persist recovered field '${field}':`, err);
       }
-    }
-  }
+    });
+
+  await Promise.allSettled(persistPromises);
 }
 
 // ============================================================================
@@ -191,19 +193,18 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       // This ensures that if the app crashes mid-migration, the version won't be
       // updated without the settings being reset (which would skip the migration on next run)
       if (needsMigration) {
-        // Save the reset keys with their new default values
-        // Use individual try-catch to ensure we attempt all keys even if some fail
-        for (const key of keysToReset) {
+        // Save the reset keys with their new default values in parallel
+        const migrationPromises = Array.from(keysToReset).map(async (key) => {
           try {
-            // Safe to access since keysToReset only contains keys from SETTINGS_MIGRATIONS
-            // which are guaranteed to be valid AppSettings keys
             const settingsKey = key as keyof AppSettings;
             const defaultValue = DEFAULT_SETTINGS[settingsKey];
             await window.goodvibes.setSetting(key, defaultValue);
           } catch (err) {
             logger.error(`Failed to migrate setting ${key}:`, err);
           }
-        }
+        });
+
+        await Promise.allSettled(migrationPromises);
 
         // Always save version to prevent re-running migration endlessly
         // Even if some keys failed, we don't want to retry the whole migration

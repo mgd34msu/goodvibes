@@ -46,7 +46,10 @@ describe('MCPServerCard', () => {
     vi.clearAllMocks();
   });
 
-  const renderCard = (server: MCPServer = createMockServer()) => {
+  const renderCard = (
+    server: MCPServer = createMockServer(),
+    props: Partial<React.ComponentProps<typeof MCPServerCard>> = {},
+  ) => {
     return render(
       <MCPServerCard
         server={server}
@@ -55,6 +58,7 @@ describe('MCPServerCard', () => {
         onRestart={mockOnRestart}
         onEdit={mockOnEdit}
         onUninstall={mockOnUninstall}
+        {...props}
       />
     );
   };
@@ -348,6 +352,47 @@ describe('MCPServerCard', () => {
     it('handles server with high tool count', () => {
       renderCard(createMockServer({ toolCount: 9999 }));
       expect(screen.getByText('Tools: 9999')).toBeInTheDocument();
+    });
+  });
+
+  // ==========================================================================
+  // LOADING STATES TESTS
+  // ==========================================================================
+
+  describe('Loading States', () => {
+    it('disables Start button and applies opacity styling when isStarting is true', () => {
+      const server = createMockServer({ status: 'disconnected' });
+      renderCard(server, { isStarting: true });
+
+      const startButton = screen.getByTitle('Start');
+      expect(startButton).toBeDisabled();
+      expect(startButton).toHaveClass('opacity-50', 'cursor-not-allowed');
+    });
+
+    it('disables Stop button and applies opacity styling when isStopping is true', () => {
+      const server = createMockServer({ status: 'connected' });
+      renderCard(server, { isStopping: true });
+
+      const stopButton = screen.getByTitle('Stop');
+      expect(stopButton).toBeDisabled();
+      expect(stopButton).toHaveClass('opacity-50', 'cursor-not-allowed');
+    });
+
+    it('disables Restart button and applies opacity styling when isRestarting is true', () => {
+      renderCard(createMockServer(), { isRestarting: true });
+
+      const restartButton = screen.getByTitle('Restart');
+      expect(restartButton).toBeDisabled();
+      expect(restartButton).toHaveClass('opacity-50', 'cursor-not-allowed');
+    });
+
+    it('shows "Uninstalling..." text and disables button when isUninstalling is true', () => {
+      renderCard(createMockServer(), { isUninstalling: true });
+
+      expect(screen.getByText('Uninstalling...')).toBeInTheDocument();
+      const uninstallButton = screen.getByText('Uninstalling...');
+      expect(uninstallButton).toBeDisabled();
+      expect(uninstallButton).toHaveClass('opacity-50', 'cursor-not-allowed');
     });
   });
 });

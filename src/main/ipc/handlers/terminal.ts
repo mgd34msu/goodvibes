@@ -75,6 +75,9 @@ const TEXT_EDITORS: Array<{ name: string; command: string; windowsCommands?: str
   { name: 'Micro', command: 'micro', windowsCommands: ['micro', 'micro.exe'] },
 ];
 
+// Cache for detected editors - only needs to run once per app session
+let cachedEditors: TextEditorInfo[] | null = null;
+
 /**
  * Check if a command exists on the system.
  * Uses the centralized safeExec utility which validates inputs
@@ -85,9 +88,14 @@ function checkCommandExists(command: string): boolean {
 }
 
 function detectAvailableEditors(): TextEditorInfo[] {
+  // Return cached result if available
+  if (cachedEditors !== null) {
+    return cachedEditors;
+  }
+
   const isWindows = process.platform === 'win32';
 
-  return TEXT_EDITORS.map(editor => {
+  cachedEditors = TEXT_EDITORS.map(editor => {
     let available = false;
     let command = editor.command;
 
@@ -109,6 +117,8 @@ function detectAvailableEditors(): TextEditorInfo[] {
       available,
     };
   });
+
+  return cachedEditors;
 }
 
 function getDefaultEditor(): string | null {

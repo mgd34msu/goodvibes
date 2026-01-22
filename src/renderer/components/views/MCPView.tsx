@@ -47,10 +47,10 @@ export default function MCPView() {
   const [restartingId, setRestartingId] = useState<number | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
 
-  const { confirm: confirmDelete, ConfirmDialog: DeleteConfirmDialog } = useConfirm({
-    title: 'Delete MCP Server',
-    message: 'Are you sure you want to delete this MCP server?',
-    confirmText: 'Delete',
+  const { confirm: confirmUninstall, ConfirmDialog: UninstallConfirmDialog } = useConfirm({
+    title: 'Uninstall MCP Server',
+    message: 'Are you sure you want to uninstall this MCP server?',
+    confirmText: 'Uninstall',
     variant: 'danger',
   });
 
@@ -151,7 +151,7 @@ export default function MCPView() {
   const handleUninstall = useCallback(async (id: number) => {
     const server = servers.find(s => s.id === id);
     const serverName = server?.name || 'MCP server';
-    const confirmed = await confirmDelete();
+    const confirmed = await confirmUninstall();
     if (!confirmed) return;
 
     setUninstallingId(id);
@@ -168,7 +168,7 @@ export default function MCPView() {
     } finally {
       setUninstallingId(null);
     }
-  }, [servers, confirmDelete, deleteServer]);
+  }, [servers, confirmUninstall, deleteServer]);
 
   const handleInstall = useCallback(async (server: MarketplaceServer) => {
     setInstallingId(server.id);
@@ -211,7 +211,7 @@ export default function MCPView() {
 
   return (
     <>
-    <DeleteConfirmDialog />
+    <UninstallConfirmDialog />
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-surface-800">

@@ -20,6 +20,8 @@ export function useSessions(filter: SessionFilter): { sessions: Session[]; isLoa
           return await window.goodvibes.getActiveSessions();
       }
     },
+    refetchInterval: 5000, // Poll for new sessions every 5 seconds to match Live Monitor
+    refetchIntervalInBackground: false, // Stop polling when app is backgrounded
   });
 
   return { sessions, isLoading, error };

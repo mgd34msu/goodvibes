@@ -29,7 +29,7 @@ export const BUILT_IN_PLUGINS: Plugin[] = [
     category: 'productivity',
     repository: 'https://github.com/glittercowboy/get-shit-done',
     featured: true,
-    vibes: 'great',
+    vibes: 'productive',
   },
 
   // ============================================================================
@@ -202,6 +202,8 @@ export const BUILT_IN_PLUGINS: Plugin[] = [
     category: 'ai',
     repository: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop',
     author: 'Anthropic',
+    featured: true,
+    vibes: 'unpossible',
   },
   {
     id: 'rust-analyzer-lsp',

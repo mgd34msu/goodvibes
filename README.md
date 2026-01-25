@@ -20,10 +20,10 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 
 For the best experience, we recommend using GoodVibes alongside the **GoodVibes Plugin** for Claude Code. The plugin provides:
 
+- **Directed or Autonomous Modes**: Vibecoding mode gives interactive feedback as you guide the orchestrator, Justvibes mode is full auto
 - **Specialized Agents**: Pre-configured agents for frontend, backend, testing, DevOps, and more
 - **Skills Library**: Reusable slash commands for common workflows (security audits, code reviews, etc.)
 - **MCP Tools**: Extended tooling via Model Context Protocol for code intelligence, validation, and automation
-- **Output Styles**: Different interaction modes including autonomous "JustVibes" mode
 
 **Get the plugin:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
 
@@ -192,31 +192,6 @@ SQLite database with WAL mode for concurrent access. Tables include:
 - `agents` - Agent templates
 - `skills` - Skill definitions
 - `projects` - Project registry
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes following the existing code style
-4. Run tests: `npm run test`
-5. Run linter: `npm run lint:fix`
-6. Run type checking: `npm run typecheck`
-7. Commit your changes with a descriptive message
-8. Push to your fork and create a Pull Request
-
-### Code Style
-
-- Follow TypeScript strict mode
-- Use ESLint and Prettier configurations
-- Write meaningful commit messages
-- Add tests for new features
-- Update documentation as needed
-
-### Testing
-
-- Unit tests: `src/**/*.test.ts` files using Vitest
-- E2E tests: `test/e2e/` using Playwright
-- Run all tests before submitting PRs
 
 ## License
 

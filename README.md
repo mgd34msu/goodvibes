@@ -20,7 +20,7 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 - **Project Registry**: Multi-project management with per-project settings
 - **Memory Management**: Edit CLAUDE.md files for persistent context injection
 
-## GoodVibes Plugin
+## GoodVibes Plugin - Highly Recommended
 
 For the best experience, we recommend using GoodVibes alongside the **GoodVibes Plugin** for Claude Code. The plugin provides:
 
@@ -29,7 +29,30 @@ For the best experience, we recommend using GoodVibes alongside the **GoodVibes 
 - **Skills Library**: Reusable slash commands for common workflows (security audits, code reviews, etc.)
 - **MCP Tools**: Extended tooling via Model Context Protocol for code intelligence, validation, and automation
 
-**Get the plugin:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
+### Quick-install plugin:
+
+Copy/Paste these into your terminal of choice. 
+
+#### Linux / MacOS
+```
+curl -sL https://goodvibes.sh/install-plugin.sh | bash
+```
+#### Windows (Powershell)
+```
+powershell -ExecutionPolicy Bypass -NoProfile -Command "& { $(Invoke-RestMethod -Uri https://goodvibes.sh/install-plugin.ps1) }"
+```
+
+#### Other (Windows & MacOS - interactive)
+- Windows: [https://goodvibes.sh/install-plugin.bat](https://goodvibes.sh/install-plugin.bat)
+- MacOS: [https://goodvibes.sh/install-plugin.command](https://goodvibes.sh/install-plugin.command)
+
+**Goodvibes Plugin Repo:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
+
+#### Important Security Notes:
+
+Users are **STRONGLY** encouraged to download and inspect these scripts **AND** the plugin source code prior to running / installing them.
+Regardless of what some may claim, as of January 31st 2026, **ALL** CLI plugins and MCP servers have unrestricted access to read, write, and execute code on your computer. 
+This is true for OpenAI, Google, and Anthropic CLIs, as well as any third-party CLIs. The problem is inherent in 1) the MCP standard and 2) with plugins being granted the same rights as native tools.
 
 ## GitHub Integration
 

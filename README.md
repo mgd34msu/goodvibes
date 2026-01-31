@@ -42,9 +42,11 @@ curl -sL https://goodvibes.sh/install-plugin.sh | bash
 powershell -ExecutionPolicy Bypass -NoProfile -Command "& { $(Invoke-RestMethod -Uri https://goodvibes.sh/install-plugin.ps1) }"
 ```
 
-#### Other (Windows & MacOS - interactive)
-- Windows: [https://goodvibes.sh/install-plugin.bat](https://goodvibes.sh/install-plugin.bat)
-- MacOS: [https://goodvibes.sh/install-plugin.command](https://goodvibes.sh/install-plugin.command)
+#### Download Links
+- Linux & MacOS: [https://goodvibes.sh/install-plugin.sh](https://goodvibes.sh/install-plugin.sh)
+- MacOS [interactive]: [https://goodvibes.sh/install-plugin.command](https://goodvibes.sh/install-plugin.command)
+- Windows [powershell]: [https://goodvibes.sh/install-plugin.ps1](https://goodvibes.sh/install-plugin.ps1)
+- Windows [cmd.exe]: [https://goodvibes.sh/install-plugin.bat](https://goodvibes.sh/install-plugin.bat)
 
 **Goodvibes Plugin Repo:** [github.com/mgd34msu/goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin)
 

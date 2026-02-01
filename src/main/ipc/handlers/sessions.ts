@@ -276,6 +276,12 @@ export function registerSessionHandlers(): void {
     return sessionManager?.getLiveSessions() ?? [];
   }));
 
+  ipcMain.handle('rescan-sessions', withContext('rescan-sessions', async () => {
+    const sessionManager = getSessionManager();
+    await sessionManager?.rescanSessions();
+    return true;
+  }));
+
   ipcMain.handle('get-session-raw-entries', withContext('get-session-raw-entries', async (_, id: string, afterIndex?: number) => {
     // Validate session ID
     const result = sessionIdSchema.safeParse(id);

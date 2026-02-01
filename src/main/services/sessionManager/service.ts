@@ -352,6 +352,14 @@ export class SessionManagerInstance {
   // PUBLIC API
   // ============================================================================
 
+  /**
+   * Force a full rescan of all session files.
+   * This picks up new sessions that started after the app opened.
+   */
+  async rescanSessions(): Promise<void> {
+    await this.scanSessions();
+  }
+
   getAllSessions(): Session[] {
     return getAllSessions();
   }

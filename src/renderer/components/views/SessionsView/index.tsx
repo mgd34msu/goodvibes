@@ -2,7 +2,7 @@
 // SESSIONS VIEW COMPONENT - Unified Sessions + Monitor View
 // ============================================================================
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Session, SessionFilter } from './types';
 import { useSessions, useLiveSessions, useSessionFilters } from './hooks';
 import { useSettingsStore } from '../../../stores/settingsStore';
@@ -22,6 +22,18 @@ export default function SessionsView() {
   const { sessions, isLoading, error } = useSessions(filter);
   const { liveSessionIds } = useLiveSessions();
   const { filteredSessions } = useSessionFilters(sessions, search);
+
+  // Auto-rescan for new sessions every 10 seconds
+  useEffect(() => {
+    // Initial rescan when view opens
+    window.goodvibes.rescanSessions?.();
+    
+    const interval = setInterval(() => {
+      window.goodvibes.rescanSessions?.();
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle clicking activity items - fetch the session by ID and open modal
   const handleActivityClick = useCallback(async (sessionId: string) => {

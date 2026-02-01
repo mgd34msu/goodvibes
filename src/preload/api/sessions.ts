@@ -35,6 +35,8 @@ export const sessionsApi = {
     ipcRenderer.invoke('watch-session', id) as Promise<string | null>,
   recalculateSessionCosts: () =>
     ipcRenderer.invoke('recalculate-session-costs'),
+  rescanSessions: () =>
+    ipcRenderer.invoke('rescan-sessions'),
   // Session summaries (for project-based session lookup)
   getProjectSessions: (projectPath: string, limit?: number) =>
     ipcRenderer.invoke('session:getForProject', projectPath, limit ?? 5),

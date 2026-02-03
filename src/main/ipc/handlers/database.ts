@@ -30,10 +30,6 @@ import {
   sessionCollectionSchema,
   createSmartCollectionSchema,
 } from '../schemas/collections.js';
-import {
-  createTagSchema,
-  sessionTagSchema,
-} from '../schemas/tags.js';
 import { savePromptSchema } from '../schemas/prompts.js';
 import {
   createQuickNoteSchema,
@@ -150,44 +146,6 @@ export function registerDatabaseHandlers(): void {
     if (!validation.success) return validation.error;
     collections.deleteSmartCollection(validation.data);
     return true;
-  }));
-
-  // ============================================================================
-  // TAG HANDLERS
-  // ============================================================================
-
-  ipcMain.handle('get-tags', withContext('get-tags', async () => {
-    return db.getAllTags();
-  }));
-
-  ipcMain.handle('delete-tag', withContext('delete-tag', async (_, id: unknown) => {
-    const validation = validateInput(numericIdSchema, id, 'delete-tag');
-    if (!validation.success) return validation.error;
-    db.deleteTag(validation.data);
-    return true;
-  }));
-
-  ipcMain.handle('add-tag-to-session', withContext('add-tag-to-session', async (_, data: unknown) => {
-    const validation = validateInput(sessionTagSchema, data, 'add-tag-to-session');
-    if (!validation.success) return validation.error;
-    const { sessionId, tagId } = validation.data;
-    // Returns true if association was created, false if it already exists
-    // Throws on actual database errors
-    return db.addTagToSession(sessionId, tagId);
-  }));
-
-  ipcMain.handle('remove-tag-from-session', withContext('remove-tag-from-session', async (_, data: unknown) => {
-    const validation = validateInput(sessionTagSchema, data, 'remove-tag-from-session');
-    if (!validation.success) return validation.error;
-    const { sessionId, tagId } = validation.data;
-    db.removeTagFromSession(sessionId, tagId);
-    return true;
-  }));
-
-  ipcMain.handle('get-session-tags', withContext('get-session-tags', async (_, sessionId: unknown) => {
-    const validation = validateInput(sessionIdSchema, sessionId, 'get-session-tags');
-    if (!validation.success) return validation.error;
-    return db.getSessionTags(validation.data);
   }));
 
   // ============================================================================

@@ -65,7 +65,7 @@ export function TagFilterModal({
 
       if (allTagsResult.success) {
         // Sort by usage count descending
-        const sorted = [...allTagsResult.data].sort((a, b) => b.usageCount - a.usageCount);
+        const sorted = [...allTagsResult.data].sort((a, b) => (b.usageCount ?? 0) - (a.usageCount ?? 0));
         setAllTags(sorted);
       } else {
         logger.error('Failed to load tags', { error: allTagsResult.error });

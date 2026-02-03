@@ -40,23 +40,6 @@ export const databaseApi = {
   deleteSmartCollection: (id: number) =>
     ipcRenderer.invoke('delete-smart-collection', id),
 
-  // ============================================================================
-  // TAGS
-  // ============================================================================
-  getTags: () =>
-    ipcRenderer.invoke('get-tags'),
-  createTag: (name: string, color: string) =>
-    ipcRenderer.invoke('create-tag', { name, color }),
-  deleteTag: (id: number) =>
-    ipcRenderer.invoke('delete-tag', id),
-  addTagToSession: (sessionId: string, tagId: number) =>
-    ipcRenderer.invoke('add-tag-to-session', { sessionId, tagId }),
-  removeTagFromSession: (sessionId: string, tagId: number) =>
-    ipcRenderer.invoke('remove-tag-from-session', { sessionId, tagId }),
-  getSessionTags: (sessionId: string) =>
-    ipcRenderer.invoke('get-session-tags', sessionId),
-
-  // ============================================================================
   // PROMPTS
   // ============================================================================
   getPrompts: () =>

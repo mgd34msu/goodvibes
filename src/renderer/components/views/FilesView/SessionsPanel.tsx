@@ -3,8 +3,8 @@
 // Shows sessions for a directory with split view: list + preview
 // ============================================================================
 
-import { useState, useRef } from 'react';
-import { MessageSquare, Coins, Clock, X, GripHorizontal, Calendar } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { MessageSquare, X, GripHorizontal } from 'lucide-react';
 import { clsx } from 'clsx';
 import { SessionPreviewView } from '../../preview/SessionPreviewView';
 
@@ -66,7 +66,7 @@ function formatTokens(count: number | undefined): string {
 
 export function SessionsPanel({ sessions, onClose }: SessionsPanelProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [listHeight, setListHeight] = useState(50); // percentage
+  const [listHeight, setListHeight] = useState(20); // percentage
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
@@ -86,7 +86,7 @@ export function SessionsPanel({ sessions, onClose }: SessionsPanelProps) {
     if (!isDragging.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const newHeight = ((e.clientY - rect.top) / rect.height) * 100;
-    setListHeight(Math.min(80, Math.max(20, newHeight)));
+    setListHeight(Math.min(50, Math.max(10, newHeight)));
   };
 
   const handleDragEnd = () => {
@@ -94,6 +94,15 @@ export function SessionsPanel({ sessions, onClose }: SessionsPanelProps) {
     document.removeEventListener('mousemove', handleDragMove);
     document.removeEventListener('mouseup', handleDragEnd);
   };
+
+  // Cleanup event listeners on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Cleanup any lingering event listeners on unmount
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+    };
+  }, []);
 
   const handleSessionClick = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -117,70 +126,53 @@ export function SessionsPanel({ sessions, onClose }: SessionsPanelProps) {
         </button>
       </div>
 
-      {/* Sessions List */}
+      {/* Sessions List - Table */}
       <div className="overflow-y-auto" style={{ flex: `0 0 ${listHeight}%` }}>
         {sortedSessions.length === 0 ? (
           <div className="flex items-center justify-center py-12 text-surface-500 text-sm">
             No sessions found
           </div>
         ) : (
-          <div className="divide-y divide-surface-700/50">
-            {sortedSessions.map((session) => {
-              const isSelected = selectedSessionId === session.sessionId;
-              return (
-                <button
-                  key={session.sessionId}
-                  onClick={() => handleSessionClick(session.sessionId)}
-                  className={clsx(
-                    'w-full px-4 py-3 text-left transition-colors',
-                    isSelected
-                      ? 'bg-primary-600/20 border-l-2 border-primary-400'
-                      : 'hover:bg-surface-800 border-l-2 border-transparent'
-                  )}
-                >
-                  {/* First line: Date and cost */}
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Calendar className="w-3.5 h-3.5 text-surface-400" />
-                      <span className={clsx(
-                        'font-medium',
-                        isSelected ? 'text-primary-300' : 'text-surface-200'
-                      )}>
-                        {formatDateTime(session.lastActive)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 text-xs">
-                      <Coins className="w-3 h-3 text-warning-400" />
-                      <span className="text-warning-300 font-mono">
-                        {formatCost(session.costUsd)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Second line: Stats */}
-                  <div className="flex items-center gap-4 text-xs text-surface-400">
-                    <div className="flex items-center gap-1">
-                      <MessageSquare className="w-3 h-3" />
-                      <span>{session.messageCount} messages</span>
-                    </div>
-                    {session.tokenCount && (
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{formatTokens(session.tokenCount)} tokens</span>
-                      </div>
+          <table className="w-full">
+            <thead className="bg-surface-800 sticky top-0 z-10">
+              <tr className="text-xs text-surface-400 border-b border-surface-700">
+                <th className="px-4 py-2 text-left font-medium">Date & Time</th>
+                <th className="px-4 py-2 text-left font-medium">Messages</th>
+                <th className="px-4 py-2 text-left font-medium">Tokens</th>
+                <th className="px-4 py-2 text-right font-medium">Cost</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-700/50">
+              {sortedSessions.map((session) => {
+                const isSelected = selectedSessionId === session.sessionId;
+                return (
+                  <tr
+                    key={session.sessionId}
+                    onClick={() => handleSessionClick(session.sessionId)}
+                    className={clsx(
+                      'cursor-pointer transition-colors',
+                      isSelected
+                        ? 'bg-primary-600/20'
+                        : 'hover:bg-surface-800'
                     )}
-                  </div>
-
-                  {/* Third line: First prompt preview */}
-                  {session.firstPrompt && (
-                    <div className="mt-1.5 text-xs text-surface-500 truncate">
-                      {session.firstPrompt}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                  >
+                    <td className="px-4 py-2 text-sm text-surface-200">
+                      {formatDateTime(session.lastActive)}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-surface-300">
+                      {session.messageCount}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-surface-300 font-mono">
+                      {formatTokens(session.tokenCount)}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-right text-warning-300 font-mono">
+                      {formatCost(session.costUsd)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 

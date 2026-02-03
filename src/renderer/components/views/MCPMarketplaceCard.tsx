@@ -78,6 +78,7 @@ export const MARKETPLACE_SERVERS: MarketplaceServer[] = [
     category: 'devops',
     transport: 'stdio',
     npmPackage: 'chrome-devtools-mcp',
+    args: ['--headless'],
     documentation: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
     repository: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
     featured: true,

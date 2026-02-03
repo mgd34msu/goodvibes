@@ -295,6 +295,107 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`DROP TABLE hooks_backup`);
     },
   },
+  {
+    version: 2,
+    description: 'Expand tag system with effects, aliases, suggestions, templates, and analytics',
+    up: (db) => {
+      // Extend tags table with new columns
+      db.exec(`ALTER TABLE tags ADD COLUMN effect TEXT DEFAULT NULL`);
+      db.exec(`ALTER TABLE tags ADD COLUMN alias_of INTEGER DEFAULT NULL`);
+      db.exec(`ALTER TABLE tags ADD COLUMN description TEXT DEFAULT NULL`);
+      db.exec(`ALTER TABLE tags ADD COLUMN is_pinned INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tags ADD COLUMN usage_count INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tags ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP`);
+
+      // Recreate session_tags with added_by column
+      db.exec(`DROP TABLE IF EXISTS session_tags`);
+      db.exec(`
+        CREATE TABLE session_tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          tag_id INTEGER NOT NULL,
+          added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          added_by TEXT DEFAULT 'user',
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+          UNIQUE(session_id, tag_id)
+        )
+      `);
+
+      // Create tag_suggestions table
+      db.exec(`
+        CREATE TABLE tag_suggestions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          tag_name TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          category TEXT,
+          reasoning TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          reviewed_at TEXT DEFAULT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Create suggestion_feedback table
+      db.exec(`
+        CREATE TABLE suggestion_feedback (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag_name TEXT NOT NULL,
+          context_hash TEXT,
+          accepted_count INTEGER DEFAULT 0,
+          rejected_count INTEGER DEFAULT 0,
+          last_feedback_at TEXT,
+          UNIQUE(tag_name, context_hash)
+        )
+      `);
+
+      // Create tag_templates table
+      db.exec(`
+        CREATE TABLE tag_templates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          tag_ids TEXT NOT NULL,
+          is_system INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create recent_tags table
+      db.exec(`
+        CREATE TABLE recent_tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag_id INTEGER NOT NULL,
+          used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Extend sessions table
+      db.exec(`ALTER TABLE sessions ADD COLUMN suggestion_scan_status TEXT DEFAULT 'pending'`);
+      db.exec(`ALTER TABLE sessions ADD COLUMN suggestion_scanned_at TEXT DEFAULT NULL`);
+      db.exec(`ALTER TABLE sessions ADD COLUMN suggestion_scan_depth TEXT DEFAULT NULL`);
+
+      // Create indexes
+      db.exec(`CREATE INDEX idx_tags_pinned ON tags(is_pinned)`);
+      db.exec(`CREATE INDEX idx_tags_usage ON tags(usage_count DESC)`);
+      db.exec(`CREATE INDEX idx_session_tags_session ON session_tags(session_id)`);
+      db.exec(`CREATE INDEX idx_session_tags_tag ON session_tags(tag_id)`);
+      db.exec(`CREATE INDEX idx_suggestions_session ON tag_suggestions(session_id)`);
+      db.exec(`CREATE INDEX idx_suggestions_status ON tag_suggestions(status)`);
+      db.exec(`CREATE INDEX idx_sessions_scan_status ON sessions(suggestion_scan_status)`);
+
+      // Calculate initial usage_count
+      db.exec(`
+        UPDATE tags SET usage_count = (
+          SELECT COUNT(*) FROM session_tags WHERE session_tags.tag_id = tags.id
+        )
+      `);
+    },
+  },
 ];
 
 // ============================================================================

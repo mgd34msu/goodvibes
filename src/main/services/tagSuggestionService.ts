@@ -16,10 +16,9 @@ import type {
   ScanStatus,
 } from '../../shared/types/tag-types.js';
 
-// Placeholder imports - will be implemented in later phases
-// import { gatherSessionContext } from './tagSuggestionContext.js';
-// import { anthropicClient } from './anthropicClient.js';
-// import * as tagSuggestions from '../database/tagSuggestions.js';
+import { gatherQuickContext, formatContextForPrompt } from './tagSuggestionContext.js';
+import { generateTagSuggestions } from './anthropicClient.js';
+import * as tagSuggestions from '../database/tagSuggestions.js';
 
 const logger = new Logger('TagSuggestionService');
 
@@ -344,11 +343,8 @@ class TagSuggestionService extends EventEmitter {
     logger.info('Queueing all pending sessions...');
 
     try {
-      // TODO: Query database for sessions without AI suggestions
-      // const pendingSessions = await tagSuggestions.getPendingSessions(db);
-      
-      // Placeholder implementation
-      const pendingSessions: string[] = [];
+      // Query database for sessions without AI suggestions
+      const pendingSessions = tagSuggestions.getPendingSessions(100);
 
       for (const sessionId of pendingSessions) {
         this.queueSession(sessionId, 'low');
@@ -372,18 +368,37 @@ class TagSuggestionService extends EventEmitter {
     logger.info(`Scanning session ${sessionId}...`);
 
     try {
-      // TODO: Implement actual scanning logic
-      // 1. Gather session context using tagSuggestionContext.ts
-      // const context = await gatherSessionContext(sessionId);
+      // 1. Gather session context
+      const context = gatherQuickContext(sessionId);
       
-      // 2. Call Anthropic API using anthropicClient.ts
-      // const suggestions = await anthropicClient.suggestTags(context);
+      if (!context) {
+        logger.warn(`Session ${sessionId} not found or has no context`);
+        tagSuggestions.updateSessionScanStatus(sessionId, 'failed', 'quick');
+        return [];
+      }
       
-      // 3. Save suggestions to database
-      // await tagSuggestions.saveSuggestions(db, sessionId, suggestions);
-
-      // Placeholder implementation
-      const suggestions: TagSuggestion[] = [];
+      // 2. Format context for prompt
+      const formattedContext = formatContextForPrompt(context);
+      
+      // 3. Call Anthropic API to generate tag suggestions
+      const apiResults = await generateTagSuggestions(
+        formattedContext,
+        context.existingTags
+      );
+      
+      // 4. Save suggestions to database
+      const suggestions = tagSuggestions.createSuggestions(
+        apiResults.map(result => ({
+          sessionId,
+          tagName: result.tagName,
+          confidence: result.confidence,
+          category: result.category,
+          reasoning: result.reasoning,
+        }))
+      );
+      
+      // 5. Update session scan status
+      tagSuggestions.updateSessionScanStatus(sessionId, 'completed', 'quick');
 
       logger.info(`Generated ${suggestions.length} suggestions for session ${sessionId}`);
       this.emit('complete', sessionId, suggestions);
@@ -392,6 +407,14 @@ class TagSuggestionService extends EventEmitter {
     } catch (error) {
       logger.error(`Failed to scan session ${sessionId}:`, error);
       this.lastError = error instanceof Error ? error.message : String(error);
+      
+      // Mark session as failed
+      try {
+        tagSuggestions.updateSessionScanStatus(sessionId, 'failed', 'quick');
+      } catch (updateError) {
+        logger.error(`Failed to update scan status for ${sessionId}:`, updateError);
+      }
+      
       this.emit('error', error as Error, sessionId);
       throw error;
     }

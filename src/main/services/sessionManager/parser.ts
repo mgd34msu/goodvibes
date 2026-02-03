@@ -8,6 +8,7 @@ import { Logger } from '../logger.js';
 import type { SessionMessage } from '../../../shared/types/index.js';
 import type { TokenStats, ParsedSessionData, DetailedToolUsage } from './types.js';
 import { resolveToolNames } from '../../../shared/toolParser.js';
+import { calculateCost } from './cost.js';
 
 const logger = new Logger('SessionParser');
 
@@ -132,7 +133,7 @@ export async function parseSessionFileWithStats(filePath: string): Promise<Parse
         extractToolUsage(entry, toolUsage);
 
         // Extract detailed tool usage with deduplication
-        extractDetailedToolUsage(entry, detailedToolUsage);
+        await extractDetailedToolUsage(entry, detailedToolUsage);
       } catch (error) {
         logger.debug('Skipped malformed JSON line in session file', {
           filePath,
@@ -189,8 +190,9 @@ export function parseEntry(entry: unknown): Partial<SessionMessage> | null {
   let content = '';
   let tokenCount = 0;
 
-  // Extract token count from usage data
-  const usage = getObject(entry, 'usage');
+  // Extract token count from usage data (check both entry.usage and entry.message.usage)
+  const messageObj = getObject(entry, 'message');
+  const usage = messageObj ? getObject(messageObj, 'usage') : getObject(entry, 'usage');
   if (usage) {
     tokenCount = (getNumber(usage, 'input_tokens') ?? 0) + (getNumber(usage, 'output_tokens') ?? 0);
   }
@@ -265,10 +267,10 @@ export function extractContent(message: unknown): string {
 /**
  * Extract detailed tool usage from a session entry
  */
-function extractDetailedToolUsage(
+async function extractDetailedToolUsage(
   entry: unknown,
   detailedToolUsage: Omit<DetailedToolUsage, 'sessionId'>[]
-): void {
+): Promise<void> {
   if (!isObject(entry)) return;
 
   // Extract IDs for deduplication
@@ -276,8 +278,9 @@ function extractDetailedToolUsage(
   const requestId = extractRequestId(entry);
   const entryHash = computeEntryHash(messageId, requestId);
 
-  // Extract usage data
-  const usage = getObject(entry, 'usage');
+  // Extract usage data from entry.message.usage (primary) or entry.usage (fallback)
+  const message = getObject(entry, 'message');
+  const usage = message ? getObject(message, 'usage') : getObject(entry, 'usage');
   if (!usage) return;
 
   const inputTokens = getNumber(usage, 'input_tokens') ?? 0;
@@ -285,14 +288,21 @@ function extractDetailedToolUsage(
   const cacheWriteTokens = getNumber(usage, 'cache_creation_input_tokens') ?? 0;
   const cacheReadTokens = getNumber(usage, 'cache_read_input_tokens') ?? 0;
   const tokenCost = inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
-  const costUsd = getNumber(entry, 'costUSD') ?? 0;
 
-  // Extract model and timestamp
-  const model = getString(entry, 'model') ?? null;
+  // Extract model and timestamp from message or entry
+  const model = (message ? getString(message, 'model') : getString(entry, 'model')) ?? null;
   const timestamp = getString(entry, 'timestamp') ?? null;
 
-  // Extract tool information from message content
-  const message = getObject(entry, 'message');
+  // Calculate cost using the same logic as the main cost calculation
+  const tokenStats: TokenStats = {
+    inputTokens,
+    outputTokens,
+    cacheWriteTokens,
+    cacheReadTokens,
+  };
+  const costUsd = await calculateCost(tokenStats, model ?? null, timestamp ?? undefined);
+
+  // Extract tool information from message content (message already extracted above)
   const messageContent = message ? message['content'] : undefined;
 
   if (messageContent && Array.isArray(messageContent)) {

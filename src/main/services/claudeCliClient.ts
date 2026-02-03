@@ -305,7 +305,26 @@ Existing tags in the system: ${existingTagsList || 'none'}
 
 Prefer existing tags when appropriate. Only suggest new tags if truly needed.
 
-IMPORTANT: Return tags for ALL sessions, indexed by their session ID.`;
+IMPORTANT: Return tags for ALL sessions. Use the EXACT session ID provided.
+
+Example output format:
+{
+  "sessions": [
+    {
+      "sessionId": "abc-123-def",
+      "tags": [
+        { "name": "bug-fix", "confidence": 0.9, "reasoning": "Session focused on fixing a bug", "category": "bug" },
+        { "name": "react", "confidence": 0.8, "reasoning": "React components were modified", "category": "feature" }
+      ]
+    },
+    {
+      "sessionId": "xyz-456-ghi",
+      "tags": [
+        { "name": "refactor", "confidence": 0.85, "reasoning": "Code was restructured", "category": "refactor" }
+      ]
+    }
+  ]
+}`;
 
   return prompt;
 }

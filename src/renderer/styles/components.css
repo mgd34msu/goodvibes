@@ -3140,7 +3140,7 @@
     flex-direction: column;
     width: 100%;
     max-width: 520px;
-    max-height: 85vh;
+    max-height: 90vh;
     margin: var(--space-4);
     border-radius: 24px;
     background: linear-gradient(

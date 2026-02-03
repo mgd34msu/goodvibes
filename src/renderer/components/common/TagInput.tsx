@@ -80,27 +80,27 @@ export function TagInput({
   // ============================================================================
 
   useEffect(() => {
-    if (isOpen && containerRef.current) {
-      const updatePosition = () => {
-        if (containerRef.current) {
-          const rect = containerRef.current.getBoundingClientRect();
-          setDropdownPosition({
-            top: rect.bottom,
-            left: rect.left,
-            width: rect.width,
-          });
-        }
-      };
+    if (!isOpen || !containerRef.current) return;
 
-      updatePosition();
-      window.addEventListener('scroll', updatePosition, true);
-      window.addEventListener('resize', updatePosition);
+    const updatePosition = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDropdownPosition({
+          top: rect.bottom,
+          left: rect.left,
+          width: rect.width,
+        });
+      }
+    };
 
-      return () => {
-        window.removeEventListener('scroll', updatePosition, true);
-        window.removeEventListener('resize', updatePosition);
-      };
-    }
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
   }, [isOpen]);
 
   // ============================================================================
@@ -301,7 +301,7 @@ export function TagInput({
   return (
     <div className="space-y-2">
       {/* Input */}
-      <div className="relative">
+      <div ref={containerRef} className="relative">
         <input
           ref={inputRef}
           type="text"
@@ -314,11 +314,16 @@ export function TagInput({
           className={`w-full bg-surface-700 border border-surface-600 rounded focus:outline-none focus:ring-2 focus:ring-accent-purple/50 focus:border-accent-purple text-surface-100 placeholder-surface-400 transition-colors ${SIZE_CLASSES[size]}`}
         />
 
-        {/* Dropdown */}
-        {isOpen && (suggestions.length > 0 || shouldShowCreateOption) && (
+        {/* Dropdown (rendered in portal to escape modal overflow) */}
+        {isOpen && (suggestions.length > 0 || shouldShowCreateOption) && createPortal(
           <div
             ref={dropdownRef}
-            className="absolute z-50 w-full mt-1 bg-surface-800 border border-surface-600 rounded shadow-lg max-h-60 overflow-y-auto"
+            className="fixed z-[9999] bg-surface-800 border border-surface-600 rounded shadow-lg max-h-80 overflow-y-auto"
+            style={{
+              top: `${dropdownPosition.top + 4}px`,
+              left: `${dropdownPosition.left}px`,
+              width: `${dropdownPosition.width}px`,
+            }}
           >
             {/* Existing tag suggestions */}
             {suggestions.map((tag, index) => (
@@ -362,7 +367,8 @@ export function TagInput({
                 </span>
               </button>
             )}
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 

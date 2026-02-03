@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { Logger } from './logger';
+import * as db from '../database';
 import type { SuggestionCategory, ScanCostEstimate } from '../../shared/types/tag-types';
 
 const logger = new Logger('AnthropicClient');
@@ -124,9 +125,15 @@ function getApiKey(): string | null {
     return envKey.trim();
   }
 
-  // TODO: Check settings store when available
-  // const { getConfig } = require('./config');
-  // return getConfig().anthropicApiKey;
+  // Check settings database for stored API key
+  try {
+    const storedKey = db.getSetting<string>('anthropicApiKey');
+    if (storedKey && storedKey.trim()) {
+      return storedKey.trim();
+    }
+  } catch (error) {
+    logger.debug('Failed to retrieve anthropicApiKey from settings', { error });
+  }
 
   return null;
 }

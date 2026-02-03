@@ -170,6 +170,26 @@ export function ScanProgressModal({
   }, [isOpen]);
 
   /**
+   * Start the background scan when modal opens
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Start the background scan
+    window.goodvibes.startBackgroundScan()
+      .then((result) => {
+        if (!result.success) {
+          console.error('Failed to start background scan:', result.error);
+          setError(result.error || 'Failed to start scan');
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to start background scan:', error);
+        setError('Failed to start scan');
+      });
+  }, [isOpen]);
+
+  /**
    * Handle escape key
    */
   useEffect(() => {

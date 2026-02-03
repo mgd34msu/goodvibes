@@ -362,6 +362,29 @@ async function extractDetailedToolUsage(
         toolIndex++;
       }
     }
+
+    // Fallback: If no tool_use blocks found but we have usage data, record as non-tool entry
+    if (toolIndex === 0) {
+      detailedToolUsage.push({
+        toolName: '__message__',
+        toolInput: null,
+        toolResultPreview: null,
+        success: true,
+        durationMs: null,
+        inputTokens,
+        outputTokens,
+        cacheWriteTokens,
+        cacheReadTokens,
+        tokenCost,
+        costUsd,
+        messageId,
+        requestId,
+        entryHash,
+        toolIndex: 0,
+        model,
+        timestamp,
+      });
+    }
   }
 }
 

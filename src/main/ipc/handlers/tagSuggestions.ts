@@ -5,6 +5,8 @@
 import { ipcMain } from 'electron';
 import { z } from 'zod';
 import { Logger } from '../../services/logger.js';
+import tagSuggestionService from '../../services/tagSuggestionService.js';
+import { estimateScanCost } from '../../services/anthropicClient.js';
 import { withContext } from '../utils.js';
 import * as db from '../../database/tagSuggestions.js';
 import * as tags from '../../database/tags.js';
@@ -320,54 +322,59 @@ export function registerTagSuggestionHandlers(): void {
   // ============================================================================
 
   ipcMain.handle('start-background-scan', withContext('start-background-scan', async () => {
-    // TODO: Phase 5 - Start TagSuggestionService
-    logger.debug('start-background-scan called (not implemented - Phase 5)');
-    return ipcOk({
-      status: 'not_implemented',
-      message: 'AI scanning will be implemented in Phase 5',
-    });
+    try {
+      tagSuggestionService.start();
+      logger.info('Background scan started');
+      return ipcOk({ status: 'started' });
+    } catch (error) {
+      logger.error('Failed to start background scan', error);
+      return ipcErr(error, { status: 'error' });
+    }
   }));
 
   ipcMain.handle('stop-background-scan', withContext('stop-background-scan', async () => {
-    // TODO: Phase 5 - Stop TagSuggestionService
-    logger.debug('stop-background-scan called (not implemented - Phase 5)');
-    return ipcOk({
-      status: 'not_implemented',
-      message: 'AI scanning will be implemented in Phase 5',
-    });
+    try {
+      tagSuggestionService.stop();
+      logger.info('Background scan stopped');
+      return ipcOk({ status: 'stopped' });
+    } catch (error) {
+      logger.error('Failed to stop background scan', error);
+      return ipcErr(error, { status: 'error' });
+    }
   }));
 
   ipcMain.handle('get-scan-progress', withContext('get-scan-progress', async () => {
-    // TODO: Phase 5 - Return actual progress from TagSuggestionService
-    logger.debug('get-scan-progress called (not implemented - Phase 5)');
-    return ipcOk({
-      current: 0,
-      total: 0,
-      percentage: 0,
-      estimatedTimeMs: 0,
-      status: 'not_implemented',
-    });
+    try {
+      const progress = tagSuggestionService.getProgress();
+      return ipcOk(progress);
+    } catch (error) {
+      logger.error('Failed to get scan progress', error);
+      return ipcErr(error, {
+        current: 0,
+        total: 0,
+        percentage: 0,
+        estimatedTimeMs: 0,
+      });
+    }
   }));
 
   ipcMain.handle('estimate-scan-cost', withContext('estimate-scan-cost', async () => {
-    // TODO: Phase 5 - Calculate cost estimate based on pending sessions
-    // For now, return placeholder values
-    logger.debug('estimate-scan-cost called (not implemented - Phase 5)');
     try {
       const counts = db.getScanCounts();
+      const estimate = estimateScanCost(counts.pending);
       return ipcOk({
-        pendingSessions: counts.pending,
-        estimatedCostUsd: 0,
-        estimatedTokens: 0,
-        note: 'Cost estimation will be implemented in Phase 5',
+        totalSessions: estimate.totalSessions,
+        estimatedTokens: estimate.estimatedTokens,
+        estimatedCost: estimate.estimatedCost,
+        estimatedTimeMinutes: estimate.estimatedTimeMinutes,
       });
     } catch (error) {
       logger.error('Failed to estimate scan cost', error);
       return ipcErr(error, {
-        pendingSessions: 0,
-        estimatedCostUsd: 0,
+        totalSessions: 0,
         estimatedTokens: 0,
-        note: 'Error calculating estimate',
+        estimatedCost: 0,
+        estimatedTimeMinutes: 0,
       });
     }
   }));

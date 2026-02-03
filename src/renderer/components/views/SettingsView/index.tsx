@@ -62,20 +62,20 @@ export default function SettingsView() {
         {/* Default Expand States */}
         <SessionPreviewExpandSettings settings={settings} onChange={handleChange} />
 
-        {/* Keyboard Shortcuts */}
-        <KeyboardSettings />
-
         {/* Tag Settings */}
         <TagSettings settings={settings} onChange={handleChange} />
-
-        {/* Danger Zone */}
-        <DangerZoneSettings isResetting={isResetting} onReset={handleResetSettings} />
 
         {/* Data & Backup */}
         <BackupSettings settings={settings} onChange={handleChange} />
 
         {/* Maintenance */}
         <MaintenanceSettings />
+
+        {/* Keyboard Shortcuts */}
+        <KeyboardSettings />
+
+        {/* Danger Zone */}
+        <DangerZoneSettings isResetting={isResetting} onReset={handleResetSettings} />
       </div>
 
       {/* Confirmation Modal */}

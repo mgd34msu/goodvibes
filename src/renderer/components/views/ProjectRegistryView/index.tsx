@@ -4,6 +4,8 @@
 
 import { useState, useCallback } from 'react';
 import { createLogger } from '../../../../shared/logger.js';
+import { useTerminalStore } from '../../../stores/terminalStore';
+import { useAppStore } from '../../../stores/appStore';
 
 const logger = createLogger('ProjectRegistryView');
 import { clsx } from 'clsx';
@@ -20,6 +22,8 @@ import type { RegisteredProject, ProjectSettings } from './types';
 type TabType = 'projects' | 'templates';
 
 export default function ProjectRegistryView() {
+  const createTerminal = useTerminalStore((state) => state.createTerminal);
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
   const [activeTab, setActiveTab] = useState<TabType>('projects');
   const [selectedProject, setSelectedProject] = useState<RegisteredProject | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -87,13 +91,19 @@ export default function ProjectRegistryView() {
     }
   }, [confirmDeleteTemplate, deleteTemplate]);
 
-  const handleNewSession = useCallback((project: RegisteredProject) => {
+  const handleNewSession = useCallback(async (project: RegisteredProject) => {
     // Start a new Claude session in the project's directory
-    window.goodvibes?.startClaude?.({
-      cwd: project.path,
-      name: project.name,
-    }).catch((err: unknown) => logger.error('Failed to start Claude session', err));
-  }, []);
+    try {
+      const result = await createTerminal(project.path, project.name);
+      if (result.error) {
+        logger.error('Failed to start Claude session', result.error);
+      } else {
+        setCurrentView('terminal');
+      }
+    } catch (err: unknown) {
+      logger.error('Failed to start Claude session', err);
+    }
+  }, [createTerminal, setCurrentView]);
 
   function formatDate(dateString: string): string {
     return new Date(dateString).toLocaleDateString(undefined, {

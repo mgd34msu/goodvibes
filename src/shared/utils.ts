@@ -5,19 +5,54 @@
 /**
  * Decode project name from path-encoded format
  *
- * @param name - The encoded project name (e.g., "C--Users-buzzkill-Documents-myproject")
+ * @param name - The encoded project name (e.g., "C--Users-buzzkill-Documents-myproject" or "-home-buzzkill-Projects-myproject")
  * @param projectsRoot - Optional projects root path to compute relative paths
- * @returns The decoded project name, relative to projectsRoot if provided
+ * @returns The decoded project name with smart home directory handling
  *
  * Examples:
+ * Windows:
  * - decodeProjectName("C--Users-buzzkill-Documents-goodvibes") => "goodvibes"
- * - decodeProjectName("C--Users-buzzkill-Documents-goodvibes", "C:\\Users\\buzzkill\\Documents") => "goodvibes"
- * - decodeProjectName("C--Users-buzzkill-Documents-work-api", "C:\\Users\\buzzkill\\Documents") => "work/api"
+ * - decodeProjectName("C--Users-buzzkill") => "~"
+ *
+ * Linux:
+ * - decodeProjectName("-home-buzzkill-Projects-goodvibes-sh") => "goodvibes.sh"
+ * - decodeProjectName("-home-buzzkill") => "~"
  */
 export function decodeProjectName(name: string | null | undefined, projectsRoot?: string | null): string {
   if (!name) return 'Unknown';
 
-  // Handle dash-separated path encoding (e.g., "C--Users-name-project")
+  // Get home directory for replacement (cross-platform)
+  const homeDir = typeof process !== 'undefined' && process.env?.HOME
+    ? process.env.HOME
+    : typeof process !== 'undefined' && process.env?.USERPROFILE
+    ? process.env.USERPROFILE
+    : null;
+
+  // Handle Linux-style dash-separated paths (e.g., "-home-buzzkill-Projects-myproject")
+  if (name.startsWith('-')) {
+    // Parse the encoded path: split by dash and rebuild full path
+    const parts = name.substring(1).split('-').filter(Boolean); // Remove leading dash and split
+    const fullPath = '/' + parts.join('/');
+
+    // Check if this is the home directory itself
+    if (homeDir && fullPath === homeDir) {
+      return '~';
+    }
+
+    // If projectsRoot is provided, compute relative path
+    if (projectsRoot) {
+      const normalizedRoot = projectsRoot.replace(/\\/g, '/').replace(/\/$/, '');
+      if (fullPath.startsWith(normalizedRoot + '/')) {
+        const relativePath = fullPath.substring(normalizedRoot.length + 1);
+        return relativePath || parts[parts.length - 1] || name;
+      }
+    }
+
+    // Return just the last part (folder name)
+    return parts[parts.length - 1] || name;
+  }
+
+  // Handle Windows-style dash-separated paths (e.g., "C--Users-name-project")
   // Format: "C--Users-buzzkill-Documents-myproject" (-- after drive, - between dirs)
   if (name.includes('--') || name.match(/^[A-Z]-/)) {
     // Parse the encoded path into parts
@@ -35,6 +70,14 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
         });
       }
     });
+
+    // Reconstruct full path to check if it's home directory
+    const fullPath = pathParts[0] + ':/' + pathParts.slice(1).join('/');
+
+    // Check if this is the home directory itself
+    if (homeDir && fullPath.replace(/\\/g, '/') === homeDir.replace(/\\/g, '/')) {
+      return '~';
+    }
 
     // If projectsRoot is provided, compute relative path
     if (projectsRoot) {
@@ -218,15 +261,23 @@ export function formatRelativeTime(dateStr: string | null | undefined): string {
 /**
  * Decode project name from path-encoded format back to full path
  *
- * @param name - The encoded project name (e.g., "C--Users-buzzkill-Documents-myproject")
- * @returns The decoded full path (e.g., "C:/Users/buzzkill/Documents/myproject")
+ * @param name - The encoded project name (e.g., "C--Users-buzzkill-Documents-myproject" or "-home-buzzkill-Projects-myproject")
+ * @returns The decoded full path (e.g., "C:/Users/buzzkill/Documents/myproject" or "/home/buzzkill/Projects/myproject")
  *
  * Examples:
  * - decodeProjectPath("C--Users-buzzkill-Documents-goodvibes") => "C:/Users/buzzkill/Documents/goodvibes"
+ * - decodeProjectPath("-home-user-projects-myapp") => "/home/user/projects/myapp"
  * - decodeProjectPath("home-user-projects-myapp") => "/home/user/projects/myapp"
  */
 export function decodeProjectPath(name: string | null | undefined): string | null {
   if (!name) return null;
+
+  // Handle Linux-style dash-separated paths with leading dash (e.g., "-home-buzzkill-Projects-myproject")
+  if (name.startsWith('-home-') || name.startsWith('-Users-')) {
+    // Parse the encoded path: split by dash and rebuild full path
+    const parts = name.substring(1).split('-').filter(Boolean); // Remove leading dash and split
+    return '/' + parts.join('/');
+  }
 
   // Handle dash-separated path encoding (e.g., "C--Users-name-project")
   // Format: "C--Users-buzzkill-Documents-myproject" (-- after drive, - between dirs)
@@ -251,7 +302,7 @@ export function decodeProjectPath(name: string | null | undefined): string | nul
     return pathParts.join('/');
   }
 
-  // Unix-style paths (e.g., "home-user-projects")
+  // Unix-style paths without leading dash (e.g., "home-user-projects")
   if (name.match(/^home-/) || name.match(/^Users-/)) {
     const parts = name.split('-');
     return '/' + parts.join('/');

@@ -22,7 +22,15 @@ export const LIVE_SESSION_CHECK_THRESHOLD_MS = 30000; // 30 seconds
  *
  * Cache multipliers:
  * - Cache creation (5m): 1.25x base input price
+ * - Cache creation (1h): 2x base input price
  * - Cache read: 0.1x base input price
+ *
+ * Long context pricing (Sonnet 4/4.5 only, >200K input tokens):
+ * - Input: 2x normal price ($6/MTok)
+ * - Output: 1.5x normal price ($22.50/MTok)
+ *
+ * Batch pricing:
+ * - 50% discount on all token types
  */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // Opus models
@@ -41,11 +49,26 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   'claude-haiku-3': { input: 0.25, output: 1.25 },
 };
 
-/** Cache write multiplier (1.25x base input price) */
-export const CACHE_WRITE_MULTIPLIER = 1.25;
+/** Cache write multiplier for 5-minute cache (1.25x base input price) */
+export const CACHE_WRITE_5M_MULTIPLIER = 1.25;
+
+/** Cache write multiplier for 1-hour cache (2x base input price) */
+export const CACHE_WRITE_1H_MULTIPLIER = 2.0;
 
 /** Cache read multiplier (0.1x base input price) */
 export const CACHE_READ_MULTIPLIER = 0.1;
+
+/** Long context threshold for Sonnet models (tokens) */
+export const LONG_CONTEXT_THRESHOLD = 200_000;
+
+/** Long context input price multiplier for Sonnet models (2x) */
+export const LONG_CONTEXT_INPUT_MULTIPLIER = 2.0;
+
+/** Long context output price multiplier for Sonnet models (1.5x) */
+export const LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5;
+
+/** Batch pricing discount (50% off) */
+export const BATCH_DISCOUNT_MULTIPLIER = 0.5;
 
 /** Default pricing when model is unknown (uses Sonnet 4 pricing) */
 export const DEFAULT_INPUT_PRICE = 3;

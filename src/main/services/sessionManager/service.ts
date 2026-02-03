@@ -157,7 +157,7 @@ export class SessionManagerInstance {
       tokenStats.cacheWriteTokens + tokenStats.cacheReadTokens;
 
     // Use actual cost from JSONL if available, otherwise calculate
-    const totalCost = costUSD > 0 ? costUSD : calculateCost(tokenStats, model);
+    const totalCost = costUSD > 0 ? costUSD : await calculateCost(tokenStats, model);
 
     // Upsert session
     upsertSession({

@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, Home, ArrowUp, Pin, X, GripHorizontal } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ChevronDown, Home, ArrowUp, Pin, X, GripHorizontal, Play, FolderPlus } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface TreeNode {
@@ -27,6 +27,8 @@ interface FileTreeProps {
   pinnedFolders: PinnedFolder[];
   onPinFolder: (path: string, name: string) => void;
   onUnpinFolder: (path: string) => void;
+  onStartSession?: (path: string) => void;
+  onAddToRegistry?: (path: string) => void;
 }
 
 interface TreeItemProps {
@@ -36,6 +38,8 @@ interface TreeItemProps {
   onNavigate: (path: string) => void;
   onLoadChildren: (path: string) => Promise<TreeNode[]>;
   onPinFolder: (path: string, name: string) => void;
+  onStartSession?: (path: string) => void;
+  onAddToRegistry?: (path: string) => void;
   isPinned: boolean;
   isExpanded: boolean;
   expandedPaths: Set<string>;
@@ -43,7 +47,7 @@ interface TreeItemProps {
   registerRef: (path: string, el: HTMLDivElement | null) => void;
 }
 
-function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinFolder, isPinned, isExpanded, expandedPaths, onToggleExpand, registerRef }: TreeItemProps) {
+function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinFolder, onStartSession, onAddToRegistry, isPinned, isExpanded, expandedPaths, onToggleExpand, registerRef }: TreeItemProps) {
   const [children, setChildren] = useState<TreeNode[] | null>(node.children || null);
   const [isLoading, setIsLoading] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -156,6 +160,22 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
               <Pin className="w-4 h-4" /> Pin folder
             </button>
           )}
+          {onStartSession && (
+            <button
+              className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+              onClick={() => { onStartSession(node.id); setShowContextMenu(null); }}
+            >
+              <Play className="w-4 h-4" /> Start new session
+            </button>
+          )}
+          {onAddToRegistry && (
+            <button
+              className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+              onClick={() => { onAddToRegistry(node.id); setShowContextMenu(null); }}
+            >
+              <FolderPlus className="w-4 h-4" /> Add to project registry
+            </button>
+          )}
         </div>
       )}
       
@@ -170,6 +190,8 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
               onNavigate={onNavigate}
               onLoadChildren={onLoadChildren}
               onPinFolder={onPinFolder}
+              onStartSession={onStartSession}
+              onAddToRegistry={onAddToRegistry}
               isPinned={false}
               isExpanded={expandedPaths.has(child.id)}
               expandedPaths={expandedPaths}
@@ -183,7 +205,7 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
   );
 }
 
-export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pinnedFolders, onPinFolder, onUnpinFolder }: FileTreeProps) {
+export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pinnedFolders, onPinFolder, onUnpinFolder, onStartSession, onAddToRegistry }: FileTreeProps) {
   const [rootNodes, setRootNodes] = useState<TreeNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pinnedContextMenu, setPinnedContextMenu] = useState<{ x: number; y: number; path: string } | null>(null);
@@ -387,6 +409,8 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
               onNavigate={onNavigate}
               onLoadChildren={onLoadChildren}
               onPinFolder={onPinFolder}
+              onStartSession={onStartSession}
+              onAddToRegistry={onAddToRegistry}
               isPinned={isPinned(node.id)}
               isExpanded={expandedPaths.has(node.id)}
               expandedPaths={expandedPaths}
@@ -448,6 +472,22 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
           >
             <X className="w-4 h-4" /> Unpin folder
           </button>
+          {onStartSession && (
+            <button
+              className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+              onClick={() => { onStartSession(pinnedContextMenu.path); setPinnedContextMenu(null); }}
+            >
+              <Play className="w-4 h-4" /> Start new session
+            </button>
+          )}
+          {onAddToRegistry && (
+            <button
+              className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+              onClick={() => { onAddToRegistry(pinnedContextMenu.path); setPinnedContextMenu(null); }}
+            >
+              <FolderPlus className="w-4 h-4" /> Add to project registry
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -9,6 +9,8 @@ import { FileExplorer } from './FileExplorer';
 import { FileViewer } from './FileViewer';
 import { toast } from '../../../stores/toastStore';
 import { createLogger } from '../../../../shared/logger';
+import { useTerminalStore } from '../../../stores/terminalStore';
+import { useAppStore } from '../../../stores/appStore';
 
 import { FileTree } from './FileTree';
 
@@ -43,6 +45,8 @@ const savePinnedFolders = (folders: PinnedFolder[]) => {
 };
 
 export default function FilesView() {
+  const createTerminal = useTerminalStore((state) => state.createTerminal);
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [homeDir, setHomeDir] = useState<string>('');
   const [fileTree, setFileTree] = useState<any>(null);
@@ -253,6 +257,32 @@ export default function FilesView() {
     }
   };
 
+  const handleStartSession = async (path: string) => {
+    try {
+      const result = await createTerminal(path);
+      if (result.error) {
+        logger.error('Failed to start session:', result.error);
+        toast.error('Failed to start Claude session');
+      } else {
+        toast.success(`Started Claude session in ${path}`);
+        setCurrentView('terminal');
+      }
+    } catch (error) {
+      logger.error('Failed to start session:', error);
+      toast.error('Failed to start Claude session');
+    }
+  };
+
+  const handleAddToRegistry = async (path: string) => {
+    try {
+      await window.goodvibes.projectRegister({ path });
+      toast.success(`Added ${path} to project registry`);
+    } catch (error) {
+      logger.error('Failed to add to registry:', error);
+      toast.error('Failed to add to project registry');
+    }
+  };
+
   if (isLoading && !fileTree) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -299,6 +329,8 @@ export default function FilesView() {
             pinnedFolders={pinnedFolders}
             onPinFolder={handlePinFolder}
             onUnpinFolder={handleUnpinFolder}
+            onStartSession={handleStartSession}
+            onAddToRegistry={handleAddToRegistry}
           />
         </div>
 
@@ -307,6 +339,7 @@ export default function FilesView() {
           <div className={showViewer ? 'w-1/2 border-r border-surface-700' : 'flex-1'}>
             <FileExplorer
               files={fileTree?.children || []}
+              currentPath={currentPath}
               onFileOpen={handleFileOpen}
               onFileSelect={handleFileSelect}
               onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
@@ -314,6 +347,8 @@ export default function FilesView() {
               onPinFolder={handlePinFolder}
               selectedFile={selectedFile}
               isLoading={isLoading}
+              onStartSession={handleStartSession}
+              onAddToRegistry={handleAddToRegistry}
             />
           </div>
           {showViewer && (

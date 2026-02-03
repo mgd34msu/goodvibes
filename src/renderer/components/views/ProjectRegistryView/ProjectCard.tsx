@@ -185,6 +185,7 @@ export function ProjectCard({
                     <button
                       onClick={() => setShowTemplateMenu(!showTemplateMenu)}
                       className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center justify-between transition-colors leading-normal"
+                      tabIndex={-1}
                       aria-expanded={showTemplateMenu}
                       aria-haspopup="menu"
                     >

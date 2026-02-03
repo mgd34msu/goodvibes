@@ -17,3 +17,4 @@ export { projectRegistryApi } from './project-registry.js';
 export { recommendationsApi } from './recommendations.js';
 export { featuresApi } from './features.js';
 export { pluginsApi } from './plugins.js';
+export { tagsApi } from './tags.js';

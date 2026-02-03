@@ -28,6 +28,8 @@ import {
   registerClipboardHandlers,
   registerFeatureHandlers,
   registerPluginHandlers,
+  registerTagSuggestionHandlers,
+  registerTagHandlers,
 } from './handlers/index.js';
 
 const logger = new Logger('IPC');
@@ -56,6 +58,12 @@ export function registerAllIpcHandlers(): void {
 
   // Database operations (collections, tags, prompts, notes, notifications, knowledge, search, analytics)
   registerDatabaseHandlers();
+
+  // Tag CRUD and session-tag associations
+  registerTagHandlers();
+
+  // Tag suggestions (AI-powered tagging)
+  registerTagSuggestionHandlers();
 
   // Export functionality
   registerExportHandlers();

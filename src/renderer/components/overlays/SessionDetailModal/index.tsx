@@ -15,13 +15,14 @@ import { ErrorBoundary } from '../../common/ErrorBoundary';
 import { OverviewTab } from './OverviewTab';
 import { MessagesTab } from './MessagesTab';
 import { TokensTab } from './TokensTab';
+import { TagsSection } from './TagsSection.js';
 import type { SessionDetailModalProps } from './types';
 
 export function SessionDetailModal({ session, onClose }: SessionDetailModalProps): React.JSX.Element {
   const { setCurrentView } = useAppStore();
   const { settings } = useSettingsStore();
   const { createPreviewTerminal, createTerminal } = useTerminalStore();
-  const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'tokens'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'tokens' | 'tags'>('overview');
 
   const { data: messages = [], isLoading: messagesLoading } = useQuery({
     queryKey: ['session-messages', session.id],
@@ -98,7 +99,7 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
 
           {/* Tabs */}
           <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.06] bg-white/[0.01]">
-            {(['overview', 'messages', 'tokens'] as const).map((tab) => (
+            {(['overview', 'messages', 'tokens', 'tags'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -124,6 +125,14 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
             )}
             {activeTab === 'tokens' && (
               <TokensTab session={currentSession} />
+            )}
+            {activeTab === 'tags' && (
+              <TagsSection
+                sessionId={session.id}
+                onTagsChange={() => {
+                  // Optionally refresh session data when tags change
+                }}
+              />
             )}
           </div>
 

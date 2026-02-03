@@ -24,6 +24,7 @@ import { projectRegistryApi } from './api/project-registry.js';
 import { recommendationsApi } from './api/recommendations.js';
 import { featuresApi } from './api/features.js';
 import { pluginsApi } from './api/plugins.js';
+import { tagsApi } from './api/tags.js';
 
 // Combine all APIs into single exposed object
 const api = {
@@ -71,6 +72,9 @@ const api = {
 
   // Plugins (management)
   ...pluginsApi,
+
+  // Tags (full tag system API)
+  ...tagsApi,
 };
 
 // Expose API to renderer

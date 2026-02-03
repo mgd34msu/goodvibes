@@ -337,7 +337,7 @@ class TagSuggestionService extends EventEmitter {
 
   /**
    * Queue all sessions pending AI suggestions
-   * TODO: Implement database query to find sessions without suggestions
+   * Queries database for sessions without AI suggestions and adds them to queue
    */
   async queueAllPending(): Promise<void> {
     logger.info('Queueing all pending sessions...');

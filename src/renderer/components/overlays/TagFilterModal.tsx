@@ -2,7 +2,7 @@
 // TAG FILTER MODAL - Visual tag filter builder with boolean logic
 // ============================================================================
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Search, X, ChevronDown } from 'lucide-react';
@@ -287,6 +287,13 @@ export function TagFilterModal({
   // FILTERING
   // ============================================================================
 
+  const filteredTags = useMemo(() => {
+    if (!searchQuery.trim()) return allTags;
+    const query = searchQuery.toLowerCase();
+    return allTags.filter(tag => 
+      tag.name.toLowerCase().includes(query)
+    );
+  }, [allTags, searchQuery]);
 
 
   // ============================================================================
@@ -411,7 +418,7 @@ export function TagFilterModal({
                                   aria-label="Select tag"
                                 >
                                   <option value="">Select tag...</option>
-                                  {allTags.map(tag => (
+                                  {filteredTags.map(tag => (
                                     <option key={tag.id} value={tag.id}>
                                       #{tag.name} ({tag.usageCount})
                                     </option>
@@ -542,21 +549,22 @@ function buildExpressionFromGroups(state: FilterState): TagFilterExpression {
 
   // Build expressions for each group
   const groupExpressions = validGroups.map(group => {
-    const validConditions = group.conditions.filter(c => c.tagId !== null);
+    const validConditions = group.conditions
+      .filter((c): c is FilterCondition & { tagId: number } => c.tagId !== null);
     
     let groupExpr: TagFilterExpression;
     
     if (validConditions.length === 1 && validConditions[0]) {
       groupExpr = {
         type: 'tag',
-        tagId: validConditions[0].tagId!,
+        tagId: validConditions[0].tagId,
       };
     } else {
       groupExpr = {
         type: group.internalLogic.toLowerCase() as 'and' | 'or',
         children: validConditions.map(c => ({
           type: 'tag',
-          tagId: c.tagId!,
+          tagId: c.tagId,
         })),
       };
     }

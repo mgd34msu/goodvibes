@@ -11,6 +11,13 @@ import { getSessionMessages } from '../database/messages';
 import { getSessionTags } from '../database/tags';
 import type { Session, SessionMessage } from '../../shared/types/session-types';
 import type { Tag } from '../../shared/types/tag-types.js';
+import { Logger } from './logger.js';
+
+// ==================================================================================
+// LOGGER
+// ==================================================================================
+
+const logger = new Logger('TagSuggestionContext');
 
 // ==================================================================================
 // TYPES
@@ -291,7 +298,7 @@ export function gatherQuickContext(sessionId: string): SessionContext | null {
       existingTags: tags.map(t => t.name),
     };
   } catch (error) {
-    console.error(`Failed to gather quick context for session ${sessionId}:`, error);
+    logger.error(`Failed to gather quick context for session ${sessionId}:`, error);
     return null;
   }
 }
@@ -345,7 +352,7 @@ export function gatherFullContext(sessionId: string): SessionContext | null {
       existingTags: tags.map(t => t.name),
     };
   } catch (error) {
-    console.error(`Failed to gather full context for session ${sessionId}:`, error);
+    logger.error(`Failed to gather full context for session ${sessionId}:`, error);
     return null;
   }
 }

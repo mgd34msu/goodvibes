@@ -287,7 +287,16 @@ export function TagFilterModal({
   // FILTERING
   // ============================================================================
 
+  const filteredTags = allTags.filter(tag => {
+    if (!searchQuery) return true;
+    return tag.name.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
+  // Get all selected tag IDs across all groups
+  const selectedTagIds = filterState.groups.flatMap(g =>
+    g.conditions.map(c => c.tagId).filter((id): id is number => id !== null)
+  );
+  const selectedTags = allTags.filter(tag => selectedTagIds.includes(tag.id));
 
   // ============================================================================
   // RENDER
@@ -546,7 +555,7 @@ function buildExpressionFromGroups(state: FilterState): TagFilterExpression {
     
     let groupExpr: TagFilterExpression;
     
-    if (validConditions.length === 1 && validConditions[0]) {
+    if (validConditions.length === 1) {
       groupExpr = {
         type: 'tag',
         tagId: validConditions[0].tagId!,
@@ -573,13 +582,13 @@ function buildExpressionFromGroups(state: FilterState): TagFilterExpression {
   });
 
   // Combine groups with group logic
-  if (groupExpressions.length === 1 && groupExpressions[0]) {
-    return groupExpressions[0] as TagFilterExpression;
+  if (groupExpressions.length === 1) {
+    return groupExpressions[0];
   }
 
   return {
     type: state.groupLogic.toLowerCase() as 'and' | 'or',
-    children: groupExpressions as TagFilterExpression[],
+    children: groupExpressions,
   };
 }
 
@@ -710,8 +719,8 @@ function buildExpressionPreview(state: FilterState, tags: Tag[]): string {
   }
 
   if (groupStrings.length === 1) {
-    return groupStrings[0] ?? '';
+    return groupStrings[0];
   }
 
-  return groupStrings.filter(Boolean).join(` ${state.groupLogic} `);
+  return groupStrings.join(` ${state.groupLogic} `);
 }

@@ -22,8 +22,29 @@ interface TreeNode {
   modified?: Date;
 }
 
+interface PinnedFolder {
+  path: string;
+  name: string;
+}
+
+const PINNED_FOLDERS_KEY = 'goodvibes-pinned-folders';
+
+const loadPinnedFolders = (): PinnedFolder[] => {
+  try {
+    const stored = localStorage.getItem(PINNED_FOLDERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePinnedFolders = (folders: PinnedFolder[]) => {
+  localStorage.setItem(PINNED_FOLDERS_KEY, JSON.stringify(folders));
+};
+
 export default function FilesView() {
   const [currentPath, setCurrentPath] = useState<string>('');
+  const [homeDir, setHomeDir] = useState<string>('');
   const [fileTree, setFileTree] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -31,10 +52,28 @@ export default function FilesView() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
+  const [pinnedFolders, setPinnedFolders] = useState<PinnedFolder[]>(loadPinnedFolders);
 
-  // Load initial directory
+  const handlePinFolder = (path: string, name: string) => {
+    const newPinned = [...pinnedFolders, { path, name }];
+    setPinnedFolders(newPinned);
+    savePinnedFolders(newPinned);
+  };
+
+  const handleUnpinFolder = (path: string) => {
+    const newPinned = pinnedFolders.filter(f => f.path !== path);
+    setPinnedFolders(newPinned);
+    savePinnedFolders(newPinned);
+  };
+
+  // Load home directory and initial directory
   useEffect(() => {
-    loadDirectory();
+    const init = async () => {
+      const home = await window.goodvibes.getHomeDirectory() || '/';
+      setHomeDir(home);
+      loadDirectory();
+    };
+    init();
   }, []);
 
   const loadDirectory = async (path?: string) => {
@@ -222,7 +261,8 @@ export default function FilesView() {
     );
   }
 
-  const rootPath = currentPath.split(/[\\/]/).slice(0, 2).join('\\') || '/';
+  // Root the tree at user's home directory
+  const rootPath = homeDir || '/';
 
   return (
     <div className="h-full flex flex-col bg-surface-900">
@@ -256,6 +296,9 @@ export default function FilesView() {
             currentPath={currentPath}
             onNavigate={handleNavigate}
             onLoadChildren={loadChildren}
+            pinnedFolders={pinnedFolders}
+            onPinFolder={handlePinFolder}
+            onUnpinFolder={handleUnpinFolder}
           />
         </div>
 
@@ -268,6 +311,7 @@ export default function FilesView() {
               onFileSelect={handleFileSelect}
               onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
               onDelete={handleFileDelete}
+              onPinFolder={handlePinFolder}
               selectedFile={selectedFile}
               isLoading={isLoading}
             />

@@ -1,6 +1,6 @@
 // FileExplorer - Custom file browser with grid/list views
 import { useState } from 'react';
-import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink } from 'lucide-react';
+import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink, Pin } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface FileEntry {
@@ -17,6 +17,7 @@ onFileOpen: (file: FileEntry) => void;
 onFileSelect: (file: FileEntry | null) => void;
 onRename: (file: FileEntry) => void;
 onDelete: (file: FileEntry) => void;
+onPinFolder?: (path: string, name: string) => void;
 selectedFile: FileEntry | null;
 isLoading: boolean;
 }
@@ -37,7 +38,7 @@ if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
 return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
 
-export function FileExplorer({ files, onFileOpen, onFileSelect, onRename, onDelete, selectedFile, isLoading }:
+export function FileExplorer({ files, onFileOpen, onFileSelect, onRename, onDelete, onPinFolder, selectedFile, isLoading }:
 FileExplorerProps) {
 const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileEntry } | null>(null);
@@ -106,7 +107,7 @@ return (
             const Icon = getFileIcon(file);
             const isSelected = selectedFile?.id === file.id;
             return (
-                <div key={file.id} className={clsx('flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors', isSelected ? 'bg-primary-600/20 ring-1 ring-primary-500' : 'hover:bg-surface-700/50')} onClick={() => onFileSelect(file)} onDoubleClick={() => onFileOpen(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                <div key={file.id} className={clsx('flex flex-col items-center p-3 rounded-lg cursor-pointer transition-colors', isSelected ? 'bg-primary-600/20 ring-1 ring-primary-500' : 'hover:bg-surface-700/50')} onClick={() => file.isDir ? onFileSelect(file) : onFileOpen(file)} onDoubleClick={() => file.isDir ? onFileOpen(file) : undefined} onContextMenu={(e) => handleContextMenu(e, file)}>
                 <Icon className={clsx('w-10 h-10 mb-2', file.isDir ? 'text-primary-400' : 'text-surface-400')} />
                 <span className="text-sm text-center truncate w-full text-surface-200">{file.name}</span>
                 </div>
@@ -128,7 +129,7 @@ return (
                 const isSelected = selectedFile?.id === file.id;
                 return (
                 <tr key={file.id} className={clsx('cursor-pointer transition-colors', isSelected ?
-'bg-primary-600/20' : 'hover:bg-surface-700/50')} onClick={() => onFileSelect(file)} onDoubleClick={() => onFileOpen(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+'bg-primary-600/20' : 'hover:bg-surface-700/50')} onClick={() => file.isDir ? onFileSelect(file) : onFileOpen(file)} onDoubleClick={() => file.isDir ? onFileOpen(file) : undefined} onContextMenu={(e) => handleContextMenu(e, file)}>
                     <td className="py-2 flex items-center gap-2">
                     <Icon className={clsx('w-4 h-4', file.isDir ? 'text-primary-400' : 'text-surface-400')} />
                     <span className="text-sm text-surface-200">{file.name}</span>
@@ -149,6 +150,12 @@ return (
 onClick={() => { onFileOpen(contextMenu.file); closeContextMenu(); }}>
             <ExternalLink className="w-4 h-4" /> Open
         </button>
+        {contextMenu.file.isDir && onPinFolder && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onPinFolder(contextMenu.file.id, contextMenu.file.name); closeContextMenu(); }}>
+            <Pin className="w-4 h-4" /> Pin folder
+          </button>
+        )}
         <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
 onClick={() => { onRename(contextMenu.file); closeContextMenu(); }}>
             <Pencil className="w-4 h-4" /> Rename

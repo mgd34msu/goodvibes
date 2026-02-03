@@ -187,6 +187,17 @@ export function TagSettings({ settings, onChange }: TagSettingsProps): React.JSX
         </SettingRow>
 
         <SettingRow
+          label="Rate Limit Scanning"
+          description="Limit scanning to control token usage (100 sessions per hour)"
+        >
+          <ToggleSwitch
+            checked={settings.tagScanRateLimitEnabled}
+            onChange={(value) => onChange('tagScanRateLimitEnabled', value)}
+            disabled={!settings.enableAiSuggestions}
+          />
+        </SettingRow>
+
+        <SettingRow
           label="Auto-Accept High-Confidence Tags"
           description="Automatically apply tags with high confidence scores"
         >

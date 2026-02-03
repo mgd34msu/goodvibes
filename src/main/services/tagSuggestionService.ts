@@ -19,6 +19,7 @@ import type {
 import { gatherQuickContext, formatContextForPrompt } from './tagSuggestionContext.js';
 import { generateTagSuggestionsViaCli } from './claudeCliClient.js';
 import * as tagSuggestions from '../database/tagSuggestions.js';
+import * as db from '../database/index.js';
 
 const logger = new Logger('TagSuggestionService');
 
@@ -496,8 +497,9 @@ class TagSuggestionService extends EventEmitter {
         break;
       }
 
-      // Check rate limit
-      if (!this.rateLimiter.tryConsume()) {
+      // Check rate limit (if enabled)
+      const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
+      if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
         const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
         logger.info(`Rate limit reached. Next token available in ${Math.round(timeUntilNext / 1000)}s`);
         break;

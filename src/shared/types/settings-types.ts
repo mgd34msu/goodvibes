@@ -65,6 +65,7 @@ export interface AppSettings {
   aiSuggestionsScanDepth: 'quick' | 'full';
   aiSuggestionsAutoAccept: boolean;
   aiSuggestionsAutoAcceptThreshold: number; // 0-1 confidence threshold
+  tagScanRateLimitEnabled: boolean; // Enable rate limiting for tag scanning
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -124,6 +125,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiSuggestionsScanDepth: 'quick',
   aiSuggestionsAutoAccept: false,
   aiSuggestionsAutoAcceptThreshold: 0.9,
+  tagScanRateLimitEnabled: true, // enabled by default
 };
 
 // Settings version - increment this when adding new settings that need migration
@@ -143,7 +145,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 // Version 8: Added preferredTextEditor setting
 // Version 9: Added colorTheme setting for dynamic theming
 // Version 10: Added timezone setting
-export const SETTINGS_VERSION = 11;
+export const SETTINGS_VERSION = 12;
 
 // Settings that were added/changed in each version and need to be reset to defaults
 export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
@@ -205,6 +207,10 @@ export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
     'aiSuggestionsScanDepth',
     'aiSuggestionsAutoAccept',
     'aiSuggestionsAutoAcceptThreshold',
+  ],
+  // Version 12: Added rate limit toggle for tag scanning
+  12: [
+    'tagScanRateLimitEnabled',
   ],
 };
 

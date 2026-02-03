@@ -339,3 +339,11 @@ export interface ToolCostBreakdown {
   avgCostPerCall: number;
   avgDurationMs: number;
 }
+
+export interface ToolEfficiencyStats {
+  toolName: string;
+  totalCalls: number;
+  successRate: number;
+  avgDurationMs: number | null;
+  totalTokenCost: number;
+}

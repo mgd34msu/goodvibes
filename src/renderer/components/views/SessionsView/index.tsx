@@ -71,15 +71,13 @@ export default function SessionsView() {
     return filteredSessions.filter(session => sessionIdSet.has(session.id));
   }, [filteredSessions, filteredSessionIds]);
 
-  // Auto-scan for NEW sessions every 10 seconds (incremental, not full rescan)
+  // Auto-refresh sessions every 10 seconds (scans for new and updates existing)
   useEffect(() => {
     // Note: Full scan happens at app startup, so we don't need one here.
-    // Just start the incremental scan interval.
+    // Just start the refresh interval.
     const interval = setInterval(() => {
-      // Only scan for NEW sessions, not re-process all existing ones
-      void window.goodvibes.scanNewSessions().catch(() => {
-        // API should always exist - log if call fails
-        logger.debug('scanNewSessions API call failed');
+      void window.goodvibes.refreshSessions().catch(() => {
+        // Silent fail - UI will update on next successful refresh
       });
     }, 10000);
     

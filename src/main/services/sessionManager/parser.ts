@@ -114,7 +114,6 @@ export async function parseSessionFileWithStats(filePath: string): Promise<Parse
   let model: string | null = null;
   const toolUsage = new Map<string, number>();
   const detailedToolUsage: Omit<DetailedToolUsage, 'sessionId'>[] = [];
-  const seenHashes = new Set<string>();
 
   try {
     const content = await fs.readFile(filePath, 'utf-8');
@@ -133,7 +132,7 @@ export async function parseSessionFileWithStats(filePath: string): Promise<Parse
         extractToolUsage(entry, toolUsage);
 
         // Extract detailed tool usage with deduplication
-        extractDetailedToolUsage(entry, detailedToolUsage, seenHashes);
+        extractDetailedToolUsage(entry, detailedToolUsage);
       } catch (error) {
         logger.debug('Skipped malformed JSON line in session file', {
           filePath,
@@ -143,10 +142,11 @@ export async function parseSessionFileWithStats(filePath: string): Promise<Parse
     }
 
     // Compute aggregated token stats from detailed tool usage (deduplicated)
-    const uniqueEntries = detailedToolUsage.filter((entry, idx) => {
-      // Only count entries with unique hashes for token totals
-      const firstIdx = detailedToolUsage.findIndex(e => e.entryHash === entry.entryHash);
-      return firstIdx === idx;
+    const seenHashesForTotals = new Set<string>();
+    const uniqueEntries = detailedToolUsage.filter(entry => {
+      if (seenHashesForTotals.has(entry.entryHash)) return false;
+      seenHashesForTotals.add(entry.entryHash);
+      return true;
     });
 
     tokenStats = uniqueEntries.reduce(
@@ -267,8 +267,7 @@ export function extractContent(message: unknown): string {
  */
 function extractDetailedToolUsage(
   entry: unknown,
-  detailedToolUsage: Omit<DetailedToolUsage, 'sessionId'>[],
-  seenHashes: Set<string>
+  detailedToolUsage: Omit<DetailedToolUsage, 'sessionId'>[]
 ): void {
   if (!isObject(entry)) return;
 
@@ -323,7 +322,8 @@ function extractDetailedToolUsage(
               const resultContent = resultBlock['content'];
               if (typeof resultContent === 'string') {
                 toolResultPreview = resultContent.substring(0, 500);
-                success = !getString(resultBlock, 'is_error');
+                const isError = resultBlock['is_error'];
+                success = typeof isError === 'boolean' ? !isError : true;
               }
             }
           }

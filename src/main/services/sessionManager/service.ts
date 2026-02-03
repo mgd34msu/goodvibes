@@ -19,6 +19,8 @@ import {
   clearSessionToolUsage,
   getKnownSessionPaths,
   getKnownSessionPathsWithMtime,
+  clearDetailedToolUsage,
+  batchRecordDetailedToolUsage,
 } from '../../database/index.js';
 import { sendToRenderer } from '../../window.js';
 import { Logger } from '../logger.js';
@@ -149,7 +151,7 @@ export class SessionManagerInstance {
       return;
     }
 
-    const { messages, tokenStats, costUSD, model, toolUsage } = await parseSessionFileWithStats(filePath);
+    const { messages, tokenStats, costUSD, model, toolUsage, detailedToolUsage } = await parseSessionFileWithStats(filePath);
 
     // Calculate session stats
     let startTime: string | null = null;
@@ -195,6 +197,33 @@ export class SessionManagerInstance {
     clearSessionToolUsage(filename);
     for (const [toolName, count] of toolUsage) {
       trackToolUsage(filename, toolName, count);
+    }
+
+    // Record detailed tool usage with token attribution
+    clearDetailedToolUsage(filename);
+    if (detailedToolUsage.length > 0) {
+      batchRecordDetailedToolUsage(
+        detailedToolUsage.map(usage => ({
+          sessionId: filename,
+          toolName: usage.toolName,
+          toolInput: usage.toolInput,
+          toolResultPreview: usage.toolResultPreview,
+          success: usage.success,
+          durationMs: usage.durationMs,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
+          cacheReadTokens: usage.cacheReadTokens,
+          tokenCost: usage.tokenCost,
+          costUsd: usage.costUsd,
+          messageId: usage.messageId,
+          requestId: usage.requestId,
+          entryHash: usage.entryHash,
+          toolIndex: usage.toolIndex,
+          model: usage.model,
+          timestamp: usage.timestamp,
+        }))
+      );
     }
   }
 

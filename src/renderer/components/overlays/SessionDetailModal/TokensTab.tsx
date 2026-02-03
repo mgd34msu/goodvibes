@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { clsx } from 'clsx';
+import { useQuery } from '@tanstack/react-query';
 import type { Session } from '../../../../shared/types';
 import { formatCost, formatNumber } from '../../../../shared/utils';
 import { StatCard, DetailRow } from './HelperComponents';
@@ -11,7 +12,26 @@ interface TokensTabProps {
   session: Session;
 }
 
+interface ToolCostBreakdown {
+  toolName: string;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCost: number;
+  avgCostPerCall: number;
+  avgDurationMs: number;
+}
+
 export function TokensTab({ session }: TokensTabProps): React.JSX.Element {
+  // Query for tool breakdown
+  const { data: toolBreakdown = [] } = useQuery<ToolCostBreakdown[]>({
+    queryKey: ['session-tool-breakdown', session.id],
+    queryFn: () => window.goodvibes.getSessionToolBreakdown(session.id),
+    enabled: !!session.id,
+  });
+
   const tokenBreakdown = [
     { label: 'Input Tokens', value: session.inputTokens, color: 'bg-primary-500' },
     { label: 'Output Tokens', value: session.outputTokens, color: 'bg-success-500' },
@@ -71,6 +91,24 @@ export function TokensTab({ session }: TokensTabProps): React.JSX.Element {
           />
         </div>
       </div>
+
+      {/* Tool Token Usage */}
+      {toolBreakdown.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-medium text-surface-300">Tool Token Usage</h3>
+          <div className="space-y-2">
+            {toolBreakdown.map((tool, index) => (
+              <div key={index} className="flex justify-between items-center text-sm">
+                <span className="text-surface-300 font-mono truncate">{tool.toolName}</span>
+                <div className="flex gap-4 text-surface-100">
+                  <span>{tool.callCount} calls</span>
+                  <span>${tool.totalCost?.toFixed(4) || '0.0000'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

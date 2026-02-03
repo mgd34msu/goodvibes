@@ -139,6 +139,7 @@ export {
 export type {
   DetailedToolUsage,
   ToolCostBreakdown,
+  ToolEfficiencyStats,
   SessionAnalytics,
 } from './primitives/types.js';
 

@@ -52,4 +52,11 @@ export const sessionsApi = {
       lastActive: string;
       firstPrompt?: string;
     } | null>,
+  // Tool cost breakdown and efficiency stats
+  getSessionToolBreakdown: (sessionId: string) =>
+    ipcRenderer.invoke('get-session-tool-breakdown', sessionId),
+  getToolEfficiencyStats: () =>
+    ipcRenderer.invoke('get-tool-efficiency-stats'),
+  refreshSessions: () =>
+    ipcRenderer.invoke('refresh-sessions') as Promise<{ newCount: number; updatedCount: number }>,
 };

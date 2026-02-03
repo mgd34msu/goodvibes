@@ -500,5 +500,20 @@ export function registerSessionHandlers(): void {
     return null;
   }));
 
+  // Tool cost breakdown and efficiency stats
+  ipcMain.handle('get-session-tool-breakdown', withContext('get-session-tool-breakdown', async (_, sessionId: string) => {
+    return db.getSessionToolCostBreakdown(sessionId);
+  }));
+
+  ipcMain.handle('get-tool-efficiency-stats', withContext('get-tool-efficiency-stats', async () => {
+    return db.getToolEfficiencyStats();
+  }));
+
+  // Refresh sessions (new + resumed)
+  ipcMain.handle('refresh-sessions', withContext('refresh-sessions', async () => {
+    const sessionManager = getSessionManager();
+    return await sessionManager?.refreshSessions() ?? { newCount: 0, updatedCount: 0 };
+  }));
+
   logger.info('Session handlers registered');
 }

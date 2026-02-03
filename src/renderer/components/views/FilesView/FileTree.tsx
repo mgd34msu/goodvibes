@@ -37,13 +37,23 @@ interface TreeItemProps {
   onLoadChildren: (path: string) => Promise<TreeNode[]>;
   onPinFolder: (path: string, name: string) => void;
   isPinned: boolean;
+  isExpanded: boolean;
+  expandedPaths: Set<string>;
+  onToggleExpand: (path: string) => void;
+  registerRef: (path: string, el: HTMLDivElement | null) => void;
 }
 
-function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinFolder, isPinned }: TreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinFolder, isPinned, isExpanded, expandedPaths, onToggleExpand, registerRef }: TreeItemProps) {
   const [children, setChildren] = useState<TreeNode[] | null>(node.children || null);
   const [isLoading, setIsLoading] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const itemRef = useRef<HTMLDivElement>(null);
+
+  // Register this item's ref for scrolling
+  useEffect(() => {
+    registerRef(node.id, itemRef.current);
+    return () => registerRef(node.id, null);
+  }, [node.id, registerRef]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -67,21 +77,27 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
   const isSelected = currentPath === node.id;
   const indent = level * 12 + 8;
 
+  // Load children when expanded (if not already loaded)
+  useEffect(() => {
+    const loadChildrenIfNeeded = async () => {
+      if (isExpanded && !children) {
+        setIsLoading(true);
+        try {
+          const loadedChildren = await onLoadChildren(node.id);
+          setChildren(loadedChildren.filter(c => c.isDir));
+        } catch {
+          setChildren([]);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    loadChildrenIfNeeded();
+  }, [isExpanded, children, node.id, onLoadChildren]);
+
   const handleToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    if (!isExpanded && !children) {
-      setIsLoading(true);
-      try {
-        const loadedChildren = await onLoadChildren(node.id);
-        setChildren(loadedChildren.filter(c => c.isDir));
-      } catch {
-        setChildren([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    setIsExpanded(!isExpanded);
+    onToggleExpand(node.id);
   };
 
   const handleClick = () => {
@@ -93,6 +109,7 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
   return (
     <div>
       <div
+        ref={itemRef}
         className={clsx(
           'flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors',
           isSelected
@@ -154,6 +171,10 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
               onLoadChildren={onLoadChildren}
               onPinFolder={onPinFolder}
               isPinned={false}
+              isExpanded={expandedPaths.has(child.id)}
+              expandedPaths={expandedPaths}
+              onToggleExpand={onToggleExpand}
+              registerRef={registerRef}
             />
           ))}
         </div>
@@ -167,8 +188,90 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
   const [isLoading, setIsLoading] = useState(true);
   const [pinnedContextMenu, setPinnedContextMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [pinnedHeight, setPinnedHeight] = useState(30); // percentage
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isDragging = useRef(false);
+
+  // Register/unregister tree item refs for scrolling
+  const registerItemRef = useCallback((path: string, el: HTMLDivElement | null) => {
+    if (el) {
+      itemRefs.current.set(path, el);
+    } else {
+      itemRefs.current.delete(path);
+    }
+  }, []);
+
+  // Toggle expansion of a path
+  const handleToggleExpand = useCallback((path: string) => {
+    setExpandedPaths(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  // Get all ancestor paths for a given path (relative to rootPath)
+  const getAncestorPaths = useCallback((targetPath: string): string[] => {
+    const paths: string[] = [];
+    // Build path from root to target
+    const targetParts = targetPath.split('/').filter(Boolean);
+    const rootParts = rootPath.split('/').filter(Boolean);
+    
+    // Start from one level after root
+    let currentPath = rootPath;
+    for (let i = rootParts.length; i < targetParts.length; i++) {
+      currentPath = currentPath + '/' + targetParts[i];
+      paths.push(currentPath);
+    }
+    return paths;
+  }, [rootPath]);
+
+  // Expand to a specific path (collapse all, then expand ancestors + target)
+  const expandToPath = useCallback((targetPath: string) => {
+    const ancestorPaths = getAncestorPaths(targetPath);
+    // Include the target path itself to expand it
+    const pathsToExpand = [...ancestorPaths];
+    setExpandedPaths(new Set(pathsToExpand));
+  }, [getAncestorPaths]);
+
+  // Scroll to a specific path in the tree (with retry for async loading)
+  const scrollToPath = useCallback((targetPath: string) => {
+    let attempts = 0;
+    const maxAttempts = 20; // Max 2 seconds (20 * 100ms)
+    
+    const tryScroll = () => {
+      const el = itemRefs.current.get(targetPath);
+      const scrollContainer = treeScrollRef.current;
+      
+      if (el && scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const offsetTop = elRect.top - containerRect.top + scrollContainer.scrollTop;
+        // Scroll so the element is at the top of the container
+        scrollContainer.scrollTo({ top: offsetTop, behavior: 'smooth' });
+      } else if (attempts < maxAttempts) {
+        // Element not found yet, retry after delay (waiting for async load)
+        attempts++;
+        setTimeout(tryScroll, 100);
+      }
+    };
+    
+    // Start trying after initial delay for state update
+    setTimeout(tryScroll, 50);
+  }, []);
+
+  // Handle pinned folder click: collapse all, expand to path, scroll
+  const handlePinnedFolderClick = useCallback((folderPath: string) => {
+    onNavigate(folderPath);
+    expandToPath(folderPath);
+    scrollToPath(folderPath);
+  }, [onNavigate, expandToPath, scrollToPath]);
 
   const handleDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -265,7 +368,7 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
         )}
       </div>
 
-      <div className="overflow-y-auto p-2" style={{ flex: `1 1 ${100 - pinnedHeight}%` }}>
+      <div ref={treeScrollRef} className="overflow-y-auto p-2" style={{ flex: `1 1 ${100 - pinnedHeight}%` }}>
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="w-6 h-6 border-2 border-surface-600 border-t-primary-400 rounded-full animate-spin" />
@@ -285,6 +388,10 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
               onLoadChildren={onLoadChildren}
               onPinFolder={onPinFolder}
               isPinned={isPinned(node.id)}
+              isExpanded={expandedPaths.has(node.id)}
+              expandedPaths={expandedPaths}
+              onToggleExpand={handleToggleExpand}
+              registerRef={registerItemRef}
             />
           ))
         )}
@@ -312,7 +419,7 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
             pinnedFolders.map((folder) => (
               <button
                 key={folder.path}
-                onClick={() => onNavigate(folder.path)}
+                onClick={() => handlePinnedFolderClick(folder.path)}
                 onContextMenu={(e) => handlePinnedContextMenu(e, folder.path)}
                 className={clsx(
                   'flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm transition-colors group',

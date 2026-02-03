@@ -1,6 +1,6 @@
 // FileExplorer - Custom file browser with grid/list views
 import { useState } from 'react';
-import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink, Pin } from 'lucide-react';
+import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink, Pin, Play, FolderPlus } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface FileEntry {
@@ -13,11 +13,14 @@ modified?: string;
 
 interface FileExplorerProps {
 files: FileEntry[];
+currentPath: string;
 onFileOpen: (file: FileEntry) => void;
 onFileSelect: (file: FileEntry | null) => void;
 onRename: (file: FileEntry) => void;
 onDelete: (file: FileEntry) => void;
 onPinFolder?: (path: string, name: string) => void;
+onStartSession?: (path: string) => void;
+onAddToRegistry?: (path: string) => void;
 selectedFile: FileEntry | null;
 isLoading: boolean;
 }
@@ -38,10 +41,11 @@ if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
 return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
 
-export function FileExplorer({ files, onFileOpen, onFileSelect, onRename, onDelete, onPinFolder, selectedFile, isLoading }:
+export function FileExplorer({ files, currentPath, onFileOpen, onFileSelect, onRename, onDelete, onPinFolder, onStartSession, onAddToRegistry, selectedFile, isLoading }:
 FileExplorerProps) {
 const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileEntry } | null>(null);
+const [whitespaceMenu, setWhitespaceMenu] = useState<{ x: number; y: number } | null>(null);
 const [sortBy, setSortBy] = useState<'name' | 'size' | 'modified'>('name');
 const [sortAsc, setSortAsc] = useState(true);
 
@@ -60,7 +64,19 @@ const handleContextMenu = (e: React.MouseEvent, file: FileEntry) => {
     setContextMenu({ x: e.clientX, y: e.clientY, file });
 };
 
-const closeContextMenu = () => setContextMenu(null);
+const closeContextMenu = () => {
+    setContextMenu(null);
+    setWhitespaceMenu(null);
+};
+
+const handleWhitespaceContextMenu = (e: React.MouseEvent) => {
+    // Only show if clicking on the container itself, not on a file
+    if (e.target === e.currentTarget) {
+        e.preventDefault();
+        setWhitespaceMenu({ x: e.clientX, y: e.clientY });
+        setContextMenu(null);
+    }
+};
 
 const handleSort = (col: 'name' | 'size' | 'modified') => {
     if (sortBy === col) setSortAsc(!sortAsc);
@@ -100,9 +116,9 @@ return (
         </div>
     </div>
 
-    <div className="flex-1 overflow-auto p-4">
+    <div className="flex-1 overflow-auto p-4" onContextMenu={handleWhitespaceContextMenu}>
         {viewMode === 'grid' ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3" onContextMenu={handleWhitespaceContextMenu}>
             {sortedFiles.map(file => {
             const Icon = getFileIcon(file);
             const isSelected = selectedFile?.id === file.id;
@@ -156,6 +172,18 @@ onClick={() => { onPinFolder(contextMenu.file.id, contextMenu.file.name); closeC
             <Pin className="w-4 h-4" /> Pin folder
           </button>
         )}
+        {contextMenu.file.isDir && onStartSession && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onStartSession(contextMenu.file.id); closeContextMenu(); }}>
+            <Play className="w-4 h-4" /> Start new session
+          </button>
+        )}
+        {contextMenu.file.isDir && onAddToRegistry && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onAddToRegistry(contextMenu.file.id); closeContextMenu(); }}>
+            <FolderPlus className="w-4 h-4" /> Add to project registry
+          </button>
+        )}
         <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
 onClick={() => { onRename(contextMenu.file); closeContextMenu(); }}>
             <Pencil className="w-4 h-4" /> Rename
@@ -164,6 +192,23 @@ onClick={() => { onRename(contextMenu.file); closeContextMenu(); }}>
 onClick={() => { onDelete(contextMenu.file); closeContextMenu(); }}>
             <Trash2 className="w-4 h-4" /> Delete
         </button>
+        </div>
+    )}
+
+    {whitespaceMenu && (
+        <div className="fixed bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 z-50" style={{ left: whitespaceMenu.x, top: whitespaceMenu.y }}>
+        {onStartSession && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onStartSession(currentPath); closeContextMenu(); }}>
+            <Play className="w-4 h-4" /> Start new session here
+          </button>
+        )}
+        {onAddToRegistry && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onAddToRegistry(currentPath); closeContextMenu(); }}>
+            <FolderPlus className="w-4 h-4" /> Add to project registry
+          </button>
+        )}
         </div>
     )}
     </div>

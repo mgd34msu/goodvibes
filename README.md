@@ -20,6 +20,18 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 - **Project Registry**: Multi-project management with per-project settings
 - **Memory Management**: Edit CLAUDE.md files for persistent context injection
 
+## Installation
+
+Download the latest release for your operating system from the [Releases page](https://github.com/mgd34msu/goodvibes.sh/releases):
+
+| Platform | Download |
+|----------|----------|
+| Windows | `GoodVibes-Setup-x.x.x.exe` |
+| macOS | `GoodVibes-x.x.x.dmg` |
+| Linux | `GoodVibes-x.x.x.AppImage` |
+
+See [Linux Setup](#linux-setup) below for additional configuration on Linux systems.
+
 ## GoodVibes Plugin - Highly Recommended
 
 For the best experience, we recommend using GoodVibes alongside the **GoodVibes Plugin** for Claude Code. The plugin provides:

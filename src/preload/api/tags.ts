@@ -9,7 +9,6 @@ import type {
   TagTemplate,
   CreateTagInput, 
   UpdateTagInput,
-  TagFilterExpression,
   ScanProgress,
   ScanStatusInfo,
   ScanCostEstimate,

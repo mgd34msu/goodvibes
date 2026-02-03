@@ -5,6 +5,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Session, SessionFilter } from './types';
+import type { TagFilterExpression } from '../../../../shared/types/tag-types';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
 export function useSessions(filter: SessionFilter): { sessions: Session[]; isLoading: boolean; error: Error | null } {
@@ -82,4 +83,112 @@ export function useAppUptime(): number {
   }, []);
 
   return appUptime;
+}
+
+// ============================================================================
+// TAG FILTERING
+// ============================================================================
+
+export interface UseTagFilterResult {
+  // Filter state
+  tagFilterExpression: TagFilterExpression | null;
+  activeFilterCount: number;
+  
+  // Modal state
+  isFilterModalOpen: boolean;
+  openFilterModal: () => void;
+  closeFilterModal: () => void;
+  
+  // Filter actions
+  applyFilter: (expression: TagFilterExpression | null) => void;
+  clearFilter: () => void;
+  
+  // Filtered session IDs (for use in session queries)
+  filteredSessionIds: string[] | null; // null means no filter active
+  isFiltering: boolean; // loading state
+}
+
+/**
+ * Helper function to count total number of tags in a filter expression
+ */
+function countTagsInExpression(expr: TagFilterExpression | null): number {
+  if (!expr) return 0;
+  if (expr.type === 'tag') return 1;
+  if (!expr.children) return 0;
+  return expr.children.reduce((sum, child) => sum + countTagsInExpression(child), 0);
+}
+
+/**
+ * Hook for managing tag filter state in SessionsView
+ * Handles filter expression, modal state, and filtered session IDs
+ */
+export function useTagFilter(): UseTagFilterResult {
+  const [tagFilterExpression, setTagFilterExpression] = useState<TagFilterExpression | null>(null);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [filteredSessionIds, setFilteredSessionIds] = useState<string[] | null>(null);
+  const [isFiltering, setIsFiltering] = useState(false);
+
+  // Calculate active filter count from expression
+  const activeFilterCount = useMemo(
+    () => countTagsInExpression(tagFilterExpression),
+    [tagFilterExpression]
+  );
+
+  // Fetch filtered session IDs when expression changes
+  useEffect(() => {
+    if (!tagFilterExpression) {
+      setFilteredSessionIds(null);
+      setIsFiltering(false);
+      return;
+    }
+
+    // Start filtering
+    setIsFiltering(true);
+
+    // TODO: This needs an IPC handler to be added to src/preload/api/tags.ts
+    // For now, we'll set empty array to indicate "no sessions match"
+    // Once the IPC handler is added, replace with:
+    // window.goodvibes.getFilteredSessionIds(tagFilterExpression)
+    //   .then(result => {
+    //     if (result.success) {
+    //       setFilteredSessionIds(result.data);
+    //     } else {
+    //       console.error('Failed to get filtered session IDs:', result.error);
+    //       setFilteredSessionIds([]);
+    //     }
+    //   })
+    //   .finally(() => setIsFiltering(false));
+    
+    // Temporary placeholder until IPC handler is implemented
+    console.warn('Tag filtering not yet implemented - needs IPC handler for getFilteredSessionIds');
+    setFilteredSessionIds([]);
+    setIsFiltering(false);
+  }, [tagFilterExpression]);
+
+  // Modal controls
+  const openFilterModal = () => setIsFilterModalOpen(true);
+  const closeFilterModal = () => setIsFilterModalOpen(false);
+
+  // Filter actions
+  const applyFilter = (expression: TagFilterExpression | null) => {
+    setTagFilterExpression(expression);
+    closeFilterModal();
+  };
+
+  const clearFilter = () => {
+    setTagFilterExpression(null);
+    setFilteredSessionIds(null);
+  };
+
+  return {
+    tagFilterExpression,
+    activeFilterCount,
+    isFilterModalOpen,
+    openFilterModal,
+    closeFilterModal,
+    applyFilter,
+    clearFilter,
+    filteredSessionIds,
+    isFiltering,
+  };
 }

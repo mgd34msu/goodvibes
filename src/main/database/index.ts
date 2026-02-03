@@ -113,6 +113,15 @@ export {
   skipOldSessions,
 } from './tagSuggestions.js';
 
+// Re-export tag filter operations
+export {
+  buildTagFilterQuery,
+  getFilteredSessionIds,
+  validateTagIds,
+  type FilterResult,
+  type ValidationResult,
+} from './tagFilters.js';
+
 const logger = new Logger('Database');
 
 let db: Database.Database | null = null;

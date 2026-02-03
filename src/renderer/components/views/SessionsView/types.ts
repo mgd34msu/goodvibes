@@ -35,6 +35,7 @@ export interface SessionFiltersProps {
   onFilterChange: (filter: SessionFilter) => void;
   search: string;
   onSearchChange: (search: string) => void;
+  tagFilterButton?: React.ReactNode;
 }
 
 export interface CompactMetricCardProps {

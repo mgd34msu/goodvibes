@@ -2,12 +2,14 @@
 // SESSIONS VIEW COMPONENT - Unified Sessions + Monitor View
 // ============================================================================
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { Session, SessionFilter } from './types';
 import { createLogger } from '../../../../shared/logger';
 
 const logger = createLogger('SessionsView');
-import { useSessions, useLiveSessions, useSessionFilters } from './hooks';
+import { useSessions, useLiveSessions, useSessionFilters, useTagFilter } from './hooks';
+import { TagFilterButton } from './TagFilterButton';
+import { TagFilterModal } from '../../overlays/TagFilterModal';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { SessionFilters } from './SessionFilters';
 import { VirtualSessionList } from './VirtualSessionList';
@@ -25,6 +27,30 @@ export default function SessionsView() {
   const { sessions, isLoading, error } = useSessions(filter);
   const { liveSessionIds } = useLiveSessions();
   const { filteredSessions } = useSessionFilters(sessions, search);
+
+  // Tag filter hook
+  const {
+    tagFilterExpression,
+    activeFilterCount,
+    isFilterModalOpen,
+    openFilterModal,
+    closeFilterModal,
+    applyFilter,
+    filteredSessionIds,
+    isFiltering,
+  } = useTagFilter();
+
+  // Apply tag filtering on top of text-based filtering
+  const finalFilteredSessions = useMemo(() => {
+    // If no tag filter is active, return text-filtered sessions
+    if (!filteredSessionIds) {
+      return filteredSessions;
+    }
+
+    // Filter to only include sessions that match the tag filter
+    const sessionIdSet = new Set(filteredSessionIds);
+    return filteredSessions.filter(session => sessionIdSet.has(session.id));
+  }, [filteredSessions, filteredSessionIds]);
 
   // Auto-scan for NEW sessions every 10 seconds (incremental, not full rescan)
   useEffect(() => {
@@ -80,18 +106,24 @@ export default function SessionsView() {
           onFilterChange={setFilter}
           search={search}
           onSearchChange={setSearch}
+          tagFilterButton={
+            <TagFilterButton
+              activeFilterCount={activeFilterCount}
+              onClick={openFilterModal}
+            />
+          }
         />
 
         {/* Sessions Content */}
-        {isLoading ? (
+        {isLoading || isFiltering ? (
           <LoadingSkeleton />
         ) : error ? (
           <ErrorState error={error} />
-        ) : filteredSessions.length === 0 ? (
+        ) : finalFilteredSessions.length === 0 ? (
           <EmptyState filter={filter} search={search} />
         ) : (
           <VirtualSessionList
-            sessions={filteredSessions}
+            sessions={finalFilteredSessions}
             projectsRoot={settings.projectsRoot}
             liveSessionIds={liveSessionIds}
             onSessionClick={setSelectedSession}
@@ -112,6 +144,14 @@ export default function SessionsView() {
       {selectedSession && (
         <SessionDetailModal session={selectedSession} onClose={() => setSelectedSession(null)} />
       )}
+
+      {/* Tag Filter Modal */}
+      <TagFilterModal
+        isOpen={isFilterModalOpen}
+        onClose={closeFilterModal}
+        onApply={applyFilter}
+        initialExpression={tagFilterExpression}
+      />
     </div>
   );
 }

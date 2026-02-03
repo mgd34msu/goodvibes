@@ -12,6 +12,7 @@ export function SessionFilters({
   onFilterChange,
   search,
   onSearchChange,
+  tagFilterButton,
 }: SessionFiltersProps) {
   return (
     <div className="px-5 py-4 border-b border-surface-800 bg-surface-900/80 h-[68px] flex items-center">
@@ -34,6 +35,8 @@ export function SessionFilters({
                 {f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
+            {/* Tag Filter Button */}
+            {tagFilterButton}
           </div>
         </div>
         <input

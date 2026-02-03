@@ -20,7 +20,6 @@ export type {
   Collection,
   SmartCollection,
   SmartCollectionRule,
-  Tag,
   Bookmark,
   Prompt,
   QuickNote,
@@ -39,6 +38,7 @@ export type {
 
 // Tag system types
 export type {
+  Tag,
   TagEffect,
   TagSource,
   SuggestionCategory,

@@ -2,6 +2,27 @@
 // SHARED UTILITIES - Used by both main and renderer processes
 // ============================================================================
 
+// Common file extensions that should be converted to dotted format
+const COMMON_EXTENSIONS = ['sh', 'ts', 'js', 'py', 'rs', 'go', 'md', 'json', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'io', 'ai', 'co'] as const;
+
+/**
+ * Apply extension logic to convert folder names like "goodvibes-sh" to "goodvibes.sh"
+ * @param pathStr - The path string to process
+ * @returns The path with extension logic applied
+ */
+function applyExtensionLogic(pathStr: string): string {
+  const pathParts = pathStr.split('/');
+  const lastPart = pathParts[pathParts.length - 1];
+  
+  if (lastPart && COMMON_EXTENSIONS.includes(lastPart as any) && pathParts.length >= 2) {
+    const secondToLast = pathParts[pathParts.length - 2];
+    pathParts[pathParts.length - 2] = secondToLast + '.' + lastPart;
+    pathParts.pop();
+    return pathParts.join('/');
+  }
+  return pathStr;
+}
+
 /**
  * Decode project name from path-encoded format
  *
@@ -44,14 +65,14 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
       const normalizedRoot = projectsRoot.replace(/\\/g, '/').replace(/\/$/, '');
       if (fullPath.startsWith(normalizedRoot + '/')) {
         const relativePath = fullPath.substring(normalizedRoot.length + 1);
-        return relativePath || parts[parts.length - 1] || name;
+        const processedPath = applyExtensionLogic(relativePath);
+        return processedPath || parts[parts.length - 1] || name;
       }
     }
 
     // Handle encoded dots in folder names (e.g., "goodvibes-sh" -> "goodvibes.sh")
-    const commonExtensions = ['sh', 'ts', 'js', 'py', 'rs', 'go', 'md', 'json', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'io', 'ai', 'co'];
     const lastPart = parts[parts.length - 1];
-    if (lastPart && commonExtensions.includes(lastPart) && parts.length >= 2) {
+    if (lastPart && COMMON_EXTENSIONS.includes(lastPart as any) && parts.length >= 2) {
       const secondToLast = parts[parts.length - 2];
       return secondToLast + '.' + lastPart;
     }
@@ -110,7 +131,8 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
 
       // Return relative path from projects root
       if (matchEnd > 0 && matchEnd < pathParts.length) {
-        return pathParts.slice(matchEnd).join('/');
+        const relativePath = pathParts.slice(matchEnd).join('/');
+        return applyExtensionLogic(relativePath);
       }
     }
 

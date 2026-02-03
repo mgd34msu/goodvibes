@@ -147,3 +147,44 @@ describe('decodeProjectName', () => {
     expect(result).toBe('work/api');
   });
 });
+
+describe('decodeProjectName extension handling', () => {
+  it('converts extension-like folder names to dotted format with projectsRoot', () => {
+    expect(decodeProjectName(
+      '-home-buzzkill-Projects-goodvibes-sh',
+      '/home/buzzkill/Projects'
+    )).toBe('goodvibes.sh');
+  });
+
+  it('converts extension-like folder names without projectsRoot', () => {
+    expect(decodeProjectName('-home-buzzkill-Projects-goodvibes-sh')).toBe('goodvibes.sh');
+  });
+
+  it('handles nested paths with extensions', () => {
+    expect(decodeProjectName(
+      '-home-buzzkill-Projects-apps-myapp-ts',
+      '/home/buzzkill/Projects'
+    )).toBe('apps/myapp.ts');
+  });
+
+  it('does not convert non-extension endings', () => {
+    expect(decodeProjectName(
+      '-home-buzzkill-Projects-myproject',
+      '/home/buzzkill/Projects'
+    )).toBe('myproject');
+  });
+
+  it('handles Windows paths with extension logic', () => {
+    expect(decodeProjectName(
+      'C--Users-buzzkill-Documents-goodvibes-sh',
+      'C:\\Users\\buzzkill\\Documents'
+    )).toBe('goodvibes.sh');
+  });
+
+  it('handles Windows nested paths with extensions', () => {
+    expect(decodeProjectName(
+      'C--Users-buzzkill-Documents-apps-myapp-ts',
+      'C:\\Users\\buzzkill\\Documents'
+    )).toBe('apps/myapp.ts');
+  });
+});

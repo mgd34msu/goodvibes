@@ -1,6 +1,6 @@
 // FileExplorer - Custom file browser with grid/list views
 import { useState } from 'react';
-import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink, Pin, Play, FolderPlus } from 'lucide-react';
+import { File, Folder, FileText, FileCode, Image, Grid, List, Pencil, Trash2, ExternalLink, Pin, Play, FolderPlus, History } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface FileEntry {
@@ -21,6 +21,8 @@ onDelete: (file: FileEntry) => void;
 onPinFolder?: (path: string, name: string) => void;
 onStartSession?: (path: string) => void;
 onAddToRegistry?: (path: string) => void;
+sessionCount?: number;
+onViewSessions?: () => void;
 selectedFile: FileEntry | null;
 isLoading: boolean;
 }
@@ -41,7 +43,7 @@ if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
 return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
 
-export function FileExplorer({ files, currentPath, onFileOpen, onFileSelect, onRename, onDelete, onPinFolder, onStartSession, onAddToRegistry, selectedFile, isLoading }:
+export function FileExplorer({ files, currentPath, onFileOpen, onFileSelect, onRename, onDelete, onPinFolder, onStartSession, onAddToRegistry, sessionCount, onViewSessions, selectedFile, isLoading }:
 FileExplorerProps) {
 const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: FileEntry } | null>(null);
@@ -197,6 +199,12 @@ onClick={() => { onDelete(contextMenu.file); closeContextMenu(); }}>
 
     {whitespaceMenu && (
         <div className="fixed bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 z-50" style={{ left: whitespaceMenu.x, top: whitespaceMenu.y }}>
+        {onViewSessions && sessionCount && sessionCount > 0 && (
+          <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
+onClick={() => { onViewSessions(); closeContextMenu(); }}>
+            <History className="w-4 h-4" /> View sessions ({sessionCount})
+          </button>
+        )}
         {onStartSession && (
           <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
 onClick={() => { onStartSession(currentPath); closeContextMenu(); }}>

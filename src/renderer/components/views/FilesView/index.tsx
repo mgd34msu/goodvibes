@@ -13,6 +13,7 @@ import { useTerminalStore } from '../../../stores/terminalStore';
 import { useAppStore } from '../../../stores/appStore';
 
 import { FileTree } from './FileTree';
+import { SessionsPanel } from './SessionsPanel';
 
 const logger = createLogger('FilesView');
 
@@ -57,6 +58,9 @@ export default function FilesView() {
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
   const [pinnedFolders, setPinnedFolders] = useState<PinnedFolder[]>(loadPinnedFolders);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
 
   const handlePinFolder = (path: string, name: string) => {
     const newPinned = [...pinnedFolders, { path, name }];
@@ -88,11 +92,30 @@ export default function FilesView() {
       const tree = await buildFileTree(targetPath);
       setFileTree(tree);
       setCurrentPath(targetPath);
+      // Load sessions for new directory
+      await loadSessions(targetPath);
     } catch (error) {
       logger.error('Failed to load directory:', error);
       toast.error('Failed to load directory');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadSessions = async (path: string) => {
+    try {
+      const result = await window.goodvibes.getProjectSessions(path, 50);
+      if (result && Array.isArray(result)) {
+        setSessions(result);
+        setSessionCount(result.length);
+      } else {
+        setSessions([]);
+        setSessionCount(0);
+      }
+    } catch (error) {
+      logger.error('Failed to load sessions:', error);
+      setSessions([]);
+      setSessionCount(0);
     }
   };
 
@@ -233,29 +256,7 @@ export default function FilesView() {
     }
   };
 
-  const handleNewFile = async (name: string) => {
-    try {
-      const newPath = `${currentPath}/${name}`;
-      await window.goodvibes.createFile(newPath);
-      await loadDirectory(currentPath);
-      toast.success('File created');
-    } catch (error) {
-      logger.error('Failed to create file:', error);
-      toast.error('Failed to create file');
-    }
-  };
 
-  const handleNewFolder = async (name: string) => {
-    try {
-      const newPath = `${currentPath}/${name}`;
-      await window.goodvibes.createDirectory(newPath);
-      await loadDirectory(currentPath);
-      toast.success('Folder created');
-    } catch (error) {
-      logger.error('Failed to create folder:', error);
-      toast.error('Failed to create folder');
-    }
-  };
 
   const handleStartSession = async (path: string) => {
     try {
@@ -303,8 +304,20 @@ export default function FilesView() {
           <h1 className="text-lg font-semibold text-surface-100">File Manager</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="text-sm text-surface-400 font-mono truncate max-w-md">
-            {currentPath}
+          <div className="flex items-center gap-2 text-sm text-surface-400">
+            <span className="font-mono truncate max-w-md">{currentPath}</span>
+            {sessionCount > 0 && (
+              <>
+                <span>·</span>
+                <button
+                  onClick={() => setShowSessions(true)}
+                  className="text-primary-400 hover:text-primary-300 transition-colors hover:underline"
+                  title="View sessions for this directory"
+                >
+                  {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
+                </button>
+              </>
+            )}
           </div>
           <button
             onClick={handleRefresh}
@@ -334,33 +347,42 @@ export default function FilesView() {
           />
         </div>
 
-        {/* Right Panel: File Explorer + Viewer */}
+        {/* Right Panel: File Explorer + Viewer OR Sessions Panel */}
         <div className="flex-1 flex overflow-hidden">
-          <div className={showViewer ? 'w-1/2 border-r border-surface-700' : 'flex-1'}>
-            <FileExplorer
-              files={fileTree?.children || []}
-              currentPath={currentPath}
-              onFileOpen={handleFileOpen}
-              onFileSelect={handleFileSelect}
-              onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
-              onDelete={handleFileDelete}
-              onPinFolder={handlePinFolder}
-              selectedFile={selectedFile}
-              isLoading={isLoading}
-              onStartSession={handleStartSession}
-              onAddToRegistry={handleAddToRegistry}
+          {showSessions ? (
+            <SessionsPanel
+              sessions={sessions}
+              onClose={() => setShowSessions(false)}
             />
-          </div>
-          {showViewer && (
-            <div className="w-1/2">
-              <FileViewer
-                file={selectedFile}
-                content={fileContent}
-                isLoading={isLoadingContent}
-                onClose={handleCloseViewer}
-                onSave={handleSaveFile}
-              />
-            </div>
+          ) : (
+            <>
+              <div className={showViewer ? 'w-1/2 border-r border-surface-700' : 'flex-1'}>
+                <FileExplorer
+                  files={fileTree?.children || []}
+                  currentPath={currentPath}
+                  onFileOpen={handleFileOpen}
+                  onFileSelect={handleFileSelect}
+                  onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
+                  onDelete={handleFileDelete}
+                  onPinFolder={handlePinFolder}
+                  selectedFile={selectedFile}
+                  isLoading={isLoading}
+                  onStartSession={handleStartSession}
+                  onAddToRegistry={handleAddToRegistry}
+                />
+              </div>
+              {showViewer && (
+                <div className="w-1/2">
+                  <FileViewer
+                    file={selectedFile}
+                    content={fileContent}
+                    isLoading={isLoadingContent}
+                    onClose={handleCloseViewer}
+                    onSave={handleSaveFile}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

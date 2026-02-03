@@ -76,6 +76,7 @@ function TreeItem({ node, level, currentPath, onNavigate, onLoadChildren, onPinF
       document.addEventListener('click', closeMenu);
       return () => document.removeEventListener('click', closeMenu);
     }
+    return undefined;
   }, [showContextMenu]);
 
   const isSelected = currentPath === node.id;
@@ -326,6 +327,7 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
       document.addEventListener('click', closeMenu);
       return () => document.removeEventListener('click', closeMenu);
     }
+    return undefined;
   }, [pinnedContextMenu]);
 
   const isPinned = (path: string) => pinnedFolders.some(p => p.path === path);

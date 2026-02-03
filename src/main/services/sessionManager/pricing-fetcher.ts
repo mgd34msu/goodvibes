@@ -1,5 +1,6 @@
 // ============================================================================
 // PRICING FETCHER - Automatic pricing updates from Anthropic
+// Supports historical pricing so sessions retain their original costs
 // ============================================================================
 
 import fs from 'fs';
@@ -18,9 +19,26 @@ export interface ModelPricing {
   cacheRead?: number;
 }
 
-export interface PricingCache {
-  fetchedAt: string;
+/**
+ * A single pricing entry with an effective date.
+ * Used to track pricing changes over time.
+ */
+export interface PricingEntry {
+  /** ISO date string when this pricing became effective */
+  effectiveDate: string;
+  /** Model pricing data for this period */
   models: Record<string, ModelPricing>;
+}
+
+/**
+ * Cache structure that stores pricing history.
+ * Allows historical sessions to use their original pricing.
+ */
+export interface PricingCache {
+  /** When we last fetched from Anthropic */
+  lastFetchedAt: string;
+  /** Pricing history sorted by effectiveDate descending (newest first) */
+  history: PricingEntry[];
 }
 
 // ============================================================================
@@ -61,7 +79,11 @@ function getCachePath(): string {
   return path.join(configDir, 'pricing-cache.json');
 }
 
-function loadCache(): PricingCache | null {
+/**
+ * Loads full cache with history. Returns null only if file doesn't exist or is corrupted.
+ * Does NOT check TTL - that's handled by the fetch logic.
+ */
+function loadFullCache(): PricingCache | null {
   try {
     const cachePath = getCachePath();
     if (!fs.existsSync(cachePath)) {
@@ -71,12 +93,16 @@ function loadCache(): PricingCache | null {
     const data = fs.readFileSync(cachePath, 'utf-8');
     const cache = JSON.parse(data) as PricingCache;
     
-    // Check if cache is expired
-    const fetchedAt = new Date(cache.fetchedAt).getTime();
-    const now = Date.now();
-    
-    if (now - fetchedAt > CACHE_TTL_MS) {
-      return null; // Cache expired
+    // Migrate old format to new format if needed
+    if (!cache.history && (cache as any).models) {
+      const oldCache = cache as any;
+      return {
+        lastFetchedAt: oldCache.fetchedAt || new Date().toISOString(),
+        history: [{
+          effectiveDate: oldCache.fetchedAt || new Date().toISOString(),
+          models: oldCache.models,
+        }],
+      };
     }
     
     return cache;
@@ -84,6 +110,15 @@ function loadCache(): PricingCache | null {
     console.error('Failed to load pricing cache:', error);
     return null;
   }
+}
+
+/**
+ * Checks if we need to fetch new pricing (TTL expired)
+ */
+function isCacheExpired(cache: PricingCache): boolean {
+  const fetchedAt = new Date(cache.lastFetchedAt).getTime();
+  const now = Date.now();
+  return now - fetchedAt > CACHE_TTL_MS;
 }
 
 function saveCache(cache: PricingCache): void {
@@ -167,79 +202,203 @@ function parsePricingTable(markdown: string): Record<string, ModelPricing> {
   return pricing;
 }
 
-async function fetchAndCachePricing(): Promise<Record<string, ModelPricing>> {
+/**
+ * Compares two pricing records to detect changes.
+ * Returns true if there are meaningful differences.
+ */
+function hasPricingChanged(
+  oldPricing: Record<string, ModelPricing>,
+  newPricing: Record<string, ModelPricing>
+): boolean {
+  // Check for new models
+  const oldModels = Object.keys(oldPricing);
+  const newModels = Object.keys(newPricing);
+  
+  if (oldModels.length !== newModels.length) return true;
+  
+  // Check each model's pricing
+  for (const model of newModels) {
+    const oldPrice = oldPricing[model];
+    const newPrice = newPricing[model];
+    
+    if (!oldPrice) return true; // New model
+    
+    // Compare prices (using small epsilon for floating point)
+    const epsilon = 0.001;
+    if (Math.abs(oldPrice.input - newPrice.input) > epsilon) return true;
+    if (Math.abs(oldPrice.output - newPrice.output) > epsilon) return true;
+    
+    // Compare cache pricing if present
+    if (newPrice.cacheWrite5m !== undefined && oldPrice.cacheWrite5m !== undefined) {
+      if (Math.abs(oldPrice.cacheWrite5m - newPrice.cacheWrite5m) > epsilon) return true;
+    }
+    if (newPrice.cacheWrite1h !== undefined && oldPrice.cacheWrite1h !== undefined) {
+      if (Math.abs(oldPrice.cacheWrite1h - newPrice.cacheWrite1h) > epsilon) return true;
+    }
+    if (newPrice.cacheRead !== undefined && oldPrice.cacheRead !== undefined) {
+      if (Math.abs(oldPrice.cacheRead - newPrice.cacheRead) > epsilon) return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Fetches pricing from Anthropic and updates the cache history.
+ * Only adds a new entry if pricing has actually changed.
+ */
+async function fetchAndUpdateCache(): Promise<PricingCache> {
+  const existingCache = loadFullCache();
+  const now = new Date().toISOString();
+  
   try {
     const markdown = await fetchPricingMarkdown();
-    const pricing = parsePricingTable(markdown);
+    const newPricing = parsePricingTable(markdown);
     
-    // Save to cache
-    const cache: PricingCache = {
-      fetchedAt: new Date().toISOString(),
-      models: pricing,
-    };
+    // Get the most recent pricing from history
+    const latestPricing = existingCache?.history?.[0]?.models;
     
-    saveCache(cache);
+    // Check if pricing has changed
+    const hasChanged = !latestPricing || hasPricingChanged(latestPricing, newPricing);
     
-    return pricing;
+    if (hasChanged) {
+      // Create new history entry
+      const newEntry: PricingEntry = {
+        effectiveDate: now,
+        models: newPricing,
+      };
+      
+      // Prepend to history (newest first)
+      const history = existingCache?.history || [];
+      const updatedCache: PricingCache = {
+        lastFetchedAt: now,
+        history: [newEntry, ...history],
+      };
+      
+      saveCache(updatedCache);
+      console.log(`Pricing updated: ${Object.keys(newPricing).length} models, new entry added`);
+      return updatedCache;
+    } else {
+      // No price changes, just update the fetch timestamp
+      const updatedCache: PricingCache = {
+        lastFetchedAt: now,
+        history: existingCache?.history || [],
+      };
+      
+      saveCache(updatedCache);
+      console.log(`Pricing checked: no changes detected`);
+      return updatedCache;
+    }
   } catch (error) {
     console.error('Failed to fetch pricing from Anthropic:', error);
-    return FALLBACK_PRICING;
+    
+    // Return existing cache or create fallback
+    if (existingCache && existingCache.history.length > 0) {
+      return existingCache;
+    }
+    
+    // Create fallback cache with hardcoded pricing
+    return {
+      lastFetchedAt: now,
+      history: [{
+        effectiveDate: '2024-01-01T00:00:00.000Z', // Historical baseline
+        models: FALLBACK_PRICING,
+      }],
+    };
   }
+}
+
+/**
+ * Gets pricing for a specific date from the history.
+ * Returns the pricing that was in effect at that time.
+ */
+function getPricingForDate(
+  cache: PricingCache,
+  targetDate: string | Date
+): Record<string, ModelPricing> {
+  const targetTime = new Date(targetDate).getTime();
+  
+  // Find the pricing entry that was in effect at the target date
+  // History is sorted newest first, so find the first entry <= target date
+  for (const entry of cache.history) {
+    const entryTime = new Date(entry.effectiveDate).getTime();
+    if (entryTime <= targetTime) {
+      return entry.models;
+    }
+  }
+  
+  // If no entry found (target date before all entries), use oldest entry
+  const oldest = cache.history[cache.history.length - 1];
+  return oldest?.models || FALLBACK_PRICING;
 }
 
 // ============================================================================
 // PUBLIC API
 // ============================================================================
 
-let pricingData: Record<string, ModelPricing> | null = null;
+let cachedPricingData: PricingCache | null = null;
+
+/**
+ * Ensures pricing cache is loaded and up-to-date.
+ * Fetches from Anthropic if cache is expired or missing.
+ */
+async function ensureCacheLoaded(): Promise<PricingCache> {
+  // Load from disk if not in memory
+  if (!cachedPricingData) {
+    cachedPricingData = loadFullCache();
+  }
+  
+  // Fetch from Anthropic if missing or expired
+  if (!cachedPricingData || isCacheExpired(cachedPricingData)) {
+    cachedPricingData = await fetchAndUpdateCache();
+  }
+  
+  return cachedPricingData;
+}
 
 /**
  * Get pricing for a specific model.
  * 
- * Fetches from cache if available and not expired.
- * If cache is expired or missing, fetches from Anthropic.
- * Falls back to hardcoded values if fetch fails.
- * 
  * @param model - Model identifier (e.g., "claude-opus-4-5")
+ * @param asOfDate - Optional date to get historical pricing (defaults to now)
  * @returns Pricing information for the model, or undefined if not found
  */
-export async function getPricing(model: string): Promise<ModelPricing | undefined> {
-  // Initialize pricing data if not loaded
-  if (!pricingData) {
-    const cache = loadCache();
-    
-    if (cache) {
-      pricingData = cache.models;
-    } else {
-      pricingData = await fetchAndCachePricing();
-    }
-  }
+export async function getPricing(
+  model: string,
+  asOfDate?: string | Date
+): Promise<ModelPricing | undefined> {
+  const cache = await ensureCacheLoaded();
   
-  return pricingData[model];
+  // Get pricing for the specified date (or current if not specified)
+  const pricing = getPricingForDate(cache, asOfDate || new Date());
+  
+  return pricing[model];
 }
 
 /**
  * Get all available model pricing.
  * 
+ * @param asOfDate - Optional date to get historical pricing (defaults to now)
  * @returns Record of all model pricing
  */
-export async function getAllPricing(): Promise<Record<string, ModelPricing>> {
-  if (!pricingData) {
-    const cache = loadCache();
-    
-    if (cache) {
-      pricingData = cache.models;
-    } else {
-      pricingData = await fetchAndCachePricing();
-    }
-  }
-  
-  return pricingData;
+export async function getAllPricing(
+  asOfDate?: string | Date
+): Promise<Record<string, ModelPricing>> {
+  const cache = await ensureCacheLoaded();
+  return getPricingForDate(cache, asOfDate || new Date());
 }
 
 /**
- * Force refresh pricing from Anthropic, bypassing cache.
+ * Get the full pricing cache with history.
+ * Useful for debugging or displaying pricing timeline.
+ */
+export async function getPricingHistory(): Promise<PricingCache> {
+  return ensureCacheLoaded();
+}
+
+/**
+ * Force refresh pricing from Anthropic, bypassing cache TTL.
  */
 export async function refreshPricing(): Promise<void> {
-  pricingData = await fetchAndCachePricing();
+  cachedPricingData = await fetchAndUpdateCache();
 }

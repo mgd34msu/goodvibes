@@ -29,9 +29,17 @@ import type { TokenStats } from './types.js';
  * - Cache read: 0.1x input price
  * - Long context (Sonnet 4/4.5 only, >200K input tokens): 2x input, 1.5x output
  *
+ * Historical pricing:
+ * - If sessionTimestamp is provided, uses pricing that was in effect at that time
+ * - This ensures older sessions retain their original costs even after price changes
+ *
  * Pricing source: https://platform.claude.com/docs/en/about-claude/pricing
  */
-export async function calculateCost(tokenStats: TokenStats, model: string | null): Promise<number> {
+export async function calculateCost(
+  tokenStats: TokenStats,
+  model: string | null,
+  sessionTimestamp?: string | Date
+): Promise<number> {
   // Normalize model name to match our pricing keys
   // e.g., "claude-opus-4-5-20251101" -> "claude-opus-4-5"
   const normalizedModel = model
@@ -39,7 +47,10 @@ export async function calculateCost(tokenStats: TokenStats, model: string | null
     : null;
 
   // Get pricing for this model from the pricing fetcher
-  let pricing = normalizedModel ? await getPricing(normalizedModel) : undefined;
+  // If sessionTimestamp is provided, use historical pricing from that date
+  let pricing = normalizedModel 
+    ? await getPricing(normalizedModel, sessionTimestamp) 
+    : undefined;
   
   // Fall back to defaults if pricing not found
   if (!pricing) {

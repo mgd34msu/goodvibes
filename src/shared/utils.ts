@@ -66,6 +66,27 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
       if (fullPath.startsWith(normalizedRoot + '/')) {
         const relativePath = fullPath.substring(normalizedRoot.length + 1);
         const processedPath = applyExtensionLogic(relativePath);
+        
+        // BUGFIX: The encoded path loses information about hyphens in folder names.
+        // When split by dashes, "goodvibes-plugin" becomes "goodvibes/plugin".
+        // We need to distinguish between:
+        // 1. Single folder with hyphens (e.g., "goodvibes-plugin" -> "goodvibes/plugin")
+        // 2. Nested folders (e.g., "apps/myapp.ts" stays as-is)
+        //
+        // Heuristic: If the path has slashes and matches these conditions, join with hyphens:
+        // - Only 2 path components (likely a single folder name with one hyphen)
+        // - Last part is NOT a known file extension (not part of extension logic)
+        if (processedPath.includes('/')) {
+          const parts = processedPath.split('/');
+          const lastPart = parts[parts.length - 1];
+          
+          // If it's a simple two-part path and the last part is not a known extension,
+          // it's likely a folder name with a hyphen that was incorrectly split
+          if (parts.length === 2 && !(COMMON_EXTENSIONS as readonly string[]).includes(lastPart)) {
+            return processedPath.replace(/\//g, '-');
+          }
+        }
+        
         return processedPath || parts[parts.length - 1] || name;
       }
     }

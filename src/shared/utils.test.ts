@@ -187,4 +187,21 @@ describe('decodeProjectName extension handling', () => {
       'C:\\Users\\buzzkill\\Documents'
     )).toBe('apps/myapp.ts');
   });
+
+  it('handles folder names with hyphens (not extensions)', () => {
+    // This is the bug fix: "goodvibes-plugin" should not become "goodvibes/plugin"
+    expect(decodeProjectName(
+      '-home-buzzkill-Projects-goodvibes-plugin',
+      '/home/buzzkill/Projects'
+    )).toBe('goodvibes-plugin');
+  });
+
+  it('handles multi-level nested paths correctly', () => {
+    // Multi-level paths (3+ components) are ambiguous - we keep them as nested paths
+    // since we can't determine if "apps-frontend-dashboard" is one folder or three without filesystem access
+    expect(decodeProjectName(
+      '-home-buzzkill-Projects-apps-frontend-dashboard',
+      '/home/buzzkill/Projects'
+    )).toBe('apps/frontend/dashboard');
+  });
 });

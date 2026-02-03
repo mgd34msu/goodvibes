@@ -40,6 +40,25 @@ export default function SessionsView() {
     isFiltering,
   } = useTagFilter();
 
+  // Keyboard shortcut: T to open tag filter modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (e.target instanceof HTMLInputElement || 
+          e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        openFilterModal();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [openFilterModal]);
+
   // Apply tag filtering on top of text-based filtering
   const finalFilteredSessions = useMemo(() => {
     // If no tag filter is active, return text-filtered sessions

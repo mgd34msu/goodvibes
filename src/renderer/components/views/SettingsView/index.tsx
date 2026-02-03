@@ -11,6 +11,7 @@ import { GitHubSettings } from './GitHubSettings';
 import { SessionPreviewVisibilitySettings, SessionPreviewExpandSettings } from './SessionPreviewSettings';
 import { KeyboardSettings } from './KeyboardSettings';
 import { MaintenanceSettings, DangerZoneSettings } from './MaintenanceSettings';
+import { TagSettings } from './TagSettings';
 
 export default function SettingsView() {
   const {
@@ -63,6 +64,9 @@ export default function SettingsView() {
 
         {/* Keyboard Shortcuts */}
         <KeyboardSettings />
+
+        {/* Tag Settings */}
+        <TagSettings settings={settings} onChange={handleChange} />
 
         {/* Danger Zone */}
         <DangerZoneSettings isResetting={isResetting} onReset={handleResetSettings} />

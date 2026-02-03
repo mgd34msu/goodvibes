@@ -126,13 +126,16 @@ export function SettingRow({ label, description, children }: SettingRowProps): R
 interface ToggleSwitchProps {
   checked: boolean;
   onChange: (value: boolean) => void;
+  disabled?: boolean;
 }
 
-export function ToggleSwitch({ checked, onChange }: ToggleSwitchProps): React.JSX.Element {
+export function ToggleSwitch({ checked, onChange, disabled = false }: ToggleSwitchProps): React.JSX.Element {
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    onChange(!checked);
+    if (!disabled) {
+      onChange(!checked);
+    }
   };
 
   return (
@@ -141,8 +144,11 @@ export function ToggleSwitch({ checked, onChange }: ToggleSwitchProps): React.JS
       role="switch"
       aria-checked={checked}
       onClick={handleClick}
+      disabled={disabled}
       className={clsx(
-        'relative inline-flex flex-shrink-0 w-11 h-6 rounded-full transition-all duration-200 cursor-pointer',
+        'relative inline-flex flex-shrink-0 w-11 h-6 rounded-full transition-all duration-200',
+        !disabled && 'cursor-pointer',
+        disabled && 'opacity-50 cursor-not-allowed',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-800',
         checked ? 'bg-primary-500 shadow-md shadow-primary-500/30' : 'bg-surface-600'
       )}

@@ -52,6 +52,19 @@ export interface AppSettings {
   // Session backup settings
   sessionBackupEnabled: boolean;
   timezone: string;
+  // Tag Display Settings
+  showTagsInSessionList: boolean;
+  maxVisibleTagsInList: number;
+  // Tag Filter Settings
+  defaultFilterLogic: 'and' | 'or';
+  rememberFilterState: boolean;
+  // AI Suggestion Settings
+  enableAiSuggestions: boolean;
+  aiSuggestionsSessionsPerHour: number;
+  aiSuggestionsMinSessionLength: number; // minimum messages
+  aiSuggestionsScanDepth: 'quick' | 'full';
+  aiSuggestionsAutoAccept: boolean;
+  aiSuggestionsAutoAcceptThreshold: number; // 0-1 confidence threshold
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -98,6 +111,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Session backup settings
   sessionBackupEnabled: true,
   timezone: 'UTC',
+  // Tag Display Settings
+  showTagsInSessionList: true,
+  maxVisibleTagsInList: 3,
+  // Tag Filter Settings
+  defaultFilterLogic: 'and',
+  rememberFilterState: true,
+  // AI Suggestion Settings
+  enableAiSuggestions: false, // disabled by default
+  aiSuggestionsSessionsPerHour: 60,
+  aiSuggestionsMinSessionLength: 5,
+  aiSuggestionsScanDepth: 'quick',
+  aiSuggestionsAutoAccept: false,
+  aiSuggestionsAutoAcceptThreshold: 0.9,
 };
 
 // Settings version - increment this when adding new settings that need migration
@@ -117,7 +143,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 // Version 8: Added preferredTextEditor setting
 // Version 9: Added colorTheme setting for dynamic theming
 // Version 10: Added timezone setting
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 11;
 
 // Settings that were added/changed in each version and need to be reset to defaults
 export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
@@ -167,6 +193,19 @@ export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
   9: ['colorTheme'],
   // Version 10: Added timezone setting
   10: ['timezone'],
+  // Version 11: Added session tagging system settings
+  11: [
+    'showTagsInSessionList',
+    'maxVisibleTagsInList',
+    'defaultFilterLogic',
+    'rememberFilterState',
+    'enableAiSuggestions',
+    'aiSuggestionsSessionsPerHour',
+    'aiSuggestionsMinSessionLength',
+    'aiSuggestionsScanDepth',
+    'aiSuggestionsAutoAccept',
+    'aiSuggestionsAutoAcceptThreshold',
+  ],
 };
 
 // Settings that were removed and should be cleaned up during migration

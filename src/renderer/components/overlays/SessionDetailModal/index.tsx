@@ -3,7 +3,7 @@
 // Premium cinematic modal for viewing session details
 // ============================================================================
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { X, Eye, Play, FileText, FileJson, Star, Archive } from 'lucide-react';
@@ -23,6 +23,20 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
   const { settings } = useSettingsStore();
   const { createPreviewTerminal, createTerminal } = useTerminalStore();
   const [activeTab, setActiveTab] = useState<'overview' | 'messages' | 'tokens' | 'tags'>('overview');
+
+  // Keyboard shortcut: Cmd/Ctrl+T to focus tag input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 't' || e.key === 'T')) {
+        e.preventDefault();
+        setActiveTab('tags');
+        // Focus will be handled by TagInput component after tab switch
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const { data: messages = [], isLoading: messagesLoading } = useQuery({
     queryKey: ['session-messages', session.id],

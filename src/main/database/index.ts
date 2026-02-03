@@ -53,12 +53,41 @@ export {
 
 // Re-export tag operations
 export {
+  // Tag CRUD
   getAllTags,
+  getTag,
+  getTagByName,
   createTag,
+  updateTag,
   deleteTag,
+  mergeTags,
+  // Tag Properties
+  toggleTagPinned,
+  setTagColor,
+  setTagEffect,
+  setTagParent,
+  createTagAlias,
+  getTagChildren,
+  getTagAliases,
+  // Session-Tag Associations
   addTagToSession,
   removeTagFromSession,
   getSessionTags,
+  clearSessionTags,
+  setSessionTags,
+  // Bulk Operations
+  addTagToSessions,
+  removeTagFromSessions,
+  clearTagsFromSessions,
+  // Recent & Pinned
+  getRecentTags,
+  recordTagUsage,
+  getPinnedTags,
+  // Usage Count
+  incrementTagUsage,
+  decrementTagUsage,
+  recalculateTagUsageCount,
+  recalculateAllTagUsageCounts,
 } from './tags.js';
 
 const logger = new Logger('Database');

@@ -48,6 +48,14 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
       }
     }
 
+    // Handle encoded dots in folder names (e.g., "goodvibes-sh" -> "goodvibes.sh")
+    const commonExtensions = ['sh', 'ts', 'js', 'py', 'rs', 'go', 'md', 'json', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'io', 'ai', 'co'];
+    const lastPart = parts[parts.length - 1];
+    if (lastPart && commonExtensions.includes(lastPart) && parts.length >= 2) {
+      const secondToLast = parts[parts.length - 2];
+      return secondToLast + '.' + lastPart;
+    }
+
     // Return just the last part (folder name)
     return parts[parts.length - 1] || name;
   }

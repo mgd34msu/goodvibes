@@ -167,7 +167,8 @@ function getSessionsFromMainTable(projectPath: string, limit: number) {
   const normalizedProjectName = projectPath
     .replace(/\\/g, '-')
     .replace(/:/g, '-')
-    .replace(/\//g, '-');
+    .replace(/\//g, '-')
+    .replace(/\./g, '-');
 
   // Query sessions table by project_name (stored as path with dashes)
   // Filter to only user sessions (not agent sessions which start with 'agent-')

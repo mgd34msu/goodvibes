@@ -107,7 +107,7 @@ return (
     <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700/50">
         <span className="text-sm text-surface-400">
           {files.length} items
-          {sessionCount && sessionCount > 0 && (
+          {sessionCount !== undefined && sessionCount > 0 && (
             <>
               <span className="mx-1">·</span>
               <button
@@ -213,7 +213,7 @@ onClick={() => { onDelete(contextMenu.file); closeContextMenu(); }}>
 
     {whitespaceMenu && (
         <div className="fixed bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 z-50" style={{ left: whitespaceMenu.x, top: whitespaceMenu.y }}>
-        {onViewSessions && sessionCount && sessionCount > 0 && (
+        {onViewSessions && sessionCount !== undefined && sessionCount > 0 && (
           <button className="flex items-center gap-2 w-full px-4 py-2 text-sm text-surface-200 hover:bg-surface-700"
 onClick={() => { onViewSessions(); closeContextMenu(); }}>
             <History className="w-4 h-4" /> View sessions ({sessionCount})

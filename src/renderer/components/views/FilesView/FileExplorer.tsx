@@ -105,7 +105,21 @@ if (files.length === 0) {
 return (
     <div className="h-full flex flex-col" onClick={closeContextMenu}>
     <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700/50">
-        <span className="text-sm text-surface-400">{files.length} items</span>
+        <span className="text-sm text-surface-400">
+          {files.length} items
+          {sessionCount && sessionCount > 0 && (
+            <>
+              <span className="mx-1">·</span>
+              <button
+                onClick={onViewSessions}
+                className="text-primary-400 hover:text-primary-300 hover:underline"
+                title="View sessions for this directory"
+              >
+                {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
+              </button>
+            </>
+          )}
+        </span>
         <div className="flex gap-1">
         <button onClick={() => setViewMode('grid')} className={clsx('p-1.5 rounded', viewMode === 'grid' ?
 'bg-surface-700 text-surface-100' : 'text-surface-400 hover:text-surface-100')}>

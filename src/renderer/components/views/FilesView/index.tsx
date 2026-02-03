@@ -205,6 +205,7 @@ export default function FilesView() {
     } else {
       setSelectedFile(file);
       setShowViewer(true);
+      setShowSessions(false);  // Close sessions panel when opening file
       setIsLoadingContent(true);
       try {
         const content = await window.goodvibes.readFileContent(file.id);
@@ -319,18 +320,6 @@ export default function FilesView() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-sm text-surface-400">
             <span className="font-mono truncate max-w-md">{currentPath}</span>
-            {sessionCount > 0 && (
-              <>
-                <span>·</span>
-                <button
-                  onClick={() => setShowSessions(true)}
-                  className="text-primary-400 hover:text-primary-300 transition-colors hover:underline"
-                  title="View sessions for this directory"
-                >
-                  {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
-                </button>
-              </>
-            )}
           </div>
           <button
             onClick={handleRefresh}
@@ -360,44 +349,48 @@ export default function FilesView() {
           />
         </div>
 
-        {/* Right Panel: File Explorer + Viewer OR Sessions Panel */}
+        {/* Right Panel: File Explorer + (Viewer OR Sessions) */}
         <div className="flex-1 flex overflow-hidden">
-          {showSessions ? (
-            <SessionsPanel
-              sessions={sessions}
-              onClose={() => setShowSessions(false)}
+          {/* File Explorer - always visible */}
+          <div className={showViewer || showSessions ? 'w-1/2 border-r border-surface-700' : 'flex-1'}>
+            <FileExplorer
+              files={fileTree?.children || []}
+              currentPath={currentPath}
+              onFileOpen={handleFileOpen}
+              onFileSelect={handleFileSelect}
+              onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
+              onDelete={handleFileDelete}
+              onPinFolder={handlePinFolder}
+              selectedFile={selectedFile}
+              isLoading={isLoading}
+              onStartSession={handleStartSession}
+              onAddToRegistry={handleAddToRegistry}
+              sessionCount={sessionCount}
+              onViewSessions={() => {
+                setShowSessions(true);
+                setShowViewer(false);  // Close file viewer when opening sessions
+              }}
             />
-          ) : (
-            <>
-              <div className={showViewer ? 'w-1/2 border-r border-surface-700' : 'flex-1'}>
-                <FileExplorer
-                  files={fileTree?.children || []}
-                  currentPath={currentPath}
-                  onFileOpen={handleFileOpen}
-                  onFileSelect={handleFileSelect}
-                  onRename={(f) => handleFileRename(f, prompt('New name:', f.name) || f.name)}
-                  onDelete={handleFileDelete}
-                  onPinFolder={handlePinFolder}
-                  selectedFile={selectedFile}
-                  isLoading={isLoading}
-                  onStartSession={handleStartSession}
-                  onAddToRegistry={handleAddToRegistry}
-                  sessionCount={sessionCount}
-                  onViewSessions={() => setShowSessions(true)}
+          </div>
+          
+          {/* Right pane: FileViewer OR SessionsPanel */}
+          {(showViewer || showSessions) && (
+            <div className="w-1/2">
+              {showSessions ? (
+                <SessionsPanel
+                  sessions={sessions}
+                  onClose={() => setShowSessions(false)}
                 />
-              </div>
-              {showViewer && (
-                <div className="w-1/2">
-                  <FileViewer
-                    file={selectedFile}
-                    content={fileContent}
-                    isLoading={isLoadingContent}
-                    onClose={handleCloseViewer}
-                    onSave={handleSaveFile}
-                  />
-                </div>
+              ) : (
+                <FileViewer
+                  file={selectedFile}
+                  content={fileContent}
+                  isLoading={isLoadingContent}
+                  onClose={handleCloseViewer}
+                  onSave={handleSaveFile}
+                />
               )}
-            </>
+            </div>
           )}
         </div>
       </div>

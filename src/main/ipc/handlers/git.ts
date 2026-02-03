@@ -55,7 +55,10 @@ import {
 const logger = new Logger('IPC:Git');
 
 /**
- * Custom error class for IPC validation failures
+ * Custom error class for IPC validation failures.
+ * Provides a structured way to handle validation errors in Git IPC handlers.
+ * @param message - Error message describing the validation failure
+ * @param code - Optional error code for categorizing the failure (default: 'VALIDATION_ERROR')
  */
 class IPCValidationError extends Error {
   constructor(
@@ -67,6 +70,12 @@ class IPCValidationError extends Error {
   }
 }
 
+/**
+ * Registers all Git-related IPC handlers.
+ * Handles comprehensive Git operations including status, diff, branch management,
+ * commits, stashing, merging, rebasing, tags, worktrees, submodules, and more.
+ * All handlers validate input using Zod schemas before executing Git commands.
+ */
 export function registerGitHandlers(): void {
   // ============================================================================
   // BASIC GIT OPERATIONS

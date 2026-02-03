@@ -70,7 +70,7 @@ export function registerHooksHandlers(): void {
     const hookData = {
       name: result.data.name,
       eventType: result.data.eventType as primitives.HookEventType,
-      command: result.data.command,
+      command: result.data.script,
       timeout: result.data.timeout ?? 30000,
       enabled: result.data.enabled,
       scope: result.data.projectPath ? 'project' as const : 'user' as const,
@@ -93,7 +93,7 @@ export function registerHooksHandlers(): void {
     const dbUpdates: Partial<primitives.HookConfig> = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.eventType !== undefined) dbUpdates.eventType = updates.eventType as primitives.HookEventType;
-    if (updates.command !== undefined) dbUpdates.command = updates.command;
+    if (updates.script !== undefined) dbUpdates.command = updates.script;
     if (updates.timeout !== undefined) dbUpdates.timeout = updates.timeout;
     if (updates.enabled !== undefined) dbUpdates.enabled = updates.enabled;
     if (updates.projectPath !== undefined) {

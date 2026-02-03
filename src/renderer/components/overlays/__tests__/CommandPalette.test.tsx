@@ -12,7 +12,7 @@
 //
 // ============================================================================
 
-import React from 'react';
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -495,7 +495,9 @@ describe('CommandPalette', () => {
       );
       
       await act(async () => {
-        fireEvent.click(commands[0]);
+        if (commands[0]) {
+          fireEvent.click(commands[0]);
+        }
       });
 
       await waitFor(() => {

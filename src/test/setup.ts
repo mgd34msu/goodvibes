@@ -119,6 +119,27 @@ const mockGoodVibesAPI = {
   gitWatch: vi.fn().mockResolvedValue(true),
   gitUnwatch: vi.fn().mockResolvedValue(true),
   onGitChanged: vi.fn().mockReturnValue(() => {}),
+  // Additional Git functions used by useGitState
+  gitDetailedStatus: vi.fn().mockResolvedValue({
+    branch: 'main',
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }),
+  gitBranches: vi.fn().mockResolvedValue({ branches: [] }),
+  gitLogDetailed: vi.fn().mockResolvedValue({ commits: [] }),
+  gitStashList: vi.fn().mockResolvedValue({ stashes: [] }),
+  gitMergeInProgress: vi.fn().mockResolvedValue(false),
+  gitCherryPickInProgress: vi.fn().mockResolvedValue(false),
+  gitRebaseInProgress: vi.fn().mockResolvedValue(false),
+  gitTags: vi.fn().mockResolvedValue({ tags: [] }),
+  gitConflictFiles: vi.fn().mockResolvedValue({ files: [] }),
+  gitConventionalPrefixes: vi.fn().mockResolvedValue({ prefixes: [] }),
+  gitCherryPick: vi.fn().mockResolvedValue({ success: true }),
+  gitCherryPickContinue: vi.fn().mockResolvedValue({ success: true }),
+  gitCherryPickAbort: vi.fn().mockResolvedValue({ success: true }),
+  gitMerge: vi.fn().mockResolvedValue({ success: true }),
+  gitMergeAbort: vi.fn().mockResolvedValue({ success: true }),
 
   // File/Folder
   selectFolder: vi.fn().mockResolvedValue(null),

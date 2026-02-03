@@ -15,29 +15,58 @@ function createMockPullRequest(overrides: Partial<GitHubPullRequest> = {}): GitH
   return {
     id: 123,
     number: 1,
+    node_id: 'pr123',
     title: 'Test Pull Request',
     state: 'open',
+    locked: false,
     draft: false,
     html_url: 'https://github.com/owner/repo/pull/1',
+    diff_url: 'https://github.com/owner/repo/pull/1.diff',
+    patch_url: 'https://github.com/owner/repo/pull/1.patch',
+    body: null,
+    merged: false,
+    mergeable: true,
+    mergeable_state: 'clean',
+    merged_by: null,
+    comments: 0,
+    review_comments: 0,
+    commits: 1,
+    additions: 10,
+    deletions: 5,
+    changed_files: 2,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
+    closed_at: null,
+    merged_at: null,
+    assignees: [],
+    requested_reviewers: [],
     user: {
       login: 'testuser',
       id: 1,
-      node_id: 'user1',
       avatar_url: 'https://github.com/testuser.png',
-      gravatar_id: '',
-      url: 'https://api.github.com/users/testuser',
-      html_url: 'https://github.com/testuser',
       type: 'User',
     },
     head: {
       ref: 'feature-branch',
       sha: 'abc123',
+      label: 'testuser:feature-branch',
+      repo: {
+        id: 456,
+        name: 'repo',
+        full_name: 'owner/repo',
+        html_url: 'https://github.com/owner/repo',
+      },
     },
     base: {
       ref: 'main',
       sha: 'def456',
+      label: 'owner:main',
+      repo: {
+        id: 456,
+        name: 'repo',
+        full_name: 'owner/repo',
+        html_url: 'https://github.com/owner/repo',
+      },
     },
     labels: [],
     ...overrides,
@@ -47,12 +76,27 @@ function createMockPullRequest(overrides: Partial<GitHubPullRequest> = {}): GitH
 function createMockCheckRun(overrides: Partial<GitHubCheckRun> = {}): GitHubCheckRun {
   return {
     id: 1,
+    node_id: 'check1',
     name: 'Test Check',
+    head_sha: 'abc123',
+    external_id: null,
     status: 'completed',
     conclusion: 'success',
     started_at: '2024-01-01T00:00:00Z',
     completed_at: '2024-01-01T00:01:00Z',
     html_url: 'https://github.com/owner/repo/runs/1',
+    details_url: null,
+    output: {
+      title: null,
+      summary: null,
+      text: null,
+      annotations_count: 0,
+    },
+    app: {
+      id: 1,
+      slug: 'github-actions',
+      name: 'GitHub Actions',
+    },
     ...overrides,
   };
 }
@@ -195,8 +239,8 @@ describe('PullRequestList', () => {
 
     it('displays branch names correctly', async () => {
       const mockPR = createMockPullRequest({
-        head: { ref: 'feature-auth', sha: 'abc' },
-        base: { ref: 'develop', sha: 'def' },
+        head: { ref: 'feature-auth', sha: 'abc', label: 'testuser:feature-auth', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
+        base: { ref: 'develop', sha: 'def', label: 'owner:develop', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
       });
 
       window.goodvibes.githubListPRs = vi.fn().mockResolvedValue({
@@ -258,8 +302,8 @@ describe('PullRequestList', () => {
     it('displays PR labels correctly', async () => {
       const mockPR = createMockPullRequest({
         labels: [
-          { id: 1, name: 'bug', color: 'd73a4a' },
-          { id: 2, name: 'enhancement', color: 'a2eeef' },
+          { id: 1, node_id: 'label1', name: 'bug', color: 'd73a4a', description: null, default: false },
+          { id: 2, node_id: 'label2', name: 'enhancement', color: 'a2eeef', description: null, default: false },
         ],
       });
 
@@ -283,11 +327,11 @@ describe('PullRequestList', () => {
     it('displays only first 3 labels and shows count for remainder', async () => {
       const mockPR = createMockPullRequest({
         labels: [
-          { id: 1, name: 'bug', color: 'd73a4a' },
-          { id: 2, name: 'enhancement', color: 'a2eeef' },
-          { id: 3, name: 'documentation', color: '0075ca' },
-          { id: 4, name: 'help wanted', color: '008672' },
-          { id: 5, name: 'good first issue', color: '7057ff' },
+          { id: 1, node_id: 'label1', name: 'bug', color: 'd73a4a', description: null, default: false },
+          { id: 2, node_id: 'label2', name: 'enhancement', color: 'a2eeef', description: null, default: false },
+          { id: 3, node_id: 'label3', name: 'documentation', color: '0075ca', description: null, default: false },
+          { id: 4, node_id: 'label4', name: 'help wanted', color: '008672', description: null, default: false },
+          { id: 5, node_id: 'label5', name: 'good first issue', color: '7057ff', description: null, default: false },
         ],
       });
 
@@ -315,7 +359,7 @@ describe('PullRequestList', () => {
   describe('Current Branch Handling', () => {
     it('highlights PR for current branch', async () => {
       const mockPR = createMockPullRequest({
-        head: { ref: 'feature-branch', sha: 'abc' },
+        head: { ref: 'feature-branch', sha: 'abc', label: 'testuser:feature-branch', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
       });
 
       window.goodvibes.githubListPRs = vi.fn().mockResolvedValue({
@@ -338,7 +382,7 @@ describe('PullRequestList', () => {
     it('shows notice when current branch has open PR', async () => {
       const mockPR = createMockPullRequest({
         number: 42,
-        head: { ref: 'my-feature', sha: 'abc' },
+        head: { ref: 'my-feature', sha: 'abc', label: 'testuser:my-feature', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
       });
 
       window.goodvibes.githubListPRs = vi.fn().mockResolvedValue({
@@ -359,7 +403,7 @@ describe('PullRequestList', () => {
 
     it('shows Create PR button when current branch has no PR', async () => {
       const mockPR = createMockPullRequest({
-        head: { ref: 'other-branch', sha: 'abc' },
+        head: { ref: 'other-branch', sha: 'abc', label: 'testuser:other-branch', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
       });
 
       window.goodvibes.githubListPRs = vi.fn().mockResolvedValue({
@@ -445,8 +489,8 @@ describe('PullRequestList', () => {
   describe('CI Status Integration', () => {
     it('loads CI status for each PR', async () => {
       const mockPRs = [
-        createMockPullRequest({ number: 1, head: { ref: 'feature-1', sha: 'sha1' } }),
-        createMockPullRequest({ number: 2, head: { ref: 'feature-2', sha: 'sha2' } }),
+        createMockPullRequest({ number: 1, head: { ref: 'feature-1', sha: 'sha1', label: 'testuser:feature-1', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } } }),
+        createMockPullRequest({ number: 2, head: { ref: 'feature-2', sha: 'sha2', label: 'testuser:feature-2', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } } }),
       ];
 
       const mockGetChecks = vi.fn().mockResolvedValue({
@@ -471,7 +515,7 @@ describe('PullRequestList', () => {
     it('displays CI status badge when checks are successful', async () => {
       const mockPR = createMockPullRequest({
         number: 1,
-        head: { ref: 'feature', sha: 'abc123' },
+        head: { ref: 'feature', sha: 'abc123', label: 'testuser:feature', repo: { id: 456, name: 'repo', full_name: 'owner/repo', html_url: 'https://github.com/owner/repo' } },
       });
 
       const mockChecks = [

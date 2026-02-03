@@ -25,6 +25,8 @@ const logger = new Logger('IPC:Sessions');
 
 /**
  * Creates a validation error response with detailed field information.
+ * @param error - The Zod validation error
+ * @returns Formatted validation error response
  */
 function createValidationError(error: ZodError): { error: string; details: Record<string, string[]> } {
   const details: Record<string, string[]> = {};
@@ -52,6 +54,11 @@ interface ClaudeSessionFile {
   firstPrompt?: string;
 }
 
+/**
+ * Finds the most recently modified Claude session file from ~/.claude/projects/ directory.
+ * Scans all project directories and their session files to determine the most recent one.
+ * @returns Information about the most recent session file, or null if none found
+ */
 function findMostRecentClaudeSession(): ClaudeSessionFile | null {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
@@ -167,6 +174,12 @@ function findMostRecentClaudeSession(): ClaudeSessionFile | null {
 }
 
 // Helper to get sessions from the main sessions table for a project
+/**
+ * Retrieves session records from the main sessions database table with pagination.
+ * @param projectPath - Project path to filter sessions
+ * @param limit - Maximum number of records to return
+ * @returns Array of session records from the database
+ */
 function getSessionsFromMainTable(projectPath: string, limit: number) {
   const database = getDatabase();
 
@@ -203,6 +216,11 @@ function getSessionsFromMainTable(projectPath: string, limit: number) {
   }));
 }
 
+/**
+ * Registers all session-related IPC handlers.
+ * Handles session management operations including creating, loading, listing,
+ * searching, and managing session summaries.
+ */
 export function registerSessionHandlers(): void {
   ipcMain.handle('get-sessions', withContext('get-sessions', async () => {
     const sessionManager = getSessionManager();

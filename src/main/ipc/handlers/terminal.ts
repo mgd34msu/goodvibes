@@ -53,11 +53,18 @@ let cachedEditors: TextEditorInfo[] | null = null;
  * Check if a command exists on the system.
  * Uses the centralized safeExec utility which validates inputs
  * and uses array-form arguments to prevent command injection.
+ * @param command - The command to check for existence
+ * @returns boolean indicating if command exists
  */
 function checkCommandExists(command: string): boolean {
   return commandExists(command);
 }
 
+/**
+ * Detects available text editors on the system by checking for their commands.
+ * Results are cached for the lifetime of the app session.
+ * @returns Array of editor information including name, command, and availability status
+ */
 function detectAvailableEditors(): TextEditorInfo[] {
   // Return cached result if available
   if (cachedEditors !== null) {
@@ -92,6 +99,10 @@ function detectAvailableEditors(): TextEditorInfo[] {
   return cachedEditors;
 }
 
+/**
+ * Gets the command for the first available text editor on the system.
+ * @returns The editor command string, or null if no editors are available
+ */
 function getDefaultEditor(): string | null {
   const editors = detectAvailableEditors();
   const available = editors.find(e => e.available);
@@ -100,6 +111,11 @@ function getDefaultEditor(): string | null {
 
 const logger = new Logger('IPC:Terminal');
 
+/**
+ * Registers all terminal-related IPC handlers.
+ * Handles terminal lifecycle operations including starting Claude terminals,
+ * plain terminals, input/output, resizing, killing, and editor detection.
+ */
 export function registerTerminalHandlers(): void {
   // ============================================================================
   // START-CLAUDE HANDLER

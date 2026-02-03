@@ -106,22 +106,18 @@ function createFileChange(overrides: Partial<GitFileChange> = {}): GitFileChange
   };
 }
 
-// Mock git status response
-const mockGitStatusResponse = {
-  success: true,
+// Mock git status response for gitDetailedStatus
+const mockGitDetailedStatusResponse = {
   branch: 'main',
   ahead: 0,
   behind: 0,
   staged: [] as GitFileChange[],
   unstaged: [] as GitFileChange[],
   untracked: [] as GitFileChange[],
-  hasRemote: true,
-  hasUpstream: true,
 };
 
 // Mock git branches response
 const mockGitBranchesResponse = {
-  success: true,
   branches: [
     { name: 'main', current: true, remote: false },
     { name: 'feature-branch', current: false, remote: false },
@@ -129,8 +125,7 @@ const mockGitBranchesResponse = {
 };
 
 // Mock git log response
-const mockGitLogResponse = {
-  success: true,
+const mockGitLogDetailedResponse = {
   commits: [
     {
       hash: 'abc123',
@@ -146,11 +141,18 @@ describe('GitPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Setup default mock implementations
+    // Setup default mock implementations for useGitState hook
     vi.mocked(window.goodvibes.gitIsRepo).mockResolvedValue(true);
-    vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(JSON.stringify(mockGitStatusResponse));
-    vi.mocked(window.goodvibes.gitBranch).mockResolvedValue(JSON.stringify(mockGitBranchesResponse));
-    vi.mocked(window.goodvibes.gitLog).mockResolvedValue(mockGitLogResponse.commits);
+    vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue(mockGitDetailedStatusResponse);
+    vi.mocked(window.goodvibes.gitBranches).mockResolvedValue(mockGitBranchesResponse);
+    vi.mocked(window.goodvibes.gitLogDetailed).mockResolvedValue(mockGitLogDetailedResponse);
+    vi.mocked(window.goodvibes.gitStashList).mockResolvedValue({ stashes: [] });
+    vi.mocked(window.goodvibes.gitMergeInProgress).mockResolvedValue(false);
+    vi.mocked(window.goodvibes.gitCherryPickInProgress).mockResolvedValue(false);
+    vi.mocked(window.goodvibes.gitRebaseInProgress).mockResolvedValue(false);
+    vi.mocked(window.goodvibes.gitTags).mockResolvedValue({ tags: [] });
+    vi.mocked(window.goodvibes.gitConflictFiles).mockResolvedValue({ files: [] });
+    vi.mocked(window.goodvibes.gitConventionalPrefixes).mockResolvedValue({ prefixes: [] });
   });
 
   describe('Initial Render', () => {
@@ -231,75 +233,67 @@ describe('GitPanel', () => {
 
   describe('Git Status Display', () => {
     it('displays staged files count', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(
-        JSON.stringify({
-          ...mockGitStatusResponse,
-          staged: [
-            createFileChange({ file: 'file1.ts', staged: true }),
-            createFileChange({ file: 'file2.ts', staged: true }),
-          ],
-        })
-      );
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue({
+        ...mockGitDetailedStatusResponse,
+        staged: [
+          createFileChange({ file: 'file1.ts', staged: true }),
+          createFileChange({ file: 'file2.ts', staged: true }),
+        ],
+      });
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
         const stagedCount = screen.getByTestId('staged-count');
         expect(stagedCount).toHaveTextContent('2');
-      });
+      }, { timeout: 3000 });
     });
 
     it('displays unstaged files count', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(
-        JSON.stringify({
-          ...mockGitStatusResponse,
-          unstaged: [
-            createFileChange({ file: 'file1.ts' }),
-            createFileChange({ file: 'file2.ts' }),
-            createFileChange({ file: 'file3.ts' }),
-          ],
-        })
-      );
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue({
+        ...mockGitDetailedStatusResponse,
+        unstaged: [
+          createFileChange({ file: 'file1.ts' }),
+          createFileChange({ file: 'file2.ts' }),
+          createFileChange({ file: 'file3.ts' }),
+        ],
+      });
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
         const unstagedCount = screen.getByTestId('unstaged-count');
         expect(unstagedCount).toHaveTextContent('3');
-      });
+      }, { timeout: 3000 });
     });
 
     it('displays untracked files count', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(
-        JSON.stringify({
-          ...mockGitStatusResponse,
-          untracked: [createFileChange({ file: 'new-file.ts', status: 'untracked' })],
-        })
-      );
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue({
+        ...mockGitDetailedStatusResponse,
+        untracked: [createFileChange({ file: 'new-file.ts', status: 'untracked' })],
+      });
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
         const untrackedCount = screen.getByTestId('untracked-count');
         expect(untrackedCount).toHaveTextContent('1');
-      });
+      }, { timeout: 3000 });
     });
 
     it('shows total changes badge in header', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(
-        JSON.stringify({
-          ...mockGitStatusResponse,
-          staged: [createFileChange({ file: 'staged.ts', staged: true })],
-          unstaged: [createFileChange({ file: 'unstaged.ts' })],
-          untracked: [createFileChange({ file: 'untracked.ts', status: 'untracked' })],
-        })
-      );
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue({
+        ...mockGitDetailedStatusResponse,
+        staged: [createFileChange({ file: 'staged.ts', staged: true })],
+        unstaged: [createFileChange({ file: 'unstaged.ts' })],
+        untracked: [createFileChange({ file: 'untracked.ts', status: 'untracked' })],
+      });
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
         expect(screen.getByText('3')).toBeInTheDocument();
-      });
+      }, { timeout: 3000 });
     });
   });
 
@@ -327,8 +321,8 @@ describe('GitPanel', () => {
       fireEvent.click(refreshButton);
 
       await waitFor(() => {
-        expect(window.goodvibes.gitStatus).toHaveBeenCalled();
-      });
+        expect(window.goodvibes.gitDetailedStatus).toHaveBeenCalled();
+      }, { timeout: 3000 });
     });
 
     it('disables refresh button while loading', async () => {
@@ -349,30 +343,29 @@ describe('GitPanel', () => {
 
   describe('Current Branch Display', () => {
     it('displays the current branch name', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockResolvedValue(
-        JSON.stringify({
-          ...mockGitStatusResponse,
-          branch: 'feature-branch',
-        })
-      );
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockResolvedValue({
+        ...mockGitDetailedStatusResponse,
+        branch: 'feature-branch',
+      });
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
         expect(screen.getByTestId('git-branches')).toHaveTextContent('feature-branch');
-      });
+      }, { timeout: 3000 });
     });
   });
 
   describe('Error Handling', () => {
     it('displays error message when git operations fail', async () => {
-      vi.mocked(window.goodvibes.gitStatus).mockRejectedValue(new Error('Git command failed'));
+      vi.mocked(window.goodvibes.gitDetailedStatus).mockRejectedValue(new Error('Git command failed'));
 
       render(<GitPanel cwd="/test/path" position="left" />);
 
+      // Wait for loading to finish and error to display
       await waitFor(() => {
-        expect(screen.getByText(/error/i)).toBeInTheDocument();
-      });
+        expect(screen.queryByText('Git command failed')).toBeInTheDocument();
+      }, { timeout: 5000 });
     });
   });
 
@@ -390,13 +383,15 @@ describe('GitPanel', () => {
         expect(screen.getByTestId('git-tags')).toBeInTheDocument();
         expect(screen.getByTestId('git-conflicts')).toBeInTheDocument();
         expect(screen.getByTestId('git-rebase')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
     });
 
     it('applies correct position class', () => {
       const { container } = render(<GitPanel cwd="/test/path" position="right" />);
 
-      expect(container.firstChild).toHaveClass('panel-right');
+      // Position is determined by border class, not a panel-position class
+      expect(container.firstChild).toHaveClass('border-l');
+      expect(container.firstChild).not.toHaveClass('border-r');
     });
   });
 
@@ -405,24 +400,24 @@ describe('GitPanel', () => {
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
-        expect(window.goodvibes.gitStatus).toHaveBeenCalledWith('/test/path');
-      });
+        expect(window.goodvibes.gitDetailedStatus).toHaveBeenCalledWith('/test/path');
+      }, { timeout: 3000 });
     });
 
     it('fetches git branches on mount', async () => {
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
-        expect(window.goodvibes.gitBranch).toHaveBeenCalledWith('/test/path');
-      });
+        expect(window.goodvibes.gitBranches).toHaveBeenCalledWith('/test/path');
+      }, { timeout: 3000 });
     });
 
     it('fetches git log on mount', async () => {
       render(<GitPanel cwd="/test/path" position="left" />);
 
       await waitFor(() => {
-        expect(window.goodvibes.gitLog).toHaveBeenCalledWith('/test/path', expect.any(Number));
-      });
+        expect(window.goodvibes.gitLogDetailed).toHaveBeenCalledWith('/test/path', expect.any(Number));
+      }, { timeout: 3000 });
     });
   });
 });

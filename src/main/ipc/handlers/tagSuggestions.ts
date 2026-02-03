@@ -318,17 +318,17 @@ export function registerTagSuggestionHandlers(): void {
   }));
 
   // ============================================================================
-  // SCAN CONTROL (Placeholder for Phase 5 AI service integration)
+  // SCAN CONTROL (Phase 5 AI service integration)
   // ============================================================================
 
   ipcMain.handle('start-background-scan', withContext('start-background-scan', async () => {
     try {
       tagSuggestionService.start();
       logger.info('Background scan started');
-      return ipcOk({ status: 'started' });
+      return ipcOk(undefined);
     } catch (error) {
       logger.error('Failed to start background scan', error);
-      return ipcErr(error, { status: 'error' });
+      return ipcErr(error);
     }
   }));
 
@@ -336,10 +336,10 @@ export function registerTagSuggestionHandlers(): void {
     try {
       tagSuggestionService.stop();
       logger.info('Background scan stopped');
-      return ipcOk({ status: 'stopped' });
+      return ipcOk(undefined);
     } catch (error) {
       logger.error('Failed to stop background scan', error);
-      return ipcErr(error, { status: 'error' });
+      return ipcErr(error);
     }
   }));
 

@@ -288,6 +288,22 @@ export default function FilesView() {
     }
   };
 
+  const handleOpenInCLI = async (sessionId: string, cwd: string) => {
+    try {
+      const result = await createTerminal(cwd, undefined, sessionId);
+      if (result.error) {
+        logger.error('Failed to open session in CLI:', result.error);
+        toast.error('Failed to open session in CLI');
+      } else {
+        toast.success(`Opened session ${sessionId.substring(0, 7)} in CLI`);
+        setCurrentView('terminal');
+      }
+    } catch (error) {
+      logger.error('Failed to open session in CLI:', error);
+      toast.error('Failed to open session in CLI');
+    }
+  };
+
   const handleAddToRegistry = async (path: string) => {
     try {
       await window.goodvibes.projectRegister({ path });
@@ -380,6 +396,7 @@ export default function FilesView() {
                 <SessionsPanel
                   sessions={sessions}
                   onClose={() => setShowSessions(false)}
+                  onOpenInCLI={handleOpenInCLI}
                 />
               ) : (
                 <FileViewer

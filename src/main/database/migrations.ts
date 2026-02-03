@@ -396,6 +396,73 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: 'Add per-tool token/cost attribution and deduplication support to tool_usage_detailed',
+    up: (db) => {
+      // Add token tracking columns
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN input_tokens INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN output_tokens INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN cache_write_tokens INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`);
+      
+      // Add cost tracking
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN cost_usd REAL DEFAULT 0`);
+      
+      // Add metadata columns
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN message_id TEXT`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN request_id TEXT`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN entry_hash TEXT`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN tool_index INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE tool_usage_detailed ADD COLUMN model TEXT`);
+
+      // Create unique index for deduplication
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_usage_detailed_dedup 
+        ON tool_usage_detailed(session_id, entry_hash, tool_index)
+      `);
+
+      // Create index for efficient message queries
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_usage_detailed_message 
+        ON tool_usage_detailed(session_id, message_id)
+      `);
+    },
+    down: (db) => {
+      // Drop indexes
+      db.exec(`DROP INDEX IF EXISTS idx_tool_usage_detailed_dedup`);
+      db.exec(`DROP INDEX IF EXISTS idx_tool_usage_detailed_message`);
+      
+      // SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+      db.exec(`
+        CREATE TABLE tool_usage_detailed_backup AS SELECT
+          id, session_id, tool_name, tool_input, tool_result_preview,
+          success, duration_ms, token_cost, timestamp
+        FROM tool_usage_detailed
+      `);
+      db.exec(`DROP TABLE tool_usage_detailed`);
+      db.exec(`
+        CREATE TABLE tool_usage_detailed (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT,
+          tool_name TEXT NOT NULL,
+          tool_input TEXT,
+          tool_result_preview TEXT,
+          success INTEGER,
+          duration_ms INTEGER,
+          token_cost INTEGER,
+          timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`INSERT INTO tool_usage_detailed SELECT * FROM tool_usage_detailed_backup`);
+      db.exec(`DROP TABLE tool_usage_detailed_backup`);
+      
+      // Recreate original indexes
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tool_usage_detailed_session ON tool_usage_detailed(session_id)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tool_usage_detailed_tool ON tool_usage_detailed(tool_name)`);
+    },
+  },
 ];
 
 // ============================================================================

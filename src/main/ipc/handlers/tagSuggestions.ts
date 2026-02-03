@@ -24,7 +24,7 @@ const limitSchema = z.number().int().positive().optional();
 const tagNameSchema = z.string().min(1);
 const contextHashSchema = z.string().nullable();
 const suggestionStatusSchema = z.enum(['pending', 'accepted', 'rejected', 'dismissed']);
-const scanStatusSchema = z.enum(['pending', 'queued', 'scanning', 'completed', 'skipped', 'failed'});
+const scanStatusSchema = z.enum(['pending', 'queued', 'scanning', 'completed', 'skipped', 'failed']);
 const scanDepthSchema = z.enum(['quick', 'full']).optional();
 
 // ============================================================================

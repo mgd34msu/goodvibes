@@ -481,18 +481,13 @@ export function getAnalytics(): Analytics {
     favoriteCount: number;
   };
 
-  // Cost by project - attribute subagent costs to their root session's project
+  // Cost by project - simple grouping by project_name
+  // Note: subagent cost attribution requires agent_tree_nodes table which may not exist
   const projectGroups = database.prepare(`
     SELECT 
-      COALESCE(
-        (SELECT s2.project_name 
-         FROM agent_tree_nodes atn 
-         JOIN sessions s2 ON s2.id = atn.root_session_id 
-         WHERE atn.session_id = s.id),
-        s.project_name
-      ) as project_name,
-      SUM(s.cost) as project_cost
-    FROM sessions s
+      project_name,
+      SUM(cost) as project_cost
+    FROM sessions
     GROUP BY project_name
   `).all() as { project_name: string; project_cost: number }[];
 

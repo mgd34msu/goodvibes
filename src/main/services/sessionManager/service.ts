@@ -18,6 +18,7 @@ import {
   trackToolUsage,
   clearSessionToolUsage,
   getKnownSessionPaths,
+  getKnownSessionPathsWithMtime,
 } from '../../database/index.js';
 import { sendToRenderer } from '../../window.js';
 import { Logger } from '../logger.js';
@@ -383,34 +384,44 @@ export class SessionManagerInstance {
   }
 
   /**
-   * Incrementally scan for NEW sessions only - does not re-process existing sessions.
-   * Uses database to check which files have already been processed.
-   * Returns the count of new sessions found.
+   * Scan for new sessions AND detect resumed sessions via mtime comparison.
+   * Returns { newCount, updatedCount } for UI feedback.
    */
-  public async scanNewSessionsOnly(): Promise<number> {
-    if (!existsSync(this.claudeDir)) return 0;
+  public async refreshSessions(): Promise<{ newCount: number; updatedCount: number }> {
+    if (!existsSync(this.claudeDir)) return { newCount: 0, updatedCount: 0 };
 
     try {
-      // Get known session paths from database
-      const knownPaths = getKnownSessionPaths();
+      // Get known paths WITH mtimes (not just paths)
+      const knownPathsWithMtime = getKnownSessionPathsWithMtime();
       
       // Find all session files in directory
       const allFiles = await this.findSessionFiles(this.claudeDir);
       
-      // Filter to only NEW files not in database
-      const newFiles = allFiles.filter(file => !knownPaths.has(file.path));
+      // Separate into new files and modified files
+      const newFiles: typeof allFiles = [];
+      const modifiedFiles: typeof allFiles = [];
       
-      if (newFiles.length === 0) {
-        return 0;
+      for (const file of allFiles) {
+        const knownMtime = knownPathsWithMtime.get(file.path);
+        if (knownMtime === undefined) {
+          // New file - not in database
+          newFiles.push(file);
+        } else if (knownMtime !== file.mtime) {
+          // Modified file - mtime differs from database
+          modifiedFiles.push(file);
+        }
+        // else: unchanged - skip
       }
       
-      logger.info(`Found ${newFiles.length} new session files to process`);
+      let newCount = 0;
+      let updatedCount = 0;
       
-      // Process only the new files
+      // Process new files
       for (const file of newFiles) {
         try {
           await this.processSessionFile(file.path, file.mtime);
           this.knownSessionFiles.add(file.path);
+          newCount++;
           
           // Start watching if recent
           const age = Date.now() - file.mtime;
@@ -423,11 +434,37 @@ export class SessionManagerInstance {
         }
       }
       
-      return newFiles.length;
+      // Process modified (resumed) files
+      for (const file of modifiedFiles) {
+        try {
+          await this.processSessionFile(file.path, file.mtime);
+          updatedCount++;
+          logger.info(`Updated resumed session: ${file.path}`);
+        } catch (error) {
+          logger.error(`Failed to update resumed session: ${file.path}`, error);
+        }
+      }
+      
+      if (newCount > 0 || updatedCount > 0) {
+        logger.info(`Session refresh: ${newCount} new, ${updatedCount} updated`);
+      }
+      
+      return { newCount, updatedCount };
     } catch (error) {
-      logger.error('Error scanning for new sessions', error);
-      return 0;
+      logger.error('Error refreshing sessions', error);
+      return { newCount: 0, updatedCount: 0 };
     }
+  }
+
+  /**
+   * Incrementally scan for NEW sessions only - does not re-process existing sessions.
+   * Uses database to check which files have already been processed.
+   * Returns the count of new sessions found.
+   * @deprecated Use refreshSessions() instead for detecting both new and resumed sessions.
+   */
+  public async scanNewSessionsOnly(): Promise<number> {
+    const { newCount } = await this.refreshSessions();
+    return newCount;
   }
 
   getAllSessions(): Session[] {

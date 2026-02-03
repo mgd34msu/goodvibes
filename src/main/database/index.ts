@@ -43,6 +43,7 @@ export {
   getFavoriteSessions,
   getArchivedSessions,
   getKnownSessionPaths,
+  getKnownSessionPathsWithMtime,
 } from './sessions.js';
 
 // Re-export message operations
@@ -121,6 +122,25 @@ export {
   type FilterResult,
   type ValidationResult,
 } from './tagFilters.js';
+
+// Re-export analytics operations
+export {
+  upsertSessionAnalytics,
+  getSessionAnalytics,
+  recordDetailedToolUsage,
+  getDetailedToolUsageBySession,
+  getToolEfficiencyStats,
+  clearDetailedToolUsage,
+  batchRecordDetailedToolUsage,
+  getSessionToolCostBreakdown,
+} from './primitives/analytics.js';
+
+// Re-export analytics types
+export type {
+  DetailedToolUsage,
+  ToolCostBreakdown,
+  SessionAnalytics,
+} from './primitives/types.js';
 
 const logger = new Logger('Database');
 

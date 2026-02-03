@@ -141,3 +141,22 @@ export function getKnownSessionPaths(): Set<string> {
   const rows = database.prepare('SELECT file_path FROM sessions WHERE file_path IS NOT NULL').all() as { file_path: string }[];
   return new Set(rows.map(row => row.file_path));
 }
+
+/**
+ * Get known session file paths with their mtimes from the database.
+ * Used for detecting both new AND resumed sessions.
+ */
+export function getKnownSessionPathsWithMtime(): Map<string, number> {
+  const database = getDatabase();
+  const rows = database.prepare(
+    'SELECT file_path, file_mtime FROM sessions WHERE file_path IS NOT NULL'
+  ).all() as { file_path: string; file_mtime: number | null }[];
+  
+  const result = new Map<string, number>();
+  for (const row of rows) {
+    if (row.file_mtime !== null) {
+      result.set(row.file_path, row.file_mtime);
+    }
+  }
+  return result;
+}

@@ -9,6 +9,7 @@ import type {
   DetailedToolUsage,
   ToolUsageDetailedRow,
   ToolEfficiencyRow,
+  ToolCostBreakdown,
 } from './types.js';
 
 // ============================================================================
@@ -68,14 +69,24 @@ export function getSessionAnalytics(sessionId: string): SessionAnalytics | null 
 // DETAILED TOOL USAGE OPERATIONS
 // ============================================================================
 
-export function recordDetailedToolUsage(usage: Omit<DetailedToolUsage, 'id' | 'timestamp'>): void {
+export function recordDetailedToolUsage(usage: {
+  sessionId: string | null;
+  toolName: string;
+  toolInput: string | null;
+  toolResultPreview: string | null;
+  success: boolean;
+  durationMs: number | null;
+  tokenCost: number | null;
+}): void {
   const db = getDatabase();
 
   db.prepare(`
     INSERT INTO tool_usage_detailed (
       session_id, tool_name, tool_input, tool_result_preview,
-      success, duration_ms, token_cost
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      success, duration_ms, token_cost,
+      input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
+      cost_usd, entry_hash, tool_index
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     usage.sessionId,
     usage.toolName,
@@ -83,7 +94,14 @@ export function recordDetailedToolUsage(usage: Omit<DetailedToolUsage, 'id' | 't
     usage.toolResultPreview,
     usage.success ? 1 : 0,
     usage.durationMs,
-    usage.tokenCost
+    usage.tokenCost,
+    0, // input_tokens
+    0, // output_tokens
+    0, // cache_write_tokens
+    0, // cache_read_tokens
+    0, // cost_usd
+    '', // entry_hash - empty for legacy entries
+    0  // tool_index
   );
 }
 
@@ -93,18 +111,27 @@ export function getDetailedToolUsageBySession(sessionId: string): DetailedToolUs
     SELECT * FROM tool_usage_detailed
     WHERE session_id = ?
     ORDER BY timestamp
-  `).all(sessionId) as ToolUsageDetailedRow[];
+  `).all(sessionId) as any[];
 
   return rows.map(row => ({
-    id: row.id,
-    sessionId: row.session_id,
+    sessionId: row.session_id || '',
     toolName: row.tool_name,
     toolInput: row.tool_input,
     toolResultPreview: row.tool_result_preview,
     success: row.success === 1,
     durationMs: row.duration_ms,
-    tokenCost: row.token_cost,
+    tokenCost: row.token_cost || 0,
     timestamp: row.timestamp,
+    inputTokens: row.input_tokens || 0,
+    outputTokens: row.output_tokens || 0,
+    cacheWriteTokens: row.cache_write_tokens || 0,
+    cacheReadTokens: row.cache_read_tokens || 0,
+    costUsd: row.cost_usd || 0,
+    messageId: row.message_id,
+    requestId: row.request_id,
+    entryHash: row.entry_hash || '',
+    toolIndex: row.tool_index || 0,
+    model: row.model,
   }));
 }
 
@@ -135,4 +162,64 @@ export function getToolEfficiencyStats(): Array<{
     avgDurationMs: row.avg_duration,
     totalTokenCost: row.total_tokens,
   }));
+}
+
+/**
+ * Clear all detailed tool usage for a session (for re-parsing)
+ */
+export function clearDetailedToolUsage(sessionId: string): void {
+  const db = getDatabase();
+  db.prepare('DELETE FROM tool_usage_detailed WHERE session_id = ?').run(sessionId);
+}
+
+/**
+ * Batch insert detailed tool usage entries
+ * Uses INSERT OR REPLACE for upsert behavior on entry_hash
+ */
+export function batchRecordDetailedToolUsage(usages: DetailedToolUsage[]): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO tool_usage_detailed (
+      session_id, tool_name, tool_input, tool_result_preview,
+      success, duration_ms, token_cost, timestamp,
+      input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
+      cost_usd, message_id, request_id, entry_hash, tool_index, model
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  const insertMany = db.transaction((items: DetailedToolUsage[]) => {
+    for (const u of items) {
+      stmt.run(
+        u.sessionId, u.toolName, u.toolInput, u.toolResultPreview,
+        u.success ? 1 : 0, u.durationMs, u.tokenCost, u.timestamp,
+        u.inputTokens, u.outputTokens, u.cacheWriteTokens, u.cacheReadTokens,
+        u.costUsd, u.messageId, u.requestId, u.entryHash, u.toolIndex, u.model
+      );
+    }
+  });
+  
+  insertMany(usages);
+}
+
+/**
+ * Get aggregated tool cost breakdown for a session
+ */
+export function getSessionToolCostBreakdown(sessionId: string): ToolCostBreakdown[] {
+  const db = getDatabase();
+  return db.prepare(`
+    SELECT 
+      tool_name as toolName,
+      COUNT(*) as callCount,
+      SUM(input_tokens) as inputTokens,
+      SUM(output_tokens) as outputTokens,
+      SUM(cache_write_tokens) as cacheWriteTokens,
+      SUM(cache_read_tokens) as cacheReadTokens,
+      SUM(cost_usd) as totalCost,
+      AVG(cost_usd) as avgCostPerCall,
+      AVG(duration_ms) as avgDurationMs
+    FROM tool_usage_detailed
+    WHERE session_id = ?
+    GROUP BY tool_name
+    ORDER BY SUM(cost_usd) DESC
+  `).all(sessionId) as ToolCostBreakdown[];
 }

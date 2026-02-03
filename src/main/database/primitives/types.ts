@@ -308,13 +308,34 @@ export interface SessionAnalytics {
 }
 
 export interface DetailedToolUsage {
-  id: number;
-  sessionId: string | null;
+  sessionId: string;
   toolName: string;
   toolInput: string | null;
   toolResultPreview: string | null;
   success: boolean;
   durationMs: number | null;
-  tokenCost: number | null;
-  timestamp: string;
+  tokenCost: number;
+  timestamp: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  messageId: string | null;
+  requestId: string | null;
+  entryHash: string;
+  toolIndex: number;
+  model: string | null;
+}
+
+export interface ToolCostBreakdown {
+  toolName: string;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCost: number;
+  avgCostPerCall: number;
+  avgDurationMs: number;
 }

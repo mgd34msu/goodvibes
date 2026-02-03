@@ -160,15 +160,6 @@ export function registerDatabaseHandlers(): void {
     return db.getAllTags();
   }));
 
-  ipcMain.handle('create-tag', withContext('create-tag', async (_, data: unknown) => {
-    const validation = validateInput(createTagSchema, data, 'create-tag');
-    if (!validation.success) return validation.error;
-    const { name, color } = validation.data;
-    // Returns true if tag was created, false if it already exists
-    // Throws on actual database errors
-    return db.createTag(name, color);
-  }));
-
   ipcMain.handle('delete-tag', withContext('delete-tag', async (_, id: unknown) => {
     const validation = validateInput(numericIdSchema, id, 'delete-tag');
     if (!validation.success) return validation.error;

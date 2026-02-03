@@ -17,7 +17,11 @@ import type {
 } from '../../shared/types/tag-types.js';
 
 import { gatherQuickContext, formatContextForPrompt } from './tagSuggestionContext.js';
-import { generateTagSuggestionsViaCli } from './claudeCliClient.js';
+import { 
+  generateTagSuggestionsViaCli, 
+  generateBatchTagSuggestions,
+  type TagSuggestionContext 
+} from './claudeCliClient.js';
 import * as tagSuggestions from '../database/tagSuggestions.js';
 import * as db from '../database/index.js';
 
@@ -222,6 +226,7 @@ class TagSuggestionService extends EventEmitter {
   private currentSessionId: string | null = null;
   private processingInterval: NodeJS.Timeout | null = null;
   private scannedCount: number = 0;
+  private totalSessionsToScan: number = 0;
   private lastError: string | null = null;
 
   constructor(private config: ServiceConfig) {
@@ -363,6 +368,96 @@ class TagSuggestionService extends EventEmitter {
   // ============================================================================
 
   /**
+   * Scan a batch of sessions in a single Claude CLI call
+   * This is much more efficient than calling scanSession() for each one
+   */
+  private async scanSessionBatch(sessionIds: string[]): Promise<void> {
+    if (sessionIds.length === 0) {
+      return;
+    }
+
+    logger.info(`Scanning batch of ${sessionIds.length} sessions...`);
+
+    try {
+      // 1. Gather context for ALL sessions
+      const sessionContexts: Array<{ sessionId: string; context: TagSuggestionContext }> = [];
+      
+      for (const sessionId of sessionIds) {
+        const quickContext = gatherQuickContext(sessionId);
+        
+        if (!quickContext) {
+          logger.warn(`Session ${sessionId} not found or has no context, marking as failed`);
+          tagSuggestions.updateSessionScanStatus(sessionId, 'failed', 'quick');
+          continue;
+        }
+        
+        // Convert SessionContext to TagSuggestionContext format
+        const context: TagSuggestionContext = {
+          projectPath: quickContext.projectName ?? undefined,
+          recentMessages: [
+            ...quickContext.userMessages.map(content => ({ role: 'user', content })),
+            ...quickContext.assistantMessages.map(content => ({ role: 'assistant', content }))
+          ],
+          toolsUsed: quickContext.toolsUsed,
+          existingTags: quickContext.existingTags,
+        };
+        
+        sessionContexts.push({ sessionId, context });
+      }
+
+      if (sessionContexts.length === 0) {
+        logger.warn('No valid sessions in batch');
+        return;
+      }
+
+      // 2. ONE CLI call for all sessions
+      const results = await generateBatchTagSuggestions(sessionContexts);
+
+      // 3. Save suggestions for each session
+      for (const [sessionId, tags] of results) {
+        if (tags.length === 0) {
+          logger.warn(`No tags generated for session ${sessionId}`);
+          tagSuggestions.updateSessionScanStatus(sessionId, 'completed', 'quick');
+          continue;
+        }
+
+        const suggestions = tagSuggestions.createSuggestions(
+          tags.map(tag => ({
+            sessionId,
+            tagName: tag.name,
+            confidence: tag.confidence,
+            category: tag.category || 'other',
+            reasoning: tag.reasoning,
+          }))
+        );
+
+        tagSuggestions.updateSessionScanStatus(sessionId, 'completed', 'quick');
+        this.scannedCount++;
+        
+        logger.info(`Generated ${suggestions.length} suggestions for session ${sessionId}`);
+        this.emit('complete', sessionId, suggestions);
+      }
+
+      logger.info(`Batch scan completed for ${results.size} sessions`);
+    } catch (error) {
+      logger.error('Failed to scan session batch:', error);
+      this.lastError = error instanceof Error ? error.message : String(error);
+      
+      // Mark all sessions in batch as failed
+      for (const sessionId of sessionIds) {
+        try {
+          tagSuggestions.updateSessionScanStatus(sessionId, 'failed', 'quick');
+        } catch (updateError) {
+          logger.error(`Failed to update scan status for ${sessionId}:`, updateError);
+        }
+      }
+      
+      this.emit('error', error as Error);
+      throw error;
+    }
+  }
+
+  /**
    * Scan a single session for tag suggestions
    */
   async scanSession(sessionId: string): Promise<TagSuggestion[]> {
@@ -429,7 +524,14 @@ class TagSuggestionService extends EventEmitter {
       this.start();
     }
 
+    // Reset counters
+    this.scannedCount = 0;
+    
     await this.queueAllPending();
+    
+    // Set total sessions to scan (queue size after queueing all)
+    this.totalSessionsToScan = this.queue.size();
+    
     logger.info('Scanning all queued sessions...');
   }
 
@@ -462,8 +564,9 @@ class TagSuggestionService extends EventEmitter {
    */
   getProgress(): ScanProgress {
     const queueSize = this.queue.size();
-    const total = this.scannedCount + queueSize;
+    const total = this.totalSessionsToScan > 0 ? this.totalSessionsToScan : this.scannedCount + queueSize;
     const current = this.scannedCount;
+    const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
 
     return {
       current,
@@ -475,6 +578,8 @@ class TagSuggestionService extends EventEmitter {
         this.rateLimiter.getTimeUntilNextToken(),
       ) || 0,
       currentSessionId: this.currentSessionId || undefined,
+      rateLimitRemaining: rateLimitEnabled ? this.rateLimiter.getRemainingTokens() : undefined,
+      rateLimitMax: rateLimitEnabled ? this.config.maxSessionsPerHour : undefined,
     };
   }
 
@@ -491,34 +596,41 @@ class TagSuggestionService extends EventEmitter {
       return;
     }
 
-    // Process up to batchSize sessions
+    // Check rate limit BEFORE collecting batch (if enabled)
+    const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? false;
+    if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
+      const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
+      logger.info(`Rate limit reached. Next batch available in ${Math.round(timeUntilNext / 1000)}s`);
+      return;
+    }
+
+    // Collect session IDs for batch processing
+    const batch: string[] = [];
+    
     for (let i = 0; i < this.config.batchSize; i++) {
       if (this.queue.isEmpty()) {
-        break;
-      }
-
-      // Check rate limit (if enabled)
-      const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
-      if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
-        const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
-        logger.info(`Rate limit reached. Next token available in ${Math.round(timeUntilNext / 1000)}s`);
         break;
       }
 
       // Get next item
       const item = this.queue.dequeue();
       if (!item) break;
+      
+      batch.push(item.sessionId);
+    }
 
-      // Process session
-      this.currentSessionId = item.sessionId;
+    // Process batch if we have any sessions
+    if (batch.length > 0) {
+      logger.info(`Processing batch of ${batch.length} sessions`);
+      this.currentSessionId = batch[0]; // Track first session ID for progress
       this.emitProgress();
 
       try {
-        await this.scanSession(item.sessionId);
-        this.scannedCount++;
+        // ONE CLI call for entire batch
+        await this.scanSessionBatch(batch);
       } catch (error) {
-        logger.error(`Failed to process session ${item.sessionId}:`, error);
-        // Continue processing other sessions
+        logger.error('Failed to process batch:', error);
+        // Error handling is done in scanSessionBatch
       } finally {
         this.currentSessionId = null;
         this.emitProgress();
@@ -596,8 +708,8 @@ class TagSuggestionService extends EventEmitter {
 // ============================================================================
 
 const DEFAULT_CONFIG: ServiceConfig = {
-  maxSessionsPerHour: 100,
-  batchSize: 5,
+  maxSessionsPerHour: 10, // 10 batches/hour (each batch = 10 sessions = 100 sessions/hour)
+  batchSize: 10,
   processingIntervalMs: 10000, // 10 seconds
 };
 

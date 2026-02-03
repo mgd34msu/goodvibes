@@ -4,7 +4,8 @@
 
 import { getDatabase } from './connection.js';
 import { Logger } from '../services/logger.js';
-import type { TagSuggestion, SuggestionFeedback, SuggestionStatus, ScanStatus } from '../../shared/types/index.js';
+import type { TagSuggestion, SuggestionFeedback, SuggestionStatus } from '../../shared/types/index.js';
+import type { ScanStatus } from '../../shared/types/tag-types.js';
 import { mapRowToTagSuggestion, mapRowToSuggestionFeedback, type TagSuggestionRow, type SuggestionFeedbackRow } from './mappers.js';
 import { createTag, addTagToSession } from './tags.js';
 

@@ -125,7 +125,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiSuggestionsScanDepth: 'quick',
   aiSuggestionsAutoAccept: false,
   aiSuggestionsAutoAcceptThreshold: 0.9,
-  tagScanRateLimitEnabled: true, // enabled by default
+  tagScanRateLimitEnabled: false, // disabled by default (user didn't request it)
 };
 
 // Settings version - increment this when adding new settings that need migration

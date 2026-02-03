@@ -212,6 +212,8 @@ export function ScanProgressModal({
   const total = progress?.total ?? 0;
   const timeRemaining = progress?.estimatedTimeMs ?? null;
   const currentSessionId = progress?.currentSessionId ?? null;
+  const rateLimitRemaining = progress?.rateLimitRemaining;
+  const rateLimitMax = progress?.rateLimitMax;
 
   return createPortal(
     <div className="modal-backdrop-premium" onClick={isComplete ? handleClose : undefined}>
@@ -329,6 +331,12 @@ export function ScanProgressModal({
                         <div>
                           <span className="text-slate-400">Failed:</span>
                           <span className="ml-2 text-red-400 font-semibold">{scanCounts?.failed}</span>
+                        </div>
+                      )}
+                      {rateLimitRemaining !== undefined && rateLimitMax !== undefined && (
+                        <div>
+                          <span className="text-slate-400">Batches Remaining:</span>
+                          <span className="ml-2 text-violet-400 font-semibold">{rateLimitRemaining}/{rateLimitMax}</span>
                         </div>
                       )}
                     </div>

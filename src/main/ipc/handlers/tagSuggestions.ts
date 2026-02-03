@@ -24,7 +24,7 @@ const limitSchema = z.number().int().positive().optional();
 const tagNameSchema = z.string().min(1);
 const contextHashSchema = z.string().nullable();
 const suggestionStatusSchema = z.enum(['pending', 'accepted', 'rejected', 'dismissed']);
-const scanStatusSchema = z.enum(['pending', 'processing', 'completed', 'failed', 'skipped']);
+const scanStatusSchema = z.enum(['pending', 'queued', 'scanning', 'completed', 'skipped', 'failed'});
 const scanDepthSchema = z.enum(['quick', 'full']).optional();
 
 // ============================================================================
@@ -244,7 +244,7 @@ export function registerTagSuggestionHandlers(): void {
     try {
       db.updateSessionScanStatus(
         parsed.data.sessionId,
-        parsed.data.status as unknown as import('../../../shared/types/index.js').ScanStatus,
+        parsed.data.status,
         parsed.data.depth
       );
       return ipcOk(true);
@@ -327,7 +327,7 @@ export function registerTagSuggestionHandlers(): void {
       return ipcOk(undefined);
     } catch (error) {
       logger.error('Failed to start background scan', error);
-      return ipcErr(error);
+      return ipcErr(error, undefined);
     }
   }));
 
@@ -338,7 +338,7 @@ export function registerTagSuggestionHandlers(): void {
       return ipcOk(undefined);
     } catch (error) {
       logger.error('Failed to stop background scan', error);
-      return ipcErr(error);
+      return ipcErr(error, undefined);
     }
   }));
 

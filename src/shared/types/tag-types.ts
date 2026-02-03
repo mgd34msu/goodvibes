@@ -162,6 +162,8 @@ export interface ScanProgress {
   percentage: number;
   estimatedTimeMs: number;
   currentSessionId?: string;
+  rateLimitRemaining?: number;
+  rateLimitMax?: number;
 }
 
 /**

@@ -322,7 +322,7 @@ export function registerTagSuggestionHandlers(): void {
 
   ipcMain.handle('start-background-scan', withContext('start-background-scan', async () => {
     try {
-      tagSuggestionService.start();
+      await tagSuggestionService.scanAll();
       logger.info('Background scan started');
       return ipcOk(undefined);
     } catch (error) {

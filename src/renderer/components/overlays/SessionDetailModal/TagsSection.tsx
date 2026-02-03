@@ -91,10 +91,14 @@ export function TagsSection({ sessionId, onTagsChange }: TagsSectionProps): Reac
     }
   };
 
-  const handleCreateAndAdd = async (name: string) => {
+  const handleCreateAndAdd = async (name: string, color: string, effect: import('../../../../shared/types/tag-types').TagEffect | null) => {
     try {
-      // Create the tag
-      const createResult = await window.goodvibes.createTag({ name });
+      // Create the tag with color and effect
+      const createResult = await window.goodvibes.createTag({ 
+        name, 
+        color, 
+        effect: effect ?? undefined 
+      });
       if (!createResult.success || !createResult.data) {
         logger.error('Failed to create tag', { error: createResult.error });
         toast.error(`Failed to create tag: ${createResult.error}`);
@@ -260,7 +264,7 @@ export function TagsSection({ sessionId, onTagsChange }: TagsSectionProps): Reac
   const existingTagIds = tags.map(t => t.id);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-h-[400px]">
       {/* Applied Tags Section */}
       <div>
         <div className="flex items-center justify-between mb-3">

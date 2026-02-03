@@ -4,11 +4,34 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { Tag } from '../../../shared/types/tag-types';
+import type { Tag, TagEffect } from '../../../shared/types/tag-types';
 import { createLogger } from '../../../shared/logger';
 import { toast } from '../../stores/toastStore';
 
 const logger = createLogger('TagInput');
+
+// ============================================================================
+// COLOR PALETTE
+// ============================================================================
+
+const TAG_COLORS = [
+  '#EF4444', // red
+  '#F97316', // orange  
+  '#EAB308', // yellow
+  '#22C55E', // green
+  '#06B6D4', // cyan
+  '#3B82F6', // blue
+  '#8B5CF6', // purple
+  '#EC4899', // pink
+  '#6B7280', // gray
+];
+
+const TAG_EFFECTS: Array<{ value: TagEffect | null; label: string }> = [
+  { value: null, label: 'None' },
+  { value: 'shimmer', label: 'Shimmer' },
+  { value: 'glow', label: 'Glow' },
+  { value: 'pulse', label: 'Pulse' },
+];
 
 // Debounce implementation
 function useDebounce<T>(value: T, delayMs: number): T {
@@ -33,7 +56,7 @@ function useDebounce<T>(value: T, delayMs: number): T {
 
 interface TagInputProps {
   onTagSelect: (tag: Tag) => void;
-  onTagCreate?: (name: string) => void;
+  onTagCreate?: (name: string, color: string, effect: TagEffect | null) => void;
   existingTagIds?: number[];
   placeholder?: string;
   autoFocus?: boolean;
@@ -69,6 +92,9 @@ export function TagInput({
   const [recentTags, setRecentTags] = useState<Tag[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [selectedColor, setSelectedColor] = useState<string>(TAG_COLORS[0] || '#6B7280');
+  const [selectedEffect, setSelectedEffect] = useState<TagEffect | null>(null);
+  const [showColorPicker, setShowColorPicker] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -230,9 +256,13 @@ export function TagInput({
 
   const handleCreateTag = (name: string) => {
     if (onTagCreate) {
-      onTagCreate(name);
+      onTagCreate(name, selectedColor, selectedEffect);
       setQuery('');
       setIsOpen(false);
+      setShowColorPicker(false);
+      // Reset to defaults for next tag
+      setSelectedColor(TAG_COLORS[0] || '#6B7280');
+      setSelectedEffect(null);
       inputRef.current?.focus();
     }
   };
@@ -351,21 +381,79 @@ export function TagInput({
 
             {/* Create new tag option */}
             {shouldShowCreateOption && (
-              <button
-                type="button"
-                onClick={() => handleCreateTag(query.trim())}
-                onMouseEnter={() => setHighlightedIndex(suggestions.length)}
-                className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 border-t border-surface-600 transition-colors ${
-                  highlightedIndex === suggestions.length
-                    ? 'bg-accent-purple/20 text-surface-100'
-                    : 'text-surface-300 hover:bg-surface-700'
-                }`}
-              >
-                <span className="text-accent-purple text-lg leading-none">+</span>
-                <span>
-                  Create <span className="font-semibold">"{query.trim()}"</span>
-                </span>
-              </button>
+              <div className="border-t border-surface-600">
+                <button
+                  type="button"
+                  onClick={() => setShowColorPicker(!showColorPicker)}
+                  onMouseEnter={() => setHighlightedIndex(suggestions.length)}
+                  className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors ${
+                    highlightedIndex === suggestions.length
+                      ? 'bg-accent-purple/20 text-surface-100'
+                      : 'text-surface-300 hover:bg-surface-700'
+                  }`}
+                >
+                  <span className="text-accent-purple text-lg leading-none">+</span>
+                  <span>
+                    Create <span className="font-semibold">"{query.trim()}"</span>
+                  </span>
+                  <span
+                    className="ml-auto w-4 h-4 rounded-full border border-surface-600 flex-shrink-0"
+                    style={{ backgroundColor: selectedColor }}
+                  />
+                </button>
+                {showColorPicker && (
+                  <div className="p-3 bg-surface-750 border-t border-surface-600 space-y-3">
+                    {/* Color Picker */}
+                    <div>
+                      <label className="text-xs text-surface-400 block mb-2">Color</label>
+                      <div className="flex flex-wrap gap-2">
+                        {TAG_COLORS.map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            onClick={() => setSelectedColor(color)}
+                            className={`w-6 h-6 rounded-full border-2 transition-all ${
+                              selectedColor === color
+                                ? 'border-white scale-110'
+                                : 'border-surface-600 hover:scale-105'
+                            }`}
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {/* Effect Selector */}
+                    <div>
+                      <label className="text-xs text-surface-400 block mb-2">Effect</label>
+                      <div className="flex gap-2">
+                        {TAG_EFFECTS.map((effect) => (
+                          <button
+                            key={effect.label}
+                            type="button"
+                            onClick={() => setSelectedEffect(effect.value)}
+                            className={`px-3 py-1 text-xs rounded transition-colors ${
+                              selectedEffect === effect.value
+                                ? 'bg-accent-purple/30 text-surface-100 border border-accent-purple/50'
+                                : 'bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600'
+                            }`}
+                          >
+                            {effect.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Create Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleCreateTag(query.trim())}
+                      className="w-full px-3 py-2 text-sm rounded bg-accent-purple hover:bg-accent-purple/80 text-white font-medium transition-colors"
+                    >
+                      Create Tag
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>,
           document.body

@@ -226,6 +226,7 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
                 onClick={handleNewClaudeSession}
                 className="dropdown-item-premium flex items-center gap-3 w-full px-4 py-3 text-left rounded-lg"
                 role="menuitem"
+                tabIndex={-1}
               >
                 <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500/20 to-primary-600/10 flex items-center justify-center">
                   <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -248,6 +249,7 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
                   !recentSession && 'opacity-50 cursor-not-allowed'
                 )}
                 role="menuitem"
+                tabIndex={-1}
               >
                 <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-accent-500/20 to-accent-600/10 flex items-center justify-center">
                   <svg className="w-5 h-5 text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -268,6 +270,7 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
                 onClick={handleOpenTextEditor}
                 className="dropdown-item-premium flex items-center gap-3 w-full px-4 py-3 text-left rounded-lg"
                 role="menuitem"
+                tabIndex={-1}
               >
                 <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-warning-500/20 to-warning-600/10 flex items-center justify-center">
                   <svg className="w-5 h-5 text-warning-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -284,6 +287,7 @@ export function TerminalHeader({ showGitPanel, onToggleGitPanel, hasActiveSessio
                 onClick={handleNewTerminal}
                 className="dropdown-item-premium flex items-center gap-3 w-full px-4 py-3 text-left rounded-lg"
                 role="menuitem"
+                tabIndex={-1}
               >
                 <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-success-500/20 to-success-600/10 flex items-center justify-center">
                   <svg className="w-5 h-5 text-success-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

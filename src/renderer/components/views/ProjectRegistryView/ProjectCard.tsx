@@ -166,6 +166,7 @@ export function ProjectCard({
                   onClick={() => { onOpenSettings(); setShowMenu(false); }}
                   className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors leading-normal"
                   role="menuitem"
+                  tabIndex={-1}
                 >
                   <Settings className="w-4 h-4 flex-shrink-0" />
                   Settings
@@ -174,6 +175,7 @@ export function ProjectCard({
                   onClick={() => { onCreateTemplate(); setShowMenu(false); }}
                   className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary flex items-center gap-2 transition-colors leading-normal"
                   role="menuitem"
+                  tabIndex={-1}
                 >
                   <FileText className="w-4 h-4 flex-shrink-0" />
                   Create Template
@@ -204,6 +206,7 @@ export function ProjectCard({
                             }}
                             className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-white/5 text-text-secondary transition-colors leading-normal"
                             role="menuitem"
+                            tabIndex={-1}
                           >
                             {template.name}
                           </button>
@@ -217,6 +220,7 @@ export function ProjectCard({
                   onClick={() => { onRemove(); setShowMenu(false); }}
                   className="w-full px-3 py-2.5 text-left text-sm rounded-lg hover:bg-error-500/10 text-error-400 flex items-center gap-2 transition-colors leading-normal"
                   role="menuitem"
+                  tabIndex={-1}
                 >
                   <Trash2 className="w-4 h-4 flex-shrink-0" />
                   Remove

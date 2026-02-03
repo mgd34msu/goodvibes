@@ -199,6 +199,7 @@ function TemplateButton({
     <button
       onClick={onClick}
       className="w-full text-left p-3 bg-surface-800 rounded-lg hover:bg-surface-700 transition-colors"
+      tabIndex={-1}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-surface-200">{template.name}</div>

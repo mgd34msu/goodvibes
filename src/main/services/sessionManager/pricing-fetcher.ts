@@ -179,16 +179,22 @@ function parsePricingTable(markdown: string): Record<string, ModelPricing> {
   for (const row of tableRows) {
     const cells = row.split('|').map(c => c.trim()).filter(c => c);
     
-    if (cells.length < 3) continue;
+    if (cells.length < 6) continue;
     
     const modelName = parseModelName(cells[0]);
+    // Updated column mapping for new table format:
+    // Column 1: Base Input Tokens
+    // Column 2: 5m Cache Writes  
+    // Column 3: 1h Cache Writes
+    // Column 4: Cache Hits & Refreshes
+    // Column 5: Output Tokens
     const inputPrice = parsePrice(cells[1]);
-    const outputPrice = parsePrice(cells[2]);
+    const outputPrice = parsePrice(cells[5]);
     
     // Optional cache pricing columns
-    const cacheWrite5m = cells[3] ? parsePrice(cells[3]) : undefined;
-    const cacheWrite1h = cells[4] ? parsePrice(cells[4]) : undefined;
-    const cacheRead = cells[5] ? parsePrice(cells[5]) : undefined;
+    const cacheWrite5m = cells[2] ? parsePrice(cells[2]) : undefined;
+    const cacheWrite1h = cells[3] ? parsePrice(cells[3]) : undefined;
+    const cacheRead = cells[4] ? parsePrice(cells[4]) : undefined;
     
     pricing[modelName] = {
       input: inputPrice,

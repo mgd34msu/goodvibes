@@ -67,6 +67,7 @@ export function RepoSelector({
           <button
             onClick={onCreateNewRepo}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-400 hover:bg-surface-700 border-b border-surface-700"
+            tabIndex={-1}
           >
             <PlusIcon className="w-4 h-4" />
             Create new repository
@@ -82,6 +83,7 @@ export function RepoSelector({
                   ? 'text-primary-400 border-b-2 border-primary-400'
                   : 'text-surface-400 hover:text-surface-200'
               )}
+              tabIndex={-1}
             >
               Your Repos
             </button>
@@ -103,6 +105,7 @@ export function RepoSelector({
                       key={org.id}
                       onClick={() => onSelectOrg(org.login)}
                       className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-surface-300 hover:bg-surface-700 leading-normal"
+                      tabIndex={-1}
                     >
                       <img
                         src={org.avatar_url}
@@ -136,6 +139,7 @@ export function RepoSelector({
                   key={repo.id}
                   onClick={() => onSelectRepo(repo)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-surface-300 hover:bg-surface-700 leading-normal"
+                  tabIndex={-1}
                 >
                   {repo.private ? (
                     <LockIcon className="w-4 h-4 text-surface-500 flex-shrink-0" />

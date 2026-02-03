@@ -4,6 +4,9 @@
 
 import { useState, useCallback } from 'react';
 import { Users, Plus, Settings } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('AgentsView');
 import { AgentForm } from './AgentForm';
 import { AgentList } from './AgentList';
 import { AgentFilters } from './AgentFilters';
@@ -84,7 +87,7 @@ export default function AgentsView() {
         };
         await saveAgent(agentData, scope === 'project' ? projectPath : null);
       } catch (error) {
-        console.error('Failed to install agent:', error);
+        logger.error('Failed to install agent:', error);
       }
     },
     [saveAgent]

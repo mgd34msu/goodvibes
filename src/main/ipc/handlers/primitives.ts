@@ -40,31 +40,8 @@ import {
 
 const logger = new Logger('IPC:Primitives');
 
-// ============================================================================
-// VALIDATION ERROR RESPONSE
-// ============================================================================
-
-interface ValidationErrorResponse {
-  success: false;
-  error: string;
-  details?: Array<{ path: string; message: string }>;
-}
-
-/**
- * Formats a ZodError into a user-friendly error response
- */
-function formatValidationError(error: ZodError): ValidationErrorResponse {
-  const details = error.errors.map((e) => ({
-    path: e.path.join('.'),
-    message: e.message,
-  }));
-
-  return {
-    success: false,
-    error: `Validation failed: ${details.map((d) => d.message).join(', ')}`,
-    details,
-  };
-}
+// Validation helpers are imported from shared utils
+import { ValidationErrorResponse, formatValidationError } from '../utils/validation-helpers.js';
 
 /**
  * Validates input using a Zod schema, logging and re-throwing on error

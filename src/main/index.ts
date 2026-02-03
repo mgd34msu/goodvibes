@@ -6,7 +6,7 @@
 // The heavy lifting is delegated to the lifecycle module.
 // ============================================================================
 
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Logger } from './services/logger.js';
@@ -54,7 +54,12 @@ if (hasLock) {
   setupShutdownHandlers();
 
   // App ready - initialize everything
-  app.whenReady().then(initializeApp);
+  app.whenReady().then(initializeApp).catch((error) => {
+    logger.error('Fatal: Failed to initialize application', error);
+    dialog.showErrorBox('Startup Error', 
+      `GoodVibes failed to start: ${error.message}`);
+    app.quit();
+  });
 }
 
 // ============================================================================

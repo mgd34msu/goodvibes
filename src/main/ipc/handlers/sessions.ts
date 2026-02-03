@@ -133,12 +133,20 @@ function findMostRecentClaudeSession(): ClaudeSessionFile | null {
                     }
                   }
                 }
-              } catch {
+              } catch (error) {
                 // Skip invalid JSON lines
+                logger.debug('Skipped invalid JSON line in session file', {
+                  file: file.filePath,
+                  error: error instanceof Error ? error.message : String(error)
+                });
               }
             }
-          } catch {
-            // Ignore read errors
+          } catch (error) {
+            // Ignore read errors but log them
+            logger.debug('Failed to read session file', {
+              file: file.filePath,
+              error: error instanceof Error ? error.message : String(error)
+            });
           }
 
           mostRecent = {

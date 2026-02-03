@@ -5,6 +5,9 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Play, Copy, Check, AlertTriangle, Terminal, RotateCcw, Info } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('HookTestPanel');
 import { CollapsibleSection } from './CollapsibleSection';
 import { EVENT_TYPES, type HookEventType } from './types';
 
@@ -145,7 +148,7 @@ export function HookTestPanel({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      logger.error('Failed to copy:', err);
     }
   }, [sampleInput]);
 

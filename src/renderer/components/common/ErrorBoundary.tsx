@@ -75,7 +75,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.setState({ errorInfo });
 
     // Call optional error callback for external error reporting
+    // This allows integration with error reporting services (e.g., Sentry)
     this.props.onError?.(error, errorInfo);
+    
+    // TODO: Add error reporting service integration here
+    // Example: reportErrorToService(error, errorInfo);
   }
 
   override componentDidUpdate(prevProps: ErrorBoundaryProps): void {

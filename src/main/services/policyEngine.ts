@@ -256,8 +256,21 @@ class PolicyEngineClass extends EventEmitter {
   /**
    * Simple glob pattern matching
    * Supports * for any characters and ** for recursive
+   * Protected against ReDoS by limiting pattern complexity
    */
   private matchGlobPattern(pattern: string, value: string): boolean {
+    // Validate pattern to prevent ReDoS attacks
+    // Reject patterns that are too complex or have dangerous combinations
+    if (pattern.length > 500) {
+      throw new Error('Pattern too long (max 500 characters)');
+    }
+    
+    // Count wildcards to prevent excessive backtracking
+    const wildcardCount = (pattern.match(/\*/g) || []).length;
+    if (wildcardCount > 20) {
+      throw new Error('Pattern has too many wildcards (max 20)');
+    }
+
     // Escape special regex characters except *
     let regexPattern = pattern
       .replace(/[.+^${}()|[\]\\]/g, '\\$&')

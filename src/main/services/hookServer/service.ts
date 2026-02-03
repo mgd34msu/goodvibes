@@ -73,6 +73,16 @@ export class HookServerService extends EventEmitter {
   }
 
   /**
+   * Set a pending subagent parent mapping with size enforcement
+   */
+  private setSubagentParent(sessionId: string, parentId: string): void {
+    // Enforce size limit before adding new entry
+    this.enforceMapSizeLimit(this.pendingSubagentParents, 'pendingSubagentParents');
+    this.pendingSubagentParents.set(sessionId, parentId);
+    logger.debug(`Set pending subagent parent: ${sessionId} -> ${parentId}`);
+  }
+
+  /**
    * Pop a session from the stack for a working directory
    */
   private popSession(workingDirectory: string | undefined, sessionId: string): void {

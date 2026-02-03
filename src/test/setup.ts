@@ -116,6 +116,9 @@ const mockGoodVibesAPI = {
   gitStash: vi.fn().mockResolvedValue(true),
   gitInit: vi.fn().mockResolvedValue(true),
   gitReset: vi.fn().mockResolvedValue(true),
+  gitWatch: vi.fn().mockResolvedValue(true),
+  gitUnwatch: vi.fn().mockResolvedValue(true),
+  onGitChanged: vi.fn().mockReturnValue(() => {}),
 
   // File/Folder
   selectFolder: vi.fn().mockResolvedValue(null),

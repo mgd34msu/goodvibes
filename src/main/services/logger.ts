@@ -58,7 +58,16 @@ const defaultConfig: LoggerConfig = {
   maxFiles: 5,
 };
 
+/**
+ * Structured logger with console and file output support
+ * Provides context-aware logging with request IDs, timestamps, and metadata
+ * @example
+ * const logger = new Logger('MyModule')
+ * logger.info('Operation completed', { count: 5 })
+ * logger.error('Operation failed', error, { userId: '123' })
+ */
 export class Logger {
+  private static readonly MAX_LOG_BUFFER_SIZE = 1000;
   private module: string;
   private static config: LoggerConfig = { ...defaultConfig };
   private static logStream: fs.WriteStream | null = null;
@@ -66,10 +75,20 @@ export class Logger {
   private static logBuffer: LogEntry[] = [];
   private static flushInterval: NodeJS.Timeout | null = null;
 
+  /**
+   * Create a new logger instance for a specific module
+   * @param module - The module name to include in log entries
+   */
   constructor(module: string) {
     this.module = module;
   }
 
+  /**
+   * Configure global logger settings
+   * @param options - Partial configuration options to override defaults
+   * @example
+   * Logger.configure({ level: 'debug', enableFile: true })
+   */
   static configure(options: Partial<LoggerConfig>): void {
     Logger.config = { ...Logger.config, ...options };
 
@@ -78,10 +97,18 @@ export class Logger {
     }
   }
 
+  /**
+   * Set the minimum log level for output
+   * @param level - The minimum level to log ('debug' | 'info' | 'warn' | 'error')
+   */
   static setLevel(level: LogLevel): void {
     Logger.config.level = level;
   }
 
+  /**
+   * Get the current minimum log level
+   * @returns The current log level
+   */
   static getLevel(): LogLevel {
     return Logger.config.level;
   }
@@ -143,6 +170,10 @@ export class Logger {
     Logger.logStream.write(content);
   }
 
+  /**
+   * Flush buffered logs and close file streams
+   * Should be called before application shutdown
+   */
   static shutdown(): void {
     Logger.flush();
 
@@ -238,30 +269,63 @@ export class Logger {
     if (Logger.config.enableFile) {
       Logger.logBuffer.push(entry);
 
-      // Immediate flush for errors
-      if (level === 'error') {
+      // Immediate flush for errors or when buffer is full
+      if (level === 'error' || Logger.logBuffer.length >= Logger.MAX_LOG_BUFFER_SIZE) {
         Logger.flush();
       }
     }
   }
 
+  /**
+   * Log a debug-level message
+   * @param message - The log message
+   * @param data - Optional data to log (objects will be JSON stringified)
+   * @param metadata - Optional metadata (requestId, duration, etc.)
+   */
   debug(message: string, data?: unknown, metadata?: LogMetadata): void {
     this.log('debug', message, data, metadata);
   }
 
+  /**
+   * Log an info-level message
+   * @param message - The log message
+   * @param data - Optional data to log (objects will be JSON stringified)
+   * @param metadata - Optional metadata (requestId, duration, etc.)
+   */
   info(message: string, data?: unknown, metadata?: LogMetadata): void {
     this.log('info', message, data, metadata);
   }
 
+  /**
+   * Log a warning-level message
+   * @param message - The log message
+   * @param data - Optional data to log (objects will be JSON stringified)
+   * @param metadata - Optional metadata (requestId, duration, etc.)
+   */
   warn(message: string, data?: unknown, metadata?: LogMetadata): void {
     this.log('warn', message, data, metadata);
   }
 
+  /**
+   * Log an error-level message
+   * @param message - The log message
+   * @param data - Optional data to log (Error objects will include stack traces)
+   * @param metadata - Optional metadata (requestId, duration, etc.)
+   */
   error(message: string, data?: unknown, metadata?: LogMetadata): void {
     this.log('error', message, data, metadata);
   }
 
   // Convenience methods for common patterns
+  /**
+   * Start a timer for measuring operation duration
+   * @param label - Label for the timed operation
+   * @returns Function to call when operation completes (logs duration)
+   * @example
+   * const done = logger.time('fetchData')
+   * await fetchData()
+   * done() // logs "fetchData completed" with duration metadata
+   */
   time(label: string): () => void {
     const start = performance.now();
     return () => {
@@ -270,6 +334,14 @@ export class Logger {
     };
   }
 
+  /**
+   * Create a child logger with a namespaced module name
+   * @param subModule - Sub-module name to append to current module
+   * @returns New logger instance with combined module name
+   * @example
+   * const parentLogger = new Logger('Database')
+   * const childLogger = parentLogger.child('Migrations') // => 'Database:Migrations'
+   */
   child(subModule: string): Logger {
     return new Logger(`${this.module}:${subModule}`);
   }

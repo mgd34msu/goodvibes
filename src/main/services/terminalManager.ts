@@ -16,6 +16,16 @@ import type { TerminalInfo, TerminalStartOptions, TerminalStartResult } from '..
 const logger = new Logger('TerminalManager');
 
 // ============================================================================
+// CHUNKED WRITE TRACKING - Prevent memory leaks
+// ============================================================================
+
+/**
+ * Track active chunk writes per terminal for cleanup on terminal kill.
+ * Maps terminal ID to the active setTimeout handle.
+ */
+const activeChunkWrites = new Map<number, NodeJS.Timeout>();
+
+// ============================================================================
 // INPUT VALIDATION - Security against command injection
 // ============================================================================
 
@@ -36,7 +46,7 @@ function isValidSessionId(sessionId: string): boolean {
  * 2. Are absolute paths or known shell names
  * 3. Actually exist on the filesystem (for absolute paths)
  */
-function isValidShellPath(shellPath: string): boolean {
+async function isValidShellPath(shellPath: string): Promise<boolean> {
   if (!shellPath || shellPath.length === 0 || shellPath.length > 1024) {
     return false;
   }
@@ -69,7 +79,7 @@ function isValidShellPath(shellPath: string): boolean {
 
     // Check if the file exists and is executable
     try {
-      const stats = fs.statSync(shellPath);
+      const stats = await fs.promises.stat(shellPath);
       if (!stats.isFile()) {
         logger.warn('Shell path is not a file', { shellPath });
         return false;
@@ -101,7 +111,7 @@ function isValidShellPath(shellPath: string): boolean {
  * Validate working directory path.
  * Prevents directory traversal and ensures the path exists.
  */
-function isValidWorkingDirectory(cwd: string): boolean {
+async function isValidWorkingDirectory(cwd: string): Promise<boolean> {
   if (!cwd || cwd.length === 0 || cwd.length > 4096) {
     return false;
   }
@@ -115,7 +125,7 @@ function isValidWorkingDirectory(cwd: string): boolean {
 
   // Check if directory exists
   try {
-    const stats = fs.statSync(cwd);
+    const stats = await fs.promises.stat(cwd);
     if (!stats.isDirectory()) {
       logger.warn('Working directory is not a directory', { cwd });
       return false;
@@ -224,7 +234,7 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
     const workingDir = options.cwd || process.cwd();
 
     // Validate working directory to prevent injection attacks
-    if (!isValidWorkingDirectory(workingDir)) {
+    if (!(await isValidWorkingDirectory(workingDir))) {
       logger.error('Invalid working directory', { cwd: workingDir });
       return { error: 'Invalid working directory path' };
     }
@@ -355,7 +365,7 @@ export async function startPlainTerminal(options: TerminalStartOptions): Promise
     const workingDir = options.cwd || process.cwd();
 
     // Validate working directory to prevent injection attacks
-    if (!isValidWorkingDirectory(workingDir)) {
+    if (!(await isValidWorkingDirectory(workingDir))) {
       logger.error('Invalid working directory for plain terminal', { cwd: workingDir });
       return { error: 'Invalid working directory path' };
     }
@@ -371,7 +381,7 @@ export async function startPlainTerminal(options: TerminalStartOptions): Promise
     // Use custom shell only if it's valid, otherwise fall back to default
     let shell = defaultShell;
     if (customShell) {
-      if (isValidShellPath(customShell)) {
+      if (await isValidShellPath(customShell)) {
         shell = customShell;
       } else {
         logger.warn('Custom shell path is invalid, using default', {
@@ -382,7 +392,7 @@ export async function startPlainTerminal(options: TerminalStartOptions): Promise
     }
 
     // Final validation of the shell path
-    if (!isValidShellPath(shell)) {
+    if (!(await isValidShellPath(shell))) {
       logger.error('Shell path validation failed', { shell });
       return { error: 'Invalid shell configuration' };
     }
@@ -485,7 +495,7 @@ export function writeToTerminal(id: number, data: string): void {
     }
 
     // For large data, chunk it to prevent buffer overflow
-    writeChunked(terminal.pty, data);
+    writeChunked(id, terminal.pty, data);
   } catch (error) {
     logger.error(`Failed to write to terminal ${id}`, error);
   }
@@ -495,11 +505,27 @@ export function writeToTerminal(id: number, data: string): void {
  * Write large data in chunks with delays to prevent buffer overflow.
  * This is necessary because node-pty and terminals have buffer size limits.
  */
-function writeChunked(ptyProc: pty.IPty, data: string): void {
+function writeChunked(terminalId: number, ptyProc: pty.IPty, data: string): void {
+  // Clear any existing write for this terminal
+  const existing = activeChunkWrites.get(terminalId);
+  if (existing) {
+    clearTimeout(existing);
+    activeChunkWrites.delete(terminalId);
+  }
+
   let offset = 0;
 
   const writeNextChunk = () => {
-    if (offset >= data.length) return;
+    // Terminal killed, stop writing
+    if (!terminals.has(terminalId)) {
+      activeChunkWrites.delete(terminalId);
+      return;
+    }
+
+    if (offset >= data.length) {
+      activeChunkWrites.delete(terminalId);
+      return;
+    }
 
     const chunk = data.slice(offset, offset + PASTE_CHUNK_SIZE);
     offset += PASTE_CHUNK_SIZE;
@@ -508,10 +534,14 @@ function writeChunked(ptyProc: pty.IPty, data: string): void {
       ptyProc.write(chunk);
 
       if (offset < data.length) {
-        setTimeout(writeNextChunk, PASTE_CHUNK_DELAY_MS);
+        const timeout = setTimeout(writeNextChunk, PASTE_CHUNK_DELAY_MS);
+        activeChunkWrites.set(terminalId, timeout);
+      } else {
+        activeChunkWrites.delete(terminalId);
       }
     } catch (error) {
       logger.error('Failed to write chunk to terminal', error);
+      activeChunkWrites.delete(terminalId);
     }
   };
 
@@ -533,6 +563,13 @@ export function killTerminal(id: number): boolean {
   const terminal = terminals.get(id);
   if (terminal) {
     try {
+      // Clear any active chunk writes to prevent memory leaks
+      const activeWrite = activeChunkWrites.get(id);
+      if (activeWrite) {
+        clearTimeout(activeWrite);
+        activeChunkWrites.delete(id);
+      }
+
       terminal.pty.kill();
       terminals.delete(id);
       logger.info(`Terminal ${id} killed`);

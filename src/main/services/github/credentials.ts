@@ -5,6 +5,8 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import os from 'os';
 import Store from 'electron-store';
 import { Logger } from '../logger.js';
 import type { GitHubUser } from '../../../shared/types/github.js';
@@ -14,6 +16,29 @@ const logger = new Logger('GitHubCredentials');
 // ============================================================================
 // SECURE STORE
 // ============================================================================
+
+/**
+ * Generate a machine-specific encryption key.
+ * Uses hardware identifiers to create a per-installation key.
+ * This is more secure than a hardcoded key, though still not perfect.
+ * For production, consider using OS keychains (Keytar/safeStorage).
+ */
+function generateEncryptionKey(): string {
+  // Combine multiple machine identifiers for uniqueness
+  const machineInfo = [
+    os.hostname(),
+    os.platform(),
+    os.arch(),
+    os.homedir(),
+    app.getPath('userData'),
+  ].join('|');
+
+  // Generate a stable hash
+  return crypto.createHash('sha256')
+    .update(`goodvibes-github-${machineInfo}`)
+    .digest('hex')
+    .substring(0, 32);
+}
 
 // Type for GitHub store schema
 interface GitHubStoreSchema {
@@ -32,7 +57,7 @@ interface GitHubStoreSchema {
 // Create an encrypted store for GitHub credentials
 export const githubStore = new Store<GitHubStoreSchema>({
   name: 'github-auth',
-  encryptionKey: 'goodvibes-github-store',
+  encryptionKey: generateEncryptionKey(),
 });
 
 // ============================================================================

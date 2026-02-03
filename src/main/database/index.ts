@@ -69,6 +69,13 @@ let db: Database.Database | null = null;
 // INITIALIZATION
 // ============================================================================
 
+/**
+ * Initialize the database connection and create all necessary tables
+ * @param userDataPath - Path to the user data directory where the database will be stored
+ * @returns Promise that resolves when database initialization is complete
+ * @example
+ * await initDatabase(app.getPath('userData'))
+ */
 export async function initDatabase(userDataPath: string): Promise<void> {
   const dbPath = path.join(userDataPath, 'goodvibes.db');
 
@@ -109,6 +116,9 @@ export async function initDatabase(userDataPath: string): Promise<void> {
   logger.info(`Database initialized at ${dbPath}`);
 }
 
+/**
+ * Close the database connection and clean up resources
+ */
 export function closeDatabase(): void {
   if (db) {
     db.close();
@@ -410,6 +420,13 @@ function createIndexes(): void {
 // SETTINGS OPERATIONS
 // ============================================================================
 
+/**
+ * Retrieve a setting value from the database by key
+ * @param key - The setting key to retrieve
+ * @returns The parsed setting value of type T, or null if not found
+ * @example
+ * const theme = getSetting<string>('theme') // => "dark" or null
+ */
 export function getSetting<T>(key: string): T | null {
   const database = getDatabase();
   const row = database.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
@@ -422,6 +439,14 @@ export function getSetting<T>(key: string): T | null {
   }
 }
 
+/**
+ * Store or update a setting value in the database
+ * @param key - The setting key to store
+ * @param value - The value to store (will be JSON stringified)
+ * @example
+ * setSetting('theme', 'dark')
+ * setSetting('windowBounds', { x: 100, y: 100, width: 800, height: 600 })
+ */
 export function setSetting(key: string, value: unknown): void {
   const database = getDatabase();
   database.prepare(`
@@ -431,6 +456,12 @@ export function setSetting(key: string, value: unknown): void {
   `).run(key, JSON.stringify(value));
 }
 
+/**
+ * Retrieve all settings from the database
+ * @returns Object containing all settings as key-value pairs
+ * @example
+ * const settings = getAllSettings() // => { theme: 'dark', windowBounds: {...}, ... }
+ */
 export function getAllSettings(): Record<string, unknown> {
   const database = getDatabase();
   const rows = database.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
@@ -452,6 +483,13 @@ export function getAllSettings(): Record<string, unknown> {
 // ANALYTICS
 // ============================================================================
 
+/**
+ * Compute comprehensive analytics data from all sessions
+ * @returns Analytics object containing totals, daily stats, project costs, and time series data
+ * @example
+ * const analytics = getAnalytics()
+ * console.log(analytics.totalCost, analytics.totalSessions)
+ */
 export function getAnalytics(): Analytics {
   const database = getDatabase();
   const today = getTodayString();
@@ -497,6 +535,7 @@ export function getAnalytics(): Analytics {
       SUM(cost) as project_cost
     FROM sessions
     GROUP BY project_name
+    LIMIT 100
   `).all() as { project_name: string; project_cost: number }[];
 
   const costByProject: Record<string, number> = {};
@@ -560,6 +599,13 @@ export function getAnalytics(): Analytics {
 import type { ToolUsageStat, ActivityLogEntry } from '../../shared/types/index.js';
 import { mapRowToActivity, type ActivityLogRow } from './mappers.js';
 
+/**
+ * Get aggregated tool usage statistics across all sessions
+ * @returns Array of tool usage statistics sorted by usage count descending
+ * @example
+ * const stats = getToolUsageStats()
+ * // => [{ toolName: 'Read', totalCount: 523, lastUsed: '2024-01-15' }, ...]
+ */
 export function getToolUsageStats(): ToolUsageStat[] {
   const database = getDatabase();
   const rows = database.prepare(`
@@ -576,11 +622,23 @@ export function getToolUsageStats(): ToolUsageStat[] {
   }));
 }
 
+/**
+ * Record tool usage for a session
+ * @param sessionId - The session ID
+ * @param toolName - The name of the tool used
+ * @param count - Number of times the tool was used (default: 1)
+ * @example
+ * trackToolUsage('session-123', 'Read', 5)
+ */
 export function trackToolUsage(sessionId: string, toolName: string, count: number = 1): void {
   const database = getDatabase();
   database.prepare('INSERT INTO tool_usage (session_id, tool_name, count) VALUES (?, ?, ?)').run(sessionId, toolName, count);
 }
 
+/**
+ * Delete all tool usage records for a specific session
+ * @param sessionId - The session ID whose tool usage records should be cleared
+ */
 export function clearSessionToolUsage(sessionId: string): void {
   const database = getDatabase();
   database.prepare('DELETE FROM tool_usage WHERE session_id = ?').run(sessionId);
@@ -590,6 +648,15 @@ export function clearSessionToolUsage(sessionId: string): void {
 // ACTIVITY LOG
 // ============================================================================
 
+/**
+ * Log an activity event to the activity log
+ * @param type - The type of activity (e.g., 'session_created', 'session_deleted')
+ * @param sessionId - Associated session ID or null for global activities
+ * @param description - Human-readable description of the activity
+ * @param metadata - Optional additional data to store with the activity
+ * @example
+ * logActivity('session_created', 'session-123', 'Created new session', { project: 'myapp' })
+ */
 export function logActivity(type: string, sessionId: string | null, description: string, metadata?: unknown): void {
   const database = getDatabase();
   database.prepare('INSERT INTO activity_log (type, session_id, description, metadata) VALUES (?, ?, ?, ?)').run(
@@ -600,12 +667,22 @@ export function logActivity(type: string, sessionId: string | null, description:
   );
 }
 
+/**
+ * Retrieve recent activity log entries
+ * @param limit - Maximum number of entries to return (default: 50)
+ * @returns Array of activity log entries sorted by timestamp descending
+ * @example
+ * const activities = getRecentActivity(10)
+ */
 export function getRecentActivity(limit: number = 50): ActivityLogEntry[] {
   const database = getDatabase();
   const rows = database.prepare('SELECT * FROM activity_log ORDER BY timestamp DESC, id DESC LIMIT ?').all(limit) as ActivityLogRow[];
   return rows.map(mapRowToActivity);
 }
 
+/**
+ * Delete all entries from the activity log
+ */
 export function clearActivityLog(): void {
   const database = getDatabase();
   database.prepare('DELETE FROM activity_log').run();

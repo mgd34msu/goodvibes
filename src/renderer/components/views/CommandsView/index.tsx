@@ -4,6 +4,9 @@
 
 import { useState, useCallback } from 'react';
 import { Terminal, Plus, Settings } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('CommandsView');
 import { CommandForm } from './CommandForm';
 import { CommandList } from './CommandList';
 import { CommandFilters } from './CommandFilters';
@@ -86,7 +89,7 @@ export default function CommandsView() {
       };
       await saveCommand(commandData, projectPath);
     } catch (error) {
-      console.error('Failed to install command:', error);
+      logger.error('Failed to install command:', error);
     }
     setInstallCommand(null);
   };

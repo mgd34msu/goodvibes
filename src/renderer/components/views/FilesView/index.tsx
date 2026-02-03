@@ -25,6 +25,20 @@ interface TreeNode {
   modified?: string;
 }
 
+interface DirectoryEntry {
+  name: string;
+  isDirectory: boolean;
+  size?: number;
+  modified?: string;
+}
+
+interface FileTreeRoot {
+  id: string;
+  name: string;
+  isDir: boolean;
+  children: TreeNode[];
+}
+
 interface PinnedFolder {
   path: string;
   name: string;
@@ -144,15 +158,15 @@ export default function FilesView() {
     return await window.goodvibes.getHomeDirectory() || '/';
   };
 
-  const buildFileTree = async (dirPath: string): Promise<any> => {
+  const buildFileTree = async (dirPath: string): Promise<FileTreeRoot> => {
     try {
       const entries = await window.goodvibes.readDirectory(dirPath);
 
       return {
         id: dirPath,
-        name: dirPath.split(/[\/]/).pop() || dirPath,
+        name: dirPath.split(/[/]/).pop() || dirPath,
         isDir: true,
-        children: entries.map((entry: any) => ({
+        children: entries.map((entry: DirectoryEntry) => ({
           id: `${dirPath}/${entry.name}`,
           name: entry.name,
           isDir: entry.isDirectory,
@@ -169,7 +183,7 @@ export default function FilesView() {
   const loadChildren = async (path: string): Promise<TreeNode[]> => {
     try {
       const entries = await window.goodvibes.readDirectory(path);
-      return entries.map((entry: any) => ({
+      return entries.map((entry: DirectoryEntry) => ({
         id: `${path}/${entry.name}`,
         name: entry.name,
         isDir: entry.isDirectory,

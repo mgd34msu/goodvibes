@@ -37,7 +37,7 @@ export function registerProtocol(): void {
  * Handle a protocol URL (goodvibes://...)
  * Routes to appropriate handler based on the path
  */
-export function handleProtocolUrl(url: string): void {
+export async function handleProtocolUrl(url: string): Promise<void> {
   logger.info('Handling protocol URL', { url });
 
   try {
@@ -52,10 +52,10 @@ export function handleProtocolUrl(url: string): void {
 
       if (error) {
         logger.error('OAuth callback received error', { error, errorDescription });
-        handleOAuthCallback(null, state, error, errorDescription);
+        await handleOAuthCallback(null, state, error, errorDescription);
       } else if (code) {
         logger.info('OAuth callback received code');
-        handleOAuthCallback(code, state, null, null);
+        await handleOAuthCallback(code, state, null, null);
       } else {
         logger.error('OAuth callback missing code and error');
       }
@@ -91,7 +91,9 @@ export function setupSingleInstance(): boolean {
     const protocolUrl = commandLine.find(arg => arg.startsWith(`${PROTOCOL_NAME}://`));
 
     if (protocolUrl) {
-      handleProtocolUrl(protocolUrl);
+      handleProtocolUrl(protocolUrl).catch((error) => {
+        logger.error('Failed to handle protocol URL from second instance', error);
+      });
     }
 
     // Focus the main window
@@ -110,7 +112,9 @@ export function setupSingleInstance(): boolean {
     logger.info('Received open-url event', { url });
 
     if (url.startsWith(`${PROTOCOL_NAME}://`)) {
-      handleProtocolUrl(url);
+      handleProtocolUrl(url).catch((error) => {
+        logger.error('Failed to handle protocol URL from open-url event', error);
+      });
     }
   });
 

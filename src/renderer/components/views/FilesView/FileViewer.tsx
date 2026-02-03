@@ -5,6 +5,9 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { X, Edit, Save, FileText, Image as ImageIcon, Eye, EyeOff } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('FileViewer');
 import { clsx } from 'clsx';
 import { MarkdownRenderer } from '../../common/MarkdownRenderer';
 
@@ -74,7 +77,7 @@ export function FileViewer({ file, content, isLoading, onClose, onSave }: FileVi
       setHasUnsavedChanges(false);
       setIsEditing(false);
     } catch (error) {
-      console.error('Failed to save file:', error);
+      logger.error('Failed to save file:', error);
     } finally {
       setIsSaving(false);
     }

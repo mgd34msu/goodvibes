@@ -21,6 +21,9 @@ import type { Theme, ThemeId, ThemeMetadata } from '../../shared/types/theme-typ
 import { DEFAULT_THEME_ID } from '../../shared/types/theme-types';
 import { useSettingsStore } from '../stores/settingsStore';
 import { applyTheme } from '../utils/themeInjector';
+import { createLogger } from '../../shared/logger';
+
+const logger = createLogger('ThemeContext');
 
 // Import all themes
 import { goodvibesClassic } from '../themes/goodvibes-classic';
@@ -187,7 +190,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): React.JSX.Eleme
       // Persist to settings store (async, but we don't need to wait)
       updateSetting('colorTheme', id).catch((error) => {
         // Log error but don't revert - the theme is already applied visually
-        console.error('Failed to persist theme setting:', error);
+        logger.error('Failed to persist theme setting:', error);
       });
     },
     [updateSetting]

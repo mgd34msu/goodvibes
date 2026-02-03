@@ -14,7 +14,7 @@ function applyExtensionLogic(pathStr: string): string {
   const pathParts = pathStr.split('/');
   const lastPart = pathParts[pathParts.length - 1];
   
-  if (lastPart && COMMON_EXTENSIONS.includes(lastPart as any) && pathParts.length >= 2) {
+  if (lastPart && (COMMON_EXTENSIONS as readonly string[]).includes(lastPart) && pathParts.length >= 2) {
     const secondToLast = pathParts[pathParts.length - 2];
     pathParts[pathParts.length - 2] = secondToLast + '.' + lastPart;
     pathParts.pop();
@@ -72,7 +72,7 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
 
     // Handle encoded dots in folder names (e.g., "goodvibes-sh" -> "goodvibes.sh")
     const lastPart = parts[parts.length - 1];
-    if (lastPart && COMMON_EXTENSIONS.includes(lastPart as any) && parts.length >= 2) {
+    if (lastPart && (COMMON_EXTENSIONS as readonly string[]).includes(lastPart) && parts.length >= 2) {
       const secondToLast = parts[parts.length - 2];
       return secondToLast + '.' + lastPart;
     }
@@ -145,6 +145,12 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
 
 /**
  * Format duration in seconds to human-readable string
+ * @param seconds - The duration in seconds to format
+ * @returns Formatted duration string (e.g., "42s", "2:30", "1:23:45")
+ * @example
+ * formatDuration(45) // => "45s"
+ * formatDuration(90) // => "1:30"
+ * formatDuration(3661) // => "1:01:01"
  */
 export function formatDuration(seconds: number): string {
   if (seconds < 60) {
@@ -164,13 +170,15 @@ export function formatDuration(seconds: number): string {
 
 /**
  * Format large numbers with comma separators for thousands, then M/B/T suffixes for larger numbers
- * Examples:
- * - 999 -> "999"
- * - 1000 -> "1,000"
- * - 999999 -> "999,999"
- * - 1000000 -> "1.00M"
- * - 1500000000 -> "1.50B"
- * - 2500000000000 -> "2.50T"
+ * @param num - The number to format (nullable)
+ * @returns Formatted number string with thousands separators or M/B/T suffix
+ * @example
+ * formatNumber(999) // => "999"
+ * formatNumber(1000) // => "1,000"
+ * formatNumber(999999) // => "999,999"
+ * formatNumber(1000000) // => "1.00M"
+ * formatNumber(1500000000) // => "1.50B"
+ * formatNumber(2500000000000) // => "2.50T"
  */
 export function formatNumber(num: number | null | undefined): string {
   if (num == null || isNaN(num)) return '0';
@@ -193,13 +201,15 @@ export function formatNumber(num: number | null | undefined): string {
 
 /**
  * Format cost with 2 decimal places and thousands separators
- * Examples:
- * - 0 -> "$0.00"
- * - 0.001 -> "$0.00"
- * - 0.015 -> "$0.02"
- * - 1.5 -> "$1.50"
- * - 1234.56 -> "$1,234.56"
- * - 1234567.89 -> "$1,234,567.89"
+ * @param cost - The cost amount in USD to format (nullable)
+ * @returns Formatted cost string in USD currency format
+ * @example
+ * formatCost(0) // => "$0.00"
+ * formatCost(0.001) // => "$0.00"
+ * formatCost(0.015) // => "$0.02"
+ * formatCost(1.5) // => "$1.50"
+ * formatCost(1234.56) // => "$1,234.56"
+ * formatCost(1234567.89) // => "$1,234,567.89"
  */
 export function formatCost(cost: number | null | undefined): string {
   if (cost == null || isNaN(cost)) return '$0.00';
@@ -214,7 +224,11 @@ export function formatCost(cost: number | null | undefined): string {
 }
 
 /**
- * Format date for display
+ * Format date for display in locale-aware short format
+ * @param dateStr - ISO date string or null/undefined
+ * @returns Formatted date string (e.g., "Jan 15, 2024") or "Unknown" if invalid
+ * @example
+ * formatDate("2024-01-15T10:30:00Z") // => "Jan 15, 2024"
  */
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';
@@ -232,7 +246,11 @@ export function formatDate(dateStr: string | null | undefined): string {
 }
 
 /**
- * Format date and time for display
+ * Format date and time for display in locale-aware format
+ * @param dateStr - ISO date string or null/undefined
+ * @returns Formatted date and time string (e.g., "Jan 15, 2024, 10:30 AM") or "Unknown" if invalid
+ * @example
+ * formatDateTime("2024-01-15T10:30:00Z") // => "Jan 15, 2024, 10:30 AM"
  */
 export function formatDateTime(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';
@@ -252,7 +270,12 @@ export function formatDateTime(dateStr: string | null | undefined): string {
 }
 
 /**
- * Format relative time (e.g., "2 hours ago")
+ * Format relative time from now (e.g., "2 hours ago")
+ * @param dateStr - ISO date string or null/undefined
+ * @returns Human-readable relative time string or "Unknown" if invalid
+ * @example
+ * formatRelativeTime("2024-01-15T10:00:00Z") // => "2 hours ago" (if current time is 12:00)
+ * formatRelativeTime("2024-01-10T10:00:00Z") // => "5 days ago"
  */
 export function formatRelativeTime(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';

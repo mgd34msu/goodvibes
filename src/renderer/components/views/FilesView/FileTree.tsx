@@ -350,7 +350,7 @@ export function FileTree({ rootPath, currentPath, onNavigate, onLoadChildren, pi
   }, [rootPath, loadChildren]);
 
   const getParentPath = (path: string) => {
-    const parts = path.split(/[\/]/).filter(Boolean);
+    const parts = path.split(/[/]/).filter(Boolean);
     if (parts.length <= 1) return path;
     parts.pop();
     if (path.match(/^[a-zA-Z]:/)) {

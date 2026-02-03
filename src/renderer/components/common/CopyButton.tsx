@@ -10,6 +10,9 @@ import { createLogger } from '../../../shared/logger';
 
 const logger = createLogger('CopyButton');
 
+// Constants
+const TOAST_DURATION_MS = 2000;
+
 export interface CopyButtonProps {
   /** Content to copy to clipboard */
   content: string;
@@ -50,7 +53,7 @@ export function CopyButton({
     try {
       await navigator.clipboard.writeText(content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), TOAST_DURATION_MS);
     } catch (err) {
       logger.error('Failed to copy:', err);
     }

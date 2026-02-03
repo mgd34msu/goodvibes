@@ -3,6 +3,9 @@
 // ============================================================================
 
 import { createRequestContext, runWithContextAsync } from '../services/requestContext.js';
+import { Logger } from '../services/logger.js';
+
+const logger = new Logger('IPC:Utils');
 
 /**
  * Wraps an IPC handler with request context for correlation logging.
@@ -18,6 +21,11 @@ export function withContext<TArgs extends unknown[], TReturn>(
 ): (...args: TArgs) => Promise<TReturn> {
   return async (...args: TArgs): Promise<TReturn> => {
     const context = createRequestContext(operation);
-    return runWithContextAsync(context, () => handler(...args));
+    try {
+      return await runWithContextAsync(context, () => handler(...args));
+    } catch (error) {
+      logger.error(`Error in IPC operation: ${operation}`, error);
+      throw error;
+    }
   };
 }

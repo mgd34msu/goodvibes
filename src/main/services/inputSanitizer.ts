@@ -14,6 +14,7 @@
 //
 // ============================================================================
 
+import path from 'path';
 import { Logger } from './logger.js';
 
 const logger = new Logger('InputSanitizer');
@@ -42,8 +43,14 @@ const _WINDOWS_DANGEROUS_PATTERNS = /[&|<>^%]/;
 
 /**
  * Path traversal patterns
+ * Checks for various encodings and formats of path traversal attempts
  */
-const PATH_TRAVERSAL_PATTERN = /\.\.[/\\]/;
+const PATH_TRAVERSAL_PATTERNS = [
+  /\.\.[/\\]/,           // Standard ../ or ..\
+  /%2e%2e[/\\]/i,        // URL-encoded ../ or ..\
+  /\.\.\/|\.\.%2[fF]/,  // Mixed encoding
+  /\.\.%5[cC]/,          // URL-encoded backslash
+];
 
 // ============================================================================
 // VALIDATION RESULTS
@@ -80,9 +87,11 @@ export function validateCommandName(command: string): ValidationResult {
 
   // Check for path components (only allow simple command names or absolute paths)
   // Reject relative paths that could escape intended directories
-  if (PATH_TRAVERSAL_PATTERN.test(trimmed)) {
-    logger.warn('Command contains path traversal pattern', { command: trimmed });
-    return { valid: false, error: 'Command contains path traversal characters' };
+  for (const pattern of PATH_TRAVERSAL_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      logger.warn('Command contains path traversal pattern', { command: trimmed });
+      return { valid: false, error: 'Command contains path traversal characters' };
+    }
   }
 
   // Allow alphanumeric, dots, hyphens, underscores, and path separators for absolute paths
@@ -215,10 +224,27 @@ export function validatePath(pathStr: string, allowAbsolute = true): ValidationR
     return { valid: false, error: 'Path contains null byte' };
   }
 
-  // Check for path traversal
-  if (PATH_TRAVERSAL_PATTERN.test(trimmed)) {
-    logger.warn('Path contains traversal pattern', { path: trimmed });
-    return { valid: false, error: 'Path contains directory traversal' };
+  // Check for path traversal (including URL-encoded variants)
+  for (const pattern of PATH_TRAVERSAL_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      logger.warn('Path contains traversal pattern', { path: trimmed });
+      return { valid: false, error: 'Path contains directory traversal' };
+    }
+  }
+  
+  // Additional check: resolve path and ensure it doesn't escape bounds
+  // This catches cases that regex patterns might miss
+  try {
+    const resolved = path.resolve(trimmed);
+    // Check if resolved path contains .. components (shouldn't happen after resolve, but defense in depth)
+    if (resolved.includes('..')) {
+      logger.warn('Path resolves to traversal pattern', { path: trimmed, resolved });
+      return { valid: false, error: 'Path contains directory traversal' };
+    }
+  } catch {
+    // If path.resolve fails, the path is likely invalid
+    logger.warn('Path resolution failed', { path: trimmed });
+    return { valid: false, error: 'Invalid path' };
   }
 
   // Check if absolute path is allowed

@@ -39,11 +39,13 @@ const logger = new Logger('SessionManager');
 // ============================================================================
 
 export class SessionManagerInstance {
+  private readonly SESSION_UPDATE_THROTTLE_MS = 250; // Max 4 updates/sec
   private claudeDir: string;
   private statusCallback: StatusCallback;
   private watchedSessions = new Map<string, boolean>();
   private knownSessionFiles = new Set<string>();
   private sessionWatchInterval: NodeJS.Timeout | null = null;
+  private lastUpdateTime = new Map<string, number>();
 
   constructor(statusCallback: StatusCallback) {
     this.claudeDir = path.join(os.homedir(), '.claude', 'projects');
@@ -77,16 +79,23 @@ export class SessionManagerInstance {
 
     logger.info(`Found ${total} session files`);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      this.statusCallback('scanning', `Processing ${path.basename(file.path)}`, { current: i + 1, total });
+    // Process files in batches for better throughput
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      this.statusCallback('scanning', `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}`, { current: i + 1, total });
 
-      try {
-        await this.processSessionFile(file.path, file.mtime);
-        this.knownSessionFiles.add(file.path);
-      } catch (error) {
-        logger.error(`Failed to process session file: ${file.path}`, error);
-      }
+      await Promise.all(
+        batch.map(file =>
+          this.processSessionFile(file.path, file.mtime)
+            .then(() => {
+              this.knownSessionFiles.add(file.path);
+            })
+            .catch(err => {
+              logger.error(`Failed to process: ${file.path}`, err);
+            })
+        )
+      );
     }
 
     this.statusCallback('complete', `Scanned ${total} sessions`);
@@ -278,13 +287,23 @@ export class SessionManagerInstance {
           unwatchFile(filePath);
           this.watchedSessions.delete(filePath);
           this.knownSessionFiles.delete(filePath);
+          this.lastUpdateTime.delete(filePath);
           return;
         }
 
         const stats = await fs.stat(filePath);
         if (stats.size !== lastSize) {
+          // Throttle updates to max 4 per second
+          const now = Date.now();
+          const lastUpdate = this.lastUpdateTime.get(filePath) || 0;
+          if (now - lastUpdate < this.SESSION_UPDATE_THROTTLE_MS) {
+            logger.debug('Session update throttled', { filePath, sessionId, timeSinceLastUpdate: now - lastUpdate });
+            return;
+          }
+          
           logger.debug('Session file changed', { filePath, sessionId, oldSize: lastSize, newSize: stats.size });
           lastSize = stats.size;
+          this.lastUpdateTime.set(filePath, now);
           const { messages } = await parseSessionFileWithStats(filePath);
 
           logger.debug('Sending session update event', { filePath, sessionId, messageCount: messages.length });
@@ -307,6 +326,7 @@ export class SessionManagerInstance {
             unwatchFile(filePath);
             this.watchedSessions.delete(filePath);
             this.knownSessionFiles.delete(filePath);
+            this.lastUpdateTime.delete(filePath);
             logger.debug('Cleaned up watcher for deleted file after error', { filePath, sessionId });
           } catch (cleanupError) {
             // Ignore cleanup errors

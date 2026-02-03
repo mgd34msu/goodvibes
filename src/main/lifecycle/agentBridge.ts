@@ -26,6 +26,10 @@ import type {
 
 const logger = new Logger('AgentBridge');
 
+// Max limits for unbounded maps to prevent memory leaks
+const MAX_AGENT_INSTANCE_COUNTS = 1000;
+const MAX_TERMINAL_TO_AGENTS = 500;
+
 // Track detected agents: key is a composite of terminalId + timestamp to ensure uniqueness
 // Also track agent instance counts per name for display purposes
 const agentInstanceCounts = new Map<string, number>(); // agentName -> count
@@ -72,6 +76,12 @@ function handleAgentSpawn(data: AgentSpawnData): void {
   // Track instance count for this agent name
   const currentCount = agentInstanceCounts.get(agentName) || 0;
   const instanceNumber = currentCount + 1;
+  
+  // Enforce size limit with LRU eviction
+  if (agentInstanceCounts.size >= MAX_AGENT_INSTANCE_COUNTS && !agentInstanceCounts.has(agentName)) {
+    const firstKey = agentInstanceCounts.keys().next().value;
+    if (firstKey) agentInstanceCounts.delete(firstKey);
+  }
   agentInstanceCounts.set(agentName, instanceNumber);
 
   // Create a display name with instance number if > 1
@@ -89,6 +99,11 @@ function handleAgentSpawn(data: AgentSpawnData): void {
 
   // Track which agents belong to which terminal for cleanup
   if (!terminalToAgents.has(terminalId)) {
+    // Enforce size limit with LRU eviction
+    if (terminalToAgents.size >= MAX_TERMINAL_TO_AGENTS) {
+      const firstKey = terminalToAgents.keys().next().value;
+      if (firstKey !== undefined) terminalToAgents.delete(firstKey);
+    }
     terminalToAgents.set(terminalId, new Set());
   }
   const terminalAgents = terminalToAgents.get(terminalId);

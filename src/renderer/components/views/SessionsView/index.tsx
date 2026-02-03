@@ -4,6 +4,9 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import type { Session, SessionFilter } from './types';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('SessionsView');
 import { useSessions, useLiveSessions, useSessionFilters } from './hooks';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { SessionFilters } from './SessionFilters';
@@ -31,7 +34,7 @@ export default function SessionsView() {
       // Only scan for NEW sessions, not re-process all existing ones
       void window.goodvibes.scanNewSessions().catch(() => {
         // API should always exist - log if call fails
-        console.debug('scanNewSessions API call failed');
+        logger.debug('scanNewSessions API call failed');
       });
     }, 10000);
     
@@ -62,7 +65,7 @@ export default function SessionsView() {
         toast.info('This session has completed and is no longer accessible.', { title: 'Session unavailable' });
       }
     } catch (err) {
-      console.error('Failed to fetch session for activity item:', err);
+      logger.error('Failed to fetch session for activity item:', err);
       toast.error('Failed to load session');
     }
   }, [sessions]);

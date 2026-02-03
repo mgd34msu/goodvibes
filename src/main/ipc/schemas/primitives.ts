@@ -165,7 +165,15 @@ export const relativeFilePathSchema = z.string()
   .min(1, 'File path is required')
   .max(500, 'File path too long')
   .refine(
-    (val) => !path.isAbsolute(val),
+    (val) => {
+      // Check for Unix absolute paths
+      if (path.isAbsolute(val)) return false;
+      // Check for Windows absolute paths (works cross-platform)
+      if (/^[a-zA-Z]:[/\\]/.test(val)) return false;
+      // Check for UNC paths
+      if (/^\\\\/.test(val)) return false;
+      return true;
+    },
     { message: 'Path must be relative' }
   )
   .refine(

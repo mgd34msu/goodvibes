@@ -6,6 +6,9 @@
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+import { Logger } from '../logger.js';
+
+const logger = new Logger('PricingFetcher');
 
 // ============================================================================
 // TYPES
@@ -94,20 +97,25 @@ function loadFullCache(): PricingCache | null {
     const cache = JSON.parse(data) as PricingCache;
     
     // Migrate old format to new format if needed
-    if (!cache.history && (cache as any).models) {
-      const oldCache = cache as any;
+    interface OldCacheFormat {
+      fetchedAt?: string;
+      models?: Record<string, ModelPricing>;
+    }
+    
+    if (!cache.history && 'models' in cache) {
+      const oldCache = cache as unknown as OldCacheFormat;
       return {
         lastFetchedAt: oldCache.fetchedAt || new Date().toISOString(),
         history: [{
           effectiveDate: oldCache.fetchedAt || new Date().toISOString(),
-          models: oldCache.models,
+          models: oldCache.models || {},
         }],
       };
     }
     
     return cache;
   } catch (error) {
-    console.error('Failed to load pricing cache:', error);
+    logger.error('Failed to load pricing cache', error);
     return null;
   }
 }
@@ -126,7 +134,7 @@ function saveCache(cache: PricingCache): void {
     const cachePath = getCachePath();
     fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
   } catch (error) {
-    console.error('Failed to save pricing cache:', error);
+    logger.error('Failed to save pricing cache', error);
   }
 }
 
@@ -282,7 +290,7 @@ async function fetchAndUpdateCache(): Promise<PricingCache> {
       };
       
       saveCache(updatedCache);
-      console.log(`Pricing updated: ${Object.keys(newPricing).length} models, new entry added`);
+      logger.info(`Pricing updated: ${Object.keys(newPricing).length} models, new entry added`);
       return updatedCache;
     } else {
       // No price changes, just update the fetch timestamp
@@ -292,11 +300,11 @@ async function fetchAndUpdateCache(): Promise<PricingCache> {
       };
       
       saveCache(updatedCache);
-      console.log(`Pricing checked: no changes detected`);
+      logger.info('Pricing checked: no changes detected');
       return updatedCache;
     }
   } catch (error) {
-    console.error('Failed to fetch pricing from Anthropic:', error);
+    logger.error('Failed to fetch pricing from Anthropic', error);
     
     // Return existing cache or create fallback
     if (existingCache && existingCache.history.length > 0) {

@@ -292,7 +292,22 @@ export class HookExecutor {
         // Check argument pattern (simplified glob matching)
         if (argPattern !== '*' && context.toolInput) {
           const inputStr = JSON.stringify(context.toolInput);
-          const regex = new RegExp(argPattern.replace(/\*/g, '.*'));
+          
+          // Protect against ReDoS by validating pattern
+          if (argPattern.length > 200) {
+            logger.warn('Hook pattern too long, rejecting', { pattern: argPattern });
+            return false;
+          }
+          
+          const wildcardCount = (argPattern.match(/\*/g) || []).length;
+          if (wildcardCount > 10) {
+            logger.warn('Hook pattern has too many wildcards, rejecting', { pattern: argPattern });
+            return false;
+          }
+          
+          // Escape regex special characters before replacing wildcards
+          const escapedPattern = argPattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escapedPattern.replace(/\*/g, '.*'));
           return regex.test(inputStr);
         }
 

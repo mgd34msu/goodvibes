@@ -7,7 +7,7 @@
 //
 // ============================================================================
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../logger.js';
@@ -258,11 +258,21 @@ export async function installPlugin(
       logger.debug(`Cloning ${treeInfo.repoUrl} (branch: ${treeInfo.branch}) to ${normalizedTempCloneDir}`);
       
       try {
-        execSync(`git clone --depth 1 --branch "${treeInfo.branch}" "${treeInfo.repoUrl}" "${normalizedTempCloneDir}"`, {
+        const cloneResult = spawnSync('git', [
+          'clone',
+          '--depth', '1',
+          '--branch', treeInfo.branch,
+          treeInfo.repoUrl,
+          normalizedTempCloneDir
+        ], {
           stdio: 'pipe',
           encoding: 'utf-8',
           timeout: 120000, // 2 minute timeout
         });
+        
+        if (cloneResult.error || cloneResult.status !== 0) {
+          throw new Error(cloneResult.stderr || cloneResult.error?.message || 'Git clone failed');
+        }
       } catch (cloneError) {
         const errorMessage = cloneError instanceof Error ? cloneError.message : String(cloneError);
         logger.error(`Git clone failed for ${treeInfo.repoUrl}:`, errorMessage);
@@ -290,11 +300,20 @@ export async function installPlugin(
       logger.debug(`Cloning ${repository} to ${normalizedPluginDir}`);
       
       try {
-        execSync(`git clone "${repository}" "${normalizedPluginDir}"`, {
+        const cloneResult = spawnSync('git', [
+          'clone',
+          repository,
+          normalizedPluginDir
+        ], {
           stdio: 'pipe',
           encoding: 'utf-8',
           timeout: 120000, // 2 minute timeout
         });
+        
+        if (cloneResult.error || cloneResult.status !== 0) {
+          throw new Error(cloneResult.stderr || cloneResult.error?.message || 'Git clone failed');
+        }
+        
         logger.info(`Successfully cloned repository to ${tempPluginDir}`);
       } catch (cloneError) {
         const errorMessage = cloneError instanceof Error ? cloneError.message : String(cloneError);

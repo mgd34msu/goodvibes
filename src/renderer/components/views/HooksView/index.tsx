@@ -4,6 +4,9 @@
 
 import { useState, useCallback } from 'react';
 import { Webhook, Plus, Settings, Search } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('HooksView');
 import { useConfirm } from '../../overlays/ConfirmModal';
 import { HookForm } from './HookForm';
 import { HookCard } from './HookCard';
@@ -96,7 +99,7 @@ export default function HooksView() {
         await handleSave(hookData);
         setHookToInstall(null);
       } catch (error) {
-        console.error('Failed to install hook:', error);
+        logger.error('Failed to install hook:', error);
       }
     },
     [handleSave]

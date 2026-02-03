@@ -16,6 +16,9 @@ import { LoadingSpinner } from '../common/LoadingSpinner';
 
 const logger = createLogger('DeviceFlowLogin');
 
+// Constants
+const DEFAULT_CODE_EXPIRY_MS = 900000; // 15 minutes
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -225,7 +228,7 @@ export function DeviceFlowLogin({
 
       const expiresAt = result.expiresIn
         ? Date.now() + result.expiresIn * 1000
-        : Date.now() + 900000; // Default 15 minutes
+        : Date.now() + DEFAULT_CODE_EXPIRY_MS;
 
       setFlowState({
         step: 'code_display',

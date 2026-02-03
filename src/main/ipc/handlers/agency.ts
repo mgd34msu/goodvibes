@@ -34,33 +34,8 @@ import {
 
 const logger = new Logger('IPC:Agency');
 
-// ============================================================================
-// VALIDATION ERROR RESPONSE
-// ============================================================================
-
-interface ValidationErrorResponse {
-  success: false;
-  error: string;
-  code: 'VALIDATION_ERROR';
-  details?: Array<{ path: string; message: string }>;
-}
-
-/**
- * Formats a ZodError into a user-friendly error response
- */
-function formatValidationError(error: ZodError): ValidationErrorResponse {
-  const details = error.errors.map((e) => ({
-    path: e.path.join('.'),
-    message: e.message,
-  }));
-
-  return {
-    success: false,
-    error: `Validation failed: ${details.map((d) => d.message).join(', ')}`,
-    code: 'VALIDATION_ERROR',
-    details,
-  };
-}
+// Validation helpers are imported from shared utils
+import { ValidationErrorResponse, formatValidationError } from '../utils/validation-helpers.js';
 
 export function registerAgencyHandlers(): void {
   // ============================================================================

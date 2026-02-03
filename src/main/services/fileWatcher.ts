@@ -47,6 +47,7 @@ export interface WatchedPath {
 // ============================================================================
 
 class FileWatcherService extends EventEmitter {
+  private readonly MAX_FILE_CACHE_SIZE = 5000;
   private watchers: Map<string, WatchedPath> = new Map();
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private fileCache: Map<string, { size: number; mtime: number }> = new Map();
@@ -57,6 +58,17 @@ class FileWatcherService extends EventEmitter {
   constructor() {
     super();
     this.setMaxListeners(100);
+  }
+
+  /**
+   * Add entry to file cache with LRU eviction.
+   */
+  private addToFileCache(path: string, stats: { size: number; mtime: number }): void {
+    if (this.fileCache.size >= this.MAX_FILE_CACHE_SIZE) {
+      const firstKey = this.fileCache.keys().next().value;
+      if (firstKey) this.fileCache.delete(firstKey);
+    }
+    this.fileCache.set(path, stats);
   }
 
   // ============================================================================
@@ -277,7 +289,7 @@ class FileWatcherService extends EventEmitter {
         }
 
         // Update cache
-        this.fileCache.set(fullPath, {
+        this.addToFileCache(fullPath, {
           size: stats.size,
           mtime: stats.mtimeMs,
         });
@@ -492,7 +504,7 @@ class FileWatcherService extends EventEmitter {
     try {
       const stats = await fs.stat(filePath);
       const result = { size: stats.size, mtime: stats.mtimeMs };
-      this.fileCache.set(filePath, result);
+      this.addToFileCache(filePath, result);
       return result;
     } catch {
       return null;

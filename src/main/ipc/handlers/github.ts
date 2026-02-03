@@ -32,33 +32,8 @@ import {
 
 const logger = new Logger('IPC:GitHub');
 
-// ============================================================================
-// VALIDATION HELPERS
-// ============================================================================
-
-interface ValidationErrorResponse {
-  success: false;
-  error: string;
-  code: 'VALIDATION_ERROR';
-  details?: Array<{ path: string; message: string }>;
-}
-
-/**
- * Format Zod validation errors into a structured response
- */
-function formatValidationError(error: ZodError): ValidationErrorResponse {
-  const details = error.errors.map((e) => ({
-    path: e.path.join('.'),
-    message: e.message,
-  }));
-
-  return {
-    success: false,
-    error: `Validation failed: ${details.map((d) => d.message).join(', ')}`,
-    code: 'VALIDATION_ERROR',
-    details,
-  };
-}
+// Validation helpers are imported from shared utils
+import { ValidationErrorResponse, formatValidationError } from '../utils/validation-helpers.js';
 
 /**
  * Validates input using a Zod schema, returning structured error on failure

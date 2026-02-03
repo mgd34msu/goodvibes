@@ -112,6 +112,8 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const { theme } = useTheme();
 
   // Memoize the xterm theme to prevent unnecessary recalculations
@@ -228,6 +230,8 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
+    webLinksAddonRef.current = webLinksAddon;
 
     // Run full reinit (fit, refresh, resize, focus, scroll)
     // Use setTimeout to ensure DOM is ready
@@ -239,8 +243,13 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
       // Clean up initialization timeout to prevent memory leaks
       clearTimeout(initTimeoutId);
       terminal.dispose();
+      fitAddonRef.current?.dispose();
+      searchAddonRef.current?.dispose();
+      webLinksAddonRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      searchAddonRef.current = null;
+      webLinksAddonRef.current = null;
     };
     // Note: xtermTheme is intentionally excluded from dependencies.
     // Theme changes are handled by the separate "Handle theme change" useEffect below.

@@ -11,6 +11,9 @@
 
 import { useState, useCallback } from 'react';
 import { Sparkles, Plus, Settings } from 'lucide-react';
+import { createLogger } from '../../../../shared/logger';
+
+const logger = createLogger('SkillsView');
 import { SkillForm } from './SkillForm';
 import { SkillList } from './SkillList';
 import { SkillFilters } from './SkillFilters';
@@ -101,7 +104,7 @@ export default function AgentSkillsView() {
       };
       await saveSkill(skillData, projectPath);
     } catch (error) {
-      console.error('Failed to install skill:', error);
+      logger.error('Failed to install skill:', error);
     }
     setInstallSkill(null);
   };

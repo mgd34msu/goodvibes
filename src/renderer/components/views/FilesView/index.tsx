@@ -22,7 +22,7 @@ interface TreeNode {
   name: string;
   isDir: boolean;
   size?: number;
-  modified?: Date;
+  modified?: string;
 }
 
 interface PinnedFolder {
@@ -50,16 +50,25 @@ export default function FilesView() {
   const setCurrentView = useAppStore((state) => state.setCurrentView);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [homeDir, setHomeDir] = useState<string>('');
-  const [fileTree, setFileTree] = useState<any>(null);
+  const [fileTree, setFileTree] = useState<{ id: string; name: string; isDir: boolean; children: TreeNode[] } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [selectedFile, setSelectedFile] = useState<TreeNode | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
   const [pinnedFolders, setPinnedFolders] = useState<PinnedFolder[]>(loadPinnedFolders);
   const [sessionCount, setSessionCount] = useState(0);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<Array<{
+    sessionId: string;
+    cwd: string;
+    messageCount: number;
+    costUsd: number;
+    startedAt: string;
+    lastActive: string;
+    firstPrompt?: string;
+    tokenCount?: number;
+  }>>([]);
   const [showSessions, setShowSessions] = useState(false);
 
   const handlePinFolder = (path: string, name: string) => {
@@ -188,7 +197,7 @@ export default function FilesView() {
     }
   };
 
-  const handleFileOpen = async (file: any) => {
+  const handleFileOpen = async (file: TreeNode) => {
     if (file.isDir) {
       await loadDirectory(file.id);
     } else {
@@ -198,7 +207,9 @@ export default function FilesView() {
       try {
         const content = await window.goodvibes.readFileContent(file.id);
         setFileContent(content);
-      } catch {
+      } catch (error) {
+        logger.error('Failed to load file content:', error);
+        toast.error('Failed to load file content');
         setFileContent(null);
       } finally {
         setIsLoadingContent(false);
@@ -206,7 +217,7 @@ export default function FilesView() {
     }
   };
 
-  const handleFileSelect = (file: any) => {
+  const handleFileSelect = (file: TreeNode | null) => {
     setSelectedFile(file);
   };
 
@@ -228,7 +239,7 @@ export default function FilesView() {
     setFileContent(null);
   };
 
-  const handleFileRename = async (file: any, newName: string) => {
+  const handleFileRename = async (file: TreeNode, newName: string) => {
     try {
       const parentPath = file.id.substring(0, file.id.lastIndexOf('/'));
       const newPath = `${parentPath}/${newName}`;
@@ -241,7 +252,7 @@ export default function FilesView() {
     }
   };
 
-  const handleFileDelete = async (file: any) => {
+  const handleFileDelete = async (file: TreeNode) => {
     try {
       if (file.isDir) {
         await window.goodvibes.deleteDirectory(file.id);
@@ -369,6 +380,8 @@ export default function FilesView() {
                   isLoading={isLoading}
                   onStartSession={handleStartSession}
                   onAddToRegistry={handleAddToRegistry}
+                  sessionCount={sessionCount}
+                  onViewSessions={() => setShowSessions(true)}
                 />
               </div>
               {showViewer && (

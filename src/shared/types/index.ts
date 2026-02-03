@@ -37,6 +37,25 @@ export type {
   SavedSearch,
 } from './session-types.js';
 
+// Tag system types
+export type {
+  TagEffect,
+  TagSource,
+  SuggestionCategory,
+  SuggestionStatus,
+  SessionTag,
+  TagSuggestion,
+  SuggestionFeedback,
+  TagTemplate,
+  CreateTagInput,
+  UpdateTagInput,
+  TagFilterExpression,
+  ScanProgress,
+  ScanStatusInfo,
+  ScanCostEstimate,
+  TagStatistics,
+} from './tag-types.js';
+
 // Analytics and project types
 export type {
   Analytics,

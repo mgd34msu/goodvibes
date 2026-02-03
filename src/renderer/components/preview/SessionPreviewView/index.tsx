@@ -14,7 +14,7 @@ import { parseAllEntries } from './utils';
 import { EntryBlock } from './EntryBlock';
 import { CountBadge } from './CountBadge';
 
-export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewViewProps): React.JSX.Element {
+export function SessionPreviewView({ sessionId, sessionName, hideHeader }: SessionPreviewViewProps): React.JSX.Element {
   const { settings } = useSettingsStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -128,6 +128,7 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
   return (
     <div className="flex flex-col h-full bg-surface-900 relative">
       {/* Header */}
+      {!hideHeader && (
       <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700 bg-surface-850">
         <div className="flex items-center gap-2">
           <span className="text-surface-200 font-medium">{sessionName}</span>
@@ -173,8 +174,10 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
           </button>
         </div>
       </div>
+      )}
 
       {/* Entry Count Summary */}
+      {!hideHeader && (
       <div className="px-4 py-2 border-b border-surface-700 bg-surface-850/50 text-xs text-surface-400 flex flex-wrap gap-2">
         <span className="font-medium text-surface-300">{counts.total} entries:</span>
         {counts.user > 0 && <CountBadge type="user" count={counts.user} />}
@@ -185,6 +188,7 @@ export function SessionPreviewView({ sessionId, sessionName }: SessionPreviewVie
         {counts.system > 0 && <CountBadge type="system" count={counts.system} />}
         {counts.summary > 0 && <CountBadge type="summary" count={counts.summary} />}
       </div>
+      )}
 
       {/* Entries - Virtualized for performance */}
       <div

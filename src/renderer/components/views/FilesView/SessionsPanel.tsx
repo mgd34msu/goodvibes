@@ -232,33 +232,36 @@ export function SessionsPanel({ sessions, onClose, onOpenInCLI }: SessionsPanelP
       <div className="flex-1 overflow-hidden border-t border-surface-700">
         {selectedSessionId ? (
           <div className="h-full flex flex-col">
-            {/* Session Preview Header with Open CLI Button */}
+            {/* Consolidated Session Preview Header */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700 bg-surface-800">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-surface-200">Session</span>
                 <span className="text-sm font-mono text-primary-400">{selectedSessionId.substring(0, 7)}</span>
               </div>
-              {onOpenInCLI && (
-                <button
-                  onClick={() => {
-                    const session = sortedSessions.find(s => s.sessionId === selectedSessionId);
-                    if (session) {
-                      onOpenInCLI(selectedSessionId, session.cwd);
-                    }
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium transition-colors"
-                  title="Open this session in CLI"
-                >
-                  <Terminal className="w-4 h-4" />
-                  <span>Open with CLI</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {onOpenInCLI && (
+                  <button
+                    onClick={() => {
+                      const session = sortedSessions.find(s => s.sessionId === selectedSessionId);
+                      if (session) {
+                        onOpenInCLI(selectedSessionId, session.cwd);
+                      }
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium transition-colors"
+                    title="Open this session in CLI"
+                  >
+                    <Terminal className="w-4 h-4" />
+                    <span>Open with CLI</span>
+                  </button>
+                )}
+              </div>
             </div>
             {/* Session Preview Content */}
             <div className="flex-1 overflow-hidden">
               <SessionPreviewView
                 sessionId={selectedSessionId}
                 sessionName={selectedSessionId.substring(0, 7)}
+                hideHeader={true}
               />
             </div>
           </div>

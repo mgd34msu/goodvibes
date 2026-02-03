@@ -7,6 +7,7 @@ import type { SessionEntryType, ParsedSessionEntry, SessionEntryCounts } from '.
 export interface SessionPreviewViewProps {
   sessionId: string;
   sessionName: string;
+  hideHeader?: boolean;
 }
 
 export interface RawEntry {

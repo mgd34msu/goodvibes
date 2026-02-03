@@ -67,8 +67,8 @@ export const tagsApi = {
   // SESSION-TAG ASSOCIATIONS
   // ============================================================================
   
-  addTagToSession: (sessionId: string, tagId: number, source?: string): Promise<IPCResult<void>> => 
-    ipcRenderer.invoke('add-tag-to-session', { sessionId, tagId, source }),
+  addTagToSession: (sessionId: string, tagId: number): Promise<IPCResult<void>> => 
+    ipcRenderer.invoke('add-tag-to-session', sessionId, tagId),
   
   removeTagFromSession: (sessionId: string, tagId: number): Promise<IPCResult<void>> => 
     ipcRenderer.invoke('remove-tag-from-session', sessionId, tagId),
@@ -83,8 +83,8 @@ export const tagsApi = {
   // BULK OPERATIONS
   // ============================================================================
   
-  addTagToSessions: (sessionIds: string[], tagId: number, source?: string): Promise<IPCResult<void>> => 
-    ipcRenderer.invoke('add-tag-to-sessions', { sessionIds, tagId, source }),
+  addTagToSessions: (sessionIds: string[], tagId: number): Promise<IPCResult<void>> => 
+    ipcRenderer.invoke('add-tag-to-sessions', sessionIds, tagId),
   
   removeTagFromSessions: (sessionIds: string[], tagId: number): Promise<IPCResult<void>> => 
     ipcRenderer.invoke('remove-tag-from-sessions', sessionIds, tagId),

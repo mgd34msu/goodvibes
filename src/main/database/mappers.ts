@@ -2,7 +2,7 @@
 // DATABASE ROW MAPPERS - Shared utility functions for mapping database rows
 // ============================================================================
 
-import type { Session, SessionMessage, Tag, Collection, SmartCollection, ActivityLogEntry, Bookmark, Prompt, QuickNote, KnowledgeEntry, AppNotification, SavedSearch, SessionLink } from '../../shared/types/index.js';
+import type { Session, SessionMessage, Tag, SessionTag, TagSuggestion, SuggestionFeedback, TagTemplate, TagEffect, TagSource, SuggestionStatus, SuggestionCategory, Collection, SmartCollection, ActivityLogEntry, Bookmark, Prompt, QuickNote, KnowledgeEntry, AppNotification, SavedSearch, SessionLink } from '../../shared/types/index.js';
 
 // ============================================================================
 // DATABASE ROW TYPES
@@ -64,8 +64,75 @@ export interface TagRow {
   name: string;
   color: string;
   parent_id: number | null;
-  parent_name?: string;
+  alias_of: number | null;
+  effect: string | null;
+  description: string | null;
+  is_pinned: number;
+  usage_count: number;
   created_at: string;
+  updated_at: string;
+  // Optional joined field
+  parent_name?: string;
+}
+
+/**
+ * Raw database row type for session_tags table
+ */
+export interface SessionTagRow {
+  id: number;
+  session_id: string;
+  tag_id: number;
+  added_at: string;
+  added_by: string;
+}
+
+/**
+ * Raw database row type for tag_suggestions table
+ */
+export interface TagSuggestionRow {
+  id: number;
+  session_id: string;
+  tag_name: string;
+  confidence: number;
+  category: string | null;
+  reasoning: string | null;
+  status: string;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+/**
+ * Raw database row type for suggestion_feedback table
+ */
+export interface SuggestionFeedbackRow {
+  id: number;
+  tag_name: string;
+  context_hash: string | null;
+  accepted_count: number;
+  rejected_count: number;
+  last_feedback_at: string | null;
+}
+
+/**
+ * Raw database row type for tag_templates table
+ */
+export interface TagTemplateRow {
+  id: number;
+  name: string;
+  description: string | null;
+  tag_ids: string; // JSON string of number[]
+  is_system: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Raw database row type for recent_tags table
+ */
+export interface RecentTagRow {
+  id: number;
+  tag_id: number;
+  used_at: string;
 }
 
 /**
@@ -271,8 +338,80 @@ export function mapRowToTag(row: TagRow): Tag {
     name: row.name,
     color: row.color,
     parentId: row.parent_id,
-    parentName: row.parent_name,
+    aliasOf: row.alias_of,
+    effect: row.effect as TagEffect | null,
+    description: row.description,
+    isPinned: Boolean(row.is_pinned),
+    usageCount: row.usage_count,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Maps a database row to a SessionTag object
+ * @param row - The raw database row from the session_tags table
+ * @returns A SessionTag object with properly typed fields
+ */
+export function mapRowToSessionTag(row: SessionTagRow): SessionTag {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    tagId: row.tag_id,
+    addedAt: row.added_at,
+    addedBy: row.added_by as TagSource,
+  };
+}
+
+/**
+ * Maps a database row to a TagSuggestion object
+ * @param row - The raw database row from the tag_suggestions table
+ * @returns A TagSuggestion object with properly typed fields
+ */
+export function mapRowToTagSuggestion(row: TagSuggestionRow): TagSuggestion {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    tagName: row.tag_name,
+    confidence: row.confidence,
+    category: row.category as SuggestionCategory | null,
+    reasoning: row.reasoning,
+    status: row.status as SuggestionStatus,
+    createdAt: row.created_at,
+    reviewedAt: row.reviewed_at,
+  };
+}
+
+/**
+ * Maps a database row to a SuggestionFeedback object
+ * @param row - The raw database row from the suggestion_feedback table
+ * @returns A SuggestionFeedback object with properly typed fields
+ */
+export function mapRowToSuggestionFeedback(row: SuggestionFeedbackRow): SuggestionFeedback {
+  return {
+    id: row.id,
+    tagName: row.tag_name,
+    contextHash: row.context_hash,
+    acceptedCount: row.accepted_count,
+    rejectedCount: row.rejected_count,
+    lastFeedbackAt: row.last_feedback_at,
+  };
+}
+
+/**
+ * Maps a database row to a TagTemplate object
+ * @param row - The raw database row from the tag_templates table
+ * @returns A TagTemplate object with properly typed fields
+ */
+export function mapRowToTagTemplate(row: TagTemplateRow): TagTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    tagIds: JSON.parse(row.tag_ids) as number[],
+    isSystem: Boolean(row.is_system),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

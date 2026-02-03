@@ -481,11 +481,19 @@ export function getAnalytics(): Analytics {
     favoriteCount: number;
   };
 
-  // Cost by project - simple grouping by project_name
-  // Note: subagent cost attribution requires agent_tree_nodes table which may not exist
+  // Cost by project - attribute subagent costs to their parent project
+  // Subagent sessions have project_name='subagents' but their file_path contains the parent project
   const projectGroups = database.prepare(`
     SELECT 
-      project_name,
+      CASE 
+        WHEN project_name = 'subagents' AND file_path LIKE '%/projects/%' THEN
+          SUBSTR(
+            file_path,
+            INSTR(file_path, '/projects/') + 10,
+            INSTR(SUBSTR(file_path, INSTR(file_path, '/projects/') + 10), '/') - 1
+          )
+        ELSE project_name
+      END as project_name,
       SUM(cost) as project_cost
     FROM sessions
     GROUP BY project_name

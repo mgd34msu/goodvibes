@@ -101,24 +101,6 @@ export function TagSettings({ settings, onChange }: TagSettingsProps): React.JSX
             <option value="5">5</option>
           </select>
         </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title="Filtering">
-        <SettingRow
-          label="Default Filter Logic"
-          description="How multiple tags are combined when filtering"
-        >
-          <select
-            value={settings.defaultFilterLogic}
-            onChange={(e) => onChange('defaultFilterLogic', e.target.value as 'and' | 'or')}
-            className="select w-32"
-            aria-label="Default filter logic"
-          >
-            <option value="and">AND</option>
-            <option value="or">OR</option>
-          </select>
-        </SettingRow>
-
         <SettingRow
           label="Remember Filter State"
           description="Persist tag filters between app sessions"

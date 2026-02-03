@@ -282,6 +282,12 @@ export function registerSessionHandlers(): void {
     return true;
   }));
 
+  ipcMain.handle('scan-new-sessions', withContext('scan-new-sessions', async () => {
+    const sessionManager = getSessionManager();
+    const count = await sessionManager?.scanNewSessionsOnly() ?? 0;
+    return count;
+  }));
+
   ipcMain.handle('get-session-raw-entries', withContext('get-session-raw-entries', async (_, id: string, afterIndex?: number) => {
     // Validate session ID
     const result = sessionIdSchema.safeParse(id);

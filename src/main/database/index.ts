@@ -42,6 +42,7 @@ export {
   getActiveSessions,
   getFavoriteSessions,
   getArchivedSessions,
+  getKnownSessionPaths,
 } from './sessions.js';
 
 // Re-export message operations

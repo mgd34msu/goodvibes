@@ -66,3 +66,27 @@ export interface InstallPluginOptions {
   projectPath?: string;
   enabled?: boolean;
 }
+
+// ============================================================================
+// CLI INSTALLED PLUGINS FORMAT
+// ============================================================================
+
+/**
+ * CLI installed_plugins.json format - single plugin entry
+ */
+export interface CLIInstalledPluginEntry {
+  scope: 'user' | 'project';
+  installPath: string;
+  version: string;
+  installedAt: string;
+  lastUpdated: string;
+  gitCommitSha?: string;
+}
+
+/**
+ * CLI installed_plugins.json format - root structure
+ */
+export interface CLIInstalledPluginsFile {
+  version: number;
+  plugins: Record<string, CLIInstalledPluginEntry[]>;
+}

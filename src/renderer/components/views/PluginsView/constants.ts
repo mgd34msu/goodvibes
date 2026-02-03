@@ -6,7 +6,7 @@ import type { Plugin } from './types';
 
 /**
  * Built-in plugins that are available in the marketplace
- * Order: Featured plugins first (GoodVibes, Get Shit Done), then alphabetically
+ * Order: Featured plugins first (GoodVibes), then alphabetically
  */
 export const BUILT_IN_PLUGINS: Plugin[] = [
   // ============================================================================
@@ -22,16 +22,6 @@ export const BUILT_IN_PLUGINS: Plugin[] = [
     featured: true,
     vibes: 'immaculate',
   },
-  {
-    id: 'get-shit-done',
-    name: 'Get Shit Done',
-    description: 'A meta-prompting, context engineering and spec-driven development system. Combats context rot with structured phases, atomic commits, and multi-agent orchestration.',
-    category: 'productivity',
-    repository: 'https://github.com/glittercowboy/get-shit-done',
-    featured: true,
-    vibes: 'productive',
-  },
-
   // ============================================================================
   // ANTHROPIC OFFICIAL PLUGINS (alphabetically sorted)
   // ============================================================================
@@ -114,6 +104,15 @@ export const BUILT_IN_PLUGINS: Plugin[] = [
     category: 'productivity',
     repository: 'https://github.com/anthropics/claude-plugins-official/tree/main/plugins/frontend-design',
     author: 'Anthropic',
+  },
+  {
+    id: 'get-shit-done',
+    name: 'Get Shit Done',
+    description: 'A meta-prompting, context engineering and spec-driven development system. Combats context rot with structured phases, atomic commits, and multi-agent orchestration.',
+    category: 'productivity',
+    repository: 'https://github.com/glittercowboy/get-shit-done',
+    featured: true,
+    vibes: 'productive',
   },
   {
     id: 'gopls-lsp',

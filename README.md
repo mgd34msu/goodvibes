@@ -98,6 +98,45 @@ For users who want full control over their GitHub integration, you can configure
 - **Git**: Required for version control features
 - **Windows/macOS/Linux**: Cross-platform support
 
+## Linux Setup
+
+When running GoodVibes from a desktop launcher (not a terminal), your shell's PATH modifications from `.bashrc` or `.zshrc` may not be available. This can prevent GoodVibes from finding the `claude` CLI.
+
+### Fix PATH for Desktop Apps
+
+Add your local bin directory to the systemd user environment:
+
+```bash
+mkdir -p ~/.config/environment.d
+echo 'PATH="$HOME/.local/bin:$PATH"' > ~/.config/environment.d/path.conf
+```
+
+Then **log out and back in** for changes to take effect.
+
+### AppImage Desktop Entry
+
+To create a desktop entry for the AppImage with proper flags:
+
+1. Download the AppImage to a permanent location (e.g., `~/.local/bin/GoodVibes.AppImage`)
+2. Make it executable: `chmod +x ~/.local/bin/GoodVibes.AppImage`
+3. Create a desktop entry:
+
+```bash
+cat > ~/.local/share/applications/goodvibes.desktop << 'EOF'
+[Desktop Entry]
+Name=GoodVibes
+Comment=Enhanced Claude CLI Interface
+Exec=$HOME/.local/bin/GoodVibes.AppImage --no-sandbox %U
+Icon=goodvibes
+Type=Application
+Categories=Development;
+StartupWMClass=GoodVibes
+MimeType=x-scheme-handler/goodvibes;
+EOF
+```
+
+**Note:** The `--no-sandbox` flag may be required on some Linux distributions when running AppImages. If GoodVibes launches without issues, you can omit this flag.
+
 ## Setup
 
 1. **Clone the repository**

@@ -138,4 +138,27 @@ export const primitivesApi = {
     ipcRenderer.invoke('show-context-menu', options),
   showTerminalContextMenu: (options: { hasSelection: boolean; selectedText?: string }) =>
     ipcRenderer.invoke('show-terminal-context-menu', options),
+
+  // ============================================================================
+  // FILE OPERATIONS
+  // ============================================================================
+  getHomeDirectory: () => ipcRenderer.invoke('get-home-directory'),
+  readDirectory: (dirPath: string) =>
+    ipcRenderer.invoke('read-directory', dirPath),
+  openFileExternal: (filePath: string) =>
+    ipcRenderer.invoke('open-file-external', filePath),
+  renameFile: (oldPath: string, newPath: string) =>
+    ipcRenderer.invoke('rename-file', oldPath, newPath),
+  deleteFile: (filePath: string) =>
+    ipcRenderer.invoke('delete-file', filePath),
+  deleteDirectory: (dirPath: string) =>
+    ipcRenderer.invoke('delete-directory', dirPath),
+  createFile: (filePath: string) =>
+    ipcRenderer.invoke('create-file', filePath),
+  createDirectory: (dirPath: string) =>
+    ipcRenderer.invoke('create-directory', dirPath),
+  readFileContent: (filePath: string) =>
+    ipcRenderer.invoke('read-file-content', filePath),
+  writeFileContent: (filePath: string, content: string) =>
+    ipcRenderer.invoke('write-file-content', filePath, content),
 };

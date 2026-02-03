@@ -170,6 +170,55 @@ export function getActiveTerminalIds(): Set<number> {
 // TERMINAL OPERATIONS
 // ============================================================================
 
+/**
+ * Find the claude executable by checking PATH and common installation locations.
+ * This is necessary because GUI-launched apps may not have the user's full PATH.
+ */
+function findClaudeExecutable(): string {
+  if (process.platform === 'win32') {
+    return 'claude.cmd';
+  }
+
+  // Common locations where claude might be installed
+  const homeDir = process.env.HOME || '';
+  const commonPaths = [
+    path.join(homeDir, '.local', 'bin', 'claude'),
+    path.join(homeDir, '.npm-global', 'bin', 'claude'),
+    path.join(homeDir, '.nvm', 'versions', 'node', '*', 'bin', 'claude'),
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+  ];
+
+  // Check each path
+  for (const checkPath of commonPaths) {
+    // Handle glob pattern for nvm
+    if (checkPath.includes('*')) {
+      try {
+        const baseDir = checkPath.substring(0, checkPath.indexOf('*'));
+        if (fs.existsSync(baseDir)) {
+          const entries = fs.readdirSync(baseDir);
+          for (const entry of entries) {
+            const fullPath = checkPath.replace('*', entry);
+            if (fs.existsSync(fullPath)) {
+              logger.info(`Found claude at: ${fullPath}`);
+              return fullPath;
+            }
+          }
+        }
+      } catch {
+        // Continue to next path
+      }
+    } else if (fs.existsSync(checkPath)) {
+      logger.info(`Found claude at: ${checkPath}`);
+      return checkPath;
+    }
+  }
+
+  // Fall back to 'claude' and hope it's in PATH
+  logger.warn('Could not find claude in common locations, falling back to PATH lookup');
+  return 'claude';
+}
+
 export async function startTerminal(options: TerminalStartOptions): Promise<TerminalStartResult> {
   try {
     const workingDir = options.cwd || process.cwd();
@@ -182,8 +231,8 @@ export async function startTerminal(options: TerminalStartOptions): Promise<Term
 
     const terminalId = ++terminalIdCounter;
 
-    // Find claude executable path
-    const claudePath = process.platform === 'win32' ? 'claude.cmd' : 'claude';
+    // Find claude executable path (checks common locations if not in PATH)
+    const claudePath = findClaudeExecutable();
 
     // Build arguments array
     const args: string[] = [];

@@ -17,6 +17,7 @@ import {
   logActivity,
   trackToolUsage,
   clearSessionToolUsage,
+  getKnownSessionPaths,
 } from '../../database/index.js';
 import { sendToRenderer } from '../../window.js';
 import { Logger } from '../logger.js';
@@ -358,6 +359,54 @@ export class SessionManagerInstance {
    */
   async rescanSessions(): Promise<void> {
     await this.scanSessions();
+  }
+
+  /**
+   * Incrementally scan for NEW sessions only - does not re-process existing sessions.
+   * Uses database to check which files have already been processed.
+   * Returns the count of new sessions found.
+   */
+  public async scanNewSessionsOnly(): Promise<number> {
+    if (!existsSync(this.claudeDir)) return 0;
+
+    try {
+      // Get known session paths from database
+      const knownPaths = getKnownSessionPaths();
+      
+      // Find all session files in directory
+      const allFiles = await this.findSessionFiles(this.claudeDir);
+      
+      // Filter to only NEW files not in database
+      const newFiles = allFiles.filter(file => !knownPaths.has(file.path));
+      
+      if (newFiles.length === 0) {
+        return 0;
+      }
+      
+      logger.info(`Found ${newFiles.length} new session files to process`);
+      
+      // Process only the new files
+      for (const file of newFiles) {
+        try {
+          await this.processSessionFile(file.path, file.mtime);
+          this.knownSessionFiles.add(file.path);
+          
+          // Start watching if recent
+          const age = Date.now() - file.mtime;
+          if (age < NEW_SESSION_THRESHOLD_MS) {
+            this.notifyNewSession(file.path);
+            this.startWatchingSessionFile(file.path);
+          }
+        } catch (error) {
+          logger.error(`Failed to process new session file: ${file.path}`, error);
+        }
+      }
+      
+      return newFiles.length;
+    } catch (error) {
+      logger.error('Error scanning for new sessions', error);
+      return 0;
+    }
   }
 
   getAllSessions(): Session[] {

@@ -87,6 +87,7 @@ export const VIEWS = [
   'analytics',
   'tasks',
   'notebook',
+  'files',
   'hooks',
   'mcp',
   'plugins',
@@ -121,7 +122,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: 'organize',
     label: 'Organize',
-    views: ['notebook', 'tasks'],
+    views: ['notebook', 'files', 'tasks'],
   },
   {
     id: 'system',

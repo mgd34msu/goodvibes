@@ -272,6 +272,14 @@ export function isGitHubTreeUrl(url: string): boolean {
 }
 
 /**
+ * Normalize path for git commands (convert backslashes to forward slashes)
+ * Git on Windows accepts forward slashes and they avoid escaping issues
+ */
+export function normalizePathForGit(filepath: string): string {
+  return filepath.replace(/\\/g, '/');
+}
+
+/**
  * Remove a directory recursively
  */
 export function removeDirectory(dirPath: string): void {
@@ -286,4 +294,12 @@ export function removeDirectory(dirPath: string): void {
     logger.error(`Failed to remove directory ${dirPath}`, error);
     throw new Error(`Failed to remove directory: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+}
+
+/**
+ * Get the path to CLI's installed_plugins.json
+ */
+export function getCLIInstalledPluginsPath(): string {
+  const homeDir = app.getPath('home');
+  return path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json');
 }

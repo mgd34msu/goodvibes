@@ -23,13 +23,16 @@ export default function SessionsView() {
   const { liveSessionIds } = useLiveSessions();
   const { filteredSessions } = useSessionFilters(sessions, search);
 
-  // Auto-rescan for new sessions every 10 seconds
+  // Auto-scan for NEW sessions every 10 seconds (incremental, not full rescan)
   useEffect(() => {
-    // Initial rescan when view opens
-    window.goodvibes.rescanSessions?.();
-    
+    // Note: Full scan happens at app startup, so we don't need one here.
+    // Just start the incremental scan interval.
     const interval = setInterval(() => {
-      window.goodvibes.rescanSessions?.();
+      // Only scan for NEW sessions, not re-process all existing ones
+      void window.goodvibes.scanNewSessions().catch(() => {
+        // API should always exist - log if call fails
+        console.debug('scanNewSessions API call failed');
+      });
     }, 10000);
     
     return () => clearInterval(interval);

@@ -26,22 +26,14 @@
   },
   "win": {
     "target": [
-      { "target": "nsis", "arch": ["x64"] },
       { "target": "portable", "arch": ["x64"] }
     ],
     "icon": "build/icon.ico",
     "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
-  "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true,
-    "shortcutName": "GoodVibes"
-  },
   "mac": {
     "target": [
-      { "target": "dmg", "arch": ["x64", "arm64"] }
+      { "target": "zip", "arch": ["x64", "arm64"] }
     ],
     "icon": "build/icon.icns",
     "category": "public.app-category.developer-tools",
@@ -54,7 +46,15 @@
     ],
     "icon": "build",
     "category": "Development",
-    "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "desktop": {
+      "Name": "GoodVibes",
+      "Comment": "Enhanced Claude CLI Interface",
+      "Categories": "Development;",
+      "StartupWMClass": "GoodVibes",
+      "MimeType": "x-scheme-handler/goodvibes;"
+    },
+    "executableArgs": ["--no-sandbox"]
   },
   "publish": null,
   "asar": true,

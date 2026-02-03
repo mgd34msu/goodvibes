@@ -71,3 +71,23 @@ recalculate-*.ps1
 *-review.md
 enhanced-findings-*.md
 dev.pid
+
+# Environment files
+*.env
+
+# Secret files
+*.pem
+*.key
+credentials.json
+secrets.json
+service-account*.json
+
+# Cloud credentials
+.aws/
+.gcp/
+kubeconfig
+
+# Database files
+*.sqlite
+*.sqlite3
+prisma/*.db

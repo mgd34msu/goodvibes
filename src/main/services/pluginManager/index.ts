@@ -11,7 +11,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../logger.js';
-import type { InstalledPlugin } from './types.js';
+import type { InstalledPlugin, CLIInstalledPluginsFile } from './types.js';
 import {
   getPluginsDir,
   ensureDir,
@@ -23,6 +23,8 @@ import {
   removeDirectory,
   parseGitHubTreeUrl,
   normalizeAuthor,
+  normalizePathForGit,
+  getCLIInstalledPluginsPath,
 } from './utils.js';
 
 const logger = new Logger('PluginManager');
@@ -83,10 +85,117 @@ export async function getInstalledPlugins(
     }
   }
 
-  return plugins;
+  // Fetch CLI-installed plugins
+  const cliPlugins = await getCLIInstalledPlugins();
+
+  // Merge plugins, avoiding duplicates (prefer directory-scanned over CLI if both exist)
+  const pluginMap = new Map<string, InstalledPlugin>();
+
+  // Add directory-scanned plugins first
+  for (const plugin of plugins) {
+    pluginMap.set(plugin.id, plugin);
+  }
+
+  // Add CLI plugins if not already present
+  for (const cliPlugin of cliPlugins) {
+    if (!pluginMap.has(cliPlugin.id)) {
+      pluginMap.set(cliPlugin.id, cliPlugin);
+    }
+  }
+
+  return Array.from(pluginMap.values());
 }
 
 // ============================================================================
+
+// ============================================================================
+// CLI PLUGIN DETECTION
+// ============================================================================
+
+/**
+ * Get plugins installed via Claude CLI
+ * Reads from ~/.claude/plugins/installed_plugins.json
+ * @returns Array of installed plugins from CLI
+ */
+async function getCLIInstalledPlugins(): Promise<InstalledPlugin[]> {
+  const plugins: InstalledPlugin[] = [];
+
+  try {
+    const cliPluginsPath = getCLIInstalledPluginsPath();
+
+    if (!fs.existsSync(cliPluginsPath)) {
+      logger.debug('CLI installed_plugins.json not found');
+      return plugins;
+    }
+
+    const content = fs.readFileSync(cliPluginsPath, 'utf-8');
+    const cliData = JSON.parse(content) as CLIInstalledPluginsFile;
+
+    for (const [pluginKey, entries] of Object.entries(cliData.plugins)) {
+      for (const entry of entries) {
+        try {
+          // Extract plugin name from key format: "pluginName@marketplace"
+          const pluginName = pluginKey.split('@')[0];
+
+          // Read manifest from installPath
+          const manifest = readManifest(entry.installPath);
+
+          if (!manifest) {
+            // If manifest can't be read, include plugin with basic info
+            logger.warn(`Could not read manifest for CLI plugin ${pluginKey} at ${entry.installPath}`);
+            const pluginId = generatePluginId(pluginName);
+            const enabled = await isPluginEnabled(pluginId, entry.scope);
+
+            plugins.push({
+              id: pluginId,
+              name: pluginName,
+              version: entry.version,
+              description: 'CLI-installed plugin (manifest unavailable)',
+              scope: entry.scope,
+              path: entry.installPath,
+              enabled,
+              installedAt: entry.installedAt,
+              manifest: {
+                name: pluginName,
+                version: entry.version,
+                description: 'CLI-installed plugin (manifest unavailable)',
+              },
+            });
+            continue;
+          }
+
+          const pluginId = generatePluginId(manifest.name);
+          const enabled = await isPluginEnabled(pluginId, entry.scope);
+
+          plugins.push({
+            id: pluginId,
+            name: manifest.name,
+            version: entry.version, // Use version from CLI JSON
+            description: manifest.description,
+            author: normalizeAuthor(manifest.author),
+            repository: manifest.repository,
+            scope: entry.scope,
+            path: entry.installPath,
+            enabled,
+            installedAt: entry.installedAt,
+            manifest,
+          });
+
+          logger.debug(`Found CLI plugin: ${manifest.name} (${entry.version})`);
+        } catch (error) {
+          logger.error(`Failed to process CLI plugin ${pluginKey}`, error);
+        }
+      }
+    }
+
+    logger.debug(`Found ${plugins.length} CLI-installed plugins`);
+  } catch (error) {
+    logger.error('Failed to read CLI installed_plugins.json', error);
+  }
+
+  return plugins;
+}
+
 // PLUGIN INSTALLATION
 // ============================================================================
 
@@ -145,11 +254,20 @@ export async function installPlugin(
       logger.info(`Detected GitHub monorepo, cloning from ${treeInfo.repoUrl}`);
 
       // Clone the full repository to temp location
-      execSync(`git clone --depth 1 --branch "${treeInfo.branch}" "${treeInfo.repoUrl}" "${tempCloneDir}"`, {
-        stdio: 'pipe',
-        encoding: 'utf-8',
-        timeout: 120000, // 2 minute timeout
-      });
+      const normalizedTempCloneDir = normalizePathForGit(tempCloneDir!);
+      logger.debug(`Cloning ${treeInfo.repoUrl} (branch: ${treeInfo.branch}) to ${normalizedTempCloneDir}`);
+      
+      try {
+        execSync(`git clone --depth 1 --branch "${treeInfo.branch}" "${treeInfo.repoUrl}" "${normalizedTempCloneDir}"`, {
+          stdio: 'pipe',
+          encoding: 'utf-8',
+          timeout: 120000, // 2 minute timeout
+        });
+      } catch (cloneError) {
+        const errorMessage = cloneError instanceof Error ? cloneError.message : String(cloneError);
+        logger.error(`Git clone failed for ${treeInfo.repoUrl}:`, errorMessage);
+        throw new Error(`Failed to clone repository: ${errorMessage}`);
+      }
 
       logger.debug(`Cloned base repo to ${tempCloneDir}`);
 
@@ -168,13 +286,21 @@ export async function installPlugin(
 
     } else {
       // DIRECT REPO INSTALLATION: Clone directly
-      execSync(`git clone "${repository}" "${tempPluginDir}"`, {
-        stdio: 'pipe',
-        encoding: 'utf-8',
-        timeout: 120000, // 2 minute timeout
-      });
-
-      logger.info(`Successfully cloned repository to ${tempPluginDir}`);
+      const normalizedPluginDir = normalizePathForGit(tempPluginDir);
+      logger.debug(`Cloning ${repository} to ${normalizedPluginDir}`);
+      
+      try {
+        execSync(`git clone "${repository}" "${normalizedPluginDir}"`, {
+          stdio: 'pipe',
+          encoding: 'utf-8',
+          timeout: 120000, // 2 minute timeout
+        });
+        logger.info(`Successfully cloned repository to ${tempPluginDir}`);
+      } catch (cloneError) {
+        const errorMessage = cloneError instanceof Error ? cloneError.message : String(cloneError);
+        logger.error(`Git clone failed for ${repository}:`, errorMessage);
+        throw new Error(`Failed to clone repository: ${errorMessage}`);
+      }
     }
 
     // Read and validate manifest

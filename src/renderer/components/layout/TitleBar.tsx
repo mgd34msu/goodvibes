@@ -19,6 +19,7 @@ import {
   Brain,
   Sparkles,
   FolderKanban,
+  FolderOpen,
   ChevronDown,
   Puzzle,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ const VIEW_ICONS: Record<ViewName, React.ReactNode> = {
   analytics: <BarChart3 className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   tasks: <FileText className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   notebook: <Library className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
+  files: <FolderOpen className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   settings: <Settings className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   hooks: <Webhook className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
   mcp: <Server className={ICON_CLASS} size={ICON_SIZE} aria-hidden="true" />,
@@ -57,6 +59,7 @@ const VIEW_LABELS: Record<ViewName, string> = {
   analytics: 'Analytics',
   tasks: 'Tasks',
   notebook: 'Notebook',
+  files: 'Files',
   settings: 'Settings',
   hooks: 'Hooks',
   mcp: 'MCP',

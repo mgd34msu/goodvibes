@@ -131,3 +131,13 @@ export function getArchivedSessions(): Session[] {
   const rows = database.prepare('SELECT * FROM sessions WHERE archived = 1 ORDER BY end_time DESC').all() as SessionRow[];
   return rows.map(mapRowToSession);
 }
+
+/**
+ * Get all known session file paths from the database.
+ * Used for incremental scanning to avoid re-processing existing sessions.
+ */
+export function getKnownSessionPaths(): Set<string> {
+  const database = getDatabase();
+  const rows = database.prepare('SELECT file_path FROM sessions WHERE file_path IS NOT NULL').all() as { file_path: string }[];
+  return new Set(rows.map(row => row.file_path));
+}

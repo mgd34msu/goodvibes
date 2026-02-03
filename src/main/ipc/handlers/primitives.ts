@@ -363,5 +363,70 @@ export function registerPrimitivesHandlers(): void {
     return primitives.getToolEfficiencyStats();
   }));
 
+  // File Operations
+  ipcMain.handle('read-directory', async (_event, dirPath: string) => {
+    const { readdir, stat } = await import('fs/promises');
+    const { join } = await import('path');
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    return Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = join(dirPath, entry.name);
+        const stats = await stat(fullPath);
+        return {
+          name: entry.name,
+          isDirectory: entry.isDirectory(),
+          size: stats.size,
+          modified: stats.mtime.getTime(),
+        };
+      })
+    );
+  });
+
+  ipcMain.handle('open-file-external', async (_event, filePath: string) => {
+    const { shell } = await import('electron');
+    return shell.openPath(filePath);
+  });
+
+  ipcMain.handle('rename-file', async (_event, oldPath: string, newPath: string) => {
+    const { rename } = await import('fs/promises');
+    return rename(oldPath, newPath);
+  });
+
+  ipcMain.handle('delete-file', async (_event, filePath: string) => {
+    const { unlink } = await import('fs/promises');
+    return unlink(filePath);
+  });
+
+  ipcMain.handle('delete-directory', async (_event, dirPath: string) => {
+    const { rm } = await import('fs/promises');
+    return rm(dirPath, { recursive: true });
+  });
+
+  ipcMain.handle('create-file', async (_event, filePath: string) => {
+    const { writeFile } = await import('fs/promises');
+    return writeFile(filePath, '', 'utf-8');
+  });
+
+  ipcMain.handle('create-directory', async (_event, dirPath: string) => {
+    const { mkdir } = await import('fs/promises');
+    return mkdir(dirPath, { recursive: true });
+  });
+
+  ipcMain.handle('read-file-content', async (_event, filePath: string) => {
+    const { readFile } = await import('fs/promises');
+    return readFile(filePath, 'utf-8');
+  });
+
+  ipcMain.handle('write-file-content', async (_event, filePath: string, content: string) => {
+    const { writeFile } = await import('fs/promises');
+    return writeFile(filePath, content, 'utf-8');
+  });
+
   logger.info('Primitives handlers registered (with Zod validation)');
 }
+
+  // Get user home directory (cross-platform)
+  ipcMain.handle('get-home-directory', async () => {
+    const os = await import('os');
+    return os.homedir();
+  });

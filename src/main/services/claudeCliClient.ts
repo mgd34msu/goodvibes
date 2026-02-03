@@ -323,6 +323,7 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
     // Build CLI arguments with batch schema
     const args = [
       '-p', prompt,
+      '--model', 'haiku',
       '--output-format', 'json',
       '--json-schema', BATCH_TAG_SCHEMA,
       '--allowedTools', 'Read'

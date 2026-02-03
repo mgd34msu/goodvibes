@@ -90,6 +90,29 @@ export {
   recalculateAllTagUsageCounts,
 } from './tags.js';
 
+// Re-export tag suggestion operations
+export {
+  createSuggestions,
+  getSessionSuggestions,
+  getSuggestion,
+  updateSuggestionStatus,
+  acceptSuggestion,
+  rejectSuggestion,
+  dismissSuggestion,
+  acceptAllSuggestions,
+  dismissAllSuggestions,
+  deleteOldSuggestions,
+  recordSuggestionFeedback,
+  getSuggestionFeedback,
+  isTagFrequentlyRejected,
+  updateSessionScanStatus,
+  getPendingSessions,
+  getSessionsNeedingRescan,
+  getScanCounts,
+  getSessionScanStatus,
+  skipOldSessions,
+} from './tagSuggestions.js';
+
 const logger = new Logger('Database');
 
 let db: Database.Database | null = null;

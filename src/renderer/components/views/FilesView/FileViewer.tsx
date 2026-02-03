@@ -4,8 +4,9 @@
 // ============================================================================
 
 import { useState, useEffect, useMemo } from 'react';
-import { X, Edit, Save, FileText, Image as ImageIcon } from 'lucide-react';
+import { X, Edit, Save, FileText, Image as ImageIcon, Eye, EyeOff } from 'lucide-react';
 import { clsx } from 'clsx';
+import { MarkdownRenderer } from '../../common/MarkdownRenderer';
 
 interface FileViewerProps {
   file: { id: string; name: string; isDir: boolean } | null;
@@ -32,11 +33,17 @@ function detectFileType(filename: string): FileType {
   return 'binary';
 }
 
+function isMarkdownFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ext === 'md' || ext === 'mdx';
+}
+
 export function FileViewer({ file, content, isLoading, onClose, onSave }: FileViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [renderMarkdown, setRenderMarkdown] = useState(false);
 
   useEffect(() => {
     if (content !== null) {
@@ -48,10 +55,15 @@ export function FileViewer({ file, content, isLoading, onClose, onSave }: FileVi
   useEffect(() => {
     setIsEditing(false);
     setHasUnsavedChanges(false);
+    setRenderMarkdown(false);
   }, [file?.id]);
 
   const fileType = useMemo<FileType>(() => {
     return file ? detectFileType(file.name) : 'binary';
+  }, [file?.name]);
+
+  const isMarkdown = useMemo(() => {
+    return file ? isMarkdownFile(file.name) : false;
   }, [file?.name]);
 
   const handleSave = async () => {
@@ -108,6 +120,23 @@ export function FileViewer({ file, content, isLoading, onClose, onSave }: FileVi
         <div className="flex items-center gap-2">
           {fileType === 'text' && (
             <>
+              {isMarkdown && !isEditing && (
+                <button
+                  onClick={() => setRenderMarkdown(!renderMarkdown)}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5",
+                    renderMarkdown
+                      ? "bg-primary-600 hover:bg-primary-700 text-white"
+                      : "bg-surface-700 hover:bg-surface-600 text-surface-100"
+                  )}
+                  title={renderMarkdown ? "Show raw markdown" : "Preview rendered markdown"}
+                  aria-label={renderMarkdown ? "Show raw markdown" : "Preview rendered markdown"}
+                  aria-pressed={renderMarkdown}
+                >
+                  {renderMarkdown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  {renderMarkdown ? 'Raw' : 'Preview'}
+                </button>
+              )}
               {isEditing ? (
                 <button onClick={handleSave} disabled={!hasUnsavedChanges || isSaving} className="px-3 py-1.5 rounded-md bg-primary-600 hover:bg-primary-700 disabled:bg-surface-700 disabled:text-surface-400 text-white text-sm font-medium transition-colors flex items-center gap-1.5">
                   <Save className="w-3.5 h-3.5" />
@@ -151,6 +180,10 @@ export function FileViewer({ file, content, isLoading, onClose, onSave }: FileVi
           </div>
         ) : isEditing ? (
           <textarea value={editContent} onChange={handleContentChange} className="w-full h-full p-4 bg-surface-900 text-surface-100 font-mono text-sm resize-none focus:outline-none" spellCheck={false} />
+        ) : isMarkdown && renderMarkdown ? (
+          <div className="h-full p-4 overflow-auto prose prose-invert max-w-none">
+            <MarkdownRenderer content={content || ''} />
+          </div>
         ) : (
           <pre className="h-full p-4 m-0 overflow-auto">
             <code className={clsx('block font-mono text-sm leading-relaxed whitespace-pre-wrap', 'text-surface-200')}>

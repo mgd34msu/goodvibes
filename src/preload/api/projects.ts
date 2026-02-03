@@ -32,6 +32,16 @@ export const projectsApi = {
     ipcRenderer.invoke('clear-recent-projects'),
 
   // ============================================================================
+  // PINNED FOLDERS
+  // ============================================================================
+  getPinnedFolders: () =>
+    ipcRenderer.invoke('get-pinned-folders'),
+  addPinnedFolder: (path: string, name: string) =>
+    ipcRenderer.invoke('add-pinned-folder', { path, name }),
+  removePinnedFolder: (path: string) =>
+    ipcRenderer.invoke('remove-pinned-folder', path),
+
+  // ============================================================================
   // EXPORT
   // ============================================================================
   exportSession: (sessionId: string, format: string) =>

@@ -30,21 +30,6 @@ interface PinnedFolder {
   name: string;
 }
 
-const PINNED_FOLDERS_KEY = 'goodvibes-pinned-folders';
-
-const loadPinnedFolders = (): PinnedFolder[] => {
-  try {
-    const stored = localStorage.getItem(PINNED_FOLDERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const savePinnedFolders = (folders: PinnedFolder[]) => {
-  localStorage.setItem(PINNED_FOLDERS_KEY, JSON.stringify(folders));
-};
-
 export default function FilesView() {
   const createTerminal = useTerminalStore((state) => state.createTerminal);
   const setCurrentView = useAppStore((state) => state.setCurrentView);
@@ -57,7 +42,7 @@ export default function FilesView() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
-  const [pinnedFolders, setPinnedFolders] = useState<PinnedFolder[]>(loadPinnedFolders);
+  const [pinnedFolders, setPinnedFolders] = useState<PinnedFolder[]>([]);
   const [sessionCount, setSessionCount] = useState(0);
   const [sessions, setSessions] = useState<Array<{
     sessionId: string;
@@ -71,23 +56,40 @@ export default function FilesView() {
   }>>([]);
   const [showSessions, setShowSessions] = useState(false);
 
-  const handlePinFolder = (path: string, name: string) => {
-    const newPinned = [...pinnedFolders, { path, name }];
-    setPinnedFolders(newPinned);
-    savePinnedFolders(newPinned);
+  const handlePinFolder = async (path: string, name: string) => {
+    try {
+      const updated = await window.goodvibes.addPinnedFolder(path, name);
+      setPinnedFolders(updated);
+    } catch (error) {
+      logger.error('Failed to pin folder:', error);
+      toast.error('Failed to pin folder');
+    }
   };
 
-  const handleUnpinFolder = (path: string) => {
-    const newPinned = pinnedFolders.filter(f => f.path !== path);
-    setPinnedFolders(newPinned);
-    savePinnedFolders(newPinned);
+  const handleUnpinFolder = async (path: string) => {
+    try {
+      const updated = await window.goodvibes.removePinnedFolder(path);
+      setPinnedFolders(updated);
+    } catch (error) {
+      logger.error('Failed to unpin folder:', error);
+      toast.error('Failed to unpin folder');
+    }
   };
 
-  // Load home directory and initial directory
+  // Load home directory, pinned folders, and initial directory
   useEffect(() => {
     const init = async () => {
       const home = await window.goodvibes.getHomeDirectory() || '/';
       setHomeDir(home);
+      
+      // Load pinned folders from database
+      try {
+        const pinned = await window.goodvibes.getPinnedFolders();
+        setPinnedFolders(pinned);
+      } catch (error) {
+        logger.error('Failed to load pinned folders:', error);
+      }
+      
       loadDirectory();
     };
     init();

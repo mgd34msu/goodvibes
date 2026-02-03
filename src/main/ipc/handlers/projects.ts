@@ -14,6 +14,11 @@ import {
   pinProject,
 } from '../../services/recentProjects.js';
 import {
+  getPinnedFolders,
+  addPinnedFolder,
+  removePinnedFolder,
+} from '../../services/pinnedFolders.js';
+import {
   openInExplorerInputSchema,
   addRecentProjectInputSchema,
   removeRecentProjectInputSchema,
@@ -127,6 +132,33 @@ export function registerProjectsHandlers(): void {
   ipcMain.handle('clear-recent-projects', withContext('clear-recent-projects', async () => {
     clearRecentProjects();
     return true;
+  }));
+
+  // ============================================================================
+  // PINNED FOLDERS HANDLERS
+  // ============================================================================
+
+  ipcMain.handle('get-pinned-folders', withContext('get-pinned-folders', async () => {
+    return getPinnedFolders();
+  }));
+
+  ipcMain.handle('add-pinned-folder', withContext('add-pinned-folder', async (_, data: unknown) => {
+    // Validate input - expect {path: string, name: string}
+    if (!data || typeof data !== 'object' || !('path' in data) || !('name' in data)) {
+      throw new IPCValidationError('Invalid pinned folder data: expected {path: string, name: string}');
+    }
+    const { path, name } = data as { path: string; name: string };
+    if (typeof path !== 'string' || typeof name !== 'string') {
+      throw new IPCValidationError('Invalid pinned folder data: path and name must be strings');
+    }
+    return addPinnedFolder(path, name);
+  }));
+
+  ipcMain.handle('remove-pinned-folder', withContext('remove-pinned-folder', async (_, folderPath: unknown) => {
+    if (typeof folderPath !== 'string') {
+      throw new IPCValidationError('Invalid folder path: expected string');
+    }
+    return removePinnedFolder(folderPath);
   }));
 
   logger.info('Projects handlers registered');

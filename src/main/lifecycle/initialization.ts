@@ -12,6 +12,7 @@ import { initSessionManager, getSessionManager } from '../services/sessionManage
 import { initTerminalManager } from '../services/terminalManager.js';
 import { registerAllIpcHandlers } from '../ipc/index.js';
 import { loadRecentProjects } from '../services/recentProjects.js';
+import { loadPinnedFolders } from '../services/pinnedFolders.js';
 import { initializeGitHub } from '../services/github.js';
 import { initAgentRegistry } from '../services/agentRegistry.js';
 import { startHookServer } from '../services/hookServer.js';
@@ -84,6 +85,10 @@ export async function initializeApp(): Promise<void> {
     // Load recent projects
     loadRecentProjects();
     logger.info('Recent projects loaded');
+
+    // Load pinned folders
+    loadPinnedFolders();
+    logger.info('Pinned folders loaded');
 
     // Initialize GitHub service (restore auth state from storage)
     await initializeGitHub();

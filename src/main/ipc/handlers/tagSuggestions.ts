@@ -6,7 +6,6 @@ import { ipcMain } from 'electron';
 import { z } from 'zod';
 import { Logger } from '../../services/logger.js';
 import tagSuggestionService from '../../services/tagSuggestionService.js';
-import { estimateScanCost } from '../../services/anthropicClient.js';
 import { withContext } from '../utils.js';
 import * as db from '../../database/tagSuggestions.js';
 import * as tags from '../../database/tags.js';
@@ -361,12 +360,14 @@ export function registerTagSuggestionHandlers(): void {
   ipcMain.handle('estimate-scan-cost', withContext('estimate-scan-cost', async () => {
     try {
       const counts = db.getScanCounts();
-      const estimate = estimateScanCost(counts.pending);
+      // Note: Cost estimation removed since we're using Claude CLI (no API cost)
+      // Return estimated time only based on pending sessions
+      const estimatedTimeMinutes = Math.ceil(counts.pending / 60); // Rough estimate
       return ipcOk({
-        totalSessions: estimate.totalSessions,
-        estimatedTokens: estimate.estimatedTokens,
-        estimatedCost: estimate.estimatedCost,
-        estimatedTimeMinutes: estimate.estimatedTimeMinutes,
+        totalSessions: counts.pending,
+        estimatedTokens: 0,
+        estimatedCost: 0, // No cost with CLI
+        estimatedTimeMinutes,
       });
     } catch (error) {
       logger.error('Failed to estimate scan cost', error);

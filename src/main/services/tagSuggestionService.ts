@@ -17,7 +17,7 @@ import type {
 } from '../../shared/types/tag-types.js';
 
 import { gatherQuickContext, formatContextForPrompt } from './tagSuggestionContext.js';
-import { generateTagSuggestions } from './anthropicClient.js';
+import { generateTagSuggestionsViaCli } from './claudeCliClient.js';
 import * as tagSuggestions from '../database/tagSuggestions.js';
 
 const logger = new Logger('TagSuggestionService');
@@ -380,19 +380,19 @@ class TagSuggestionService extends EventEmitter {
       // 2. Format context for prompt
       const formattedContext = formatContextForPrompt(context);
       
-      // 3. Call Anthropic API to generate tag suggestions
-      const apiResults = await generateTagSuggestions(
+      // 3. Call Claude CLI to generate tag suggestions
+      const cliResults = await generateTagSuggestionsViaCli(
         formattedContext,
         context.existingTags
       );
       
       // 4. Save suggestions to database
       const suggestions = tagSuggestions.createSuggestions(
-        apiResults.map(result => ({
+        cliResults.map(result => ({
           sessionId,
-          tagName: result.tagName,
+          tagName: result.name,
           confidence: result.confidence,
-          category: result.category,
+          category: result.category || 'other',
           reasoning: result.reasoning,
         }))
       );

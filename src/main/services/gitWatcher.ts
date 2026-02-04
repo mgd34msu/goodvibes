@@ -3,7 +3,8 @@
 // ============================================================================
 
 import path from 'path';
-import { existsSync, watch, FSWatcher } from 'fs';
+import { watch, FSWatcher } from 'fs';
+import { access, constants } from 'fs/promises';
 import { Logger } from './logger.js';
 import { sendToRenderer } from '../window.js';
 
@@ -21,10 +22,12 @@ class GitWatcherService {
   /**
    * Start watching a git repository for changes
    */
-  watchRepo(repoPath: string): boolean {
+  async watchRepo(repoPath: string): Promise<boolean> {
     const gitDir = path.join(repoPath, '.git');
 
-    if (!existsSync(gitDir)) {
+    try {
+      await access(gitDir, constants.F_OK);
+    } catch {
       logger.debug(`Not a git repo: ${repoPath}`);
       return false;
     }
@@ -45,20 +48,29 @@ class GitWatcherService {
     ];
 
     for (const target of watchTargets) {
-      if (existsSync(target)) {
-        try {
-          const watcher = watch(target, { persistent: false }, () => {
-            this.handleChange(repoPath);
-          });
+      try {
+        await access(target, constants.F_OK);
+        const watcher = watch(target, { persistent: false }, () => {
+          this.handleChange(repoPath);
+        });
 
-          watcher.on('error', (err) => {
-            logger.debug(`Watch error for ${target}:`, err);
-          });
+        watcher.on('error', (err) => {
+          logger.debug(`Watch error for ${target}:`, err);
+          // Close and remove failed watcher to prevent zombie watchers
+          try {
+            watcher.close();
+          } catch (closeErr) {
+            logger.debug('Failed to close watcher:', closeErr);
+          }
+          const index = repoWatchers.indexOf(watcher);
+          if (index > -1) {
+            repoWatchers.splice(index, 1);
+          }
+        });
 
-          repoWatchers.push(watcher);
-        } catch (err) {
-          logger.debug(`Failed to watch ${target}:`, err);
-        }
+        repoWatchers.push(watcher);
+      } catch (err) {
+        logger.debug(`Target does not exist or failed to watch ${target}:`, err);
       }
     }
 
@@ -107,7 +119,11 @@ class GitWatcherService {
     const timer = setTimeout(() => {
       this.debounceTimers.delete(repoPath);
       logger.debug(`Git changed: ${repoPath}`);
-      sendToRenderer('git-changed', { path: repoPath });
+      try {
+        sendToRenderer('git-changed', { path: repoPath });
+      } catch (err) {
+        logger.debug('Failed to send git-changed event:', err);
+      }
     }, this.DEBOUNCE_MS);
 
     this.debounceTimers.set(repoPath, timer);
@@ -145,3 +161,21 @@ export function shutdownGitWatcher(): void {
 }
 
 export { GitWatcherService };
+
+// ============================================================================
+// PROCESS EXIT HANDLERS - Ensure cleanup on unexpected exit
+// ============================================================================
+
+// Handle graceful shutdown signals
+process.once('SIGTERM', () => {
+  shutdownGitWatcher();
+});
+
+process.once('SIGINT', () => {
+  shutdownGitWatcher();
+});
+
+// Handle uncaught exceptions before exit
+process.once('beforeExit', () => {
+  shutdownGitWatcher();
+});

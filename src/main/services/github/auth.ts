@@ -47,6 +47,7 @@ import {
   authenticateWithDeviceFlow,
   getDeviceFlowClientId,
   shouldUseDeviceFlow,
+  shutdownDeviceFlow,
 } from './device-flow.js';
 
 const logger = new Logger('GitHubAuth');
@@ -68,6 +69,7 @@ export {
   authenticateWithDeviceFlow,
   getDeviceFlowClientId,
   shouldUseDeviceFlow,
+  shutdownDeviceFlow,
   // State accessors
   getAccessToken,
   isAuthenticated,

@@ -244,6 +244,7 @@ export async function gitApplyPatch(
 
   // Use spawn to pass the patch via stdin
   const { spawn } = await import('child_process');
+  const { GIT_TIMEOUT } = await import('./core.js');
 
   return new Promise((resolve) => {
     const proc = spawn('git', args, {
@@ -253,6 +254,20 @@ export async function gitApplyPatch(
 
     let stdout = '';
     let stderr = '';
+    let isResolved = false;
+
+    // Set timeout to prevent hanging
+    const timeout = setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
+        proc.kill('SIGTERM');
+        resolve({
+          success: false,
+          error: 'Git apply operation timed out',
+          stderr: stderr.trim(),
+        });
+      }
+    }, GIT_TIMEOUT);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -263,28 +278,48 @@ export async function gitApplyPatch(
     });
 
     proc.on('error', (error: Error) => {
-      resolve({
-        success: false,
-        error: error.message,
-        stderr: stderr.trim(),
-      });
-    });
-
-    proc.on('close', (code: number | null) => {
-      if (code === 0) {
-        resolve({ success: true, output: stdout.trim(), stderr: stderr.trim() });
-      } else {
+      if (!isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
         resolve({
           success: false,
-          error: stderr.trim() || `Process exited with code ${code}`,
+          error: error.message,
           stderr: stderr.trim(),
         });
       }
     });
 
+    proc.on('close', (code: number | null) => {
+      if (!isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ success: true, output: stdout.trim(), stderr: stderr.trim() });
+        } else {
+          resolve({
+            success: false,
+            error: stderr.trim() || `Process exited with code ${code}`,
+            stderr: stderr.trim(),
+          });
+        }
+      }
+    });
+
     // Write the patch to stdin and close
-    proc.stdin.write(patch);
-    proc.stdin.end();
+    try {
+      proc.stdin.write(patch);
+      proc.stdin.end();
+    } catch (error) {
+      if (!isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
+        resolve({
+          success: false,
+          error: `Failed to write patch: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          stderr: stderr.trim(),
+        });
+      }
+    }
   });
 }
 

@@ -2,7 +2,7 @@
 // USE GIT BRANCHES HOOK - Branch operations, checkout, create, delete
 // ============================================================================
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { createLogger } from '../../../../shared/logger';
 import type { ExtendedGitBranchInfo } from '../types';
 import type { GitHookBaseProps, UseGitBranchesReturn } from './types';
@@ -18,6 +18,18 @@ export function useGitBranches({
   setState,
   fetchGitInfo,
 }: GitHookBaseProps): UseGitBranchesReturn {
+  // Ref to track error clear timeout for cleanup
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Sort branches: main/master first, then alphabetically but grouped by parent
   const localBranches = useMemo((): ExtendedGitBranchInfo[] => {
     const branches = state.branches.filter(b => !b.isRemote);
@@ -66,8 +78,14 @@ export function useGitBranches({
           operationInProgress: null,
           error: `Checkout failed: ${result.error}`,
         }));
-        setTimeout(() => {
+        // Clear any existing timeout
+        if (errorTimeoutRef.current) {
+          clearTimeout(errorTimeoutRef.current);
+        }
+        // Set new timeout and store reference for cleanup
+        errorTimeoutRef.current = setTimeout(() => {
           setState(prev => prev.error?.startsWith('Checkout failed') ? { ...prev, error: null } : prev);
+          errorTimeoutRef.current = null;
         }, 5000);
         return;
       }

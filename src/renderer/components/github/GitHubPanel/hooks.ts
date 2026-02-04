@@ -174,6 +174,9 @@ export function useRepoSelector(cwd: string, loadRepoInfo: () => Promise<void>) 
   const [error, setError] = useState<string | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const reposCacheRef = useRef<{ repos: GitHubRepository[]; orgs: GitHubOrganization[]; timestamp: number } | null>(null);
+  const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const requestIdRef = useRef(0);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -187,18 +190,46 @@ export function useRepoSelector(cwd: string, loadRepoInfo: () => Promise<void>) 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const loadUserRepos = async () => {
     if (reposLoading) return;
+
+    // Check cache (5 minute TTL)
+    const now = Date.now();
+    if (reposCacheRef.current && (now - reposCacheRef.current.timestamp) < 300000) {
+      setRepos(reposCacheRef.current.repos);
+      setOrgs(reposCacheRef.current.orgs);
+      return;
+    }
+
+    // Track this request to ignore stale responses
+    const requestId = ++requestIdRef.current;
 
     setReposLoading(true);
     try {
       const [reposResult, orgsResult] = await Promise.all([
-        window.goodvibes.githubListRepos({ sort: 'pushed', per_page: 100 }),
+        window.goodvibes.githubListRepos({ sort: 'pushed', per_page: 30 }),
         window.goodvibes.githubListOrgs(),
       ]);
 
+      // Ignore if a newer request has started
+      if (requestId !== requestIdRef.current) return;
+
       if (reposResult.success && reposResult.data) {
         setRepos(reposResult.data);
+        reposCacheRef.current = {
+          repos: reposResult.data,
+          orgs: orgsResult.success && orgsResult.data ? orgsResult.data : [],
+          timestamp: Date.now(),
+        };
       }
       if (orgsResult.success && orgsResult.data) {
         setOrgs(orgsResult.data);
@@ -206,22 +237,38 @@ export function useRepoSelector(cwd: string, loadRepoInfo: () => Promise<void>) 
     } catch (err) {
       logger.error('Failed to load repos:', err);
     } finally {
-      setReposLoading(false);
+      // Only update loading state if this is still the latest request
+      if (requestId === requestIdRef.current) {
+        setReposLoading(false);
+      }
     }
   };
 
   const loadOrgRepos = async (org: string) => {
+    if (reposLoading) return;
+
     setReposLoading(true);
     setSelectedOrg(org);
+    
+    // Track this request to ignore stale responses
+    const requestId = ++requestIdRef.current;
+
     try {
-      const result = await window.goodvibes.githubListOrgRepos(org, { sort: 'pushed', per_page: 100 });
+      const result = await window.goodvibes.githubListOrgRepos(org, { sort: 'pushed', per_page: 30 });
+      
+      // Ignore if a newer request has started
+      if (requestId !== requestIdRef.current) return;
+
       if (result.success && result.data) {
         setRepos(result.data);
       }
     } catch (err) {
       logger.error('Failed to load org repos:', err);
     } finally {
-      setReposLoading(false);
+      // Only update loading state if this is still the latest request
+      if (requestId === requestIdRef.current) {
+        setReposLoading(false);
+      }
     }
   };
 
@@ -264,7 +311,15 @@ export function useRepoSelector(cwd: string, loadRepoInfo: () => Promise<void>) 
   const handleOpenRepoDropdown = () => {
     setShowRepoDropdown(true);
     setSelectedOrg(null);
-    loadUserRepos();
+    
+    // Debounce to prevent rapid open/close causing multiple loads
+    if (loadTimeoutRef.current) {
+      clearTimeout(loadTimeoutRef.current);
+    }
+    loadTimeoutRef.current = setTimeout(() => {
+      loadUserRepos();
+      loadTimeoutRef.current = null;
+    }, 150);
   };
 
   return {

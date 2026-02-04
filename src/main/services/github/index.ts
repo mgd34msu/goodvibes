@@ -25,6 +25,7 @@ export {
   isDeviceFlowAvailable,
   authenticateWithDeviceFlow,
   getDeviceFlowClientId,
+  shutdownDeviceFlow,
   // Auth state
   logout,
   refreshTokenIfNeeded,

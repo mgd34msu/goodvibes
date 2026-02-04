@@ -105,7 +105,11 @@ function useGitStateImpl(cwd: string) {
 
   // Fetch REMOTE git information (ahead/behind counts)
   const fetchRemoteGitInfo = useCallback(async () => {
-    if (!cwd || !state.isRepo) return;
+    if (!cwd) return;
+
+    // Check isRepo from the latest state instead of capturing it in closure
+    const isRepo = await window.goodvibes.gitIsRepo(cwd);
+    if (!isRepo) return;
 
     try {
       const aheadBehindResult = await window.goodvibes.gitAheadBehind(cwd);
@@ -121,7 +125,7 @@ function useGitStateImpl(cwd: string) {
     } catch (err) {
       // Silent fail for remote info - not critical
     }
-  }, [cwd, state.isRepo]);
+  }, [cwd, setState]);
 
   // Fetch ALL git information (local + remote) - used for initial load
   const fetchGitInfo = useCallback(async () => {
@@ -148,17 +152,22 @@ function useGitStateImpl(cwd: string) {
       unsubscribe();
       window.goodvibes.gitUnwatch(cwd);
     };
-  }, [cwd, fetchGitInfo, fetchLocalGitInfo]);
+  }, [cwd, fetchGitInfo]);
 
   // Poll REMOTE info only (ahead/behind) every 5 minutes when window is focused
   useEffect(() => {
-    if (!gitAutoRefresh || !state.isRepo) return;
+    if (!gitAutoRefresh) return;
 
     let interval: ReturnType<typeof setInterval> | null = null;
+    let isMounted = true;
 
     const startInterval = () => {
       if (interval) clearInterval(interval);
-      interval = setInterval(fetchRemoteGitInfo, 300000); // 5 minutes
+      interval = setInterval(() => {
+        if (isMounted) {
+          fetchRemoteGitInfo();
+        }
+      }, 300000); // 5 minutes
     };
 
     const stopInterval = () => {
@@ -169,7 +178,9 @@ function useGitStateImpl(cwd: string) {
     };
 
     // Only refresh when window is focused
-    const handleFocus = () => startInterval();
+    const handleFocus = () => {
+      if (isMounted) startInterval();
+    };
     const handleBlur = () => stopInterval();
 
     window.addEventListener('focus', handleFocus);
@@ -181,11 +192,12 @@ function useGitStateImpl(cwd: string) {
     }
 
     return () => {
+      isMounted = false;
       stopInterval();
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [fetchRemoteGitInfo, gitAutoRefresh, state.isRepo]);
+  }, [fetchRemoteGitInfo, gitAutoRefresh]);
 
   // Local info is refreshed via git operations - no polling needed
 

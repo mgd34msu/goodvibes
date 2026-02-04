@@ -13,6 +13,8 @@ import { closeAllTerminals, getTerminalCount } from '../services/terminalManager
 import { shutdownAgentRegistry } from '../services/agentRegistry.js';
 import { shutdownPTYStreamAnalyzer } from '../services/ptyStreamAnalyzer.js';
 import { stopHookServer } from '../services/hookServer.js';
+import { shutdownGitWatcher } from '../services/gitWatcher.js';
+import { shutdownDeviceFlow } from '../services/github/index.js';
 import { removeAllListeners } from './listenerRegistry.js';
 import { GRACEFUL_SHUTDOWN_TIMEOUT_MS } from '../../shared/constants.js';
 
@@ -78,6 +80,14 @@ export async function performGracefulShutdown(): Promise<void> {
     shutdownAgentRegistry();
     logger.info('Agent registry shut down');
 
+    // Shutdown git watcher
+    shutdownGitWatcher();
+    logger.info('Git watcher shut down');
+
+    // Shutdown GitHub device flow
+    shutdownDeviceFlow();
+    logger.info('GitHub device flow shut down');
+
     // Close all terminals
     closeAllTerminals();
     await waitForTerminals();
@@ -95,6 +105,8 @@ export async function performGracefulShutdown(): Promise<void> {
   } catch (error) {
     logger.error('Error during graceful shutdown', error);
     // Force close resources on error
+    shutdownGitWatcher();
+    shutdownDeviceFlow();
     closeAllTerminals();
     closeDatabase();
     Logger.shutdown();

@@ -834,7 +834,7 @@ export function registerGitHandlers(): void {
       logger.warn('git-watch validation failed', { error: validation.error });
       throw new IPCValidationError(`Invalid cwd: ${validation.error}`);
     }
-    return getGitWatcher().watchRepo(validation.data);
+    return await getGitWatcher().watchRepo(validation.data);
   }));
 
   ipcMain.handle('git-unwatch', withContext('git-unwatch', async (_, cwd: unknown) => {

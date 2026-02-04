@@ -598,3 +598,15 @@ export function notifyDeviceFlowState(mainWindow: BrowserWindow | null): void {
   const state = getDeviceFlowState();
   mainWindow.webContents.send('github-device-flow-state', state);
 }
+
+/**
+ * Shutdown device flow - cleanup any active polling
+ * CRITICAL: Must be called on app shutdown to prevent resource leaks
+ */
+export function shutdownDeviceFlow(): void {
+  if (activeFlow) {
+    logger.info('Shutting down device flow');
+    activeFlow.cancelled = true;
+    cleanupFlow();
+  }
+}

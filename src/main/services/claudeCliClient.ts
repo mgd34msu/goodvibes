@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { Logger } from './logger.js';
-import { toggleArchive } from '../database/sessions.js';
+import { setArchived } from '../database/sessions.js';
 
 const logger = new Logger('ClaudeCliClient');
 
@@ -740,7 +740,7 @@ export async function archiveTaggingSession(): Promise<void> {
         mtime: mostRecentTaggingSession.mtime
       });
       
-      toggleArchive(mostRecentTaggingSession.sessionId);
+      setArchived(mostRecentTaggingSession.sessionId, true);
       
       logger.info('Successfully archived tag suggestion session', {
         sessionId: mostRecentTaggingSession.sessionId

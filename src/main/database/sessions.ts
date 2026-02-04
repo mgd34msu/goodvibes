@@ -114,6 +114,14 @@ export function toggleArchive(sessionId: string): void {
   database.prepare("UPDATE sessions SET archived = NOT archived, updated_at = datetime('now') WHERE id = ?").run(sessionId);
 }
 
+export function setArchived(sessionId: string, archived: boolean): boolean {
+  const database = getDatabase();
+  const result = database.prepare(`
+    UPDATE sessions SET archived = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(archived ? 1 : 0, sessionId);
+  return result.changes > 0;
+}
+
 export function getActiveSessions(): Session[] {
   const database = getDatabase();
   const rows = database.prepare('SELECT * FROM sessions WHERE archived = 0 OR archived IS NULL ORDER BY end_time DESC').all() as SessionRow[];

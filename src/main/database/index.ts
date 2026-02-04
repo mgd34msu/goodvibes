@@ -39,6 +39,7 @@ export {
   deleteSession,
   toggleFavorite,
   toggleArchive,
+  setArchived,
   getActiveSessions,
   getFavoriteSessions,
   getArchivedSessions,

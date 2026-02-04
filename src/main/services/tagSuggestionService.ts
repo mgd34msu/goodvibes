@@ -769,7 +769,14 @@ const DEFAULT_CONFIG: ServiceConfig = {
   processingIntervalMs: 10000, // 10 seconds
 };
 
-const tagSuggestionService = new TagSuggestionService(DEFAULT_CONFIG);
+// Check if rate limiting is enabled, if not set maxSessionsPerHour to effectively unlimited
+const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
+const effectiveConfig: ServiceConfig = {
+  ...DEFAULT_CONFIG,
+  maxSessionsPerHour: rateLimitEnabled ? DEFAULT_CONFIG.maxSessionsPerHour : 9999,
+};
+
+const tagSuggestionService = new TagSuggestionService(effectiveConfig);
 
 // ============================================================================
 // EXPORTS

@@ -273,37 +273,15 @@ Prefer existing tags when appropriate. Only suggest new tags if truly needed.`;
  * Build the batch prompt for multiple sessions
  */
 function buildBatchPrompt(
-  sessions: Array<{ sessionId: string; context: TagSuggestionContext }>
+  sessions: Array<{ sessionId: string; context: TagSuggestionContext; filePath?: string }>
 ): string {
-  const allExistingTags = new Set<string>();
-  sessions.forEach(s => s.context.existingTags.forEach(tag => allExistingTags.add(tag)));
-  const existingTagsList = Array.from(allExistingTags).join(', ');
-
-  let prompt = `Suggest tags for these coding sessions. Existing tags: ${existingTagsList || 'none'}\n\n`;
+  let prompt = `Read each session file below and suggest 3-5 tags per session.\n\n`;
 
   sessions.forEach((session) => {
-    const ctx = session.context;
-    prompt += `SESSION ${session.sessionId}\n`;
-    
-    if (ctx.projectPath) {
-      prompt += `Project: ${ctx.projectPath}\n`;
-    }
-    
-    if (ctx.recentMessages.length > 0) {
-      ctx.recentMessages.slice(0, 3).forEach(msg => {
-        const content = msg.content.substring(0, 150).replace(/\n/g, ' ');
-        prompt += `${msg.role}: ${content}\n`;
-      });
-    }
-    
-    if (ctx.toolsUsed.length > 0) {
-      prompt += `Tools: ${ctx.toolsUsed.join(', ')}\n`;
-    }
-    
-    prompt += `\n`;
+    prompt += `${session.sessionId}: ${session.filePath || 'unknown'}\n`;
   });
 
-  prompt += `For each session, suggest 3-5 tags. Use lowercase-with-hyphens. Categories: feature, bug, refactor, docs, test, config, other.`;
+  prompt += `\nFor each session, output its sessionId and tags with name, confidence (0-1), reasoning, and category.`;
 
   return prompt;
 }

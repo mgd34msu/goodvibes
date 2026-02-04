@@ -159,6 +159,43 @@ async function initializeHookSystem(): Promise<void> {
 function setupTagSuggestionService(): void {
   const mainWindow = getMainWindow();
   if (mainWindow) {
+    // Set up auto-apply listener for completed scans
+    tagSuggestionService.on('complete', async (sessionId, suggestions) => {
+      try {
+        const autoAccept = getSetting<boolean>('aiSuggestionsAutoAccept') ?? false;
+        const autoAcceptThreshold = getSetting<number>('aiSuggestionsAutoAcceptThreshold') ?? 0.9;
+        
+        if (autoAccept && suggestions.length > 0) {
+          const tagSuggestions = await import('../database/tagSuggestions.js');
+          let acceptedCount = 0;
+          
+          // Auto-accept suggestions that meet the confidence threshold
+          for (const suggestion of suggestions) {
+            if (suggestion.confidence >= autoAcceptThreshold) {
+              try {
+                tagSuggestions.acceptSuggestion(suggestion.id);
+                acceptedCount++;
+                logger.debug(`Auto-accepted suggestion ${suggestion.id}: ${suggestion.tagName} (confidence: ${suggestion.confidence})`);
+              } catch (error) {
+                logger.warn(`Failed to auto-accept suggestion ${suggestion.id}`, { error });
+              }
+            }
+          }
+          
+          if (acceptedCount > 0) {
+            logger.info(`Auto-applied ${acceptedCount}/${suggestions.length} tags for session ${sessionId}`);
+            
+            // Notify renderer to refresh tags display
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('tags-updated', { sessionId });
+            }
+          }
+        }
+      } catch (error) {
+        logger.error('Failed to auto-apply tags', error, { sessionId });
+      }
+    });
+    
     mainWindow.webContents.on('did-finish-load', async () => {
       // Small delay to ensure renderer JS is initialized
       setTimeout(async () => {

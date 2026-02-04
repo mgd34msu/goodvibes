@@ -56,6 +56,7 @@ interface ClaudeCliResponse {
  * CLI returns structured output via a StructuredOutput tool_use in content array
  */
 interface ClaudeCliBatchResponse {
+  // Direct content array (some CLI versions)
   content?: Array<{
     type: string;
     name?: string;
@@ -66,6 +67,20 @@ interface ClaudeCliBatchResponse {
       }>;
     };
   }>;
+  // Message wrapper (other CLI versions)
+  message?: {
+    role: string;
+    content?: Array<{
+      type: string;
+      name?: string;
+      input?: {
+        sessions: Array<{
+          sessionId: string;
+          tags: TagSuggestion[];
+        }>;
+      };
+    }>;
+  };
   // Legacy format (kept for backwards compatibility)
   structured_output?: {
     sessions: Array<{
@@ -549,8 +564,10 @@ function parseBatchCliResponse(
   let sessionsData: Array<{ sessionId: string; tags: TagSuggestion[] }> | undefined;
   
   // Try new format: content[].input.sessions where name === 'StructuredOutput'
-  if (response.content && Array.isArray(response.content)) {
-    const structuredOutput = response.content.find(
+  // Handle both direct content array and message.content wrapper
+  const contentArray = response.content ?? response.message?.content;
+  if (contentArray && Array.isArray(contentArray)) {
+    const structuredOutput = contentArray.find(
       item => item.type === 'tool_use' && item.name === 'StructuredOutput'
     );
     if (structuredOutput?.input?.sessions) {

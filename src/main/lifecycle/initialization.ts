@@ -102,13 +102,22 @@ export async function initializeApp(): Promise<void> {
     registerAllIpcHandlers();
     logger.info('IPC handlers registered');
 
+    // Import sessions BEFORE creating the window
+    // This ensures sessions are available when any view tries to load them
+    const sessionManager = getSessionManager();
+    if (sessionManager) {
+      logger.info('Importing sessions from ~/.claude/projects...');
+      await sessionManager.init();
+      logger.info('Session import complete');
+    }
+
     // Create main window
     createWindow();
     createMenu();
     logger.info('Window created');
 
-    // Start session scanning after window is ready
-    setupSessionScanning();
+    // Start tag suggestion service after window is ready
+    setupTagSuggestionService();
 
     logger.info('GoodVibes initialized successfully');
   } catch (error) {
@@ -144,19 +153,15 @@ async function initializeHookSystem(): Promise<void> {
 }
 
 /**
- * Set up session scanning to start after window is ready
+ * Set up tag suggestion service to start after window is ready
+ * Sessions are already imported at this point, so we can safely queue them
  */
-function setupSessionScanning(): void {
+function setupTagSuggestionService(): void {
   const mainWindow = getMainWindow();
   if (mainWindow) {
     mainWindow.webContents.on('did-finish-load', async () => {
       // Small delay to ensure renderer JS is initialized
       setTimeout(async () => {
-        const sessionManager = getSessionManager();
-        if (sessionManager) {
-          await sessionManager.init();
-        }
-        
         // Auto-start tag suggestion service if enabled
         const enableAiSuggestions = getSetting<boolean>('enableAiSuggestions') ?? true;
         if (enableAiSuggestions) {
@@ -164,6 +169,7 @@ function setupSessionScanning(): void {
           tagSuggestionService.start();
           
           // Queue 10 most recent unscanned sessions
+          // Sessions are already imported at this point, so FK constraints will be satisfied
           const pendingSessions = await import('../database/tagSuggestions.js').then(m => m.getPendingSessions(10));
           for (const sessionId of pendingSessions) {
             tagSuggestionService.queueSession(sessionId, 'medium');

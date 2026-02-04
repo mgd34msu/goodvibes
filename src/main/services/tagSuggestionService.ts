@@ -226,6 +226,7 @@ class TagSuggestionService extends EventEmitter {
   private isPaused: boolean = false;
   private currentSessionId: string | null = null;
   private processingInterval: NodeJS.Timeout | null = null;
+  private isProcessingBatch: boolean = false;
   private scannedCount: number = 0;
   private totalSessionsToScan: number = 0;
   private lastError: string | null = null;
@@ -285,6 +286,7 @@ class TagSuggestionService extends EventEmitter {
       this.processingInterval = null;
     }
 
+    this.isProcessingBatch = false;
     this.emitStatusChanged();
   }
 
@@ -611,6 +613,12 @@ class TagSuggestionService extends EventEmitter {
       return;
     }
 
+    // Don't start a new batch if one is already processing
+    if (this.isProcessingBatch) {
+      logger.debug('Skipping batch - previous batch still processing');
+      return;
+    }
+
     // Check rate limit BEFORE collecting batch (if enabled)
     const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
     if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
@@ -637,6 +645,7 @@ class TagSuggestionService extends EventEmitter {
     // Process batch if we have any sessions
     if (batch.length > 0) {
       logger.info(`Processing batch of ${batch.length} sessions`);
+      this.isProcessingBatch = true;
       this.currentSessionId = batch[0]; // Track first session ID for progress
       this.emitProgress();
 
@@ -647,6 +656,7 @@ class TagSuggestionService extends EventEmitter {
         logger.error('Failed to process batch:', error);
         // Error handling is done in scanSessionBatch
       } finally {
+        this.isProcessingBatch = false;
         this.currentSessionId = null;
         this.emitProgress();
       }

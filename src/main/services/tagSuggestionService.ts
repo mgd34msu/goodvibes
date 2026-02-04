@@ -396,6 +396,13 @@ class TagSuggestionService extends EventEmitter {
         
         // Get file path from database
         const session = db.getSession(sessionId);
+        
+        // Skip if session doesn't exist in DB (not imported yet)
+        if (!session) {
+          logger.warn(`Session ${sessionId} not found in database, skipping`);
+          continue;
+        }
+        
         const filePath = session?.filePath ?? undefined;
         
         // Convert SessionContext to TagSuggestionContext format

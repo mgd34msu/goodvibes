@@ -124,7 +124,39 @@ echo ""
 echo "  Building all platforms..."
 echo ""
 cd "$PROJECT_ROOT"
+
+# Archive old releases before building
+OLD_RELEASES_DIR="$PROJECT_ROOT/release/old-releases"
+if compgen -G "$PROJECT_ROOT/release/*.AppImage" > /dev/null 2>&1 || compgen -G "$PROJECT_ROOT/release/*.zip" > /dev/null 2>&1; then
+  echo "  Archiving old releases..."
+  mkdir -p "$OLD_RELEASES_DIR"
+  for file in "$PROJECT_ROOT/release"/*.AppImage "$PROJECT_ROOT/release"/*.zip; do
+    if [[ -f "$file" ]]; then
+      mv -f "$file" "$OLD_RELEASES_DIR/"
+      echo "    Moved: $(basename "$file")"
+    fi
+  done
+  echo ""
+fi
+
 npm run package:all
+
+# Create Windows portable zip from win-unpacked directory
+echo "  Creating Windows portable zip..."
+WIN_UNPACKED="$PROJECT_ROOT/release/win-unpacked"
+if [[ -d "$WIN_UNPACKED" ]]; then
+  WIN_ZIP="$PROJECT_ROOT/release/GoodVibes-$NEW_VERSION-win-portable.zip"
+  cd "$PROJECT_ROOT/release"
+  # Rename to GoodVibes for clean zip structure
+  mv win-unpacked GoodVibes
+  zip -r "$WIN_ZIP" GoodVibes
+  # Restore original name
+  mv GoodVibes win-unpacked
+  cd "$PROJECT_ROOT"
+  echo "  Created: $(basename "$WIN_ZIP")"
+else
+  echo "  WARNING: win-unpacked directory not found"
+fi
 
 # Create GitHub release with assets
 if ! $NO_GIT; then
@@ -141,8 +173,8 @@ if ! $NO_GIT; then
     RELEASE_DIR="$PROJECT_ROOT/release"
     ASSETS=()
     
-    # Add all release files
-    for file in "$RELEASE_DIR"/*.AppImage "$RELEASE_DIR"/*.deb "$RELEASE_DIR"/*.exe "$RELEASE_DIR"/*.zip; do
+    # Add release files (AppImage + zips only, no raw exe)
+    for file in "$RELEASE_DIR"/*.AppImage "$RELEASE_DIR"/*.zip; do
       if [[ -f "$file" ]]; then
         ASSETS+=("$file")
       fi

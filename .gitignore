@@ -36,6 +36,7 @@ github-oauth.json
 
 # Test coverage
 coverage/
+playwright-report/
 
 # Temporary files
 *.tmp

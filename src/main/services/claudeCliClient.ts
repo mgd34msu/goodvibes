@@ -365,7 +365,9 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
 
     // Spawn the CLI process
     const child = spawn('claude', args, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env }
     });
 
     let stdout = '';
@@ -444,7 +446,9 @@ function callClaudeCli(prompt: string): Promise<string> {
 
     // Spawn the CLI process
     const child = spawn('claude', args, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env }
     });
 
     let stdout = '';

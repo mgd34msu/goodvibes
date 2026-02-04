@@ -608,7 +608,7 @@ class TagSuggestionService extends EventEmitter {
     }
 
     // Check rate limit BEFORE collecting batch (if enabled)
-    const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? false;
+    const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
     if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
       const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
       logger.info(`Rate limit reached. Next batch available in ${Math.round(timeUntilNext / 1000)}s`);

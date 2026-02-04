@@ -35,6 +35,11 @@ export const eventsApi = {
     ipcRenderer.on('session-detected', handler);
     return () => { ipcRenderer.removeListener('session-detected', handler); };
   },
+  onTagsUpdated: (callback: (data: { sessionId: string }) => void): (() => void) => {
+    const handler = (_: unknown, data: { sessionId: string }) => callback(data);
+    ipcRenderer.on('tags-updated', handler);
+    return () => { ipcRenderer.removeListener('tags-updated', handler); };
+  },
   onSubagentSessionUpdate: (callback: (data: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown) => callback(data);
     ipcRenderer.on('subagent-session-update', handler);

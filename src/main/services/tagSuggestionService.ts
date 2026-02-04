@@ -764,19 +764,15 @@ class TagSuggestionService extends EventEmitter {
 // ============================================================================
 
 const DEFAULT_CONFIG: ServiceConfig = {
-  maxSessionsPerHour: 10, // 10 batches/hour (each batch = 25 sessions = 250 sessions/hour)
+  // When rate limiting is disabled, processQueue() skips the rate limit check entirely.
+  // So we use a high maxSessionsPerHour (9999) here - the actual limiting is done dynamically
+  // in processQueue() based on the tagScanRateLimitEnabled setting.
+  maxSessionsPerHour: 9999, // Effectively unlimited - rate limiting is checked dynamically
   batchSize: 25,
   processingIntervalMs: 10000, // 10 seconds
 };
 
-// Check if rate limiting is enabled, if not set maxSessionsPerHour to effectively unlimited
-const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
-const effectiveConfig: ServiceConfig = {
-  ...DEFAULT_CONFIG,
-  maxSessionsPerHour: rateLimitEnabled ? DEFAULT_CONFIG.maxSessionsPerHour : 9999,
-};
-
-const tagSuggestionService = new TagSuggestionService(effectiveConfig);
+const tagSuggestionService = new TagSuggestionService(DEFAULT_CONFIG);
 
 // ============================================================================
 // EXPORTS

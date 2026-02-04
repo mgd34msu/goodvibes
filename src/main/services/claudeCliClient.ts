@@ -129,7 +129,7 @@ const CLI_TIMEOUT_MS = 120000; // 2 minutes for single session
 /**
  * Prefix used to identify tag suggestion sessions
  */
-const SESSION_TAGGING_PREFIX = '[session tagging]';
+const SESSION_TAGGING_PREFIX = 'Suggest tags for these coding sessions';
 
 // ============================================================================
 // Main API Function
@@ -279,65 +279,31 @@ function buildBatchPrompt(
   sessions.forEach(s => s.context.existingTags.forEach(tag => allExistingTags.add(tag)));
   const existingTagsList = Array.from(allExistingTags).join(', ');
 
-  let prompt = `[session tagging]
+  let prompt = `Suggest tags for these coding sessions. Existing tags: ${existingTagsList || 'none'}\n\n`;
 
-Analyze these Claude Code sessions and suggest relevant tags for EACH session.
-
-Existing tags in the system: ${existingTagsList || 'none'}
-
-`;
-
-  // Add each session
-  sessions.forEach((session, index) => {
+  sessions.forEach((session) => {
     const ctx = session.context;
-    prompt += `=== SESSION ${index + 1} (ID: ${session.sessionId}) ===\n`;
+    prompt += `SESSION ${session.sessionId}\n`;
     
     if (ctx.projectPath) {
       prompt += `Project: ${ctx.projectPath}\n`;
     }
     
     if (ctx.recentMessages.length > 0) {
-      prompt += `Recent messages:\n`;
       ctx.recentMessages.slice(0, 3).forEach(msg => {
-        prompt += `  [${msg.role}]: ${msg.content.substring(0, 100)}...\n`;
+        const content = msg.content.substring(0, 150).replace(/\n/g, ' ');
+        prompt += `${msg.role}: ${content}\n`;
       });
     }
     
     if (ctx.toolsUsed.length > 0) {
-      prompt += `Tools used: ${ctx.toolsUsed.join(', ')}\n`;
+      prompt += `Tools: ${ctx.toolsUsed.join(', ')}\n`;
     }
     
     prompt += `\n`;
   });
 
-  prompt += `For EACH session, suggest 3-5 relevant tags. For each tag:
-- Use lowercase with hyphens (e.g., "bug-fix", "feature", "refactor")
-- Provide confidence 0-1 (higher for existing tags, moderate for new tags)
-- Explain your reasoning briefly
-- Categorize as: feature, bug, refactor, docs, test, config, or other
-
-Prefer existing tags when appropriate. Only suggest new tags if truly needed.
-
-IMPORTANT: Return tags for ALL sessions. Use the EXACT session ID provided.
-
-Example output format:
-{
-  "sessions": [
-    {
-      "sessionId": "abc-123-def",
-      "tags": [
-        { "name": "bug-fix", "confidence": 0.9, "reasoning": "Session focused on fixing a bug", "category": "bug" },
-        { "name": "react", "confidence": 0.8, "reasoning": "React components were modified", "category": "feature" }
-      ]
-    },
-    {
-      "sessionId": "xyz-456-ghi",
-      "tags": [
-        { "name": "refactor", "confidence": 0.85, "reasoning": "Code was restructured", "category": "refactor" }
-      ]
-    }
-  ]
-}`;
+  prompt += `For each session, suggest 3-5 tags. Use lowercase-with-hyphens. Categories: feature, bug, refactor, docs, test, config, other.`;
 
   return prompt;
 }
@@ -352,25 +318,40 @@ Example output format:
  */
 function callClaudeCliBatch(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Build CLI arguments with batch schema
+    // Write prompt and schema to temp files to avoid shell escaping issues
+    const timestamp = Date.now();
+    const promptFile = path.join(os.tmpdir(), `claude-batch-prompt-${timestamp}.txt`);
+    const schemaFile = path.join(os.tmpdir(), `claude-batch-schema-${timestamp}.json`);
+    
+    fs.writeFileSync(promptFile, prompt, 'utf-8');
+    fs.writeFileSync(schemaFile, BATCH_TAG_SCHEMA, 'utf-8');
+
+    // Build CLI arguments - read prompt and schema from files
     const args = [
-      '-p', prompt,
+      '-p', `@${promptFile}`,
       '--model', 'haiku',
       '--output-format', 'json',
-      '--json-schema', BATCH_TAG_SCHEMA,
+      '--json-schema', `@${schemaFile}`,
       '--allowedTools', 'Read'
     ];
 
     logger.info('=== SPAWNING CLAUDE CLI FOR BATCH ===');
-    logger.info('Batch sessions:', { count: args.length, prompt_length: prompt.length });
-    logger.info('Command: claude ' + args.slice(0, 4).join(' ') + ' ...');
+    logger.info('Batch sessions:', { prompt_length: prompt.length, promptFile, schemaFile });
+    logger.info('Args:', args);
 
-    // Spawn the CLI process
-    const child = spawn('claude', args, {
+    // Find claude path and spawn without shell to avoid escaping issues
+    const claudePath = process.env.HOME + '/.local/bin/claude';
+    const child = spawn(claudePath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
+      shell: false,
       env: { ...process.env }
     });
+
+    // Clean up temp files when done
+    const cleanup = () => {
+      try { fs.unlinkSync(promptFile); } catch (_e) { /* ignore */ }
+      try { fs.unlinkSync(schemaFile); } catch (_e) { /* ignore */ }
+    };
 
     let stdout = '';
     let stderr = '';
@@ -396,6 +377,7 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
 
     // Handle process exit
     child.on('close', (code: number | null) => {
+      cleanup();
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
@@ -415,6 +397,7 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
 
     // Handle spawn errors
     child.on('error', (error: Error) => {
+      cleanup();
       if (timeoutId) {
         clearTimeout(timeoutId);
       }

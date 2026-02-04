@@ -599,9 +599,20 @@ class TagSuggestionService extends EventEmitter {
    */
   getProgress(): ScanProgress {
     const queueSize = this.queue.size();
-    const total = this.totalSessionsToScan > 0 ? this.totalSessionsToScan : this.scannedCount + queueSize;
-    const current = this.scannedCount;
     const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
+    
+    // When rate limiting is disabled, show actual total pending sessions
+    // When rate limiting is enabled, cap display at 100 (rate limit max)
+    let total: number;
+    if (rateLimitEnabled) {
+      total = this.totalSessionsToScan > 0 ? this.totalSessionsToScan : this.scannedCount + queueSize;
+    } else {
+      // Get actual pending count from database when rate limiting is off
+      const actualPending = tagSuggestions.getPendingSessions().length;
+      total = this.scannedCount + actualPending;
+    }
+    
+    const current = this.scannedCount;
 
     return {
       current,
@@ -639,10 +650,12 @@ class TagSuggestionService extends EventEmitter {
 
     // Check rate limit BEFORE collecting batch (if enabled)
     const rateLimitEnabled = db.getSetting<boolean>('tagScanRateLimitEnabled') ?? true;
-    if (rateLimitEnabled && !this.rateLimiter.tryConsume()) {
-      const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
-      logger.info(`Rate limit reached. Next batch available in ${Math.round(timeUntilNext / 1000)}s`);
-      return;
+    if (rateLimitEnabled) {
+      if (!this.rateLimiter.tryConsume()) {
+        const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
+        logger.info(`Rate limit reached. Next batch available in ${Math.round(timeUntilNext / 1000)}s`);
+        return;
+      }
     }
 
     // Collect session IDs for batch processing

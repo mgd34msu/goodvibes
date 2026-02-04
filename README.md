@@ -26,8 +26,8 @@ Download the latest release for your operating system from the [Releases page](h
 
 | Platform | Download |
 |----------|----------|
-| Windows | `GoodVibes-Setup-x.x.x.exe` |
-| macOS | `GoodVibes-x.x.x.dmg` |
+| Windows | `GoodVibes-x.x.x-win-portable.zip` |
+| macOS | `GoodVibes-x.x.x-mac.zip` |
 | Linux | `GoodVibes-x.x.x.AppImage` |
 
 See [Linux Setup](#linux-setup) below for additional configuration on Linux systems.

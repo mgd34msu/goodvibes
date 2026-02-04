@@ -3,7 +3,11 @@
 // ============================================================================
 
 import { spawn } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { Logger } from './logger.js';
+import { toggleArchive } from '../database/sessions.js';
 
 const logger = new Logger('ClaudeCliClient');
 
@@ -121,6 +125,11 @@ const BATCH_TAG_SCHEMA = JSON.stringify({
  * Timeout for CLI execution (30 seconds)
  */
 const CLI_TIMEOUT_MS = 30000;
+
+/**
+ * Prefix used to identify tag suggestion sessions
+ */
+const SESSION_TAGGING_PREFIX = '[session tagging]';
 
 // ============================================================================
 // Main API Function
@@ -242,7 +251,9 @@ export async function generateBatchTagSuggestions(
  * Build the prompt for Claude CLI
  */
 function buildPrompt(sessionContext: string, existingTags: string[]): string {
-  return `Analyze this Claude Code session and suggest relevant tags for categorization.
+  return `[session tagging]
+
+Analyze this Claude Code session and suggest relevant tags for categorization.
 
 Existing tags in the system: ${existingTags.length > 0 ? existingTags.join(', ') : 'none'}
 
@@ -268,7 +279,9 @@ function buildBatchPrompt(
   sessions.forEach(s => s.context.existingTags.forEach(tag => allExistingTags.add(tag)));
   const existingTagsList = Array.from(allExistingTags).join(', ');
 
-  let prompt = `Analyze these Claude Code sessions and suggest relevant tags for EACH session.
+  let prompt = `[session tagging]
+
+Analyze these Claude Code sessions and suggest relevant tags for EACH session.
 
 Existing tags in the system: ${existingTagsList || 'none'}
 
@@ -638,4 +651,114 @@ function validateSuggestion(suggestion: unknown): TagSuggestion {
     reasoning: s.reasoning.trim(),
     category: typeof s.category === 'string' ? s.category.trim() : undefined,
   };
+}
+
+// ============================================================================
+// Session Auto-Archiving
+// ============================================================================
+
+/**
+ * Find and archive the most recent CLI session with [session tagging] prefix
+ * This prevents tagging sessions from cluttering the main session list
+ */
+export async function archiveTaggingSession(): Promise<void> {
+  try {
+    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+    
+    if (!fs.existsSync(claudeDir)) {
+      logger.debug('Claude projects directory not found, cannot archive tagging session');
+      return;
+    }
+
+    let mostRecentTaggingSession: { sessionId: string; filePath: string; mtime: Date } | null = null;
+
+    // Scan all project directories
+    const projectDirs = fs.readdirSync(claudeDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => path.join(claudeDir, d.name));
+
+    for (const projectDir of projectDirs) {
+      // Get all .jsonl files (session files) in the project directory
+      const sessionFiles = fs.readdirSync(projectDir, { withFileTypes: true })
+        .filter(f => f.isFile() && f.name.endsWith('.jsonl') && !f.name.startsWith('agent-'))
+        .map(f => {
+          const filePath = path.join(projectDir, f.name);
+          const stats = fs.statSync(filePath);
+          return {
+            sessionId: f.name.replace('.jsonl', ''),
+            filePath,
+            mtime: stats.mtime,
+          };
+        });
+
+      // Check each session for the tagging prefix
+      for (const file of sessionFiles) {
+        try {
+          const content = fs.readFileSync(file.filePath, 'utf-8');
+          const lines = content.split('\n').filter(l => l.trim());
+          
+          // Check first few lines for user message with tagging prefix
+          for (const line of lines.slice(0, 5)) {
+            try {
+              const entry = JSON.parse(line);
+              if (entry.type === 'human' || entry.type === 'user') {
+                let messageText = '';
+                
+                // Extract message text
+                if (typeof entry.message === 'string') {
+                  messageText = entry.message;
+                } else if (entry.message?.content) {
+                  if (typeof entry.message.content === 'string') {
+                    messageText = entry.message.content;
+                  } else if (Array.isArray(entry.message.content)) {
+                    const textBlock = entry.message.content.find((b: { type: string }) => b.type === 'text');
+                    if (textBlock?.text) {
+                      messageText = textBlock.text;
+                    }
+                  }
+                }
+
+                // Check if this is a tagging session
+                if (messageText.includes(SESSION_TAGGING_PREFIX)) {
+                  if (!mostRecentTaggingSession || file.mtime > mostRecentTaggingSession.mtime) {
+                    mostRecentTaggingSession = file;
+                  }
+                  break;
+                }
+              }
+            } catch (err) {
+              // Skip invalid JSON lines
+              continue;
+            }
+          }
+        } catch (err) {
+          // Skip files we can't read
+          logger.debug('Could not read session file for archiving', {
+            file: file.filePath,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
+      }
+    }
+
+    // Archive the most recent tagging session if found
+    if (mostRecentTaggingSession) {
+      logger.info('Archiving tag suggestion session', {
+        sessionId: mostRecentTaggingSession.sessionId,
+        mtime: mostRecentTaggingSession.mtime
+      });
+      
+      toggleArchive(mostRecentTaggingSession.sessionId);
+      
+      logger.info('Successfully archived tag suggestion session', {
+        sessionId: mostRecentTaggingSession.sessionId
+      });
+    } else {
+      logger.debug('No recent tagging session found to archive');
+    }
+  } catch (err) {
+    logger.error('Failed to archive tagging session', {
+      error: err instanceof Error ? err.message : String(err)
+    });
+  }
 }

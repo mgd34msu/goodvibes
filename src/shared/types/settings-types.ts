@@ -119,13 +119,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultFilterLogic: 'and',
   rememberFilterState: true,
   // AI Suggestion Settings
-  enableAiSuggestions: false, // disabled by default
+  enableAiSuggestions: true, // enabled by default
   aiSuggestionsSessionsPerHour: 60,
   aiSuggestionsMinSessionLength: 5,
   aiSuggestionsScanDepth: 'quick',
   aiSuggestionsAutoAccept: false,
   aiSuggestionsAutoAcceptThreshold: 0.9,
-  tagScanRateLimitEnabled: false, // disabled by default (user didn't request it)
+  tagScanRateLimitEnabled: true, // enabled by default for API protection
 };
 
 // Settings version - increment this when adding new settings that need migration

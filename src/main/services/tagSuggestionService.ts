@@ -20,6 +20,7 @@ import { gatherQuickContext, formatContextForPrompt } from './tagSuggestionConte
 import { 
   generateTagSuggestionsViaCli, 
   generateBatchTagSuggestions,
+  archiveTaggingSession,
   type TagSuggestionContext 
 } from './claudeCliClient.js';
 import * as tagSuggestions from '../database/tagSuggestions.js';
@@ -413,6 +414,11 @@ class TagSuggestionService extends EventEmitter {
       // 2. ONE CLI call for all sessions
       const results = await generateBatchTagSuggestions(sessionContexts);
 
+      // Archive the CLI session that was created
+      archiveTaggingSession().catch(err => {
+        logger.warn('Failed to archive tagging session after batch CLI call', { error: err });
+      });
+
       // 3. Save suggestions for each session
       for (const [sessionId, tags] of results) {
         if (tags.length === 0) {
@@ -481,6 +487,11 @@ class TagSuggestionService extends EventEmitter {
         formattedContext,
         context.existingTags
       );
+      
+      // Archive the CLI session that was created
+      archiveTaggingSession().catch(err => {
+        logger.warn('Failed to archive tagging session after CLI call', { error: err });
+      });
       
       // 4. Save suggestions to database
       const suggestions = tagSuggestions.createSuggestions(

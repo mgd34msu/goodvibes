@@ -23,6 +23,7 @@ import { createWindow, getMainWindow } from '../window.js';
 import { createMenu } from '../menu.js';
 import { wireAgentBridge, wireHookServerEvents } from './agentBridge.js';
 import { SESSION_SCAN_INIT_DELAY_MS } from '../../shared/constants.js';
+import tagSuggestionService from '../services/tagSuggestionService.js';
 
 const logger = new Logger('Initialization');
 
@@ -154,6 +155,23 @@ function setupSessionScanning(): void {
         const sessionManager = getSessionManager();
         if (sessionManager) {
           await sessionManager.init();
+        }
+        
+        // Auto-start tag suggestion service if enabled
+        const enableAiSuggestions = getSetting<boolean>('enableAiSuggestions') ?? true;
+        if (enableAiSuggestions) {
+          logger.info('Starting tag suggestion service (auto-scan enabled)');
+          tagSuggestionService.start();
+          
+          // Queue 10 most recent unscanned sessions
+          const pendingSessions = await import('../database/tagSuggestions.js').then(m => m.getPendingSessions(10));
+          for (const sessionId of pendingSessions) {
+            tagSuggestionService.queueSession(sessionId, 'medium');
+          }
+          
+          if (pendingSessions.length > 0) {
+            logger.info(`Queued ${pendingSessions.length} recent sessions for tag scanning`);
+          }
         }
       }, SESSION_SCAN_INIT_DELAY_MS);
     });

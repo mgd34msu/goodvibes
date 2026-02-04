@@ -133,11 +133,11 @@
       ]
     },
     "win": {
-      "target": "nsis",
+      "target": "dir",
       "icon": "build/icon.ico"
     },
     "mac": {
-      "target": "dmg",
+      "target": "zip",
       "icon": "build/icon.icns"
     },
     "linux": {

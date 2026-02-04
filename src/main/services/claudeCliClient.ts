@@ -582,6 +582,12 @@ function parseBatchCliResponse(
     logger.debug('Found sessions in legacy structured_output field');
   }
   
+  // Fallback to direct sessions array (--output-format json may output schema directly)
+  if (!sessionsData && (response as Record<string, unknown>).sessions) {
+    sessionsData = (response as Record<string, unknown>).sessions as Array<{ sessionId: string; tags: TagSuggestion[] }>;
+    logger.debug('Found sessions in direct response.sessions field');
+  }
+  
   if (!sessionsData) {
     logger.error('Claude CLI batch response missing sessions data', { 
       hasContent: !!response.content,

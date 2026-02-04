@@ -123,149 +123,153 @@ export function TagSettings({ settings, onChange }: TagSettingsProps): React.JSX
           />
         </SettingRow>
 
-        <SettingRow
-          label="Sessions per Hour"
-          description="Rate limit for AI tag suggestions"
-        >
-          <input
-            type="number"
-            value={settings.aiSuggestionsSessionsPerHour}
-            onChange={(e) => {
-              const value = parseInt(e.target.value, 10);
-              if (!isNaN(value) && value >= 1 && value <= 1000) {
-                onChange('aiSuggestionsSessionsPerHour', value);
-              }
-            }}
-            min="1"
-            max="1000"
-            step="1"
-            className="input w-24"
-            disabled={!settings.enableAiSuggestions}
-            aria-label="Sessions per hour"
-          />
-        </SettingRow>
+        {settings.enableAiSuggestions && (
+          <>
+            <SettingRow
+              label="Sessions per Hour"
+              description="Rate limit for AI tag suggestions"
+            >
+              <input
+                type="number"
+                value={settings.aiSuggestionsSessionsPerHour}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (!isNaN(value) && value >= 1 && value <= 1000) {
+                    onChange('aiSuggestionsSessionsPerHour', value);
+                  }
+                }}
+                min="1"
+                max="1000"
+                step="1"
+                className="input w-24"
+                disabled={!settings.enableAiSuggestions}
+                aria-label="Sessions per hour"
+              />
+            </SettingRow>
 
-        <SettingRow
-          label="Min Session Length"
-          description="Minimum number of messages before suggesting tags"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={settings.aiSuggestionsMinSessionLength}
-              onChange={(e) => {
-                const value = parseInt(e.target.value, 10);
-                if (!isNaN(value) && value >= 1 && value <= 100) {
-                  onChange('aiSuggestionsMinSessionLength', value);
-                }
-              }}
-              min="1"
-              max="100"
-              step="1"
-              className="input w-24"
-              disabled={!settings.enableAiSuggestions}
-              aria-label="Minimum session length"
-            />
-            <span className="text-xs text-surface-500">messages</span>
-          </div>
-        </SettingRow>
+            <SettingRow
+              label="Min Session Length"
+              description="Minimum number of messages before suggesting tags"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={settings.aiSuggestionsMinSessionLength}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    if (!isNaN(value) && value >= 1 && value <= 100) {
+                      onChange('aiSuggestionsMinSessionLength', value);
+                    }
+                  }}
+                  min="1"
+                  max="100"
+                  step="1"
+                  className="input w-24"
+                  disabled={!settings.enableAiSuggestions}
+                  aria-label="Minimum session length"
+                />
+                <span className="text-xs text-surface-500">messages</span>
+              </div>
+            </SettingRow>
 
-        <SettingRow
-          label="Scan Depth"
-          description="How thoroughly to analyze session content"
-        >
-          <select
-            value={settings.aiSuggestionsScanDepth}
-            onChange={(e) => onChange('aiSuggestionsScanDepth', e.target.value as 'quick' | 'full')}
-            className="select w-32"
-            disabled={!settings.enableAiSuggestions}
-            aria-label="Scan depth"
-          >
-            <option value="quick">Quick</option>
-            <option value="full">Full</option>
-          </select>
-        </SettingRow>
+            <SettingRow
+              label="Scan Depth"
+              description="How thoroughly to analyze session content"
+            >
+              <select
+                value={settings.aiSuggestionsScanDepth}
+                onChange={(e) => onChange('aiSuggestionsScanDepth', e.target.value as 'quick' | 'full')}
+                className="select w-32"
+                disabled={!settings.enableAiSuggestions}
+                aria-label="Scan depth"
+              >
+                <option value="quick">Quick</option>
+                <option value="full">Full</option>
+              </select>
+            </SettingRow>
 
-        <SettingRow
-          label="Rate Limit Scanning"
-          description="Limit scanning to control token usage (100 sessions per hour)"
-        >
-          <ToggleSwitch
-            checked={settings.tagScanRateLimitEnabled}
-            onChange={(value) => onChange('tagScanRateLimitEnabled', value)}
-            disabled={!settings.enableAiSuggestions}
-          />
-        </SettingRow>
+            <SettingRow
+              label="Rate Limit Scanning"
+              description="Limit scanning to control token usage (100 sessions per hour)"
+            >
+              <ToggleSwitch
+                checked={settings.tagScanRateLimitEnabled}
+                onChange={(value) => onChange('tagScanRateLimitEnabled', value)}
+                disabled={!settings.enableAiSuggestions}
+              />
+            </SettingRow>
 
-        <SettingRow
-          label="Scan Agent Sessions"
-          description="Include agent sessions in tag suggestions (disabled by default)"
-        >
-          <ToggleSwitch
-            checked={settings.tagScanAgentSessions}
-            onChange={(value) => onChange('tagScanAgentSessions', value)}
-            disabled={!settings.enableAiSuggestions}
-          />
-        </SettingRow>
+            <SettingRow
+              label="Scan Agent Sessions"
+              description="Include agent sessions in tag suggestions (disabled by default)"
+            >
+              <ToggleSwitch
+                checked={settings.tagScanAgentSessions}
+                onChange={(value) => onChange('tagScanAgentSessions', value)}
+                disabled={!settings.enableAiSuggestions}
+              />
+            </SettingRow>
 
-        <SettingRow
-          label="Auto-Accept High-Confidence Tags"
-          description="Automatically apply tags with high confidence scores"
-        >
-          <ToggleSwitch
-            checked={settings.aiSuggestionsAutoAccept}
-            onChange={(value) => onChange('aiSuggestionsAutoAccept', value)}
-            disabled={!settings.enableAiSuggestions}
-          />
-        </SettingRow>
+            <SettingRow
+              label="Auto-Accept High-Confidence Tags"
+              description="Automatically apply tags with high confidence scores"
+            >
+              <ToggleSwitch
+                checked={settings.aiSuggestionsAutoAccept}
+                onChange={(value) => onChange('aiSuggestionsAutoAccept', value)}
+                disabled={!settings.enableAiSuggestions}
+              />
+            </SettingRow>
 
-        {settings.aiSuggestionsAutoAccept && (
-          <SettingRow
-            label="Auto-Accept Threshold"
-            description="Minimum confidence score to auto-accept (0.0-1.0)"
-          >
-            <input
-              type="number"
-              value={settings.aiSuggestionsAutoAcceptThreshold}
-              onChange={(e) => {
-                const value = parseFloat(e.target.value);
-                if (!isNaN(value) && value >= 0 && value <= 1) {
-                  onChange('aiSuggestionsAutoAcceptThreshold', value);
-                }
-              }}
-              min="0"
-              max="1"
-              step="0.05"
-              className="input w-24"
-              disabled={!settings.enableAiSuggestions}
-              aria-label="Auto-accept threshold"
-            />
-          </SettingRow>
-        )}
+            {settings.aiSuggestionsAutoAccept && (
+              <SettingRow
+                label="Auto-Accept Threshold"
+                description="Minimum confidence score to auto-accept (0.0-1.0)"
+              >
+                <input
+                  type="number"
+                  value={settings.aiSuggestionsAutoAcceptThreshold}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value);
+                    if (!isNaN(value) && value >= 0 && value <= 1) {
+                      onChange('aiSuggestionsAutoAcceptThreshold', value);
+                    }
+                  }}
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  className="input w-24"
+                  disabled={!settings.enableAiSuggestions}
+                  aria-label="Auto-accept threshold"
+                />
+              </SettingRow>
+            )}
 
-        <div className="px-5 py-4 space-y-3 bg-surface-800/30">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-surface-100">Backlog Status</div>
-              <div className="text-xs text-surface-500 mt-0.5">
-                {isLoadingCount ? (
-                  'Loading...'
-                ) : pendingCount > 0 ? (
-                  `${pendingCount} session${pendingCount === 1 ? '' : 's'} pending analysis`
-                ) : (
-                  'All sessions have been analyzed'
-                )}
+            <div className="px-5 py-4 space-y-3 bg-surface-800/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-surface-100">Backlog Status</div>
+                  <div className="text-xs text-surface-500 mt-0.5">
+                    {isLoadingCount ? (
+                      'Loading...'
+                    ) : pendingCount > 0 ? (
+                      `${pendingCount} session${pendingCount === 1 ? '' : 's'} pending analysis`
+                    ) : (
+                      'All sessions have been analyzed'
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleScanAll}
+                  disabled={!settings.enableAiSuggestions || pendingCount === 0 || isLoadingCount}
+                  className="btn btn-primary btn-sm"
+                >
+                  Scan All Sessions
+                </button>
               </div>
             </div>
-            <button
-              onClick={handleScanAll}
-              disabled={!settings.enableAiSuggestions || pendingCount === 0 || isLoadingCount}
-              className="btn btn-primary btn-sm"
-            >
-              Scan All Sessions
-            </button>
-          </div>
-        </div>
+          </>
+        )}
       </SettingsSection>
 
       <ScanProgressModal

@@ -120,7 +120,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultFilterLogic: 'and',
   rememberFilterState: true,
   // AI Suggestion Settings
-  enableAiSuggestions: true, // enabled by default
+  enableAiSuggestions: false, // disabled by default
   aiSuggestionsSessionsPerHour: 60,
   aiSuggestionsMinSessionLength: 5,
   aiSuggestionsScanDepth: 'quick',

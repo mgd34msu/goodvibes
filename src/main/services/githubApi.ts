@@ -311,6 +311,7 @@ export async function closePullRequest(
 
 /**
  * Get check runs for a specific ref (branch, tag, or commit)
+ * Returns empty array if ref is not found (404/422 errors)
  */
 export async function getCheckRuns(
   owner: string,
@@ -318,30 +319,51 @@ export async function getCheckRuns(
   ref: string
 ): Promise<GitHubApiResult<GitHubCheckRun[]>> {
   return apiCall('getCheckRuns', async (octokit) => {
-    const { data } = await octokit.checks.listForRef({
-      owner,
-      repo,
-      ref,
-    });
-    return data.check_runs as unknown as GitHubCheckRun[];
+    try {
+      const { data } = await octokit.checks.listForRef({
+        owner,
+        repo,
+        ref,
+      });
+      return data.check_runs as unknown as GitHubCheckRun[];
+    } catch (error: unknown) {
+      const e = error as { status?: number; message?: string };
+      // Return empty array if ref doesn't exist (404) or is invalid (422)
+      if (e.status === 404 || e.status === 422) {
+        logger.debug(`Ref "${ref}" not found for ${owner}/${repo} - returning empty check runs`);
+        return [];
+      }
+      throw error;
+    }
   });
 }
 
 /**
  * Get combined commit status
+ * Returns null if ref is not found (404/422 errors)
  */
 export async function getCommitStatus(
   owner: string,
   repo: string,
   ref: string
-): Promise<GitHubApiResult<GitHubCombinedStatus>> {
+): Promise<GitHubApiResult<GitHubCombinedStatus | null>> {
   return apiCall('getCommitStatus', async (octokit) => {
-    const { data } = await octokit.repos.getCombinedStatusForRef({
-      owner,
-      repo,
-      ref,
-    });
-    return data as unknown as GitHubCombinedStatus;
+    try {
+      const { data } = await octokit.repos.getCombinedStatusForRef({
+        owner,
+        repo,
+        ref,
+      });
+      return data as unknown as GitHubCombinedStatus;
+    } catch (error: unknown) {
+      const e = error as { status?: number; message?: string };
+      // Return null if ref doesn't exist (404) or is invalid (422)
+      if (e.status === 404 || e.status === 422) {
+        logger.debug(`Ref "${ref}" not found for ${owner}/${repo} - returning null commit status`);
+        return null;
+      }
+      throw error;
+    }
   });
 }
 

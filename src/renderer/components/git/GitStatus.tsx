@@ -14,6 +14,9 @@ interface GitStatusProps {
     staged: boolean;
     unstaged: boolean;
     untracked: boolean;
+    stagedTruncated?: boolean;
+    unstagedTruncated?: boolean;
+    untrackedTruncated?: boolean;
   };
   toggleSection: (section: keyof ExpandedSections) => void;
   onStage: (files: string[]) => Promise<void>;
@@ -216,7 +219,7 @@ export function GitStatus({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               <span className="text-xs font-medium text-success-400">Staged Changes</span>
-              <span className="text-xs text-surface-500">({staged.length})</span>
+              <span className="text-xs text-surface-500">({(expandedSections as any).stagedTruncated ? '2500+' : staged.length})</span>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); onUnstageAll(); }}
@@ -268,7 +271,7 @@ export function GitStatus({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               <span className="text-xs font-medium text-primary-400">Changes</span>
-              <span className="text-xs text-surface-500">({unstaged.length})</span>
+              <span className="text-xs text-surface-500">({(expandedSections as any).unstagedTruncated ? '2500+' : unstaged.length})</span>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); onStageAll(); }}
@@ -320,7 +323,7 @@ export function GitStatus({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               <span className="text-xs font-medium text-warning-400">Untracked</span>
-              <span className="text-xs text-surface-500">({untracked.length})</span>
+              <span className="text-xs text-surface-500">({(expandedSections as any).untrackedTruncated ? '2500+' : untracked.length})</span>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); onStage(untracked.map(f => f.file)); }}

@@ -78,6 +78,15 @@ export interface GitPanelState {
   staged: GitFileChange[];
   unstaged: GitFileChange[];
   untracked: GitFileChange[];
+  statusTruncated: boolean;
+  statusTotalFiles: number;
+  stagedTruncated: boolean;
+  unstagedTruncated: boolean;
+  untrackedTruncated: boolean;
+  totalStaged: number;
+  totalUnstaged: number;
+  totalUntracked: number;
+  totalFiles: number;
 
   // Branches
   branches: ExtendedGitBranchInfo[];
@@ -190,6 +199,15 @@ export const initialGitPanelState: GitPanelState = {
   staged: [],
   unstaged: [],
   untracked: [],
+  statusTruncated: false,
+  statusTotalFiles: 0,
+  stagedTruncated: false,
+  unstagedTruncated: false,
+  untrackedTruncated: false,
+  totalStaged: 0,
+  totalUnstaged: 0,
+  totalUntracked: 0,
+  totalFiles: 0,
   branches: [],
   commits: [],
   commitMessage: '',

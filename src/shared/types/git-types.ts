@@ -92,6 +92,14 @@ export interface GitDetailedStatus {
   branch: string;
   ahead: number;
   behind: number;
+  truncated?: boolean;
+  totalFiles?: number;
+  stagedTruncated?: boolean;
+  unstagedTruncated?: boolean;
+  untrackedTruncated?: boolean;
+  totalStaged?: number;
+  totalUnstaged?: number;
+  totalUntracked?: number;
 }
 
 export interface GitAheadBehind {

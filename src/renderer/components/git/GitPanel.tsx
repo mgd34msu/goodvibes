@@ -53,7 +53,6 @@ export function GitPanel({ cwd, position }: GitPanelProps): React.JSX.Element {
     setState,
     branchDropdownRef,
     localBranches,
-    totalChanges,
     fetchGitInfo,
     toggleSection,
     handleStage,
@@ -357,8 +356,8 @@ export function GitPanel({ cwd, position }: GitPanelProps): React.JSX.Element {
             </svg>
           </div>
           <span className="text-sm font-semibold text-surface-100">Source Control</span>
-          {totalChanges > 0 && (
-            <span className="badge-premium ml-1">{totalChanges}</span>
+          {state.totalFiles > 0 && (
+            <span className="badge-premium ml-1">{state.totalFiles.toLocaleString()}</span>
           )}
         </div>
         <button
@@ -372,6 +371,23 @@ export function GitPanel({ cwd, position }: GitPanelProps): React.JSX.Element {
           </svg>
         </button>
       </div>
+
+      {/* Truncation Warning */}
+      {state.statusTruncated && (
+        <div className="mx-3 mt-3 p-3 rounded-lg bg-warning-500/10 border border-warning-500/20">
+          <div className="flex items-start gap-2">
+            <svg className="w-4 h-4 text-warning-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-xs text-warning-300 font-medium">Large repository detected</p>
+              <p className="text-xs text-warning-400/80 mt-1">
+                Showing up to 2,500 files per category (staged/changes/untracked) of {state.statusTotalFiles.toLocaleString()} total files to maintain performance.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content - Premium Scrollable Area */}
       <div className="flex-1 overflow-y-auto scrollbar-premium scroll-fade-bottom">
@@ -419,7 +435,7 @@ export function GitPanel({ cwd, position }: GitPanelProps): React.JSX.Element {
             <GitMerge cwd={cwd} branch={state.branch} mergeInProgress={state.mergeInProgress} cherryPickInProgress={state.cherryPickInProgress} localBranches={localBranches} showMergeModal={state.showMergeModal} mergeBranch={state.mergeBranch} mergeOptions={state.mergeOptions} onMergeBranchChange={(branch) => setState(prev => ({ ...prev, mergeBranch: branch }))} onMergeOptionsChange={(options) => setState(prev => ({ ...prev, mergeOptions: options }))} onMerge={handleMerge} onMergeAbort={handleMergeAbort} onCloseMergeModal={() => setState(prev => ({ ...prev, showMergeModal: false, mergeBranch: null }))} onCherryPickContinue={handleCherryPickContinue} onCherryPickAbort={handleCherryPickAbort} />
             <GitConflicts conflictFiles={state.conflictFiles} expandedSections={state.expandedSections} toggleSection={toggleSection} onResolveOurs={handleResolveOurs} onResolveTheirs={handleResolveTheirs} />
             <GitCommits commits={state.commits} commitMessage={state.commitMessage} amendMode={state.amendMode} isCommitting={state.isCommitting} stagedCount={state.staged.length} expandedSections={state.expandedSections} conventionalPrefixes={state.conventionalPrefixes} showConventionalDropdown={state.showConventionalDropdown} toggleSection={toggleSection} onCommitMessageChange={(msg) => setState(prev => ({ ...prev, commitMessage: msg }))} onAmendModeChange={(amend) => setState(prev => ({ ...prev, amendMode: amend }))} onCommit={handleCommitWithAmend} onViewCommit={handleViewCommit} onCherryPick={handleCherryPick} onConventionalPrefix={handleConventionalPrefix} onToggleConventionalDropdown={() => setState(prev => ({ ...prev, showConventionalDropdown: !prev.showConventionalDropdown }))} formatRelativeTime={formatRelativeTime} />
-            <GitStatus staged={state.staged} unstaged={state.unstaged} untracked={state.untracked} expandedSections={state.expandedSections} toggleSection={toggleSection} onStage={handleStage} onUnstage={handleUnstage} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} onDiscard={handleDiscard} onViewDiff={(file, staged) => handleViewDiff(file, staged)} onViewBlame={handleViewBlame} onViewFileHistory={handleViewFileHistory} />
+            <GitStatus staged={state.staged} unstaged={state.unstaged} untracked={state.untracked} expandedSections={{...state.expandedSections, stagedTruncated: state.stagedTruncated, unstagedTruncated: state.unstagedTruncated, untrackedTruncated: state.untrackedTruncated}} toggleSection={toggleSection} onStage={handleStage} onUnstage={handleUnstage} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} onDiscard={handleDiscard} onViewDiff={(file, staged) => handleViewDiff(file, staged)} onViewBlame={handleViewBlame} onViewFileHistory={handleViewFileHistory} />
             <GitStash stashes={state.stashes} expandedSections={state.expandedSections} showStashModal={state.showStashModal} stashMessage={state.stashMessage} hasChangesToStash={state.staged.length > 0 || state.unstaged.length > 0} stagedCount={state.staged.length} unstagedCount={state.unstaged.length} toggleSection={toggleSection} onStashMessageChange={(msg) => setState(prev => ({ ...prev, stashMessage: msg }))} onShowStashModal={() => setState(prev => ({ ...prev, showStashModal: true }))} onCloseStashModal={() => setState(prev => ({ ...prev, showStashModal: false, stashMessage: '' }))} onStashPush={handleStashPush} onStashPop={handleStashPop} onStashApply={handleStashApply} onStashDrop={handleStashDrop} />
             <GitTags tags={state.tags} expandedSections={state.expandedSections} showTagModal={state.showTagModal} newTagName={state.newTagName} newTagMessage={state.newTagMessage} newTagCommit={state.newTagCommit} toggleSection={toggleSection} onTagNameChange={(name) => setState(prev => ({ ...prev, newTagName: name }))} onTagMessageChange={(msg) => setState(prev => ({ ...prev, newTagMessage: msg }))} onTagCommitChange={(commit) => setState(prev => ({ ...prev, newTagCommit: commit }))} onShowTagModal={() => setState(prev => ({ ...prev, showTagModal: true }))} onCloseTagModal={() => setState(prev => ({ ...prev, showTagModal: false, newTagName: '', newTagMessage: '', newTagCommit: '' }))} onCreateTag={handleCreateTag} onDeleteTag={handleDeleteTag} />
             <GitRebase branch={state.branch} rebaseInProgress={state.rebaseInProgress} localBranches={localBranches} showRebaseModal={state.showRebaseModal} rebaseBranch={state.rebaseBranch} showReflogModal={state.showReflogModal} reflogEntries={state.reflogEntries} isLoadingReflog={state.isLoadingReflog} formatRelativeTime={formatRelativeTime} onRebaseBranchChange={(branch) => setState(prev => ({ ...prev, rebaseBranch: branch }))} onShowRebaseModal={() => setState(prev => ({ ...prev, showRebaseModal: true }))} onCloseRebaseModal={() => setState(prev => ({ ...prev, showRebaseModal: false, rebaseBranch: null }))} onRebase={handleRebase} onRebaseAbort={handleRebaseAbort} onRebaseContinue={handleRebaseContinue} onRebaseSkip={handleRebaseSkip} onViewReflog={handleViewReflog} onCloseReflogModal={() => setState(prev => ({ ...prev, showReflogModal: false }))} onResetToReflog={handleResetToReflog} />

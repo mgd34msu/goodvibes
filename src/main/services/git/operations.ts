@@ -150,7 +150,7 @@ function parseStatusLine(line: string): GitFileChange | null {
 /**
  * Get detailed git status with parsed file changes
  */
-export async function gitDetailedStatus(cwd: string): Promise<GitDetailedStatus> {
+export async function gitDetailedStatus(cwd: string, options?: { maxFiles?: number }): Promise<GitDetailedStatus> {
   if (!cwd) {
     return {
       success: false,
@@ -187,6 +187,16 @@ export async function gitDetailedStatus(cwd: string): Promise<GitDetailedStatus>
   let ahead = 0;
   let behind = 0;
 
+  // Apply per-category limit of 2500 to prevent UI lockup
+  const PER_CATEGORY_LIMIT = 2500;
+  let totalFiles = 0;
+  let stagedCount = 0;
+  let unstagedCount = 0;
+  let untrackedCount = 0;
+  let stagedTruncated = false;
+  let unstagedTruncated = false;
+  let untrackedTruncated = false;
+
   for (const line of lines) {
     if (line.startsWith('##')) {
       // Parse branch line: ## branch...origin/branch [ahead N, behind M]
@@ -205,19 +215,41 @@ export async function gitDetailedStatus(cwd: string): Promise<GitDetailedStatus>
     const change = parseStatusLine(line);
     if (!change) continue;
 
+    totalFiles++;
+
     if (change.status === 'untracked') {
-      untracked.push(change);
+      if (untrackedCount < PER_CATEGORY_LIMIT) {
+        untracked.push(change);
+      } else if (untrackedCount === PER_CATEGORY_LIMIT) {
+        untrackedTruncated = true;
+      }
+      untrackedCount++;
     } else if (change.staged) {
-      staged.push(change);
+      if (stagedCount < PER_CATEGORY_LIMIT) {
+        staged.push(change);
+      } else if (stagedCount === PER_CATEGORY_LIMIT) {
+        stagedTruncated = true;
+      }
+      stagedCount++;
       // File might also have unstaged changes
       if (change.workTreeStatus !== ' ') {
-        unstaged.push({
-          ...change,
-          staged: false,
-        });
+        if (unstagedCount < PER_CATEGORY_LIMIT) {
+          unstaged.push({
+            ...change,
+            staged: false,
+          });
+        } else if (unstagedCount === PER_CATEGORY_LIMIT) {
+          unstagedTruncated = true;
+        }
+        unstagedCount++;
       }
     } else {
-      unstaged.push(change);
+      if (unstagedCount < PER_CATEGORY_LIMIT) {
+        unstaged.push(change);
+      } else if (unstagedCount === PER_CATEGORY_LIMIT) {
+        unstagedTruncated = true;
+      }
+      unstagedCount++;
     }
   }
 
@@ -229,6 +261,14 @@ export async function gitDetailedStatus(cwd: string): Promise<GitDetailedStatus>
     branch,
     ahead,
     behind,
+    truncated: stagedTruncated || unstagedTruncated || untrackedTruncated,
+    totalFiles,
+    stagedTruncated,
+    unstagedTruncated,
+    untrackedTruncated,
+    totalStaged: stagedCount,
+    totalUnstaged: unstagedCount,
+    totalUntracked: untrackedCount,
   };
 }
 

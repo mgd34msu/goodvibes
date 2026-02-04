@@ -124,7 +124,7 @@ const BATCH_TAG_SCHEMA = JSON.stringify({
 /**
  * Timeout for CLI execution (30 seconds)
  */
-const CLI_TIMEOUT_MS = 30000;
+const CLI_TIMEOUT_MS = 120000; // 2 minutes for single session
 
 /**
  * Prefix used to identify tag suggestion sessions
@@ -373,7 +373,7 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
     let timeoutId: NodeJS.Timeout | null = null;
 
     // Set up timeout (longer for batch processing)
-    const batchTimeout = CLI_TIMEOUT_MS * 2; // 60 seconds for batch
+    const batchTimeout = CLI_TIMEOUT_MS * 3; // 6 minutes for batch of up to 10 sessions
     timeoutId = setTimeout(() => {
       logger.warn('Claude CLI batch timeout, killing process');
       child.kill('SIGTERM');

@@ -354,8 +354,16 @@ class TagSuggestionService extends EventEmitter {
     try {
       // Query database for sessions without AI suggestions
       const pendingSessions = tagSuggestions.getPendingSessions(); // No limit - queue all pending
+      
+      // Check if agent session scanning is enabled
+      const scanAgentSessions = db.getSetting<boolean>('tagScanAgentSessions') ?? false;
 
       for (const sessionId of pendingSessions) {
+        // Skip agent sessions if the setting is disabled
+        if (sessionId.startsWith('agent-') && !scanAgentSessions) {
+          continue;
+        }
+        
         // User sessions get medium priority, agent sessions get low priority
         // This ensures user sessions are processed before agent sessions
         const priority = sessionId.startsWith('agent-') ? 'low' : 'medium';
@@ -743,8 +751,8 @@ class TagSuggestionService extends EventEmitter {
 // ============================================================================
 
 const DEFAULT_CONFIG: ServiceConfig = {
-  maxSessionsPerHour: 10, // 10 batches/hour (each batch = 10 sessions = 100 sessions/hour)
-  batchSize: 10,
+  maxSessionsPerHour: 10, // 10 batches/hour (each batch = 25 sessions = 250 sessions/hour)
+  batchSize: 25,
   processingIntervalMs: 10000, // 10 seconds
 };
 

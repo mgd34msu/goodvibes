@@ -198,6 +198,17 @@ export function TagSettings({ settings, onChange }: TagSettingsProps): React.JSX
         </SettingRow>
 
         <SettingRow
+          label="Scan Agent Sessions"
+          description="Include agent sessions in tag suggestions (disabled by default)"
+        >
+          <ToggleSwitch
+            checked={settings.tagScanAgentSessions}
+            onChange={(value) => onChange('tagScanAgentSessions', value)}
+            disabled={!settings.enableAiSuggestions}
+          />
+        </SettingRow>
+
+        <SettingRow
           label="Auto-Accept High-Confidence Tags"
           description="Automatically apply tags with high confidence scores"
         >

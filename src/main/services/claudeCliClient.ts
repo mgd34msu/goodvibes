@@ -345,6 +345,10 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
       env: { ...process.env }
     });
 
+    // Close stdin immediately - CLI has all input via -p flag
+    // Without this, the process hangs waiting for stdin input
+    child.stdin.end();
+
     const cleanup = () => {
       // No temp files to clean up anymore
     };
@@ -431,6 +435,9 @@ function callClaudeCli(prompt: string): Promise<string> {
       shell: true,
       env: { ...process.env }
     });
+
+    // Close stdin immediately - CLI has all input via -p flag
+    child.stdin.end();
 
     let stdout = '';
     let stderr = '';

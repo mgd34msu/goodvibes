@@ -356,7 +356,10 @@ class TagSuggestionService extends EventEmitter {
       const pendingSessions = tagSuggestions.getPendingSessions(); // No limit - queue all pending
 
       for (const sessionId of pendingSessions) {
-        this.queueSession(sessionId, 'low');
+        // User sessions get medium priority, agent sessions get low priority
+        // This ensures user sessions are processed before agent sessions
+        const priority = sessionId.startsWith('agent-') ? 'low' : 'medium';
+        this.queueSession(sessionId, priority);
       }
 
       logger.info(`Queued ${pendingSessions.length} pending sessions`);

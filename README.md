@@ -5,7 +5,7 @@
 GoodVibes is an Electron-based desktop application that provides an enhanced interface for Claude CLI with session management, analytics, Git integration, and a rich plugin ecosystem.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/mgd34msu/goodvibes-plugin)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/mgd34msu/goodvibes-plugin)
 [![Claude Code Platform](https://img.shields.io/badge/Claude%20Code-Platform-purple.svg)](https://claude.com/claude-code)
 [![Vibe Development Environment](https://img.shields.io/badge/Vibe%20Development%20Environment-VDE-green.svg)](https://goodvibes.sh)
 ## Features

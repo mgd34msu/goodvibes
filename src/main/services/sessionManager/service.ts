@@ -21,6 +21,7 @@ import {
   getKnownSessionPathsWithMtime,
   clearDetailedToolUsage,
   batchRecordDetailedToolUsage,
+  toggleArchive,
 } from '../../database/index.js';
 import { sendToRenderer } from '../../window.js';
 import { Logger } from '../logger.js';
@@ -189,6 +190,13 @@ export class SessionManagerInstance {
       cacheWriteTokens: tokenStats.cacheWriteTokens,
       cacheReadTokens: tokenStats.cacheReadTokens,
     });
+
+    // Auto-archive sessions that start with [session tagging] (headless CLI tag suggestion sessions)
+    const firstUserMessage = messages.find(m => m.role === 'user');
+    if (firstUserMessage?.content?.startsWith('[session tagging]')) {
+      toggleArchive(filename);
+      logger.debug(`Auto-archived session tagging session: ${filename}`);
+    }
 
     // Store messages
     storeMessages(filename, messages);

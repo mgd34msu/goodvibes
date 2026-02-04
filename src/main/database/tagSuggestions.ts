@@ -365,6 +365,7 @@ export function updateSessionScanStatus(
 
 /**
  * Get sessions pending scan (LIFO order - newest first)
+ * Prioritizes user sessions over agent sessions
  */
 export function getPendingSessions(limit = 10): string[] {
   const database = getDatabase();
@@ -372,7 +373,10 @@ export function getPendingSessions(limit = 10): string[] {
   const rows = database.prepare(`
     SELECT id FROM sessions
     WHERE suggestion_scan_status = 'pending' OR suggestion_scan_status IS NULL
-    ORDER BY end_time DESC, updated_at DESC
+    ORDER BY 
+      CASE WHEN id LIKE 'agent-%' THEN 1 ELSE 0 END,
+      end_time DESC, 
+      updated_at DESC
     LIMIT ?
   `).all(limit) as Array<{ id: string }>;
 

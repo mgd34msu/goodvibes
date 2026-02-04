@@ -381,7 +381,7 @@ class TagSuggestionService extends EventEmitter {
 
     try {
       // 1. Gather context for ALL sessions
-      const sessionContexts: Array<{ sessionId: string; context: TagSuggestionContext }> = [];
+      const sessionContexts: Array<{ sessionId: string; context: TagSuggestionContext; filePath?: string }> = [];
       
       for (const sessionId of sessionIds) {
         const quickContext = gatherQuickContext(sessionId);
@@ -391,6 +391,10 @@ class TagSuggestionService extends EventEmitter {
           tagSuggestions.updateSessionScanStatus(sessionId, 'failed', 'quick');
           continue;
         }
+        
+        // Get file path from database
+        const session = db.getSession(sessionId);
+        const filePath = session?.filePath ?? undefined;
         
         // Convert SessionContext to TagSuggestionContext format
         const context: TagSuggestionContext = {
@@ -403,7 +407,7 @@ class TagSuggestionService extends EventEmitter {
           existingTags: quickContext.existingTags,
         };
         
-        sessionContexts.push({ sessionId, context });
+        sessionContexts.push({ sessionId, context, filePath });
       }
 
       if (sessionContexts.length === 0) {

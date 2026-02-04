@@ -367,7 +367,7 @@ export function updateSessionScanStatus(
  * Get sessions pending scan (LIFO order - newest first)
  * Prioritizes user sessions over agent sessions
  */
-export function getPendingSessions(limit = 10): string[] {
+export function getPendingSessions(limit = 999999): string[] {
   const database = getDatabase();
 
   const rows = database.prepare(`

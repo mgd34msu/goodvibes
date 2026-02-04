@@ -353,7 +353,7 @@ class TagSuggestionService extends EventEmitter {
 
     try {
       // Query database for sessions without AI suggestions
-      const pendingSessions = tagSuggestions.getPendingSessions(100);
+      const pendingSessions = tagSuggestions.getPendingSessions(); // No limit - queue all pending
 
       for (const sessionId of pendingSessions) {
         this.queueSession(sessionId, 'low');

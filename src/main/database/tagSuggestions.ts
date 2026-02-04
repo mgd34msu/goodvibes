@@ -356,6 +356,16 @@ export function updateSessionScanStatus(
 ): void {
   const database = getDatabase();
 
+  // Check if session exists first
+  const sessionExists = database.prepare(`
+    SELECT 1 FROM sessions WHERE id = ?
+  `).get(sessionId);
+  
+  if (!sessionExists) {
+    logger.warn(`Cannot update scan status: session ${sessionId} not found in database`);
+    return;
+  }
+
   database.prepare(`
     UPDATE sessions
     SET suggestion_scan_status = ?, suggestion_scanned_at = datetime('now'), suggestion_scan_depth = ?
@@ -403,10 +413,10 @@ export function getSessionsNeedingRescan(): string[] {
 /**
  * Get count of scanned vs unscanned sessions
  */
-export function getScanCounts(): { scanned: number; pending: number; total: number } {
+export function getScanCounts(): { pending: number; completed: number; failed: number } {
   const database = getDatabase();
 
-  const scanned = database.prepare(`
+  const completed = database.prepare(`
     SELECT COUNT(*) as count FROM sessions
     WHERE suggestion_scan_status = 'completed'
   `).get() as { count: number };
@@ -416,14 +426,15 @@ export function getScanCounts(): { scanned: number; pending: number; total: numb
     WHERE suggestion_scan_status = 'pending' OR suggestion_scan_status IS NULL
   `).get() as { count: number };
 
-  const total = database.prepare(`
+  const failed = database.prepare(`
     SELECT COUNT(*) as count FROM sessions
+    WHERE suggestion_scan_status = 'failed'
   `).get() as { count: number };
 
   return {
-    scanned: scanned.count,
     pending: pending.count,
-    total: total.count,
+    completed: completed.count,
+    failed: failed.count,
   };
 }
 

@@ -284,7 +284,7 @@ export function registerTagSuggestionHandlers(): void {
       return ipcOk(counts);
     } catch (error) {
       logger.error('Failed to get scan counts', error);
-      return ipcErr(error, { scanned: 0, pending: 0, total: 0 });
+      return ipcErr(error, { pending: 0, completed: 0, failed: 0 });
     }
   }));
 

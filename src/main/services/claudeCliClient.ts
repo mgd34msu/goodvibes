@@ -361,7 +361,9 @@ function callClaudeCliBatch(prompt: string): Promise<string> {
       '--allowedTools', 'Read'
     ];
 
-    logger.debug('Spawning Claude CLI for batch processing', { argsCount: args.length });
+    logger.info('=== SPAWNING CLAUDE CLI FOR BATCH ===');
+    logger.info('Batch sessions:', { count: args.length, prompt_length: prompt.length });
+    logger.info('Command: claude ' + args.slice(0, 4).join(' ') + ' ...');
 
     // Spawn the CLI process
     const child = spawn('claude', args, {

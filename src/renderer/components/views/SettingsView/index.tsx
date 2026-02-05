@@ -69,7 +69,7 @@ export default function SettingsView() {
         <BackupSettings settings={settings} onChange={handleChange} />
 
         {/* Maintenance */}
-        <MaintenanceSettings />
+        <MaintenanceSettings settings={settings} onChange={handleChange} />
 
         {/* Keyboard Shortcuts */}
         <KeyboardSettings />

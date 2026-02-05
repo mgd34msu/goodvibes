@@ -134,11 +134,35 @@ export function registerClipboardHandlers(): void {
       const tempDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
       await fs.promises.mkdir(tempDir, { recursive: true });
 
-      // Clean up old paste-* files to prevent accumulation
+      // Age-based cleanup of old paste-* files (respects user settings)
       try {
-        const existingFiles = await fs.promises.readdir(tempDir);
-        const staleFiles = existingFiles.filter(f => f.startsWith('paste-'));
-        await Promise.all(staleFiles.map(f => fs.promises.unlink(path.join(tempDir, f)).catch(() => {})));
+        // Read cleanup settings from database via electron's settings
+        // Using dynamic import to avoid loading database module until needed (lazy loading)
+        const { getSetting } = await import('../../database/index.js');
+        const cleanupEnabled = getSetting<boolean>('clipboardImageCleanupEnabled');
+        const maxAgeDays = getSetting<number>('clipboardImageMaxAgeDays');
+        
+        // Only clean up if enabled (default: true if setting not found)
+        if (cleanupEnabled !== false) {
+          const maxAgeMs = ((typeof maxAgeDays === 'number' && maxAgeDays > 0) ? maxAgeDays : 7) * 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          const existingFiles = await fs.promises.readdir(tempDir);
+          
+          for (const file of existingFiles) {
+            // Only clean paste-* files, preserve files with original names
+            if (file.startsWith('paste-')) {
+              try {
+                const oldFilePath = path.join(tempDir, file);
+                const stat = await fs.promises.stat(oldFilePath);
+                if (now - stat.mtimeMs > maxAgeMs) {
+                  await fs.promises.unlink(oldFilePath);
+                }
+              } catch {
+                // Individual file cleanup failure is fine
+              }
+            }
+          }
+        }
       } catch {
         // Cleanup is best-effort
       }

@@ -67,6 +67,9 @@ export interface AppSettings {
   aiSuggestionsAutoAcceptThreshold: number; // 0-1 confidence threshold
   tagScanRateLimitEnabled: boolean; // Enable rate limiting for tag scanning
   tagScanAgentSessions: boolean; // Whether to scan agent sessions for tag suggestions
+  // Clipboard image settings
+  clipboardImageCleanupEnabled: boolean;
+  clipboardImageMaxAgeDays: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -128,6 +131,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiSuggestionsAutoAcceptThreshold: 0.9,
   tagScanRateLimitEnabled: true, // enabled by default for API protection
   tagScanAgentSessions: false, // disabled by default - don't scan agent sessions
+  // Clipboard image settings
+  clipboardImageCleanupEnabled: true,
+  clipboardImageMaxAgeDays: 7,
 };
 
 // Settings version - increment this when adding new settings that need migration
@@ -147,7 +153,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
 // Version 8: Added preferredTextEditor setting
 // Version 9: Added colorTheme setting for dynamic theming
 // Version 10: Added timezone setting
-export const SETTINGS_VERSION = 13;
+// Version 11: Added session tagging system settings
+// Version 12: Added rate limit toggle for tag scanning
+// Version 13: Added agent session scanning toggle
+// Version 14: Added clipboard image cleanup settings
+export const SETTINGS_VERSION = 14;
 
 // Settings that were added/changed in each version and need to be reset to defaults
 export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
@@ -217,6 +227,11 @@ export const SETTINGS_MIGRATIONS: Record<number, (keyof AppSettings)[]> = {
   // Version 13: Added agent session scanning toggle
   13: [
     'tagScanAgentSessions',
+  ],
+  // Version 14: Added clipboard image cleanup settings
+  14: [
+    'clipboardImageCleanupEnabled',
+    'clipboardImageMaxAgeDays',
   ],
 };
 

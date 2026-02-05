@@ -955,7 +955,7 @@ describe('MaintenanceSettings', () => {
 
   it('renders Recalculate Session Costs button', async () => {
     await act(async () => {
-      renderWithProviders(<MaintenanceSettings />);
+      renderWithProviders(<MaintenanceSettings settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
     });
 
     expect(screen.getByText('Recalculate Session Costs')).toBeInTheDocument();
@@ -964,7 +964,7 @@ describe('MaintenanceSettings', () => {
 
   it('shows description for recalculate costs', async () => {
     await act(async () => {
-      renderWithProviders(<MaintenanceSettings />);
+      renderWithProviders(<MaintenanceSettings settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
     });
 
     expect(screen.getByText(/Re-parse all sessions with updated pricing/)).toBeInTheDocument();
@@ -977,7 +977,7 @@ describe('MaintenanceSettings', () => {
     });
 
     await act(async () => {
-      renderWithProviders(<MaintenanceSettings />);
+      renderWithProviders(<MaintenanceSettings settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
     });
 
     const recalculateButton = screen.getByText('Recalculate');
@@ -996,7 +996,7 @@ describe('MaintenanceSettings', () => {
     );
 
     await act(async () => {
-      renderWithProviders(<MaintenanceSettings />);
+      renderWithProviders(<MaintenanceSettings settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
     });
 
     const recalculateButton = screen.getByText('Recalculate');
@@ -1013,7 +1013,7 @@ describe('MaintenanceSettings', () => {
     );
 
     await act(async () => {
-      renderWithProviders(<MaintenanceSettings />);
+      renderWithProviders(<MaintenanceSettings settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
     });
 
     const recalculateButton = screen.getByText('Recalculate');

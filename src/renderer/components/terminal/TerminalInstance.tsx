@@ -156,15 +156,35 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     }
   }, []);
 
-  // Paste text into terminal
+  // Paste text into terminal (smart paste: tries image first, falls back to text)
   const pasteToTerminal = useCallback(async () => {
     const terminal = terminalRef.current;
     if (!terminal) return;
 
-    const text = await window.goodvibes.clipboardRead();
-    if (text) {
-      // Send the pasted text to the terminal PTY
-      handleTerminalInput(id, text);
+    // Smart paste: check for image first, fall back to text
+    try {
+      const hasImage = await window.goodvibes.clipboardHasImage();
+      if (hasImage) {
+        const result = await window.goodvibes.clipboardReadImage();
+        if (result.success && result.filePath) {
+          // Paste the image file path so Claude CLI can read it
+          handleTerminalInput(id, result.filePath);
+          return;
+        }
+      }
+    } catch {
+      // Image detection failed, fall back to text paste
+      logger.warn('Image clipboard detection failed, falling back to text');
+    }
+
+    // Fall back to text paste
+    try {
+      const text = await window.goodvibes.clipboardRead();
+      if (text) {
+        handleTerminalInput(id, text);
+      }
+    } catch {
+      logger.warn('Failed to read text from clipboard');
     }
   }, [id]);
 
@@ -184,11 +204,21 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
 
     if (action === 'paste') {
       pasteToTerminal();
+    } else if (action === 'paste-image') {
+      // Paste image from clipboard as temp file path
+      try {
+        const result = await window.goodvibes.clipboardReadImage();
+        if (result.success && result.filePath) {
+          handleTerminalInput(id, result.filePath);
+        }
+      } catch {
+        logger.warn('Failed to paste image from context menu');
+      }
     } else if (action === 'clear') {
       terminal.clear();
     }
     // 'copy' action is handled by the main process directly
-  }, [pasteToTerminal]);
+  }, [id, pasteToTerminal]);
 
   // Initialize terminal
   useEffect(() => {

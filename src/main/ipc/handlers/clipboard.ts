@@ -2,15 +2,16 @@
 // CLIPBOARD & CONTEXT MENU IPC HANDLERS
 // ============================================================================
 
-import { ipcMain, clipboard, Menu, BrowserWindow } from 'electron';
+import { ipcMain, clipboard, Menu, BrowserWindow, app } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs';
 import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import {
   clipboardWriteSchema,
   contextMenuOptionsSchema,
   terminalContextMenuOptionsSchema,
-} from '../schemas/window.js';
-import type { ZodError } from 'zod';
+} from '../schemas/clipboard.js';
 
 const logger = new Logger('IPC:Clipboard');
 
@@ -40,6 +41,36 @@ export function registerClipboardHandlers(): void {
 
     clipboard.writeText(validation.data);
     return { success: true };
+  }));
+
+  ipcMain.handle('clipboard-has-image', withContext('clipboard-has-image', async () => {
+    const image = clipboard.readImage();
+    return !image.isEmpty();
+  }));
+
+  ipcMain.handle('clipboard-read-image', withContext('clipboard-read-image', async () => {
+    try {
+      const image = clipboard.readImage();
+      if (image.isEmpty()) {
+        return { success: false, error: 'No image in clipboard' };
+      }
+
+      const pngBuffer = image.toPNG();
+      const tempDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
+
+      // Ensure temp directory exists
+      await fs.promises.mkdir(tempDir, { recursive: true });
+
+      const filename = 'clipboard-paste.png';
+      const filePath = path.join(tempDir, filename);
+      await fs.promises.writeFile(filePath, pngBuffer);
+
+      return { success: true, filePath };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to read image from clipboard', { error: errorMessage });
+      return { success: false, error: errorMessage };
+    }
   }));
 
   // ============================================================================
@@ -143,6 +174,16 @@ export function registerClipboardHandlers(): void {
           accelerator: 'CmdOrCtrl+V',
           click: () => {
             resolve('paste');
+          },
+        });
+      }
+
+      const clipboardImage = clipboard.readImage();
+      if (!clipboardImage.isEmpty()) {
+        menuTemplate.push({
+          label: 'Paste Image',
+          click: () => {
+            resolve('paste-image');
           },
         });
       }

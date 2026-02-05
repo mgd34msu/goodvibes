@@ -55,15 +55,96 @@ export function registerClipboardHandlers(): void {
         return { success: false, error: 'No image in clipboard' };
       }
 
-      const pngBuffer = image.toPNG();
-      const tempDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
+      // Detect available clipboard formats
+      const formats = clipboard.availableFormats();
 
-      // Ensure temp directory exists
+      // Determine best image format and get buffer
+      const mimeToExt: Record<string, string> = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+        'image/bmp': '.bmp',
+        'image/tiff': '.tiff',
+      };
+
+      let imageBuffer: Buffer;
+      let extension = '.png';
+
+      if (formats.includes('image/jpeg')) {
+        // Preserve JPEG format natively
+        imageBuffer = image.toJPEG(100);
+        extension = '.jpg';
+      } else if (formats.some(f => f.startsWith('image/') && f !== 'image/png' && f !== 'image/jpeg')) {
+        // Try to read exotic format raw from clipboard
+        const exoticFormat = formats.find(f => f.startsWith('image/') && f !== 'image/png' && mimeToExt[f]);
+        if (exoticFormat) {
+          try {
+            const rawBuffer = clipboard.readBuffer(exoticFormat);
+            if (rawBuffer && rawBuffer.length > 0) {
+              imageBuffer = rawBuffer;
+              extension = mimeToExt[exoticFormat] || '.png';
+            } else {
+              imageBuffer = image.toPNG();
+              extension = '.png';
+            }
+          } catch {
+            // Fall back to PNG
+            imageBuffer = image.toPNG();
+            extension = '.png';
+          }
+        } else {
+          imageBuffer = image.toPNG();
+        }
+      } else {
+        // Default to PNG
+        imageBuffer = image.toPNG();
+        extension = '.png';
+      }
+
+      // Try to extract original filename from clipboard
+      let originalFilename: string | null = null;
+
+      if (formats.includes('text/uri-list')) {
+        try {
+          const uriList = clipboard.read('text/uri-list');
+          if (uriList) {
+            const firstUri = uriList.split('\n')[0].trim();
+            if (firstUri.startsWith('file://')) {
+              const decodedPath = decodeURIComponent(firstUri.replace('file://', ''));
+              const basename = path.basename(decodedPath);
+              // Sanitize: strip path separators, null bytes, limit length
+              const sanitized = basename
+                .replace(/[/\\:\0]/g, '')
+                .replace(/\.\./g, '')
+                .slice(0, 255);
+              if (sanitized && /\.(png|jpg|jpeg|gif|webp|bmp|tiff|svg)$/i.test(sanitized)) {
+                originalFilename = sanitized;
+              }
+            }
+          }
+        } catch {
+          // Filename extraction is best-effort
+        }
+      }
+
+      // Build final filename
+      const filename = originalFilename || `paste-${Date.now()}${extension}`;
+
+      const tempDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
       await fs.promises.mkdir(tempDir, { recursive: true });
 
-      const filename = 'clipboard-paste.png';
+      // Clean up old paste-* files to prevent accumulation
+      try {
+        const existingFiles = await fs.promises.readdir(tempDir);
+        const staleFiles = existingFiles.filter(f => f.startsWith('paste-'));
+        await Promise.all(staleFiles.map(f => fs.promises.unlink(path.join(tempDir, f)).catch(() => {})));
+      } catch {
+        // Cleanup is best-effort
+      }
+
       const filePath = path.join(tempDir, filename);
-      await fs.promises.writeFile(filePath, pngBuffer);
+      await fs.promises.writeFile(filePath, imageBuffer);
 
       return { success: true, filePath };
     } catch (error) {

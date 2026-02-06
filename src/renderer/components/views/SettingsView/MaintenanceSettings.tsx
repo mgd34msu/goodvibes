@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '../../../stores/toastStore';
-import { SettingsSection, SettingRow } from './components';
+import { SettingsSection, SettingRow, ToggleSwitch } from './components';
 import type { AppSettings } from '../../../../shared/types/settings-types';
 
 interface MaintenanceSettingsProps {
@@ -39,16 +39,10 @@ function ClipboardImageSettings({ settings, onChange }: MaintenanceSettingsProps
         label="Auto-clean Clipboard Images"
         description="Automatically remove old pasted images from the temp directory"
       >
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={settings.clipboardImageCleanupEnabled}
-            onChange={(e) => onChange('clipboardImageCleanupEnabled', e.target.checked)}
-          />
-          <span className="toggle-track">
-            <span className="toggle-thumb" />
-          </span>
-        </label>
+        <ToggleSwitch
+          checked={settings.clipboardImageCleanupEnabled}
+          onChange={(value) => onChange('clipboardImageCleanupEnabled', value)}
+        />
       </SettingRow>
       {settings.clipboardImageCleanupEnabled && (
         <SettingRow
@@ -58,7 +52,7 @@ function ClipboardImageSettings({ settings, onChange }: MaintenanceSettingsProps
           <select
             value={settings.clipboardImageMaxAgeDays}
             onChange={(e) => onChange('clipboardImageMaxAgeDays', Number(e.target.value))}
-            className="select select-sm"
+            className="select w-32"
           >
             {maxAgeOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>

@@ -132,8 +132,8 @@ export const primitivesApi = {
     ipcRenderer.invoke('clipboard-write', text),
   clipboardHasImage: () =>
     ipcRenderer.invoke('clipboard-has-image'),
-  clipboardReadImage: () =>
-    ipcRenderer.invoke('clipboard-read-image'),
+  clipboardReadImage: (projectPath?: string) =>
+    ipcRenderer.invoke('clipboard-read-image', projectPath),
 
   // ============================================================================
   // CONTEXT MENU

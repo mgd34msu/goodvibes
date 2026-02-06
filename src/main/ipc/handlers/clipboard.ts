@@ -9,6 +9,7 @@ import { Logger } from '../../services/logger.js';
 import { withContext } from '../utils.js';
 import {
   clipboardWriteSchema,
+  clipboardReadImageSchema,
   contextMenuOptionsSchema,
   terminalContextMenuOptionsSchema,
 } from '../schemas/clipboard.js';
@@ -48,7 +49,10 @@ export function registerClipboardHandlers(): void {
     return !image.isEmpty();
   }));
 
-  ipcMain.handle('clipboard-read-image', withContext('clipboard-read-image', async () => {
+  ipcMain.handle('clipboard-read-image', withContext('clipboard-read-image', async (_, projectPath?: unknown) => {
+    // Validate input
+    const parsedPath = clipboardReadImageSchema.safeParse(projectPath);
+    const validatedPath = parsedPath.success ? parsedPath.data : undefined;
     try {
       const image = clipboard.readImage();
       if (image.isEmpty()) {
@@ -131,43 +135,60 @@ export function registerClipboardHandlers(): void {
       // Build final filename
       const filename = originalFilename || `paste-${Date.now()}${extension}`;
 
-      const tempDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
-      await fs.promises.mkdir(tempDir, { recursive: true });
+      // Determine save directory with validation
+      let saveDir: string;
+      if (validatedPath && typeof validatedPath === 'string') {
+        const resolved = path.resolve(validatedPath);
+        // Validate: must be absolute and normalized (no traversal)
+        if (path.isAbsolute(resolved) && resolved === path.normalize(resolved)) {
+          saveDir = path.join(resolved, '.goodvibes', 'images');
+        } else {
+          logger.warn('Invalid projectPath for clipboard image', { projectPath: validatedPath });
+          saveDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
+        }
+      } else {
+        saveDir = path.join(app.getPath('temp'), 'goodvibes-clipboard');
+      }
+      await fs.promises.mkdir(saveDir, { recursive: true });
 
-      // Age-based cleanup of old paste-* files (respects user settings)
-      try {
-        // Read cleanup settings from database via electron's settings
-        // Using dynamic import to avoid loading database module until needed (lazy loading)
-        const { getSetting } = await import('../../database/index.js');
-        const cleanupEnabled = getSetting<boolean>('clipboardImageCleanupEnabled');
-        const maxAgeDays = getSetting<number>('clipboardImageMaxAgeDays');
-        
-        // Only clean up if enabled (default: true if setting not found)
-        if (cleanupEnabled !== false) {
-          const maxAgeMs = ((typeof maxAgeDays === 'number' && maxAgeDays > 0) ? maxAgeDays : 7) * 24 * 60 * 60 * 1000;
-          const now = Date.now();
-          const existingFiles = await fs.promises.readdir(tempDir);
+      // Only run age-based cleanup for temp directory, not project-scoped images
+      const isUsingTempDir = !validatedPath || saveDir.includes(app.getPath('temp'));
+      if (isUsingTempDir) {
+        // Age-based cleanup of old paste-* files (respects user settings)
+        try {
+          // Read cleanup settings from database via electron's settings
+          // Using dynamic import to avoid loading database module until needed (lazy loading)
+          const { getSetting } = await import('../../database/index.js');
+          const cleanupEnabled = getSetting<boolean>('clipboardImageCleanupEnabled');
+          const maxAgeDays = getSetting<number>('clipboardImageMaxAgeDays');
           
-          for (const file of existingFiles) {
-            // Only clean paste-* files, preserve files with original names
-            if (file.startsWith('paste-')) {
-              try {
-                const oldFilePath = path.join(tempDir, file);
-                const stat = await fs.promises.stat(oldFilePath);
-                if (now - stat.mtimeMs > maxAgeMs) {
-                  await fs.promises.unlink(oldFilePath);
+          // Only clean up if enabled (default: true if setting not found)
+          if (cleanupEnabled !== false) {
+            const maxAgeMs = ((typeof maxAgeDays === 'number' && maxAgeDays > 0) ? maxAgeDays : 7) * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const existingFiles = await fs.promises.readdir(saveDir);
+            
+            for (const file of existingFiles) {
+              // Only clean paste-* files, preserve files with original names
+              if (file.startsWith('paste-')) {
+                try {
+                  const oldFilePath = path.join(saveDir, file);
+                  const stat = await fs.promises.stat(oldFilePath);
+                  if (now - stat.mtimeMs > maxAgeMs) {
+                    await fs.promises.unlink(oldFilePath);
+                  }
+                } catch {
+                  // Individual file cleanup failure is fine
                 }
-              } catch {
-                // Individual file cleanup failure is fine
               }
             }
           }
+        } catch {
+          // Cleanup is best-effort
         }
-      } catch {
-        // Cleanup is best-effort
       }
 
-      const filePath = path.join(tempDir, filename);
+      const filePath = path.join(saveDir, filename);
       await fs.promises.writeFile(filePath, imageBuffer);
 
       return { success: true, filePath };

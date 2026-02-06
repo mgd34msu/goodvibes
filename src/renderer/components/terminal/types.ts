@@ -31,6 +31,7 @@ export interface TerminalInstanceProps {
   zoomLevel: number;
   isActive: boolean;
   isPlainTerminal?: boolean;
+  cwd?: string;
 }
 
 /**

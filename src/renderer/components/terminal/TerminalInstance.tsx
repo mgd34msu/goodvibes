@@ -108,7 +108,7 @@ function terminalColorsToXtermTheme(colors: TerminalColors, isPlainTerminal?: bo
 // COMPONENT
 // ============================================================================
 
-export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: TerminalInstanceProps): React.JSX.Element {
+export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal, cwd }: TerminalInstanceProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -156,6 +156,20 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     }
   }, []);
 
+  // Helper to paste a clipboard image into the terminal
+  const pasteImageToTerminal = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await window.goodvibes.clipboardReadImage(cwd);
+      if (result.success && result.filePath) {
+        handleTerminalInput(id, `@${result.filePath}`);
+        return true;
+      }
+    } catch {
+      logger.warn('Failed to paste image from clipboard');
+    }
+    return false;
+  }, [id, cwd]);
+
   // Paste text into terminal (smart paste: tries image first, falls back to text)
   const pasteToTerminal = useCallback(async () => {
     const terminal = terminalRef.current;
@@ -165,12 +179,8 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     try {
       const hasImage = await window.goodvibes.clipboardHasImage();
       if (hasImage) {
-        const result = await window.goodvibes.clipboardReadImage();
-        if (result.success && result.filePath) {
-          // Paste the image file path so Claude CLI can read it
-          handleTerminalInput(id, result.filePath);
-          return;
-        }
+        const pasted = await pasteImageToTerminal();
+        if (pasted) return;
       }
     } catch {
       // Image detection failed, fall back to text paste
@@ -186,7 +196,7 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     } catch {
       logger.warn('Failed to read text from clipboard');
     }
-  }, [id]);
+  }, [id, cwd, pasteImageToTerminal]);
 
   // Handle context menu
   const handleContextMenu = useCallback(async (e: React.MouseEvent) => {
@@ -205,20 +215,13 @@ export function TerminalInstance({ id, zoomLevel, isActive, isPlainTerminal }: T
     if (action === 'paste') {
       pasteToTerminal();
     } else if (action === 'paste-image') {
-      // Paste image from clipboard as temp file path
-      try {
-        const result = await window.goodvibes.clipboardReadImage();
-        if (result.success && result.filePath) {
-          handleTerminalInput(id, result.filePath);
-        }
-      } catch {
-        logger.warn('Failed to paste image from context menu');
-      }
+      // Paste image from clipboard with @ prefix
+      await pasteImageToTerminal();
     } else if (action === 'clear') {
       terminal.clear();
     }
     // 'copy' action is handled by the main process directly
-  }, [id, pasteToTerminal]);
+  }, [id, cwd, pasteToTerminal, pasteImageToTerminal]);
 
   // Initialize terminal
   useEffect(() => {

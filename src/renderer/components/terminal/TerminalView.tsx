@@ -171,6 +171,7 @@ export default function TerminalView() {
                         zoomLevel={zoomLevel}
                         isActive={terminal.id === activeTerminalId}
                         isPlainTerminal={terminal.isPlainTerminal}
+                        cwd={terminal.cwd}
                       />
                     )}
                   </ErrorBoundary>

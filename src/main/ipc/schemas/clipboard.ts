@@ -25,3 +25,8 @@ export const terminalContextMenuOptionsSchema = z.object({
  * Clipboard write schema
  */
 export const clipboardWriteSchema = z.string().max(10000000); // 10MB limit
+
+/**
+ * Clipboard read image schema
+ */
+export const clipboardReadImageSchema = z.string().optional();

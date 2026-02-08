@@ -59,4 +59,6 @@ export const sessionsApi = {
     ipcRenderer.invoke('get-tool-efficiency-stats'),
   refreshSessions: () =>
     ipcRenderer.invoke('refresh-sessions') as Promise<{ newCount: number; updatedCount: number }>,
+  resolveProjectPath: (encodedName: string) =>
+    ipcRenderer.invoke('resolve-project-path', encodedName) as Promise<{ path: string | null; error?: string }>,
 };

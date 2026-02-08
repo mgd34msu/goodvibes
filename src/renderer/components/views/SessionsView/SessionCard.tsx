@@ -20,7 +20,6 @@ import {
   formatNumber,
   formatRelativeTime,
   decodeProjectName,
-  decodeProjectPath,
 } from '../../../../shared/utils';
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { useAppStore } from '../../../stores/appStore';
@@ -65,9 +64,11 @@ export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionC
   const displayName = session.customTitle || decodeProjectName(session.projectName, projectsRoot);
 
   const handleOpenPreview = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       e.stopPropagation();
-      const cwd = decodeProjectPath(session.projectName) || undefined;
+      if (!session.projectName) return;
+      const result = await window.goodvibes.resolveProjectPath(session.projectName);
+      const cwd = result?.path || undefined;
       createPreviewTerminal(session.id, displayName, cwd);
       setCurrentView('terminal');
     },
@@ -77,7 +78,9 @@ export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionC
   const handleOpenCLI = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      const cwd = decodeProjectPath(session.projectName) || undefined;
+      if (!session.projectName) return;
+      const result = await window.goodvibes.resolveProjectPath(session.projectName);
+      const cwd = result?.path || undefined;
       await createTerminal(cwd, displayName, session.id);
       setCurrentView('terminal');
     },

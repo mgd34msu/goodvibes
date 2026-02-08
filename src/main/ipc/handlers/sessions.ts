@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { ZodError } from 'zod';
 import { Logger } from '../../services/logger.js';
+import { resolveEncodedProjectPath } from '../../utils/pathResolver.js';
 import { withContext } from '../utils.js';
 import { getSessionManager } from '../../services/sessionManager.js';
 import * as db from '../../database/index.js';
@@ -95,24 +96,9 @@ function findMostRecentClaudeSession(): ClaudeSessionFile | null {
           const sessionId = file.name.replace('.jsonl', '');
 
           // Extract project path from directory name
-          // Directory format: C--Users-buzzkill-Documents-project -> C:\Users\buzzkill\Documents\project
+          // Use filesystem-aware resolver to handle hyphens in directory names
           const projectDirName = path.basename(projectDir);
-          let projectPath = projectDirName;
-
-          // Try to reconstruct the original path
-          // Format is drive letter followed by dashes for separators
-          if (process.platform === 'win32') {
-            // Windows: C--Users-... -> C:\Users\...
-            const match = projectDirName.match(/^([A-Z])--(.*)/);
-            if (match) {
-              projectPath = match[1] + ':\\' + match[2].replace(/-/g, '\\');
-            }
-          } else {
-            // Unix: -home-user-... -> /home/user/...
-            if (projectDirName.startsWith('-')) {
-              projectPath = projectDirName.replace(/-/g, '/');
-            }
-          }
+          const projectPath = resolveEncodedProjectPath(projectDirName) || projectDirName;
 
           // Try to read the first user prompt from the session file
           let firstPrompt: string | undefined;
@@ -221,6 +207,29 @@ function getSessionsFromMainTable(projectPath: string, limit: number) {
  * searching, and managing session summaries.
  */
 export function registerSessionHandlers(): void {
+  // IPC handler to resolve encoded project paths
+  ipcMain.handle('resolve-project-path', withContext('resolve-project-path', async (_, encodedName: unknown) => {
+    // Validate input
+    if (!encodedName || typeof encodedName !== 'string') {
+      return { path: null, error: 'Invalid input: expected string' };
+    }
+    if (encodedName.length > 4096) {
+      return { path: null, error: 'Input too long' };
+    }
+    // Only accept valid encoded path formats
+    if (!encodedName.startsWith('-') && !encodedName.includes('--') && !encodedName.match(/^[A-Z]-/)) {
+      return { path: null, error: 'Invalid encoded path format' };
+    }
+
+    try {
+      const resolved = resolveEncodedProjectPath(encodedName);
+      return { path: resolved };
+    } catch (error) {
+      logger.error('Failed to resolve project path', { encodedName, error });
+      return { path: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }));
+
   ipcMain.handle('get-sessions', withContext('get-sessions', async () => {
     const sessionManager = getSessionManager();
     return sessionManager?.getAllSessions() ?? [];

@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { X, Eye, Play, FileText, FileJson, Star, Archive } from 'lucide-react';
-import { decodeProjectName, decodeProjectPath } from '../../../../shared/utils';
+import { decodeProjectName } from '../../../../shared/utils';
 import { useAppStore } from '../../../stores/appStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { useTerminalStore } from '../../../stores/terminalStore';
@@ -56,8 +56,10 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
 
   const displayName = currentSession.customTitle || decodeProjectName(currentSession.projectName, settings.projectsRoot);
 
-  const handleOpenPreview = () => {
-    const cwd = decodeProjectPath(session.projectName) || undefined;
+  const handleOpenPreview = async () => {
+    if (!session.projectName) return;
+    const result = await window.goodvibes.resolveProjectPath(session.projectName);
+    const cwd = result?.path || undefined;
     createPreviewTerminal(session.id, displayName, cwd);
     setCurrentView('terminal');
     onClose();
@@ -162,7 +164,9 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
               </button>
               <button
                 onClick={async () => {
-                  const cwd = decodeProjectPath(session.projectName) || undefined;
+                  if (!session.projectName) return;
+                  const result = await window.goodvibes.resolveProjectPath(session.projectName);
+                  const cwd = result?.path || undefined;
                   await createTerminal(cwd, displayName, session.id);
                   setCurrentView('terminal');
                   onClose();

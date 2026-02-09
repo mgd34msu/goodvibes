@@ -3,6 +3,7 @@
 // ============================================================================
 
 import React, { useCallback } from 'react';
+import { useResolvedProjectName } from '../../../hooks/useResolvedProjectName';
 import { useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import {
@@ -19,7 +20,6 @@ import {
   formatCost,
   formatNumber,
   formatRelativeTime,
-  decodeProjectName,
 } from '../../../../shared/utils';
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { useAppStore } from '../../../stores/appStore';
@@ -61,7 +61,8 @@ export function SessionCard({ session, projectsRoot, isLive, onClick }: SessionC
     [session.id, queryClient]
   );
 
-  const displayName = session.customTitle || decodeProjectName(session.projectName, projectsRoot);
+  const resolvedName = useResolvedProjectName(session.projectName, projectsRoot);
+  const displayName = session.customTitle || resolvedName;
 
   const handleOpenPreview = useCallback(
     async (e: React.MouseEvent) => {

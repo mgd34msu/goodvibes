@@ -164,6 +164,52 @@ export function decodeProjectName(name: string | null | undefined, projectsRoot?
 }
 
 /**
+ * Format a resolved filesystem path into a display name for the UI.
+ * Unlike decodeProjectName(), this takes an already-resolved real path,
+ * so there is no hyphen/separator ambiguity.
+ *
+ * @param resolvedPath - The real filesystem path (e.g., "/home/buzzkill/Projects/goodvibes-sh")
+ * @param projectsRoot - Optional projects root path to compute relative paths
+ * @returns A human-readable display name
+ *
+ * @example
+ * formatProjectDisplayName("/home/buzzkill") // => "~"
+ * formatProjectDisplayName("/home/buzzkill/Projects/my-app", "/home/buzzkill/Projects") // => "my-app"
+ * formatProjectDisplayName("/home/buzzkill/Projects/deep/nested", "/home/buzzkill/Projects") // => "deep/nested"
+ * formatProjectDisplayName("/some/random/path") // => "path"
+ */
+export function formatProjectDisplayName(resolvedPath: string, projectsRoot?: string | null): string {
+  if (!resolvedPath) return 'Unknown';
+
+  // Normalize backslashes to forward slashes (Windows compat)
+  const normalized = resolvedPath.replace(/\\/g, '/').replace(/\/+$/, '');
+
+  // Get home directory for ~ shorthand
+  const homeDir = typeof process !== 'undefined' && process.env?.HOME
+    ? process.env.HOME.replace(/\\/g, '/').replace(/\/+$/, '')
+    : typeof process !== 'undefined' && process.env?.USERPROFILE
+    ? process.env.USERPROFILE.replace(/\\/g, '/').replace(/\/+$/, '')
+    : null;
+
+  // Check if path is exactly the home directory
+  if (homeDir && normalized === homeDir) {
+    return '~';
+  }
+
+  // If projectsRoot matches, return relative path (preserving real hyphens)
+  if (projectsRoot) {
+    const normalizedRoot = projectsRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (normalized.startsWith(normalizedRoot + '/')) {
+      return normalized.substring(normalizedRoot.length + 1);
+    }
+  }
+
+  // Fallback: return the last path component (basename)
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || normalized;
+}
+
+/**
  * Format duration in seconds to human-readable string
  * @param seconds - The duration in seconds to format
  * @returns Formatted duration string (e.g., "42s", "2:30", "1:23:45")
@@ -332,6 +378,10 @@ export function formatRelativeTime(dateStr: string | null | undefined): string {
 }
 
 /**
+ * @deprecated Use `window.goodvibes.resolveProjectPath()` via IPC instead.
+ * This function uses naive dash-splitting which loses hyphen information.
+ * Kept for backward compatibility but should not be used in new code.
+ *
  * Decode project name from path-encoded format back to full path
  *
  * @param name - The encoded project name (e.g., "C--Users-buzzkill-Documents-myproject" or "-home-buzzkill-Projects-myproject")

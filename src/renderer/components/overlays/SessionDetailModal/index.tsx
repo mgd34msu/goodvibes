@@ -4,10 +4,11 @@
 // ============================================================================
 
 import { useState, useEffect } from 'react';
+import { useResolvedProjectName } from '../../../hooks/useResolvedProjectName';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { X, Eye, Play, FileText, FileJson, Star, Archive } from 'lucide-react';
-import { decodeProjectName } from '../../../../shared/utils';
+
 import { useAppStore } from '../../../stores/appStore';
 import { useSettingsStore } from '../../../stores/settingsStore';
 import { useTerminalStore } from '../../../stores/terminalStore';
@@ -54,7 +55,8 @@ export function SessionDetailModal({ session, onClose }: SessionDetailModalProps
   // Use refreshed session data when available, fallback to prop session
   const currentSession = refreshedSession ?? session;
 
-  const displayName = currentSession.customTitle || decodeProjectName(currentSession.projectName, settings.projectsRoot);
+  const resolvedName = useResolvedProjectName(currentSession.projectName, settings.projectsRoot);
+  const displayName = currentSession.customTitle || resolvedName;
 
   const handleOpenPreview = async () => {
     if (!session.projectName) return;

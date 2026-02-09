@@ -3,10 +3,11 @@
 // ============================================================================
 
 import React from 'react';
+import { useResolvedProjectName } from '../../hooks/useResolvedProjectName';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import type { Analytics, ToolUsageStat } from '../../../shared/types';
-import { formatNumber, formatCost, formatDate, decodeProjectName } from '../../../shared/utils';
+import { formatNumber, formatCost, formatDate } from '../../../shared/utils';
 import { formatTimestamp } from '../../../shared/dateUtils';
 import { AnalyticsCardSkeleton } from '../common/Skeleton';
 import { toast } from '../../stores/toastStore';
@@ -354,21 +355,25 @@ function CostByProject({ data, projectsRoot }: { data: Record<string, number>; p
 
   return (
     <div className="space-y-2">
-      {entries.map(([project, cost]) => {
-        const displayName = decodeProjectName(project, projectsRoot);
-        return (
-          <div key={project} className="flex items-center gap-3">
-            <div className="w-24 text-xs text-surface-400 truncate" title={displayName}>{displayName}</div>
-            <div className="flex-1 h-6 bg-surface-800 rounded overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-primary-600 to-accent-600"
-                style={{ width: `${(cost / maxCost) * 100}%` }}
-              />
-            </div>
-            <div className="w-16 text-xs text-surface-400 text-right">{formatCost(cost)}</div>
-          </div>
-        );
-      })}
+      {entries.map(([project, cost]) => (
+        <ProjectCostBar key={project} project={project} cost={cost} maxCost={maxCost} projectsRoot={projectsRoot} />
+      ))}
+    </div>
+  );
+}
+
+function ProjectCostBar({ project, cost, maxCost, projectsRoot }: { project: string; cost: number; maxCost: number; projectsRoot: string | null }) {
+  const displayName = useResolvedProjectName(project, projectsRoot);
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-24 text-xs text-surface-400 truncate" title={displayName}>{displayName}</div>
+      <div className="flex-1 h-6 bg-surface-800 rounded overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-primary-600 to-accent-600"
+          style={{ width: `${(cost / maxCost) * 100}%` }}
+        />
+      </div>
+      <div className="w-16 text-xs text-surface-400 text-right">{formatCost(cost)}</div>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatRelativeTime,
   decodeProjectName,
+  formatProjectDisplayName,
 } from './utils';
 
 describe('formatNumber', () => {
@@ -203,5 +204,63 @@ describe('decodeProjectName extension handling', () => {
       '-home-buzzkill-Projects-apps-frontend-dashboard',
       '/home/buzzkill/Projects'
     )).toBe('apps/frontend/dashboard');
+  });
+});
+
+describe('formatProjectDisplayName', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, HOME: '/home/buzzkill' };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('returns Unknown for empty string', () => {
+    expect(formatProjectDisplayName('')).toBe('Unknown');
+  });
+
+  it('returns ~ for home directory', () => {
+    expect(formatProjectDisplayName('/home/buzzkill')).toBe('~');
+  });
+
+  it('returns relative path when projectsRoot matches', () => {
+    expect(formatProjectDisplayName('/home/buzzkill/Projects/my-app', '/home/buzzkill/Projects')).toBe('my-app');
+  });
+
+  it('preserves hyphens in project names', () => {
+    expect(formatProjectDisplayName('/home/buzzkill/Projects/goodvibes-plugin', '/home/buzzkill/Projects')).toBe('goodvibes-plugin');
+  });
+
+  it('handles nested relative paths', () => {
+    expect(formatProjectDisplayName('/home/buzzkill/Projects/deep/nested/app', '/home/buzzkill/Projects')).toBe('deep/nested/app');
+  });
+
+  it('falls back to basename when no projectsRoot', () => {
+    expect(formatProjectDisplayName('/some/random/path')).toBe('path');
+  });
+
+  it('falls back to basename when projectsRoot does not match', () => {
+    expect(formatProjectDisplayName('/other/path/myapp', '/home/buzzkill/Projects')).toBe('myapp');
+  });
+
+  it('normalizes Windows backslashes', () => {
+    process.env = { ...originalEnv, HOME: 'C:/Users/buzzkill', USERPROFILE: 'C:\\Users\\buzzkill' };
+    expect(formatProjectDisplayName('C:\\Users\\buzzkill\\Projects\\my-app', 'C:\\Users\\buzzkill\\Projects')).toBe('my-app');
+  });
+
+  it('handles trailing slashes', () => {
+    expect(formatProjectDisplayName('/home/buzzkill/Projects/app/', '/home/buzzkill/Projects/')).toBe('app');
+  });
+
+  it('returns ~ for home with trailing slash', () => {
+    expect(formatProjectDisplayName('/home/buzzkill/')).toBe('~');
+  });
+
+  it('handles Windows home directory', () => {
+    process.env = { ...originalEnv, HOME: undefined, USERPROFILE: 'C:\\Users\\buzzkill' };
+    expect(formatProjectDisplayName('C:\\Users\\buzzkill')).toBe('~');
   });
 });

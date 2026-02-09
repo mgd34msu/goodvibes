@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { useQuery } from '@tanstack/react-query';
+import { useResolvedProjectName } from '../../../hooks/useResolvedProjectName';
 import { clsx } from 'clsx';
 import type {
   MonitorPanelProps,
@@ -14,8 +15,9 @@ import type {
   AccentColor,
 } from './types';
 import { useAppUptime } from './hooks';
-import { formatDuration, formatRelativeTime, decodeProjectName } from '../../../../shared/utils';
+import { formatDuration, formatRelativeTime } from '../../../../shared/utils';
 import { useTerminalStore } from '../../../stores/terminalStore';
+import { useSettingsStore } from '../../../stores/settingsStore';
 
 // ============================================================================
 // MONITOR PANEL
@@ -220,6 +222,7 @@ function CompactMetricCard({
 // ============================================================================
 
 function CompactLiveSessionCard({ session, projectsRoot, onClick }: CompactLiveSessionCardProps) {
+  const displayName = useResolvedProjectName(session.projectName, projectsRoot);
   return (
     <div
       className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-surface-900/60 border border-surface-800/60 hover:bg-surface-800/40 transition-colors cursor-pointer"
@@ -238,7 +241,7 @@ function CompactLiveSessionCard({ session, projectsRoot, onClick }: CompactLiveS
         <span className="relative inline-flex rounded-full h-2 w-2 bg-success-500"></span>
       </span>
       <span className="text-sm font-medium text-surface-200 truncate flex-1">
-        {decodeProjectName(session.projectName, projectsRoot)}
+        {displayName}
       </span>
       <span className="text-xs text-surface-500 flex-shrink-0">{session.messageCount} msgs</span>
     </div>
@@ -250,19 +253,22 @@ function CompactLiveSessionCard({ session, projectsRoot, onClick }: CompactLiveS
 // ============================================================================
 
 function CompactActivityItem({ entry, onClick }: CompactActivityItemProps) {
-  // Parse metadata to extract project name if available
-  let projectName: string | null = null;
+  // Parse metadata to extract encoded project name if available
+  let encodedProjectName: string | null = null;
   if (entry.metadata) {
     try {
       const metadata =
         typeof entry.metadata === 'string' ? JSON.parse(entry.metadata) : entry.metadata;
       if (metadata?.projectName) {
-        projectName = decodeProjectName(metadata.projectName);
+        encodedProjectName = metadata.projectName;
       }
     } catch {
       // Ignore parse errors
     }
   }
+
+  const { settings } = useSettingsStore();
+  const projectName = useResolvedProjectName(encodedProjectName, settings.projectsRoot);
 
   const { icon, bgColor } = getActivityIconConfig(entry.type);
   const isClickable = !!onClick;
@@ -299,7 +305,7 @@ function CompactActivityItem({ entry, onClick }: CompactActivityItemProps) {
         <p className="text-xs text-surface-300 leading-snug line-clamp-2">{entry.description}</p>
         <div className="flex items-center gap-1.5 mt-1">
           <span className="text-2xs text-surface-500">{formatRelativeTime(entry.timestamp)}</span>
-          {projectName && (
+          {encodedProjectName && (
             <>
               <span className="text-surface-600">&#8226;</span>
               <span className="text-2xs text-surface-400 truncate">{projectName}</span>

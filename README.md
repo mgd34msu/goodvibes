@@ -58,6 +58,10 @@ Built-in file explorer with a tree view, icon grid, and a live preview pane that
 
 ![File Manager](assets/screenshots/file-manager.png)
 
+The session view displays Claude CLI session history with commit details and conversation previews directly in the file explorer.
+
+![File Manager - Sessions](assets/screenshots/file-manager-sessions.png)
+
 ### Project Registry
 
 Manage multiple projects from a single interface. Each project tracks its sessions, token usage, and cost independently.

@@ -20,6 +20,74 @@ GoodVibes is an Electron-based desktop application that provides an enhanced int
 - **Project Registry**: Multi-project management with per-project settings
 - **Memory Management**: Edit CLAUDE.md files for persistent context injection
 
+## Screenshots
+
+### Welcome Screen
+
+The home screen provides quick access to start a new Claude session, open a recent project, use the text editor, or access the terminal.
+
+![Welcome Screen](assets/screenshots/welcome.png)
+
+### Terminal
+
+Full-featured terminal with Claude CLI integration, session tabs, and a session explorer sidebar for quick navigation between active and past sessions.
+
+![Terminal](assets/screenshots/terminal.png)
+
+### Session History & Live Monitor
+
+Browse all past sessions with filtering and search. The live monitor shows real-time activity across active sessions with an activity feed.
+
+![Session History](assets/screenshots/session-history.png)
+
+### Session Detail
+
+Drill into any session to see a detailed breakdown including token usage, cost, duration, messages, and tool usage statistics.
+
+![Session Detail](assets/screenshots/session-detail.png)
+
+### Analytics Dashboard
+
+Comprehensive analytics with cost tracking, token consumption graphs, session trends, per-project breakdowns, and a contribution-style usage heatmap.
+
+![Analytics Dashboard](assets/screenshots/analytics-dashboard.png)
+
+### File Manager
+
+Built-in file explorer with a tree view, icon grid, and a live preview pane that renders Markdown, displays code with syntax highlighting, and shows file metadata.
+
+![File Manager](assets/screenshots/file-manager.png)
+
+### Project Registry
+
+Manage multiple projects from a single interface. Each project tracks its sessions, token usage, and cost independently.
+
+![Project Registry](assets/screenshots/project-registry.png)
+
+### Hooks
+
+Configure pre-tool and post-tool hooks to enforce safety rules, block dangerous commands, restrict file access, and customize Claude's behavior per project.
+
+![Hooks](assets/screenshots/hooks.png)
+
+### Skills Library
+
+Browse and manage reusable skills (slash commands) for common workflows like code reviews, security audits, refactoring, and more.
+
+![Skills](assets/screenshots/skills.png)
+
+### Agent Templates
+
+Pre-configured agent personalities for specialized tasks: engineering, code review, architecture, debugging, testing, deployment, and more.
+
+![Agents](assets/screenshots/agents.png)
+
+### Settings
+
+Customize your experience with color themes, display options, date/time formatting, and startup behavior preferences.
+
+![Settings](assets/screenshots/settings.png)
+
 ## Installation
 
 Download the latest release for your operating system from the [Releases page](https://github.com/mgd34msu/goodvibes.sh/releases):
@@ -86,7 +154,7 @@ For users who want full control over their GitHub integration, you can configure
    - Set **Authorization callback URL** to: `goodvibes://oauth/callback`
 
 2. **Configure in GoodVibes**
-   - Go to **Settings → GitHub → Custom OAuth App → Configure**
+   - Go to **Settings -> GitHub -> Custom OAuth App -> Configure**
    - Enter your **Client ID**
    - Choose **Device Flow** (recommended) or **Authorization Code Flow**
    - If using Authorization Code Flow, also enter your **Client Secret**

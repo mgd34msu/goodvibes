@@ -1,0 +1,33 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+*.tsbuildinfo
+sbom.cdx.json*
+.tmp/
+
+# Local GoodVibes daemon/session state and credentials. Keep project-local
+# experimentation state out of source control. Durable project vocabulary,
+# architecture decisions, patterns, and fixtures belong in explicit repo paths
+# such as docs/, test fixtures, or named JSON/Markdown artifacts.
+.goodvibes/
+
+# Verdaccio dry-run scratch dir
+.test-tmp/
+
+# api-extractor transient output (temp/ is gitignored; only etc/ baseline is committed)
+temp/
+**/temp/
+
+# wrangler dev --local cache — created inside test/workers-wrangler/ on first run
+test/workers-wrangler/.wrangler/
+
+# Defensive guard against accidental SQLite `:memory:` sentinel file leaks
+:memory:
+
+# Review artifacts (transient)
+*-review.md
+*-review-*.md
+*-verification.md
+.claude/scheduled_tasks.lock

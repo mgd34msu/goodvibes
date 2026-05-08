@@ -4,12 +4,17 @@ This repository is the central index for the GoodVibes projects hosted under
 [mgd34msu on GitHub](https://github.com/mgd34msu). The descriptions below are
 based on the current README files in the linked repositories.
 
-## Core Runtime And SDK
+## SDK
+
+| Project | Purpose |
+| --- | --- |
+| [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | TypeScript SDK for building clients, daemon hosts, remote surfaces, and automation around the GoodVibes daemon. Published as `@pellux/goodvibes-sdk`. |
+
+## Core Runtime
 
 | Project | Purpose |
 | --- | --- |
 | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal-native AI coding, operations, automation, knowledge, and integration console. It can run the GoodVibes daemon/API host and exposes runtime surfaces for channels, remote peers, web clients, automation, and companion apps. |
-| [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | TypeScript SDK for building clients, daemon hosts, remote surfaces, and automation around the GoodVibes daemon. Published as `@pellux/goodvibes-sdk`. |
 
 ## Operator And Companion Surfaces
 
@@ -28,10 +33,10 @@ based on the current README files in the linked repositories.
 
 ## Quick Orientation
 
-- Start with `goodvibes-tui` if you want the main terminal product and local
-  daemon/runtime.
-- Use `goodvibes-sdk` when building a client, integration, daemon host, or
+- Start with `goodvibes-sdk` when building a client, integration, daemon host, or
   automation against the daemon contract.
+- Use `goodvibes-tui` when you want the main terminal product and local
+  daemon/runtime.
 - Use `goodvibes-webui`, `goodvibes-apk`, or `goodvibes-homeassistant` when you
   need a browser, Android, or Home Assistant surface for the daemon.
 - Use `goodvibes-plugin` and `goodvibes-desktop` for Claude Code and Claude CLI

@@ -20,6 +20,7 @@ based on the current README files in the linked repositories.
 
 | Project | Purpose |
 | --- | --- |
+| [goodvibes-agent](https://github.com/mgd34msu/goodvibes-agent) | Personal operator assistant built on the GoodVibes terminal UI foundation. Acts as a serial assistant layer that handles operator chat, memory, approvals, and automation observability while delegating actual coding execution to the GoodVibes TUI through public daemon contracts. |
 | [goodvibes-webui](https://github.com/mgd34msu/goodvibes-webui) | Browser operator surface for the GoodVibes daemon, built with Bun, Vite, React, TypeScript, and the public SDK browser/auth/contracts surfaces. |
 | [goodvibes-apk](https://github.com/mgd34msu/goodvibes-apk) | React Native Android companion app for the GoodVibes TUI/daemon. It is a remote control-plane client for daemon connection, approvals, sessions, tasks, provider state, model changes, and companion-only remote chat. |
 | [goodvibes-homeassistant](https://github.com/mgd34msu/goodvibes-homeassistant) | Custom Home Assistant integration for the GoodVibes daemon Home Assistant surface. Home Assistant supplies Assist plumbing, services, sensors, repairs, sidebar UI, and Home Graph context while the daemon owns routing, knowledge, graph storage, wiki rendering, and model/provider behavior. |
@@ -37,6 +38,8 @@ based on the current README files in the linked repositories.
   automation against the daemon contract.
 - Use `goodvibes-tui` when you want the main terminal product and local
   daemon/runtime.
+- Use `goodvibes-agent` when you want a personal operator assistant surface
+  layered on the TUI foundation that delegates coding work to the daemon.
 - Use `goodvibes-webui`, `goodvibes-apk`, or `goodvibes-homeassistant` when you
   need a browser, Android, or Home Assistant surface for the daemon.
 - Use `goodvibes-plugin` and `goodvibes-desktop` for Claude Code and Claude CLI
@@ -74,6 +77,19 @@ clients connect to. The TUI owns terminal UX, host wiring, local configuration,
 runtime visibility, provider/model selection, operational panels, slash commands,
 and product composition while consuming the SDK platform layer for shared
 contracts, transports, daemon routes, and reusable runtime code.
+
+### goodvibes-agent
+
+`goodvibes-agent` is the personal operator assistant built on the GoodVibes
+terminal UI foundation. It was split from `goodvibes-tui` to deliver an
+assistant-first user experience while keeping coding execution in the TUI.
+
+The agent runs as a TypeScript/Bun application and operates as a serial
+assistant layer that connects to an external GoodVibes daemon (it does not
+manage daemon lifecycle). It owns the assistant surface, companion chat,
+operator memory, approvals, and automation observability, and delegates actual
+coding work to `goodvibes-tui` through public daemon contracts rather than
+executing code locally.
 
 ### goodvibes-webui
 

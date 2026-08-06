@@ -11,7 +11,7 @@ August 2026.
 | --- | --- | --- |
 | SDK | [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | TypeScript SDK and contract layer for clients, daemon hosts, remote surfaces, and automation around the GoodVibes daemon. Published as `@pellux/goodvibes-sdk`. |
 | Core runtime | [goodvibes-daemon](https://github.com/mgd34msu/goodvibes-daemon) | Standalone control plane for the platform: a long-running process that answers operator verbs over HTTP, manages sessions and data stores, runs scheduled work, and coordinates grouped machines via leader election. Published as `@pellux/goodvibes-daemon`. |
-| Core runtime | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal-native AI coding, operations, automation, knowledge, and integration console. As of 2.0 it adopts the standalone GoodVibes daemon rather than hosting one in-process. Published as `@pellux/goodvibes-tui`. |
+| Core runtime | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal console for coding and operations work with an AI model: permission-gated tools, a live multi-provider model catalog with failover routing, per-turn token and cost accounting, and panel control rooms. The daemon is not part of the TUI — it is the separate `goodvibes-daemon`, installed alongside as a dependency. Published as `@pellux/goodvibes-tui`. |
 | Operator surface | [goodvibes-agent](https://github.com/mgd34msu/goodvibes-agent) | Installable autonomous operator assistant: chat, planning, memory, research, scheduling, and visible agents over the daemon contract with explicit confirmation gates. Published as `@pellux/goodvibes-agent`. |
 | Operator surface | [goodvibes-webui](https://github.com/mgd34msu/goodvibes-webui) | Browser chat application and operator console with near-parity to the terminal UI. One responsive app for desktop and phone, installable from the browser. |
 | Integration | [goodvibes-homeassistant](https://github.com/mgd34msu/goodvibes-homeassistant) | Custom Home Assistant integration for the daemon's Home Assistant surface: Assist plumbing, services, sensors, Home Graph sync, and the GoodVibes Home sidebar panel. |
@@ -36,8 +36,9 @@ npm.
 - Build against the daemon contract with `goodvibes-sdk`.
 - Run the platform control plane as its own long-running process with
   `goodvibes-daemon` — the backbone every other surface connects to.
-- Run the main terminal product with `goodvibes-tui`; as of 2.0 it adopts the
-  standalone daemon rather than hosting one itself.
+- Run the main terminal product with `goodvibes-tui`; the daemon is no longer
+  inside it — the TUI adopts the standalone `goodvibes-daemon`, which installs
+  alongside it as a dependency.
 - Use `goodvibes-agent` for an assistant-first operator surface with confirmation
   gates and receipts.
 - Use `goodvibes-webui` or `goodvibes-homeassistant` for browser or
@@ -95,32 +96,44 @@ Install with `curl -fsSL https://goodvibes.sh/install.sh | sh`, or via
 
 ### goodvibes-tui
 
-`goodvibes-tui` is the main terminal-native GoodVibes product — a Bun
-application with a raw ANSI interface for coding, operations, automation,
-knowledge work, provider routing, tools, agents, panels, and runtime control
-rooms.
+`goodvibes-tui` is the main terminal-native GoodVibes product. Running
+`goodvibes` in a project directory opens a full-screen terminal app where you
+talk to a model that can read and edit your files, run shell commands, search
+the web, and hand work off to background agents — asking permission before
+anything that writes or executes. Workspace trust is decided per directory, and
+the default `prompt` permission mode stops on writes, edits, shell commands,
+network fetches, agent spawns, and MCP calls, with decisions rememberable at
+exact-command, command-shape, project, or session scope.
 
-The project follows semver (1.0.0 shipped 2026-07-03): incompatible changes to
-CLI flags, config keys, slash commands, key bindings, daemon routes, and
-on-disk layouts land only in major releases, with deprecations noted in
-`CHANGELOG.md` first. The 2.0 release moved the daemon out of the TUI into the
-separate `goodvibes-daemon` package.
+It talks to many providers — OpenAI, Anthropic, Gemini, Bedrock, Copilot,
+OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama
+and LM Studio discovered on startup — through a live model catalog with
+per-role routing (main chat, helper, tool, TTS, embeddings) and `synthetic`
+failover groups that never cross the free, paid, and subscription boundaries.
+Settings, sessions, and secrets stay on your own machine, and the footer keeps
+an honest running token and cost total for every turn. Panels turn background
+work into live control rooms: Fleet (`F2`) tracks agents, workstreams,
+watchers, and scheduled jobs, with attach, detach, pause, resume, and archive.
 
 Install with `curl -fsSL https://goodvibes.sh/install.sh | sh`, or via
 `bun add -g @pellux/goodvibes-tui` followed by
-`bun pm trust -g @pellux/goodvibes-tui goodvibes-daemon` (Bun blocks lifecycle
-scripts for untrusted global packages). If the trust step is skipped the
+`bun pm trust -g @pellux/goodvibes-tui goodvibes-daemon` — `goodvibes-daemon`
+is a dependency of the package, so one install brings both commands, and the
+trust step lets both postinstalls place their binaries. If it is skipped the
 `goodvibes` launcher self-heals on first run by fetching and checksum-verifying
 its own binary. Runs on Linux, macOS, and Windows via WSL2; native Windows is
 beta.
 
-As of 2.0 the TUI adopts a running standalone GoodVibes daemon, or starts one
-already installed as a stopped service — it never spawns a new daemon process
-itself. This is controlled by the `daemon.enabled` setting (default true), with
-the daemon bound to loopback. The TUI owns terminal UX, host wiring, local
-configuration, provider/model selection, operational panels, and slash commands
-while consuming the SDK platform layer for shared contracts, transports, and
-reusable runtime code.
+The daemon is no longer part of the TUI — it is the separate standalone
+`goodvibes-daemon` product. The TUI binary adopts a running daemon, or starts
+one already installed as a stopped service; it never spawns a new daemon
+process itself (`daemon.enabled`, on by default, loopback-bound). The TUI
+consumes the published `@pellux/goodvibes-sdk` platform layer, pinned in
+`package.json`, for shared contracts, daemon routes, and transports, and keeps
+the terminal UI, host wiring, and product composition in its own repo. From
+1.0.0 the project follows semver: incompatible changes to CLI flags, config
+keys, slash commands, key bindings, daemon routes, and on-disk layouts land
+only in major releases, with deprecations noted in `CHANGELOG.md` first.
 
 ### goodvibes-agent
 

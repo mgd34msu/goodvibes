@@ -11,7 +11,7 @@ August 2026.
 | --- | --- | --- |
 | SDK | [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | Typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, knowledge and memory, the control-plane HTTP and realtime API, and transports. Published as `@pellux/goodvibes-sdk`. |
 | Core runtime | [goodvibes-daemon](https://github.com/mgd34msu/goodvibes-daemon) | Standalone control plane for the platform: a long-running process that answers operator verbs over HTTP, manages sessions and data stores, runs scheduled work, and coordinates grouped machines via leader election. Published as `@pellux/goodvibes-daemon`. |
-| Core runtime | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal console for coding and operations work with an AI model: permission-gated tools, a live multi-provider model catalog with failover routing, per-turn token and cost accounting, and panel control rooms. The daemon is not part of the TUI — it is the separate `goodvibes-daemon`, installed alongside as a dependency. Published as `@pellux/goodvibes-tui`. |
+| Operator surface | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal console for coding and operations work with an AI model: permission-gated tools, a live multi-provider model catalog with failover routing, per-turn token and cost accounting, and panel control rooms. Published as `@pellux/goodvibes-tui`. |
 | Operator surface | [goodvibes-agent](https://github.com/mgd34msu/goodvibes-agent) | Installable autonomous operator assistant: chat, planning, memory, research, scheduling, and visible agents over the daemon contract with explicit confirmation gates. Published as `@pellux/goodvibes-agent`. |
 | Operator surface | [goodvibes-webui](https://github.com/mgd34msu/goodvibes-webui) | Browser chat application and operator console with near-parity to the terminal UI. One responsive app for desktop and phone, installable from the browser. |
 | Integration | [goodvibes-homeassistant](https://github.com/mgd34msu/goodvibes-homeassistant) | Custom Home Assistant integration for the daemon's Home Assistant surface: Assist plumbing, services, sensors, Home Graph sync, and the GoodVibes Home sidebar panel. |
@@ -36,9 +36,7 @@ npm.
 - Build against the daemon contract with `goodvibes-sdk`.
 - Run the platform control plane as its own long-running process with
   `goodvibes-daemon` — the backbone every other surface connects to.
-- Run the main terminal product with `goodvibes-tui`; the daemon is no longer
-  inside it — the TUI adopts the standalone `goodvibes-daemon`, which installs
-  alongside it as a dependency.
+- Run the main terminal product with `goodvibes-tui`.
 - Use `goodvibes-agent` for an assistant-first operator surface with confirmation
   gates and receipts.
 - Use `goodvibes-webui` or `goodvibes-homeassistant` for browser or
@@ -140,11 +138,10 @@ trust step lets both postinstalls place their binaries. If it is skipped the
 its own binary. Runs on Linux, macOS, and Windows via WSL2; native Windows is
 beta.
 
-The daemon is no longer part of the TUI — it is the separate standalone
-`goodvibes-daemon` product. The TUI binary adopts a running daemon, or starts
-one already installed as a stopped service; it never spawns a new daemon
-process itself (`daemon.enabled`, on by default, loopback-bound). The TUI
-consumes the published `@pellux/goodvibes-sdk` platform layer, pinned in
+Like every other surface, the TUI is a client of the standalone
+`goodvibes-daemon`: it adopts a running daemon, or starts one already
+installed as a stopped service; it never spawns a new daemon process itself
+(`daemon.enabled`, on by default, loopback-bound). The TUI consumes the published `@pellux/goodvibes-sdk` platform layer, pinned in
 `package.json`, for shared contracts, daemon routes, and transports, and keeps
 the terminal UI, host wiring, and product composition in its own repo. From
 1.0.0 the project follows semver: incompatible changes to CLI flags, config

@@ -2,33 +2,54 @@
 
 Central index for the GoodVibes projects hosted under
 [mgd34msu on GitHub](https://github.com/mgd34msu). The descriptions below match
-each repository's README and the published npm packages as of August 2026.
+each repository's README and the published packages as of August 21, 2026.
 
-## Project map
+The family splits into two groups. The core projects ride the sdk release
+train: when `@pellux/goodvibes-sdk` publishes, each of them repins to the new
+version and releases in the same cycle. The non-core projects are independent:
+they do not depend on the sdk and release on their own schedules, only when
+they have something to ship.
 
-| Area | Project | Purpose |
-| --- | --- | --- |
-| SDK | [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | Typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, knowledge and memory, the control-plane HTTP and realtime API, and transports. Published as `@pellux/goodvibes-sdk`. |
-| Core runtime | [goodvibes-daemon](https://github.com/mgd34msu/goodvibes-daemon) | Standalone control plane for the platform: a long-running process that answers operator verbs over HTTP, manages sessions and data stores, runs scheduled work, and coordinates grouped machines via leader election. Published as `@pellux/goodvibes-daemon`. |
-| Operator surface | [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal console for coding and operations work with an AI model: permission-gated tools, a live multi-provider model catalog with failover routing, per-turn token and cost accounting, and panel control rooms. Published as `@pellux/goodvibes-tui`. |
-| Operator surface | [goodvibes-agent](https://github.com/mgd34msu/goodvibes-agent) | Installable autonomous operator assistant: chat, planning, memory, research, scheduling, and visible agents over the daemon contract with explicit confirmation gates. Published as `@pellux/goodvibes-agent`. |
-| Operator surface | [goodvibes-webui](https://github.com/mgd34msu/goodvibes-webui) | Browser chat application and operator console with near-parity to the terminal UI. One responsive app for desktop and phone, installable from the browser. |
-| Integration | [goodvibes-homeassistant](https://github.com/mgd34msu/goodvibes-homeassistant) | Custom Home Assistant integration for the daemon's Home Assistant surface: Assist plumbing, services, sensors, Home Graph sync, and the GoodVibes Home sidebar panel. |
-| Claude tooling | [goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin) | Claude Code plugin: three MCP servers and 25 tools for structure-aware code intelligence, session cost analytics, and an API/DB workbench. |
-| Codex tooling | [goodvibes-codex](https://github.com/mgd34msu/goodvibes-codex) | Codex CLI port of `goodvibes-plugin`: the same three MCP servers and 25 tools without any Claude-specific dependencies. Early-stage. |
+## Core projects (sdk release train)
 
-## Published packages
+| Project | Purpose |
+| --- | --- |
+| [goodvibes-sdk](https://github.com/mgd34msu/goodvibes-sdk) | Typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, knowledge and memory, the control-plane HTTP and realtime API, and transports. Published as `@pellux/goodvibes-sdk`. |
+| [goodvibes-daemon](https://github.com/mgd34msu/goodvibes-daemon) | Standalone control plane for the platform: a long-running process that answers operator verbs over HTTP, manages sessions and data stores, runs scheduled work, and coordinates grouped machines via leader election. Published as `@pellux/goodvibes-daemon`. |
+| [goodvibes-tui](https://github.com/mgd34msu/goodvibes-tui) | Terminal console for coding and operations work with an AI model: permission-gated tools, a live multi-provider model catalog with failover routing, per-turn token and cost accounting, and panel control rooms. Published as `@pellux/goodvibes-tui`. |
+| [goodvibes-agent](https://github.com/mgd34msu/goodvibes-agent) | Installable autonomous operator assistant: chat, planning, memory, research, scheduling, and visible agents over the daemon contract with explicit confirmation gates. Published as `@pellux/goodvibes-agent`. |
+| [goodvibes-webui](https://github.com/mgd34msu/goodvibes-webui) | Browser chat application and operator console with near-parity to the terminal UI. One responsive app for desktop and phone, installable from the browser as a standalone app. |
+| [goodvibes-app](https://github.com/mgd34msu/goodvibes-app) | Native desktop operator console built with Electrobun (Bun and TypeScript, no Electron): one window unifying the terminal console's coding and operations capability with the agent's assistant surfaces, over the daemon's operator contract. |
 
-Current npm versions as of August 2026:
+## Non-core projects (independent)
 
-- `@pellux/goodvibes-sdk` 2.0.10
-- `@pellux/goodvibes-daemon` 1.28.12
-- `@pellux/goodvibes-tui` 2.0.10
-- `@pellux/goodvibes-agent` 2.0.9
+| Project | Purpose |
+| --- | --- |
+| [goodvibes-homeassistant](https://github.com/mgd34msu/goodvibes-homeassistant) | Custom Home Assistant integration for the daemon's Home Assistant surface: Assist plumbing, services, sensors, Home Graph sync, and the GoodVibes Home sidebar panel. Vendors a generated client rather than depending on the sdk package. |
+| [goodvibes-plugin](https://github.com/mgd34msu/goodvibes-plugin) | Claude Code plugin: three MCP servers and 25 tools for structure-aware code intelligence, session cost analytics, and an API/DB workbench. Independent of the daemon stack. |
+| [goodvibes-codex](https://github.com/mgd34msu/goodvibes-codex) | Codex CLI port of `goodvibes-plugin`: the same three MCP servers and 25 tools without any Claude-specific dependencies. Early-stage. |
+| [goodvibes-desktop](https://github.com/mgd34msu/goodvibes-desktop) | Electron desktop application wrapping the Claude CLI with session management, analytics, Git integration, hooks, MCP server management, and a plugin ecosystem. Predates the daemon stack and does not use it. |
 
-`goodvibes-webui`, `goodvibes-homeassistant`, `goodvibes-plugin`, and
-`goodvibes-codex` install from their repositories or GitHub Releases rather than
-npm.
+The retired Android companion app is no longer part of the family; the webui's
+installable browser app is its replacement, including QR pairing with a
+phone's camera.
+
+## Current versions
+
+As of August 21, 2026:
+
+- `@pellux/goodvibes-sdk` 2.0.19 (npm, with `@pellux/goodvibes-contracts` and
+  `@pellux/goodvibes-toolchain` published from the same workspace at the same
+  version)
+- `@pellux/goodvibes-daemon` 1.28.21 (npm)
+- `@pellux/goodvibes-tui` 2.0.15 (npm)
+- `@pellux/goodvibes-agent` 2.0.16 (npm)
+- `goodvibes-webui` 1.13.14 (GitHub release)
+- `goodvibes-app` 0.4.0 (GitHub release)
+- `goodvibes-homeassistant` 0.13.12 (GitHub release, HACS)
+- `goodvibes-plugin` 2.3.4 (repository is the distribution channel)
+- `goodvibes-codex` 0.1.1 (GitHub release)
+- `goodvibes-desktop` 1.1.5 (GitHub release)
 
 ## Quick orientation
 
@@ -39,9 +60,11 @@ npm.
 - Use `goodvibes-agent` for an assistant-first operator surface with confirmation
   gates and receipts.
 - Use `goodvibes-webui` or `goodvibes-homeassistant` for browser or
-  Home Assistant surfaces onto the same daemon.
+  Home Assistant surfaces onto the same daemon, and `goodvibes-app` for the
+  native desktop window over it.
 - Use `goodvibes-plugin` for Claude Code and `goodvibes-codex` for the Codex
-  CLI; both are independent of the daemon stack.
+  CLI; both are independent of the daemon stack, as is `goodvibes-desktop`,
+  the Electron wrapper around the Claude CLI.
 
 ## Release train
 
@@ -62,9 +85,10 @@ products: sessions, provider and model routing, in-process agents, a knowledge
 and memory store, the control-plane HTTP and realtime API, and the transports
 that carry it all. The daemon is its own product, built on this SDK.
 The terminal app and the agent embed the runtime directly in a Bun process
-and connect to the daemon as clients. The web UI, mobile clients, and the
-Home Assistant integration connect to the same daemon as thin remote clients
-over HTTP, SSE, and WebSocket.
+and connect to the daemon as clients. The web UI, the native desktop app,
+phones through the web UI's installable app, and the Home Assistant
+integration connect to the same daemon as thin remote clients over HTTP,
+SSE, and WebSocket.
 
 One published package covers both surfaces: `@pellux/goodvibes-sdk` is a
 facade over a set of source-of-truth sibling packages (errors, transports,
@@ -195,6 +219,7 @@ itself current: it swaps in updates after a checksum check, at launch and at
 idle moments, and keeps the replaced file beside it as `.previous` so
 `/update rollback` can undo the swap.
 Package-managed installs never self-swap and defer to `bun add -g` instead.
+
 Semantic, embedding-backed memory search depends on the `sqlite-vec` native
 addon, which Bun cannot embed inside a compiled binary; releases ship it as a
 per-platform archive to extract beside the binary. Without it the agent still
@@ -203,7 +228,7 @@ unavailable regardless, because the system SQLite refuses to load extensions.
 
 ### goodvibes-webui
 
-`goodvibes-webui` (1.12.1) is the browser surface for the GoodVibes daemon: a
+`goodvibes-webui` is the browser surface for the GoodVibes daemon: a
 full chat application and operator console with feature parity across most of
 the terminal UI's surface. It spans Chat, Sessions, Fleet, Memory, Knowledge,
 Calendar, Providers, and Admin views, plus Checkpoints (browse, create,
@@ -229,6 +254,26 @@ and talks to the daemon through the configured WebUI origin and Vite proxy in
 development, or same-origin in production.
 Built with Bun, Vite, React, TypeScript, and TanStack Query, with Playwright
 phone and desktop end-to-end suites running against a hermetic mock daemon.
+
+### goodvibes-app
+
+`goodvibes-app` is the native desktop operator console: chat, fleet,
+automation, knowledge, code, and observability in one window. It unifies the
+capability of `goodvibes-tui` and `goodvibes-agent` on top of
+`@pellux/goodvibes-sdk`, built with Electrobun in Bun and TypeScript with no
+Node, no Rust, and no Electron. The daemon does the work; the app is a
+control surface over its operator contract, plus a handful of process-local
+features (git, terminal, file-based registries) implemented directly in the
+Bun main process.
+
+The Bun main process adopts an already-running daemon at its default local
+address or spawns one detached, serves the built UI from a loopback port, and
+reverse-proxies API calls to the daemon while stamping the bearer token
+server-side, so the webview never holds the credential. The UI is a React
+single-page app in the system webview, with server state managed through
+query caching and realtime invalidation over SSE. From 0.4.0 the app also
+carries the wake-word stack for its own surface, serving the daemon's
+verified voice models same-origin from the Bun side.
 
 ### goodvibes-homeassistant
 
@@ -296,3 +341,14 @@ interactive terminal before intel's filesystem tools will touch them, and
 authority-changing operations (services, credentials, trust mode) stay in
 the interactive control utility, unavailable through MCP. A capability matrix
 in the repo documents migration status relative to the Claude plugin.
+
+### goodvibes-desktop
+
+`goodvibes-desktop` is an Electron desktop application that wraps the Claude
+CLI in a richer interface: multiple terminal sessions with tabs, session
+analytics with token and usage tracking, a Git panel with staging, commits,
+branches, and GitHub PR and issue management, a hooks system for customizing
+Claude behavior, MCP server management, a skills library, agent templates, a
+multi-project registry, and CLAUDE.md memory editing. It predates the daemon
+stack and does not use it; like the plugin and the Codex port, it releases on
+its own schedule through GitHub Releases.

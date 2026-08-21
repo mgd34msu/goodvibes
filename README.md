@@ -89,14 +89,19 @@ advises pinning exact versions and reading `CHANGELOG.md` before upgrading.
 per machine that holds the control plane every GoodVibes client talks to. The
 terminal app, the conversational agent, and the web app are clients of this
 process. They render, capture input, and call verbs; the work happens here.
-It answers the operator verb families over HTTP, reads and replies on your
-channels, and elects a leader among grouped machines so only one answers a
-shared inbox. It runs scheduled and triggered work and keeps the session,
-memory, knowledge, and code-index stores. It provisions the local voice and
-wake-word models. It serves the browser UI on its own listener, loopback by
-default; `goodvibes-daemon webui --lan` is the deliberate act that widens it.
-It updates itself at an idle moment, with a rollback if the new binary will
-not start.
+
+What the daemon owns:
+
+- Answers the operator verb families over HTTP.
+- Reads and replies on your channels, and elects a leader among grouped
+  machines so only one answers a shared inbox.
+- Runs scheduled and triggered work.
+- Keeps the session, memory, knowledge, and code-index stores.
+- Provisions the local voice and wake-word models.
+- Serves the browser UI on its own listener, loopback by default;
+  `goodvibes-daemon webui --lan` is the deliberate act that widens it.
+- Updates itself at an idle moment, with a rollback if the new binary will
+  not start.
 
 Like the TUI and agent, it is a product over `@pellux/goodvibes-sdk` rather
 than a duplicate of it: the repository keeps the composition root, the product
@@ -179,13 +184,16 @@ selections, permissions, surfaces, and daemon endpoints carry over from
 `goodvibes-tui` instead of being configured twice.
 
 Install with `bun add -g @pellux/goodvibes-agent`, then
-`bun pm trust -g goodvibes-daemon`: the agent depends on the `goodvibes-daemon`
-package (default target `http://127.0.0.1:3421`), and it is the daemon's
-postinstall that needs trusting; the agent package has none of its own. Each
-GitHub release also attaches standalone Linux and macOS binaries with a
-`SHA256SUMS.txt` manifest. Directly-downloaded binaries self-update with a
-checksum-verified swap at launch and at idle moments while running, keeping
-the replaced file beside it as `.previous` so `/update rollback` can undo it.
+`bun pm trust -g goodvibes-daemon`. The trust step is for the daemon's
+postinstall, not the agent's: the agent package ships no install scripts, but
+it depends on `goodvibes-daemon` (default target `http://127.0.0.1:3421`),
+whose postinstall needs your approval to run.
+
+Prefer a standalone binary? Each GitHub release attaches Linux and macOS
+builds with a `SHA256SUMS.txt` manifest. A directly-downloaded binary keeps
+itself current: it swaps in updates after a checksum check, at launch and at
+idle moments, and keeps the replaced file beside it as `.previous` so
+`/update rollback` can undo the swap.
 Package-managed installs never self-swap and defer to `bun add -g` instead.
 Semantic, embedding-backed memory search depends on the `sqlite-vec` native
 addon, which Bun cannot embed inside a compiled binary; releases ship it as a

@@ -36,20 +36,21 @@ phone's camera.
 
 ## Current versions
 
-As of August 21, 2026:
+Every release current as of August 21, 2026, with where each one is
+distributed from:
 
-- `@pellux/goodvibes-sdk` 2.0.19 (npm, with `@pellux/goodvibes-contracts` and
-  `@pellux/goodvibes-toolchain` published from the same workspace at the same
-  version)
-- `@pellux/goodvibes-daemon` 1.28.21 (npm)
-- `@pellux/goodvibes-tui` 2.0.15 (npm)
-- `@pellux/goodvibes-agent` 2.0.16 (npm)
-- `goodvibes-webui` 1.13.14 (GitHub release)
-- `goodvibes-app` 0.4.0 (GitHub release)
-- `goodvibes-homeassistant` 0.13.12 (GitHub release, HACS)
-- `goodvibes-plugin` 2.3.4 (repository is the distribution channel)
-- `goodvibes-codex` 0.1.1 (GitHub release)
-- `goodvibes-desktop` 1.1.5 (GitHub release)
+| Project | Version | Distributed via |
+| --- | --- | --- |
+| `@pellux/goodvibes-sdk` | 2.0.19 | npm; `@pellux/goodvibes-contracts` and `@pellux/goodvibes-toolchain` publish from the same workspace at the same version |
+| `@pellux/goodvibes-daemon` | 1.28.21 | npm; the daemon binary itself attaches to the GitHub release the publish is gated on |
+| `@pellux/goodvibes-tui` | 2.0.15 | npm |
+| `@pellux/goodvibes-agent` | 2.0.16 | npm |
+| `goodvibes-webui` | 1.13.14 | GitHub release, with the built bundle attached for the suite installer |
+| `goodvibes-app` | 0.4.0 | GitHub release |
+| `goodvibes-homeassistant` | 0.13.12 | GitHub release; installable through HACS as a custom repository |
+| `goodvibes-plugin` | 2.3.4 | the repository's main branch is the distribution channel |
+| `goodvibes-codex` | 0.1.1 | GitHub release, via the Codex plugin marketplace |
+| `goodvibes-desktop` | 1.1.5 | GitHub release |
 
 ## Quick orientation
 

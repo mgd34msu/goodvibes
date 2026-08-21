@@ -43,6 +43,16 @@ npm.
 - Use `goodvibes-plugin` for Claude Code and `goodvibes-codex` for the Codex
   CLI; both are independent of the daemon stack.
 
+## Release train
+
+`train-manifest.json` lists every repo in the family and whether it tracks the
+sdk. From this directory, `bunx @pellux/goodvibes-toolchain goodvibes-train-status
+--manifest train-manifest.json` prints the cycle's status: sdk pins vs the
+latest published sdk, unreleased and unpushed commit counts, and the suggested
+action per repo. sdk consumers repin and release each cycle; independent repos
+(plugin, codex, desktop, homeassistant) release through their own gated paths
+only when the table shows a delta, and skip cycles where they show zeros.
+
 ## Project details
 
 ### goodvibes-sdk

@@ -1,0 +1,14 @@
+{
+  "repos": [
+    { "path": "../goodvibes-sdk", "name": "sdk", "kind": "sdk" },
+    { "path": "../goodvibes-daemon", "name": "daemon", "kind": "sdk-consumer" },
+    { "path": "../goodvibes-tui", "name": "tui", "kind": "sdk-consumer" },
+    { "path": "../goodvibes-agent", "name": "agent", "kind": "sdk-consumer" },
+    { "path": "../goodvibes-webui", "name": "webui", "kind": "sdk-consumer" },
+    { "path": "../goodvibes-app", "name": "app", "kind": "sdk-consumer" },
+    { "path": "../goodvibes-homeassistant", "name": "homeassistant", "kind": "independent" },
+    { "path": "../goodvibes-plugin", "name": "plugin", "kind": "independent", "releaseCommand": "./scripts/release.sh" },
+    { "path": "../goodvibes-codex", "name": "codex", "kind": "independent" },
+    { "path": "../goodvibes-desktop", "name": "desktop", "kind": "independent", "releaseCommand": "./scripts/release.sh" }
+  ]
+}

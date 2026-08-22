@@ -41,13 +41,13 @@ distributed from:
 
 | Project | Version | Distributed via |
 | --- | --- | --- |
-| `@pellux/goodvibes-sdk` | 2.0.20 | npm; `@pellux/goodvibes-contracts` and `@pellux/goodvibes-toolchain` publish from the same workspace at the same version |
-| `@pellux/goodvibes-daemon` | 1.28.22 | npm; the daemon binary itself attaches to the GitHub release the publish is gated on |
-| `@pellux/goodvibes-tui` | 2.0.17 | npm |
-| `@pellux/goodvibes-agent` | 2.0.18 | npm |
-| `goodvibes-webui` | 1.13.15 | GitHub release, with the built bundle attached for the suite installer |
-| `goodvibes-app` | 0.4.1 | GitHub release |
-| `goodvibes-homeassistant` | 0.13.13 | GitHub release; installable through HACS as a custom repository |
+| `@pellux/goodvibes-sdk` | 2.0.21 | npm; `@pellux/goodvibes-contracts` and `@pellux/goodvibes-toolchain` publish from the same workspace at the same version |
+| `@pellux/goodvibes-daemon` | 1.28.23 | npm; the daemon binary itself attaches to the GitHub release the publish is gated on |
+| `@pellux/goodvibes-tui` | 2.0.18 | npm |
+| `@pellux/goodvibes-agent` | 2.0.19 | npm |
+| `goodvibes-webui` | 1.13.16 | GitHub release, with the built bundle attached for the suite installer |
+| `goodvibes-app` | 0.4.2 | GitHub release |
+| `goodvibes-homeassistant` | 0.13.14 | GitHub release; installable through HACS as a custom repository |
 | `goodvibes-plugin` | 2.3.4 | the repository's main branch is the distribution channel |
 | `goodvibes-codex` | 0.1.1 | GitHub release, via the Codex plugin marketplace |
 | `goodvibes-desktop` | 1.1.5 | GitHub release |

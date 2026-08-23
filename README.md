@@ -43,7 +43,7 @@ distributed from:
 | --- | --- | --- |
 | `@pellux/goodvibes-sdk` | 2.0.22 | npm; `@pellux/goodvibes-contracts` and `@pellux/goodvibes-toolchain` publish from the same workspace at the same version |
 | `@pellux/goodvibes-daemon` | 1.28.24 | npm; the daemon binary itself attaches to the GitHub release the publish is gated on |
-| `@pellux/goodvibes-tui` | 2.0.19 | npm |
+| `@pellux/goodvibes-tui` | 2.0.20 | npm |
 | `@pellux/goodvibes-agent` | 2.0.20 | npm |
 | `goodvibes-webui` | 1.13.17 | GitHub release, with the built bundle attached for the suite installer |
 | `goodvibes-app` | 0.4.3 | GitHub release |

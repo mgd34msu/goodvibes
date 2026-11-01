@@ -3,7 +3,6 @@
  * an `announce` function that pushes messages to screen readers.
  *
  * Contract: `useAnnouncer()` → `announce(message, politeness?)`
- * See: docs/ux-overhaul/TOKEN-CONTRACT.md
  *
  * Architecture:
  * A module-level store (subscribe/getSnapshot) holds the current polite and

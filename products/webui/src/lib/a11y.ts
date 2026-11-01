@@ -1,6 +1,5 @@
 /**
  * Accessibility helpers shared across the app.
- * See: docs/ux-overhaul/TOKEN-CONTRACT.md
  */
 import type React from 'react';
 import { useId } from 'react';

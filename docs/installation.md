@@ -50,7 +50,7 @@ journalctl --user -u goodvibes-jev.service
 
 Launch `goodvibes` from your project directory for the terminal UI, or
 `goodvibes-agent` for Agent. The installer pairs the TUI; Agent has its own
-[connected-host setup and native authority requirements](../products/agent/docs/setup-native-readiness.md).
+[connected-host setup and native authority requirements](../products/agent/docs/setup-explicit-pairing.md#native-intake-setup-readiness).
 
 The service starts with your user session. To start it before login and keep it
 running after logout, run `loginctl enable-linger "$USER"`; your distribution

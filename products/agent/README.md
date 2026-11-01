@@ -15,7 +15,7 @@ owns retry/waiting and cancellation.
 Use the [suite installation guide](../../docs/installation.md) from the monorepo
 root, then run `goodvibes-agent`. A fresh Agent home opens setup. The installer
 pairs the TUI; Agent's connected-host credentials and native authority require
-separate setup. See [native readiness](docs/setup-native-readiness.md) before
+separate setup. See [native readiness](docs/setup-explicit-pairing.md#native-intake-setup-readiness) before
 using native conversation or work controls. Completing the onboarding marker
 alone does not grant those scopes.
 

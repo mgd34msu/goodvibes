@@ -60,7 +60,7 @@ failure. A passing focused run is not a full suite, aggregate CI or release rece
 Tests should demonstrably fail when the behavior under test is broken.
 
 For the optional inbox resolver API, persisted assignment and revocation
-requirements, see [daemon inbox routing ownership](../../../docs/contracts/daemon-inbox-routing.md).
+requirements, see [daemon inbox routing ownership](../../../docs/contracts/daemon-inbox-and-triage.md#inbox-routing-ownership).
 Its product factory tests complement the canonical engine store/resolver suites.
 
 ## Local native packaging

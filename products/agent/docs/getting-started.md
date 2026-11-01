@@ -25,7 +25,7 @@ directly into the Agent workspace.
 
 Agent needs a connected daemon, accepted credentials and the scopes required
 by each route. The suite installer pairs the TUI, while Agent's native
-conversation and work routes require their own [native readiness](setup-native-readiness.md)
+conversation and work routes require their own [native readiness](setup-explicit-pairing.md#native-intake-setup-readiness)
 and [explicit pairing](setup-explicit-pairing.md). An onboarding marker does not
 grant authority. Configure the conversation provider separately from Jev.
 

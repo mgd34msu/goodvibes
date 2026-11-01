@@ -3,7 +3,6 @@
  * The app currently has no top-level error boundary; this is the critical missing piece.
  *
  * Contract: default export, prop `fallback?: (error, reset) => ReactNode`
- * See: docs/ux-overhaul/TOKEN-CONTRACT.md
  */
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { formatError } from '../../lib/errors';

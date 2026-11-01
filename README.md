@@ -206,7 +206,7 @@ The root `prepare` script points git at `.githooks/`. The local pre-commit hook 
 
 - [Installation, updates, services and uninstall](docs/installation.md)
 - [Terminal UI](products/tui/README.md) and [CLI flags](products/tui/docs/cli-flags.md)
-- [Agent](products/agent/README.md) and [first-start readiness](products/agent/docs/setup-native-readiness.md)
+- [Agent](products/agent/README.md) and [first-start readiness](products/agent/docs/setup-explicit-pairing.md#native-intake-setup-readiness)
 - [Daemon](products/daemon/README.md) and [configuration](products/daemon/docs/configuration.md)
 - [WebUI](products/webui/README.md) and [operator guide](products/webui/docs/operator-guide.md)
 - [Engine documentation](packages/engine/docs/README.md) and [judgment foundation](packages/judgment/README.md)

@@ -5,7 +5,7 @@
  * Setters call pushState (navigateTo) by default; pass `replace: true`
  * to use replaceState instead.
  *
- * Contract (TOKEN-CONTRACT.md):
+ * Contract:
  *   useUrlState() => current state + setters
  */
 

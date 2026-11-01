@@ -9,7 +9,7 @@ for another.
 Use the [runtime construction and production-intake
 contract](daemon-runtime-ownership.md#production-intake-and-selected-transport) for root startup,
 selected transport, canonical config/secret managers and deployment authority. Use the [routing
-contract](daemon-inbox-routing.md) for persisted channel/profile bindings, and the [cluster
+contract](#inbox-routing-ownership) for persisted channel/profile bindings, and the [cluster
 contract](daemon-remote-and-cluster.md#cluster-election-membership-and-admission-lifetime) for
 election and membership ownership. Project accounting and historical source/run receipts belong to
 [THE-18 / current
@@ -611,7 +611,7 @@ mailbox is empty.
 Both the intake collector and canonical `ImapSession` preserve explicit byte/literal frames into the
 shared FETCH parser. Compatibility display-string adapters are not permission to parse literal
 content as protocol. Protocol decoding performs no judgment or privacy sanitization and raw
-envelopes stay local. The [routing owner](daemon-inbox-routing.md) consumes only provider,
+envelopes stay local. The [routing owner](#inbox-routing-ownership) consumes only provider,
 structured kind and sender digest; failure leaves the item unbound, and source/account lifetime is
 rechecked after an awaited resolver.
 
@@ -843,6 +843,47 @@ Implementation:
 [index.ts](../../packages/engine/sdk/src/platform/intake/triage/tagger/index.ts#L49-L126),
 [index.ts](../../packages/engine/sdk/src/platform/intake/triage/tagger/index.ts#L127-L167),
 [meaning.ts](../../packages/engine/sdk/src/platform/intake/triage/tagger/meaning.ts#L9-L83).
+
+## Inbox routing ownership
+
+The daemon's actual Slack and email inbox factories connect the canonical
+routing registration to the provider owners. Slack owner context may carry
+`resolveRouteId`; `EmailInboxOwnerOptions` also has an optional `resolveRouteId`.
+Callers without those optional ports preserve their no-route behavior. The
+product's required routing registration must not be replaced by a fallback.
+
+Only provider, conversation kind and sender digest reach the resolver.
+Owner-authored persisted bindings choose the profile; message text, a semantic
+classifier or a new default policy cannot choose it. Profile IDs are not route
+IDs. Closed or failed optional routing does not fabricate a binding.
+
+After awaiting the resolver, email rechecks source, account and observation
+lifetime. Slack retains its adapter and owner fences. Revocation while a callback
+is held must prevent the stale item from being persisted. These fences apply in
+addition to the protected-source and provider-account boundaries, not in their
+place.
+
+The store and bridge contract remains in
+[host channel/profile routing](daemon-remote-and-cluster.md#persisted-channel-and-profile-bindings).
+Provider intake contracts remain in the [Slack](#slack-account-and-transport)
+and [email](#email-complete-source-reads) sections of the
+inbox and triage contract.
+
+### Verification boundary
+
+The active product suite
+[`inbox-route-composition.test.ts`](../../products/daemon/src/test/runtime/inbox-route-composition.test.ts)
+checks actual persisted assignments through both factories into `item.routeId`,
+no binding, other-provider and wildcard resolution, closed resolution, and
+source/account/credential revocation. Whole source-assertion coverage also needs
+[`inbox-source-parity.test.ts`](../../products/daemon/src/test/runtime/inbox-source-parity.test.ts);
+engine owner tests alone do not prove the product invocation boundary.
+
+Use the [daemon's canonical focused-test procedure](../../products/daemon/docs/testing-and-validation.md#local-commands)
+with those active suite paths. Synthetic provider inputs establish these ownership
+and persistence boundaries; they do not establish live-provider parity.
+Historical mappings, receipts and open acceptance are in
+[THE-18](https://linear.app/the-artificery/issue/TA-18/port-daemon-composition-and-remote-cluster-infrastructure).
 
 ## Validation boundaries
 

@@ -1,85 +1,39 @@
-/**
- * Print (or regenerate) COVERAGE.md from the sorted list of test/*.test.ts files.
- *
- * Usage:
- *   bun scripts/print-test-coverage.ts
- *
- * This script globs all test/*.test.ts files, sorts them,
- * and prints a Markdown table to stdout. Redirect to COVERAGE.md to regenerate:
- *
- *   bun scripts/print-test-coverage.ts > COVERAGE.md
- *
- * Or pipe to the file directly.
- */
+/** Print the monorepo test-file navigation map; this is not execution coverage. */
+import { execFileSync } from 'node:child_process';
+import { posix, resolve } from 'node:path';
 
-import { glob } from 'node:fs/promises';
-import { resolve } from 'node:path';
-
-const ROOT = resolve(import.meta.dir, '..');
-const TEST_DIR = resolve(ROOT, 'test');
-
-// Root-level test files
-const files: string[] = [];
-for await (const entry of glob('*.test.ts', { cwd: TEST_DIR })) {
-  files.push(entry);
+const REPO_ROOT = resolve(import.meta.dir, '../../..');
+const workspaces = [
+  ['packages/judgment/', 'Judgment foundation'],
+  ['packages/engine/', 'Engine platform'],
+  ['products/daemon/', 'Daemon'],
+  ['products/tui/', 'Terminal UI'],
+  ['products/agent/', 'Agent'],
+  ['products/webui/', 'Web UI'],
+] as const;
+const candidates = execFileSync('git', [
+  'ls-files', '--cached', '--others', '--exclude-standard', '--',
+  '*.test.ts', '*.test.tsx', '*.spec.ts', '*.spec.tsx',
+], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+const files = [...new Set(candidates.trim().split('\n'))]
+  .filter(file => file && !/(?:^|\/)(?:vendor|generated|dist|node_modules)\//.test(file))
+  .sort();
+const lines = [
+  '# Test Coverage Map', '',
+  'Status: generated test-file navigation for the current monorepo checkout.', '',
+  'This map lists files, not measured branch coverage or proof that every test has run.',
+  'It includes nested suites and product tests; generated/vendor/build files are excluded.', '',
+  'Regenerate from the repository root:', '',
+  '```sh',
+  'bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md',
+  '```', '',
+];
+for (const [prefix, title] of workspaces) {
+  const selected = files.filter(file => file.startsWith(prefix));
+  lines.push(`## ${title} (${selected.length} files)`, '', '| File |', '| --- |');
+  for (const file of selected) {
+    lines.push(`| [${file}](${posix.relative('packages/engine', file)}) |`);
+  }
+  lines.push('');
 }
-files.sort();
-
-// Integration test files
-const integrationFiles: string[] = [];
-for await (const entry of glob('integration/**/*.test.ts', { cwd: TEST_DIR })) {
-  integrationFiles.push(entry);
-}
-integrationFiles.sort();
-
-// Workers / sub-runner test files
-const workersFiles: string[] = [];
-for await (const entry of glob('workers*/**/*.test.ts', { cwd: TEST_DIR })) {
-  workersFiles.push(entry);
-}
-workersFiles.sort();
-
-const header = `# Test Coverage Map
-
-This file lists test files for navigation and review.
-Generated from the sorted list of \`test/*.test.ts\` root-level files.
-Integration tests live under \`test/integration/\` and are listed separately.
-
-Regenerate via \`bun scripts/print-test-coverage.ts > COVERAGE.md\`
-
-## Root-level tests (\`test/*.test.ts\`)
-
-| File |
-|------|`;
-
-const rows = files
-  .map(file => `| \`test/${file}\` |`)
-  .join('\n');
-
-const integrationHeader = `
-## Integration tests (\`test/integration/**/*.test.ts\`)
-
-| File |
-|------|`;
-
-const integrationRows = integrationFiles
-  .map(file => `| \`test/${file}\` |`)
-  .join('\n');
-
-const workersHeader = `
-## Sub-runner tests (\`test/workers*/**/*.test.ts\`)
-
-| File |
-|------|`;
-
-const workersRows = workersFiles
-  .map(file => `| \`test/${file}\` |`)
-  .join('\n');
-
-console.log(`${header}\n${rows}\n`);
-if (integrationFiles.length > 0) {
-  console.log(`${integrationHeader}\n${integrationRows}\n`);
-}
-if (workersFiles.length > 0) {
-  console.log(`${workersHeader}\n${workersRows}\n`);
-}
+console.log(lines.join('\n'));

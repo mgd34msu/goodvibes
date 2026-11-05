@@ -1,5 +1,7 @@
 # Product workspace contracts and gates
 
+Status: migration contract and acceptance plan. Product migration and release qualification remain in progress; the per-file consolidation inventory records completed shared ownership.
+
 The four products are ports of the existing products. They retain their screens,
 commands, styles and behavior. Their composition, input and rendering remain in
 the product; shared platform behavior is hoisted into the engine. The later

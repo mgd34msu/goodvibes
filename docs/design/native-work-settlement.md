@@ -1,5 +1,7 @@
 # Native work settlement
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Native execution and verified completion have different lifetimes. A passed
 runner is necessary, but it cannot establish ledger verification. The native
 host owns a separate non-executing settlement lifetime after runner and any

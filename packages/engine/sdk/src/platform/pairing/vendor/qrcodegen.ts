@@ -1,4 +1,5 @@
 // @ts-nocheck
+// Vendored Nayuki generator retains upstream types; qr-generator.ts owns the typed boundary.
 /* 
  * QR Code generator library (TypeScript)
  * 

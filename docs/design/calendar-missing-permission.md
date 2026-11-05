@@ -1,5 +1,7 @@
 # Calendar missing-permission reading
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 This completes only the original THE-13 inventory row for
 `calendar/calendar-api-shared.ts`. THE-13 remains open for the other original
 engine decisions. Tests below are synthetic; no live provider/calibration or

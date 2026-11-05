@@ -1,5 +1,7 @@
 # Native contract composition for product hosts
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 This checkpoint composes the native source/semantic runner, durable admission, shared autonomous tool evaluator, and PR56 captured-input execution. It is an engine handoff for Agent/TUI and hosted-session owners, not a product entry-point cutover or a new external-effect ledger.
 
 ## Runnable host surface

@@ -64,9 +64,11 @@ precedes projection, logging, or provider access. Each reader additionally owns
 its exact resolved-input limits (including the error/status field limits).
 
 Execution bounds: four logical runs per principal, sixteen total, four concurrent provider calls per run and eight globally.
-There is no separate elapsed outage deadline. The shared port retries
-primary-only outages until recovery or owned cancellation. Configured failover
-tries each compatible target once and returns typed `unavailable` on exhaustion.
+There is no additional consumer outage-retry loop. The shared port gives each
+configured target one finite attempt (default 30 seconds), with at most one
+complete-input long-context upgrade. Both single-target and multi-target chains
+terminate on exhaustion; unavailable decision models halt the operation. Owner
+cancellation or authority revocation stops the chain immediately.
 Each adapter's declared total is capped at 64 logical calls. Queueing exists
 only inside already-admitted bounded fan-out. Cancellation removes queued calls.
 Shutdown closes admission, aborts work, and waits for the actual owned promises;

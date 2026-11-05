@@ -1,5 +1,7 @@
 # Explicit Telegram delegated intake and owner review
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: delegated intake, with work execution governed by a separate contract.
 Nonselected Telegram routes keep their existing behavior. Offline fixtures need
 no provider, credentials, live grant or live retention-policy changes.

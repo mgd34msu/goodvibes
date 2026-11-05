@@ -1,5 +1,7 @@
 # Explicit native work submission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 This supplies a complete-source data boundary before native execution. It does
 not interpret unrestricted conversation, generate original acceptance criteria,
 replace legacy outer starts, or execute submitted work automatically.

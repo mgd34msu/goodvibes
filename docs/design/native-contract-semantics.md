@@ -1,5 +1,7 @@
 # Native contract semantic ownership
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Durable admission and PR56 input authority compose as described in `native-durable-contract-composition.md`. Native host/product entry points remain host-owned. Engine semantics do not provide a transactional claim for arbitrary external effects.
 
 ## Shared evaluator

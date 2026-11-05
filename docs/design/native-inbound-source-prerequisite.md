@@ -1,5 +1,7 @@
 # Inbound original-source and held-delivery prerequisite
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: source preservation with injected offline validation. Live ingress requires
 its own integration and authority boundary; source capture alone does not enable it.
 

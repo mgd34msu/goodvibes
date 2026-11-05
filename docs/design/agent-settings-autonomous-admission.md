@@ -1,5 +1,7 @@
 # Agent SETTINGS admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: SETTINGS admission through the Agent, shared permission owner and serving
 config/auth owners. READ admission has its own consumer contract.
 

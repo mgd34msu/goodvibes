@@ -1,5 +1,7 @@
 # Source-aware native selected-change comments
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Session Changes comments share the host-owned session classification boundary used
 by the conversation and Fleet composers. Only an explicit `legacy` response mounts
 the prior trimmed, excerpt-prefixed steer/follow-up composer. Native discovery,

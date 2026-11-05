@@ -92,7 +92,7 @@ The parser guarantees detached receipt immutability. Binding validation cannot m
 
 ## Retry and product progress
 
-The judgment port is the only transport-retry owner. Daemon, TUI, Agent, Web UI and native bridges consume its lifecycle signal and waiting notifications. They must not wrap it in another retry loop, turn waiting into `reject`/`defer`, synthesize an answer, or display an approval prompt.
+The judgment port is the only transport-retry owner. It tries the configured hosted/local decision targets with finite per-target deadlines. The first valid semantic answer is final, including a refusal. If all targets fail, report that no decision models are currently available, direct the user to check keys, endpoint/model configuration and local services, and halt the operation. An outage is never a semantic defer, a fabricated General route, or a reason to repeat the chain indefinitely. Daemon, TUI, Agent, Web UI and native bridges consume its lifecycle signal and waiting notifications. They must not wrap it in another retry loop, turn waiting into `reject`/`defer`, synthesize an answer, or display an approval prompt.
 
 Operational progress is separate from `JevDecision`. While a logical reading is pending, the consumer has a pending task and the port's credential-free waiting/backoff data; it has no semantic receipt. Display “Waiting for Jev” or equivalent and keep cancellation responsive. User cancellation, supersession, shutdown and deterministic authority revocation stop that operation without manufacturing a semantic decision. Permanent request/authentication/format failures remain explicit operational failures; they do not grant execution authority.
 

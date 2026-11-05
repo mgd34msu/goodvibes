@@ -1,5 +1,7 @@
 # Agent harness catalog ranking (THE-63 P11)
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 ## Bounded adoption
 
 The mode, model-tool, slash-command, and daemon operator-method catalogs delegate

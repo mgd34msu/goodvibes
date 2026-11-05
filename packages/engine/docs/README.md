@@ -122,3 +122,6 @@ Repository-wide policies and engine references:
 - [Security policy](../../../SECURITY.md)
 - [Changelog](../CHANGELOG.md)
 - [Test coverage](../COVERAGE.md)
+
+Type directive rationale and guarded host-only imports are documented in
+[type suppressions and optional imports](type-suppressions-and-optional-imports.md).

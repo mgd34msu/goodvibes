@@ -1,5 +1,7 @@
 # Agent native remote owner conversation
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 ## Boundary
 
 The interactive owner composer captures its original text before trimming,

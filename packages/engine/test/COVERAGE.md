@@ -1,7 +1,8 @@
 # Test Coverage Map
 
-This file maps focused observability, security, and performance coverage to
-their implementation files.
+This is a hand-maintained topic index for observability, security and performance
+checks. The complete current test-file list is the generated [monorepo map](../COVERAGE.md).
+Neither index measures executed branch coverage.
 
 This map tracks implemented coverage areas. Removed or merged checks are listed
 by their current file names instead of retaining issue-number labels.

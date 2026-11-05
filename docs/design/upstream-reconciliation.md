@@ -1,5 +1,7 @@
 # Integrating the October 1 platform refresh
 
+Status: historical reconciliation plan. Subsequent boundary contracts and the root README govern current behavior and readiness.
+
 The owner asked us to inspect the newly published platform commits, integrate
 them, and continue the Jev project to completion. This replaces the temporary
 upstream hold. The existing Jev behavior, privacy boundaries, operator authority

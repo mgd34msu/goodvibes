@@ -1,5 +1,7 @@
 # Paired daemon native-work execution
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The daemon now registers an identity-only native execution path for an existing
 complete `LedgerWork` with an active attempt claimed by that paired principal.
 The native graph is acquired lazily after authentication and project validation.

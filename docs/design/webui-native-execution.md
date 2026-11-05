@@ -1,5 +1,7 @@
 # WebUI native work execution
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The Native request form connects original-source admission to the existing paired
 native execution wire. One deliberate Submit preserves the exact original, asks
 Jev to admit it and, for a genuine `work` result, automatically requests execution

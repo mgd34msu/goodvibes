@@ -1,5 +1,7 @@
 # Durable cancellation before native admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The native-work wire distinguishes a real execution association from an admission
 intent. An intent stores the complete deterministic host request, immutable
 existing work/attempt revisions, captured paired authority and scope facts, a

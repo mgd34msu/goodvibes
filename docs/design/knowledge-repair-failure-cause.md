@@ -1,5 +1,7 @@
 # Knowledge repair failure cause
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 ## Scope and original authority
 
 This closes the remaining knowledge self-improvement failure-cause site in the

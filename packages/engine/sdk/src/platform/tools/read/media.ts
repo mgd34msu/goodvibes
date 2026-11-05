@@ -316,6 +316,8 @@ type SharpFactory = (input: Buffer) => SharpInstance;
  * Returns the sharp factory function on success, null if unavailable.
  */
 export async function tryLoadSharp(): Promise<SharpFactory | null> {
+  // Host-only optional import; strict browser/worker CSPs must never execute the shim.
+  if (typeof window !== 'undefined' || 'WorkerGlobalScope' in globalThis) return null;
   try {
     // Preserve dynamic ESM import when TypeScript is emitted through CommonJS
     // targets; `import('sharp')` would otherwise be lowered into `require`.

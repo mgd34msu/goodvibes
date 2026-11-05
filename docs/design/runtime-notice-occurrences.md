@@ -1,5 +1,7 @@
 # Runtime notice occurrence provenance
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Runtime occurrence identity is independent of agent ids, contract ids, traces,
 timestamps, prose, and token usage. A later wake or a restored nonterminal
 contract can produce an identical outcome under the same entity id.

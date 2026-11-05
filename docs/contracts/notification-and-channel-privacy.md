@@ -53,7 +53,7 @@ establish application-wide log, receipt or privacy coverage.
 
 ## Typed proactive check-in decision
 
-The runtime asks the canonical `engine.checkin.worth-interrupting` yes/no battery over the complete captured briefing. Only a settled high-band yes can continue. No or uncertain stays silent; a missing/unrecorded/permanently failing port produces an error receipt. Temporary provider failure uses the shared Jev transport without a check-in retry loop. Primary-only outages remain pending until recovery or owner cancellation. Configured failover exhaustion produces an error receipt and cannot authorize a notification.
+The runtime asks the canonical `engine.checkin.worth-interrupting` yes/no battery over the complete captured briefing. Only a settled high-band yes can continue. No or uncertain stays silent; a missing/unrecorded/permanently failing port produces an error receipt. Temporary provider failure uses the shared Jev transport without a check-in retry loop. Both primary-only and configured multi-target chains have finite attempt deadlines. Exhaustion produces an operational error receipt, stops the check-in and cannot authorize a notification. Owner cancellation stops pending attempts.
 
 ### Note content and evidence
 

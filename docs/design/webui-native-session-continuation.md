@@ -1,5 +1,7 @@
 # Native continuation of an owned hosted session
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The conversation composer and steerable Fleet process actions first ask
 `workLedger.turn.session` for the host's session kind. Only an explicit `legacy` result selects the existing steer and
 follow-up composer. A native result opens the native intake workflow scoped to

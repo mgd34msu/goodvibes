@@ -1,5 +1,7 @@
 # Native contract source preservation
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: additive source preservation. Autonomous decision dispatch, durable launch fencing and product entry points have separate owners. Legacy owner-reply flows are not an autonomous fallback.
 
 ## Input and persisted authority

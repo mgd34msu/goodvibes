@@ -1,5 +1,7 @@
 # Native Herdr session reporting
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The TUI and Agent share `createHerdrSessionReporter` from `@goodvibes-jev/engine/terminal-shell`. Each interactive process owns one reporter. No global hooks, launcher changes, or Herdr row settings are installed.
 
 The reporter requires inherited `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_BIN_PATH`, and `HERDR_SOCKET_PATH`. It invokes that owning binary against the explicit pane and socket; it never falls back to the focused pane or another binary on `PATH`. Source and agent label are `goodvibes`. The former `herdr:goodvibes` source is released first for that exact pane and label.

@@ -1,5 +1,7 @@
 # WebUI original-source admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Work → New → Native request uses the existing authenticated
 `workLedger.intake.capture/get/admit/resume/cancel` routes. One deliberate Submit
 captures the original text and immediately invokes Jev admission. There is no

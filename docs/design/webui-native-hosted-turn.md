@@ -1,5 +1,7 @@
 # Native hosted conversation delivery
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 A genuine `turn` admission from Work → New → Native request now continues
 through `workLedger.turn.start/status/cancel`. One Submit captures the complete
 original and asks Jev for its disposition; an admitted conversation is delivered

@@ -1,5 +1,7 @@
 # Read-only native integration inspection
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Native Work's authenticated status response provides ephemeral per-unit integration facts. It is a supported successor for the live inspection responsibilities retained from Fleet worktree detail. It does not add durable per-unit history, change completion accounting, or make the former Agents modal's historical rendering a native execution authority.
 
 ## Ownership and access

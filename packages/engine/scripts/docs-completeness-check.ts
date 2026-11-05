@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,4 +66,11 @@ for (const relativePath of [...requiredDocs, ...requiredExamples]) {
   }
 }
 
-console.log('docs/examples completeness check passed');
+// A status must precede the design body, so proposed behavior cannot silently
+// become a release claim. Reuse this docs lane rather than adding another script.
+const designDirectory = resolve(SDK_ROOT, '../../docs/design');
+for (const file of readdirSync(designDirectory).filter(name => name.endsWith('.md'))) {
+  const preamble = readFileSync(resolve(designDirectory, file), 'utf8').split('\n').slice(0, 10).join('\n');
+  if (!/^\*{0,2}Status:/m.test(preamble)) throw new Error(`Design doc needs an explicit status preamble: ${file}`);
+}
+console.log('docs/examples completeness and design status check passed');

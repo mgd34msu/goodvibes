@@ -27,7 +27,7 @@ Historical changelogs identify retired packages as `legacy-package:name`.
   complete saved transcript. Expand within explicit limits for ambiguous turns;
   preserve active task continuity across brief lookup turns. Pin the selected
   answer model through each user turn, including streaming and tool execution.
-- [ ] Show the actual route and attribute actual model usage and cost in products.
+- [x] Show the actual route and attribute actual model usage and cost in products.
 - [ ] Consolidate duplicated terminal behavior into the engine platform and
   existing terminal-shell, preserving product-specific adapters and views.
 - [x] Share equivalent rejected-promise draining without hiding meaningful errors.

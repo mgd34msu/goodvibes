@@ -1,5 +1,7 @@
 # Autonomous tool admission vertical
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: the primary orchestrator path. Each product caller must establish its own
 autonomous admission binding.
 

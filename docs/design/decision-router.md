@@ -1,6 +1,6 @@
 # Decision Router
 
-Status: implemented on the v3 development branch; integrated release qualification is in progress.
+Status: implemented on main for v3 development; integrated release qualification is pending.
 
 Select `decision-router:auto` explicitly to categorize a user turn and use its
 configured answering model. Selecting another provider adds no categorization

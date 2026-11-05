@@ -1,5 +1,7 @@
 # Native durable contract admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 This additive engine seam binds a native work attempt to the existing contract runner. It does not implement the native semantic ledger, action journal/outbox, or another Jev retry loop. Jev semantic decisions remain the native owner's responsibility; no approval prompt or heuristic fallback is added.
 
 ## Host composition

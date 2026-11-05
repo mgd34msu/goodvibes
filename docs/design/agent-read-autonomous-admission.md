@@ -1,5 +1,7 @@
 # Agent main-conversation READ admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 Scope: the existing autonomous permission owner and the Agent main conversation's
 `read` tool. Settings, `agent_harness`, write/edit, contract-member registries and
 legacy SDK callers have separate consumer contracts.

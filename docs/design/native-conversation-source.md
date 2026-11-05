@@ -1,5 +1,7 @@
 # Conversational original-source admission
 
+Status: scoped contract and implementation record. Scope and validation limits are documented below; this record does not establish overall product or release readiness.
+
 The explicit UTF-8 file submission path remains supported. This contract captures and admits text; product ingress and execution have their own owners and proof obligations.
 
 ## Source authority

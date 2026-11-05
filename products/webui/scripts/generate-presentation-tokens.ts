@@ -84,7 +84,7 @@ export interface PresentationContractSnapshot {
   readonly thinkingPhrases: WidenLiterals<typeof THINKING_PHRASES>;
 }
 
-/** Read the real contract from the installed @pellux/goodvibes-sdk. */
+/** Read the real contract from the installed @goodvibes-jev/engine/sdk. */
 export function loadContractSnapshot(): PresentationContractSnapshot {
   return {
     glyphs: GLYPHS,

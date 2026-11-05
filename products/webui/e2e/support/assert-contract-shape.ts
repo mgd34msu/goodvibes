@@ -111,7 +111,7 @@ export function assertFixtureMatchesOperatorContract(methodId: string, sample: u
   const method = METHODS.get(methodId);
   if (!method) {
     throw new ContractShapeError(
-      `"${methodId}" is not a method in the installed @pellux/goodvibes-sdk operator-contract.json. The fixture is bound to a method id the contract no longer declares.`,
+      `"${methodId}" is not a method in the installed @goodvibes-jev/engine/sdk operator-contract.json. The fixture is bound to a method id the contract no longer declares.`,
     );
   }
   walk(method.outputSchema, sample, '');

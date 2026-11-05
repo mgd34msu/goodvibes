@@ -12,7 +12,7 @@ const root = process.cwd();
 const dryRun = process.argv.includes('--dry-run');
 const registry = process.env.GOODVIBES_PUBLISH_REGISTRY?.trim() || 'https://registry.npmjs.org';
 if (process.env.GOODVIBES_PUBLIC_PACKAGE_NAME?.trim()) {
-  throw new Error('GOODVIBES_PUBLIC_PACKAGE_NAME is not supported. GoodVibes Agent only publishes @pellux/goodvibes-agent.');
+  throw new Error('GOODVIBES_PUBLIC_PACKAGE_NAME is not supported. GoodVibes Agent only publishes @goodvibes-jev/agent.');
 }
 
 const tempBase = join(root, '.test-tmp');
@@ -148,7 +148,7 @@ try {
     if (typeof stagedPackage.name !== 'string' || typeof stagedPackage.version !== 'string') {
       throw new Error('staged package.json is missing string name/version fields');
     }
-    if (stagedPackage.name !== '@pellux/goodvibes-agent') {
+    if (stagedPackage.name !== '@goodvibes-jev/agent') {
       throw new Error(`staged package.json has unexpected package name: ${stagedPackage.name}`);
     }
 

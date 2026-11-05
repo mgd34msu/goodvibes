@@ -1,4 +1,4 @@
-# wrangler.toml — wrangler-CLI harness for @pellux/goodvibes-sdk
+# wrangler.toml — wrangler-CLI harness for @goodvibes-jev/engine/sdk
 #
 # Points wrangler dev at the test worker entry (test/workers-wrangler/worker.ts).
 # wrangler bundles via its own esbuild pipeline, resolving relative imports

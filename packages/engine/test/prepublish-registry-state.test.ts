@@ -18,7 +18,7 @@ function state(entries: Record<string, [string | null, string | null]>): Publish
 describe('classifyPrepublishRegistryState', () => {
   test('an empty registry proceeds', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [null, null], '@pellux/goodvibes-toolchain': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [null, null], '@goodvibes-jev/engine/toolchain': [null, null] }),
       VERSION,
       REGISTRY,
       SHA,
@@ -34,7 +34,7 @@ describe('classifyPrepublishRegistryState', () => {
 
   test('a fully published version from THIS commit proceeds with no warnings', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, SHA], '@pellux/goodvibes-toolchain': [VERSION, SHA] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, SHA], '@goodvibes-jev/engine/toolchain': [VERSION, SHA] }),
       VERSION,
       REGISTRY,
       SHA,
@@ -48,10 +48,10 @@ describe('classifyPrepublishRegistryState', () => {
     // and the only way forward was cutting a new version by hand.
     const decision = classifyPrepublishRegistryState(
       state({
-        '@pellux/goodvibes-sdk': [VERSION, SHA],
-        '@pellux/goodvibes-toolchain': [VERSION, SHA],
-        '@pellux/goodvibes-daemon': [null, null],
-        '@pellux/goodvibes-tui': [null, null],
+        '@goodvibes-jev/engine/sdk': [VERSION, SHA],
+        '@goodvibes-jev/engine/toolchain': [VERSION, SHA],
+        '@goodvibes-jev/daemon': [null, null],
+        '@goodvibes-jev/tui': [null, null],
       }),
       VERSION,
       REGISTRY,
@@ -63,26 +63,26 @@ describe('classifyPrepublishRegistryState', () => {
 
   test('the resume message names which packages are skipped and which still publish', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, SHA], '@pellux/goodvibes-daemon': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, SHA], '@goodvibes-jev/daemon': [null, null] }),
       VERSION,
       REGISTRY,
       SHA,
     );
-    expect(decision.message).toContain('will skip these): @pellux/goodvibes-sdk@2.4.0');
-    expect(decision.message).toContain('Still to publish: @pellux/goodvibes-daemon@2.4.0');
+    expect(decision.message).toContain('will skip these): @goodvibes-jev/engine/sdk@2.4.0');
+    expect(decision.message).toContain('Still to publish: @goodvibes-jev/daemon@2.4.0');
   });
 
   test('a published package from a DIFFERENT commit is refused, naming both SHAs', () => {
     // Another release run, or a force-moved tag, already published this version
     // from another tree. Finishing the rest would ship a split-tree version.
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, OTHER_SHA], '@pellux/goodvibes-daemon': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, OTHER_SHA], '@goodvibes-jev/daemon': [null, null] }),
       VERSION,
       REGISTRY,
       SHA,
     );
     expect(decision.kind).toBe('refuse');
-    expect(decision.message).toContain('@pellux/goodvibes-sdk@2.4.0');
+    expect(decision.message).toContain('@goodvibes-jev/engine/sdk@2.4.0');
     expect(decision.message).toContain(OTHER_SHA);
     expect(decision.message).toContain(SHA);
     expect(decision.message).toContain('two different trees');
@@ -90,21 +90,21 @@ describe('classifyPrepublishRegistryState', () => {
 
   test('a foreign commit is refused even when every package is published (complete state)', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, SHA], '@pellux/goodvibes-daemon': [VERSION, OTHER_SHA] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, SHA], '@goodvibes-jev/daemon': [VERSION, OTHER_SHA] }),
       VERSION,
       REGISTRY,
       SHA,
     );
     expect(decision.kind).toBe('refuse');
-    expect(decision.message).toContain('@pellux/goodvibes-daemon@2.4.0');
+    expect(decision.message).toContain('@goodvibes-jev/daemon@2.4.0');
   });
 
   test('one matching gitHead does not excuse another package published from a foreign commit', () => {
     const decision = classifyPrepublishRegistryState(
       state({
-        '@pellux/goodvibes-sdk': [VERSION, SHA],
-        '@pellux/goodvibes-toolchain': [VERSION, OTHER_SHA],
-        '@pellux/goodvibes-daemon': [null, null],
+        '@goodvibes-jev/engine/sdk': [VERSION, SHA],
+        '@goodvibes-jev/engine/toolchain': [VERSION, OTHER_SHA],
+        '@goodvibes-jev/daemon': [null, null],
       }),
       VERSION,
       REGISTRY,
@@ -118,48 +118,48 @@ describe('classifyPrepublishRegistryState', () => {
     // is the normal case here (publishing from a staged temp copy). A check
     // that cannot see the commit must not manufacture a refusal.
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, null], '@pellux/goodvibes-daemon': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, null], '@goodvibes-jev/daemon': [null, null] }),
       VERSION,
       REGISTRY,
       SHA,
     );
     expect(decision.kind).toBe('resume');
     expect(decision.warnings.length).toBe(1);
-    expect(decision.warnings[0]).toContain('@pellux/goodvibes-sdk@2.4.0');
+    expect(decision.warnings[0]).toContain('@goodvibes-jev/engine/sdk@2.4.0');
     expect(decision.warnings[0]).toContain('no gitHead');
   });
 
   test('an absent gitHead warns on the complete path too', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, null], '@pellux/goodvibes-daemon': [VERSION, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, null], '@goodvibes-jev/daemon': [VERSION, null] }),
       VERSION,
       REGISTRY,
       SHA,
     );
     expect(decision.kind).toBe('complete');
-    expect(decision.warnings[0]).toContain('@pellux/goodvibes-sdk@2.4.0');
-    expect(decision.warnings[0]).toContain('@pellux/goodvibes-daemon@2.4.0');
+    expect(decision.warnings[0]).toContain('@goodvibes-jev/engine/sdk@2.4.0');
+    expect(decision.warnings[0]).toContain('@goodvibes-jev/daemon@2.4.0');
   });
 
   test('a present-and-matching gitHead alongside an absent one warns only about the absent one', () => {
     const decision = classifyPrepublishRegistryState(
       state({
-        '@pellux/goodvibes-sdk': [VERSION, SHA],
-        '@pellux/goodvibes-toolchain': [VERSION, null],
-        '@pellux/goodvibes-daemon': [null, null],
+        '@goodvibes-jev/engine/sdk': [VERSION, SHA],
+        '@goodvibes-jev/engine/toolchain': [VERSION, null],
+        '@goodvibes-jev/daemon': [null, null],
       }),
       VERSION,
       REGISTRY,
       SHA,
     );
     expect(decision.kind).toBe('resume');
-    expect(decision.warnings[0]).toContain('@pellux/goodvibes-toolchain@2.4.0');
-    expect(decision.warnings[0]).not.toContain('@pellux/goodvibes-sdk@2.4.0');
+    expect(decision.warnings[0]).toContain('@goodvibes-jev/engine/toolchain@2.4.0');
+    expect(decision.warnings[0]).not.toContain('@goodvibes-jev/engine/sdk@2.4.0');
   });
 
   test('no release SHA warns and resumes rather than refusing on an unknowable comparison', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [VERSION, OTHER_SHA], '@pellux/goodvibes-daemon': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [VERSION, OTHER_SHA], '@goodvibes-jev/daemon': [null, null] }),
       VERSION,
       REGISTRY,
       null,
@@ -170,7 +170,7 @@ describe('classifyPrepublishRegistryState', () => {
 
   test('an empty registry with no release SHA stays clean (nothing to compare)', () => {
     const decision = classifyPrepublishRegistryState(
-      state({ '@pellux/goodvibes-sdk': [null, null] }),
+      state({ '@goodvibes-jev/engine/sdk': [null, null] }),
       VERSION,
       REGISTRY,
       null,

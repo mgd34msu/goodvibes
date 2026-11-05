@@ -1,5 +1,5 @@
 /**
- * wrangler-CLI harness, @pellux/goodvibes-sdk Workers parity test.
+ * wrangler-CLI harness, @goodvibes-jev/engine/sdk Workers parity test.
  *
  * Spawns `wrangler dev --local` against test/workers-wrangler/worker.ts and
  * exercises the same endpoint surface as the Miniflare harness in

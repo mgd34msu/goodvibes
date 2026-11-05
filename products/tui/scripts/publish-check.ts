@@ -2,7 +2,7 @@
 /**
  * publish-check.ts, pre-publish gate (thin toolchain orchestrator).
  *
- * The shared mechanics are owned by @pellux/goodvibes-toolchain and driven by
+ * The shared mechanics are owned by @goodvibes-jev/engine/toolchain and driven by
  * this repo's toolchain.config.json:
  *   - sdk-pin-gate: the SDK-pin tri-agreement (overlay absent, exact-semver pin,
  *     installed==pin, lockfile resolves pin) + npm-specifier-only imports;

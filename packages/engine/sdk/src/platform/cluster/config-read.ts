@@ -6,7 +6,7 @@
  * slice of `GoodVibesConfig` with `declare module`. Those augmentations are in
  * scope while the SDK itself compiles, but they do NOT survive into the
  * published type surface, a consumer importing `ConfigManager` from
- * `@pellux/goodvibes-sdk/platform/config` finds that `getCategory('cluster')`
+ * `@goodvibes-jev/engine/sdk/platform/config` finds that `getCategory('cluster')`
  * does not typecheck, and neither does `getCategory('fleet')` or
  * `getCategory('conversationGate')`. That is a pre-existing gap in how the
  * schema domains are published, not something the cluster domain introduced.

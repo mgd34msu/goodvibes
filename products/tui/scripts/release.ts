@@ -3,7 +3,7 @@
  * release.ts, local release preparation (thin toolchain wrapper).
  *
  * The bump / version-file stamping / CHANGELOG / commit / tag mechanics are
- * owned by @pellux/goodvibes-toolchain `release-cut`, parameterized by this
+ * owned by @goodvibes-jev/engine/toolchain `release-cut`, parameterized by this
  * repo's toolchain.config.json (releaseCut section: branch, platform version
  * files, sync commands, commit paths, changelog format). Per the CI/CD design's
  * "CI owns validation" principle, release-cut NEVER re-runs gates, validation

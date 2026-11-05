@@ -1,5 +1,5 @@
 /**
- * @pellux/goodvibes-contracts/testing, the shipped conformance kit + mock-daemon
+ * @goodvibes-jev/engine/contracts/testing, the shipped conformance kit + mock-daemon
  * fixture generator, the single source consuming front-ends (terminal-shell, the
  * tui and agent forks, the webui, the Home Assistant fixtures) run instead of a
  * divergent local copy.

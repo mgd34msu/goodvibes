@@ -1,7 +1,7 @@
 // relay/index.ts
 //
 // Daemon-side relay surface: the reachability controller and the WebAuthn
-// step-up policy hook. Node-only (reached via the `@pellux/goodvibes-sdk/daemon`
+// step-up policy hook. Node-only (reached via the `@goodvibes-jev/engine/sdk/daemon`
 // entry), never the browser index.
 //
 // Deliberately NO certificate machinery lives here: the daemon never mints

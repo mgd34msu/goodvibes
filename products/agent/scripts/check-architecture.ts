@@ -59,7 +59,7 @@ function isTestSource(path: string): boolean {
  * Regex matching bare relative import paths (static import/export/require).
  *
  * Coverage note: Only relative imports (beginning with ".") are resolved.
- * Path-alias imports (e.g. `@/runtime/index.ts`, `@pellux/…`) are NOT
+ * Path-alias imports (e.g. `@/runtime/index.ts`, `@goodvibes-jev/…`) are NOT
  * followed, they are invisible to the cycle detector and layer-boundary
  * checker. In practice `@/`-routed imports are mostly `import type` (erased
  * at runtime) and the codebase uses them deliberately to break cycles (e.g.

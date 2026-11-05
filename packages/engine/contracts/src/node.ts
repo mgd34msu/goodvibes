@@ -14,14 +14,14 @@ function resolveArtifactPath(artifactRelativePath: string): string {
     throw new Error(
       `Cannot resolve contract artifact path "${artifactRelativePath}". ` +
       'This usually means the module was bundled without copying the artifacts/ directory. ' +
-      'Ensure the @pellux/goodvibes-contracts package is not inlined by your bundler. ' +
+      'Ensure the @goodvibes-jev/engine/contracts package is not inlined by your bundler. ' +
       `Caused by: ${String(cause)}`,
     );
   }
   if (!existsSync(resolved)) {
     throw new Error(
       `Contract artifact not found at resolved path: ${resolved}. ` +
-      'Ensure the @pellux/goodvibes-contracts package includes the artifacts/ directory ' +
+      'Ensure the @goodvibes-jev/engine/contracts package includes the artifacts/ directory ' +
       '(check that your package manager did not strip non-JS files from node_modules).',
     );
   }

@@ -40,7 +40,7 @@ export function methodIdToSchemaName(methodId: string): string {
  * skipped.
  *
  * @param methodIds - All operator contract method ids to map.
- * @param schemas - The module namespace object from `@pellux/goodvibes-contracts`.
+ * @param schemas - The module namespace object from `@goodvibes-jev/engine/contracts`.
  * @returns A partial record from method id to Zod schema.
  */
 export function buildSchemaRegistry(

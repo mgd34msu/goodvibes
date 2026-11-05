@@ -2,7 +2,7 @@
 
 ## Summary
 
-This directory contains the Cloudflare Workers runtime test harness for `@pellux/goodvibes-sdk`. It proves the `./web` entry runs cleanly under the workerd V8 isolate via Miniflare's programmatic API.
+This directory contains the Cloudflare Workers runtime test harness for `@goodvibes-jev/engine/sdk`. It proves the `./web` entry runs cleanly under the workerd V8 isolate via Miniflare's programmatic API.
 
 **Result: `./web` entry is sufficient for normal Worker-hosted operator HTTP clients. `./workers` now exists separately for the optional GoodVibes Worker bridge.**
 

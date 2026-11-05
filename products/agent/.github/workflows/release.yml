@@ -348,7 +348,7 @@ jobs:
       id-token: write
     uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-npm-publish.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
-      package-name: "@pellux/goodvibes-agent"
+      package-name: "@goodvibes-jev/agent"
       environment: production
       # Publish the STAGED pack-job tarball (runtime bundled + asserted present
       # in the pack step), never a bare checkout. 1.12.2 published a runtime-less
@@ -397,7 +397,7 @@ jobs:
           export BUN_INSTALL="${TMP_ROOT}/bun"
           export GOODVIBES_WORKING_DIR="${TMP_ROOT}/workspace"
 
-          bun add -g "@pellux/goodvibes-agent@${VERSION}" --registry https://registry.npmjs.org --minimum-release-age 0
+          bun add -g "@goodvibes-jev/agent@${VERSION}" --registry https://registry.npmjs.org --minimum-release-age 0
           export PATH="${TMP_ROOT}/bun/bin:${PATH}"
 
           redact() { sed "s/${TOKEN_SENTINEL}/[redacted-connected-host-token]/g" "$1"; }

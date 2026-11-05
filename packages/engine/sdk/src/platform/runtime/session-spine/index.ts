@@ -1,5 +1,5 @@
 /**
- * @pellux/goodvibes-sdk/platform/runtime/session-spine
+ * @goodvibes-jev/engine/sdk/platform/runtime/session-spine
  *
  * The ONE session-spine surface client extracted from the near-twin TUI and agent
  * implementations, plus the cross-surface session read facade (union cache). Both

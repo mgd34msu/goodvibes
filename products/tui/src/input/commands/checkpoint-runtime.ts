@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // checkpoint-runtime.ts, /checkpoints, /checkpoint
 //
-// UX over WorkspaceCheckpointManager (@pellux/goodvibes-sdk/platform/workspace),
+// UX over WorkspaceCheckpointManager (@goodvibes-jev/engine/sdk/platform/workspace),
 // the whole-workspace, git-backed snapshot engine wired onto RuntimeServices as
 // `workspaceCheckpointManager` (src/runtime/services.ts) and threaded through
 // CommandContext.workspace exactly like FileUndoManager already is.

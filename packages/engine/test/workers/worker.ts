@@ -1,5 +1,5 @@
 /**
- * Cloudflare Workers test script for @pellux/goodvibes-sdk.
+ * Cloudflare Workers test script for @goodvibes-jev/engine/sdk.
  *
  * This script runs inside the Miniflare Workers isolate. It exercises the
  * SDK's ./web entry point against mock HTTP responses to prove the bundle

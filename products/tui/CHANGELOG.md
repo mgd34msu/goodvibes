@@ -429,7 +429,7 @@ All notable changes to GoodVibes TUI.
   are gone: three collapsed tool results that took nineteen rows now take
   ten. Expanded rendering is unchanged. The fold decisions — threshold,
   default, separators, preview rule — now come from the shared platform
-  policy in `@pellux/goodvibes-terminal-shell` (2.0.3), the same module the
+  policy in `legacy-package:goodvibes-terminal-shell` (2.0.3), the same module the
   Agent reads, so the two renderers cannot drift apart again.
 - Fixed: a client that inherited the daemon's bind host is no longer refused
   as "insecure PUBLIC transport" when that host is a wildcard (platform
@@ -498,7 +498,7 @@ All notable changes to GoodVibes TUI.
   its own release line and its own npm package now. This package builds one
   binary, ships one `bin` entry, vendors one file, and its releases carry four
   binaries instead of eight.
-- `npm install @pellux/goodvibes-tui` still brings the whole thing: this package
+- `npm install legacy-package:goodvibes-tui` still brings the whole thing: this package
   declares `goodvibes-daemon` as a dependency, so one install still puts both
   commands on your PATH. What changed is that the daemon's own package places
   the daemon's own binary — two packages each placing a copy of
@@ -565,14 +565,14 @@ All notable changes to GoodVibes TUI.
   SDK's: `config/goodvibes-home.ts` (tree-root and daemon-home resolution),
   `config/provider-model.ts` (`provider:model` parsing) and `config/index.ts`
   (which was a barrel over the SDK plus two derivation helpers, both of which
-  moved). Every importer reads them from `@pellux/goodvibes-sdk/platform/config`
+  moved). Every importer reads them from `legacy-package:goodvibes-sdk/platform/config`
   and `.../platform/providers`. One behaviour came with them: an unreadable
   `provider.systemPromptFile` still degrades to "no configured system prompt"
   rather than throwing, because the SDK adopted this app's version.
 
 - The local `sql.js` ambient declaration is gone. The SDK ships the declaration
   now, and the one file that imports `sql.js` picks it up with
-  `/// <reference types="@pellux/goodvibes-sdk/sql-js" />`.
+  `/// <reference types="legacy-package:goodvibes-sdk/sql-js" />`.
 
 ## [1.27.0] - 2026-07-30
 
@@ -720,13 +720,13 @@ Updated: bundled platform runtime to 1.11.4.
 Fixed: selecting a custom-provider model no longer crashes the app at the next startup — boot now waits for custom providers to load before resolving the current model, and falls back to a selectable model (with a logged warning) if the configured provider's file was removed.
 Fixed: startup failures now print a clear "goodvibes failed to start" message with the real error and exit, instead of hanging on a blank screen while the log recorded an empty error object.
 Fixed: after an automatic context compaction, the transcript shows a compact expandable "compaction handoff" block instead of re-printing the entire re-injected instruction text every time.
-Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (quieter startup when no hooks file exists; error summaries no longer mangle redacted paths).
+Updated: legacy-package:goodvibes-sdk and legacy-package:goodvibes-terminal-shell to 1.11.3 (quieter startup when no hooks file exists; error summaries no longer mangle redacted paths).
 
 ## [1.19.3] - 2026-07-17
 
 ### Changes
 
-- Adopt published SDK 1.11.2, which now carries `@pellux/goodvibes-toolchain` as a real dependency of its own — the toolchain devDependency pin is no longer needed here and has been dropped; it resolves transitively through the SDK.
+- Adopt published SDK 1.11.2, which now carries `legacy-package:goodvibes-toolchain` as a real dependency of its own — the toolchain devDependency pin is no longer needed here and has been dropped; it resolves transitively through the SDK.
 - Adopt zero-touch releases: a green CI run on a push to main now tags the release commit and dispatches the release workflow automatically (`ci.yml`'s new `auto-release` job), instead of requiring a manual tag push. `release.yml` gains a `workflow_dispatch` `mode` input (`dry-run` default, `release`) so a release-mode dispatch runs the full publish topology that used to be push-only, while a plain dispatch still behaves as the existing dry-validation path.
 - e1e4f446 deps: adopt published SDK 1.11.2 + zero-touch release adoption
 
@@ -743,7 +743,7 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 - 526d2dae cicd: rewire workflows onto the shared composite + reusable workflows
 - 4ad63923 cicd: swap release/build/gate scripts to thin toolchain invocations
 - 224f9b4b cicd: add toolchain.config.json contract + platform optional-deps sync
-- 1484f09a build: dev-link @pellux/goodvibes-toolchain from SDK 20093d41 tarball
+- 1484f09a build: dev-link legacy-package:goodvibes-toolchain from SDK 20093d41 tarball
 
 ## [1.19.1] — 2026-07-16
 
@@ -963,7 +963,7 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 ### Changes
 - fix(smoke): opt the daemon post-build smoke out of service boot promotion so the daemon under test stays in-process
 - fix(daemon): print this binary's real version in the connection banner instead of the v0.0.0 default
-- a7780e18 Pin @pellux/goodvibes-sdk and goodvibes-terminal-shell to published 1.8.0
+- a7780e18 Pin legacy-package:goodvibes-sdk and goodvibes-terminal-shell to published 1.8.0
 - 08d4c409 Sync foundation artifacts and test provider doubles to the round-10 SDK contract
 - 39134bb2 Complete the CI fix-session affordance: one-key attach to the real session, honest error line on a failed spawn
 - ce1b14bd Re-link the local SDK tarballs to the round-10 build carrying the real fix-session id contract
@@ -1060,7 +1060,7 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 ## [1.14.0] — 2026-07-11
 
 ### Changes
-- f45a47a6 chore: pin @pellux/goodvibes-sdk 1.7.0 — published feature-flags and emitters runtime subpaths; add @pellux/goodvibes-terminal-shell 1.7.0; drop dev-link overrides
+- f45a47a6 chore: pin legacy-package:goodvibes-sdk 1.7.0 — published feature-flags and emitters runtime subpaths; add legacy-package:goodvibes-terminal-shell 1.7.0; drop dev-link overrides
 - e9f844d6 feat(flags): align TUI toggle path with the SDK live config->flag bridge
 - 3d1cb772 test(verification): behavior-verify the 28 flag-gated feature-knob settings; clear ledger floor
 - a714db76 chore: adopt repacked SDK dev tarballs 1.6.1 (HEAD 0665cadc)
@@ -1079,7 +1079,7 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 - b1299979 feat(rewind): persist message-anchored rewind anchors across session resume
 - 572d52f2 feat(release): mirror platform binary packages to GitHub Packages + workflow structure gate
 - f3a34e00 feat(compaction): surface sectionsIncluded in the post-compaction receipt
-- be1f0fe2 chore: refresh @pellux tarball integrity for repacked SDK 1.6.1 dev state
+- be1f0fe2 chore: refresh the retired package scope tarball integrity for repacked SDK 1.6.1 dev state
 - 6f9e03cd feat: surface the new SDK asks/receipts/results (compaction, attribution, judgment, child failure)
 - 14185544 feat(context): bind context_accounting to the live Orchestrator
 - b8b76ea9 chore: reconcile goldens for the refreshed SDK dev-link tarballs
@@ -1162,24 +1162,24 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 
 ### Changes
 - c3a54b1b fix: clean terminal restore on exit; feat: /resume session picker
-- f29e97ff chore: pin @pellux/goodvibes-sdk 1.6.1 — compact-and-retry on provider context rejections, learned context ceilings, fleet archive, deliver-once replays
+- f29e97ff chore: pin legacy-package:goodvibes-sdk 1.6.1 — compact-and-retry on provider context rejections, learned context ceilings, fleet archive, deliver-once replays
 - d320ca15 feat: fleet archive view + learned context-limit display
 
 ## [1.12.0] — 2026-07-08
 
 ### Changes
-- 894099e9 chore: pin @pellux/goodvibes-sdk 1.5.0 — model compaction warnings compact immediately; persistent per-model context windows
+- 894099e9 chore: pin legacy-package:goodvibes-sdk 1.5.0 — model compaction warnings compact immediately; persistent per-model context windows
 - b89d0494 feat: /context window — view, set, or clear a custom context window for the current model
 
 ## [1.11.1] — 2026-07-08
 
 ### Changes
-- f3abc72b chore: pin @pellux/goodvibes-sdk 1.4.1 — permission settings own command-class risk in exec
+- f3abc72b chore: pin legacy-package:goodvibes-sdk 1.4.1 — permission settings own command-class risk in exec
 
 ## [1.11.0] — 2026-07-07
 
 ### Changes
-- b4a2155d chore: pin @pellux/goodvibes-sdk 1.4.0 — the daemon gains server-side turn control
+- b4a2155d chore: pin legacy-package:goodvibes-sdk 1.4.0 — the daemon gains server-side turn control
 
 ## [1.10.1] - 2026-07-07
 
@@ -1189,7 +1189,7 @@ Updated: @pellux/goodvibes-sdk and @pellux/goodvibes-terminal-shell to 1.11.3 (q
 
 ## [1.10.0] — 2026-07-06
 
-Adopts `@pellux/goodvibes-sdk` 1.3.0. The through-line is the shared engines the SDK now owns: the terminal no longer keeps its own copy of the text-to-speech pipeline or its own path to the memory store — it consumes the one the SDK ships, so the terminal, the desktop app, and the agent all speak the same way, resolve the same voice, and reach memory the same way. Ships against `@pellux/goodvibes-sdk` 1.3.0.
+Adopts `legacy-package:goodvibes-sdk` 1.3.0. The through-line is the shared engines the SDK now owns: the terminal no longer keeps its own copy of the text-to-speech pipeline or its own path to the memory store — it consumes the one the SDK ships, so the terminal, the desktop app, and the agent all speak the same way, resolve the same voice, and reach memory the same way. Ships against `legacy-package:goodvibes-sdk` 1.3.0.
 
 ### Shared text-to-speech engine, now sourced from the SDK
 - The TUI's local spoken-turn controller and sentence chunker were replaced by the SDK's shared voice engine (sentence chunking, request merging with bounded concurrency, retry-with-honest-skip, and drain-vs-interrupt semantics). Behavior is unchanged from what shipped in 1.9.2, but the pipeline is now the single copy shared with the agent and a future browser build rather than a hand-maintained terminal fork. The existing mpv/ffplay subprocess player stays exactly as it was, now plugged in as the engine's audio sink.
@@ -1220,7 +1220,7 @@ Patch release fixing text-to-speech playback so spoken responses play start-to-f
 
 ## [1.9.1] — 2026-07-06
 
-Follow-up patch that completes the client-side credential-status adoption for the TUI. The 1.9.0 release pinned SDK 1.0.0 and unified memory but left the client-side credential-status read for a follow-up; this release lands it. Ships against @pellux/goodvibes-sdk 1.0.0.
+Follow-up patch that completes the client-side credential-status adoption for the TUI. The 1.9.0 release pinned SDK 1.0.0 and unified memory but left the client-side credential-status read for a follow-up; this release lands it. Ships against legacy-package:goodvibes-sdk 1.0.0.
 
 ### Credential-status read as a daemon client
 - When the TUI acts as a client of an adopted external daemon (`HostServiceStatus` mode `external`), provider/model/secret STATUS is read from that daemon's `credentials.get` wire method instead of the TUI's own surfaceRoot store. The read carries only status metadata (key / configured / usable / source / secure) — never a secret value, mirroring the SDK's status-only wire contract. The env-only API-key posture and all secret value-reads that provider auth needs stay local and are untouched; only STATUS reads use the daemon path.
@@ -1231,7 +1231,7 @@ Follow-up patch that completes the client-side credential-status adoption for th
 
 ## [1.7.0] — 2026-07-04
 
-The evolution release: six batched development cycles (internal 1.2.0–1.6.0, which were never published) land together as one public version. The through-line is a product that reports the truth about itself — reversible edits you can actually undo, a live fleet you can watch and steer, orchestration that runs the plan it showed you, memory that demonstrably enters the turns it claims to, and a panel surface cut down to the consoles that earn their place. Ships against @pellux/goodvibes-sdk 0.38.0.
+The evolution release: six batched development cycles (internal 1.2.0–1.6.0, which were never published) land together as one public version. The through-line is a product that reports the truth about itself — reversible edits you can actually undo, a live fleet you can watch and steer, orchestration that runs the plan it showed you, memory that demonstrably enters the turns it claims to, and a panel surface cut down to the consoles that earn their place. Ships against legacy-package:goodvibes-sdk 0.38.0.
 
 ### Reversibility and checkpoints
 - Workspace checkpoints with `/checkpoints`, `/checkpoint`, and `/rewind`: snapshot the working tree, list snapshots newest-first, and preview-then-restore files from any checkpoint (files only — conversation history is left untouched). Backed by the SDK's `WorkspaceCheckpointManager` and wired through TUI services, with guards so an unguarded checkpoint call can no longer surface as a silent unhandled rejection.
@@ -1291,7 +1291,7 @@ The evolution release: six batched development cycles (internal 1.2.0–1.6.0, w
 
 ## [1.1.0] — 2026-07-03
 
-The first cycle of the post-1.0 evolution effort: trust repairs. Every change closes a defect found by live dogfooding v1.0.0 where the product reported something other than the truth. Ships against @pellux/goodvibes-sdk 0.36.0 (same effort, SDK side).
+The first cycle of the post-1.0 evolution effort: trust repairs. Every change closes a defect found by live dogfooding v1.0.0 where the product reported something other than the truth. Ships against legacy-package:goodvibes-sdk 0.36.0 (same effort, SDK side).
 
 ### Fixed
 - Failing commands are visible again: the SDK masked every command-level failure as "Error: Unknown error", so a red test suite was literally invisible to the model — it would honestly conclude "no failure observed" while your tests were failing. Exit code, stdout, and stderr now reach the model byte-faithfully, and long-output truncation keeps the tail (where test runners print failures) instead of the head. Verified live: the model reads a sabotaged test's actual assertion diff and fixes the right side.
@@ -1370,7 +1370,7 @@ Panel navigation & UI/UX overhaul, plus the accumulated post-0.27.0 UX fixes.
 ### Changed
 - **Width-aware formatting** across panels: shared toolkit primitives (`fitDisplay`, table/tree/badge/meter helpers) replace hand-rolled `.slice()`/`.padEnd()`, so rows stay aligned across emoji, CJK, and other wide characters.
 - **Scroll-back**: you can scroll up during and after a turn; the view only auto-follows the tail when parked at the bottom.
-- **Auto-compaction is now owned entirely by the SDK** (`@pellux/goodvibes-sdk` 0.35.0 `handlePostTurnContextMaintenance`). The redundant TUI-side trigger was removed to prevent double-compaction; manual `/compact` now builds a richer handoff context (running agents, WRFC chains, active plan, session lineage).
+- **Auto-compaction is now owned entirely by the SDK** (`legacy-package:goodvibes-sdk` 0.35.0 `handlePostTurnContextMaintenance`). The redundant TUI-side trigger was removed to prevent double-compaction; manual `/compact` now builds a richer handoff context (running agents, WRFC chains, active plan, session lineage).
 
 ### Fixed
 - Timer/async panels repaint while the main thread is idle instead of looking frozen (repaints gated on panel-active state).
@@ -1383,7 +1383,7 @@ Panel navigation & UI/UX overhaul, plus the accumulated post-0.27.0 UX fixes.
 
 ## [0.27.0] — 2026-06-30
 
-Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score of 10) and adoption of `@pellux/goodvibes-sdk` 0.35.0.
+Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score of 10) and adoption of `legacy-package:goodvibes-sdk` 0.35.0.
 
 ### Fixed
 - **Context window**: the footer meter, footer-height, context-inspector overlay, `/health`, `/guidance`, and the context visualizer now use the resolved `getContextWindowForModel` so every surface agrees; the pre-catalog fallback uses the SDK's family-aware `inferFallbackContextWindow` instead of a hardcoded 128k/32k.
@@ -1396,15 +1396,15 @@ Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score o
 - **DRY**: standardized 53 error stringifications on the SDK `summarizeError`; consolidated three duration formatters onto `formatElapsed`; migrated 12 panel palettes to `extendPalette(DEFAULT_PANEL_PALETTE, …)` so themes propagate.
 
 ### Changed
-- Adopt `@pellux/goodvibes-sdk` **0.35.0** — its own 55-finding audit remediation: tool-loop circuit-breaker fix, window-scaled compaction safety buffer, `configured_cap` context-window resolution, MCP orphan-restart fix, transport-middleware retry + SSE auth fixes, and the new `inferFallbackContextWindow` export.
+- Adopt `legacy-package:goodvibes-sdk` **0.35.0** — its own 55-finding audit remediation: tool-loop circuit-breaker fix, window-scaled compaction safety buffer, `configured_cap` context-window resolution, MCP orphan-restart fix, transport-middleware retry + SSE auth fixes, and the new `inferFallbackContextWindow` export.
 
 ## [0.26.0] — 2026-06-21
 
 ### Changes
 - 8852a2f4 chore: set version baseline to published 0.25.0
 - 981adb46 feat(daemon): implement operator-method handlers against goodvibes-sdk 0.34.0 contracts
-- 97f74119 chore: upgrade @pellux/goodvibes-sdk to 0.34.0
-- 6de2627a revert: remove daemon control-plane buildout — duplicated @pellux/goodvibes-sdk 0.34.0
+- 97f74119 chore: upgrade legacy-package:goodvibes-sdk to 0.34.0
+- 6de2627a revert: remove daemon control-plane buildout — duplicated legacy-package:goodvibes-sdk 0.34.0
 
 ## [0.25.0] — 2026-06-21
 
@@ -1417,7 +1417,7 @@ Full deep-review audit of the TUI (33 findings fixed, each reviewed to a score o
 
 ### Changes
 - 1813b36d test: align suite with goodvibes-sdk 0.33.38 behavior
-- 0ee3b615 chore: bump @pellux/goodvibes-sdk to 0.33.38
+- 0ee3b615 chore: bump legacy-package:goodvibes-sdk to 0.33.38
 - 32a813e4 chore: untrack internal deep-dive notes (moved to .goodvibes/deepdives/)
 - c73a3fcb docs: refresh README — version badge 0.24.0, SDK-extracted tools, test count
 - ca262d5e docs: handoff updated — 0.24.0 confirmed live on npm
@@ -1542,7 +1542,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.20.0] — 2026-05-11
 
 ### Changes
-- Updated `@pellux/goodvibes-sdk` to `0.33.30` for guest-side QEMU REPL execution and exec working-directory fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.30` for guest-side QEMU REPL execution and exec working-directory fixes.
 - Added generated QEMU sandbox setup docs, runtime bootstrap scripts, cloud-init seed files, and guest runtime provisioning guidance.
 - Wired `sandbox.replJavaScriptCommand` through generated QEMU setup manifests so JavaScript-family REPL snippets use the guest Bun runtime.
 - Removed the obsolete `/sandbox qemu create-image` command in favor of the generated `create-image.sh` bootstrap workflow.
@@ -1586,7 +1586,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.92] — 2026-05-10
 
 ### Changes
-- Updated `@pellux/goodvibes-sdk` to `0.33.24` for the companion-chat
+- Updated `legacy-package:goodvibes-sdk` to `0.33.24` for the companion-chat
   tool-loop finalization fix used by Home Assistant Assist conversations.
 
 ## [0.19.91] — 2026-05-10
@@ -1791,7 +1791,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.63] — 2026-05-05
 
 ### Changed
-- Made the npm registry install path explicitly Bun-first: `bun add -g @pellux/goodvibes-tui` is now the documented global install command, while `npm install -g` requires Bun to already be installed.
+- Made the npm registry install path explicitly Bun-first: `bun add -g legacy-package:goodvibes-tui` is now the documented global install command, while `npm install -g` requires Bun to already be installed.
 - Switched the published `goodvibes`, `goodvibes-daemon`, and postinstall entrypoints to Bun.
 - Added a preinstall Bun availability check so npm users get a clear error before postinstall runs.
 - Added package verification coverage for Bun shebangs and the Bun preinstall script.
@@ -1818,9 +1818,9 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.61] — 2026-05-05
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.28.22`.
+- Updated `legacy-package:goodvibes-sdk` to `0.28.22`.
 - Regenerated the operator contract artifacts for SDK 0.28.22.
-- Updated `@pellux/goodvibes-sdk` and all split GoodVibes packages to `0.33.4`.
+- Updated `legacy-package:goodvibes-sdk` and all split GoodVibes packages to `0.33.4`.
 - Migrated TUI imports to SDK public package/subpath seams after the SDK removed private `_internal` and catch-all platform exports.
 - Regenerated foundation/operator contract artifacts for the SDK 0.33 public contract shape.
 
@@ -1866,7 +1866,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.59] — 2026-05-01
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.28.3`.
+- Updated `legacy-package:goodvibes-sdk` to `0.28.3`.
 - Picked up SDK Home Graph refinement coalescing so overlapping Refine/Reindex/Ask repair work should not stack and pin the daemon.
 
 ### Fixed
@@ -1884,7 +1884,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.57] — 2026-05-01
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.28.2`.
+- Updated `legacy-package:goodvibes-sdk` to `0.28.2`.
 - Documented SDK `0.28.2` Home Graph refinement guardrails: runtime dist now defaults to 12 refinement gaps per run, caps broad runs at 24 gaps, and reopens historical `No semantic gap repairer is configured` tasks when the host repairer is wired.
 
 ### Fixed
@@ -1902,7 +1902,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.55] — 2026-05-01
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.28.1`.
+- Updated `legacy-package:goodvibes-sdk` to `0.28.1`.
 - Documented SDK-owned Home Graph and base knowledge refinement budget behavior: Ask returns current evidence quickly with `refinementTaskIds`, reindex queues repair work instead of blocking, broad refinement runs cap effective work per run, and stale active tasks recover to retriable blocked state.
 
 ### Fixed
@@ -1917,7 +1917,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Added `/knowledge ask <query>` to render the SDK-returned semantic answer, sources, facts, linked objects, gaps, confidence, and synthesized state without locally building snippets from search results.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.28.0`.
+- Updated `legacy-package:goodvibes-sdk` to `0.28.0`.
 - Reworked `/plan` so it inspects/seeds SDK-backed project planning state and no longer injects a model-authored execution-plan prompt that claims agents will spawn automatically.
 - Wired the SDK semantic knowledge service into both base knowledge and Home Graph routes, using the SDK-owned bounded provider-backed semantic LLM wrapper with timeout, abort, concurrency, and capped broad-reindex LLM attempts.
 - Wired the SDK web-backed semantic gap repairer into the TUI/daemon runtime composition so Home Graph and base knowledge refinement can search, ingest, and repair gaps instead of reporting an unconfigured repairer.
@@ -1941,7 +1941,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documented SDK-owned generic knowledge issue review routes and operator method.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.8`.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.8`.
 - Documented SDK 0.26.8 Home Graph behavior for durable review decisions, generated issue resolved-state preservation, stricter Home Assistant quality rules, and pending Home Assistant integration documentation source candidates.
 
 ### Fixed
@@ -1952,7 +1952,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.52] — 2026-04-28
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.7`.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.7`.
 - Documented that Home Assistant Home Graph manuals and documents ingested before SDK `0.26.7` should be reingested or reindexed when deep manual detail search is needed.
 
 ### Fixed
@@ -1964,7 +1964,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.51] — 2026-04-28
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.6`.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.6`.
 - Embedded and standalone daemon hosts now wrap Bun request handlers so unexpected daemon/listener route exceptions return bounded JSON errors and are logged instead of printing raw stack/source output into the TUI terminal.
 
 ### Fixed
@@ -1975,7 +1975,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.50] — 2026-04-28
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.5`.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.5`.
 - TUI external-service inspection now uses SDK `daemonStatus` and `httpListenerStatus` startup modes to distinguish embedded services, verified external daemons, blocked ports, disabled services, and unavailable services.
 
 ### Fixed
@@ -1987,7 +1987,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.49] — 2026-04-28
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.4` for SDK-owned multipart/raw artifact uploads across artifact storage, knowledge ingest, and Home Assistant Home Graph ingest.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.4` for SDK-owned multipart/raw artifact uploads across artifact storage, knowledge ingest, and Home Assistant Home Graph ingest.
 - Exposed the SDK `storage.artifacts.maxBytes` setting through the normal storage configuration surface.
 - Regenerated foundation operator contract artifacts from the SDK 0.26.4 contract.
 
@@ -2000,7 +2000,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.48] — 2026-04-28
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.1` for SDK-owned `goodvibes_context` and `goodvibes_settings` tools, shared harness-awareness prompt support, and Home Assistant automation tool alias support.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.1` for SDK-owned `goodvibes_context` and `goodvibes_settings` tools, shared harness-awareness prompt support, and Home Assistant automation tool alias support.
 - Adopted SDK 0.26.1 shared-session routing semantics where omitted message `kind` defaults to normal chat and `kind: "task"` is reserved for agent/WRFC continuations.
 
 ### Fixed
@@ -2030,13 +2030,13 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documented SDK-owned browser-local knowledge ingestion as an opt-in local-data import path exposed through `knowledge.ingest.browserHistory`.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.26.0` for Home Assistant Home Graph support, browser-local knowledge ingestion, Readability-backed HTML extraction, and refreshed SDK docs/operator contracts.
+- Updated `legacy-package:goodvibes-sdk` to `0.26.0` for Home Assistant Home Graph support, browser-local knowledge ingestion, Readability-backed HTML extraction, and refreshed SDK docs/operator contracts.
 - Regenerated foundation operator contract artifacts from the SDK 0.26.0 contract.
 
 ## [0.19.44] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.21` for SDK-owned Cloudflare hostname normalization and zone ownership checks.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.21` for SDK-owned Cloudflare hostname normalization and zone ownership checks.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.21 contract.
 
 ### Fixed
@@ -2046,7 +2046,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.43] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.20` for SDK-owned Cloudflare Durable Object migration idempotency and retry fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.20` for SDK-owned Cloudflare Durable Object migration idempotency and retry fixes.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.20 contract.
 
 ### Fixed
@@ -2055,7 +2055,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.42] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.19` for SDK-owned Cloudflare Workers provisioning fixes around existing workers.dev subdomains, Worker cron settings, and workers.dev route disable flows.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.19` for SDK-owned Cloudflare Workers provisioning fixes around existing workers.dev subdomains, Worker cron settings, and workers.dev route disable flows.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.19 contract.
 
 ### Fixed
@@ -2066,31 +2066,31 @@ First release of the best-in-class program: a full UX-first review of the codeba
 ## [0.19.41] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.18` for SDK-owned Cloudflare provisioning idempotency and recovery fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.18` for SDK-owned Cloudflare provisioning idempotency and recovery fixes.
 - Cloudflare setup now benefits from repeated-run reuse of existing Queues, queue consumers, KV namespaces, R2 buckets, Secrets Stores, Zero Trust Tunnels, Access resources, DNS CNAMEs, and workers.dev script routes.
 
 ## [0.19.40] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.17` for SDK-owned Cloudflare operational-token policy fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.17` for SDK-owned Cloudflare operational-token policy fixes.
 - Cloudflare setup now benefits from separate account, zone, and R2-bucket token policies, created-token policy verification before storing `CLOUDFLARE_API_TOKEN`, and improved R2 permission scope handling.
 
 ## [0.19.39] — 2026-04-27
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.16` for SDK-owned Cloudflare operational-token creation fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.16` for SDK-owned Cloudflare operational-token creation fixes.
 - Cloudflare setup now benefits from SDK permission matching for Cloudflare `Write`/`Edit` naming variants and corrected resource scopes for R2, DNS, and Zero Trust Access token creation.
 
 ## [0.19.38] — 2026-04-26
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.15` for SDK-owned Cloudflare bootstrap-token permission-group resolution fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.15` for SDK-owned Cloudflare bootstrap-token permission-group resolution fixes.
 - Cloudflare bootstrap setup now benefits from filtered permission-group lookups for account and zone permissions such as Workers Scripts Write, Queues Write, Zone Read, DNS Write, and Workers KV Storage Write.
 
 ## [0.19.37] — 2026-04-26
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.14` for SDK-owned Home Assistant isolated remote-chat sessions, route-binding cleanup, and Assist chat response contract fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.14` for SDK-owned Home Assistant isolated remote-chat sessions, route-binding cleanup, and Assist chat response contract fixes.
 - Home Assistant docs now state that Assist chat responses use `mode: "remote-chat"`, expose `assistant.text` / `assistant.speechText`, and do not include `agentId`.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.14 contract.
 
@@ -2101,7 +2101,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documentation now covers the authenticated Home Assistant Assist conversation routes: `GET /api/homeassistant/health`, `POST /api/homeassistant/conversation`, `POST /api/homeassistant/conversation/stream`, and `POST /api/homeassistant/conversation/cancel`.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.13` for direct non-WRFC Home Assistant ingress, daemon-owned remote sessions, Assist reply correlation metadata, and event-bus reply delivery fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.13` for direct non-WRFC Home Assistant ingress, daemon-owned remote sessions, Assist reply correlation metadata, and event-bus reply delivery fixes.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.13 contract.
 
 ## [0.19.35] — 2026-04-26
@@ -2111,7 +2111,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Cloudflare onboarding and `/cloudflare provision` now pass Tunnel token refs, Tunnel service URLs, Access app/service-token refs, and advanced KV/DO/R2/Secrets Store provisioning fields through to the SDK daemon routes.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.11` for Cloudflare token-creation fixes, Home Assistant companion surface contracts, and redacted auth-session fingerprints.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.11` for Cloudflare token-creation fixes, Home Assistant companion surface contracts, and redacted auth-session fingerprints.
 - Local auth session listings now show SDK session fingerprints instead of assuming raw tokens are available; revoke-session accepts either a raw token or SDK fingerprint.
 - Regenerated foundation operator contract artifacts from the SDK 0.25.11 contract.
 
@@ -2124,7 +2124,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documentation for Cloudflare token setup, daemon routes, onboarding fields, batch modes, and secret references.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.10` for SDK-owned Cloudflare daemon routes, token creation, discovery, validation, provisioning, and config persistence.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.10` for SDK-owned Cloudflare daemon routes, token creation, discovery, validation, provisioning, and config persistence.
 - Onboarding Cloudflare provisioning failures are reported as warnings so local daemon usage is not blocked when optional Cloudflare setup needs follow-up.
 
 ## [0.19.33] — 2026-04-26
@@ -2148,7 +2148,7 @@ First release of the best-in-class program: a full UX-first review of the codeba
 - Documentation for live TTS usage, playback requirements, TTS config keys, and the new `POST /api/voice/tts/stream` daemon route.
 
 ### Changed
-- Updated `@pellux/goodvibes-sdk` to `0.25.8` and regenerated foundation operator contract artifacts.
+- Updated `legacy-package:goodvibes-sdk` to `0.25.8` and regenerated foundation operator contract artifacts.
 - Exposed provider auth route posture in CLI provider management output.
 - Updated onboarding wizard navigation with an `Apply & Continue To Next Section` action that saves wizard screen state without applying runtime settings before the final review/apply step.
 - Kept prompt borders visually inactive when keyboard focus moves to the process indicator.
@@ -2219,7 +2219,7 @@ SDK 0.23.x constraint-propagation reconciliation. Surfaces the new per-chain con
 
 ### Changed
 
-- **SDK dep bumped to `@pellux/goodvibes-sdk@0.23.2`.** Picks up constraint-propagation additions from 0.23.0 (feature), the 0.23.1 cleanup (removed opt-in golden-prompt suite that was skipped by default), and the 0.23.2 docs bundle (the complete `docs/wrfc-constraint-propagation.md` + reference-runtime-events + observability + error-kinds + migration docs shipped with the feature). New types consumed by this TUI release: `Constraint` and `ConstraintFinding` from `platform/agents/completion-report`; three new fields on `WrfcChain` (`constraints`, `constraintsEnumerated`, `syntheticIssues`); `WORKFLOW_CONSTRAINTS_ENUMERATED` runtime event; optional constraint summary fields on `WORKFLOW_REVIEW_COMPLETED` (`constraintsSatisfied`, `constraintsTotal`, `unsatisfiedConstraintIds`) and `WORKFLOW_FIX_ATTEMPTED` (`targetConstraintIds`); optional `constraints?` on `EngineerReport`; optional `constraintFindings?` on `ReviewerReport`; `AgentRecord.systemPromptAddendum?`.
+- **SDK dep bumped to `legacy-package:goodvibes-sdk@0.23.2`.** Picks up constraint-propagation additions from 0.23.0 (feature), the 0.23.1 cleanup (removed opt-in golden-prompt suite that was skipped by default), and the 0.23.2 docs bundle (the complete `docs/wrfc-constraint-propagation.md` + reference-runtime-events + observability + error-kinds + migration docs shipped with the feature). New types consumed by this TUI release: `Constraint` and `ConstraintFinding` from `platform/agents/completion-report`; three new fields on `WrfcChain` (`constraints`, `constraintsEnumerated`, `syntheticIssues`); `WORKFLOW_CONSTRAINTS_ENUMERATED` runtime event; optional constraint summary fields on `WORKFLOW_REVIEW_COMPLETED` (`constraintsSatisfied`, `constraintsTotal`, `unsatisfiedConstraintIds`) and `WORKFLOW_FIX_ATTEMPTED` (`targetConstraintIds`); optional `constraints?` on `EngineerReport`; optional `constraintFindings?` on `ReviewerReport`; `AgentRecord.systemPromptAddendum?`.
 
 ### Added
 
@@ -2275,7 +2275,7 @@ Hotfix release: regenerates foundation artifacts against SDK 0.22.0 after 0.19.2
 Maintenance release: SDK 0.22.0 bump + README/gitignore hygiene + test-timeout polish. **Did not publish** — the release workflow's foundation-artifacts gate detected stale artifact drift against SDK 0.22.0; see 0.19.22 for the shipped fix. No consumer-facing feature or behavior changes.
 
 ### Changed
-- **SDK dep bumped to `@pellux/goodvibes-sdk@0.22.0`.** Picks up the SDK's contract-artifact refresh pipeline, documentation audit, and test-suite cleanup. No TUI code paths change; the bump is source-compatible.
+- **SDK dep bumped to `legacy-package:goodvibes-sdk@0.22.0`.** Picks up the SDK's contract-artifact refresh pipeline, documentation audit, and test-suite cleanup. No TUI code paths change; the bump is source-compatible.
 - **Active-early-development banner** added near the top of `README.md`. Signals that CLI flags, config keys, slash commands, key bindings, daemon routes, and on-disk layouts can change across patch releases pre-1.0; no legacy/compat shims; docs describe current behavior only. 1.0.0 is the stability freeze.
 
 ### Fixed
@@ -2307,7 +2307,7 @@ Maintenance release: SDK 0.22.0 bump + README/gitignore hygiene + test-timeout p
 SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14, and PERF-08 consumer-side migrations; no 0.19.17 was ever published (tests failed in CI) — this release closes out all of that work.
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` from 0.21.27 to 0.21.35. Panel and provider-routing cleanup, plus the SSE backpressure rebuild.
+- Upgraded `legacy-package:goodvibes-sdk` from 0.21.27 to 0.21.35. Panel and provider-routing cleanup, plus the SSE backpressure rebuild.
 - `src/runtime/bootstrap.ts`: `getOrCreateCompanionToken('tui')` call migrated to the F3 signature `getOrCreateCompanionToken('tui', { daemonHomeDir })` with `daemonHomeDir` resolved from `services.homeDirectory`.
 - `src/panels/tool-inspector-panel.ts`:
   - TOOL_SUCCEEDED / TOOL_FAILED handlers simplified after OBS-05. Post-0.21.31 the `.result` field on these events is a `ToolResultSummary` (`{ kind, byteSize, preview? }`), not the raw tool result, so the prior `_policyAudit` extraction is no longer reachable from this event path. Dead lookup removed with an inline note pointing future readers at the approval broker / tool result store as the new channel for policy audit metadata.
@@ -2317,7 +2317,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ### Fixed
 - **OBS-14 test migration** across 17 test files. SDK 0.21.32+ `RuntimeEventBus.emit(...)` dispatches listeners via `queueMicrotask`. Tests that emitted a bus event and asserted synchronously on subscriber-populated state now drain queued microtasks first. Injected a local `flushMicrotasks = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }` helper in each affected file; converted sync test callbacks to `async () => {}` where needed, and inserted `await flushMicrotasks();` after bus-emitting calls before each dependent assertion. Wrapper emission helpers (`emitTurn`, `emitTask`, `emitAgentCompleted`, `emitAgentFailed`, `emitToolRuntimeEvent`) promoted to `async function(): Promise<void>` in test files that needed them; all callers awaited. Files touched: `src/test/core/event-replay.test.ts`, `streaming.test.ts`, `qol-features.test.ts`, `tool-result-reconciliation.test.ts`, `src/test/daemon/telemetry-routes.test.ts`, `src/test/agents/wrfc-controller.test.ts`, `src/test/integration/tool-execution.test.ts`, `src/test/plugins/plugin-system.test.ts`, `src/test/panels/workspace-migration.test.ts`, `src/test/panels/provider-health-panel.test.ts`, `src/test/runtime/ops/playbook-runtime-context.test.ts`, `src/test/runtime/forensics/forensics.test.ts`, `src/test/runtime/operator-client.test.ts`, `src/test/runtime/telemetry-api.test.ts`, `src/test/release-gates/policy-and-budget-evidence-gate.test.ts`, `src/test/release-gates/runtime-certification-gate.test.ts`, `src/test/runtime/emit-enforcement.test.ts`.
 - **OBS-05 tool result fixture** in `src/test/integration/tool-execution.test.ts`: TOOL_SUCCEEDED fixture constructs a `ToolResultSummary` shape (`{ kind: 'json', byteSize, preview }`) rather than the raw tool result.
-- **OBS-06 redaction import path** in `src/test/export/session-export.test.ts`: `redactSensitiveData` now imported from `@pellux/goodvibes-sdk/platform/utils/redaction`.
+- **OBS-06 redaction import path** in `src/test/export/session-export.test.ts`: `redactSensitiveData` now imported from `legacy-package:goodvibes-sdk/platform/utils/redaction`.
 - **PERF-08 SSE backpressure** (via SDK): `src/test/control-plane/gateway-stream.test.ts` "replays recent events with ids and resumes after Last-Event-ID" now passes against SDK 0.21.35. Test additions: `flushMicrotasks` drains between `publishEvent`/`createEventStream`/`reader.read()` to let async dispatch settle; test timeout raised to 15s for headroom (completes in ~65ms with the SDK fix).
 
 ### Notes
@@ -2328,7 +2328,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.16] - 2026-04-20
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.27. Picks up three F-closures (all internal to the SDK; TUI requires zero active wiring):
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.27. Picks up three F-closures (all internal to the SDK; TUI requires zero active wiring):
   1. **F7 closed** — OTLP POST receivers implemented at `/api/v1/telemetry/otlp/v1/{logs,traces,metrics}`. JSON-only (`application/json`); protobuf returns 415. `ingestSink` wired to `TelemetryApiService` in daemon router (not null). Ingested records enter the ring buffer (~500 events) with `source: 'otlp-ingest'` and are observable on `GET /api/v1/telemetry/events`. Note: prior "by design" framing for this failure was incorrect — it was a missing implementation.
   2. **F5b closed** — SDK runtime sqlite-vec resolver (`resolveSqliteVecPath()` in `memory-vector-store.js`) now detects the bundled-executable case (`import.meta.url.includes('$bunfs')`) and resolves the addon from `dirname(process.execPath)/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>`. Completes the full chain with F5a (build-side `.so` copy to `dist/lib/`, landed TUI 0.19.12). Smoke-confirmed: `GET /api/memory/vector` returns 200.
   3. **F-PROV-009 closed** — `secretsResolutionSkipped: true` now actually emitted on `GET /api/providers` when `secretsManager` is null, plumbed end-to-end in 0.21.27. Prior 0.21.25 claim of this fix was incomplete.
@@ -2351,7 +2351,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.14] - 2026-04-20
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.26. Picks up: (1) **F16b end-to-end fix** — daemon facade now derives `resolveDefaultProviderModel` internally from `providerRegistry.getCurrentModel()`; TUI requires zero active wiring; companion-chat session creation auto-resolves current provider/model or returns `400 NO_MODEL_CONFIGURED`; (2) **scheduler.capacity in method catalog** — `scheduler.capacity` descriptor added to `builtinGatewayRuntimeMethodDescriptors`; now appears in regenerated `operator-contract.json`; (3) **CI flake fixed** — `cache-invariants.test.ts` rewritten to synchronous emit pattern (no TUI impact).
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.26. Picks up: (1) **F16b end-to-end fix** — daemon facade now derives `resolveDefaultProviderModel` internally from `providerRegistry.getCurrentModel()`; TUI requires zero active wiring; companion-chat session creation auto-resolves current provider/model or returns `400 NO_MODEL_CONFIGURED`; (2) **scheduler.capacity in method catalog** — `scheduler.capacity` descriptor added to `builtinGatewayRuntimeMethodDescriptors`; now appears in regenerated `operator-contract.json`; (3) **CI flake fixed** — `cache-invariants.test.ts` rewritten to synchronous emit pattern (no TUI impact).
 - TUI version bumped to 0.19.14.
 - Regenerated `docs/foundation-artifacts/operator-contract.json` — now includes `scheduler.capacity` method entry reflecting SDK 0.21.26 builtin catalog.
 
@@ -2364,7 +2364,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.13] - 2026-04-20
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.25 (0.21.24 was CI-orphaned; 0.21.25 is the actual release). Picks up: (1) F16b — `resolveDefaultProviderModel` callback hook added to companion-chat-routes session-create handler (router plumbing pending, see below); (2) F17 — `POST /inputs/:iid/cancel` on non-queued state now returns `409 CANCEL_NOT_ALLOWED`; (3) F19 — `PATCH /api/channels/policies/:surface` handler restored; (4) F-PROV-009 — `secretsResolutionSkipped:true` on provider response when secrets store unavailable; (5) `GET /api/runtime/scheduler` capacity observability endpoint added.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.25 (0.21.24 was CI-orphaned; 0.21.25 is the actual release). Picks up: (1) F16b — `resolveDefaultProviderModel` callback hook added to companion-chat-routes session-create handler (router plumbing pending, see below); (2) F17 — `POST /inputs/:iid/cancel` on non-queued state now returns `409 CANCEL_NOT_ALLOWED`; (3) F19 — `PATCH /api/channels/policies/:surface` handler restored; (4) F-PROV-009 — `secretsResolutionSkipped:true` on provider response when secrets store unavailable; (5) `GET /api/runtime/scheduler` capacity observability endpoint added.
 - TUI version bumped to 0.19.13.
 
 ### Fixed
@@ -2390,15 +2390,15 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.11] - 2026-04-19
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.23. Picks up: (1) runtime default config includes `runtime.companionChatLimiter.perSessionLimit: 10`, closing the "section 'runtime' does not exist" regression that caused 29 assertions across 9 test files to fail; (2) `buildOperatorContract` now consumes catalog via `toMethodContract`/`toEventContract` projectors, populating `methods`, `events`, and `coverage` from the live catalog rather than a static baked contract; (3) `RuntimeEventDomain` includes `'workspace'` domain (27 total) sourced from generated file; (4) browser tests guard with `skipIf(typeof window === 'undefined')`.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.23. Picks up: (1) runtime default config includes `runtime.companionChatLimiter.perSessionLimit: 10`, closing the "section 'runtime' does not exist" regression that caused 29 assertions across 9 test files to fail; (2) `buildOperatorContract` now consumes catalog via `toMethodContract`/`toEventContract` projectors, populating `methods`, `events`, and `coverage` from the live catalog rather than a static baked contract; (3) `RuntimeEventDomain` includes `'workspace'` domain (27 total) sourced from generated file; (4) browser tests guard with `skipIf(typeof window === 'undefined')`.
 
 ### Fixed
-- `method-catalog.test.ts` `buildOperatorContract` assertion restored to strict form: `contract.operator.events` now asserts `toHaveLength(catalog.listEvents().length)` (was loosened to `toBeGreaterThan(0)` during SDK 0.21.20–0.21.21 regression). Failure tracker entry `sdk-buildoperatorcontract-regression-0-21-20` closed (`resolved_in: @pellux/goodvibes-sdk@0.21.22`, `resolved_by_sdk_version: 0.21.23`).
+- `method-catalog.test.ts` `buildOperatorContract` assertion restored to strict form: `contract.operator.events` now asserts `toHaveLength(catalog.listEvents().length)` (was loosened to `toBeGreaterThan(0)` during SDK 0.21.20–0.21.21 regression). Failure tracker entry `sdk-buildoperatorcontract-regression-0-21-20` closed (`resolved_in: legacy-package:goodvibes-sdk@0.21.22`, `resolved_by_sdk_version: 0.21.23`).
 - All 29 previously-failing assertions across 9 test files caused by missing `runtime` section in SDK default config are now green (fixed by SDK 0.21.23 runtime default config inclusion).
 - Regenerated foundation artifacts to reflect SDK 0.21.23 operator contract (30 events, 27 domains, includes `workspace` domain). Full test suite: 7490 pass / 0 fail.
 
 ### Changed (SDK 0.21.21)
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.21. Picks up `rerootStores(newWorkingDir: string): Promise<void>` on `RuntimeServices` (workspace swap support), `WorkspaceEvent` domain in `AnyRuntimeEvent` and `DomainEventMap`, F3 companion token `daemonHomeDir` option for global (non-workspace-scoped) token storage at `~/.goodvibes/daemon/operator-tokens.json`, and state tool well-known keys `runtime.workingDir` / `daemon.homeDir`.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.21. Picks up `rerootStores(newWorkingDir: string): Promise<void>` on `RuntimeServices` (workspace swap support), `WorkspaceEvent` domain in `AnyRuntimeEvent` and `DomainEventMap`, F3 companion token `daemonHomeDir` option for global (non-workspace-scoped) token storage at `~/.goodvibes/daemon/operator-tokens.json`, and state tool well-known keys `runtime.workingDir` / `daemon.homeDir`.
 - F3: `getOrCreateCompanionToken` / `regenerateCompanionToken` calls in `src/daemon/cli.ts` and `src/panels/builtin/session.ts` now pass `daemonHomeDir: join(homeDirectory, '.goodvibes', 'daemon')` to use the new global token path (was workspace-scoped).
 - Implemented `rerootStores` in `src/runtime/services.ts`: delegates to `memoryStore.reroot(newMemoryDbPath)` and `projectIndex.reroot(newWorkingDir)` so `WorkspaceSwapManager` can migrate path-bound stores on workspace swap without a process restart.
 
@@ -2408,7 +2408,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 - Foundation artifacts: `docs/foundation-artifacts/operator-contract.json` regenerated via `bun run foundation:artifacts` to reflect SDK 0.21.21 operator contract.
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.20. Picks up `swapManager: WorkspaceSwapManagerLike | null` field in `DaemonSystemRouteContext`; test mocks updated accordingly.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.20. Picks up `swapManager: WorkspaceSwapManagerLike | null` field in `DaemonSystemRouteContext`; test mocks updated accordingly.
 - `build:daemon:*` convenience scripts in `package.json` now delegate to `scripts/build.ts` (with `--target daemon-<platform>` aliases) so daemon-only builds include `--external sqlite-vec` flags and native addon copy. Previously these scripts bypassed the build script and omitted externalization.
 - Added `--daemon-home=<path>` and `--working-dir=<path>` CLI flags to `src/cli-flags.ts` and `src/daemon/cli.ts`. Flags set `GOODVIBES_DAEMON_HOME` and `GOODVIBES_WORKING_DIR` env vars before directory resolution, enabling per-launch home and workspace overrides without env var pre-flight.
 - Added `smoke:daemon` script (`scripts/post-build-smoke.ts`) that spawns the linux-x64 daemon binary, polls `/api/health`, curls `/api/memory/vector`, and asserts no sqlite-vec error in the response or stderr. Exits 0/1. Wired into `.github/workflows/release.yml` after the linux-x64 binary build step.
@@ -2429,7 +2429,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 <!-- Prior [UNRELEASED] content from SDK 0.21.18 cycle merged below -->
 
 ### Changed (SDK 0.21.18)
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.18. Picks up `DaemonApiRouteExtension` type on `dispatchDaemonApiRoutes`; `providers` and `turn` are confirmed in `DEFAULT_DOMAINS` for all daemon postures.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.18. Picks up `DaemonApiRouteExtension` type on `dispatchDaemonApiRoutes`; `providers` and `turn` are confirmed in `DEFAULT_DOMAINS` for all daemon postures.
 
 ### Fixed
 - **F2** — Standalone daemon (`goodvibes-daemon-*`) now loads persisted providers from disk at startup via `loadPersistedProviders()` and registers them with `ProviderRegistry`. A background LAN scan runs on startup and merges discovered servers into the registry. Provider count on a fresh standalone daemon is now non-zero when providers have been previously discovered.
@@ -2443,7 +2443,7 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.10] - 2026-04-19
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` to 0.21.16. Picks up the discovered-provider configuration fix: network-discovered providers (LM Studio, Ollama, vLLM, llama.cpp, TGI, LocalAI) are now reported as configured by `GET /api/providers` and accepted by `PATCH /api/providers/current` without a fake API-key requirement.
+- Upgraded `legacy-package:goodvibes-sdk` to 0.21.16. Picks up the discovered-provider configuration fix: network-discovered providers (LM Studio, Ollama, vLLM, llama.cpp, TGI, LocalAI) are now reported as configured by `GET /api/providers` and accepted by `PATCH /api/providers/current` without a fake API-key requirement.
 
 ### Fixed
 - `PATCH /api/providers/current` with a discovered provider's registryKey (e.g. `"LM Studio (192.168.0.85):qwen3.6-35b-a3b@q2_k_xl"`) no longer returns `PROVIDER_NOT_CONFIGURED` with a placeholder `<API key for X>` message. The daemon accepts the switch and the turn uses the discovered provider.
@@ -2455,14 +2455,14 @@ SDK 0.21.27 → 0.21.35 upgrade. Captures all OBS-05, OBS-06, OBS-14, F3, QA-14,
 ## [0.19.8] - 2026-04-19
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` from 0.21.10 to 0.21.15. Carries the companion main-chat routing fix: `POST /api/sessions/:id/messages` with `kind: 'message'` now short-circuits the daemon's WRFC engineer-chain fall-through. The TUI wires `orchestrator.handleUserInput()` into the `COMPANION_MESSAGE_RECEIVED` runtime bus subscriber, so companion main-chat sends fire a real LLM turn via the same entry point as the TUI input box. Turn `STREAM_DELTA` / `TURN_COMPLETED` events stream back to both TUI and companion SSE.
+- Upgraded `legacy-package:goodvibes-sdk` from 0.21.10 to 0.21.15. Carries the companion main-chat routing fix: `POST /api/sessions/:id/messages` with `kind: 'message'` now short-circuits the daemon's WRFC engineer-chain fall-through. The TUI wires `orchestrator.handleUserInput()` into the `COMPANION_MESSAGE_RECEIVED` runtime bus subscriber, so companion main-chat sends fire a real LLM turn via the same entry point as the TUI input box. Turn `STREAM_DELTA` / `TURN_COMPLETED` events stream back to both TUI and companion SSE.
 
 ### Fixed
 - Companion main-chat no longer produces engineer-agent acknowledgement boilerplate ("Update noted", "WRFC chain has passed all gates"). The message is received by the daemon, persisted, rendered in the TUI, and answered by a normal chat turn.
 ## [0.19.7] - 2026-04-18
 
 ### Changed
-- Bumped `@pellux/goodvibes-sdk` from 0.21.10 to 0.21.12.
+- Bumped `legacy-package:goodvibes-sdk` from 0.21.10 to 0.21.12.
 
 ### Investigation: No TUI-side changes required
 
@@ -2487,7 +2487,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ## [0.19.6] - 2026-04-18
 
 ### Fixed
-- Bumped `@pellux/goodvibes-sdk` to 0.21.10 (up from 0.21.8 which was pinned by mistake in 0.19.5). 0.19.5 subscribed to the `COMPANION_MESSAGE_RECEIVED` runtime event but remained on an SDK version that didn't emit it, so the "companion main-chat messages render in TUI" fix from 0.19.5 didn't actually work. 0.19.6 corrects the dep so the subscription is live against an SDK that emits the event. Removed the `as Parameters<typeof runtimeBus.on>[0]` type cast that was hiding the version gap.
+- Bumped `legacy-package:goodvibes-sdk` to 0.21.10 (up from 0.21.8 which was pinned by mistake in 0.19.5). 0.19.5 subscribed to the `COMPANION_MESSAGE_RECEIVED` runtime event but remained on an SDK version that didn't emit it, so the "companion main-chat messages render in TUI" fix from 0.19.5 didn't actually work. 0.19.6 corrects the dep so the subscription is live against an SDK that emits the event. Removed the `as Parameters<typeof runtimeBus.on>[0]` type cast that was hiding the version gap.
 
 ---
 
@@ -2497,14 +2497,14 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 - Companion-app messages sent via POST `/api/sessions/:id/messages` (kind `message`) are now rendered in the TUI conversation view immediately upon receipt. Previously the 202 was acknowledged and the message was persisted (SDK 0.21.9), but the TUI conversation never displayed it. The fix subscribes to the new `COMPANION_MESSAGE_RECEIVED` runtime bus event (emitted by the daemon's HTTP router after persistence, added in SDK 0.21.10) and calls `conversation.addUserMessage()` to surface the message inline.
 
 ### Changed
-- SDK dependency remains `@pellux/goodvibes-sdk@0.21.8` (published); the `COMPANION_MESSAGE_RECEIVED` event type is cast at the call-site until SDK 0.21.10 is available on npm.
+- SDK dependency remains `legacy-package:goodvibes-sdk@0.21.8` (published); the `COMPANION_MESSAGE_RECEIVED` event type is cast at the call-site until SDK 0.21.10 is available on npm.
 
 ---
 
 ## [0.19.4] - 2026-04-18
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` from 0.21.6 to 0.21.8. This carries the **bare-model-id fix** (0.21.7): the companion-chat adapter now correctly passes the bare model id (e.g. `"mercury-2"`) to provider `.chat()` calls instead of the compound registry key (e.g. `"inception:mercury-2"`). Upstream compat APIs (InceptionLabs, Venice, Cerebras, Groq, etc.) only accept bare ids. Resolves `400 invalid_request_error` reported by companion apps.
+- Upgraded `legacy-package:goodvibes-sdk` from 0.21.6 to 0.21.8. This carries the **bare-model-id fix** (0.21.7): the companion-chat adapter now correctly passes the bare model id (e.g. `"mercury-2"`) to provider `.chat()` calls instead of the compound registry key (e.g. `"inception:mercury-2"`). Upstream compat APIs (InceptionLabs, Venice, Cerebras, Groq, etc.) only accept bare ids. Resolves `400 invalid_request_error` reported by companion apps.
 - Also includes 0.21.8's internal rename nit fix (cosmetic only).
 
 ## [0.19.3] - 2026-04-18
@@ -2537,7 +2537,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ## [0.19.1] — 2026-04-17
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` from 0.21.1 to 0.21.6 — includes secrets-tier
+- Upgraded `legacy-package:goodvibes-sdk` from 0.21.1 to 0.21.6 — includes secrets-tier
   `configuredVia` discriminator, HTTP `/api/providers` + `/api/providers/current` (GET/PATCH),
   reactive `model.changed` SSE event, `BUILTIN_LABEL_MAP` brand-accurate provider labels,
   and clean unconfigured-provider errors instead of silent 401 pass-through.
@@ -2569,7 +2569,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
 ## [0.19.0] — 2026-04-18
 
 ### Changed
-- Upgraded `@pellux/goodvibes-sdk` from 0.19.6 to 0.21.1 (soak-period release).
+- Upgraded `legacy-package:goodvibes-sdk` from 0.19.6 to 0.21.1 (soak-period release).
   TUI adaptations required:
   1. `docs/foundation-artifacts/operator-contract.json` — regenerated to match
      updated `buildOperatorContract()` output (`peer-contract.json`, knowledge
@@ -2594,7 +2594,7 @@ Updated `docs/foundation-artifacts/operator-contract.json` SDK version field to 
   `SubscriptionEntry` type definitions out of the settings-modal module.
 
 ### Security
-- Postinstall patcher from `@pellux/goodvibes-sdk@0.21.1` mitigates three
+- Postinstall patcher from `legacy-package:goodvibes-sdk@0.21.1` mitigates three
   minimatch ReDoS advisories in the consumer install tree.
 - Added `overrides: { minimatch: ^10.2.5 }` to TUI's own `package.json`
   so `npm audit` reports clean for the TUI install tree independently.
@@ -2828,7 +2828,7 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### Dependencies
 
-- Bumped `@pellux/goodvibes-sdk` 0.18.36 → 0.18.37, picking up: `sharedDaemonToken`/`sharedHttpListenerToken` factory options on `startHostServices`, bootstrap credential drift detection that warns when `auth-bootstrap.txt` falls out of sync with `auth-users.json`
+- Bumped `legacy-package:goodvibes-sdk` 0.18.36 → 0.18.37, picking up: `sharedDaemonToken`/`sharedHttpListenerToken` factory options on `startHostServices`, bootstrap credential drift detection that warns when `auth-bootstrap.txt` falls out of sync with `auth-users.json`
 - Regenerated `docs/foundation-artifacts/*` against SDK 0.18.37
 
 ### Tests
@@ -2851,7 +2851,7 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### Dependencies
 
-- Bumped `@pellux/goodvibes-sdk` 0.18.33 → 0.18.36, picking up: daemon shutdown symmetry, event bus iteration fix, atomic session writes, rate limiter TTL + LRU + sweep, `fetchWithTimeout` helper, restored port honoring in `resolveHostBinding` for `local`/`network` hostModes, and restored constructor-injected port/host in `resolveDaemonFacadeRuntime`
+- Bumped `legacy-package:goodvibes-sdk` 0.18.33 → 0.18.36, picking up: daemon shutdown symmetry, event bus iteration fix, atomic session writes, rate limiter TTL + LRU + sweep, `fetchWithTimeout` helper, restored port honoring in `resolveHostBinding` for `local`/`network` hostModes, and restored constructor-injected port/host in `resolveDaemonFacadeRuntime`
 - Regenerated `docs/foundation-artifacts/*` against the new SDK
 
 ### Tests & Checks
@@ -2880,7 +2880,7 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 ### Config Re-export Shim Inlining (Tier 3 item 18)
 
 - Deleted `src/config/service-registry.ts` and `src/config/subscription-providers.ts` (1-line SDK re-exports)
-- Updated 29 call sites to import directly from `@pellux/goodvibes-sdk/platform/config/*`
+- Updated 29 call sites to import directly from `legacy-package:goodvibes-sdk/platform/config/*`
 
 ### SDK Consolidation — UI Read Models (Tier 3 items 19-20)
 
@@ -2934,7 +2934,7 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### SDK 0.18.30 Update
 
-- Updated to `@pellux/goodvibes-sdk@0.18.30`
+- Updated to `legacy-package:goodvibes-sdk@0.18.30`
 - Consumes new pairing module, `tools.llmEnabled` config, and all 0.18.29 boundary cleanup
 
 ### Verification
@@ -2945,7 +2945,7 @@ The 0.18.18 review scored 9.76/10 with three dimensions below 10 (Error Handling
 
 ### SDK/TUI Boundary Separation
 
-Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wiring layer built on `@pellux/goodvibes-sdk@0.18.29`. Thousands of lines of duplicated, forked, and dead code have been removed and replaced with SDK imports.
+Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wiring layer built on `legacy-package:goodvibes-sdk@0.18.29`. Thousands of lines of duplicated, forked, and dead code have been removed and replaced with SDK imports.
 
 #### Dead Code Removed
 
@@ -2989,13 +2989,13 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 ### Verification
 
 - Full typecheck passes: `bun x tsc --noEmit` — 0 errors
-- Updated to `@pellux/goodvibes-sdk@0.18.29`
+- Updated to `legacy-package:goodvibes-sdk@0.18.29`
 
 ## [0.18.12] — 2026-04-15
 
 ### SDK `0.18.28` Session-Persistence Boundary Fix
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `@pellux/goodvibes-sdk@0.18.28`
+- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.28`
 - Pulled in the SDK fix that threads `surfaceRoot` through the last-session pointer and crash-recovery helpers instead of silently falling back to the shared `.goodvibes/...` tree
 - This closes the remaining TUI session-storage boundary leak that could still split a TUI-owned session across `.goodvibes/tui/...` and the unscoped shared root even after the broader SDK cutover
 
@@ -3026,7 +3026,7 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ### SDK `0.18.26` Update
 
-- Updated `goodvibes-tui` to consume `@pellux/goodvibes-sdk@0.18.26`
+- Updated `goodvibes-tui` to consume `legacy-package:goodvibes-sdk@0.18.26`
 - Pulled in the SDK fix that syncs the baked runtime version fallback from the package version and adds a workspace lock around build and staging so concurrent validate/release flows stop racing over `dist`
 - This removes the stale embedded `0.18.14` SDK fallback string from rebuilt downstream binaries and closes the recurring pack/release race that was still showing up during SDK release validation
 - Rebuilt the TUI against that SDK patch and confirmed the startup header now shows `v0.18.11` while the stale `0.18.14` leak is gone from the compiled binary
@@ -3051,7 +3051,7 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ### SDK `0.18.25` Startup Crash Fix
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `@pellux/goodvibes-sdk@0.18.25`
+- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.25`
 - Pulled in the SDK fix that removes startup-time top-level `@ast-grep/napi` imports from shared structural-find and `ast_pattern` edit paths
 - Closed the compiled-binary startup regression where `./dist/goodvibes` could crash before any AST-backed tool was used simply because the full tool surface is registered during host boot
 
@@ -3080,7 +3080,7 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ### SDK `0.18.24` Host-Boundary Cutover
 
-- Updated `goodvibes-tui` to consume the published canonical SDK line at `@pellux/goodvibes-sdk@0.18.24`
+- Updated `goodvibes-tui` to consume the published canonical SDK line at `legacy-package:goodvibes-sdk@0.18.24`
 - Fixed the TUI host/runtime boundary so SDK-owned services receive explicit TUI configuration instead of inheriting shared defaults
 - Passed TUI-owned ecosystem catalog roots into SDK marketplace, skills, integration, and product surfaces so curated catalogs and receipts stay under `.goodvibes/tui/ecosystem/...`
 - Passed `surfaceRoot: 'tui'` into the daemon service manager and `defaultSurfaceKind: 'tui'` into automation runtime setup so service files and automation target semantics stay product-owned
@@ -3116,7 +3116,7 @@ Major cleanup of the SDK/TUI boundary. The TUI is now a thin rendering/input/wir
 
 ### Canonical SDK Cutover Completion
 
-- Switched the TUI to the canonical published SDK line at `@pellux/goodvibes-sdk@0.18.21`
+- Switched the TUI to the canonical published SDK line at `legacy-package:goodvibes-sdk@0.18.21`
 - Removed the remaining local REPL and sandbox runtime implementations from the TUI and routed those flows through SDK-owned package imports instead
 - Rewired command, MCP, panel, and runtime call sites that were still holding local platform copies so the TUI now consumes the shared SDK surface instead of carrying duplicate implementations
 
@@ -3175,7 +3175,7 @@ Superseded before successful public registry release. The repo checkout still ra
 ### Public Package Delivery Fix
 
 - Replaced the oversized bundled-binary npm package model with a smaller package that installs the matching TUI and standalone daemon binaries during `postinstall`
-- Kept the package identities as `@pellux/goodvibes-tui` on npmjs and `@mgd34msu/goodvibes-tui` on GitHub Packages while keeping the installed CLI surface as `goodvibes` and `goodvibes-daemon`
+- Kept the package identities as `legacy-package:goodvibes-tui` on npmjs and `@mgd34msu/goodvibes-tui` on GitHub Packages while keeping the installed CLI surface as `goodvibes` and `goodvibes-daemon`
 - Kept the runtime fallback path so installs can still run from Bun + source if a platform binary is unavailable, but made the intended install path the version-matched release binaries
 
 ### Release Workflow Correction
@@ -3200,7 +3200,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 ### Public Package And Release Correction
 
 - Corrected the public packaged release path after the initial `0.18.4` cutover so the shipped npm distribution now matches the actual intended install model
-- Published the TUI on npm as `@pellux/goodvibes-tui` and mirrored the same release to GitHub Packages as `@mgd34msu/goodvibes-tui`
+- Published the TUI on npm as `legacy-package:goodvibes-tui` and mirrored the same release to GitHub Packages as `@mgd34msu/goodvibes-tui`
 - Kept the installed CLI surface as `goodvibes` and `goodvibes-daemon` while moving the package identity to the scoped release names
 - Added both launcher bins to the packaged distribution so global installs expose the interactive TUI and the standalone daemon directly on the user path
 
@@ -3246,7 +3246,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ### First Public Distribution And Delivery
 
-- Published the TUI under the Pellux scope as `@pellux/goodvibes-tui` while keeping the installed CLI commands as `goodvibes` and `goodvibes-daemon`
+- Published the TUI under the Pellux scope as `legacy-package:goodvibes-tui` while keeping the installed CLI commands as `goodvibes` and `goodvibes-daemon`
 - Added a GitHub Packages mirror as `@mgd34msu/goodvibes-tui`
 - Bundled the compiled TUI and standalone daemon binaries directly into the npm package instead of relying on install-time downloads
 - Added both `goodvibes` and `goodvibes-daemon` launcher bins to the package so global npm installs expose both commands on the user path
@@ -3264,7 +3264,7 @@ Superseded before successful public registry release. The bundled-binary tarball
 
 ### Canonical SDK Cutover
 
-- Switched `goodvibes-tui` from the temporary beta line to the canonical `@pellux/goodvibes-sdk@0.18.14` package and rewired imports to the canonical SDK entrypoints
+- Switched `goodvibes-tui` from the temporary beta line to the canonical `legacy-package:goodvibes-sdk@0.18.14` package and rewired imports to the canonical SDK entrypoints
 - Removed the duplicated local platform implementation that had already been extracted into the SDK, including large portions of contracts, daemon route handlers, runtime transports, state/runtime helpers, tools, utilities, and other shared platform code
 - Cut the remaining local state-inspector implementation over to the SDK-owned surface so the TUI now consumes the shared runtime inspection code instead of carrying its own duplicate copy
 

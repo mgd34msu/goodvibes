@@ -1,5 +1,5 @@
 {
-  "//": "Private workspace build configuration. Build/smoke invoke only the CLI declared by the installed Jev engine package.",
+  "//": "Private monorepo product. Build and release qualification are owned by the repository root; engine and toolchain modules resolve from the engine workspace.",
   "packageName": "@goodvibes-jev/tui",
   "sdkPin": {
     "sdkPackage": "@goodvibes-jev/engine",
@@ -104,7 +104,7 @@
     "changelogInsertMarker": "first-separator"
   },
   "publish": {
-    "packageName": "@pellux/goodvibes-tui",
+    "packageName": "@goodvibes-jev/tui",
     "defaultRegistry": "https://registry.npmjs.org",
     "requiredTarballPaths": [
       "README.md",

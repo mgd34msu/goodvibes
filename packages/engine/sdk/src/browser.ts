@@ -14,8 +14,8 @@ import {
  * - `fetch` and `WebSocketImpl` default to the browser globals.
  *
  * This is the canonical options type for the browser entrypoint
- * (`@pellux/goodvibes-sdk/browser`). The web entrypoint
- * (`@pellux/goodvibes-sdk/web`) exposes the same shape as
+ * (`@goodvibes-jev/engine/sdk/browser`). The web entrypoint
+ * (`@goodvibes-jev/engine/sdk/web`) exposes the same shape as
  * `WebGoodVibesSdkOptions`, a named alias retained for ergonomic imports.
  */
 export interface BrowserGoodVibesSdkOptions

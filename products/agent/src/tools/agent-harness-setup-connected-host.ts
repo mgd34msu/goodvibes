@@ -462,8 +462,8 @@ export function connectedHostBootstrapPlan(
         label: 'Install the owning GoodVibes host',
         purpose: 'Install the package that provides both the TUI and goodvibes-daemon launchers.',
         commands: [
-          'bun add -g @pellux/goodvibes-tui',
-          'bun pm trust -g @pellux/goodvibes-tui @goodvibes-jev/engine/sdk core-js tree-sitter-css tree-sitter-javascript tree-sitter-json tree-sitter-python tree-sitter-typescript',
+          'bun add -g @goodvibes-jev/tui',
+          'bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/engine/sdk core-js tree-sitter-css tree-sitter-javascript tree-sitter-json tree-sitter-python tree-sitter-typescript',
         ],
         expected: 'Global package install completes and Bun reports lifecycle scripts are trusted.',
         fallback: 'If release assets cannot download, use the goodvibes-tui source checkout and run bun install before bun run daemon.',

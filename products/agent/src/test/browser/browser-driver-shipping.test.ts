@@ -218,8 +218,8 @@ describe('remediation matches how the agent was actually installed', () => {
   });
 
   test('a package install is told to reinstall the package', () => {
-    const advice = driverRemediation({ execPath: '/home/someone/.bun/install/global/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent.ts' });
-    expect(advice).toContain('bun add -g @pellux/goodvibes-agent');
+    const advice = driverRemediation({ execPath: '/home/someone/.bun/install/global/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent.ts' });
+    expect(advice).toContain('bun add -g @goodvibes-jev/agent');
   });
 
   test('a source checkout is told to install dependencies', () => {

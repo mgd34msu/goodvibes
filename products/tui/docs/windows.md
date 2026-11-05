@@ -11,8 +11,8 @@ the Linux release binaries and every code path apply unchanged:
 # in a WSL2 shell (Ubuntu, Debian, etc.)
 curl -fsSL https://goodvibes.sh/install.sh | sh
 # or, with Bun already installed:
-bun add -g @pellux/goodvibes-tui
-bun pm trust -g @pellux/goodvibes-tui @pellux/goodvibes-daemon
+bun add -g @goodvibes-jev/tui
+bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/daemon
 ```
 
 The `linux-x64` (or `linux-arm64`) binaries run natively in WSL2. This is the
@@ -75,7 +75,7 @@ Each must be addressed (or explicitly gated off on Windows) before promotion:
 - Blockers 1–4 above are resolved or explicitly disabled on Windows with a
   clear degraded-capability message.
 - A `windows-x64` entry is added to the release matrix and to the platform
-  binary package set (`@pellux/goodvibes-tui-win32-x64`), and the launchers
+  binary package set (`@goodvibes-jev/tui-win32-x64`), and the launchers
   learn the Windows path.
 
 ## Deferred: PowerShell installer

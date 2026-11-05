@@ -10,7 +10,7 @@ import { handlePluginBundlesCommand } from './plugin-bundles-command.ts';
 // ---------------------------------------------------------------------------
 // `goodvibes plugin init` / `plugin validate`, scaffold and check plugins
 // against the SAME classic loader the running TUI uses (PluginManager wraps
-// discoverPlugins from @pellux/goodvibes-sdk/platform/plugins). The pass/fail
+// discoverPlugins from @goodvibes-jev/engine/sdk/platform/plugins). The pass/fail
 // verdict is the real loader's acceptance: we run discoverPlugins against the
 // target directory (isolated from the operator's own plugin folders) and check
 // whether it accepts the directory. Reasons for a rejected manifest are sourced

@@ -17,7 +17,7 @@
  *
  * This is the browser's own implementation of that policy, unit-tested against all
  * three properties above, and it stays separate from the SDK on purpose. The installed
- * @pellux/goodvibes-sdk also publishes a shared SpokenTurnController
+ * @goodvibes-jev/engine/sdk also publishes a shared SpokenTurnController
  * (platform/voice/spoken-turn) that drives the same three properties, but it is a
  * daemon-side engine: it is constructed around a live VoiceService (the provider
  * registry that holds real synthesis credentials and does the actual network call) and

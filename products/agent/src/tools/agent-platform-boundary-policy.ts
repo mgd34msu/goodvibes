@@ -16,7 +16,7 @@ import { assertAdmittedAgentRead, AGENT_READ_ADMISSION_DENIAL_MESSAGE } from '@g
 const PLATFORM_REPO_SEGMENT = /^goodvibes(?:-[a-z0-9.]+)*$/i;
 
 /** The published platform packages, as they appear inside a node_modules tree. */
-const PLATFORM_PACKAGE_SCOPE = '@pellux';
+const PLATFORM_PACKAGE_SCOPE = '@goodvibes-jev';
 // Closed identities of this workspace's installed packages, not arbitrary
 // names that happen to contain the word engine or the scope on its own.
 const WORKSPACE_PACKAGE_SCOPE = '@goodvibes-jev';

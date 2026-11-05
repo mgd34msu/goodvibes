@@ -10,7 +10,7 @@ import type { PermissionAttribution, PermissionPromptRequest, RememberTier } fro
  * splitting would require a genuinely new SDK diff/patch-apply primitive,
  * flagged as an explicit v2 follow-up, not built here.
  *
- * NOTE ON SDK TYPES: the installed @pellux/goodvibes-sdk (0.36.0) does not
+ * NOTE ON SDK TYPES: the installed @goodvibes-jev/engine/sdk (0.36.0) does not
  * yet export `EditItem`/`EditInput` from its `platform/tools` subpath (that
  * export is added in the in-flight SDK change for this work order, landing
  * in 0.37). Until then this module reads `request.args.edits` defensively

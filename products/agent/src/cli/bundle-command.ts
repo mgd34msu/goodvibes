@@ -172,7 +172,7 @@ export async function handleBundleCommand(runtime: CliCommandRuntime, options: J
         type: 'goodvibes-agent.support',
         capturedAt: Date.now(),
         package: {
-          name: '@pellux/goodvibes-agent',
+          name: '@goodvibes-jev/agent',
           version: getPackageVersion(),
         },
         roots: {

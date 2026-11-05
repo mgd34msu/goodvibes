@@ -10,15 +10,15 @@ const SUPPORTED_TARGETS = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm
 // is plain JS shipped in the tarball and cannot import that TS module; keep the
 // two in sync. Keyed by `${process.platform}-${node-arch}`.
 const PLATFORM_PACKAGE_NAMES = {
-  'linux-x64': '@pellux/goodvibes-tui-linux-x64',
-  'linux-arm64': '@pellux/goodvibes-tui-linux-arm64',
-  'darwin-x64': '@pellux/goodvibes-tui-darwin-x64',
-  'darwin-arm64': '@pellux/goodvibes-tui-darwin-arm64',
+  'linux-x64': '@goodvibes-jev/tui-linux-x64',
+  'linux-arm64': '@goodvibes-jev/tui-linux-arm64',
+  'darwin-x64': '@goodvibes-jev/tui-darwin-x64',
+  'darwin-arm64': '@goodvibes-jev/tui-darwin-arm64',
 };
 
 /**
  * Resolve the prebuilt binary from the installed platform package
- * (@pellux/goodvibes-tui-<os>-<arch>), if present. The package manager installs
+ * (@goodvibes-jev/tui-<os>-<arch>), if present. The package manager installs
  * it with registry integrity and no lifecycle script, so this path needs no
  * trust step and no post-install download. Returns null when the package is not
  * installed (e.g. an unsupported platform, or optional-dep resolution skipped).

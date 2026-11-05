@@ -69,7 +69,7 @@ describe('readCheckpointGuardSettings', () => {
 
 // End-to-end wiring, that the user's checkpoints.* values flow through
 // withCheckpointGuardSettings into WorkspaceCheckpointManager and actually
-// change its root-guard behavior. @pellux/goodvibes-sdk 1.6.1's
+// change its root-guard behavior. @goodvibes-jev/engine/sdk 1.6.1's
 // WorkspaceCheckpointManagerOptions now declares these guard keys
 // (preferGitRoot/allowBroadRoot/allowLargeFirstSnapshot/maxFirstSnapshotFiles/
 // autoRetention), so the previously-inert options are live and observable via

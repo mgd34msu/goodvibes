@@ -26,4 +26,16 @@ test('daemon manifest and compiled fallback use the monorepo release version', (
   expect(daemonVersion).toBe(rootVersion);
   expect(source.match(/^let _version = '([^']+)';$/m)?.[1]).toBe(rootVersion);
 });
+for (const product of ['tui', 'agent']) {
+  test(`${product} manifest and compiled fallback use the monorepo release identity`, () => {
+    const repo = resolve(ROOT, '../..');
+    const root = JSON.parse(readFileSync(resolve(repo, 'package.json'), 'utf8')) as { version: string };
+    const manifest = JSON.parse(readFileSync(resolve(repo, `products/${product}/package.json`), 'utf8')) as { name: string; version: string };
+    const source = readFileSync(resolve(repo, `products/${product}/src/version.ts`), 'utf8');
+    expect(manifest.name).toBe(`@goodvibes-jev/${product}`);
+    expect(manifest.version).toBe(root.version);
+    expect(source.match(/^let _version = '([^']+)';$/m)?.[1]).toBe(root.version);
+    expect(source).toContain(`pkg${product === 'tui' ? '?' : ''}.name === '${manifest.name}'`);
+  });
+}
 });

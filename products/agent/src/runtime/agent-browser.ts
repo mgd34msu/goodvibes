@@ -36,7 +36,7 @@ import { recordAgentSessionWrite } from '../tools/agent-session-write-ledger.ts'
  * same one the agent printed before the host client moved.
  */
 const MISSING_HOST_SCRIPT_FIX =
-  'Reinstall the agent so its files are complete: bun add -g @pellux/goodvibes-agent';
+  'Reinstall the agent so its files are complete: bun add -g @goodvibes-jev/agent';
 
 /** Where saved browser profiles live, under the agent's own storage root. */
 export function agentBrowserProfileRoot(homeDirectory: string): string {

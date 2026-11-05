@@ -213,5 +213,5 @@ curl -sS --max-time 3 http://127.0.0.1:3423/ | rg "$(node -p "require('./package
 Verify installed SDK:
 
 ```bash
-node -p "require('./node_modules/@pellux/goodvibes-sdk/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/sdk/package.json').version"
 ```

@@ -3,11 +3,11 @@
  * sdk-dev, alias.
  *
  * The canonical local-SDK overlay tool (link/status/restore, all 9 public
- * @pellux workspace packages including goodvibes-contracts) now lives in the
+ * @goodvibes-jev workspace packages including goodvibes-contracts) now lives in the
  * SDK checkout itself (goodvibes-sdk/scripts/sdk-dev.ts), consolidated there
  * to end the three-way drift between this repo's copy and
  * the TUI's and webui's. This repo's copy never picked up the all-siblings
- * fix, so it never refreshed node_modules/@pellux/goodvibes-contracts on
+ * fix, so it never refreshed node_modules/@goodvibes-jev/engine/contracts on
  * link (the live re-sync gap this brief closes), see the SDK tool's file
  * header. This file only locates that checkout and forwards argv + this
  * repo as cwd; it carries no overlay logic of its own so the three copies

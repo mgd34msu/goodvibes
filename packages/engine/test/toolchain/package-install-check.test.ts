@@ -3,7 +3,7 @@ import { evaluateTarballPaths, evaluateBinShim, parseNpmPack, runPackageInstallC
 import { fakeFs, scriptedExec } from './_helpers.ts';
 
 const config: PublishPackageConfig = {
-  packageName: '@pellux/goodvibes-tui',
+  packageName: '@goodvibes-jev/tui',
   defaultRegistry: 'https://registry.npmjs.org',
   requiredTarballPaths: ['package.json', 'README.md', 'bin/goodvibes'],
   forbiddenTarballPrefixes: ['.github/', 'src/test/', 'vendor/'],
@@ -50,7 +50,7 @@ describe('parseNpmPack + full run', () => {
   // package failing its own install gate. Both shapes must parse identically.
   test('parses the npm 12 object-keyed shape identically to the array shape', () => {
     const out = JSON.stringify({
-      '@pellux/goodvibes-tui': { files: [{ path: 'package.json' }, { path: 'bin/goodvibes' }], unpackedSize: 2048 },
+      '@goodvibes-jev/tui': { files: [{ path: 'package.json' }, { path: 'bin/goodvibes' }], unpackedSize: 2048 },
     });
     expect(parseNpmPack(out)).toEqual({ files: ['package.json', 'bin/goodvibes'], unpackedBytes: 2048 });
   });
@@ -65,7 +65,7 @@ describe('parseNpmPack + full run', () => {
     const exec = scriptedExec(() => ({
       status: 0,
       stdout: JSON.stringify({
-        '@pellux/goodvibes-tui': {
+        '@goodvibes-jev/tui': {
           files: [{ path: 'package.json' }, { path: 'README.md' }, { path: 'bin/goodvibes' }],
           unpackedSize: 10,
         },

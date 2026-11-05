@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Publish the assembled @pellux/goodvibes-tui-<os>-<arch> platform packages.
+ * Publish the assembled @goodvibes-jev/tui-<os>-<arch> platform packages.
  *
  * Run after scripts/assemble-platform-packages.ts has populated each package's
  * bin/ from the release binaries. Publishes to GOODVIBES_PUBLISH_REGISTRY
@@ -36,9 +36,9 @@ const only = onlyIdx >= 0 ? args[onlyIdx + 1] : undefined;
 const registry = process.env.GOODVIBES_PUBLISH_REGISTRY?.trim() || 'https://registry.npmjs.org';
 // Optional scope override for mirror registries (e.g. GitHub Packages requires
 // every package under the repo owner's scope). When set (e.g. "@mgd34msu"), each
-// platform package's @pellux scope is rewritten to the override before publish so
+// platform package's @goodvibes-jev scope is rewritten to the override before publish so
 // the mirrored set matches the mirrored main package's rescoped optionalDependencies.
-// Unset on the npm path, which publishes the packages under their @pellux names.
+// Unset on the npm path, which publishes the packages under their @goodvibes-jev names.
 const scopeOverride = process.env.GOODVIBES_PUBLIC_PACKAGE_SCOPE?.trim().replace(/\/+$/, '') || '';
 
 /** Rewrite a @scope/goodvibes-tui-<os>-<arch> name onto the override scope. */
@@ -97,7 +97,7 @@ for (const pkg of targets) {
   }
 
   // Apply the mirror scope override in place before publishing. On the npm path
-  // scopeOverride is empty and the name is left as its @pellux original.
+  // scopeOverride is empty and the name is left as its @goodvibes-jev original.
   const publishName = rescopeName(pkg.name);
   if (publishName !== pkgJson.name) {
     pkgJson.name = publishName;

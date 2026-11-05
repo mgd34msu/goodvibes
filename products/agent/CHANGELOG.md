@@ -1330,7 +1330,7 @@ Updated: the bundled GoodVibes platform runtime to 1.11.3 (quieter startup when 
 
 - Added behavior discovery to first-run setup so local persona, skill, and routine files can be reviewed and imported from the Agent TUI instead of starting from blank records.
 - Added profile creation from discovered behavior bundles, including local starter-template creation, profile creation, and in-workspace setup guidance.
-- Kept the installed command path simple: `bun add -g @pellux/goodvibes-agent`, then `goodvibes-agent` starts the interactive Agent TUI.
+- Kept the installed command path simple: `bun add -g legacy-package:goodvibes-agent`, then `goodvibes-agent` starts the interactive Agent TUI.
 - Preserved the Agent product boundary: connected host required, no Agent-owned host lifecycle, isolated Agent Knowledge only, local memory/skills/personas/routines, and explicit build delegation.
 
 ## 0.1.108 - 0.1.115
@@ -1368,7 +1368,7 @@ Updated: the bundled GoodVibes platform runtime to 1.11.3 (quieter startup when 
 
 ## 0.1.0 - 0.1.1
 
-- Published the first public alpha package for `@pellux/goodvibes-agent`.
+- Published the first public alpha package for `legacy-package:goodvibes-agent`.
 - Exposed the `goodvibes-agent` executable as the TUI entrypoint.
 - Established the core Agent policy: serial/proactive assistant behavior, connected-host dependency, no local worker fanout by default, isolated Agent state, and explicit build delegation.
 - Reissued `0.1.1` after the initial registry publish produced an install-blocking package metadata inconsistency.
@@ -1376,6 +1376,6 @@ Updated: the bundled GoodVibes platform runtime to 1.11.3 (quieter startup when 
 ## 0.0.0 - Private Baseline
 
 - Created the private Agent package baseline with the GoodVibes terminal shell foundation.
-- Set package identity to `@pellux/goodvibes-agent`.
+- Set package identity to `legacy-package:goodvibes-agent`.
 - Kept host lifecycle external to the Agent package.
 - Started the Agent-specific operator workspace, local behavior registries, and product policy work that led to the public alpha.

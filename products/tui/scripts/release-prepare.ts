@@ -28,7 +28,7 @@
  *      README badge, docs/foundation-artifacts, docs/commands-reference.md
  *   4. workflow pins: every `mgd34msu/goodvibes-sdk/.github/workflows/*.yml@<sha>`
  *      reference moves to the commit the pinned SDK version's tag points at,
- *      and every `@pellux/goodvibes-toolchain@<version>` moves to the
+ *      and every `@goodvibes-jev/engine/toolchain@<version>` moves to the
  *      devDependencies pin
  *   5. a `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section scaffold at the first
  *      `---` separator, when none exists for the version (unless --no-changelog)
@@ -97,7 +97,7 @@ export function rewriteWorkflowPins(
   pins: { readonly sdkVersion: string; readonly sdkSha: string | null; readonly toolchainVersion: string },
 ): string {
   let next = text.replace(
-    /(@pellux\/goodvibes-toolchain@)\d+\.\d+\.\d+/g,
+    /(@goodvibes-jev\/engine\/toolchain@)\d+\.\d+\.\d+/g,
     `$1${pins.toolchainVersion}`,
   );
   if (pins.sdkSha !== null) {
@@ -193,9 +193,9 @@ function main(argv: readonly string[]): void {
       devDependencies?: Record<string, string>;
     };
     const sdkVersion = pkg.dependencies?.['@goodvibes-jev/engine/sdk'];
-    const toolchainVersion = pkg.devDependencies?.['@pellux/goodvibes-toolchain'];
-    if (!sdkVersion || !/^\d+\.\d+\.\d+$/.test(sdkVersion)) throw new Error(`@pellux/goodvibes-sdk is not pinned to an exact version: ${String(sdkVersion)}`);
-    if (!toolchainVersion || !/^\d+\.\d+\.\d+$/.test(toolchainVersion)) throw new Error(`@pellux/goodvibes-toolchain is not pinned to an exact version: ${String(toolchainVersion)}`);
+    const toolchainVersion = pkg.devDependencies?.['@goodvibes-jev/engine/toolchain'];
+    if (!sdkVersion || !/^\d+\.\d+\.\d+$/.test(sdkVersion)) throw new Error(`@goodvibes-jev/engine/sdk is not pinned to an exact version: ${String(sdkVersion)}`);
+    if (!toolchainVersion || !/^\d+\.\d+\.\d+$/.test(toolchainVersion)) throw new Error(`@goodvibes-jev/engine/toolchain is not pinned to an exact version: ${String(toolchainVersion)}`);
     const sdkSha = resolveSdkTagSha(sdkVersion);
     const workflowsDir = join(ROOT, '.github', 'workflows');
     for (const name of readdirSync(workflowsDir).filter((f) => /\.ya?ml$/.test(f))) {

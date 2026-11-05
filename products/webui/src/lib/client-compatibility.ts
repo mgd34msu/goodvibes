@@ -11,7 +11,7 @@
  * than silently executing shared-session work under superseded rules.
  *
  * PROVENANCE: this logic is also implemented in the installed
- * @pellux/goodvibes-sdk (platform/control-plane/client-compatibility.ts,
+ * @goodvibes-jev/engine/sdk (platform/control-plane/client-compatibility.ts,
  * evaluateClientCompatibility/compareBuildVersions/readClientCompatibilityFloor), but
  * that module is exported only through the daemon-facing `@goodvibes-jev/engine/sdk/platform/control-plane`
  * subpath, whose barrel also carries the gateway/session-broker/route-dispatch server

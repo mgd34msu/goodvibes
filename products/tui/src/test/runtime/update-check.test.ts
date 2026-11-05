@@ -90,7 +90,7 @@ describe('detectInstallKind', () => {
 
   test('a vendored binary inside a node_modules install is "bun-global-package"', () => {
     expect(
-      detectInstallKind('/home/user/.bun/install/global/node_modules/@pellux/goodvibes-tui/vendor/goodvibes-linux-x64'),
+      detectInstallKind('/home/user/.bun/install/global/node_modules/@goodvibes-jev/tui/vendor/goodvibes-linux-x64'),
     ).toBe('bun-global-package');
   });
 });

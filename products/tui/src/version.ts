@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // The prebuild script updates the fallback value before compilation.
 // Uses import.meta.dir (Bun) to locate package.json relative to this file,
 // which is correct regardless of the process working directory.
-let _version = '2.1.0';
+let _version = '3.0.0-dev.0';
 try {
   const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf-8'));
   // Only trust a version read from OUR OWN package.json. A Bun single-file
@@ -16,7 +16,7 @@ try {
   // "0.0.0", exactly the wrong-version banner a bare daemon launch showed in
   // the field. Guarding on the package name means the prebuild-baked fallback
   // above wins in that case instead of a stray version.
-  if (pkg?.name === '@pellux/goodvibes-tui' && typeof pkg.version === 'string' && pkg.version.length > 0) {
+  if (pkg?.name === '@goodvibes-jev/tui' && typeof pkg.version === 'string' && pkg.version.length > 0) {
     _version = pkg.version;
   }
 } catch {

@@ -6,7 +6,7 @@
 //
 //     bun packages/daemon-sdk/dist/relay-server-entry.js
 //   or, once published:
-//     bunx --bun @pellux/goodvibes-daemon-sdk-relay
+//     bunx --bun @goodvibes-jev/engine/daemon-sdk/relay-server
 //
 // It binds a WebSocket endpoint and drives the runtime-neutral RelayHub. All the
 // zero-knowledge properties live in the hub and the transport-core relay crypto;

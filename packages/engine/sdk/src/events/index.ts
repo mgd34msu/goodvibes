@@ -1,5 +1,5 @@
 /**
- * Event type and guard exports for @pellux/goodvibes-sdk/events.
+ * Event type and guard exports for @goodvibes-jev/engine/sdk/events.
  *
  * Validation helpers:
  * - `isRuntimeEventDomain(value)`, typeguard for the 28 domain names.

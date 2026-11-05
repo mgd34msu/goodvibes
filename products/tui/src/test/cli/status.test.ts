@@ -297,14 +297,14 @@ describe('CLI doctor risky-combination and install findings', () => {
           id: 'broken-daemon-path',
           summary: 'The background daemon binary could not be located.',
           detail: 'No daemon executable was found on the packaged search paths.',
-          repairCommand: 'bun add -g @pellux/goodvibes-tui',
+          repairCommand: 'bun add -g @goodvibes-jev/tui',
         },
       ],
     });
     const mapped = findings.find((finding) => finding.id === 'install-broken-daemon-path');
     expect(mapped).toBeDefined();
     expect(mapped?.area).toBe('install');
-    expect(mapped?.action).toBe('Repair this install by running: bun add -g @pellux/goodvibes-tui');
+    expect(mapped?.action).toBe('Repair this install by running: bun add -g @goodvibes-jev/tui');
   });
 });
 

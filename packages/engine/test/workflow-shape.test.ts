@@ -1048,7 +1048,7 @@ describe('reusable workflows: workflow_call contracts', () => {
     // workspace toolchain, run the local dist bin, never bunx-from-registry.
     expect(JSON.stringify(workspaceSteps)).toContain('actions/checkout');
     expect(JSON.stringify(workspaceSteps)).toContain('toolchain/dist/bin/per-job-green.js');
-    expect(JSON.stringify(workspaceSteps)).not.toContain('bunx @pellux/goodvibes-toolchain');
+    expect(JSON.stringify(workspaceSteps)).not.toContain('bunx @goodvibes-jev/engine/toolchain');
 
     // registry mode bunx-es the published package and never assumes a checkout.
     expect(JSON.stringify(registrySteps)).toContain('goodvibes-per-job-green');

@@ -38,7 +38,7 @@ function writePublishablePackage(dir: string, overrides: Record<string, unknown>
   writeFileSync(join(dir, 'bin', 'goodvibes-agent.ts'), "#!/usr/bin/env bun\nawait import('../dist/package/main.js');\n");
   chmodSync(join(dir, 'bin', 'goodvibes-agent.ts'), 0o755);
   writeFileSync(join(dir, 'package.json'), JSON.stringify({
-    name: '@pellux/goodvibes-agent',
+    name: '@goodvibes-jev/agent',
     version: '2.1.0',
     private: false,
     type: 'module',
@@ -82,7 +82,7 @@ describe('package CLI install verification', () => {
         { command: 'bun run build:package-runtime', root: dir },
         { command: 'npm pack --json --dry-run', root: dir },
       ]);
-      expect(report.packageName).toBe('@pellux/goodvibes-agent');
+      expect(report.packageName).toBe('@goodvibes-jev/agent');
       expect(report.issues).toEqual([]);
       expect(report.bins).toEqual([
         expect.objectContaining({ command: 'goodvibes-agent', exists: true, executable: true, usesBunShebang: true, hasSourceEntrypoint: true }),
@@ -271,16 +271,16 @@ describe('package-facing text preserves public engine references and legacy excl
     withFixture((dir) => {
       writeFileSync(join(dir, 'README.md'), [
         '# GoodVibes Agent',
-        'Install with `bun add -g @pellux/goodvibes-agent`.',
+        'Install with `bun add -g @goodvibes-jev/agent`.',
         'It ships with the bundled GoodVibes platform runtime.',
         'Built on @goodvibes-jev/engine/sdk.',
-        'Legacy package: @pellux/goodvibes-sdk.',
-        'Or run `npm install -g @pellux/goodvibes-agent`.',
+        'Legacy package: @goodvibes-jev/engine/sdk.',
+        'Or run `npm install -g @goodvibes-jev/agent`.',
         '',
       ].join('\n'));
       writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## 2.1.0 - 2026-09-30\n\n- Notes.\n');
       expect(verifyPackageFacingText(dir).failures).toEqual([
-        'package-facing text README.md:5 references non-Agent GoodVibes package: @pellux/goodvibes-sdk',
+        'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/engine/sdk',
         'package-facing text README.md:6 contains non-Bun Agent install/run instruction.',
       ]);
     });

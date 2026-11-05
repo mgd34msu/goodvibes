@@ -2,7 +2,7 @@
 // codebase-runtime.ts, /codebase
 //
 // Explicit-query + transparency surface over the repo source-tree code index
-// (CodeIndexStore, @pellux/goodvibes-sdk/platform/state, landed on SDK main
+// (CodeIndexStore, @goodvibes-jev/engine/sdk/platform/state, landed on SDK main
 // with explicit-query build/status/search) via the TUI's own wiring in
 // src/runtime/code-index-services.ts, threaded through
 // CommandContext.session.codeIndexStore exactly like wrfcController/

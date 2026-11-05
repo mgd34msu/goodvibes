@@ -11,12 +11,14 @@ import { resolve } from 'node:path';
 
 const SDK_ROOT = process.env.WORKSPACE_ROOT ?? resolve(import.meta.dir, '../../..');
 
-// The old workspace packages are one engine package, released with the
-// judgment package it depends on.
+// One release identity covers the foundation, platform and every product.
 const DEFAULT_WORKSPACE_PACKAGES = [
   'packages/engine',
   'packages/judgment',
   'products/daemon',
+  'products/tui',
+  'products/agent',
+  'products/webui',
 ];
 
 function parseWorkspacePackagesJson(raw: string): string[] {

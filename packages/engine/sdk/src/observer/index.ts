@@ -63,7 +63,7 @@ export interface AuthTransitionInfo {
  */
 // SDKObserver extends TransportObserver which contributes:
 //   onTransportActivity?(info: TransportActivityInfo): void
-// See @pellux/goodvibes-transport-core for the inherited member definition.
+// See @goodvibes-jev/engine/transport-core for the inherited member definition.
 export interface SDKObserver extends TransportObserver {
   /**
    * Called for every event dispatched through the realtime transport

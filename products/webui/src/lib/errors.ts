@@ -259,7 +259,7 @@ export function isEmailAuthFailedError(error: unknown): boolean {
 
 /**
  * True for the daemon's step-up refusal on a mutating call that arrived over the relay
- * (evaluateStepUp in @pellux/goodvibes-sdk's relay step-up policy, a fail-closed hook:
+ * (evaluateStepUp in @goodvibes-jev/engine/sdk's relay step-up policy, a fail-closed hook:
  * consumers wire a real WebAuthn verifier, and until one is wired every mutating relay
  * call is refused rather than silently allowed through). Two distinct codes, both a
  * genuine policy refusal rather than a fault:

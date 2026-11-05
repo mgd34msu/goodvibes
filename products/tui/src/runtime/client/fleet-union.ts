@@ -4,7 +4,7 @@
  *
  * ── What moved to the SDK, and what stays here ────────────────────────────
  *
- * The SDK's `@pellux/goodvibes-sdk/platform/runtime/client` now owns the
+ * The SDK's `@goodvibes-jev/engine/sdk/platform/runtime/client` now owns the
  * policy every surface needs for this: `createDaemonFleetRowsPoller` (the poll
  * cadence and last-known-rows retention when a poll fails), `mergeFleetNodes`
  * (the local-wins dedupe by node id) and `daemonOnlyFleetActRefusal` (the

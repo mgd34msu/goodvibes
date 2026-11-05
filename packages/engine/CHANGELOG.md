@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [3.0.0-dev.0] - 2026-11-05
+
+### Changed
+
+- Use one development version for every product, foundation and engine package,
+  including compiled fallbacks and platform package descriptors.
+- Replace retired package names with monorepo subpaths and remove the obsolete
+  Agent lockfile; install dependencies from the repository root.
+
 ### Fixed
 
 - Reject prototype paths, accessors and object coercion in workflow trigger
@@ -5952,7 +5961,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
 ## [1.0.0] - 2026-07-06
 
 First stable release. `1.0.0` stabilizes the public operator/peer contract, the
-runtime and platform surfaces, and the nine `@pellux/goodvibes-*` workspace
+runtime and platform surfaces, and the nine `legacy-package:goodvibes-*` workspace
 packages, all published together in lockstep. It closes the goodvibes-tui
 evolution arc: the SDK is now the one platform substrate shared by
 the TUI, the agent fork, and the browser web UI, sessions, config, memory, and

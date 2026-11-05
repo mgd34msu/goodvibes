@@ -1,7 +1,7 @@
 # Hermes Runtime Probe
 
-This directory contains a manual probe for the `@pellux/goodvibes-sdk/react-native`
-and `@pellux/goodvibes-sdk/expo` bundles under Hermes. It is not part of the
+This directory contains a manual probe for the `@goodvibes-jev/engine/sdk/react-native`
+and `@goodvibes-jev/engine/sdk/expo` bundles under Hermes. It is not part of the
 normal CI matrix because the public standalone Hermes CLI releases lag the
 Hermes engine embedded in current React Native releases.
 

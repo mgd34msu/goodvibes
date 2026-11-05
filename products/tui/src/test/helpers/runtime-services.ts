@@ -188,7 +188,7 @@ export function resetTestRuntimeServices(): void {
  * genuinely succeeds at the moment it runs, but for some files a handful of
  * files reappear under the same path microtasks later, some subsystem
  * inside the created RuntimeServices graph (not identified further; it is
- * inside @pellux/goodvibes-sdk, not this repo) performs an async write after
+ * inside @goodvibes-jev/engine/sdk, not this repo) performs an async write after
  * `previous?.dispose()` above has synchronously returned, without this
  * module awaiting it (resetTestRuntimeServices()'s signature is used
  * synchronously in dozens of afterEach hooks elsewhere, so it isn't safe to

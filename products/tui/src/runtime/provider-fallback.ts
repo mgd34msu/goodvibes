@@ -4,7 +4,7 @@
  *
  * The pre-catalog fallback registration for the configured model
  * (`ensureConfiguredModelIsRoutable`) is the SDK's own
- * (`@pellux/goodvibes-sdk/platform/providers`), this file only imports it for
+ * (`@goodvibes-jev/engine/sdk/platform/providers`), this file only imports it for
  * `ensureBootModelResolvable` below, which is NOT in the SDK: it is the
  * boot-time custom-provider-readiness wrapper this app's boot path needs and
  * the SDK's floor does not compose.

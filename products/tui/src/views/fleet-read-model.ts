@@ -2,7 +2,7 @@
 // fleet-read-model.ts
 //
 // (Agents modal tree), pure, testable read-model over the SDK's live
-// process registry (@pellux/goodvibes-sdk/platform/runtime/fleet, landed on
+// process registry (@goodvibes-jev/engine/sdk/platform/runtime/fleet, landed on
 // SDK main as). No rendering dependency: this module owns the
 // flat ProcessNode[] -> tree transformation, the honest cost/token
 // aggregates, and the state->glyph/tone mapping that the Agents modal renders.
@@ -82,7 +82,7 @@ export interface FleetSnapshot {
 export type FleetStateTone = 'active' | 'success' | 'failure' | 'warn' | 'muted';
 
 // Design ruling: this is a DIFFERENT table from the SDK presentation
-// contract's STATE_GLYPHS (@pellux/goodvibes-sdk/platform/presentation), that
+// contract's STATE_GLYPHS (@goodvibes-jev/engine/sdk/platform/presentation), that
 // one is a 4-state semantic alias (good/warn/bad/info) shared by the TUI and
 // agent renderers; this one is a 12-state ProcessNode taxonomy specific to the
 // Agents modal tree (thinking/executing-tool/awaiting-approval/streaming/

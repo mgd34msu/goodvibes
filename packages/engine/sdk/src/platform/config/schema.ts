@@ -14,7 +14,7 @@
  *
  * The result was a published type that silently omitted domains. Measured
  * before this block existed: importing `GoodVibesConfig` from
- * `@pellux/goodvibes-sdk/platform/config` produced a type where
+ * `@goodvibes-jev/engine/sdk/platform/config` produced a type where
  * `conversationGate` and `voice` were absent, so a consumer writing
  * `config.getCategory('conversationGate')` got a compile error against a key
  * that ships and works. Two of this repository's own tests hit exactly that

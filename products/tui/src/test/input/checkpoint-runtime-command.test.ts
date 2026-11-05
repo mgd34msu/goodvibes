@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // checkpoint-runtime-command.test.ts, /checkpoints, /checkpoint
 //
-// Exercises the real WorkspaceCheckpointManager (@pellux/goodvibes-sdk,
+// Exercises the real WorkspaceCheckpointManager (@goodvibes-jev/engine/sdk,
 // installed in node_modules, no mock needed for the manager itself) against
 // a scratch workspace directory. Only the TUI context plumbing (print/render)
 // is mocked, per the project's existing command-test pattern.

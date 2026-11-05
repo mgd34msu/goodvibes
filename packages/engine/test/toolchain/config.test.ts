@@ -9,8 +9,8 @@ describe('toolchain config', () => {
     expect(() => parseToolchainConfig(JSON.stringify({ packageName: 'fixture', build: { ...build, compileDriver: '' } }))).toThrow(/compileDriver/);
   });
   test('parses a minimal config', () => {
-    const config = parseToolchainConfig('{"packageName":"@pellux/goodvibes-tui"}');
-    expect(config.packageName).toBe('@pellux/goodvibes-tui');
+    const config = parseToolchainConfig('{"packageName":"@goodvibes-jev/tui"}');
+    expect(config.packageName).toBe('@goodvibes-jev/tui');
   });
   test('rejects a config without packageName', () => {
     expect(() => parseToolchainConfig('{}')).toThrow(/packageName/);
@@ -43,7 +43,7 @@ describe('toolchain config', () => {
   });
   test('a one-field sdkPin section parses: requiredness lives in resolveSdkPinConfig, not the schema', () => {
     const raw = JSON.stringify({
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       sdkPin: { pinSource: 'devDependencies' },
     });
     const config = parseToolchainConfig(raw);
@@ -55,7 +55,7 @@ describe('toolchain config', () => {
   });
   test('a perJobGreen section with only owner/repo parses: the rest defaults via resolvePerJobGreenConfig', () => {
     const raw = JSON.stringify({
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       perJobGreen: { owner: 'mgd34msu', repo: 'goodvibes-sdk' },
     });
     const config = parseToolchainConfig(raw);
@@ -68,21 +68,21 @@ describe('toolchain config', () => {
   });
   test('rejects a present-but-wrongly-typed optional sdkPin field, naming it', () => {
     const raw = JSON.stringify({
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       sdkPin: { sourceRoots: 'src' },
     });
     expect(() => parseToolchainConfig(raw)).toThrow(/sdkPin\.sourceRoots/);
   });
   test('rejects a malformed nested section with a clear message naming the bad field', () => {
     const raw = JSON.stringify({
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       coverage: { funcsFloor: 80, linesFloor: '90', command: ['bun', 'test', '--coverage', 'src'] },
     });
     expect(() => parseToolchainConfig(raw)).toThrow(/coverage\.linesFloor/);
   });
   test('rejects a malformed enum field with a clear message naming the bad field', () => {
     const raw = JSON.stringify({
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       releaseCut: {
         branch: 'main',
         versionFiles: [],
@@ -96,12 +96,12 @@ describe('toolchain config', () => {
   });
   test('valid config parses to a deep-equal object, matching the old cast-through parser', () => {
     const full = {
-      packageName: '@pellux/goodvibes-tui',
+      packageName: '@goodvibes-jev/tui',
       sdkPin: {
-        sdkPackage: '@pellux/goodvibes-sdk',
+        sdkPackage: '@goodvibes-jev/engine/sdk',
         pinSource: 'dependencies',
         lockfile: 'bun.lock',
-        overlayMarker: 'node_modules/@pellux/goodvibes-sdk/.local-sdk-overlay.json',
+        overlayMarker: 'node_modules/@goodvibes-jev/engine/sdk/.local-sdk-overlay.json',
         sourceRoots: ['src'],
         enforceExportsMap: false,
       },

@@ -13,7 +13,7 @@ import {
 /**
  * Coverage for the WIRED launchd path in service-manager.ts (reached by the
  * daemon's HTTP system routes via facade-composition.ts -> facade.ts ->
- * @pellux/goodvibes-daemon-sdk system-routes.ts POST /api/service/install et al).
+ * @goodvibes-jev/engine/daemon-sdk system-routes.ts POST /api/service/install et al).
  *
  * This host is Linux, so every test here fakes the darwin/launchd platform via
  * `configManager.set('service.platform', 'launchd')` (an explicit config override

@@ -1,8 +1,8 @@
-# @pellux/goodvibes-transport-core
+# @goodvibes-jev/engine/transport-core
 
 Public GoodVibes transport-core package for shared transport, event-feed, observer, and middleware primitives.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/transport-core`. Install this package directly when you only need the transport primitives.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/transport-core`. These modules are subpath exports of the engine package.
 
 Use this surface only when you are composing your own transport/client abstraction.
 
@@ -16,7 +16,7 @@ Key exports:
 - W3C trace propagation: `injectTraceparent` (sync, `require`-based OTel detection) and `injectTraceparentAsync` (async, dynamic `import`). Both are no-ops without `@opentelemetry/api` installed or an active span.
 - Utilities: `createUuidV4`.
 
-A `./relay` subpath (`@pellux/goodvibes-sdk/transport-core/relay`) exports the runtime-neutral building blocks for the zero-knowledge, self-hostable relay, including ECDH key exchange, AEAD framing, handshake, pairing payload encoding, and the secure channel used by the relay client (`transport-realtime`), the relay server, and daemon-side termination. It is kept out of the main entry point on purpose, so most consumers never pull in the crypto primitives; import it directly only when implementing relay transport or tooling.
+A `./relay` subpath (`@goodvibes-jev/engine/sdk/transport-core/relay`) exports the runtime-neutral building blocks for the zero-knowledge, self-hostable relay, including ECDH key exchange, AEAD framing, handshake, pairing payload encoding, and the secure channel used by the relay client (`transport-realtime`), the relay server, and daemon-side termination. It is kept out of the main entry point on purpose, so most consumers never pull in the crypto primitives; import it directly only when implementing relay transport or tooling.
 
 ```ts
 import {
@@ -31,4 +31,4 @@ const envelope = createEventEnvelope(
 );
 ```
 
-Most consumers should use `@pellux/goodvibes-sdk`, `@pellux/goodvibes-sdk/operator`, or `@pellux/goodvibes-sdk/peer` instead.
+Most consumers should use `@goodvibes-jev/engine/sdk`, `@goodvibes-jev/engine/sdk/operator`, or `@goodvibes-jev/engine/sdk/peer` instead.

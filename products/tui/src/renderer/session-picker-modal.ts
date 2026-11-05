@@ -36,7 +36,7 @@ function isClosedStatus(status: string): boolean {
 /**
  * Closed sessions carry an optional, honest reason for WHY they
  * closed under `metadata.closeReason` (SDK's `SharedSessionCloseReason`,
- * 'closeReason' key, see `@pellux/goodvibes-sdk` platform/control-plane
+ * 'closeReason' key, see `@goodvibes-jev/engine/sdk` platform/control-plane
  * session-broker-sessions.ts's `readSessionCloseReason`). `metadata` is an
  * open record so old readers and records from a build that predates this
  * field ignore it safely, read it duck-typed here rather than importing the

@@ -1,0 +1,1662 @@
+{
+  "status": "in-progress",
+  "baseline": "review census at 415ceea; thin platform forwarders are shared ownership, not duplicate implementations",
+  "files": [
+    {
+      "path": "audio/activation-sound.ts",
+      "baselineTuiLines": 117,
+      "baselineSimilarity": 0.8448,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/capture.ts",
+      "baselineTuiLines": 112,
+      "baselineSimilarity": 0.4865,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/onnxruntime-assets.d.ts",
+      "baselineTuiLines": 24,
+      "baselineSimilarity": 0.9583,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/player.ts",
+      "baselineTuiLines": 242,
+      "baselineSimilarity": 0.9817,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/spoken-turn-model-routing.ts",
+      "baselineTuiLines": 121,
+      "baselineSimilarity": 0.9877,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/spoken-turn-wiring.ts",
+      "baselineTuiLines": 77,
+      "baselineSimilarity": 0.9067,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/voice-capture-wiring.ts",
+      "baselineTuiLines": 119,
+      "baselineSimilarity": 0.5583,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/wake-inference.ts",
+      "baselineTuiLines": 187,
+      "baselineSimilarity": 0.8579,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "audio/wake-runtime.ts",
+      "baselineTuiLines": 364,
+      "baselineSimilarity": 0.5932,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli-flags.ts",
+      "baselineTuiLines": 22,
+      "baselineSimilarity": 0.7727,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/bundle-command.ts",
+      "baselineTuiLines": 235,
+      "baselineSimilarity": 0.8184,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/completion.ts",
+      "baselineTuiLines": 91,
+      "baselineSimilarity": 0.8152,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/entrypoint.ts",
+      "baselineTuiLines": 283,
+      "baselineSimilarity": 0.4932,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/help.ts",
+      "baselineTuiLines": 372,
+      "baselineSimilarity": 0.3311,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/index.ts",
+      "baselineTuiLines": 11,
+      "baselineSimilarity": 0.4545,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/launch-auto-update.ts",
+      "baselineTuiLines": 327,
+      "baselineSimilarity": 0.6608,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/management-commands.ts",
+      "baselineTuiLines": 508,
+      "baselineSimilarity": 0.4944,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/management.ts",
+      "baselineTuiLines": 512,
+      "baselineSimilarity": 0.4207,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/native-headless-command.ts",
+      "baselineTuiLines": 58,
+      "baselineSimilarity": 0.5472,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/native-headless-options.ts",
+      "baselineTuiLines": 64,
+      "baselineSimilarity": 0.9688,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/native-headless-turn.ts",
+      "baselineTuiLines": 86,
+      "baselineSimilarity": 0.4444,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/native-headless.ts",
+      "baselineTuiLines": 172,
+      "baselineSimilarity": 0.9586,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/package-verification.ts",
+      "baselineTuiLines": 231,
+      "baselineSimilarity": 0.3971,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/provider-auth-routes.ts",
+      "baselineTuiLines": 22,
+      "baselineSimilarity": 0.9333,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/service-posture.ts",
+      "baselineTuiLines": 533,
+      "baselineSimilarity": 0.4293,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/status.ts",
+      "baselineTuiLines": 715,
+      "baselineSimilarity": 0.367,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "cli/tui-startup.ts",
+      "baselineTuiLines": 321,
+      "baselineSimilarity": 0.1473,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "config/host-settings.ts",
+      "baselineTuiLines": 49,
+      "baselineSimilarity": 0.3953,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "config/secret-config.ts",
+      "baselineTuiLines": 210,
+      "baselineSimilarity": 0.716,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "config/secrets.ts",
+      "baselineTuiLines": 70,
+      "baselineSimilarity": 0.4463,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "config/surface.ts",
+      "baselineTuiLines": 21,
+      "baselineSimilarity": 0.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/agent-view-render.ts",
+      "baselineTuiLines": 169,
+      "baselineSimilarity": 0.9193,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/bookmark-navigation.ts",
+      "baselineTuiLines": 50,
+      "baselineSimilarity": 0.7525,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/composer-state.ts",
+      "baselineTuiLines": 67,
+      "baselineSimilarity": 0.8438,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-display-only.ts",
+      "baselineTuiLines": 86,
+      "baselineSimilarity": 0.9767,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-line-cache.ts",
+      "baselineTuiLines": 338,
+      "baselineSimilarity": 0.9233,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-render-context.ts",
+      "baselineTuiLines": 116,
+      "baselineSimilarity": 0.7945,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-rendering.ts",
+      "baselineTuiLines": 340,
+      "baselineSimilarity": 0.7319,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-types.ts",
+      "baselineTuiLines": 85,
+      "baselineSimilarity": 0.7407,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/conversation-usage.ts",
+      "baselineTuiLines": 49,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "core/conversation.ts",
+      "baselineTuiLines": 886,
+      "baselineSimilarity": 0.6939,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/notices.ts",
+      "baselineTuiLines": 96,
+      "baselineSimilarity": 0.4044,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/process-output-log.ts",
+      "baselineTuiLines": 186,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "core/session-focus.ts",
+      "baselineTuiLines": 190,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "core/session-resume-core.ts",
+      "baselineTuiLines": 154,
+      "baselineSimilarity": 0.0615,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/system-message-noise.ts",
+      "baselineTuiLines": 87,
+      "baselineSimilarity": 0.8,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/system-message-router.ts",
+      "baselineTuiLines": 267,
+      "baselineSimilarity": 0.541,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/voice-capture-status.ts",
+      "baselineTuiLines": 53,
+      "baselineSimilarity": 0.5172,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/voice-stt-gateway.ts",
+      "baselineTuiLines": 73,
+      "baselineSimilarity": 0.2823,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/wake-provision-status.ts",
+      "baselineTuiLines": 170,
+      "baselineSimilarity": 0.5434,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-contract.ts",
+      "baselineTuiLines": 139,
+      "baselineSimilarity": 0.9928,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-focus.ts",
+      "baselineTuiLines": 290,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-fold-store.ts",
+      "baselineTuiLines": 143,
+      "baselineSimilarity": 0.9441,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-model.ts",
+      "baselineTuiLines": 749,
+      "baselineSimilarity": 0.9873,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-render.ts",
+      "baselineTuiLines": 403,
+      "baselineSimilarity": 0.9295,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-sources.ts",
+      "baselineTuiLines": 169,
+      "baselineSimilarity": 0.994,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "core/work-tree-wiring.ts",
+      "baselineTuiLines": 146,
+      "baselineSimilarity": 0.8997,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/autocomplete.ts",
+      "baselineTuiLines": 122,
+      "baselineSimilarity": 0.8716,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/bookmark-modal.ts",
+      "baselineTuiLines": 139,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "input/command-args-hint.ts",
+      "baselineTuiLines": 47,
+      "baselineSimilarity": 0.8193,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/command-registry.ts",
+      "baselineTuiLines": 685,
+      "baselineSimilarity": 0.5846,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands.ts",
+      "baselineTuiLines": 234,
+      "baselineSimilarity": 0.191,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/calendar-runtime.ts",
+      "baselineTuiLines": 245,
+      "baselineSimilarity": 0.0827,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/config.ts",
+      "baselineTuiLines": 142,
+      "baselineSimilarity": 0.1615,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/context-window.ts",
+      "baselineTuiLines": 103,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/conversation-runtime.ts",
+      "baselineTuiLines": 220,
+      "baselineSimilarity": 0.9977,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/experience-runtime.ts",
+      "baselineTuiLines": 330,
+      "baselineSimilarity": 0.3573,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/fresh-conversation.ts",
+      "baselineTuiLines": 98,
+      "baselineSimilarity": 0.9239,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/guidance-runtime.ts",
+      "baselineTuiLines": 104,
+      "baselineSimilarity": 0.3121,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/health-runtime.ts",
+      "baselineTuiLines": 523,
+      "baselineSimilarity": 0.4024,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/knowledge.ts",
+      "baselineTuiLines": 549,
+      "baselineSimilarity": 0.5337,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/legacy-work-ledger-import-runtime.ts",
+      "baselineTuiLines": 37,
+      "baselineSimilarity": 0.1875,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/local-provider-runtime.ts",
+      "baselineTuiLines": 219,
+      "baselineSimilarity": 0.5446,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/local-runtime.ts",
+      "baselineTuiLines": 468,
+      "baselineSimilarity": 0.6507,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/local-setup-review.ts",
+      "baselineTuiLines": 168,
+      "baselineSimilarity": 0.6351,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/mcp-runtime.ts",
+      "baselineTuiLines": 432,
+      "baselineSimilarity": 0.6922,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/memory.ts",
+      "baselineTuiLines": 212,
+      "baselineSimilarity": 0.551,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/notify-runtime.ts",
+      "baselineTuiLines": 92,
+      "baselineSimilarity": 0.569,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/onboarding-runtime.ts",
+      "baselineTuiLines": 13,
+      "baselineSimilarity": 0.1967,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/operator-runtime.ts",
+      "baselineTuiLines": 399,
+      "baselineSimilarity": 0.339,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/payment-card-intake.ts",
+      "baselineTuiLines": 213,
+      "baselineSimilarity": 0.4682,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/platform-access-runtime.ts",
+      "baselineTuiLines": 327,
+      "baselineSimilarity": 0.3468,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/product-runtime.ts",
+      "baselineTuiLines": 391,
+      "baselineSimilarity": 0.4242,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/provider-accounts-runtime.ts",
+      "baselineTuiLines": 178,
+      "baselineSimilarity": 0.4551,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/qrcode-runtime.ts",
+      "baselineTuiLines": 34,
+      "baselineSimilarity": 0.1778,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/recall-bundle.ts",
+      "baselineTuiLines": 132,
+      "baselineSimilarity": 0.6386,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/recall-capture.ts",
+      "baselineTuiLines": 152,
+      "baselineSimilarity": 0.8301,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/recall-query.ts",
+      "baselineTuiLines": 260,
+      "baselineSimilarity": 0.7073,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/recall-review.ts",
+      "baselineTuiLines": 157,
+      "baselineSimilarity": 0.4964,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/recall-shared.ts",
+      "baselineTuiLines": 35,
+      "baselineSimilarity": 0.7719,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/runtime-services.ts",
+      "baselineTuiLines": 396,
+      "baselineSimilarity": 0.7344,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/schedule-runtime.ts",
+      "baselineTuiLines": 400,
+      "baselineSimilarity": 0.1144,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/session-content.ts",
+      "baselineTuiLines": 465,
+      "baselineSimilarity": 0.4485,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/session-workflow.ts",
+      "baselineTuiLines": 523,
+      "baselineSimilarity": 0.6137,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/session.ts",
+      "baselineTuiLines": 505,
+      "baselineSimilarity": 0.4716,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/shell-core.ts",
+      "baselineTuiLines": 468,
+      "baselineSimilarity": 0.4973,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/status-runtime.ts",
+      "baselineTuiLines": 13,
+      "baselineSimilarity": 0.2373,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/subscription-runtime.ts",
+      "baselineTuiLines": 434,
+      "baselineSimilarity": 0.5799,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/tasks-runtime.ts",
+      "baselineTuiLines": 314,
+      "baselineSimilarity": 0.4168,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/transcript-reading.ts",
+      "baselineTuiLines": 35,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/tts-runtime.ts",
+      "baselineTuiLines": 55,
+      "baselineSimilarity": 0.5882,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/commands/update-runtime.ts",
+      "baselineTuiLines": 550,
+      "baselineSimilarity": 0.4388,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/concealed-input.ts",
+      "baselineTuiLines": 128,
+      "baselineSimilarity": 0.8604,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/feed-context-factory.ts",
+      "baselineTuiLines": 263,
+      "baselineSimilarity": 0.8663,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/file-picker.ts",
+      "baselineTuiLines": 238,
+      "baselineSimilarity": 0.9832,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-command-route.ts",
+      "baselineTuiLines": 169,
+      "baselineSimilarity": 0.6395,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-content-actions.ts",
+      "baselineTuiLines": 554,
+      "baselineSimilarity": 0.6648,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-feed-routes.ts",
+      "baselineTuiLines": 591,
+      "baselineSimilarity": 0.8574,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-feed.ts",
+      "baselineTuiLines": 521,
+      "baselineSimilarity": 0.7856,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-interactions.ts",
+      "baselineTuiLines": 306,
+      "baselineSimilarity": 0.7386,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-modal-routes.ts",
+      "baselineTuiLines": 686,
+      "baselineSimilarity": 0.7284,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-modal-stack.ts",
+      "baselineTuiLines": 337,
+      "baselineSimilarity": 0.9469,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-modal-token-routes.ts",
+      "baselineTuiLines": 311,
+      "baselineSimilarity": 0.8379,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-picker-routes.ts",
+      "baselineTuiLines": 410,
+      "baselineSimilarity": 0.7596,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-prompt-buffer.ts",
+      "baselineTuiLines": 348,
+      "baselineSimilarity": 0.9581,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-session-view-route.ts",
+      "baselineTuiLines": 152,
+      "baselineSimilarity": 0.9767,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-shortcuts.ts",
+      "baselineTuiLines": 339,
+      "baselineSimilarity": 0.5781,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-ui-state.ts",
+      "baselineTuiLines": 393,
+      "baselineSimilarity": 0.8313,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler-work-tree-route.ts",
+      "baselineTuiLines": 123,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/handler.ts",
+      "baselineTuiLines": 776,
+      "baselineSimilarity": 0.6944,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/input-history.ts",
+      "baselineTuiLines": 379,
+      "baselineSimilarity": 0.8356,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/keybindings.ts",
+      "baselineTuiLines": 362,
+      "baselineSimilarity": 0.7323,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/mcp-workspace.ts",
+      "baselineTuiLines": 594,
+      "baselineSimilarity": 0.8405,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/model-picker-open.ts",
+      "baselineTuiLines": 100,
+      "baselineSimilarity": 0.6201,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/model-picker-types.ts",
+      "baselineTuiLines": 125,
+      "baselineSimilarity": 0.7964,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/model-picker.ts",
+      "baselineTuiLines": 766,
+      "baselineSimilarity": 0.5784,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/notifications-modal.ts",
+      "baselineTuiLines": 123,
+      "baselineSimilarity": 0.9633,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/overlay-filter.ts",
+      "baselineTuiLines": 26,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "input/payments-config.ts",
+      "baselineTuiLines": 167,
+      "baselineSimilarity": 0.5112,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/profile-picker-modal.ts",
+      "baselineTuiLines": 251,
+      "baselineSimilarity": 0.8024,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/search.ts",
+      "baselineTuiLines": 298,
+      "baselineSimilarity": 0.9144,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/selection-modal.ts",
+      "baselineTuiLines": 186,
+      "baselineSimilarity": 0.9695,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/session-picker-modal.ts",
+      "baselineTuiLines": 247,
+      "baselineSimilarity": 0.5363,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal-behavior.ts",
+      "baselineTuiLines": 39,
+      "baselineSimilarity": 0.7907,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal-search.ts",
+      "baselineTuiLines": 99,
+      "baselineSimilarity": 0.9543,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal-secrets.ts",
+      "baselineTuiLines": 81,
+      "baselineSimilarity": 0.7329,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal-subscriptions.ts",
+      "baselineTuiLines": 95,
+      "baselineSimilarity": 0.9684,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal-types.ts",
+      "baselineTuiLines": 217,
+      "baselineSimilarity": 0.3514,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/settings-modal.ts",
+      "baselineTuiLines": 852,
+      "baselineSimilarity": 0.352,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/submission-intent.ts",
+      "baselineTuiLines": 18,
+      "baselineSimilarity": 0.8824,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/submission-router.ts",
+      "baselineTuiLines": 62,
+      "baselineSimilarity": 0.7652,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/surface-modal-host.ts",
+      "baselineTuiLines": 113,
+      "baselineSimilarity": 0.9956,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/theme-settings-actions.ts",
+      "baselineTuiLines": 82,
+      "baselineSimilarity": 0.9333,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "input/tts-settings-actions.ts",
+      "baselineTuiLines": 120,
+      "baselineSimilarity": 0.7841,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "main.ts",
+      "baselineTuiLines": 957,
+      "baselineSimilarity": 0.0062,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "permissions/prompt.ts",
+      "baselineTuiLines": 121,
+      "baselineSimilarity": 0.2827,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "providers/reasoning-effort-surface.ts",
+      "baselineTuiLines": 399,
+      "baselineSimilarity": 0.9449,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/autocomplete-overlay.ts",
+      "baselineTuiLines": 55,
+      "baselineSimilarity": 0.8833,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/back-to-bottom.ts",
+      "baselineTuiLines": 82,
+      "baselineSimilarity": 0.9753,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/block-actions-overlay.ts",
+      "baselineTuiLines": 41,
+      "baselineSimilarity": 0.7917,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/block-actions.ts",
+      "baselineTuiLines": 74,
+      "baselineSimilarity": 0.9595,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/bookmark-modal.ts",
+      "baselineTuiLines": 70,
+      "baselineSimilarity": 0.8889,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/buffer.ts",
+      "baselineTuiLines": 113,
+      "baselineSimilarity": 0.9737,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/code-block.ts",
+      "baselineTuiLines": 489,
+      "baselineSimilarity": 0.8858,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/composer.ts",
+      "baselineTuiLines": 146,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/compositor.ts",
+      "baselineTuiLines": 215,
+      "baselineSimilarity": 0.6972,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/context-inspector.ts",
+      "baselineTuiLines": 174,
+      "baselineSimilarity": 0.9136,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/conversation-layout.ts",
+      "baselineTuiLines": 103,
+      "baselineSimilarity": 0.9239,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/conversation-overlays.ts",
+      "baselineTuiLines": 157,
+      "baselineSimilarity": 0.7461,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/conversation-surface.ts",
+      "baselineTuiLines": 285,
+      "baselineSimilarity": 0.81,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/diff-tint.ts",
+      "baselineTuiLines": 98,
+      "baselineSimilarity": 0.9796,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/diff.ts",
+      "baselineTuiLines": 204,
+      "baselineSimilarity": 0.8365,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/file-picker-overlay.ts",
+      "baselineTuiLines": 74,
+      "baselineSimilarity": 0.9,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/header-line.ts",
+      "baselineTuiLines": 172,
+      "baselineSimilarity": 0.6358,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/help-overlay.ts",
+      "baselineTuiLines": 275,
+      "baselineSimilarity": 0.4336,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/history-search-overlay.ts",
+      "baselineTuiLines": 70,
+      "baselineSimilarity": 0.7135,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/lane-graph/bead.ts",
+      "baselineTuiLines": 804,
+      "baselineSimilarity": 0.9819,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/lane-graph/glyphs.ts",
+      "baselineTuiLines": 134,
+      "baselineSimilarity": 0.947,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/lane-graph/layout.ts",
+      "baselineTuiLines": 248,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/lane-graph/paint.ts",
+      "baselineTuiLines": 538,
+      "baselineSimilarity": 0.9767,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/lane-graph/semantic-memo.ts",
+      "baselineTuiLines": 79,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "renderer/layout.ts",
+      "baselineTuiLines": 19,
+      "baselineSimilarity": 0.9189,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/markdown-inline.ts",
+      "baselineTuiLines": 141,
+      "baselineSimilarity": 0.9894,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/markdown-table.ts",
+      "baselineTuiLines": 464,
+      "baselineSimilarity": 0.9957,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/markdown.ts",
+      "baselineTuiLines": 390,
+      "baselineSimilarity": 0.9897,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/mcp-workspace.ts",
+      "baselineTuiLines": 202,
+      "baselineSimilarity": 0.719,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/modal-utils.ts",
+      "baselineTuiLines": 14,
+      "baselineSimilarity": 0.7368,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/model-workspace.ts",
+      "baselineTuiLines": 523,
+      "baselineSimilarity": 0.1532,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/notifications-modal.ts",
+      "baselineTuiLines": 116,
+      "baselineSimilarity": 0.9569,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/process-view.ts",
+      "baselineTuiLines": 192,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/profile-picker-modal.ts",
+      "baselineTuiLines": 76,
+      "baselineSimilarity": 0.6864,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/search-overlay.ts",
+      "baselineTuiLines": 81,
+      "baselineSimilarity": 0.4161,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/selection-modal-overlay.ts",
+      "baselineTuiLines": 115,
+      "baselineSimilarity": 0.8952,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/semantic-diff.ts",
+      "baselineTuiLines": 368,
+      "baselineSimilarity": 0.9946,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "renderer/session-chips.ts",
+      "baselineTuiLines": 103,
+      "baselineSimilarity": 0.9756,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/session-picker-modal.ts",
+      "baselineTuiLines": 323,
+      "baselineSimilarity": 0.3589,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/settings-modal-context.ts",
+      "baselineTuiLines": 372,
+      "baselineSimilarity": 0.4867,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/settings-modal-helpers.ts",
+      "baselineTuiLines": 278,
+      "baselineSimilarity": 0.4127,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/settings-modal.ts",
+      "baselineTuiLines": 384,
+      "baselineSimilarity": 0.7419,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/shell-surface.ts",
+      "baselineTuiLines": 352,
+      "baselineSimilarity": 0.6344,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/shortcuts-overlay.ts",
+      "baselineTuiLines": 217,
+      "baselineSimilarity": 0.7129,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/status-glyphs.ts",
+      "baselineTuiLines": 22,
+      "baselineSimilarity": 0.5641,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/status-line.ts",
+      "baselineTuiLines": 482,
+      "baselineSimilarity": 0.9969,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/surface-compose.ts",
+      "baselineTuiLines": 174,
+      "baselineSimilarity": 0.9885,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/surface-kit-extra.ts",
+      "baselineTuiLines": 305,
+      "baselineSimilarity": 0.9441,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/surface-kit-list.ts",
+      "baselineTuiLines": 378,
+      "baselineSimilarity": 0.9785,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/surface-kit-parts.ts",
+      "baselineTuiLines": 361,
+      "baselineSimilarity": 0.928,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/surface-kit.ts",
+      "baselineTuiLines": 586,
+      "baselineSimilarity": 0.9801,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/syntax-theme.ts",
+      "baselineTuiLines": 51,
+      "baselineSimilarity": 0.9307,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/system-message.ts",
+      "baselineTuiLines": 43,
+      "baselineSimilarity": 0.8095,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/term-caps.ts",
+      "baselineTuiLines": 359,
+      "baselineSimilarity": 0.1383,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/terminal-bg-probe.ts",
+      "baselineTuiLines": 444,
+      "baselineSimilarity": 0.8367,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/terminal-escapes.ts",
+      "baselineTuiLines": 20,
+      "baselineSimilarity": 0.1429,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/terminal-palette-probe.ts",
+      "baselineTuiLines": 322,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "renderer/terminal-palette-reader.ts",
+      "baselineTuiLines": 183,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "renderer/terminal-palette.ts",
+      "baselineTuiLines": 58,
+      "baselineSimilarity": 0.9744,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "renderer/theme-mode-config.ts",
+      "baselineTuiLines": 70,
+      "baselineSimilarity": 0.4314,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/theme.ts",
+      "baselineTuiLines": 331,
+      "baselineSimilarity": 0.9329,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/thinking.ts",
+      "baselineTuiLines": 24,
+      "baselineSimilarity": 0.8511,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/throbber.ts",
+      "baselineTuiLines": 236,
+      "baselineSimilarity": 0.8411,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/toast-center.ts",
+      "baselineTuiLines": 122,
+      "baselineSimilarity": 0.9794,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/ui-factory.ts",
+      "baselineTuiLines": 184,
+      "baselineSimilarity": 0.5906,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/ui-primitives.ts",
+      "baselineTuiLines": 18,
+      "baselineSimilarity": 0.6522,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/user-message.ts",
+      "baselineTuiLines": 58,
+      "baselineSimilarity": 0.9828,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "renderer/voice-capture-chip.ts",
+      "baselineTuiLines": 53,
+      "baselineSimilarity": 0.8037,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-command-context.ts",
+      "baselineTuiLines": 333,
+      "baselineSimilarity": 0.832,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-command-parts.ts",
+      "baselineTuiLines": 443,
+      "baselineSimilarity": 0.7517,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-core.ts",
+      "baselineTuiLines": 672,
+      "baselineSimilarity": 0.4858,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-hook-bridge.ts",
+      "baselineTuiLines": 156,
+      "baselineSimilarity": 0.6324,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-shell.ts",
+      "baselineTuiLines": 369,
+      "baselineSimilarity": 0.5426,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap-shutdown.ts",
+      "baselineTuiLines": 87,
+      "baselineSimilarity": 0.2913,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/bootstrap.ts",
+      "baselineTuiLines": 767,
+      "baselineSimilarity": 0.471,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/client/fleet-union.ts",
+      "baselineTuiLines": 147,
+      "baselineSimilarity": 0.3348,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/client/hosted-sessions.ts",
+      "baselineTuiLines": 188,
+      "baselineSimilarity": 0.1703,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/client/native-host-fetch.ts",
+      "baselineTuiLines": 16,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/context-accounting-source.ts",
+      "baselineTuiLines": 120,
+      "baselineSimilarity": 0.1513,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/context.ts",
+      "baselineTuiLines": 156,
+      "baselineSimilarity": 0.9408,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/conversation-rewind-port.ts",
+      "baselineTuiLines": 158,
+      "baselineSimilarity": 0.7296,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/index.ts",
+      "baselineTuiLines": 674,
+      "baselineSimilarity": 0.8156,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-conversation-execution.ts",
+      "baselineTuiLines": 54,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-conversation-ingress.ts",
+      "baselineTuiLines": 42,
+      "baselineSimilarity": 0.7568,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-conversation-input.ts",
+      "baselineTuiLines": 24,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-conversation-intake-host.ts",
+      "baselineTuiLines": 39,
+      "baselineSimilarity": 0.5263,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-conversation-intake-journal.ts",
+      "baselineTuiLines": 259,
+      "baselineSimilarity": 0.8977,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-conversation-intake-preflight.ts",
+      "baselineTuiLines": 24,
+      "baselineSimilarity": 1.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-conversation-intake.ts",
+      "baselineTuiLines": 208,
+      "baselineSimilarity": 0.7324,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-work-execution.ts",
+      "baselineTuiLines": 161,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-work-ledger-host.ts",
+      "baselineTuiLines": 200,
+      "baselineSimilarity": 0.125,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-work-ledger.ts",
+      "baselineTuiLines": 159,
+      "baselineSimilarity": 0.0526,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-work-submission-host.ts",
+      "baselineTuiLines": 38,
+      "baselineSimilarity": 0.4337,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/native-work-submission-journal.ts",
+      "baselineTuiLines": 198,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-work-submission-preflight.ts",
+      "baselineTuiLines": 24,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-work-submission-source.ts",
+      "baselineTuiLines": 55,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/native-work-submission.ts",
+      "baselineTuiLines": 206,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "runtime/onboarding/apply.ts",
+      "baselineTuiLines": 614,
+      "baselineSimilarity": 0.5491,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/derivation.ts",
+      "baselineTuiLines": 539,
+      "baselineSimilarity": 0.7476,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/index.ts",
+      "baselineTuiLines": 8,
+      "baselineSimilarity": 0.875,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/markers.ts",
+      "baselineTuiLines": 140,
+      "baselineSimilarity": 0.5443,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/snapshot.ts",
+      "baselineTuiLines": 432,
+      "baselineSimilarity": 0.8695,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/state.ts",
+      "baselineTuiLines": 218,
+      "baselineSimilarity": 0.4624,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/types.ts",
+      "baselineTuiLines": 465,
+      "baselineSimilarity": 0.8032,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/onboarding/verify.ts",
+      "baselineTuiLines": 171,
+      "baselineSimilarity": 0.6275,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/path-shadow-startup.ts",
+      "baselineTuiLines": 54,
+      "baselineSimilarity": 0.2393,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/release-artifacts.ts",
+      "baselineTuiLines": 26,
+      "baselineSimilarity": 0.05,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/services.ts",
+      "baselineTuiLines": 713,
+      "baselineSimilarity": 0.1659,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/store/domains/index.ts",
+      "baselineTuiLines": 1,
+      "baselineSimilarity": 0.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/store/index.ts",
+      "baselineTuiLines": 11,
+      "baselineSimilarity": 0.125,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/store/selectors/index.ts",
+      "baselineTuiLines": 331,
+      "baselineSimilarity": 0.997,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/store/state.ts",
+      "baselineTuiLines": 1,
+      "baselineSimilarity": 0.0,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/ui-read-models.ts",
+      "baselineTuiLines": 61,
+      "baselineSimilarity": 0.9134,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/ui-services.ts",
+      "baselineTuiLines": 219,
+      "baselineSimilarity": 0.878,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/update-check.ts",
+      "baselineTuiLines": 41,
+      "baselineSimilarity": 0.4419,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "runtime/workspace-update-policy.ts",
+      "baselineTuiLines": 7,
+      "baselineSimilarity": 0.7143,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/blocking-input.ts",
+      "baselineTuiLines": 305,
+      "baselineSimilarity": 0.2125,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/service-settings-sync.ts",
+      "baselineTuiLines": 273,
+      "baselineSimilarity": 0.183,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/session-views.ts",
+      "baselineTuiLines": 644,
+      "baselineSimilarity": 0.9053,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/transcript-scroll.ts",
+      "baselineTuiLines": 68,
+      "baselineSimilarity": 0.8718,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/ui-openers.ts",
+      "baselineTuiLines": 549,
+      "baselineSimilarity": 0.5288,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "shell/voice-capture-shell.ts",
+      "baselineTuiLines": 71,
+      "baselineSimilarity": 0.6405,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "utils/clipboard.ts",
+      "baselineTuiLines": 22,
+      "baselineSimilarity": 0.8571,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "utils/format-elapsed.ts",
+      "baselineTuiLines": 30,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "utils/format-number.ts",
+      "baselineTuiLines": 71,
+      "baselineSimilarity": 1.0,
+      "status": "platform-forwarder"
+    },
+    {
+      "path": "utils/splash-lines.ts",
+      "baselineTuiLines": 103,
+      "baselineSimilarity": 0.6211,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "utils/terminal-width.ts",
+      "baselineTuiLines": 345,
+      "baselineSimilarity": 0.9637,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "verification/live-verifier.ts",
+      "baselineTuiLines": 421,
+      "baselineSimilarity": 0.5479,
+      "status": "pending-convergence"
+    },
+    {
+      "path": "version.ts",
+      "baselineTuiLines": 26,
+      "baselineSimilarity": 0.6222,
+      "status": "pending-convergence"
+    }
+  ]
+}

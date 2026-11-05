@@ -29,3 +29,5 @@ export * from './session-memory.js';
 export * from './tokenizer.js';
 export * from './tool-reconciliation.js';
 export * from './transcript-events/index.js';
+
+export { hydrateConversationUsage, isConversationContextAvailable, isConversationUsageAvailable } from './conversation-usage.js';

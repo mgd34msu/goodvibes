@@ -1,4 +1,4 @@
-import { nativeWorkExecutionIdentitySchema, type NativeWorkExecutionIdentity } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
@@ -22,10 +22,8 @@ export interface NativeIntakeJournalBinding {
   readonly principalId: string;
 }
 
-export interface NativeIntakeExecutionIntent {
-  readonly sourceRevision: string;
-  readonly target: NativeWorkExecutionIdentity;
-}
+import type { NativeIntakeExecutionIntent } from '@goodvibes-jev/engine/terminal-shell/native';
+export type { NativeIntakeExecutionIntent } from '@goodvibes-jev/engine/terminal-shell/native';
 
 export interface NativeIntakeJournalRecord {
   readonly binding: NativeIntakeJournalBinding;

@@ -1443,6 +1443,46 @@
       "bun": "./sdk/src/browser-decision-router.ts",
       "types": "./sdk/dist/browser-decision-router.d.ts",
       "import": "./sdk/dist/browser-decision-router.js"
+    },
+    "./terminal-shell/session-focus": {
+      "bun": "./terminal-shell/src/session-focus.ts",
+      "types": "./terminal-shell/dist/session-focus.d.ts",
+      "import": "./terminal-shell/dist/session-focus.js"
+    },
+    "./terminal-shell/process-output-log": {
+      "bun": "./terminal-shell/src/process-output-log.ts",
+      "types": "./terminal-shell/dist/process-output-log.d.ts",
+      "import": "./terminal-shell/dist/process-output-log.js"
+    },
+    "./terminal-shell/overlay-filter": {
+      "bun": "./terminal-shell/src/overlay-filter.ts",
+      "types": "./terminal-shell/dist/overlay-filter.d.ts",
+      "import": "./terminal-shell/dist/overlay-filter.js"
+    },
+    "./terminal-shell/format": {
+      "bun": "./terminal-shell/src/format.ts",
+      "types": "./terminal-shell/dist/format.d.ts",
+      "import": "./terminal-shell/dist/format.js"
+    },
+    "./terminal-shell/terminal-palette": {
+      "bun": "./terminal-shell/src/terminal-palette.ts",
+      "types": "./terminal-shell/dist/terminal-palette.d.ts",
+      "import": "./terminal-shell/dist/terminal-palette.js"
+    },
+    "./terminal-shell/semantic-diff": {
+      "bun": "./terminal-shell/src/semantic-diff.ts",
+      "types": "./terminal-shell/dist/semantic-diff.d.ts",
+      "import": "./terminal-shell/dist/semantic-diff.js"
+    },
+    "./terminal-shell/bookmark-modal": {
+      "bun": "./terminal-shell/src/bookmark-modal.ts",
+      "types": "./terminal-shell/dist/bookmark-modal.d.ts",
+      "import": "./terminal-shell/dist/bookmark-modal.js"
+    },
+    "./terminal-shell/native": {
+      "bun": "./terminal-shell/src/native/index.ts",
+      "types": "./terminal-shell/dist/native/index.d.ts",
+      "import": "./terminal-shell/dist/native/index.js"
     }
   },
   "publishConfig": {

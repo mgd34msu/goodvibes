@@ -7,6 +7,10 @@
 
 import { isSavedFileForLabel, type BookmarkEntry, type BookmarkManager } from '@goodvibes-jev/engine/sdk/platform/bookmarks';
 
+// ---------------------------------------------------------------------------
+// BookmarkModal
+// ---------------------------------------------------------------------------
+
 export class BookmarkModal {
   public static readonly DEFAULT_VISIBLE_ROWS = 8;
   public static readonly VISIBLE_ROWS = BookmarkModal.DEFAULT_VISIBLE_ROWS;
@@ -17,6 +21,11 @@ export class BookmarkModal {
   public scrollOffset = 0;
   /** Max visible list rows. */
   public visibleRows = BookmarkModal.DEFAULT_VISIBLE_ROWS;
+  /**
+   * The always-live search row's query. Narrows the list by key and label;
+   * selectedIndex indexes the narrowed list (visibleEntries).
+   */
+  public query = '';
 
   public constructor(private readonly bookmarkManager: BookmarkManager) {}
 
@@ -25,6 +34,7 @@ export class BookmarkModal {
    */
   open(): void {
     this.entries = this.bookmarkManager.list();
+    this.query = '';
     this.selectedIndex = 0;
     this.scrollOffset = 0;
     this.active = true;
@@ -32,6 +42,21 @@ export class BookmarkModal {
 
   close(): void {
     this.active = false;
+    this.query = '';
+  }
+
+  /** The entries the search row lets through, in order. */
+  get visibleEntries(): BookmarkEntry[] {
+    const q = this.query.trim().toLowerCase();
+    if (!q) return this.entries;
+    return this.entries.filter((entry) => entry.key.toLowerCase().includes(q) || entry.label.toLowerCase().includes(q));
+  }
+
+  /** Replace the query; the selection moves to the first match. */
+  setQuery(query: string): void {
+    this.query = query;
+    this.selectedIndex = 0;
+    this.scrollOffset = 0;
   }
 
   setVisibleRows(rows: number): void {
@@ -40,19 +65,21 @@ export class BookmarkModal {
   }
 
   moveUp(): void {
-    if (this.entries.length === 0) return;
-    this.selectedIndex = (this.selectedIndex - 1 + this.entries.length) % this.entries.length;
+    const n = this.visibleEntries.length;
+    if (n === 0) return;
+    this.selectedIndex = (this.selectedIndex - 1 + n) % n;
     this._clampScroll();
   }
 
   moveDown(): void {
-    if (this.entries.length === 0) return;
-    this.selectedIndex = (this.selectedIndex + 1) % this.entries.length;
+    const n = this.visibleEntries.length;
+    if (n === 0) return;
+    this.selectedIndex = (this.selectedIndex + 1) % n;
     this._clampScroll();
   }
 
   getSelected(): BookmarkEntry | null {
-    return this.entries[this.selectedIndex] ?? null;
+    return this.visibleEntries[this.selectedIndex] ?? null;
   }
 
   /**
@@ -65,10 +92,11 @@ export class BookmarkModal {
     this.bookmarkManager.toggle(entry.key); // toggle off = remove
     this.entries = this.bookmarkManager.list();
     // Clamp selectedIndex after removal
-    if (this.entries.length === 0) {
+    const n = this.visibleEntries.length;
+    if (n === 0) {
       this.selectedIndex = 0;
-    } else if (this.selectedIndex >= this.entries.length) {
-      this.selectedIndex = this.entries.length - 1;
+    } else if (this.selectedIndex >= n) {
+      this.selectedIndex = n - 1;
     }
     this._clampScroll();
     return entry;
@@ -81,10 +109,9 @@ export class BookmarkModal {
   openSelectedFile(): string | null {
     const entry = this.getSelected();
     if (!entry) return null;
-    // Saved as <timestamp>-<slug of the label>.txt: match that name exactly,
-    // so a short label cannot open another bookmark's file.
+    // Match the exact saved label; a short label must not open another bookmark.
     const files = this.bookmarkManager.listSavedFiles();
-    const match = files.find((f) => isSavedFileForLabel(f.split('/').pop() ?? '', entry.label));
+    const match = files.find(file => isSavedFileForLabel(file.split('/').pop() ?? '', entry.label));
     if (!match) return null;
     const name = match.split('/').pop()!;
     return this.bookmarkManager.loadSavedFile(name);
@@ -101,7 +128,7 @@ export class BookmarkModal {
     } else if (this.selectedIndex >= this.scrollOffset + visRows) {
       this.scrollOffset = this.selectedIndex - visRows + 1;
     }
-    const maxOffset = Math.max(0, this.entries.length - visRows);
+    const maxOffset = Math.max(0, this.visibleEntries.length - visRows);
     this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset));
   }
 }

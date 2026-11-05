@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 /**
  * Retry for the package-install steps of the release scripts (install smoke,
  * artifact lane). npm and bun fetches hit transient connection faults on CI
@@ -79,7 +80,7 @@ function ensureJudgmentPort(site: string): void {
     judgmentPort(site);
   } catch (error) {
     if (!(error instanceof JudgmentPortMissingError)) throw error;
-    installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env)));
+    installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
   }
 }
 

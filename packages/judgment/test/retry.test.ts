@@ -9,7 +9,7 @@ const good = (id = 'ok') => Response.json({ model: DEFAULT_MODEL, answers: { yes
 const bad = () => Response.json({}, { status: 503 });
 const config = (fetch: NonNullable<JudgmentConfig['fetch']>): JudgmentConfig => ({
   endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' },
-  model: DEFAULT_MODEL, timeoutMs: 15, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch,
+  signal: new AbortController().signal, model: DEFAULT_MODEL, timeoutMs: 15, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch,
 });
 
 const apiError = (headers: Record<string, string>) => APIError.fromResponse(429, {}, new Headers(headers));
@@ -52,6 +52,39 @@ describe('shared retry timing and cancellation', () => {
 });
 
 describe('shared attempt ownership', () => {
+  test.each([0, 15])('an attempt timeout of %s cannot substitute for a cancellation owner', async timeoutMs => {
+    let transmissions = 0;
+    const { signal: _testOwner, ...unowned } = config(async () => { transmissions++; return good(); });
+    const port = createSystemOnePort({ ...unowned, timeoutMs });
+    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'invalid-request' });
+    expect(transmissions).toBe(0);
+  });
+
+  for (const phase of ['fetch', 'provider-wait'] as const) {
+    test.each(['port', 'request'] as const)(`%s owner cancels ${phase} and leaves no listeners`, async cancelOwner => {
+      const owner = new AbortController(); const caller = new AbortController();
+      let started!: () => void;
+      const entered = new Promise<void>(resolve => { started = resolve; });
+      let transmissions = 0;
+      const port = createSystemOnePort({ ...config(async () => {
+        transmissions++;
+        if (phase === 'fetch') { started(); return new Promise<Response>(() => {}); }
+        return Response.json({}, { status: 503, headers: { 'retry-after': '86400' } });
+      }), timeoutMs: 0, signal: owner.signal });
+      const pending = port.ask({ ...request, signal: caller.signal, onRetry: () => { started(); } });
+      await entered;
+      (cancelOwner === 'port' ? owner : caller).abort();
+      await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+      expect(transmissions).toBe(1);
+      expect(getEventListeners(owner.signal, 'abort')).toHaveLength(0);
+      expect(getEventListeners(caller.signal, 'abort')).toHaveLength(0);
+      if (cancelOwner === 'port') {
+        await expect(port.ask({ ...request, signal: new AbortController().signal })).rejects.toMatchObject({ kind: 'aborted' });
+        expect(transmissions).toBe(1);
+      }
+    }, 1000);
+  }
+
   test('every retry rechecks current authority after backoff and before any transmission', async () => {
     let calls = 0;
     let guards = 0;

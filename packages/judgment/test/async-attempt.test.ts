@@ -9,7 +9,7 @@ const good = () => Response.json({ model: DEFAULT_MODEL, answers: { yes: { type:
 const unavailable = () => Response.json({}, { status: 503 });
 const config = (fetch: NonNullable<JudgmentConfig['fetch']>): JudgmentConfig => ({
   endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' },
-  model: DEFAULT_MODEL, timeoutMs: 50, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch,
+  signal: new AbortController().signal, model: DEFAULT_MODEL, timeoutMs: 50, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch,
 });
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

@@ -8,7 +8,7 @@ const secondary = { kind: 'local' as const, baseURL: 'http://127.0.0.1:9999', ap
 const good = (id = 'ok', model = DEFAULT_MODEL) => Response.json({ model, answers: { yes: { type: 'noul', noul: 0.9 } }, usage: { input_tokens: 1, output_tokens: 1 } }, { headers: { 'x-typesafe-request-id': id } });
 const bad = (status = 503, id = 'failed', headers = {}) => Response.json({ error: `must not log ${primary.apiKey}` }, { status, headers: { 'x-typesafe-request-id': id, ...headers } });
 function config(fetch: NonNullable<JudgmentConfig['fetch']>, overrides: Partial<JudgmentConfig> = {}): JudgmentConfig {
-  return { endpoint: primary, model: DEFAULT_MODEL, timeoutMs: 500, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fallbacks: [{ endpoint: secondary, model: DEFAULT_MODEL }], fetch, ...overrides };
+  return { signal: new AbortController().signal, endpoint: primary, model: DEFAULT_MODEL, timeoutMs: 500, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fallbacks: [{ endpoint: secondary, model: DEFAULT_MODEL }], fetch, ...overrides };
 }
 const failure = async (promise: Promise<unknown>): Promise<JudgmentError> => {
   try { await promise; throw new Error('expected rejection'); }
@@ -430,7 +430,7 @@ describe('configured System One failover and primary-only retry', () => {
       return good('local-wire');
     } });
     try {
-      const port = createSystemOnePort({ endpoint: { ...secondary, baseURL: `http://127.0.0.1:${server.port}` }, model: DEFAULT_MODEL, timeoutMs: 500, retry: {} });
+      const port = createSystemOnePort({ signal: new AbortController().signal, endpoint: { ...secondary, baseURL: `http://127.0.0.1:${server.port}` }, model: DEFAULT_MODEL, timeoutMs: 500, retry: {} });
       expect((await port.ask(request)).requestId).toBe('local-wire');
       expect(seen).toEqual(['/v1/systemone', `Bearer ${secondary.apiKey}`]);
     } finally { server.stop(true); }

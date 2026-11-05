@@ -42,7 +42,7 @@ interface UserAuthConfig {
   users?: AuthUser[] | undefined;
   bootstrapFilePath: string;
   bootstrapCredentialPath: string;
-  /** Scrypt cost params for hashing new passwords. Existing hashes carry their own params. Default: Node defaults. */
+  /** Scrypt cost params for hashing new passwords. Existing hashes carry their own params. Default: N=131072, r=8, p=1. */
   scryptParams?: ScryptParams | undefined;
   /** Injectable clock for testing. Defaults to Date.now. */
   nowFn?: (() => number) | undefined;
@@ -53,16 +53,19 @@ const DEFAULT_MAX_SESSIONS = 1000;
 const DEFAULT_MAX_ACCOUNT_LOCKS = 10_000;
 const SCRYPT_KEY_LENGTH = 64;
 
-/** Default scrypt cost parameters matching Node.js defaults (N=16384, r=8, p=1). */
-const DEFAULT_SCRYPT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
+/** New hashes use the OWASP 128 MiB scrypt configuration. */
+const DEFAULT_SCRYPT_PARAMS: ScryptParams = { N: 131072, r: 8, p: 1 };
+/** Two-part hashes predate stored parameters and always used this cost. */
+const LEGACY_SCRYPT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
+const SCRYPT_MAXMEM = 256 * 1024 * 1024;
 
 /**
  * Scrypt cost parameters. N must be a power of 2. Increasing N multiplies
  * memory usage by 128*N*r bytes and CPU time proportionally.
- * Safe minimums: N>=16384, r>=8, p>=1.
+ * New hashes default to N=131072, r=8, p=1; older stored costs remain verifiable.
  */
 export interface ScryptParams {
-  /** CPU/memory cost factor, must be a power of 2. Default: 16384. */
+  /** CPU/memory cost factor, must be a power of 2. Default: 131072. */
   readonly N: number;
   /** Block size. Default: 8. */
   readonly r: number;
@@ -130,7 +133,7 @@ function toBase64(value: Buffer): string {
  */
 function hashPassword(password: string, params: ScryptParams = DEFAULT_SCRYPT_PARAMS, salt?: Buffer): string {
   const actualSalt = salt ?? randomBytes(16);
-  const derived = scryptSync(password, actualSalt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p });
+  const derived = scryptSync(password, actualSalt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM });
   return `${toBase64(actualSalt)}:${params.N}:${params.r}:${params.p}:${toBase64(derived)}`;
 }
 
@@ -142,40 +145,40 @@ function generateInitialPassword(): string {
   return randomBytes(16).toString('hex');
 }
 
-function verifyPassword(password: string, passwordHash: string): boolean {
+function verifyPassword(password: string, passwordHash: string): { readonly params: ScryptParams; readonly legacy: boolean } | undefined {
   const parts = passwordHash.split(':');
-  // Legacy format: salt:hash (2 parts), uses DEFAULT_SCRYPT_PARAMS for backward compat.
+  // Legacy format: salt:hash (2 parts), uses the original fixed cost for backward compatibility.
   // New format: salt:N:r:p:hash (5 parts)
   let saltEncoded: string;
   let hashEncoded: string;
   let params: ScryptParams;
 
   if (parts.length === 2) {
-    // Legacy hash: no cost params stored, use defaults.
+    // Legacy hash: its historical cost must not follow new defaults.
     [saltEncoded, hashEncoded] = parts as [string, string];
-    params = DEFAULT_SCRYPT_PARAMS;
+    params = LEGACY_SCRYPT_PARAMS;
   } else if (parts.length === 5) {
     const N = Number(parts[1]);
     const r = Number(parts[2]);
     const p = Number(parts[3]);
-    if (!Number.isInteger(N) || N < 1 || !Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return false;
+    if (!Number.isInteger(N) || N < 1 || !Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return undefined;
     saltEncoded = parts[0]!;
     hashEncoded = parts[4]!;
     params = { N, r, p };
   } else {
-    return false;
+    return undefined;
   }
 
-  if (!saltEncoded || !hashEncoded) return false;
+  if (!saltEncoded || !hashEncoded) return undefined;
 
   try {
     const salt = Buffer.from(saltEncoded, 'base64');
     const expected = Buffer.from(hashEncoded, 'base64');
-    const actual = scryptSync(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p });
-    if (actual.length !== expected.length) return false;
-    return timingSafeEqual(actual, expected);
+    const actual = scryptSync(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM });
+    if (actual.length !== expected.length) return undefined;
+    return timingSafeEqual(actual, expected) ? { params, legacy: parts.length === 2 } : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -260,7 +263,7 @@ function writeBootstrapCredentialFile(filePath: string, username: string, passwo
   );
 }
 
-function loadOrBootstrapUsers(filePath: string, credentialPath: string, observedRecovery?: () => void, freshAbsence = false): AuthUser[] {
+function loadOrBootstrapUsers(filePath: string, credentialPath: string, observedRecovery?: () => void, freshAbsence = false, params = DEFAULT_SCRYPT_PARAMS): AuthUser[] {
   const existing = readBootstrapUsers(filePath, observedRecovery, freshAbsence);
   if (existing) return existing;
 
@@ -269,7 +272,7 @@ function loadOrBootstrapUsers(filePath: string, credentialPath: string, observed
   const users: AuthUser[] = [
     {
       username,
-      passwordHash: hashPassword(initialPassword),
+      passwordHash: hashPassword(initialPassword, params),
       roles: ['admin'],
     },
   ];
@@ -397,7 +400,7 @@ export class UserAuthManager {
       catch { this.settingsFaulted = true; }
     }
     const seedUsers = config.users ?? loadOrBootstrapUsers(this.userStorePath, this.bootstrapCredentialPath,
-      () => { this.settingsFaulted = true; }, freshAbsence);
+      () => { this.settingsFaulted = true; }, freshAbsence, this.scryptParams);
 
     for (const user of seedUsers) {
       this.users.set(user.username, user);
@@ -435,18 +438,29 @@ export class UserAuthManager {
       return { ok: false, lockedUntilMs: lockState.lockedUntil };
     }
 
-    const user = this.users.get(username);
+    let user = this.users.get(username);
 
-    // Always verify something with constant-time cost so unknown usernames
-    // have the same timing profile as known usernames with wrong password.
-    const hashToCheck = user?.passwordHash ?? 'dGVzdHNhbHQ=:16384:8:1:dGVzdGhhc2h0ZXN0aGFzaHRlc3RoYXNodGVzdGhhc2g=';
-    const passwordOk = verifyPassword(password, hashToCheck) && user !== undefined;
+    // Unknown accounts still perform the configured scrypt work instead of
+    // bypassing password derivation. Legacy hashes retain their stored cost.
+    const target = this.scryptParams;
+    const hashToCheck = user?.passwordHash ?? `Z29vZHZpYmVzLWR1bW15:${target.N}:${target.r}:${target.p}:${Buffer.alloc(SCRYPT_KEY_LENGTH).toString('base64')}`;
+    const verified = verifyPassword(password, hashToCheck);
 
-    if (!passwordOk) {
+    if (!verified || !user) {
       this._recordLoginFailure(username, now);
       const newLock = this.accountLocks.get(username);
       const lockedUntilMs = newLock && newLock.lockedUntil > now ? newLock.lockedUntil : undefined;
       return lockedUntilMs !== undefined ? { ok: false, lockedUntilMs } : { ok: false };
+    }
+
+    if (verified.legacy || verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p) {
+      // Never downgrade a stronger stored dimension during an automatic upgrade.
+      const params = { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) };
+      const updated = { ...user, passwordHash: hashPassword(password, params) };
+      this.users.set(username, updated);
+      try { this.persist(); }
+      catch (error) { this.users.set(username, user); throw error; }
+      user = updated;
     }
 
     // Determine whether this login used the bootstrap credential.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 // read-stale-error-kinds.ts: reads, through Jev (`errors.stale-server-kind`),
 // whether each consumer-facing error doc and worker test error-contract-check.ts
 // guards still presents 'server' as an SDK error kind, and stores the readings
@@ -29,7 +30,7 @@ import {
 const { values } = parseArgs({ args: Bun.argv.slice(2), options: { all: { type: 'boolean' } } });
 const SITE = 'errors.stale-server-kind.docs';
 
-const port = createSystemOnePort(judgmentConfigFromEnv(process.env));
+const port = createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() }));
 const model = staleServerKind.model ?? port.model;
 const stored = loadStaleServerKindReadings();
 const reuse = values.all !== true && stored?.decision === DECISION && stored.model === model;

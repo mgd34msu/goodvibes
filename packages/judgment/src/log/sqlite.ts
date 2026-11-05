@@ -1,18 +1,16 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionTruth, NewDecisionEntry } from './types.ts';
-import { COLUMNS, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
+import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
 
 /** What reading an entry back needs from its row. */
 interface Row {
   readonly id: string;
   readonly entry: string;
-  readonly readings: string | null;
-  readonly action: string | null;
-  readonly truth: string | null;
+  readonly notes: string;
 }
 
-/** Each note kind is stored, as text, in the column of the same name. */
+/** Latest-value projection columns; the ordered note table retains history. */
 type NoteColumn = DecisionNote['kind'];
 /** How a note of one kind is written to its column and read back. */
 interface NoteCodec<N extends DecisionNote> {
@@ -35,10 +33,8 @@ const toParams = (id: DecisionId, entry: NewDecisionEntry): InsertParams => ({ i
 function toEntry(row: Row): DecisionEntry {
   const entry = { ...(JSON.parse(row.entry) as NewDecisionEntry), id: row.id as DecisionId };
   if (entry.status === 'failed') return entry;
-  const notes = NOTE_COLUMNS.flatMap((column) => {
-    const text = row[column];
-    return text === null ? [] : [codecFor(column).read(text)];
-  });
+  const saved = JSON.parse(row.notes) as { kind: NoteColumn; payload: string }[];
+  const notes = saved.map(note => codecFor(note.kind).read(note.payload));
   return { ...entry, notes };
 }
 
@@ -50,13 +46,19 @@ const ID_IS = equals('id');
 const SQL = {
   insert: `INSERT INTO ${TABLE} (${INSERT_COLUMNS.join(', ')}) VALUES (${INSERT_COLUMNS.map(param).join(', ')})`,
   attach: (column: NoteColumn) => `UPDATE ${TABLE} SET ${equals(column)} WHERE ${ID_IS} AND status = 'answered'`,
+  append: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload) VALUES ($id, $kind, $payload)`,
   /** Newest first, up to $limit, meeting every condition given. */
   matching: (conditions: readonly string[]) =>
-    `SELECT * FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')} ORDER BY at DESC, id DESC LIMIT $limit`,
+    `SELECT ${TABLE}.id, ${TABLE}.entry,
+       (SELECT json_group_array(json_object('kind', kind, 'payload', payload)) FROM
+         (SELECT kind, payload FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id ORDER BY seq)) AS notes
+     FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')} ORDER BY at DESC, id DESC LIMIT $limit`,
 };
 
 const OUTCOME_FILTER =
-  `EXISTS (SELECT 1 FROM json_tree(${TABLE}.readings) WHERE json_tree.key = 'outcome' AND json_tree.type = 'text' AND json_tree.atom = $outcome)`;
+  `EXISTS (SELECT 1 FROM ${NOTES_TABLE}, json_tree(${NOTES_TABLE}.payload)
+    WHERE decision_id = ${TABLE}.id AND kind = 'readings'
+      AND json_tree.key = 'outcome' AND json_tree.type = 'text' AND json_tree.atom = $outcome)`;
 
 /** The condition each query filter puts on a row; the filter's value is bound under the filter's own name. */
 const FILTERS: Readonly<Record<Exclude<keyof DecisionQuery, 'limit'>, string>> = {
@@ -83,11 +85,13 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   /** The writing statements, prepared once. */
   readonly #insert: Statement;
   readonly #attach: Readonly<Record<NoteColumn, Statement>>;
+  readonly #append: Statement;
 
   constructor(path: string) {
     this.#db = openLog(path);
     this.#insert = this.#db.prepare(SQL.insert);
     this.#attach = Object.fromEntries(NOTE_COLUMNS.map((column) => [column, this.#db.prepare(SQL.attach(column))])) as Record<NoteColumn, Statement>;
+    this.#append = this.#db.prepare(SQL.append);
   }
 
   record(entry: NewDecisionEntry): DecisionId {
@@ -101,8 +105,14 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
 
   attach(id: string, note: DecisionNote): void {
     const column = note.kind;
-    const { changes } = this.#attach[column].run({ id, [column]: codecFor(column).write(note) });
-    if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${column} note`);
+    const payload = codecFor(column).write(note);
+    this.#db.transaction(() => {
+      // Retain latest-value columns for existing SQL consumers, but never use
+      // them as history. Both writes commit together or neither takes effect.
+      const { changes } = this.#attach[column].run({ id, [column]: payload });
+      if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${column} note`);
+      this.#append.run({ id, kind: column, payload });
+    }).immediate();
   }
 
   get(id: string): DecisionEntry | undefined {

@@ -57,6 +57,14 @@ export type DecisionNote =
   | { readonly kind: 'action'; readonly action: string }
   | { readonly kind: 'truth'; readonly truth: DecisionTruth };
 
+function latestNote(notes: readonly DecisionNote[], kind: DecisionNote['kind']): DecisionNote | undefined {
+  for (let index = notes.length - 1; index >= 0; index--) {
+    const note = notes[index];
+    if (note?.kind === kind) return note;
+  }
+  return undefined;
+}
+
 /** A call the endpoint answered. */
 export interface AnsweredEntry extends CallRecord {
   readonly status: 'answered';
@@ -69,24 +77,24 @@ export interface AnsweredEntry extends CallRecord {
   readonly notes: readonly DecisionNote[];
 }
 
-/** What the decision concluded from an entry's answers, when it has said. */
+/** The latest recorded conclusion; the entry's notes retain earlier readings. */
 export function readingsOf(entry: DecisionEntry): JsonValue | undefined {
   if (entry.status !== 'answered') return undefined;
-  const note = entry.notes.find((candidate) => candidate.kind === 'readings');
+  const note = latestNote(entry.notes, 'readings');
   return note?.kind === 'readings' ? note.readings : undefined;
 }
 
-/** What code did with an entry's decision, when it has said. */
+/** The latest recorded action; the entry's notes retain earlier actions. */
 export function actionOf(entry: DecisionEntry): string | undefined {
   if (entry.status !== 'answered') return undefined;
-  const note = entry.notes.find((candidate) => candidate.kind === 'action');
+  const note = latestNote(entry.notes, 'action');
   return note?.kind === 'action' ? note.action : undefined;
 }
 
-/** What was right for an entry's decision, when an owner, an outcome or a fixture has said. */
+/** The latest recorded ground truth; the entry's notes retain earlier truth. */
 export function truthOf(entry: DecisionEntry): DecisionTruth | undefined {
   if (entry.status !== 'answered') return undefined;
-  const note = entry.notes.find((candidate) => candidate.kind === 'truth');
+  const note = latestNote(entry.notes, 'truth');
   return note?.kind === 'truth' ? note.truth : undefined;
 }
 
@@ -122,7 +130,7 @@ export interface DecisionQuery {
 export interface DecisionLog {
   /** Appends an entry and returns its id. Throws when the write fails. */
   record(entry: NewDecisionEntry): DecisionId;
-  /** Attaches a note to an answered entry. Throws when there is no answered entry with that id or the write fails. */
+  /** Appends a note to an answered entry without replacing earlier notes. Throws when there is no answered entry with that id or the write fails. */
   attach(id: string, note: DecisionNote): void;
   get(id: string): DecisionEntry | undefined;
   query(query?: DecisionQuery): readonly DecisionEntry[];

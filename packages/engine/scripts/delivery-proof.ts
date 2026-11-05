@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 /**
  * Live proof of failure transience before retry, cooldown or dead-letter.
  *
@@ -53,7 +54,7 @@ function wording(error: unknown): string {
   return `${error.message}${cause}`;
 }
 
-installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env)));
+installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
 
 let failed = 0;
 for (const proof of CASES) {

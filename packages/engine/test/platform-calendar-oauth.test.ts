@@ -1040,7 +1040,7 @@ describe('calendar permission provenance and complete evidence', () => {
 });
 
 function transportConfig(fetchImpl: NonNullable<JudgmentConfig['fetch']>): JudgmentConfig {
-  return { endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-judgment-key' },
+  return { signal: new AbortController().signal, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-judgment-key' },
     model: DEFAULT_MODEL, timeoutMs: 1_000, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: fetchImpl };
 }
 function permissionWireResponse(body: string): Response {

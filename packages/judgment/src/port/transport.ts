@@ -26,6 +26,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   const policy = retryPolicy(config.retry);
   const timeoutMs = config.timeoutMs;
   const defaultModel = config.model;
+  const ownerSignal = config.signal;
   const health: JudgmentEndpointHealth[] = targets.map(({ endpoint, model }, endpointIndex) => ({ endpointIndex, endpointKind: endpoint.kind, model, attempts: 0, consecutiveFailures: 0 }));
   const keys = targets.map((target) => target.endpoint.apiKey);
   const safeId = (value: string | undefined): string | undefined => {
@@ -56,16 +57,20 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         if (attempts.length > 128) attempts.shift();
       };
       const { signal, beforeAttempt, beforeAsyncAttempt, onRetry } = request;
+      const owners = [...new Set([signal, ownerSignal].filter((owner): owner is AbortSignal => owner !== undefined))];
       const requestedModel = request.model ?? defaultModel;
       const controller = new AbortController();
       const cancelled = () => controller.abort(new JudgmentError('aborted', 'the judgment call was cancelled'));
-      if (signal?.aborted) cancelled();
-      signal?.addEventListener('abort', cancelled, { once: true });
+      for (const owner of owners) {
+        if (owner.aborted) cancelled();
+        owner.addEventListener('abort', cancelled, { once: true });
+      }
       const checkCancellation = () => {
-        if (signal?.aborted) cancelled();
+        if (owners.some(owner => owner.aborted)) cancelled();
         if (controller.signal.aborted) throw controller.signal.reason;
       };
       try {
+        if (owners.length === 0) throw new JudgmentError('invalid-request', 'judgment calls require an owning AbortSignal on the request or port');
         if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are not supported; cancel through the owning signal');
         checkCancellation();
         let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
@@ -199,7 +204,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           lineage: lineage(),
         });
       } finally {
-        signal?.removeEventListener('abort', cancelled);
+        for (const owner of owners) owner.removeEventListener('abort', cancelled);
       }
     },
   };

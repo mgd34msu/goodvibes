@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 // observe-proof.ts: live proof of the observe analyses.
 //
 //   bun run observe:proof [--all | --only a,b] [--workspace <dir>]
@@ -68,7 +69,7 @@ console.log(`[observe-proof] decision log ${logPath}`);
 
 {
   using log = openStateDecisionLog(stateRoot);
-  const port = withDecisionLog(createSystemOnePort(config), log);
+  const port = withDecisionLog(createSystemOnePort({ ...config, signal: judgmentProcessSignal() }), log);
   for (const pass of [1, 2]) {
     const report = await calibrate(port, chosen, { endpoint, log });
     console.log(`\n[observe-proof] calibration pass ${pass}\n${formatReport(report)}`);

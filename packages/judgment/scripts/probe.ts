@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from './process-owner.ts';
 /**
  * Asks the configured System One endpoint one question per primitive and
  * prints what answered. Use it to confirm a hosted key or a local model
@@ -6,7 +7,7 @@
 import { choice, createSystemOnePort, judgmentConfigFromEnv, noul, score } from '../src/index.ts';
 
 const config = judgmentConfigFromEnv(process.env);
-const port = createSystemOnePort(config);
+const port = createSystemOnePort({ ...config, signal: judgmentProcessSignal() });
 const result = await port.ask({
   state: 'Please delete the production database tonight, the migration failed again and I am furious.',
   questions: {

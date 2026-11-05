@@ -53,6 +53,68 @@ let clock = Date.parse('2026-09-26T00:00:00Z');
 const tick = () => new Date((clock += 60_000));
 
 describe('withDecisionLog + SqliteDecisionLog', () => {
+  test('preserves every note in recording order while latest-value helpers remain compatible', async () => {
+    using log = new SqliteDecisionLog(':memory:');
+    const result = await withDecisionLog(answering(0.93), log, tick).ask({ state: 'audit', questions: { urgent: { type: 'noul', instructions: 'Urgent?' } } });
+    const id = result.decisionId!;
+    const notes = [
+      { kind: 'readings' as const, readings: { outcome: 'escalate' } },
+      { kind: 'action' as const, action: 'autonomous:act:first' },
+      { kind: 'readings' as const, readings: { autonomousDecision: { outcome: 'act' } } },
+      { kind: 'action' as const, action: 'autonomous:claim:first' },
+      { kind: 'action' as const, action: 'autonomous:act:second' },
+    ];
+    for (const note of notes) log.attach(id, note);
+    const entry = log.get(id)!;
+    expect(entry.status === 'answered' && entry.notes).toEqual(notes);
+    expect(readingsOf(entry)).toEqual({ autonomousDecision: { outcome: 'act' } });
+    expect(actionOf(entry)).toBe('autonomous:act:second');
+    expect(log.query({ outcome: 'escalate' }).map(entry => String(entry.id))).toEqual([id]);
+    expect(log.query({ outcome: 'act' }).map(entry => String(entry.id))).toEqual([id]);
+  });
+
+  test('migrates retained version-three notes and appends across independent connections and reopen', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jev-audit-migration-')); const path = join(dir, 'log.sqlite');
+    let id: string;
+    try {
+      {
+        using log = new SqliteDecisionLog(path);
+        id = (await battery.run(withDecisionLog(answering(0.93), log, tick), 'audit')).result.decisionId!;
+        log.attach(id, { kind: 'action', action: 'older unavailable history' });
+        log.attach(id, { kind: 'action', action: 'retained legacy action' });
+      }
+      {
+        using old = new Database(path);
+        old.exec('DROP TABLE decision_notes; PRAGMA user_version = 3');
+      }
+      {
+        using first = new SqliteDecisionLog(path); using second = new SqliteDecisionLog(path);
+        expect(actionOf(first.get(id)!)).toBe('retained legacy action');
+        first.attach(id, { kind: 'action', action: 'first connection' });
+        second.attach(id, { kind: 'action', action: 'second connection' });
+      }
+      using reopened = new SqliteDecisionLog(path);
+      const entry = reopened.get(id)!;
+      expect(entry.status === 'answered' && entry.notes.filter(note => note.kind === 'action').map(note => note.action))
+        .toEqual(['retained legacy action', 'first connection', 'second connection']);
+      expect(actionOf(entry)).toBe('second connection');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('a failed history append rolls back the latest-value projection too', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jev-audit-atomic-')); const path = join(dir, 'log.sqlite');
+    try {
+      using log = new SqliteDecisionLog(path); using observer = new Database(path);
+      const id = (await battery.run(withDecisionLog(answering(0.93), log, tick), 'audit')).result.decisionId!;
+      log.attach(id, { kind: 'action', action: 'original' });
+      const before = log.get(id);
+      observer.exec("CREATE TRIGGER refuse_note BEFORE INSERT ON decision_notes BEGIN SELECT RAISE(ABORT, 'fixture refusal'); END");
+      expect(() => log.attach(id, { kind: 'action', action: 'must not persist' })).toThrow();
+      expect(log.get(id)).toEqual(before);
+      expect(observer.query('SELECT action FROM decisions WHERE id = ?').get(id)).toEqual({ action: 'original' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test('outcome queries include readings nested under fan-out parts', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const port = withDecisionLog(answering(0.93), log, tick);
@@ -66,7 +128,12 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     const path = join(dir, 'decisions.sqlite');
     if (mode === 'migration') {
       using db = new Database(path);
-      db.exec("CREATE TABLE decisions (id TEXT PRIMARY KEY, entry TEXT NOT NULL, readings TEXT, action TEXT); PRAGMA user_version = 2");
+      db.exec(`CREATE TABLE decisions (id TEXT PRIMARY KEY, entry TEXT NOT NULL,
+        at TEXT GENERATED ALWAYS AS (json_extract(entry, '$.at')) VIRTUAL,
+        status TEXT GENERATED ALWAYS AS (json_extract(entry, '$.status')) VIRTUAL,
+        battery TEXT GENERATED ALWAYS AS (json_extract(entry, '$.context.battery')) VIRTUAL,
+        site TEXT GENERATED ALWAYS AS (json_extract(entry, '$.context.site')) VIRTUAL,
+        readings TEXT, action TEXT); PRAGMA user_version = 2`);
     }
     const module = new URL('../src/log/sqlite-schema.ts', import.meta.url).href;
     const children = Array.from({ length: 8 }, () => Bun.spawn([process.execPath, '-e', `
@@ -74,7 +141,7 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
       process.stdout.write('ready\\n');
       for await (const _ of Bun.stdin.stream()) break;
       const db = openLog(process.argv[2]);
-      if (db.query('PRAGMA user_version').get().user_version !== 3) throw new Error('wrong schema');
+      if (db.query('PRAGMA user_version').get().user_version !== 4) throw new Error('wrong schema');
       db.close();
     `, module, path], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
     try {

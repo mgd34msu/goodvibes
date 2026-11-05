@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 /**
  * Live proof of the routing subsystem.
  *
@@ -37,7 +38,7 @@ type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 const stateDir = join(process.env['XDG_STATE_HOME'] ?? join(homedir(), '.local', 'state'), 'goodvibes-jev', 'routing-proof');
 mkdirSync(stateDir, { recursive: true });
 
-installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env)));
+installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
 
 const benchmarkStore = new BenchmarkStore({ dir: stateDir });
 const registry = new ProviderRegistry({

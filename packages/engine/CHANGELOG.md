@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Preserve ordered decision audit notes instead of overwriting prior readings,
+  actions and truth. Migrate retained schema 2/3 notes to append-only schema 4
+  while keeping latest-note helpers compatible.
+- Require an explicit request or port cancellation owner for real judgment
+  calls, including those with per-attempt timeouts. CLI owners cancel on SIGINT
+  and SIGTERM; live calibration remains optional.
+- Hash new local passwords with scrypt N=131072, r=8, p=1 and an explicit memory
+  budget. Preserve legacy verification and upgrade weaker hashes after successful
+  login without lowering stronger stored parameters.
+
 ## [2.0.25] - 2026-11-05
 
 ### Added

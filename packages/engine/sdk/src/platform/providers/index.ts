@@ -293,3 +293,7 @@ export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFact
 export { installCatalogModelFacts } from './model-catalog-facts.js';
 export { ModelFamilyReadings, modelFamilyReadings } from './model-family.js';
 export type { ModelFamily, ModelFamilyInput } from './model-family.js';
+
+export { DecisionRouterProvider, prepareDecisionRouterTurn, describeDecisionRoute } from './decision-router.js';
+export type { DecisionRouterRouteInfo, PreparedDecisionRoute, DecisionRouterProviderOptions } from './decision-router.js';
+export type { DecisionRoutingContext } from './decision-router-context.js';

@@ -1,3 +1,4 @@
+import type { DecisionRouterSettings } from './decision-router-settings.js';
 /**
  * Shared config schema types for goodvibes-sdk.
  */
@@ -64,6 +65,7 @@ export interface GoodVibesConfig {
     showToolPreview: boolean;   // default: false
   };
   provider: {
+    decisionRouter?: DecisionRouterSettings;
     reasoningEffort: string;    // default: 'medium'. Per-model levels, see providers/reasoning-effort.ts
     model: string;              // default: 'openrouter:openrouter/free'
     embeddingProvider: string;  // default: 'hashed-local'
@@ -244,6 +246,7 @@ export type ConfigKey =
   | 'display.showTokenSpeed'
   | 'display.showToolPreview'
   | 'provider.reasoningEffort'
+  | 'provider.decisionRouter'
   | 'provider.model'
   | 'provider.embeddingProvider'
   | 'provider.systemPromptFile'

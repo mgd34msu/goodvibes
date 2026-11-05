@@ -1438,6 +1438,11 @@
       "bun": "./sdk/src/platform/ci-watch/index.ts",
       "types": "./sdk/dist/platform/ci-watch/index.d.ts",
       "import": "./sdk/dist/platform/ci-watch/index.js"
+    },
+    "./sdk/browser/decision-router": {
+      "bun": "./sdk/src/browser-decision-router.ts",
+      "types": "./sdk/dist/browser-decision-router.d.ts",
+      "import": "./sdk/dist/browser-decision-router.js"
     }
   },
   "publishConfig": {

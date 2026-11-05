@@ -63,6 +63,7 @@ export async function runToolExhaustionFinalizer(
     systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(
       [session.meta.systemPrompt, deps.finalizerPrompt].filter(Boolean).join('\n\n'),
     ),
+    routingContext: { sessionId, turnId },
     model: session.meta.model,
     provider: session.meta.provider,
     abortSignal,

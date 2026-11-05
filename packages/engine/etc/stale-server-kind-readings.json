@@ -39,13 +39,13 @@
       "probability": 0.02
     },
     "test/workers-wrangler/wrangler.test.ts": {
-      "sha256": "02dbfe149935fb53385dad4c20825867455884168943d0254d990016c0136d61",
+      "sha256": "581b9c5be4b9743b50b60d9e080024031123d8420ef5805feb2057fce919e6a2",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.03
     },
     "test/workers/SETUP.md": {
-      "sha256": "e8b4c91a9cf063a07a37b1a915bedf4d0d708e1ca050f76e3c0d8df19057106c",
+      "sha256": "de30d2cbc852bb3d7b6ff8fc1d2988da6b49eeecb766392c32547943aa93415f",
       "verdict": "no",
       "outcome": "act",
       "probability": 0.02

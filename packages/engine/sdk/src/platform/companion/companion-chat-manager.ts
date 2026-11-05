@@ -812,11 +812,14 @@ export class CompanionChatManager {
       settle: scope.settle,
     });
 
+    let decisionRoute: import('../providers/decision-router.js').DecisionRouterRouteInfo | undefined;
+    let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     try {
       const toolDefinitions = this.toolRegistry?.getToolDefinitions() ?? [];
 
       while (!abortSignal.aborted) {
         const stream = this.provider.chatStream([...session.conversation.getMessagesForLLM()], {
+          routingContext: { sessionId, turnId, ...(userMsg ? { prompt: userMsg.content } : {}) },
           systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(session.meta.systemPrompt),
           model: session.meta.model,
           provider: session.meta.provider,
@@ -871,6 +874,13 @@ export class CompanionChatManager {
               throw new Error(chunk.error ?? 'Provider streaming error');
             }
             case 'done':
+              if (chunk.decisionRoute) decisionRoute = chunk.decisionRoute;
+              if (chunk.usage) actualUsage = {
+                inputTokens: actualUsage.inputTokens + chunk.usage.inputTokens,
+                outputTokens: actualUsage.outputTokens + chunk.usage.outputTokens,
+                cacheReadTokens: actualUsage.cacheReadTokens + (chunk.usage.cacheReadTokens ?? 0),
+                cacheWriteTokens: actualUsage.cacheWriteTokens + (chunk.usage.cacheWriteTokens ?? 0),
+              };
               break;
           }
         }
@@ -911,6 +921,7 @@ export class CompanionChatManager {
         id: assistantMessageId,
         sessionId,
         role: 'assistant',
+        ...(decisionRoute ? { metadata: { decisionRoute, usage: actualUsage } } : {}),
         content: assistantContent,
         attachments: [],
         createdAt: now,

@@ -1086,7 +1086,7 @@ export class ConfigManager {
     value = coerceSchemaValue(key, schema, value);
     if (schema?.validate && !schema.validate(value)) {
       const hint = schema.validationHint ? ` (${schema.validationHint})` : '';
-      if (key === 'judgment.fallbacks' || key === 'judgment.backend' || key === 'judgment.keyName') {
+      if (key === 'provider.decisionRouter' || key === 'judgment.fallbacks' || key === 'judgment.backend' || key === 'judgment.keyName') {
         throw new ConfigError(`Invalid value for ${key}${hint}`);
       }
       throw new ConfigError(`Invalid value for ${key}: ${String(value)}${hint}`);

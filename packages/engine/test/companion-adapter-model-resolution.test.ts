@@ -1,3 +1,5 @@
+import { DecisionRouterProvider } from '../sdk/src/platform/providers/decision-router.js';
+import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 /**
  * companion-adapter-model-resolution.test.ts
  *
@@ -293,4 +295,22 @@ describe('createCompanionProviderAdapter: model id resolution', () => {
 
     expect(recordingProvider.recordedTools?.map((tool) => tool.name)).toEqual(['read']);
   });
+});
+
+test('companion tool rounds share one Decision Router selection and expose actual route usage', async () => {
+  const readings = fakePort((name, question) => name === 'pick' ? choiceAnswer(question, 'general', 0.97) : noulAnswer(0.97));
+  const answer = makeRecordingProvider('answer');
+  const router = new DecisionRouterProvider({ settings: () => ({ categories: { general: { target: { provider: 'answer', model: 'target' } } } }),
+    resolveTarget: () => ({ provider: answer, model: makeModelDef('target', 'answer') }), capturePort: () => ({ port: readings.port, assertCurrent() {} }) });
+  const adapter = createCompanionProviderAdapter(makeStubRegistry(makeModelDef('auto', 'decision-router'), router));
+  const signal = new AbortController().signal;
+  const options = { model: 'decision-router:auto', provider: 'decision-router', abortSignal: signal, routingContext: { sessionId: 'session', turnId: 'one' } };
+  const messages: Parameters<typeof adapter.chatStream>[0] = [{ role: 'user', content: 'hello' }];
+  let terminal: unknown;
+  for await (const chunk of adapter.chatStream(messages, options)) if (chunk.type === 'done') terminal = chunk;
+  messages.push({ role: 'tool', callId: 'tool', content: 'complete tool evidence' });
+  for await (const _chunk of adapter.chatStream(messages, options)) { /* consume stream */ }
+  expect(readings.requests).toHaveLength(1);
+  expect(answer.recordedModel).toBe('target');
+  expect(terminal).toMatchObject({ decisionRoute: { provider: 'answer', model: 'target' }, usage: { inputTokens: 0, outputTokens: 0 } });
 });

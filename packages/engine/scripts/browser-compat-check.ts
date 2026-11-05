@@ -14,6 +14,7 @@ const runtimeNeutralEntries = [
   'sdk/dist/browser.js',
   'sdk/dist/browser-homeassistant.js',
   'sdk/dist/browser-knowledge.js',
+  'sdk/dist/browser-decision-router.js',
   'sdk/dist/platform/gate/presets.js',
   'sdk/dist/react-native.js',
   'sdk/dist/expo.js',

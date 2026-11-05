@@ -1,3 +1,4 @@
+import type { DecisionRouterSettings } from './decision-router-settings.js';
 /**
  * schema-types-values.ts, the ConfigKey -> value-type map.
  *
@@ -57,6 +58,7 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'display.showTokenSpeed' ? boolean :
   K extends 'display.showToolPreview' ? boolean :
   K extends 'provider.reasoningEffort' ? string :
+  K extends 'provider.decisionRouter' ? DecisionRouterSettings :
   K extends 'provider.model' ? string :
   K extends 'provider.embeddingProvider' ? string :
   K extends 'provider.systemPromptFile' ? string :

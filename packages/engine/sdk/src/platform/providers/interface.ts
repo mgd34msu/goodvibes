@@ -1,3 +1,5 @@
+import type { DecisionRoutingContext } from './decision-router-context.js';
+import type { DecisionRouterRouteInfo } from './decision-router.js';
 import type { ToolDefinition, ToolCall } from '../types/tools.js';
 import type { ProviderCapability } from './capabilities.js';
 import type { ProviderAdapterKind } from './adapter-kind.js';
@@ -313,6 +315,8 @@ export type ContentPart =
   | { type: 'image'; data: string; mediaType: string };
 
 export interface ChatRequest {
+  /** Host-owned routing hints; used only by the explicitly selected Decision Router. */
+  routingContext?: DecisionRoutingContext | undefined;
   messages: ProviderMessage[];
   tools?: ToolDefinition[] | undefined;
   model: string;
@@ -391,6 +395,8 @@ export interface ProviderResponseIdentity {
 }
 
 export interface ChatResponse {
+  /** Actual selected answer route, distinct from provider-reported identity. */
+  decisionRoute?: DecisionRouterRouteInfo | undefined;
   /** Optional bounded response provenance. Absence means the adapter did not capture it. */
   responseIdentity?: ProviderResponseIdentity | undefined;
   content: string;

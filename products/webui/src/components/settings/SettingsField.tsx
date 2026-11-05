@@ -1,3 +1,4 @@
+import { DecisionRouterEditor } from './DecisionRouterEditor';
 /**
  * SettingsField, one typed config editor row, driven by the SDK schema. Laid
  * out as a settings-dialog row: a readable label, the key in mono and the
@@ -122,6 +123,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
   const control = (() => {
     // Object-typed keys get structured editors (see module header).
     if (field.type === 'object') {
+      if (field.key === 'provider.decisionRouter') return <DecisionRouterEditor value={effectiveValue(field)} onCommit={next => onCommit(field.key, next)} />;
       if (field.key === 'pricing.modelPrices') {
         // The editor owns its saving/error state, commits go straight to the
         // parent's config.set so a rejection surfaces inside the editor row.

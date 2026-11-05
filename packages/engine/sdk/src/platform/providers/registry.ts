@@ -1,3 +1,4 @@
+import { DecisionRouterProvider } from './decision-router.js';
 import { installCatalogModelFacts } from './model-catalog-facts.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { LLMProvider, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
@@ -173,6 +174,15 @@ export class ProviderRegistry {
       persistenceRoot: this.getPersistenceRoot(),
       cachePolicy: this.configManager, // cache.enabled / cache.stableTtl, read per request like their hit-rate siblings
     });
+    if (!this.providers.has('decision-router')) this.register(new DecisionRouterProvider({
+      settings: () => this.configManager.get('provider.decisionRouter'),
+      resolveTarget: target => {
+        const definition = findModelDefinitionForProvider(target.model, target.provider, this.getModelRegistry(), CATALOG_PROVIDER_NAME_ALIASES);
+        if (!definition) throw new Error(`No model '${target.model}' for Decision Router provider '${target.provider}'.`);
+        const provider = this.getForModel(definition.registryKey, target.provider);
+        return { provider, model: { ...definition, provider: provider.name, registryKey: `${provider.name}:${definition.id}` } };
+      },
+    }));
   }
 
   /**

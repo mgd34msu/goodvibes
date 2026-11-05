@@ -1,3 +1,6 @@
+import type { DecisionRoutingContext } from '../providers/decision-router-context.js';
+import type { DecisionRouterRouteInfo } from '../providers/decision-router.js';
+import type { ChatResponse } from '../providers/interface.js';
 /**
  * companion-chat-turn-control.ts
  *
@@ -32,6 +35,8 @@ import type {
 export type CompanionProviderMessage = ProviderMessage;
 
 export interface CompanionProviderChunk {
+  readonly decisionRoute?: DecisionRouterRouteInfo;
+  readonly usage?: ChatResponse['usage'];
   readonly type: 'text_delta' | 'tool_call' | 'tool_result' | 'done' | 'error';
   readonly delta?: string | undefined;
   readonly toolCallId?: string | undefined;
@@ -47,6 +52,7 @@ export interface CompanionLLMProvider {
   chatStream(
     messages: CompanionProviderMessage[],
     options: {
+      readonly routingContext?: DecisionRoutingContext;
       readonly systemPrompt?: string | null | undefined;
       readonly model?: string | null | undefined;
       readonly provider?: string | null | undefined;

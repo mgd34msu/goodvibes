@@ -25,6 +25,15 @@ function endpoint(failFirst = false) {
 }
 
 describe('judgment settings reload captures one configuration per call', () => {
+  test('an unowned call is refused before a secret lookup can strand it', async () => {
+    const { source } = fixture(); let reads = 0;
+    const port = createSettingsJudgmentPort({ ...source, secrets: { get: () => {
+      reads++; return new Promise<string | null>(() => {});
+    } } });
+    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'invalid-request' });
+    expect(reads).toBe(0);
+  }, 1000);
+
   test('a pending secret read cannot pair its old key with a new endpoint or model', async () => {
     const { settings, env, key, source } = fixture();
     const pending = judgmentConfigFromSettings(source);

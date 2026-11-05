@@ -10,6 +10,7 @@
   "include": [
     "test/**/*.ts",
     "scripts/**/*.ts",
+    "../judgment/scripts/process-owner.ts",
     "../../products/agent/src/config/host-settings.ts",
     "../../products/tui/src/config/host-settings.ts"
   ],

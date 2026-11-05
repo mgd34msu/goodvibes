@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 // read-credential-keys.ts: reads, through Jev, whether each config schema key
 // the declared secret-bearing list does not name holds a credential, and
 // stores the readings in etc/credential-key-readings.json for the offline
@@ -23,7 +24,7 @@ const { values } = parseArgs({ args: Bun.argv.slice(2), options: { all: { type: 
 const CONCURRENCY = 8;
 const SITE = 'config.credential-key.schema';
 
-const port = createSystemOnePort(judgmentConfigFromEnv(process.env));
+const port = createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() }));
 const decision = `${credentialKey.name}@${credentialKey.version}`;
 const model = credentialKey.model ?? port.model;
 const stored = loadCredentialKeyReadings();

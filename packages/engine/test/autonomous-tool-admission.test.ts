@@ -168,7 +168,7 @@ test('authority revocation during semantic repair stops its transport before ano
   const { deps, registry, changeDirectory } = fixture(); registry.unregister('exec'); let body = 0; let fetches = 0;
   registry.register({ definition: { name: 'exec', description: 'boolean fixture', parameters: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] } },
     execute: async () => { body++; return { success: true }; } });
-  const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
+  const transport = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
     retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => { fetches++; changeDirectory(); return new Response('', { status: 503 }); } });
   installJudgmentPort(withDecisionLog(transport, log));
   await expect(executeToolCalls(deps, 'turn-1', [{ id: 'repair-revocation', name: 'exec', arguments: { enabled: 'please enable' } }])).rejects.toMatchObject({ kind: 'rejected' });
@@ -236,7 +236,7 @@ test('registration replacement during repair backoff stops the next transmission
   const { deps, registry } = fixture(); registry.unregister('exec'); let fetches = 0; let bodies = 0;
   const definition = { name: 'exec', description: 'boolean fixture', parameters: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] } };
   registry.register({ definition, execute: async () => { bodies++; return { success: true }; } });
-  const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
+  const transport = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
     retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => {
       fetches++; registry.unregister('exec'); registry.register({ definition, execute: async () => { bodies++; return { success: true }; } });
       return new Response('', { status: 503 });
@@ -263,7 +263,7 @@ test('repair attempt validates registration after every host authority callback'
   const execute = async () => { bodies++; return { success: true }; };
   registry.register({ definition, execute });
   replace = () => { registry.unregister('exec'); registry.register({ definition, execute }); };
-  const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
+  const transport = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: DEFAULT_MODEL, timeoutMs: 1000,
     retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => { fetches++; return new Response('', { status: 503 }); } });
   installJudgmentPort(withDecisionLog(transport, log));
   await expect(executeToolCalls(deps, 'turn-1', [{ id: 'repair-callback-replaced', name: 'exec', arguments: { enabled: 'please enable' } }])).rejects.toBeDefined();

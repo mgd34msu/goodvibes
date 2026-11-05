@@ -123,6 +123,7 @@ test('calibration truth records retain the unresolved result and untouched nativ
 test.each(['missing', 'malformed'] as const)('canonical %s answer fails calibration without manufacturing false', async kind => {
   let requests = 0;
   const port = createSystemOnePort({
+    signal: new AbortController().signal,
     endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-fixture' },
     model: DEFAULT_MODEL, timeoutMs: 1_000, retry: {},
     fetch: async () => {

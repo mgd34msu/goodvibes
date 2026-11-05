@@ -87,6 +87,7 @@ beforeEach(() => {
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(join(SDK_ROOT, 'scripts', script), destination);
   }
+  write('packages/judgment/scripts/process-owner.ts', readFileSync(resolve(SDK_ROOT, '../judgment/scripts/process-owner.ts'), 'utf8'));
   symlinkSync(resolve(SDK_ROOT, '../../node_modules'), join(root, 'node_modules'), 'junction');
   symlinkSync(resolve(SDK_ROOT, 'node_modules'), join(root, 'packages/engine/node_modules'), 'junction');
 });

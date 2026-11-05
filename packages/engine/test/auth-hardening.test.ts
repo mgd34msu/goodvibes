@@ -438,13 +438,16 @@ describe('scrypt cost parameterization', () => {
     const mgr2 = makeManager(dir);
     const result = mgr2.authenticate('admin', pw);
     expect(result.ok).toBe(true);
+    const upgraded = JSON.parse(readFileSync(storePath, 'utf8')) as { users: { passwordHash: string }[] };
+    expect(upgraded.users[0]!.passwordHash.split(':').slice(1, 4)).toEqual(['131072', '8', '1']);
+    expect(makeManager(dir).authenticate('admin', pw).ok).toBe(true);
   });
 
   test('static hashPassword produces 5-part hash by default', () => {
     const hash = UserAuthManager.hashPassword('testpassword');
     const parts = hash.split(':');
     expect(parts.length).toBe(5); // salt:N:r:p:derived
-    expect(Number(parts[1])).toBe(16384); // N default
+    expect(Number(parts[1])).toBe(131072); // N default
     expect(Number(parts[2])).toBe(8);     // r default
     expect(Number(parts[3])).toBe(1);     // p default
   });
@@ -455,6 +458,51 @@ describe('scrypt cost parameterization', () => {
     const parts = hash.split(':');
     expect(parts.length).toBe(5);
     expect(Number(parts[1])).toBe(1024);
+  });
+
+  test('only a successful login upgrades a stored parameterized hash, and does not rehash it again', () => {
+    const path = join(dir, 'auth-users.json');
+    const old = UserAuthManager.hashPassword('old-password', { N: 16384, r: 8, p: 1 });
+    writeFileSync(path, JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old, roles: ['admin'] }] }));
+    const mgr = makeManager(dir);
+    expect(mgr.authenticate('owner', 'wrong-password').ok).toBe(false);
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash).toBe(old);
+    const authenticated = mgr.authenticate('owner', 'old-password');
+    expect(authenticated.ok).toBe(true);
+    const upgraded = JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash as string;
+    expect(upgraded.split(':').slice(1, 4)).toEqual(['131072', '8', '1']);
+    expect(mgr.authenticate('owner', 'old-password').ok).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash).toBe(upgraded);
+  });
+
+  test('automatic migration never lowers stronger stored parameters', () => {
+    const old = UserAuthManager.hashPassword('strong-password', { N: 2048, r: 8, p: 2 });
+    const path = join(dir, 'auth-users.json');
+    writeFileSync(path, JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old }] }));
+    const mgr = makeManager(dir, { scryptParams: { N: 1024, r: 8, p: 1 } });
+    expect(mgr.authenticate('owner', 'strong-password').ok).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash).toBe(old);
+  });
+
+  test('an upgrade retains a stronger stored parallelization cost', () => {
+    const path = join(dir, 'auth-users.json');
+    const old = UserAuthManager.hashPassword('strong-password', { N: 2048, r: 8, p: 2 });
+    writeFileSync(path, JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old }] }));
+    const mgr = makeManager(dir, { scryptParams: { N: 4096, r: 8, p: 1 } });
+    expect(mgr.authenticate('owner', 'strong-password').ok).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash.split(':').slice(1, 4)).toEqual(['4096', '8', '2']);
+  });
+
+  test('a failed upgrade write keeps the original credential usable', () => {
+    const path = join(dir, 'auth-users.json');
+    const old = UserAuthManager.hashPassword('old-password', { N: 1024, r: 8, p: 1 });
+    writeFileSync(path, JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old }] }));
+    const mgr = makeManager(dir, { scryptParams: { N: 2048, r: 8, p: 1 } });
+    mkdirSync(path + '.tmp');
+    expect(() => mgr.authenticate('owner', 'old-password')).toThrow();
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash).toBe(old);
+    rmSync(path + '.tmp', { recursive: true });
+    expect(mgr.authenticate('owner', 'old-password').ok).toBe(true);
   });
 
   test('rotatePassword uses configured scrypt params', () => {

@@ -133,12 +133,14 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       return settingsModel(source);
     },
     async ask(request) {
-      const config = await activeSettings(source, request.signal);
+      const signal = request.signal;
+      if (!signal) throw new JudgmentError('invalid-request', 'settings judgment calls require an owning AbortSignal');
+      const config = await activeSettings(source, signal);
       // Key acquisition may finish after runtime shutdown or caller cancellation.
       // Never create another transport or send a late request in that case.
-      request.signal?.throwIfAborted();
+      signal.throwIfAborted();
       if (current === undefined || !sameConfig(current.config, config)) current = { config, port: createSystemOnePort(config) };
-      return current.port.ask(request);
+      return current.port.ask({ ...request, signal });
     },
   };
 }

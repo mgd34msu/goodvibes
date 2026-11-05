@@ -52,7 +52,7 @@ export interface JudgmentRequest<Q extends Questions> {
   readonly questions: Q;
   /** Model override; omitted follows the configured port model (jev-latest by default). */
   readonly model?: string;
-  /** Cancels the call and any pending retries. */
+  /** Cancels the call and any pending retries. Required by the real transport unless its config supplies an owning signal. */
   readonly signal?: AbortSignal;
   /** Synchronous current-authority check before every wire attempt, including retries. */
   readonly beforeAttempt?: () => void;

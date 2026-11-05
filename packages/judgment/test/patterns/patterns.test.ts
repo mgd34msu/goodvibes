@@ -122,6 +122,7 @@ describe('judge', () => {
     const evidence = { complete: 'Original source and execution evidence.' };
     const attempted: { state: unknown; questions: Record<string, Question> }[] = [];
     const port = withDecisionLog(createSystemOnePort({
+      signal: new AbortController().signal,
       endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' }, model: 'jev-latest', timeoutMs: 0, retry: {},
       fetch: async (_url, init) => {
         const body = JSON.parse(String(init?.body)); attempted.push(body);
@@ -513,6 +514,7 @@ describe('selector', () => {
     const attempted: { context: unknown; candidates: { id: string }[] }[] = [];
     let uncertain = true;
     const port = withDecisionLog(createSystemOnePort({
+      signal: new AbortController().signal,
       endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' }, model: 'jev-latest', timeoutMs: 0, retry: {},
       fetch: async (_url, init) => {
         const body = JSON.parse(String(init?.body)) as { state: typeof attempted[number]; questions: Record<string, Question> };

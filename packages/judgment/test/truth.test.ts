@@ -164,7 +164,7 @@ describe('truth notes in the SQLite log', () => {
     log.attach('old-1', { kind: 'truth', truth });
     expect(truthOf(log.get('old-1')!)).toEqual(truth);
     const version = new Database(path).query('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(3);
+    expect(version.user_version).toBe(4);
   });
 
   test('a log at an unknown version is refused', () => {

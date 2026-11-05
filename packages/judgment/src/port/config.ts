@@ -29,6 +29,8 @@ export interface JudgmentFallback {
 }
 
 export interface JudgmentConfig {
+  /** Cancels every call made through this port; requests may also supply a narrower owner. */
+  readonly signal?: AbortSignal;
   readonly endpoint: JudgmentEndpoint;
   /** The model id or alias to ask; defaults to {@link DEFAULT_MODEL}. */
   readonly model: string;
@@ -70,6 +72,7 @@ export function judgmentConfigFromEnv(
     model: overrides.model ?? (env['TYPESAFE_DEFAULT_MODEL']?.trim() || DEFAULT_MODEL),
     timeoutMs: overrides.timeoutMs ?? 0,
     retry: overrides.retry ?? {},
+    ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     ...(overrides.fallbacks === undefined ? {} : { fallbacks: overrides.fallbacks }),
     ...(overrides.fetch === undefined ? {} : { fetch: overrides.fetch }),
   };
@@ -77,6 +80,9 @@ export function judgmentConfigFromEnv(
 
 /** Validate the complete chain before constructing clients or transmitting state. */
 export function validateJudgmentConfig(config: JudgmentConfig): void {
+  if (config.signal !== undefined && !(config.signal instanceof AbortSignal)) {
+    throw new JudgmentError('invalid-request', 'judgment port ownership requires an AbortSignal');
+  }
   if (!Array.isArray(config.fallbacks ?? [])) throw new JudgmentError('invalid-request', 'judgment fallback targets must be an array');
   const targets = [{ endpoint: config.endpoint, model: config.model }, ...(config.fallbacks ?? [])];
   for (const target of targets) {

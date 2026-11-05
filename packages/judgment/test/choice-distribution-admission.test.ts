@@ -6,7 +6,7 @@ const answer = (probabilities: Record<string, number>, confidence = 0.42, choice
   type: 'choice' as const, choice, confidence, probabilities,
 });
 function transport(value: unknown) {
-  return createSystemOnePort({ model: 'jev-1.13.0', timeoutMs: 1000, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'fixture' },
+  return createSystemOnePort({ signal: new AbortController().signal, model: 'jev-1.13.0', timeoutMs: 1000, endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'fixture' },
     retry: { backoffInitialMs: 1, backoffMaxMs: 1 },
     fetch: async () => Response.json({ model: 'jev-1.13.0', answers: { pick: value }, usage: { input_tokens: 1, output_tokens: 1 } }),
   });

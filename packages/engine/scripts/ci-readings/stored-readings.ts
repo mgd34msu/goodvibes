@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from '../../../judgment/scripts/process-owner.ts';
 // stored-readings.ts
 //
 // The committed store of Jev readings the offline gates check against, shared
@@ -110,5 +111,5 @@ export function describeAnswer(answer: StoredAnswer): string {
 
 /** The port a reader asks through, built from the environment (TYPESAFE_API_KEY). */
 export function readerPort(): JudgmentPort {
-  return createSystemOnePort(judgmentConfigFromEnv(process.env));
+  return createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() }));
 }

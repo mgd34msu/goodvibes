@@ -50,7 +50,8 @@ Confidence remains separate from the selected option or score.
 import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment/decisions';
 
-const port = createSystemOnePort(judgmentConfigFromEnv(process.env));
+const owner = new AbortController(); // Abort when this operation or service stops.
+const port = createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: owner.signal }));
 
 const battery = defineBattery({
   name: 'example.reply',
@@ -69,6 +70,13 @@ const run = await battery.run(port, 'Question: ...\nReply: ...', { site: 'exampl
 Each check is read for what it actually decides: a check whose answer is its own definition (arithmetic, dates, counting, id equality, a grammar a program produced, a value the owner configured) stays code, and a check that answers a question of meaning is asked of the model, whatever its category, security checks included. Every battery keeps its questions and thresholds in one place, and `bun run calibrate --registry <module>` runs its fixtures live against the configured model (by default `jev-latest`) and fails when a battery falls below its floor.
 
 The decision log keeps every call with what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note). Calibration records each fixture's expectations as truth on that fixture's call; an owner correction or an observed outcome is attached the same way. The engine's observe subsystem reads accuracy against confidence, threshold sweeps, drift and historical questions stuck in `confirm` or `escalate` from the log alone. Those log values do not prescribe human approval in the autonomous contract.
+
+SQLite schema 4 appends notes in recording order. `readingsOf`, `actionOf` and
+`truthOf` return the latest note of their kind; `entry.notes` retains the whole
+sequence. Outcome queries match historical readings too. Existing schema 2/3
+files migrate on open, preserving their last retained notes. Earlier overwritten
+history and its original cross-kind ordering cannot be recovered. Older builds
+refuse schema 4 files; retain a backup before upgrading if rollback is needed.
 
 Decision IDs are opaque exact keys, not timestamps or a UUID-format contract.
 New SQLite IDs preserve every UUIDv7 hex nibble through a one-to-one a–p
@@ -102,6 +110,10 @@ uses the same `POST /v1/systemone` protocol, including owner-run loopback server
 A chat/completions provider is not a compatible substitute. Redirects are refused.
 
 The transport is the one attempt owner; SDK retries are disabled for judgments.
+Every real call requires a request `signal` or a port-level `JudgmentConfig.signal`.
+If both are present, either owner cancels the call. An absent owner fails as
+`invalid-request` before transmission, including when `timeoutMs` is positive:
+an attempt deadline does not bound the complete retry or admission lifetime.
 Connection failures, per-attempt timeouts, HTTP 408, 429 and 5xx allow retry or
 failover. With no configured fallbacks, the primary retries until an answer
 arrives or the owning signal cancels. That mode has no attempt-count or elapsed

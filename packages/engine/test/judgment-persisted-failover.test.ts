@@ -13,7 +13,7 @@ import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSe
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 const fallback = (endpoint = 'https://fallback.example.test') => ({ endpoint, model: 'jev-latest', keySource: 'env' as const, keyName: 'FALLBACK_KEY' });
-const request = { state: { fixture: 'owned persisted failover' }, questions: { allowed: noul('Is this allowed?') } };
+const request = { signal: new AbortController().signal, state: { fixture: 'owned persisted failover' }, questions: { allowed: noul('Is this allowed?') } };
 function source(settings: Record<string, unknown> = {}, env: Record<string, string | undefined> = {}): JudgmentSettingsSource {
   return { config: { get: key => settings[key] }, secrets: { get: async () => null }, env: { TYPESAFE_API_KEY: 'synthetic-primary', FALLBACK_KEY: 'synthetic-fallback', ...env } };
 }

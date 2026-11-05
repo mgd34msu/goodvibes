@@ -15,6 +15,7 @@ type Handler = (body: Record<string, unknown>) => Response;
 function portWith(handler: Handler) {
   const calls: Record<string, unknown>[] = [];
   const config: JudgmentConfig = {
+    signal: new AbortController().signal,
     endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
     model: 'jev-1.13.0',
     timeoutMs: 1_000,
@@ -166,7 +167,7 @@ describe('createSystemOnePort', () => {
 
   test('a network failure retries without surfacing a terminal unavailability', async () => {
     let calls = 0;
-    const port = createSystemOnePort({
+    const port = createSystemOnePort({ signal: new AbortController().signal,
       endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:9', apiKey: 'k' },
       model: 'jev-1.13.0',
       timeoutMs: 1_000,
@@ -225,7 +226,7 @@ describe('endpoint configuration', () => {
 test('uses long context for complete evidence and does not reject an approximate token estimate', async () => {
   const headers: Headers[] = [];
   const states: unknown[] = [];
-  const port = createSystemOnePort({ endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
+  const port = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
     model: 'jev-latest', timeoutMs: 0, retry: {}, fetch: async (_url, init) => {
       headers.push(new Headers(init?.headers)); states.push(JSON.parse(String(init?.body)).state);
       return json(200, { model: 'jev-1.13.0', answers: { urgent: GOOD_ANSWERS.urgent }, usage: { input_tokens: 1, output_tokens: 1 } });
@@ -241,7 +242,7 @@ test.each([0, 1000])('a server context refusal upgrades complete evidence once w
   const headers: Headers[] = [];
   const bodies: unknown[] = [];
   let guards = 0;
-  const port = createSystemOnePort({ endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
+  const port = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
     model: 'jev-latest', timeoutMs, retry: {}, fetch: async (_url, init) => {
       headers.push(new Headers(init?.headers)); bodies.push(JSON.parse(String(init?.body)));
       if (headers.length === 1) return json(400, { detail: { error_type: 'max_tokens_exceeded' } });
@@ -258,7 +259,7 @@ test.each([0, 1000])('a server context refusal upgrades complete evidence once w
 
 test.each(['max_tokens_exceeded', 'invalid_question'])('a persistent %s refusal stays terminal', async errorType => {
   let calls = 0;
-  const port = createSystemOnePort({ endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
+  const port = createSystemOnePort({ signal: new AbortController().signal, endpoint: { kind: 'hosted', baseURL: 'https://judge.test', apiKey: 'test-key' },
     model: 'jev-latest', timeoutMs: 0, retry: {}, fetch: async () => {
       calls++;
       return json(400, { detail: { error_type: errorType } });

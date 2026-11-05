@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from './process-owner.ts';
 /**
  * Live proof of the judgment foundation. Every reference decision (one per
  * pattern and compound) runs its fixtures against the configured System One
@@ -30,7 +31,7 @@ import { judge, multipleActions, registry, ticketTriage, ticketUrgency } from '.
 const config = judgmentConfigFromEnv(process.env);
 const logPath = join(tmpdir(), `judgment-proof-${Date.now()}.sqlite`);
 using log = new SqliteDecisionLog(logPath);
-const port = withDecisionLog(createSystemOnePort(config), log);
+const port = withDecisionLog(createSystemOnePort({ ...config, signal: judgmentProcessSignal() }), log);
 
 const report = await calibrate(port, registry.list(), { endpoint: { kind: config.endpoint.kind, baseURL: config.endpoint.baseURL } });
 console.log(formatReport(report));

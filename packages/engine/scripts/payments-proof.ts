@@ -1,3 +1,4 @@
+import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 /**
  * Live proof of payments: real purchases driven through the engine's
  * `payments.checkout.begin` handler against a local fixture merchant, with
@@ -33,7 +34,7 @@ import { FixtureCheckoutDriver, readFixtureCheckout } from '../test/helpers/fixt
 
 // Every reading the flow asks is recorded here, so each case can show them.
 const asked: string[] = [];
-const live = createSystemOnePort(judgmentConfigFromEnv(process.env));
+const live = createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() }));
 const recordingPort: JudgmentPort = {
   ...live,
   async ask(request) {

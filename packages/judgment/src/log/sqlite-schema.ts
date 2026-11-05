@@ -14,11 +14,11 @@ function bunDatabase(): typeof Database {
 }
 
 /*
- * The decision log's storage layout: its one table, the columns, and opening
+ * The decision log's storage layout: decision rows, append-only notes, and opening
  * a log file with the schema this build writes.
  */
 
-/** The one table the log keeps. */
+/** The immutable call records; post-call notes live in their own table. */
 export const TABLE = 'decisions';
 
 /**
@@ -26,7 +26,19 @@ export const TABLE = 'decisions';
  * MIGRATIONS is brought forward in place; any other version is refused rather
  * than misread.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+export const NOTES_TABLE = 'decision_notes';
+
+const NOTES_SCHEMA = `
+CREATE TABLE ${NOTES_TABLE} (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  decision_id TEXT NOT NULL REFERENCES ${TABLE}(id),
+  kind TEXT NOT NULL CHECK (kind IN ('readings', 'action', 'truth')),
+  payload TEXT NOT NULL,
+  at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX ${NOTES_TABLE}_decision_seq ON ${NOTES_TABLE} (decision_id, seq);
+`;
 
 /**
  * What a column holds. Every column is text: the row's key, a value the log
@@ -68,6 +80,11 @@ export const COLUMNS = {
  */
 const MIGRATIONS: Readonly<Record<number, string>> = {
   2: `ALTER TABLE ${TABLE} ADD COLUMN truth ${declaration(COLUMNS.truth)};`,
+  // Older files retain only the last note of each kind. Preserve those values;
+  // their original cross-kind order and any overwritten history are unknowable.
+  3: NOTES_SCHEMA + ['readings', 'action', 'truth'].map(kind =>
+    `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload, at)
+     SELECT id, '${kind}', ${kind}, NULL FROM ${TABLE} WHERE status = 'answered' AND ${kind} IS NOT NULL;`).join('\n'),
 };
 
 const SCHEMA = `
@@ -77,6 +94,7 @@ ${Object.entries(COLUMNS).map(([column, role]) => `  ${column} ${declaration(rol
 CREATE INDEX ${TABLE}_battery_at ON ${TABLE} (battery, at);
 CREATE INDEX ${TABLE}_site_at ON ${TABLE} (site, at);
 CREATE INDEX ${TABLE}_at ON ${TABLE} (at);
+${NOTES_SCHEMA}
 `;
 
 /** A value bound into a statement. */

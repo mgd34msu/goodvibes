@@ -288,7 +288,7 @@
       "path": "core/voice-capture-status.ts",
       "baselineTuiLines": 53,
       "baselineSimilarity": 0.5172,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/voice-stt-gateway.ts",
@@ -822,7 +822,7 @@
       "path": "input/settings-modal-subscriptions.ts",
       "baselineTuiLines": 95,
       "baselineSimilarity": 0.9684,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/settings-modal-types.ts",
@@ -858,7 +858,7 @@
       "path": "input/theme-settings-actions.ts",
       "baselineTuiLines": 82,
       "baselineSimilarity": 0.9333,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/tts-settings-actions.ts",
@@ -996,7 +996,7 @@
       "path": "renderer/history-search-overlay.ts",
       "baselineTuiLines": 70,
       "baselineSimilarity": 0.7135,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/lane-graph/bead.ts",
@@ -1062,7 +1062,7 @@
       "path": "renderer/modal-utils.ts",
       "baselineTuiLines": 14,
       "baselineSimilarity": 0.7368,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/model-workspace.ts",
@@ -1290,7 +1290,7 @@
       "path": "renderer/voice-capture-chip.ts",
       "baselineTuiLines": 53,
       "baselineSimilarity": 0.8037,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "runtime/bootstrap-command-context.ts",
@@ -1602,7 +1602,7 @@
       "path": "shell/transcript-scroll.ts",
       "baselineTuiLines": 68,
       "baselineSimilarity": 0.8718,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "shell/ui-openers.ts",

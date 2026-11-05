@@ -1,6 +1,5 @@
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ProviderAuthFreshness, ProviderAuthRoute } from '@/runtime/index.ts';
 import type { FeatureSetting, FlagState } from '@/runtime/index.ts';
 
 export interface SettingsModalChange {
@@ -212,16 +211,4 @@ export interface McpEntry {
   allowedHosts: string[];
 }
 
-export interface SubscriptionEntry {
-  provider: string;
-  state: 'active' | 'pending' | 'available';
-  tokenType?: string;
-  expiresAt?: number;
-  oauthConfigured: boolean;
-  activeRoute?: ProviderAuthRoute;
-  preferredRoute?: ProviderAuthRoute;
-  authFreshness?: ProviderAuthFreshness;
-  routeReason?: string;
-  issues?: string[];
-  nextActions?: string[];
-}
+export type { SubscriptionEntry } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';

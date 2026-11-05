@@ -1913,6 +1913,41 @@
       "bun": "./terminal-shell/src/native/native-conversation-intake.ts",
       "types": "./terminal-shell/dist/native/native-conversation-intake.d.ts",
       "import": "./terminal-shell/dist/native/native-conversation-intake.js"
+    },
+    "./terminal-shell/transcript-scroll": {
+      "bun": "./terminal-shell/src/transcript-scroll.ts",
+      "types": "./terminal-shell/dist/transcript-scroll.d.ts",
+      "import": "./terminal-shell/dist/transcript-scroll.js"
+    },
+    "./terminal-shell/modal-utils": {
+      "bun": "./terminal-shell/src/renderer/modal-utils.ts",
+      "types": "./terminal-shell/dist/renderer/modal-utils.d.ts",
+      "import": "./terminal-shell/dist/renderer/modal-utils.js"
+    },
+    "./terminal-shell/voice-capture-status": {
+      "bun": "./terminal-shell/src/voice-capture-status.ts",
+      "types": "./terminal-shell/dist/voice-capture-status.d.ts",
+      "import": "./terminal-shell/dist/voice-capture-status.js"
+    },
+    "./terminal-shell/voice-capture-chip": {
+      "bun": "./terminal-shell/src/renderer/voice-capture-chip.ts",
+      "types": "./terminal-shell/dist/renderer/voice-capture-chip.d.ts",
+      "import": "./terminal-shell/dist/renderer/voice-capture-chip.js"
+    },
+    "./terminal-shell/history-search-overlay": {
+      "bun": "./terminal-shell/src/renderer/history-search-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/history-search-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/history-search-overlay.js"
+    },
+    "./terminal-shell/settings-subscriptions": {
+      "bun": "./terminal-shell/src/settings-subscriptions.ts",
+      "types": "./terminal-shell/dist/settings-subscriptions.d.ts",
+      "import": "./terminal-shell/dist/settings-subscriptions.js"
+    },
+    "./terminal-shell/theme-settings-actions": {
+      "bun": "./terminal-shell/src/theme-settings-actions.ts",
+      "types": "./terminal-shell/dist/theme-settings-actions.d.ts",
+      "import": "./terminal-shell/dist/theme-settings-actions.js"
     }
   },
   "publishConfig": {

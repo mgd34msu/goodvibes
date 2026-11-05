@@ -72,7 +72,7 @@
       "path": "cli/completion.ts",
       "baselineTuiLines": 91,
       "baselineSimilarity": 0.8152,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "cli/entrypoint.ts",
@@ -1159,7 +1159,7 @@
       "path": "renderer/shortcuts-overlay.ts",
       "baselineTuiLines": 217,
       "baselineSimilarity": 0.7129,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/status-glyphs.ts",
@@ -1225,7 +1225,7 @@
       "path": "renderer/terminal-bg-probe.ts",
       "baselineTuiLines": 444,
       "baselineSimilarity": 0.8367,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/terminal-escapes.ts",
@@ -1255,7 +1255,7 @@
       "path": "renderer/theme-mode-config.ts",
       "baselineTuiLines": 70,
       "baselineSimilarity": 0.4314,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/theme.ts",
@@ -1273,7 +1273,7 @@
       "path": "renderer/throbber.ts",
       "baselineTuiLines": 236,
       "baselineSimilarity": 0.8411,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/toast-center.ts",

@@ -1,3 +1,4 @@
+import { renderCompletion as render } from '@goodvibes-jev/engine/terminal-shell/shell-completion';
 const COMMANDS = [
   'tui',
   'run',
@@ -60,32 +61,4 @@ const OPTIONS = [
   '--manual',
 ] as const;
 
-export function renderCompletion(shell: string | undefined, binary = 'goodvibes'): string {
-  const normalized = (shell ?? 'bash').toLowerCase();
-  const words = [...COMMANDS, ...OPTIONS].join(' ');
-
-  if (normalized === 'zsh') {
-    return [
-      `#compdef ${binary}`,
-      `_${binary}() {`,
-      `  compadd -- ${words}`,
-      '}',
-      `_${binary} "$@"`,
-    ].join('\n');
-  }
-
-  if (normalized === 'fish') {
-    return [...COMMANDS, ...OPTIONS]
-      .map((word) => `complete -c ${binary} -a ${JSON.stringify(word)}`)
-      .join('\n');
-  }
-
-  return [
-    `_${binary}() {`,
-    '  local cur',
-    '  cur="${COMP_WORDS[COMP_CWORD]}"',
-    `  COMPREPLY=( $(compgen -W "${words}" -- "$cur") )`,
-    '}',
-    `complete -F _${binary} ${binary}`,
-  ].join('\n');
-}
+export const renderCompletion = (shell: string | undefined, binary = 'goodvibes') => render(shell, binary, { commands: COMMANDS, options: OPTIONS });

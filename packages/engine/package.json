@@ -1973,6 +1973,31 @@
       "bun": "./terminal-shell/src/transcript-search.ts",
       "types": "./terminal-shell/dist/transcript-search.d.ts",
       "import": "./terminal-shell/dist/transcript-search.js"
+    },
+    "./terminal-shell/theme-mode-config": {
+      "bun": "./terminal-shell/src/renderer/theme-mode-config.ts",
+      "types": "./terminal-shell/dist/renderer/theme-mode-config.d.ts",
+      "import": "./terminal-shell/dist/renderer/theme-mode-config.js"
+    },
+    "./terminal-shell/terminal-bg-probe": {
+      "bun": "./terminal-shell/src/renderer/terminal-bg-probe.ts",
+      "types": "./terminal-shell/dist/renderer/terminal-bg-probe.d.ts",
+      "import": "./terminal-shell/dist/renderer/terminal-bg-probe.js"
+    },
+    "./terminal-shell/throbber": {
+      "bun": "./terminal-shell/src/renderer/throbber.ts",
+      "types": "./terminal-shell/dist/renderer/throbber.d.ts",
+      "import": "./terminal-shell/dist/renderer/throbber.js"
+    },
+    "./terminal-shell/shell-completion": {
+      "bun": "./terminal-shell/src/shell-completion.ts",
+      "types": "./terminal-shell/dist/shell-completion.d.ts",
+      "import": "./terminal-shell/dist/shell-completion.js"
+    },
+    "./terminal-shell/shortcuts-overlay": {
+      "bun": "./terminal-shell/src/renderer/shortcuts-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/shortcuts-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/shortcuts-overlay.js"
     }
   },
   "publishConfig": {

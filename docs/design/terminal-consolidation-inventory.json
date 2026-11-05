@@ -234,7 +234,7 @@
       "path": "core/conversation-types.ts",
       "baselineTuiLines": 85,
       "baselineSimilarity": 0.7407,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/conversation-usage.ts",
@@ -312,13 +312,13 @@
       "path": "core/work-tree-focus.ts",
       "baselineTuiLines": 290,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/work-tree-fold-store.ts",
       "baselineTuiLines": 143,
       "baselineSimilarity": 0.9441,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/work-tree-model.ts",
@@ -336,7 +336,7 @@
       "path": "core/work-tree-sources.ts",
       "baselineTuiLines": 169,
       "baselineSimilarity": 0.994,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/work-tree-wiring.ts",
@@ -930,7 +930,7 @@
       "path": "renderer/composer.ts",
       "baselineTuiLines": 146,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/compositor.ts",
@@ -1080,7 +1080,7 @@
       "path": "renderer/process-view.ts",
       "baselineTuiLines": 192,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/profile-picker-modal.ts",
@@ -1110,7 +1110,7 @@
       "path": "renderer/session-chips.ts",
       "baselineTuiLines": 103,
       "baselineSimilarity": 0.9756,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/session-picker-modal.ts",
@@ -1164,31 +1164,31 @@
       "path": "renderer/surface-compose.ts",
       "baselineTuiLines": 174,
       "baselineSimilarity": 0.9885,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/surface-kit-extra.ts",
       "baselineTuiLines": 305,
       "baselineSimilarity": 0.9441,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/surface-kit-list.ts",
       "baselineTuiLines": 378,
       "baselineSimilarity": 0.9785,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/surface-kit-parts.ts",
       "baselineTuiLines": 361,
       "baselineSimilarity": 0.928,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/surface-kit.ts",
       "baselineTuiLines": 586,
       "baselineSimilarity": 0.9801,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/syntax-theme.ts",
@@ -1284,7 +1284,7 @@
       "path": "renderer/user-message.ts",
       "baselineTuiLines": 58,
       "baselineSimilarity": 0.9828,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/voice-capture-chip.ts",

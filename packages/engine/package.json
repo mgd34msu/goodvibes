@@ -1553,6 +1553,71 @@
       "bun": "./terminal-shell/src/file-picker.ts",
       "types": "./terminal-shell/dist/file-picker.d.ts",
       "import": "./terminal-shell/dist/file-picker.js"
+    },
+    "./terminal-shell/surface-kit": {
+      "bun": "./terminal-shell/src/renderer/surface-kit.ts",
+      "types": "./terminal-shell/dist/renderer/surface-kit.d.ts",
+      "import": "./terminal-shell/dist/renderer/surface-kit.js"
+    },
+    "./terminal-shell/surface-kit-parts": {
+      "bun": "./terminal-shell/src/renderer/surface-kit-parts.ts",
+      "types": "./terminal-shell/dist/renderer/surface-kit-parts.d.ts",
+      "import": "./terminal-shell/dist/renderer/surface-kit-parts.js"
+    },
+    "./terminal-shell/surface-kit-list": {
+      "bun": "./terminal-shell/src/renderer/surface-kit-list.ts",
+      "types": "./terminal-shell/dist/renderer/surface-kit-list.d.ts",
+      "import": "./terminal-shell/dist/renderer/surface-kit-list.js"
+    },
+    "./terminal-shell/surface-kit-extra": {
+      "bun": "./terminal-shell/src/renderer/surface-kit-extra.ts",
+      "types": "./terminal-shell/dist/renderer/surface-kit-extra.d.ts",
+      "import": "./terminal-shell/dist/renderer/surface-kit-extra.js"
+    },
+    "./terminal-shell/surface-compose": {
+      "bun": "./terminal-shell/src/renderer/surface-compose.ts",
+      "types": "./terminal-shell/dist/renderer/surface-compose.d.ts",
+      "import": "./terminal-shell/dist/renderer/surface-compose.js"
+    },
+    "./terminal-shell/composer": {
+      "bun": "./terminal-shell/src/renderer/composer.ts",
+      "types": "./terminal-shell/dist/renderer/composer.d.ts",
+      "import": "./terminal-shell/dist/renderer/composer.js"
+    },
+    "./terminal-shell/process-view": {
+      "bun": "./terminal-shell/src/renderer/process-view.ts",
+      "types": "./terminal-shell/dist/renderer/process-view.d.ts",
+      "import": "./terminal-shell/dist/renderer/process-view.js"
+    },
+    "./terminal-shell/user-message": {
+      "bun": "./terminal-shell/src/renderer/user-message.ts",
+      "types": "./terminal-shell/dist/renderer/user-message.d.ts",
+      "import": "./terminal-shell/dist/renderer/user-message.js"
+    },
+    "./terminal-shell/session-chips": {
+      "bun": "./terminal-shell/src/renderer/session-chips.ts",
+      "types": "./terminal-shell/dist/renderer/session-chips.d.ts",
+      "import": "./terminal-shell/dist/renderer/session-chips.js"
+    },
+    "./terminal-shell/work-tree-types": {
+      "bun": "./terminal-shell/src/work-tree-types.ts",
+      "types": "./terminal-shell/dist/work-tree-types.d.ts",
+      "import": "./terminal-shell/dist/work-tree-types.js"
+    },
+    "./terminal-shell/work-tree-sources": {
+      "bun": "./terminal-shell/src/work-tree-sources.ts",
+      "types": "./terminal-shell/dist/work-tree-sources.d.ts",
+      "import": "./terminal-shell/dist/work-tree-sources.js"
+    },
+    "./terminal-shell/work-tree-focus": {
+      "bun": "./terminal-shell/src/work-tree-focus.ts",
+      "types": "./terminal-shell/dist/work-tree-focus.d.ts",
+      "import": "./terminal-shell/dist/work-tree-focus.js"
+    },
+    "./terminal-shell/work-tree-fold-store": {
+      "bun": "./terminal-shell/src/work-tree-fold-store.ts",
+      "types": "./terminal-shell/dist/work-tree-fold-store.d.ts",
+      "import": "./terminal-shell/dist/work-tree-fold-store.js"
     }
   },
   "publishConfig": {

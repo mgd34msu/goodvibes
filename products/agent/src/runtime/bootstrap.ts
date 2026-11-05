@@ -201,6 +201,7 @@ export async function bootstrapRuntime(
     setRenderRequest,
     runtimeSessionIdRef,
   } = await initializeBootstrapCore(stdout, options, (limit) => controlPlaneRecentEventsRef.value(limit));
+  options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher: services.hookDispatcher });
   const providerRegistry = services.providerRegistry;
   // A saved custom-provider model must never crash boot, see provider-boot.ts.
   await ensureBootModelResolvable(providerRegistry, options.configManager);

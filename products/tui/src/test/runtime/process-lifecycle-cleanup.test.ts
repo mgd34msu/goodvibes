@@ -27,6 +27,7 @@ function makeHarness(options: {
   shutdownHardTimeoutMs?: number;
   diagnosticsThrow?: boolean;
   onUnsubscribe?: () => void;
+  releaseSession?: () => Promise<void>;
 } = {}) {
   const events: string[] = [];
   const chunks: string[] = [];
@@ -114,6 +115,7 @@ function makeHarness(options: {
     getRecoveryInterval: () => { phase('get interval'); return recoveryInterval; },
     setRecoveryInterval: (value: null) => { phase('reset interval'); recoveryInterval = value; },
     getStopSpokenOutputForExit: () => { phase('get speech'); return () => phase('speech'); },
+    ...(options.releaseSession ? { releaseSession: options.releaseSession } : {}),
     saveNoticeAfterMs: 10_000,
     shutdownHardTimeoutMs: options.shutdownHardTimeoutMs ?? 1_000,
     recoverySnapshotExists: () => { phase('recovery exists'); return true; },
@@ -274,6 +276,54 @@ describe('exitApp owns asynchronous cleanup and repeated requests', () => {
   });
 });
 
+
+describe('native terminal session release', () => {
+  test('normal quit starts release before saving and waits for it before exiting', async () => {
+    const held = deferred();
+    let releases = 0;
+    const h = makeHarness({ releaseSession: () => { releases++; return held.promise; } });
+    const pending = h.handlers.exitApp();
+    await Bun.sleep(0);
+    expect(releases).toBe(1);
+    expect(h.events).toContain('shutdown');
+    expect(h.exitSpy).not.toHaveBeenCalled();
+    held.resolve();
+    await pending;
+    h.handlers.exitListener();
+    expect(releases).toBe(1);
+    expect(h.exitSpy).toHaveBeenCalledTimes(1);
+    expect(h.exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  for (const [signal, code] of [['SIGHUP', 129], ['SIGTERM', 143], ['uncaughtException', 1]] as const) {
+    test(`${signal} restores the terminal immediately and drains one release before exit ${code}`, async () => {
+      const held = deferred();
+      let releases = 0;
+      const h = makeHarness({ releaseSession: () => { releases++; return held.promise; } });
+      const terminate = () => signal === 'uncaughtException'
+        ? h.handlers.uncaughtExceptionHandler(new Error('synthetic crash'))
+        : h.handlers.terminationSignalHandler(signal);
+      terminate();
+      terminate();
+      expect(h.handlers.isTerminalRestored()).toBe(true);
+      expect(releases).toBe(1);
+      expect(h.exitSpy).not.toHaveBeenCalled();
+      held.resolve();
+      await Bun.sleep(0);
+      expect(h.exitSpy).toHaveBeenCalledTimes(1);
+      expect(h.exitSpy).toHaveBeenCalledWith(code);
+    });
+  }
+
+  test('a failed native release cannot strand a restored terminal', async () => {
+    const h = makeHarness({ releaseSession: () => Promise.reject(new Error('synthetic transport failure')) });
+    h.handlers.terminationSignalHandler('SIGTERM');
+    await Bun.sleep(0);
+    expect(h.handlers.isTerminalRestored()).toBe(true);
+    expect(h.exitSpy).toHaveBeenCalledTimes(1);
+    expect(h.exitSpy).toHaveBeenCalledWith(143);
+  });
+});
 
 describe('crash and termination exits retain their synchronous exit codes', () => {
   for (const fail of ['terminal write', 'dispose output guard', 'error log', 'flush']) {

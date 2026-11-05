@@ -5,6 +5,7 @@ import { dirname } from 'path';
 import type { HookDefinition, HookChain, HookEvent, HookResult } from './types.js';
 import { matchesEventPath, matchesMatcher } from './matcher.js';
 import { getHookPointContract } from './contracts.js';
+import { withHookWorkObserver } from './live-work.js';
 import { HookActivityTracker } from './activity.js';
 import { logger } from '../utils/logger.js';
 import { withCostOriginAsync } from '../runtime/cost/cost-origin.js';
@@ -21,7 +22,7 @@ import type { TriggerManagerLike } from '../workflow/trigger-executor.js';
 import { summarizeError } from '../utils/error-display.js';
 
 type HookRunnerDeps = {
-  readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned'>>) | undefined;
+  readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>) | undefined;
   readonly toolLLM?: Pick<ToolLLM, 'chat'> | undefined;
   readonly projectRoot?: string | undefined;
 };
@@ -61,10 +62,39 @@ export class HookDispatcher {
   private hooksBaseDirectory: string | null = null;
   private readonly runnerDeps: HookRunnerDeps;
   private readonly activityTracker: HookActivityTracker;
+  private activeInvocations = 0;
+  private readonly activityListeners = new Set<() => void>();
 
   constructor(runnerDeps: HookRunnerDeps = {}, activityTracker: HookActivityTracker = new HookActivityTracker()) {
     this.runnerDeps = runnerDeps;
     this.activityTracker = activityTracker;
+  }
+
+  /** Actual runner lifetimes, including detached asynchronous hooks. */
+  get activeInvocationCount(): number { return this.activeInvocations; }
+
+  onActivity(listener: () => void): () => void {
+    this.activityListeners.add(listener);
+    this.notifyActivity(listener);
+    return () => { this.activityListeners.delete(listener); };
+  }
+
+  private notifyActivity(listener?: () => void): void {
+    for (const observer of listener ? [listener] : [...this.activityListeners]) {
+      try { observer(); } catch { /* Observation never changes hook execution. */ }
+    }
+  }
+
+  private async runTrackedHook(hook: HookDefinition, event: HookEvent, execution?: HookExecutionOptions): Promise<HookResult> {
+    this.activeInvocations++;
+    this.notifyActivity();
+    let outstanding = 1, settled = false;
+    const release = () => {
+      if (--outstanding === 0) { settled = true; this.activeInvocations--; this.notifyActivity(); }
+    };
+    const retain = (work: Promise<unknown>) => { if (!settled) { outstanding++; void work.then(release, release); } };
+    try { return await withHookWorkObserver(retain, () => runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory, execution)); }
+    finally { release(); }
   }
 
   /** Attach a TriggerManager so hook events automatically fire matching triggers. */
@@ -245,7 +275,7 @@ export class HookDispatcher {
       // Async hooks run concurrently; a turn owner joins them before settlement.
       if (hook.async) {
         const asyncStart = Date.now();
-        const execute = (signal?: AbortSignal) => runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory, signal ? { signal } : undefined)
+        const execute = (signal?: AbortSignal) => this.runTrackedHook(hook, event, signal ? { signal } : undefined)
           .then((result) => {
             this.activityTracker.record(event, {
               pattern,
@@ -287,8 +317,8 @@ export class HookDispatcher {
       const hookStart = Date.now();
       try {
         result = await (admitHook
-          ? admitHook((signal) => runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory, { signal }))
-          : runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory));
+          ? admitHook((signal) => this.runTrackedHook(hook, event, { signal }))
+          : this.runTrackedHook(hook, event));
       } catch (err) {
         const message = summarizeError(err);
         logger.error('HookDispatcher: hook threw unexpectedly', {

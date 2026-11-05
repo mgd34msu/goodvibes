@@ -1,3 +1,4 @@
+import { retainHookWork } from '../live-work.js';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import type { AgentManager } from '../../tools/agent/index.js';
@@ -26,7 +27,7 @@ import { createHookExecution, type HookExecutionOptions } from '../execution.js'
 export async function run(
   hook: HookDefinition,
   event: HookEvent,
-  manager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned'>>,
+  manager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>,
   options?: HookExecutionOptions,
 ): Promise<HookResult> {
   if (options !== undefined) return runOwned(hook, event, manager, options);
@@ -57,6 +58,7 @@ export async function run(
   }
 
   const agentId = record.id;
+  if (manager.join) retainHookWork(manager.join(agentId));
 
   logger.debug('agent hook: agent spawned', { agentId, event: event.path });
 
@@ -106,7 +108,7 @@ export async function run(
 async function runOwned(
   hook: HookDefinition,
   event: HookEvent,
-  manager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned'>>,
+  manager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>,
   options: HookExecutionOptions,
 ): Promise<HookResult> {
   if (hook.prompt == null) return { ok: false, error: 'agent hook missing "prompt" field' };
@@ -121,7 +123,7 @@ async function runOwned(
       template: 'general',
       model: hook.model,
     }, { signal: execution.signal });
-    const current = await owned.settled;
+    const current = await retainHookWork(owned.settled);
     const agentId = current.id;
     if (execution.signal.aborted) {
       return { ok: false, error: options.signal?.aborted ? 'agent hook cancelled' : `agent hook timed out after ${hook.timeout ?? 0}s (agentId: ${agentId})` };

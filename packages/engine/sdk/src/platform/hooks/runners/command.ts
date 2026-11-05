@@ -12,6 +12,7 @@
  *   - Never load hooks.json from untrusted sources (e.g., project
  *     directories you did not create or audit).
  */
+import { retainHookWork } from '../live-work.js';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -75,14 +76,14 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
 
     // Start draining stdout/stderr concurrently with the exit wait. If we only
     // read after exit, a hook that writes more than the OS pipe buffer (~64KB)
-    // blocks on write, the child never exits and `await proc.exited` deadlocks
+    // blocks on write, the child never exits and `await retainHookWork(proc.exited)` deadlocks
     // until the timeout kills it, discarding the hook's intended output.
-    const stdoutPromise = new Response(proc.stdout).text();
-    const stderrPromise = new Response(proc.stderr).text();
+    const stdoutPromise = retainHookWork(new Response(proc.stdout).text());
+    const stderrPromise = retainHookWork(new Response(proc.stderr).text());
 
     let exitCode: number;
     try {
-      exitCode = await proc.exited;
+      exitCode = await retainHookWork(proc.exited);
       clearTimeout(timer);
     } catch (err) {
       clearTimeout(timer);

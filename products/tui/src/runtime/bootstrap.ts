@@ -194,6 +194,7 @@ export async function bootstrapRuntime(
     hookDispatcher,
     pluginManager,
   } = services;
+  options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
   // A saved custom-provider model must never crash boot, see provider-fallback.ts.
   await ensureBootModelResolvable(providerRegistry, configManager);
 

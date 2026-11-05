@@ -351,3 +351,19 @@ describe('fatal TUI startup formatting', () => {
     expect(debug).toContain('at ');
   });
 });
+
+
+test.each(['saved-explicit', 'latest'])('--resume %s uses the canonical session command with the owned session pointer', (requested) => {
+  const shellPaths = makeShellPaths();
+  writeLastSessionPointer('pointer-session', { surface: makeSurface(shellPaths) });
+  const cli = makeCli();
+  const commands: string[][] = [];
+  const registry = new CommandRegistry();
+  registry.register({ name: 'session', description: 'resume fixture', usage: '', handler: async args => { commands.push(args); } });
+  let openedOnboarding = false;
+  const input = { prompt: '', cursorPos: 0, openAgentWorkspace() { openedOnboarding = true; } } as unknown as InputHandler;
+  applyInitialTuiCliState({ cli: { ...cli, flags: { ...cli.flags, resume: requested } }, input,
+    commandRegistry: registry, commandContext: {} as CommandContext, shellPaths, surface: makeSurface(shellPaths), render() {} });
+  expect(commands).toEqual([['resume', requested === 'latest' ? 'pointer-session' : requested]]);
+  expect(openedOnboarding).toBe(false);
+});

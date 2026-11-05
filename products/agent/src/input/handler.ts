@@ -167,6 +167,16 @@ export class InputHandler {
   public historySearch: HistorySearch = new HistorySearch(() => this.inputHistory?.getEntries() ?? []);
   public conversationManager: ConversationManager | null = null;
   public selectionCallback: SelectionModalCallback | null = null;
+
+  get waitingForOwner(): boolean {
+    return (this.selectionModal.active && this.selectionCallback !== null)
+      || this.concealedInput !== null || this.plainLineInput !== null
+      || this.surfaceModals.waitingForOwner
+      || (this.settingsModal.active && (this.settingsModal.mcpAllowAllConfirmationTarget !== null
+        || this.settingsModal.subscriptionLogoutConfirmationTarget !== null))
+      || (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null)
+      || (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null);
+  }
   public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** Time of last [COPIED] block feedback, for brief display. */
   public lastBlockCopyTime = 0;

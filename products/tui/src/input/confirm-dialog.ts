@@ -20,6 +20,7 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
   /** 0 = cancel (left), 1 = confirm (right). */
   chosen: 0 | 1;
   private answered = false;
+  get waitingForOwner(): boolean { return !this.answered; }
 
   constructor(
     readonly options: ConfirmOptions,

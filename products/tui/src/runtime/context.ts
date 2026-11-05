@@ -48,6 +48,11 @@ export interface BootstrapOptions {
    * Otherwise main.ts binds the shell-owned exit bridge immediately after bootstrap returns.
    */
   exit?: () => void;
+  onHookDispatcherReady?: (state: {
+    readonly runtime: Pick<MutableRuntimeState, 'sessionId'>;
+    readonly surface: import('@goodvibes-jev/engine/sdk/platform/runtime/operations').SessionSurface;
+    readonly hookDispatcher: HookDispatcher;
+  }) => void;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { HookDispatcher } from '../sdk/src/platform/hooks/dispatcher.js';
 import { run } from '../sdk/src/platform/hooks/runners/agent.js';
 import type { HookDefinition, HookEvent } from '../sdk/src/platform/hooks/types.js';
 import { ASK, makeHarness, oneUnitPlan, waitFor, type Harness } from './contract/runner-support.js';
@@ -212,4 +213,30 @@ test('native owned-start preflight refuses a manager without a real join before 
   expect(result.code).toBe('OWNED_AGENT_EXECUTION_UNSUPPORTED');
   expect(h.manager.list()).toHaveLength(0);
   expect(h.events).toHaveLength(0);
+});
+
+
+test('an unowned agent hook timeout retains captured contract cleanup after its outward cancellation result', async () => {
+  const entered = deferred();
+  const cleanup = deferred();
+  const h = setup({ plan: oneUnitPlan(1), scripts: {}, planner: { run: async request => {
+    entered.resolve();
+    try {
+      if (!request.signal?.aborted) await new Promise<void>(resolve => request.signal?.addEventListener('abort', () => resolve(), { once: true }));
+      return { status: 'cancelled', output: '', elapsedMs: 1 };
+    } finally { await cleanup.promise; }
+  } } });
+  const dispatcher = new HookDispatcher({ agentManager: h.manager });
+  dispatcher.register('Post:tool:*', { ...hook, timeout: 0.03 });
+  const work = dispatcher.fire(event);
+  try {
+    await entered.promise;
+    expect((await work).error).toContain('timed out');
+    expect(dispatcher.activeInvocationCount).toBe(1);
+    const settled = deferred();
+    const detach = dispatcher.onActivity(() => { if (dispatcher.activeInvocationCount === 0) settled.resolve(); });
+    cleanup.resolve(); await settled.promise;
+    expect(dispatcher.activeInvocationCount).toBe(0);
+    detach();
+  } finally { cleanup.resolve(); }
 });

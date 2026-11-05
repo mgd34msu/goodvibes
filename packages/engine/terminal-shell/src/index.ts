@@ -40,6 +40,8 @@
  * would load the gateway/fleet graph on the renderer's startup path.
  */
 export { readNoticeSeverity, type NoticeSeverityReading } from './notice-severity.js';
+export { createHerdrSessionReporter, type HerdrSessionReporter, type HerdrSessionReporterOptions,
+  type HerdrSessionUpdate, type HerdrReporterEnvironment, type HerdrTransportContext } from './herdr-session-reporter.js';
 export { readProcessOutput, processEndpointCandidates, PROCESS_OUTPUT_READING_LIMITS, type ProcessOutputEvidence, type ProcessOutputEvidenceLine, type ProcessOutputReading } from './process-output-reading.js';
 export { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
 export { noticeSeverity, type NoticeSeverity } from './batteries/notice-severity.js';

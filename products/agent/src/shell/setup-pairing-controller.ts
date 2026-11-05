@@ -37,6 +37,7 @@ export class SetupPairingController {
 
   get active(): boolean { return this.operation !== null; }
   get ownsInput(): boolean { return this.active || this.discardUntilBoundary; }
+  get waitingForOwner(): boolean { return this.operation?.phase === 'confirmation'; }
 
   private current(operation: Operation): boolean {
     return !this.disposed && this.operation === operation && !operation.abort.signal.aborted;

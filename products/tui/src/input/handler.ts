@@ -207,6 +207,16 @@ export class InputHandler implements InputHandlerLike {
   public historySearch: HistorySearch = new HistorySearch(() => this.inputHistory?.getEntries() ?? []);
   public conversationManager: ConversationManager | null = null;
   public selectionCallback: SelectionModalCallback | null = null;
+  public get waitingForOwner(): boolean {
+    return this.concealedInput !== null || (this.selectionModal.active && this.selectionCallback !== null)
+      || this.surfaceModals.waitingForOwner
+      || (this.settingsModal.active && (this.settingsModal.mcpAllowAllConfirmationTarget !== null
+        || this.settingsModal.subscriptionLogoutConfirmationTarget !== null
+        || this.settingsModal.resetCategoryConfirm !== null || this.settingsModal.resetAllConfirm !== null))
+      || (this.configModal.active && this.configModal.hasPendingConfirm())
+      || (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null)
+      || (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null);
+  }
   public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** FIFO queue for overlapping openSelection() calls, see selection-modal-queue.ts. */
   private selectionQueue!: SelectionModalQueue;

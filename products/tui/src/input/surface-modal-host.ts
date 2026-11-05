@@ -24,6 +24,7 @@ export type SurfaceModalCloseReason = 'escape' | 'done' | 'cleared';
 export interface SurfaceModal {
   /** A short identifier (tests, diagnostics). */
   readonly name: string;
+  readonly waitingForOwner?: boolean;
   /** Handle a key or text token while this modal is on top. */
   handleToken(token: InputToken, host: SurfaceModalHost): void;
   /** Esc: pop one of this modal's own sub-levels and return true, or return false to close the modal. */
@@ -43,6 +44,8 @@ export class SurfaceModalHost {
   get active(): boolean {
     return this.stack.length > 0;
   }
+
+  get waitingForOwner(): boolean { return this.stack.some(modal => modal.waitingForOwner === true); }
 
   get depth(): number {
     return this.stack.length;

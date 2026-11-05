@@ -53,6 +53,7 @@ const apply = { apply: true, name: 'Interactive fixture' };
 describe('interactive pairing controller over the real pairing core', () => {
   test('preview reads the selected host without opening a confirmation or creating a store', async () => withController(async (f, ui) => {
     expect(ui.controller.active).toBe(false);
+    expect(ui.controller.waitingForOwner).toBe(false);
     expect(ui.feed('x')).toEqual([false]);
     await ui.controller.start({ ...apply, apply: false });
     expect(ui.controller.active).toBe(false);
@@ -67,12 +68,14 @@ describe('interactive pairing controller over the real pairing core', () => {
   test('visible exact phrase applies once and persists a private host-bound credential', async () => withController(async (f, ui) => {
     await ui.controller.start(apply);
     expect(ui.controller.active).toBe(true);
+    expect(ui.controller.waitingForOwner).toBe(true);
     expect(ui.text()).toContain(f.host);
     expect(ui.text()).toContain('persistent administrative');
     expect(f.migrations()).toBe(0);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
     ui.feed(`${ui.phrase()}\r\r`);
     await untilPairing(() => !ui.controller.active, 'paired result');
+    expect(ui.controller.waitingForOwner).toBe(false);
     expect(ui.text()).toContain('Agent host pairing: paired');
     expect(f.migrations()).toBe(1);
     expect(f.names()).toEqual([apply.name]);
@@ -189,6 +192,7 @@ describe('interactive pairing controller over the real pairing core', () => {
   test('cancel during preview consumes input and suppresses a late prompt', async () => withController(async (f, ui) => {
     const start = ui.controller.start(apply);
     await untilPairing(f.held, 'held preview');
+    expect(ui.controller.waitingForOwner).toBe(false);
     expect(ui.controller.active).toBe(true);
     expect(ui.feed('y')).toEqual([true]);
     expect(ui.feed('\x03')).toEqual([true]);
@@ -337,6 +341,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     await ui.controller.start(apply);
     ui.feed(`${ui.phrase()}\r`);
     await untilPairing(f.held, 'held migration response');
+    expect(ui.controller.waitingForOwner).toBe(false);
     expect(f.migrations()).toBe(1);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
     ui.feed('\x04');

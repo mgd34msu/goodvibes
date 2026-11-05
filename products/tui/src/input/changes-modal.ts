@@ -86,6 +86,7 @@ export class ChangesModal implements SurfaceModal {
   private previewTitle = '';
   private previewNote: string | null = null;
   private question: PendingQuestion | null = null;
+  get waitingForOwner(): boolean { return this.question !== null; }
   private loadSeq = 0;
 
   constructor(private readonly deps: ChangesDeps, mode: 'workspace' | 'preview' = 'workspace') {

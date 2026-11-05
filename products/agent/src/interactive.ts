@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
 import { settleInteractiveExit } from './shell/exit-completion.ts';
+import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
 import { Compositor } from './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
 import { ThinkingStallClock, buildThinkingOverlay, createThrobberSource, mainPermissionAsk } from './core/thinking-overlay.ts';
@@ -18,7 +19,7 @@ import { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
 import { conversationMessagesAsSessionRecords } from './core/conversation-message-snapshot.ts';
 import { createTranscriptNavigators } from './shell/transcript-navigation.ts';
 import { InputHandler } from './input/handler.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import { createHerdrSessionReporter, SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -88,6 +89,8 @@ import { SessionViews } from './shell/session-views.ts';
 
 // Escape bytes and enter/exit sequencing live in renderer/terminal-escapes.ts (re-exported from @goodvibes-jev/engine/terminal-shell) so this file never holds its own drifting copy.
 
+let releaseFailedStartupSession: (() => Promise<void>) | undefined;
+
 async function main() {
   const stdout = process.stdout;
   const stdin = process.stdin;
@@ -115,10 +118,19 @@ async function main() {
   const launchUpdateLines = await selfUpdateAtLaunch({ configManager, stdout });
   const reachabilityLines = await reachabilityAtLaunch({ stdout });
 
+  const herdrSession = createHerdrSessionReporter();
+  let refreshHerdr = (): void => {};
+  let unsubscribeHookActivity = (): void => {};
+  const closeHerdr = (): Promise<void> => { unsubscribeHookActivity(); return herdrSession.close(); };
+  releaseFailedStartupSession = closeHerdr;
   const ctx: BootstrapContext = await bootstrapRuntime(stdout, {
     configManager,
     workingDir: bootstrapWorkingDir,
     homeDirectory: bootstrapHomeDirectory,
+    onHookDispatcherReady: source => {
+      refreshHerdr = () => { void herdrSession.update(buildAgentHerdrSessionUpdate({ ...source, orchestrator: { isBusy: true, isThinking: false }, workingDir: bootstrapWorkingDir })); };
+      unsubscribeHookActivity = source.hookDispatcher.onActivity(() => refreshHerdr());
+    },
   });
   const {
     conversation,
@@ -139,6 +151,7 @@ async function main() {
     permissionPromptRef,
     systemMessageRouter,
   } = ctx;
+  void herdrSession.update(buildAgentHerdrSessionUpdate({ runtime, surface: ctx.services.surface, orchestrator, hookDispatcher, workingDir: ctx.services.workingDirectory }));
   const workingDir = ctx.services.workingDirectory;
   const homeDirectory = ctx.services.homeDirectory;
   const { approvalBroker, agentManager, modeManager, processManager, providerRegistry, secretsManager, subscriptionManager } = ctx.services;
@@ -285,6 +298,7 @@ async function main() {
   const processFaults = createProcessFaultHandlers({
     notifyHigh: (message) => systemMessageRouter.high(message), render: () => render(),
     shellPaths: ctx.services.shellPaths, activeSessionId: () => runtime.sessionId,
+    exit: (code) => exitApp(() => code),
   });
   const resizeHandler = (): void => {
     input.setContentWidth(getPromptContentWidth());
@@ -300,36 +314,43 @@ async function main() {
     // spoken-audio drain below must not re-run teardown.
     if (exiting) return;
     exiting = true;
-    setupPairing?.dispose();
-    // Gate render() before anything else so no late frame follows the terminal-restore write below.
-    paintWindow.close();
-    // Exit lets the spoken audio the user is already hearing finish inside a
-    // short bounded window (capped inside stopForExit) instead of killing the
-    // player mid-drain; queued-but-unplayed speech is dropped. Deliberate
-    // interrupts (Ctrl+C, /tts stop) still cut instantly via spokenTurns.stop().
-    let spokenOutputDrain: Promise<void> = Promise.resolve();
+    const herdrRelease = closeHerdr();
+    let exitCompletion = settleInteractiveExit(Promise.resolve(), Promise.resolve(), herdrRelease);
     try {
-      spokenOutputDrain = Promise.resolve(stopSpokenOutputForExit?.()).then(() => undefined);
-    } catch (error) { spokenOutputDrain = Promise.reject(error); }
-    unsubs.forEach(fn => fn());
-    // Persist last-seen before shutdown so the next launch can compute the digest.
-    const autonomyDrain = autonomy.stop();
-    const snapshot = buildCurrentSessionSnapshot();
-    const runtimeShutdown = autonomyDrain.then(() => ctx.shutdown(snapshot));
-    const exitCompletion = settleInteractiveExit(runtimeShutdown, spokenOutputDrain);
-    if (recoveryInterval !== null) { clearInterval(recoveryInterval); recoveryInterval = null; }
-    // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
-    removeRecoveryPoint(ctx.services.surface, runtime.sessionId);
-    stdin.removeAllListeners('data');
-    stdout.removeListener('resize', resizeHandler);
-    process.removeListener('SIGINT', sigintHandler);
-    process.removeListener('SIGTERM', terminalClosed);
-    stdin.removeListener('end', terminalClosed);
-    stdin.removeListener('close', terminalClosed);
-    processFaults.dispose();
-    allowTerminalWrite(() => stdout.write(buildExitSequence(cli.flags.noAltScreen)));
-    terminalOutputGuard.dispose();
-    stdin.setRawMode(false);
+      setupPairing?.dispose();
+      // Gate render() before anything else so no late frame follows the terminal-restore write below.
+      paintWindow.close();
+      // Exit lets the spoken audio the user is already hearing finish inside a
+      // short bounded window (capped inside stopForExit) instead of killing the
+      // player mid-drain; queued-but-unplayed speech is dropped. Deliberate
+      // interrupts (Ctrl+C, /tts stop) still cut instantly via spokenTurns.stop().
+      let spokenOutputDrain: Promise<void> = Promise.resolve();
+      try {
+        spokenOutputDrain = Promise.resolve(stopSpokenOutputForExit?.()).then(() => undefined);
+      } catch (error) { spokenOutputDrain = Promise.reject(error); }
+      unsubs.forEach(fn => fn());
+      // Persist last-seen before shutdown so the next launch can compute the digest.
+      const autonomyDrain = autonomy.stop();
+      const snapshot = buildCurrentSessionSnapshot();
+      const runtimeShutdown = autonomyDrain.then(() => ctx.shutdown(snapshot));
+      exitCompletion = settleInteractiveExit(runtimeShutdown, spokenOutputDrain, herdrRelease);
+      if (recoveryInterval !== null) { clearInterval(recoveryInterval); recoveryInterval = null; }
+      // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
+      removeRecoveryPoint(ctx.services.surface, runtime.sessionId);
+      stdin.removeAllListeners('data');
+      stdout.removeListener('resize', resizeHandler);
+      process.removeListener('SIGINT', sigintHandler);
+      process.removeListener('SIGTERM', terminalClosed);
+      process.removeListener('SIGHUP', terminalClosed);
+      stdin.removeListener('end', terminalClosed);
+      stdin.removeListener('close', terminalClosed);
+      processFaults.dispose();
+      allowTerminalWrite(() => stdout.write(buildExitSequence(cli.flags.noAltScreen)));
+      terminalOutputGuard.dispose();
+      stdin.setRawMode(false);
+    } catch (error) {
+      exitCompletion = exitCompletion.then(failures => [...failures, error]);
+    }
     // The terminal is restored immediately. Process exit and executable
     // handover wait for runtime ownership release and the bounded audio drain.
     void exitCompletion.then((failures) => {
@@ -588,6 +609,7 @@ async function main() {
   function render(): void {
     // Outside the window where this app owns the screen: the alternate screen does not exist yet, or the terminal has already been handed back. Never paint in either case.
     if (!paintWindow.isOpen()) return;
+    void herdrSession.update(buildAgentHerdrSessionUpdate({ runtime, surface: ctx.services.surface, orchestrator, hookDispatcher, fleetNodes: ctx.services.processRegistry.query().nodes, workingDir, input, pendingPermission, recoveryPending, daemonRepairPrompt, setupPairing, contracts: ctx.services.contractRunner.list({ sessionId: runtime.sessionId, includeTerminal: false }) }));
     setupPairing?.checkPresentation();
     const { width, height } = getTerminalSize(stdout);
 
@@ -758,6 +780,8 @@ async function main() {
   }
   const terminalOutputGuard = installFullScreenTerminalOutputGuard({ stdout, stderr: process.stderr, notify: (message) => { systemMessageRouter.low(message); render(); } });
 
+  refreshHerdr = render;
+  unsubs.push(ctx.services.processRegistry.subscribe(() => refreshHerdr()));
   setRenderRequest(render);
   orchestratorRefs.requestRender = render;
   commandContext.renderRequest = render;
@@ -821,6 +845,7 @@ async function main() {
     });
     ({ pendingPermission, recoveryPending } = blocking);
     if (blocking.handled) {
+      render();
       return;
     }
 
@@ -830,6 +855,7 @@ async function main() {
   stdin.on('data', (raw: string) => { const data = themeProbe.filterInput(raw); if (data.length > 0) routeInput(data); });
   process.on('SIGINT', sigintHandler);
   process.on('SIGTERM', terminalClosed);
+  process.on('SIGHUP', terminalClosed);
   stdin.on('end', terminalClosed);
   stdin.on('close', terminalClosed);
   processFaults.register();
@@ -855,8 +881,10 @@ async function main() {
     hookDispatcher,
     onStreamSpeedUpdate: (speed) => { streamTokenSpeed = speed; },
   }));
+  render();
 }
-main().catch((err: unknown) => {
+main().catch(async (err: unknown) => {
+  await releaseFailedStartupSession?.();
   reportFatalStartupError(err, {
     binary: 'goodvibes-agent',
     debug: process.env['GOODVIBES_AGENT_DEBUG'] === '1',

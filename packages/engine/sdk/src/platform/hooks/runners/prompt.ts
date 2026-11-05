@@ -1,3 +1,4 @@
+import { retainHookWork } from '../live-work.js';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
@@ -44,7 +45,7 @@ export async function run(
       execution.signal.throwIfAborted();
       // A provider may need time to unwind, or may ignore cancellation. The
       // owned invocation remains pending until that provider actually settles.
-      response = await toolLLM.chat(resolvedPrompt, { signal: execution.signal });
+      response = await retainHookWork(toolLLM.chat(resolvedPrompt, { signal: execution.signal }));
       execution.signal.throwIfAborted();
     } else {
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -54,7 +55,7 @@ export async function run(
         timerId?.unref?.();
       });
       try {
-        response = await Promise.race([toolLLM.chat(resolvedPrompt), timeoutPromise]);
+        response = await Promise.race([retainHookWork(toolLLM.chat(resolvedPrompt)), timeoutPromise]);
       } finally {
         clearTimeout(timerId);
       }

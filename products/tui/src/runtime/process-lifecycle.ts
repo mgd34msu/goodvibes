@@ -82,6 +82,8 @@ export interface ProcessLifecycleDeps {
   readonly getRecoveryInterval: () => ReturnType<typeof setInterval> | null;
   readonly setRecoveryInterval: (value: ReturnType<typeof setInterval> | null) => void;
   readonly getStopSpokenOutputForExit: () => (() => void | Promise<void>) | null;
+  /** Release terminal session reporting before the process leaves its pane. */
+  readonly releaseSession?: () => Promise<void>;
   /** Overridable for tests; defaults to SAVE_NOTICE_AFTER_MS (300ms). */
   readonly saveNoticeAfterMs?: number;
   /** Overridable for tests; defaults to SHUTDOWN_HARD_TIMEOUT_MS (3000ms). */
@@ -242,6 +244,27 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     terminalLifecycle.restoreTerminal();
   };
 
+  let sessionRelease: Promise<void> | undefined;
+  const releaseSession = (): Promise<void> => {
+    if (sessionRelease) return sessionRelease;
+    try {
+      sessionRelease = Promise.resolve(deps.releaseSession?.()).catch((error) => reportCleanupError('session release', error));
+    } catch (error) {
+      reportCleanupError('session release', error);
+      sessionRelease = Promise.resolve();
+    }
+    return sessionRelease;
+  };
+  let releaseExitScheduled = false;
+  const exitAfterRelease = (code: number): void => {
+    if (releaseExitScheduled) return;
+    releaseExitScheduled = true;
+    if (!deps.releaseSession) { process.exit(code); return; }
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    void Promise.race([releaseSession(), new Promise<void>((resolve) => { deadline = setTimeout(resolve, shutdownHardTimeoutMs); })])
+      .finally(() => { clearTimeout(deadline); process.exit(code); });
+  };
+
   const uncaughtExceptionHandler = (err: Error): void => {
     restoreTerminal();
     bestEffort('uncaughtException logging', () => logger.error('uncaughtException: terminal restored, exiting', { error: summarizeError(err), stack: err.stack }));
@@ -250,15 +273,15 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     // relying on the exit hook that also runs, the crash log is worth stating
     // the intent for at the site that produces it.
     bestEffort('activity log flush', flushActivityLogSync);
-    process.exit(1);
+    exitAfterRelease(1);
   };
   const terminationSignalHandler = (signal: NodeJS.Signals): void => {
     restoreTerminal();
     bestEffort('termination signal logging', () => logger.error(`Received ${signal}: terminal restored, exiting`, {}));
     bestEffort('activity log flush', flushActivityLogSync);
-    process.exit(signal === 'SIGHUP' ? 129 : 143);
+    exitAfterRelease(signal === 'SIGHUP' ? 129 : 143);
   };
-  const exitListener = (): void => { restoreTerminal(); };
+  const exitListener = (): void => { restoreTerminal(); void releaseSession(); };
 
   const performExit = async (): Promise<void> => {
     // Start each owner in order, attach rejection handlers immediately, and let
@@ -273,6 +296,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     };
     // Already-playing speech may finish while other cleanup proceeds; queued
     // speech is dropped by stopForExit. The shared deadline bounds every drain.
+    startCleanup('session release', releaseSession);
     startCleanup('spoken output drain', () => getStopSpokenOutputForExit()?.());
     unsubs.forEach((fn, index) => startCleanup(`unsubscribe ${index}`, fn));
     let interval: ReturnType<typeof setInterval> | null = null;

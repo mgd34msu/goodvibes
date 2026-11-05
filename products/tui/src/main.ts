@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { join } from 'node:path';
+import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
+import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
 import { ScheduleReadingLifetime } from './input/commands/schedule-reading-lifetime.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
@@ -101,6 +104,8 @@ import { registerThemeRefresh } from './renderer/theme.ts';
 import { VERSION } from './version.ts';
 import { SessionViews } from './shell/session-views.ts';
 
+let releaseFailedStartupSession: (() => Promise<void>) | undefined;
+
 async function main() {
   const stdout = process.stdout;
   const stdin = process.stdin;
@@ -122,12 +127,25 @@ async function main() {
   // an installed update this restarts onto the swapped binary and never returns.
   const launchUpdateLines = await selfUpdateAtLaunch({ configManager, stdout });
 
+  const herdrSession = createHerdrSessionReporter();
+  let refreshHerdr: () => void = () => {};
+  let unsubscribeHerdrHooks: () => void = () => {};
+  const closeHerdr = () => { unsubscribeHerdrHooks(); return herdrSession.close(); };
+  releaseFailedStartupSession = closeHerdr;
+
   const ctx: BootstrapContext = await bootstrapRuntime(stdout, {
     configManager,
     workingDir: bootstrapWorkingDir,
     homeDirectory: bootstrapHomeDirectory,
     // Named, so GOODVIBES_DAEMON_HOME on its own moves the client's daemon tier.
     daemonHomeDirectory: resolveGoodVibesDaemonHome(bootstrapHomeDirectory),
+    onHookDispatcherReady: ({ runtime: activeRuntime, surface, hookDispatcher: dispatcher }) => {
+      refreshHerdr = () => { void herdrSession.update({ sessionId: activeRuntime.sessionId,
+        sessionPath: join(surface.sessionsDir, `${sanitizeSessionName(activeRuntime.sessionId)}.jsonl`),
+        busy: dispatcher.activeInvocationCount > 0, waitingForOwner: false,
+        resumeArgv: ['goodvibes', '--working-dir', bootstrapWorkingDir, '--resume', activeRuntime.sessionId] }); };
+      unsubscribeHerdrHooks = dispatcher.onActivity(() => refreshHerdr());
+    },
   });
   const {
     conversation,
@@ -154,6 +172,7 @@ async function main() {
   const workingDir = ctx.services.workingDirectory;
   const homeDirectory = ctx.services.homeDirectory;
   const { approvalBroker, agentManager, modeManager, processManager, providerRegistry, secretsManager, subscriptionManager } = ctx.services;
+  void herdrSession.update({ sessionId: runtime.sessionId, sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`), busy: orchestrator.isBusy || hookDispatcher.activeInvocationCount > 0, waitingForOwner: false, resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId] });
   conversation.setSessionMemoryStore(ctx.services.sessionMemoryStore);
   conversation.setSessionLineageTracker(ctx.services.sessionLineageTracker);
   // Shared payload (single source of truth, includes the memoryRegistry,
@@ -179,6 +198,7 @@ async function main() {
   // Callable before the scheduler exists; see deferred-render.ts for why.
   const deferredRender = createDeferredRender();
   const render = deferredRender.render;
+  refreshHerdr = render;
   const typeahead = createStartupTypeaheadGate(); // keys typed before a startup modal appeared never answer it
 
   let pendingPermission: PendingPermissionState | null = null;
@@ -248,7 +268,7 @@ async function main() {
   // historical contract and inspect host processes on each frame/keystroke.
   // Controls still act through the registry and revalidate their live targets.
   type FleetNodes = ReturnType<typeof ctx.services.processRegistry.query>['nodes'];
-  let currentFleet: FleetNodes = [];
+  let currentFleet: FleetNodes = ctx.services.processRegistry.query().nodes;
   unsubs.push(ctx.services.processRegistry.subscribe(snapshot => {
     currentFleet = snapshot.nodes;
     render();
@@ -282,6 +302,7 @@ async function main() {
     getRecoveryInterval: () => recoveryInterval,
     setRecoveryInterval: (value) => { recoveryInterval = value; },
     getStopSpokenOutputForExit: () => stopSpokenOutputForExit,
+    releaseSession: closeHerdr,
   });
   const { exitApp, resizeHandler, sigintHandler, unhandledRejectionHandler, uncaughtExceptionHandler, terminationSignalHandler, exitListener } = lifecycle;
   commandContext.exit = exitApp;
@@ -553,6 +574,21 @@ async function main() {
     const managerAgents = agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending');
     const runtimeAgents = agentSnapshot.active;
     const sessionContracts = sessionContractViews.read();
+    void herdrSession.update({
+      sessionId: runtime.sessionId,
+      sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`),
+      busy: orchestrator.isBusy || hookDispatcher.activeInvocationCount > 0
+        || sessionContracts.some(contract => !['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contract.status))
+        || currentFleet.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
+          && ['thinking', 'executing-tool', 'streaming', 'stalled', 'retrying', 'queued'].includes(node.state)),
+      waitingForOwner: pendingPermission !== null || input.waitingForOwner || hostPairing?.waitingForOwner === true
+        || currentFleet.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
+          && node.state === 'awaiting-approval')
+        || sessionContracts.some(contract => contract.status === 'awaiting-owner'
+          || contract.groups.some(group => group.status === 'awaiting-owner')
+          || contract.units.some(unit => unit.status === 'awaiting-owner')),
+      resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId],
+    });
     const runningAgentSummary = summarizeRunningAgents(managerAgents, runtimeAgents, sessionContracts);
     const runningAgentCount = runningAgentSummary.count;
     const runningProcessCount = processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length;
@@ -915,4 +951,7 @@ async function main() {
   recoveryInterval = startRecoveryAutosave({ conversation, runtime, surface: ctx.services.surface, buildSessionContinuityHints });
 }
 
-main().catch(reportFatalStartupError);
+main().catch(async (error: unknown) => {
+  await releaseFailedStartupSession?.();
+  reportFatalStartupError(error);
+});

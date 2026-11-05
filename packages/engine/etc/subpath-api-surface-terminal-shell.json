@@ -329,6 +329,50 @@
       "text": "export interface GoodVibesCliParseResult { readonly binary: string; readonly command: GoodVibesCliCommand; readonly rawCommand: string | undefined; readonly commandArgs: readonly string[]; readonly positionals: readonly string[]; readonly flags: GoodVibesCliFlags; readonly errors: readonly string[]; readonly warnings: readonly string[]; }"
     },
     {
+      "name": "HerdrReporterEnvironment",
+      "kind": "interface",
+      "text": "export interface HerdrReporterEnvironment { readonly HERDR_ENV?: string | undefined; readonly HERDR_PANE_ID?: string | undefined; readonly HERDR_BIN_PATH?: string | undefined; readonly HERDR_SOCKET_PATH?: string | undefined; }"
+    },
+    {
+      "name": "HerdrSessionReporter",
+      "kind": "interface",
+      "required": [
+        "close",
+        "enabled",
+        "resumeCommandSupported",
+        "update"
+      ],
+      "text": "export interface HerdrSessionReporter { readonly enabled: boolean; readonly resumeCommandSupported: boolean; update(input: HerdrSessionUpdate): Promise<void>; close(): Promise<void>; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "HerdrSessionReporterOptions",
+      "kind": "interface",
+      "text": "export interface HerdrSessionReporterOptions { readonly environment?: HerdrReporterEnvironment | undefined; readonly transport?: ((argv: readonly string[], context: HerdrTransportContext) => Promise<string | void>) | undefined; readonly onError?: ((error: Error) => void) | undefined; } ;; via Error = interface Error { name: string; message: string; stack?: string; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "HerdrSessionUpdate",
+      "kind": "interface",
+      "required": [
+        "busy",
+        "resumeArgv",
+        "sessionId",
+        "waitingForOwner"
+      ],
+      "text": "export interface HerdrSessionUpdate { readonly sessionId: string; readonly sessionPath?: string | undefined; readonly busy: boolean; readonly waitingForOwner: boolean; readonly resumeArgv: readonly string[]; }"
+    },
+    {
+      "name": "HerdrTransportContext",
+      "kind": "interface",
+      "required": [
+        "binaryPath",
+        "paneId",
+        "signal",
+        "socketPath",
+        "timeoutMs"
+      ],
+      "text": "export interface HerdrTransportContext { readonly binaryPath: string; readonly socketPath: string; readonly paneId: string; readonly signal: AbortSignal; readonly timeoutMs: number; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; }"
+    },
+    {
       "name": "InfiniteBuffer",
       "kind": "class",
       "publicMembers": [
@@ -909,6 +953,11 @@
       "name": "createFleetServices",
       "kind": "function",
       "text": "export declare function createFleetServices(deps: FleetServicesDeps): { processRegistry: ArchivableProcessRegistry; };"
+    },
+    {
+      "name": "createHerdrSessionReporter",
+      "kind": "function",
+      "text": "export declare function createHerdrSessionReporter(options?: HerdrSessionReporterOptions): HerdrSessionReporter;"
     },
     {
       "name": "createRenderScheduler",

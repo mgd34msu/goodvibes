@@ -161,10 +161,13 @@ export function applyInitialTuiCliState(options: {
   const seededPrompt = cli.flags.prompt ?? (cli.rawCommand === undefined && cli.positionals.length > 0 ? cli.positionals.join(' ') : undefined);
   if (cli.command === 'onboarding') {
     input.openAgentWorkspace(commandContext, undefined, 'ONBOARDING');
-  } else if (cli.command === 'sessions' && cli.commandArgs[0] === 'resume') {
-    const target = cli.commandArgs.slice(1).join(' ').trim();
+  } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
+    const requested = cli.flags.resume ?? cli.commandArgs.slice(1).join(' ').trim();
+    const target = requested === 'latest' ? readLastSessionPointer({ surface }) ?? '' : requested;
     if (target) {
       void commandRegistry.execute('session', ['resume', target], commandContext).then(() => render());
+    } else {
+      commandContext.print('[Resume] No saved session pointer is available. Run /session list to choose a saved session.');
     }
   } else if (!onboardingCompletionMarker.payload) {
     input.openAgentWorkspace(commandContext, 'setup', 'ONBOARDING');

@@ -1,3 +1,4 @@
+import { retainHookWork } from '../live-work.js';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -49,7 +50,8 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
 
     // Keep cancellation and the deadline alive through body consumption. This
     // also settles error responses instead of leaving an unread owned body.
-    const ownedText = execution ? await response.text() : undefined;
+    const bodyText = retainHookWork(response.text());
+    const ownedText = execution ? await bodyText : undefined;
     execution?.signal.throwIfAborted();
 
     if (!response.ok) {
@@ -59,7 +61,7 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
       };
     }
 
-    const text = ownedText ?? await response.text();
+    const text = ownedText ?? await bodyText;
     if (!text.trim()) {
       return { ok: true };
     }

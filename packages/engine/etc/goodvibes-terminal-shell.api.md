@@ -295,6 +295,9 @@ export function createFleetServices(deps: FleetServicesDeps): {
 };
 
 // @public
+export function createHerdrSessionReporter(options?: HerdrSessionReporterOptions): HerdrSessionReporter;
+
+// @public
 export function createRenderScheduler(renderNow: () => void, scheduleFlush?: (flush: () => void) => void,
 isReleased?: () => boolean): RenderScheduler;
 
@@ -687,6 +690,66 @@ export function groupProviders(providers: readonly string[]): {
     popular: string[];
     all: string[];
 };
+
+// @public (undocumented)
+export interface HerdrReporterEnvironment {
+    // (undocumented)
+    readonly HERDR_BIN_PATH?: string | undefined;
+    // (undocumented)
+    readonly HERDR_ENV?: string | undefined;
+    // (undocumented)
+    readonly HERDR_PANE_ID?: string | undefined;
+    // (undocumented)
+    readonly HERDR_SOCKET_PATH?: string | undefined;
+}
+
+// @public (undocumented)
+export interface HerdrSessionReporter {
+    // (undocumented)
+    close(): Promise<void>;
+    // (undocumented)
+    readonly enabled: boolean;
+    readonly resumeCommandSupported: boolean;
+    // (undocumented)
+    update(input: HerdrSessionUpdate): Promise<void>;
+}
+
+// @public (undocumented)
+export interface HerdrSessionReporterOptions {
+    // (undocumented)
+    readonly environment?: HerdrReporterEnvironment | undefined;
+    // (undocumented)
+    readonly onError?: ((error: Error) => void) | undefined;
+    readonly transport?: ((argv: readonly string[], context: HerdrTransportContext) => Promise<string | void>) | undefined;
+}
+
+// @public (undocumented)
+export interface HerdrSessionUpdate {
+    // (undocumented)
+    readonly busy: boolean;
+    // (undocumented)
+    readonly resumeArgv: readonly string[];
+    // (undocumented)
+    readonly sessionId: string;
+    // (undocumented)
+    readonly sessionPath?: string | undefined;
+    // (undocumented)
+    readonly waitingForOwner: boolean;
+}
+
+// @public (undocumented)
+export interface HerdrTransportContext {
+    // (undocumented)
+    readonly binaryPath: string;
+    // (undocumented)
+    readonly paneId: string;
+    // (undocumented)
+    readonly signal: AbortSignal;
+    // (undocumented)
+    readonly socketPath: string;
+    // (undocumented)
+    readonly timeoutMs: number;
+}
 
 // @public (undocumented)
 export function hostModeForHostname(hostname: string): RuntimeHostMode;

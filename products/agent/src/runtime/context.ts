@@ -39,6 +39,12 @@ export interface BootstrapOptions {
    * Otherwise main.ts binds the app-owned exit route immediately after bootstrap returns.
    */
   exit?: () => void;
+  /** Bind native activity before boot lifecycle hooks can execute. */
+  onHookDispatcherReady?: (source: {
+    readonly runtime: Pick<MutableRuntimeState, 'sessionId'>;
+    readonly surface: RuntimeServices['surface'];
+    readonly hookDispatcher: HookDispatcher;
+  }) => void;
 }
 
 /**

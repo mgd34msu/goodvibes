@@ -1638,6 +1638,26 @@
       "bun": "./terminal-shell/src/work-tree-model.ts",
       "types": "./terminal-shell/dist/work-tree-model.d.ts",
       "import": "./terminal-shell/dist/work-tree-model.js"
+    },
+    "./terminal-shell/diff-review-model": {
+      "bun": "./terminal-shell/src/diff-review-model.ts",
+      "types": "./terminal-shell/dist/diff-review-model.d.ts",
+      "import": "./terminal-shell/dist/diff-review-model.js"
+    },
+    "./terminal-shell/changes-model": {
+      "bun": "./terminal-shell/src/changes-model.ts",
+      "types": "./terminal-shell/dist/changes-model.d.ts",
+      "import": "./terminal-shell/dist/changes-model.js"
+    },
+    "./terminal-shell/diff-rows": {
+      "bun": "./terminal-shell/src/renderer/diff-rows.ts",
+      "types": "./terminal-shell/dist/renderer/diff-rows.d.ts",
+      "import": "./terminal-shell/dist/renderer/diff-rows.js"
+    },
+    "./terminal-shell/lane-graph-paint": {
+      "bun": "./terminal-shell/src/renderer/lane-graph-paint.ts",
+      "types": "./terminal-shell/dist/renderer/lane-graph-paint.d.ts",
+      "import": "./terminal-shell/dist/renderer/lane-graph-paint.js"
     }
   },
   "publishConfig": {

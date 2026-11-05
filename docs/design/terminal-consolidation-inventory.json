@@ -1020,7 +1020,7 @@
       "path": "renderer/lane-graph/paint.ts",
       "baselineTuiLines": 538,
       "baselineSimilarity": 0.9767,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/lane-graph/semantic-memo.ts",

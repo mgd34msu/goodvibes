@@ -12,13 +12,13 @@
       "path": "audio/capture.ts",
       "baselineTuiLines": 112,
       "baselineSimilarity": 0.4865,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "audio/onnxruntime-assets.d.ts",
       "baselineTuiLines": 24,
       "baselineSimilarity": 0.9583,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "audio/player.ts",
@@ -36,7 +36,7 @@
       "path": "audio/spoken-turn-wiring.ts",
       "baselineTuiLines": 77,
       "baselineSimilarity": 0.9067,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "audio/voice-capture-wiring.ts",
@@ -48,7 +48,7 @@
       "path": "audio/wake-inference.ts",
       "baselineTuiLines": 187,
       "baselineSimilarity": 0.8579,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "audio/wake-runtime.ts",

@@ -29,7 +29,7 @@
     },
     "packages/engine": {
       "name": "@goodvibes-jev/engine",
-      "version": "2.0.24",
+      "version": "3.0.0-dev.0",
       "bin": {
         "goodvibes-toolchain": "./toolchain/dist/bin/toolchain.js",
         "goodvibes-sdk-pin-gate": "./toolchain/dist/bin/sdk-pin-gate.js",
@@ -48,6 +48,7 @@
       },
       "dependencies": {
         "@goodvibes-jev/judgment": "workspace:*",
+        "onnxruntime-web": "^1.27.0",
         "saxes": "6.0.0",
         "smol-toml": "1.9.1",
         "tar": "7.5.22",
@@ -96,14 +97,14 @@
     },
     "packages/judgment": {
       "name": "@goodvibes-jev/judgment",
-      "version": "2.0.24",
+      "version": "3.0.0-dev.0",
       "dependencies": {
         "@typesafe-ai/sdk": "0.6.0",
       },
     },
     "products/agent": {
       "name": "@goodvibes-jev/agent",
-      "version": "2.1.0",
+      "version": "3.0.0-dev.0",
       "bin": {
         "goodvibes-agent": "bin/goodvibes-agent.ts",
       },
@@ -123,7 +124,7 @@
     },
     "products/daemon": {
       "name": "@goodvibes-jev/daemon",
-      "version": "2.0.24",
+      "version": "3.0.0-dev.0",
       "bin": {
         "goodvibes-daemon": "./bin/goodvibes-daemon",
       },
@@ -137,7 +138,7 @@
     },
     "products/tui": {
       "name": "@goodvibes-jev/tui",
-      "version": "2.1.0",
+      "version": "3.0.0-dev.0",
       "bin": {
         "goodvibes": "bin/goodvibes",
       },
@@ -155,7 +156,7 @@
     },
     "products/webui": {
       "name": "@goodvibes-jev/webui",
-      "version": "2.0.0",
+      "version": "3.0.0-dev.0",
       "dependencies": {
         "@fontsource/geist-mono": "5.3.0",
         "@fontsource/geist-sans": "5.3.0",

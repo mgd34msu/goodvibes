@@ -1,0 +1,72 @@
+import { isProxy } from 'node:util/types';
+import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { UiRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
+import type { VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+import type { StreamingAudioPlayer } from './player.js';
+import { LocalStreamingAudioPlayer } from './player.js';
+import { SpokenTurnController } from '@goodvibes-jev/engine/sdk/platform/voice';
+export interface SpokenTurnRuntime {
+    readonly unsubs: readonly (() => void)[];
+    submitNextTurn(prompt: string): boolean;
+    /** Returns whether speech was actually active (see controller.stop). */
+    stop(message?: string | undefined): boolean;
+    /** Exit-path stop: lets the audio already playing drain, bounded (see controller.stopForExit). */
+    stopForExit(drainTimeoutMs?: number | undefined): Promise<void>;
+}
+export interface WireSpokenTurnRuntimeOptions {
+    readonly voiceService: Pick<VoiceService, 'synthesizeStream'>;
+    readonly configManager: Pick<ConfigManager, 'get'>;
+    readonly events: UiRuntimeEvents;
+    readonly notify: (message: string) => void;
+    /**
+     * Optional player factory, injected in tests to avoid spawning real
+     * subprocesses. Defaults to LocalStreamingAudioPlayer.
+     */
+    readonly playerFactory?: (() => StreamingAudioPlayer) | undefined;
+}
+/**
+ * wireSpokenTurnRuntime, wires the spoken-turn pipeline against the runtime
+ * event bus.
+ *
+ * Always-speak mode: when `ui.voiceEnabled` is true in config, every
+ * TURN_SUBMITTED event arms the turn for spoken output automatically, the
+ * user does not need to prefix the prompt with /tts. The availability check
+ * inside SpokenTurnController still gates gracefully when no player is found.
+ */
+export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, source: string): SpokenTurnRuntime {
+    const player = options.playerFactory ? options.playerFactory() : new LocalStreamingAudioPlayer();
+    // The terminal platform's subprocess-based player already satisfies the SDK's AudioSink
+    // interface unchanged (see docs/decisions/2026-07-06-spoken-turn-tts-policy-sdk-hoist.md
+    // in the SDK repo), only the option name (`sink` not `player`) and the
+    // attribution `source` are new.
+    const controller = new SpokenTurnController({
+        voiceService: options.voiceService,
+        rejectFailureObject: isProxy,
+        configManager: options.configManager,
+        sink: player,
+        source,
+        notify: options.notify,
+    });
+    const turns = options.events.turns;
+    const unsubs = [
+        turns.on('TURN_SUBMITTED', (event) => {
+            // Always-speak mode: auto-arm when ui.voiceEnabled is set.
+            if (options.configManager.get('ui.voiceEnabled')) {
+                controller.submitNextTurn(event.prompt);
+            }
+            void controller.handleTurnEvent(event);
+        }),
+        turns.on('PREFLIGHT_FAIL', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('STREAM_DELTA', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('STREAM_END', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('TURN_COMPLETED', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('TURN_ERROR', (event) => { void controller.handleTurnEvent(event); }),
+        turns.on('TURN_CANCEL', (event) => { void controller.handleTurnEvent(event); }),
+    ];
+    return {
+        unsubs,
+        submitNextTurn: (prompt) => controller.submitNextTurn(prompt),
+        stop: (message) => controller.stop(message),
+        stopForExit: (drainTimeoutMs) => controller.stopForExit(drainTimeoutMs),
+    };
+}

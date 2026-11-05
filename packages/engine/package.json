@@ -1883,6 +1883,21 @@
       "bun": "./terminal-shell/src/conversation-runtime-command.ts",
       "types": "./terminal-shell/dist/conversation-runtime-command.d.ts",
       "import": "./terminal-shell/dist/conversation-runtime-command.js"
+    },
+    "./terminal-shell/audio-capture": {
+      "bun": "./terminal-shell/src/audio/capture.ts",
+      "types": "./terminal-shell/dist/audio/capture.d.ts",
+      "import": "./terminal-shell/dist/audio/capture.js"
+    },
+    "./terminal-shell/spoken-turn-wiring": {
+      "bun": "./terminal-shell/src/audio/spoken-turn-wiring.ts",
+      "types": "./terminal-shell/dist/audio/spoken-turn-wiring.d.ts",
+      "import": "./terminal-shell/dist/audio/spoken-turn-wiring.js"
+    },
+    "./terminal-shell/wake-inference": {
+      "bun": "./terminal-shell/src/audio/wake-inference.ts",
+      "types": "./terminal-shell/dist/audio/wake-inference.d.ts",
+      "import": "./terminal-shell/dist/audio/wake-inference.js"
     }
   },
   "publishConfig": {
@@ -1906,7 +1921,8 @@
     "tar": "7.5.22",
     "undici": "7.30.1",
     "zod": "4.6.6",
-    "zustand": "5.0.12"
+    "zustand": "5.0.12",
+    "onnxruntime-web": "^1.27.0"
   },
   "optionalDependencies": {
     "@agentclientprotocol/sdk": "0.21.0",

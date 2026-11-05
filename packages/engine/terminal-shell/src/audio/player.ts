@@ -209,9 +209,9 @@ function awaitReady(proc: SpawnProcess, signal?: AbortSignal): Promise<void> {
  * its tool and capture does not must be a real difference in what is installed,
  * never a difference in how the two looked for it.
  */
-export function findExecutable(name: string, env: NodeJS.ProcessEnv): string | null {
+export function findExecutable(name: string, env: NodeJS.ProcessEnv, platform: string = process.platform): string | null {
   const pathValue = env.PATH ?? '';
-  const extensions = process.platform === 'win32'
+  const extensions = platform === 'win32'
     ? ['', '.exe', '.cmd', '.bat']
     : [''];
   for (const dir of pathValue.split(delimiter)) {

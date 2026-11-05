@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { Client, interceptors } from 'undici/index.js';
 import * as directClient from './direct-client.js';
 import { types as nodeTypes } from 'node:util';
@@ -145,7 +146,7 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
       const result: unknown = assertCurrent();
       // An async hook must not silently authorize transmission before it fails.
       if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        void Promise.resolve(result).catch(() => {});
+        drainOwned(result);
         throw unauthorized();
       }
     } catch { throw unauthorized(); }

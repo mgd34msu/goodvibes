@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/sdk/platform/routing';
 import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -657,7 +658,7 @@ export async function autonomyIntakeSummary(_context: CommandContext, args: Agen
   const assertCurrent = () => { signal?.throwIfAborted();
     const assertion: unknown = originalCurrent?.();
     if (assertion !== undefined) {
-      try { void Promise.resolve(assertion).catch(() => {}); } catch { /* Refuse asynchronous authority. */ }
+      drainOwned(assertion);
       throw new Error('Autonomy intake authority must be synchronous.');
     }
     assertOperatorCurrent();

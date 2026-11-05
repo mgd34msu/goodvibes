@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeObjectProfilePolicy } from '../extensions.js';
 import type { KnowledgeStore } from '../store.js';
@@ -100,7 +101,7 @@ async function prepareRepairSubjects(input: RepairSubjectInput): Promise<RepairS
       assertOriginalIdentity();
       const result: unknown = ownerCurrent?.();
       if (result !== undefined) {
-        try { void Promise.resolve(result).catch(() => {}); } catch { /* A callback result cannot authorize a reading. */ }
+        drainOwned(result);
         throw new Held('stale');
       }
       assertOriginalIdentity();

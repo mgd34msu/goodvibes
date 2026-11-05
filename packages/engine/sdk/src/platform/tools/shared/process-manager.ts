@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -70,7 +71,7 @@ const COMPLETED_PROCESS_TTL_MS = 30 * 60 * 1000;
 function assertSynchronousAdmission(check: (() => void) | undefined, operation = 'admission'): void {
   const result: unknown = check?.();
   if (result === undefined) return;
-  try { void Promise.resolve(result).catch(() => {}); } catch { /* Refuse below. */ }
+  drainOwned(result);
   throw new Error(`Process ${operation} currentness must be synchronous and return void`);
 }
 

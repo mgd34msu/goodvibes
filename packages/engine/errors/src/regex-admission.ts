@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { defineBattery, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment/decisions';
 import { type JudgmentReadingOptions } from './judgment-authority.js';
 
@@ -194,7 +195,7 @@ export async function admitRegex(source: string, flags: string, options: RegexAd
       throw new RegexAdmissionError(operation, 'execution owner changed');
     for (const check of [sourceCurrent, callerCurrent]) {
       const result: unknown = check?.();
-      if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new RegexAdmissionError(operation, 'asynchronous owner check'); }
+      if (result !== undefined) { drainOwned(result); throw new RegexAdmissionError(operation, 'asynchronous owner check'); }
     }
     signal.throwIfAborted();
   } };

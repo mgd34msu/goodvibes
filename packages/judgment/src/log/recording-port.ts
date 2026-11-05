@@ -1,3 +1,4 @@
+import { drainOwned } from '../drain-owned.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
@@ -134,8 +135,7 @@ function assertLogCurrent(check: (() => void) | undefined): void {
     if (value === undefined) return;
     // A refused async assertion must not leave its rejection unhandled. A
     // hostile then/constructor getter is also only a value-free refusal.
-    try { void Promise.resolve(value).catch(() => {}); }
-    catch { /* Refuse the assertion below. */ }
+    drainOwned(value);
   } catch { /* Refuse the assertion below. */ }
   throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected);
 }

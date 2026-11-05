@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** One service sequences occasion capture, acknowledgements, interviews and
  * sweeps over the shared profile and machine state. Delivery records belong to
  * each configured destination, so a failed push remains available to pull.
@@ -140,7 +141,7 @@ export class OccasionsService {
     const captured = JSON.stringify(snapshotJudgmentInput(source()));
     const work = new OccasionReadingWork({ signal, assertCurrent: () => {
       const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new OccasionReadingHeldError(); }
+      if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
       sourceLease?.assertCurrent();
       if (config.getConfigurationIncarnation?.() !== configIncarnation) throw new OccasionReadingHeldError();
       const currentFunctions = [profile.importantDates, profile.plans, profile.ownerNames, profile.person, profile.captureRead, config.get, config.getConfigurationIncarnation];
@@ -290,7 +291,7 @@ export class OccasionsService {
       signal.throwIfAborted();
       if (this.answerOwners.get(key) !== controller) throw new OccasionReadingHeldError();
       const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new OccasionReadingHeldError(); }
+      if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
     };
     retainOccasionStateReceipts(assertCurrent, options);
     try {

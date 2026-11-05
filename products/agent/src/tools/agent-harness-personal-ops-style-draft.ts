@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes-jev/engine/sdk/platform/email';
 import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -53,7 +54,7 @@ export async function runPersonalOpsStyleDraft(fields: unknown, options: Catalog
   const current = () => {
     optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
     const returned: unknown = caller?.();
-    if (returned !== undefined) { void Promise.resolve(returned).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (returned !== undefined) { drainOwned(returned); throw new ToolInputProjectionError('held'); }
     optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
   };
   current();

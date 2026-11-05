@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Post-gate failure meaning is an observation, never git repair authority. */
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -39,7 +40,7 @@ export async function classifyBookkeepingFailure(error: unknown, options: Judgme
   let current = () => {
     if (options.signal?.aborted) throw new Error('Repository failure reading cancelled.');
     const result: unknown = options.assertCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Repository failure owner unavailable.'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('Repository failure owner unavailable.'); }
   };
   try {
     current();

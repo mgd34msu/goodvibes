@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * Reads whether an undeclared config key holds credential material, through
  * the `config.credential-key` battery. The declared list in
@@ -25,7 +26,7 @@ export async function readCredentialKey(state: CredentialKeyState, site: string,
     sourceCurrent();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new Error('Credential field ownership must be synchronous.');
     }
     sourceCurrent();

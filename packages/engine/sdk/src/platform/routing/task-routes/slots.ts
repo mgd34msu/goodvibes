@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * `routing.task-route.slots`: what a user task asks for, beyond which route
  * handles it. These questions replace the agent's per-route effect word
@@ -256,7 +257,7 @@ export async function readSlots(
   const callerCurrent = () => {
     signal?.throwIfAborted();
     const assertion: unknown = originalCurrent?.();
-    if (assertion !== undefined) { void Promise.resolve(assertion).catch(() => {}); throw new Error('Task-route slot ownership must be synchronous.'); }
+    if (assertion !== undefined) { drainOwned(assertion); throw new Error('Task-route slot ownership must be synchronous.'); }
     if (options.signal !== signal || options.assertCurrent !== originalCurrent || options.namedIds !== sources || options.site !== site
       || port.model !== model || port.ask !== ask || port.recorder !== recorder) throw new Error('Task-route slot source changed.');
   };

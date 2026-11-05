@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { spawnSync } from 'node:child_process';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
@@ -411,7 +412,7 @@ export async function buildCliServicePosture(
   const assertCurrent = () => {
     sourceCurrent();
     const result: unknown = callerCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Service posture ownership must be synchronous.'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('Service posture ownership must be synchronous.'); }
     sourceCurrent();
   };
   assertCurrent();

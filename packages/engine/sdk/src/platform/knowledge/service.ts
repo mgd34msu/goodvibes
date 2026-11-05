@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { randomUUID } from 'node:crypto';
 import { snapshotNodeInput } from './activation/projection.js';
@@ -478,7 +479,7 @@ export class KnowledgeService {
         assertRequestCurrent();
         const current: unknown = callerCurrent?.();
         if (current !== undefined) {
-          void Promise.resolve(current).catch(() => {});
+          drainOwned(current);
           throw new KnowledgeScopeSelectionHeldError('stale');
         }
         assertRequestCurrent();
@@ -754,7 +755,7 @@ export class KnowledgeService {
       assertRequestCurrent();
       const current: unknown = callerCurrent?.();
       if (current !== undefined) {
-        void Promise.resolve(current).catch(() => {});
+        drainOwned(current);
         throw new KnowledgeScopeSelectionHeldError('stale');
       }
       assertRequestCurrent();

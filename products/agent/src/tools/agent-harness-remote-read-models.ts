@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -700,11 +701,11 @@ export async function settleNativeRemotePublisherSemantics(token: object, option
         || owner.state.kind === 'retired') throw new ToolInputProjectionError('held');
       const checkBackend = (guard: () => void) => {
         signal?.throwIfAborted(); const result: unknown = guard.call(options);
-        if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+        if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
       };
       assertPublisherEntryCurrent(owner, () => {
         signal?.throwIfAborted(); const result: unknown = backendCurrent.call(options);
-        if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+        if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
       }, () => checkBackend(backendMethods ?? backendCurrent));
       for (const guard of retained.values()) guard();
       signal?.throwIfAborted(); assertOptions(); assertProjection();
@@ -715,7 +716,7 @@ export async function settleNativeRemotePublisherSemantics(token: object, option
     const assertCurrent = () => {
       assertSourceCurrent();
       const result: unknown = callerCurrent.call(options);
-      if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+      if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
       assertSourceCurrent();
     };
     const current = { ...options, assertCurrent, retainCurrent: retain };

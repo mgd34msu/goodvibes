@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { logger } from '../utils/logger.js';
 import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
@@ -855,7 +856,7 @@ export class SharedSessionBroker {
     // The async startup boundary must not turn a stale source into a claim.
     const checked: unknown = options.beforeApply?.();
     if (checked !== undefined) {
-      void Promise.resolve(checked).catch(() => {});
+      drainOwned(checked);
       throw new Error('Session delivery authority checks must be synchronous');
     }
     const applied = applySurfaceInputDelivery(this.sessionInputStore(), sessionId, inputId, options, {

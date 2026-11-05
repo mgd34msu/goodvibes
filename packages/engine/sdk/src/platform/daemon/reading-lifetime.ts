@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
@@ -6,7 +7,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 export function assertSynchronousCurrent(check?: () => void): void {
   const result: unknown = check?.();
   if (result !== undefined) {
-    void Promise.resolve(result).catch(() => {});
+    drainOwned(result);
     throw new Error('Daemon reading authority checks must be synchronous');
   }
 }

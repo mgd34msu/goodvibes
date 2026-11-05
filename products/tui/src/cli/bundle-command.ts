@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -145,7 +146,7 @@ export async function handleBundleCommand(runtime: CliCommandRuntime, options: J
     const assertCurrent = () => {
       sourceCurrent();
       const result: unknown = callerCurrent?.();
-      if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Support bundle ownership must be synchronous.'); }
+      if (result !== undefined) { drainOwned(result); throw new Error('Support bundle ownership must be synchronous.'); }
       sourceCurrent();
     };
     assertCurrent();

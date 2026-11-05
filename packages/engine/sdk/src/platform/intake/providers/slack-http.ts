@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Private account-scoped Slack HTTP owner. Never exported by an SDK barrel. */
 import { Client, interceptors, type Dispatcher } from 'undici/index.js';
 import { responseStream } from '../../security/source-screening/direct-client.js';
@@ -132,7 +133,7 @@ export function createSlackInboxHttpOwner(options: SlackInboxHttpOwnerOptions): 
     try {
       const result: unknown = assertCurrent();
       if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        void Promise.resolve(result).catch(() => {});
+        drainOwned(result);
         throw unauthorized();
       }
     } catch { throw unauthorized(); }

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, retainOwnedJson } from '../../../gate/judgment-input.js';
@@ -75,7 +76,7 @@ export async function prepareSelfImprovementAssessment(input: AssessmentInput): 
     try { store.assertRecordSnapshotFrame(() => {
       assertIdentity();
       const result: unknown = ownerCurrent?.();
-      if (result !== undefined) { try { void Promise.resolve(result).catch(() => {}); } catch { /* Restriction only. */ } throw new Held('stale'); }
+      if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
       assertIdentity();
       assertKnowledgeRecordAdmissions(store, receipts);
       for (const { source, extraction } of evidence) if (store.getExtractionBySourceId(source.id) !== extraction) throw new Held('stale');

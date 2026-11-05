@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
 import { createHash } from 'node:crypto';
@@ -236,7 +237,7 @@ export async function captureAutonomyLiveRecords(context: CommandContext, option
   const assertCurrent = () => {
     assertSource();
     const outcome: unknown = options.assertCurrent?.();
-    if (outcome !== undefined) { void Promise.resolve(outcome).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (outcome !== undefined) { drainOwned(outcome); throw new ToolInputProjectionError('held'); }
     assertSource();
   };
   assertCurrent();

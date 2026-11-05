@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -155,7 +156,7 @@ export async function handleBundleCommand(runtime: CliCommandRuntime, options: J
     const assertCurrent = () => {
       sourceCurrent();
       const result: unknown = callerCurrent?.();
-      if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Support bundle ownership must be synchronous.'); }
+      if (result !== undefined) { drainOwned(result); throw new Error('Support bundle ownership must be synchronous.'); }
       sourceCurrent();
     };
     assertCurrent();

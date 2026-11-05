@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * Verified binary updates with owned staging and compensating cohort renames.
  * Individual same-filesystem renames are atomic; the cohort and the brief gap
@@ -339,7 +340,7 @@ interface TransactionPaths {
 function assertSynchronousCurrent(current: (() => void) | undefined): void {
   const result = current?.();
   if (result !== undefined) {
-    void Promise.resolve(result).catch(() => {});
+    drainOwned(result);
     throw new Error('update current restriction must complete synchronously without returning a value');
   }
 }
@@ -438,7 +439,7 @@ function transact(
     nativeGuard = restrictions.prepareNativeGuard?.();
     const admission = beforeCommit?.();
     if (admission !== undefined) {
-      void Promise.resolve(admission).catch(() => {});
+      drainOwned(admission);
       throw new Error('beforeCommit must complete synchronously without returning a value');
     }
     phase = 'commit';
@@ -619,7 +620,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     assertNativeCurrent?.();
     const result = options.beforeCommit?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new Error('beforeCommit must complete synchronously without returning a value');
     }
     assertCurrent();
@@ -660,7 +661,7 @@ export function rollbackKeptPrevious(
     if (options.requireComplete && paths.some(path => !io.exists(path.previous))) throw new Error('Previous native cohort is incomplete; refusing partial rollback');
     const result = beforeCommit?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new Error('beforeCommit must complete synchronously without returning a value');
     }
   }, (rename) => {

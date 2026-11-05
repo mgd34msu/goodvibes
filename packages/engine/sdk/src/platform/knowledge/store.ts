@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -150,7 +151,7 @@ const MAX_RETAINED_JOB_RUNS = 500;
 function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): void {
   const result: unknown = assertCurrent?.();
   if (result !== undefined) {
-    try { void Promise.resolve(result).catch(() => {}); } catch {}
+    drainOwned(result);
     throw new KnowledgeNodeActivationHeldError('stale');
   }
 }

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL } from '../../core/native-turn-scope.js';
 import { readDelegationRequest } from '../../core/delegation-request-context.js';
 import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
@@ -491,7 +492,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               assertCurrentToolInvocation(args, options);
               const checked: unknown = source?.assertCurrent?.();
               if (checked !== undefined) {
-                void Promise.resolve(checked).catch(() => {});
+                drainOwned(checked);
                 throw new Error('Workflow contract source checks must be synchronous.');
               }
               if (input.task !== task || input.mode !== 'start' || input.definition !== CONTRACT_WORKFLOW_DEFINITION

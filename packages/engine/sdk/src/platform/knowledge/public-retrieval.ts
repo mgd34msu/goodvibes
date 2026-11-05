@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { assertKnowledgeExtractionInput } from './extraction-policy.js';
 import { knowledgeNodeMatchesScope, knowledgeSourceMatchesScope } from './scope-records.js';
@@ -182,7 +183,7 @@ export async function readPublicKnowledgeSelection(store: KnowledgeStore, input:
       try {
         const current: unknown = callerCurrent?.();
         if (current !== undefined) {
-          try { void Promise.resolve(current).catch(() => {}); } catch { /* A returned value cannot grant synchronous authority. */ }
+          drainOwned(current);
           throw new Held('stale');
         }
       }

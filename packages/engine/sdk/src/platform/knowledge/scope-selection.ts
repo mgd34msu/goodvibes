@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   captureJudgmentPort,
   JudgmentAuthorityRetiredError,
@@ -129,7 +130,7 @@ export async function prepareKnowledgeScopeSelection(
     try {
       const current: unknown = check?.();
       if (current !== undefined) {
-        try { void Promise.resolve(current).catch(() => {}); } catch { /* A borrowed result cannot grant authority. */ }
+        drainOwned(current);
         throw new KnowledgeScopeSelectionHeldError('stale');
       }
     } catch (error) {

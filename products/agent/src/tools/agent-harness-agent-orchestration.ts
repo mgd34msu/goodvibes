@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -925,7 +926,7 @@ async function captureOrchestrationPublisher(context: CommandContext, backend: R
   };
   const assertCallerCurrent = () => {
     const result: unknown = callerCurrent?.call(options);
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
   };
   const assertCurrent = () => {
     assertSourceCurrent();

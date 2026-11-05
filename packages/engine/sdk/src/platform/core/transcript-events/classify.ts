@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { declaredNoticePresentation } from '../../runtime/runtime-event-notices.js';
 import { systemMessagePresentation } from '../../runtime/system-message-presentation.js';
@@ -50,7 +51,7 @@ export async function classifyTranscriptMessages(messages: readonly Conversation
   const assertCurrent = () => {
     options.signal?.throwIfAborted();
     const checked: unknown = options.assertCurrent?.();
-    if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Transcript source checks must be synchronous'); }
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Transcript source checks must be synchronous'); }
     if (JSON.stringify(captureTranscriptSnapshot(messages)) !== source) throw new TranscriptSourceChangedError();
   };
   assertCurrent();

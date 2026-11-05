@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
@@ -537,7 +538,7 @@ async function captureQueueItems(context: CommandContext, options: CatalogRankin
     assertRestrictions();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) {
-      try { void Promise.resolve(result).catch(() => {}); } catch { /* Asynchronous callbacks cannot establish current ownership. */ }
+      drainOwned(result);
       throw new ToolInputProjectionError('held');
     }
     assertRestrictions();

@@ -17,3 +17,5 @@ export { defineDispatch, type Dispatch } from './patterns/dispatch.ts';
 export { buildSelectionInput, defineSelector, type Selector, type SelectSpec, type Selection, type SelectionConfig, type SelectionRequest } from './patterns/select.ts';
 export { defineRerank, type Candidate, type Ranked, type Rerank, type RerankFixture, type RerankSpec, type Reranking } from './patterns/rerank.ts';
 export { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './port/backend-settings.ts';
+
+export { drainOwned } from './drain-owned.ts';

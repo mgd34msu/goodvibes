@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
 import { captureTranscriptSource, readTranscriptIndex, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
 import { randomBytes } from 'node:crypto';
@@ -153,7 +154,7 @@ async function printSessionExport(
     let result: unknown;
     try { result = ownerCurrent?.(); } catch { throw new TranscriptSourceChangedError(); }
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new TranscriptSourceChangedError();
     }
     readingOwner?.assertCurrent();

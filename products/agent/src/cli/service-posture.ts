@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
 import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
@@ -196,7 +197,7 @@ export async function buildCliServicePosture(
   const assertCurrent = () => {
     sourceCurrent();
     const result: unknown = callerCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Service posture ownership must be synchronous.'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('Service posture ownership must be synchronous.'); }
     sourceCurrent();
   };
   const reading = { ...options, assertCurrent };

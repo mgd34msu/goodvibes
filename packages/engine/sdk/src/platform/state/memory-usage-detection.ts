@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * memory-usage-detection.ts, reference detection (HOISTED to the SDK).
  *
@@ -52,7 +53,7 @@ export async function detectReferencedMemoryIds(
   const input = snapshotJudgmentInput(original.snapshot) as { responseText: string; records: readonly MemoryReferenceInput[] };
   const current = () => { original.assertCurrent(); options.signal?.throwIfAborted();
     const checked: unknown = options.assertCurrent?.();
-    if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Memory usage guard must be synchronous.'); }
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Memory usage guard must be synchronous.'); }
   };
   current();
   const referenced: string[] = [];

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -33,7 +34,7 @@ export async function prepareRepairProfileRequirement(input: { readonly query: s
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held('stale');
     try { originals.assertCurrent(); } catch { throw new Held('stale'); }
     const result: unknown = ownerCurrent?.();
-    if (result !== undefined) { try { void Promise.resolve(result).catch(() => {}); } catch { /* Restriction only. */ } throw new Held('stale'); }
+    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout || signal?.aborted) throw new Held('stale');
     try { originals.assertCurrent(); } catch { throw new Held('stale'); }
   };

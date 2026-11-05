@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { routingRegistry, atRestCredential, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/sdk/platform/routing';
@@ -16,11 +17,11 @@ export function retainMemoryReadingOptions(original: CatalogRankingOptions): Cat
   const assertSource = () => { fieldsCurrent(); callerCurrent?.(); retainCurrent?.(); signal?.throwIfAborted(); };
   const assertCurrent = () => {
     assertSource(); const result: unknown = caller?.call(original); assertSource();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
   };
   const retainGuard = (guard: () => void, key?: string) => {
     assertSource(); const result: unknown = retain?.call(original, guard, key); assertSource();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
   };
   assertCurrent(); retainGuard(assertSource, 'agent.memory.reading-options');
   return { signal, sourceOwner, assertCurrent, retainCurrent: retainGuard,
@@ -30,7 +31,7 @@ export function retainMemoryReadingOptions(original: CatalogRankingOptions): Cat
 export function assertMemoryCurrent(options: CatalogRankingOptions): void {
   options.signal?.throwIfAborted();
   const result: unknown = options.assertCurrent?.();
-  if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+  if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
   options.signal?.throwIfAborted();
 }
 

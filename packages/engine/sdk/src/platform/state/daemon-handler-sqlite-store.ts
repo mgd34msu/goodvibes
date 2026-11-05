@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase, SqlJsDatabaseAllocationError } from './sqljs-database.js';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
@@ -354,7 +355,7 @@ export class HandlerSqliteStore {
           try {
             result = mutate(transaction);
             if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-              void Promise.resolve(result).catch(() => {});
+              drainOwned(result);
               throw new Error('HandlerSqliteStore transaction must be synchronous');
             }
             candidate.run('COMMIT');

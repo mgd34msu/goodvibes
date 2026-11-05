@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes-jev/judgment';
 import { prepareJudgmentResult, captureStrictJudgmentJson } from '../../gate/judgment-result.js';
@@ -113,7 +114,7 @@ export async function readAutonomyIntake(request: string, options: AutonomyIntak
   const current = () => { signal?.throwIfAborted();
     const assertion: unknown = originalCurrent?.();
     if (assertion !== undefined) {
-      try { void Promise.resolve(assertion).catch(() => {}); } catch { /* Refuse asynchronous authority. */ }
+      drainOwned(assertion);
       throw new Error('Autonomy intake authority must be synchronous.');
     }
     assertOriginalBindings();

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { postalConfigKey, POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { observeImportFile } from './prepared-import.js';
@@ -537,7 +538,7 @@ export class ConfigManager {
     const check = () => {
       options.signal?.throwIfAborted();
       const result: unknown = options.assertCurrent?.();
-      if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new PostalAddressHeldError(); }
+      if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
       if (this.getConfigurationIncarnation() !== revision || this.profilePostalReader !== reader || this.profilePostalEpoch !== installation) throw new PostalAddressHeldError();
     };
     check();

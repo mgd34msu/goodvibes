@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { assertKnowledgeRecordAdmissions, assertKnowledgeRecordContainers, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { captureOwnedJson, retainOwnedJson } from '../../gate/judgment-input.js';
 import { prepareGeneratedFactIdentity, retainGeneratedFactRecordReferences, type GeneratedFactIdentity } from '../generated-fact-record-references.js';
@@ -470,7 +471,7 @@ export async function prepareSourceLinkedRepairProfileFacts(
     assertOriginalOptions();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new KnowledgeRepairSourceAuthorityHeldError('stale');
     }
     assertOriginalOptions();

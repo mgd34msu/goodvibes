@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -70,7 +71,7 @@ export function createKnowledgeUriCanonicalizer(options: KnowledgeUriOptions = {
     assertOptions();
     let result: unknown;
     try { result = ownerCurrent?.(); } catch (error) { throw error instanceof Held ? error : new Held('stale'); }
-    if (result !== undefined) { try { void Promise.resolve(result).catch(() => {}); } catch {} throw new Held('stale'); }
+    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
     assertOptions();
     for (const check of retained) check();
   };

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * routes/owner-profile-policy.ts, the owner's `profile.*` switches, enforced.
  *
@@ -101,11 +102,11 @@ export function applyOwnerProfilePolicy(
         if (service.person !== person) throw new Error('The profile person source is no longer current.');
       };
       const retained: unknown = options.retain?.(sourceCurrent);
-      if (retained !== undefined) { void Promise.resolve(retained).catch(() => {}); throw new Error('The profile person caller is no longer current.'); }
+      if (retained !== undefined) { drainOwned(retained); throw new Error('The profile person caller is no longer current.'); }
       const assertCurrent = () => {
         sourceCurrent();
         const checked: unknown = callerCurrent?.();
-        if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('The profile person caller is no longer current.'); }
+        if (checked !== undefined) { drainOwned(checked); throw new Error('The profile person caller is no longer current.'); }
         sourceCurrent();
       };
       assertCurrent();

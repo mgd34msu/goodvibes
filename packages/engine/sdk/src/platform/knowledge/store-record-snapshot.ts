@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { projectGeneratedFactRecordAdmission } from './generated-fact-record-references.js';
 import { captureKnowledgeSourceReferences, projectKnowledgeSourceReferences, projectKnowledgeNodeActivationMetadata, projectGeneratedKnowledgeNodeIdentity } from './source-structural-references.js';
 import { createHash } from 'node:crypto';
@@ -121,7 +122,7 @@ export function prepareKnowledgeRecordAdmission(store: KnowledgeStore, kind: Rec
     try {
       const result: unknown = captureMetadata(decoded.metadata);
       if (result !== undefined) {
-        try { void Promise.resolve(result).catch(() => {}); } catch { /* Async callbacks cannot supply native metadata. */ }
+        drainOwned(result);
         throw new KnowledgeRecordAdmissionHeldError('stale');
       }
     } finally {

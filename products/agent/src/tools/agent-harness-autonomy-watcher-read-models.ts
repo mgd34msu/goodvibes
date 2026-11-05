@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
@@ -542,7 +543,7 @@ export async function watcherReadModelLiveRecords(context: CommandContext, optio
   const assertCaller = () => {
     optionsCurrent(); signal?.throwIfAborted();
     const result: unknown = callerCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
     optionsCurrent(); signal?.throwIfAborted();
   };
   assertCaller();

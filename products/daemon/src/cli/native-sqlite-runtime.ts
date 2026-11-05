@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -125,7 +126,7 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   const current = () => {
     signal?.throwIfAborted();
     const result = assertCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Native SQLite lifetime must be synchronous'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
     if (retainedFile(libraryPath, cohortRoot) !== libraryOwner || retainedFile(provenancePath, cohortRoot) !== provenanceOwner) throw new Error('Native SQLite companion changed before database construction');
   };
   current();

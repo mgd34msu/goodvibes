@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 /** Jev reads schedule meaning; code owns quantities, calendars and validation. */
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -162,7 +163,7 @@ export const scheduleReading: NaturalLanguageScheduleDecision = {
     const checkSource = () => {
       original.assertCurrent(); options.signal?.throwIfAborted();
       const checked: unknown = options.beforeAttempt?.();
-      if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Schedule source guard must be synchronous.'); }
+      if (checked !== undefined) { drainOwned(checked); throw new Error('Schedule source guard must be synchronous.'); }
     };
     const authority = options.port ? undefined : captureJudgmentPort(SCHEDULE_READING_NAME, {
       signal: options.signal, assertCurrent: checkSource, prepareResultCapture: prepareJudgmentResult,

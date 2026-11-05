@@ -1,9 +1,9 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BrowserJudgmentError, type BrowserJudgmentErrorCode } from '@goodvibes-jev/engine/daemon-sdk';
 
 /** A refused asynchronous hook must not leave a private rejection unhandled. */
 export function consumeRejectedHook(value: unknown): void {
-  try { void Promise.resolve(value).catch(() => {}); }
-  catch { /* A hostile then/constructor getter is still only a refused hook. */ }
+  drainOwned(value);
 }
 export function requireSynchronousAssertion(check: () => void, code: BrowserJudgmentErrorCode): void {
   const result: unknown = check();

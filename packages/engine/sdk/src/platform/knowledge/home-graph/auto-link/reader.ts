@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { prepareJudgmentResult, retainStrictJudgmentJson, JudgmentResultAdmissionError } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -57,7 +58,7 @@ export function createHomeGraphAutoLinkReader() {
       if (options.assertCurrent !== callerCurrent || options.signal !== callerSignal) throw new Held('stale');
       if (callerSignal?.aborted) throw new Held('aborted');
       const checked: unknown = callerCurrent();
-      if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Held('stale'); }
+      if (checked !== undefined) { drainOwned(checked); throw new Held('stale'); }
       assertCurrent(); original.assertCurrent();
     };
     try { return await withSupportBudget(async (signal) => {

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { providerConversation } from './conversation-provider-projection.js';
 import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js';
 import { prepareSystemMessagePresentation, type SystemMessagePresentation } from '../runtime/system-message-presentation.js';
@@ -427,7 +428,7 @@ export class ConversationManager {
     const assertCurrent = () => {
       options.signal?.throwIfAborted();
       const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Transcript source checks must be synchronous'); }
+      if (checked !== undefined) { drainOwned(checked); throw new Error('Transcript source checks must be synchronous'); }
       if (revision !== this._messagesRevision) throw new TranscriptSourceChangedError();
     };
     lifetime.retain(assertCurrent);

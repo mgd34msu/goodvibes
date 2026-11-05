@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { readYesNo, toJson } from '@goodvibes-jev/judgment';
@@ -77,7 +78,7 @@ export function prepareKnowledgeExtractionValueReading(input: KnowledgeExtractio
     checkOriginal();
     const result: unknown = callerCurrent();
     if (result !== undefined) {
-      try { void Promise.resolve(result).catch(() => {}); } catch { /* A callback result cannot authorize a reading. */ }
+      drainOwned(result);
       throw new Held('stale');
     }
     checkOriginal();

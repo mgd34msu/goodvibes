@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { exportCredential, profileDistinctive, redactionCredential, residualCredential, type CredentialProjection, type RedactionPart } from './batteries/redaction.js';
@@ -8,7 +9,7 @@ export function assertRedactionCurrent(check: (() => void) | undefined): void {
   try { result = check?.(); }
   catch { throw new Error('Redaction source is no longer current'); }
   if (result === undefined) return;
-  try { void Promise.resolve(result).catch(() => {}); } catch { /* Reject borrowed then accessors. */ }
+  drainOwned(result);
   throw new Error('Redaction source ownership must be synchronous');
 }
 

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Browser page-purpose and same-control readings are observations, never permission to act. */
 import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -52,7 +53,7 @@ export class BrowserControlIdentityWork {
     currentExecutionMode();
     this.signal?.throwIfAborted();
     const result: unknown = this.callerCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Browser action owner must be synchronous.'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('Browser action owner must be synchronous.'); }
     this.owner?.assertCurrent();
   };
   async wait<T>(work: () => Promise<T>): Promise<T> {

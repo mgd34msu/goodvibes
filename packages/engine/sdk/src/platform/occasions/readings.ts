@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Occasion meaning is an observation, never delivery or closed-date authority. */
 import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -54,7 +55,7 @@ export class OccasionReadingWork {
   readonly assertCurrent = (): void => {
     this.options.signal?.throwIfAborted();
     const checked: unknown = this.options.assertCurrent?.();
-    if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new OccasionReadingHeldError(); }
+    if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
     for (const check of this.checks) check();
     this.owner?.assertCurrent();
   };

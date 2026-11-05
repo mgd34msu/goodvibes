@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
@@ -153,7 +154,7 @@ export async function createDiscordInboxOwner(
       if (closed || signal.aborted) throw new Error();
       const result: unknown = assertScope();
       if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        void Promise.resolve(result).catch(() => {});
+        drainOwned(result);
         throw new Error();
       }
       const channelResult: unknown = channels.assertCurrent();

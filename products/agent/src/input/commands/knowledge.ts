@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { toBrowserKinds, toBrowserSourceKinds } from './knowledge-browser-flags.ts';
@@ -136,13 +137,13 @@ function retainKnowledgeCommand(context: CommandContext, args: readonly string[]
     signal?.throwIfAborted();
     const current: unknown = callerCurrent?.();
     if (current !== undefined) {
-      try { void Promise.resolve(current).catch(() => {}); } catch { /* Refuse below. */ }
+      drainOwned(current);
       throw changed();
     }
     if (shouldStop) {
       const stopped: unknown = shouldStop();
       if (stopped !== false) {
-        try { void Promise.resolve(stopped).catch(() => {}); } catch { /* Refuse below. */ }
+        drainOwned(stopped);
         throw changed();
       }
     }

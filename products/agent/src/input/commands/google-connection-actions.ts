@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { googleSetupWritePorts } from './google-setup-effects.ts';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 /**
@@ -159,7 +160,7 @@ export function googleActionDeps(ctx: CommandContext, intake?: GoogleClientIntak
   const assertCurrent = () => {
     if (signal?.aborted) throw new Error('The Google setup request was cancelled.');
     const result: unknown = externalCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('The Google setup request guard must be synchronous.'); }
+    if (result !== undefined) { drainOwned(result); throw new Error('The Google setup request guard must be synchronous.'); }
     if (googleSetupRequests.get(ctx) !== request || configManager.get !== configGet || configManager.setDynamic !== configSet
       || secretsManager.get !== secretGet || secretsManager.set !== secretSet || ctx.platform !== platform || ctx.session !== session || session.runtime !== runtime
       || runtime.sessionId !== sessionId || platform.configManager !== configManager

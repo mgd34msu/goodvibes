@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * post-build-smoke, proves a freshly compiled binary boots.
  *
@@ -290,7 +291,7 @@ export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<Smoke
   const current = () => {
     signal?.throwIfAborted();
     const checked: unknown = assertCurrent?.();
-    if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Smoke source owner must be synchronous.'); }
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Smoke source owner must be synchronous.'); }
     if (options.binary !== binary || options.config !== config || config.bannerPrefix !== bannerPrefix
       || options.signal !== signal || options.assertCurrent !== assertCurrent || options.diagnosticSourceOwner !== sourceOwner) throw new Error('Smoke source owner changed.');
     if (sourceOwner && sourceMethods && (sourceOwner.capture !== sourceMethods.capture || sourceOwner.screen !== sourceMethods.screen

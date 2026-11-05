@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import type { KnowledgeIngestContext, KnowledgeIngestOwnership } from '../ingest-context.js';
 import { knowledgeIngestGuard } from '../ingest-preparation.js';
@@ -115,9 +116,9 @@ export function createKnowledgeIngestUriCanonicalizer(context: KnowledgeIngestCo
     if (operation.state.phase === 'retired') throw new Held('stale');
     hostSlots(); callerSlots(); storeSlots(); artifactSlots(); assertObjectCurrent(); signal.throwIfAborted();
     const result: unknown = callerCurrent?.();
-    if (result !== undefined) { try { void Promise.resolve(result).catch(() => {}); } catch {} throw new Held('stale'); }
+    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
     const sourceResult: unknown = assertSourceCurrent?.();
-    if (sourceResult !== undefined) { try { void Promise.resolve(sourceResult).catch(() => {}); } catch {} throw new Held('stale'); }
+    if (sourceResult !== undefined) { drainOwned(sourceResult); throw new Held('stale'); }
     assertReservationCurrent(); assertArtifactCurrent();
     hostSlots(); callerSlots(); storeSlots(); artifactSlots(); assertObjectCurrent(); signal.throwIfAborted();
   };

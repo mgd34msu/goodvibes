@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import { assertKnowledgeRecordAdmissions, assertKnowledgeRecordContainers, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
@@ -79,7 +80,7 @@ export async function prepareRepairSourceAuthorities(input: {
       assertOriginalIdentity();
       const result: unknown = ownerCurrent?.();
       if (result !== undefined) {
-        try { void Promise.resolve(result).catch(() => {}); } catch { /* A callback result cannot authorize a reading. */ }
+        drainOwned(result);
         throw new Held('stale');
       }
       assertOriginalIdentity();

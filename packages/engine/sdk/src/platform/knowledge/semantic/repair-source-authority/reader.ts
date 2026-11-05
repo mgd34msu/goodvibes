@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort, captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -76,7 +77,7 @@ export function createRepairSourceAuthorityReader(options: RepairSourceAuthority
     assertOriginalIdentity();
     const result: unknown = ownerCurrent?.();
     if (result !== undefined) {
-      try { void Promise.resolve(result).catch(() => {}); } catch { /* A callback result cannot authorize a reading. */ }
+      drainOwned(result);
       throw new Held('stale');
     }
     assertOriginalIdentity();

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Semantic IMAP readings. Protocol atoms and session authority stay with callers. */
 import { checkAnswers, defineBattery, defineSelector, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -66,7 +67,7 @@ export function assertImapReadingCurrent(options: JudgmentReadingOptions): void 
     if (options.signal?.aborted) throw new ImapReadingError();
     const result: unknown = options.assertCurrent?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new ImapReadingError();
     }
   } catch { throw new ImapReadingError(); }

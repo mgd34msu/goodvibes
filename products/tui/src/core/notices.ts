@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** System notices retain their full text in saved conversation history.
  * Declared runtime occurrences publish immediately and deduplicate with the bus.
  * Unstructured notices appear neutrally while their semantic severity is read.
@@ -60,7 +61,7 @@ export function publishNotice(feed: NotificationFeed, text: string, options: Not
     publication.assertCurrent();
     const result: unknown = assertCallerCurrent?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new JudgmentAuthorityRetiredError();
     }
     publication.assertCurrent();

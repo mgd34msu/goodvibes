@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   categoryForCode,
   readFailure,
@@ -163,7 +164,7 @@ export async function readFailureTransience(error: unknown, site: string, option
     options.reading?.signal?.throwIfAborted();
     const checked: unknown = options.reading?.beforeAttempt?.();
     if (checked !== undefined) {
-      void Promise.resolve(checked).catch(() => {});
+      drainOwned(checked);
       throw new Error('Failure reading authority checks must be synchronous');
     }
   };

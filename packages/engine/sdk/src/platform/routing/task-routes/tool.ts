@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * The `route` tool: the agent's route adapter, backed by the Jev task route
  * planner. The definition, the action aliases and the status output are the
@@ -129,7 +130,7 @@ export function createTaskRouteTool(deps: TaskRouteDeps = {}, options: TaskRoute
           || (opts !== undefined && invocationFields !== undefined && !sameBindings(opts, invocationFields))) throw new ToolInputProjectionError('held');
         const first: unknown = callerCurrent?.(), second: unknown = invocationCurrent?.(original);
         if (first !== undefined || second !== undefined) {
-          void Promise.resolve(first).catch(() => {}); void Promise.resolve(second).catch(() => {});
+          void Promise.resolve(first).catch(() => {}); drainOwned(second);
           throw new ToolInputProjectionError('held');
         }
         signal?.throwIfAborted();

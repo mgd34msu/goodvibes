@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Named People-line attribution is a reading, never permission to disclose a profile. */
 import { checkAnswers, defineBattery, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -30,7 +31,7 @@ export interface ProfilePersonReadingOptions extends JudgmentReadingOptions {
 
 function synchronous(check: (() => void) | undefined): void {
   const result: unknown = check?.();
-  if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ProfilePersonReadingHeldError(); }
+  if (result !== undefined) { drainOwned(result); throw new ProfilePersonReadingHeldError(); }
 }
 
 export async function readProfilePerson(

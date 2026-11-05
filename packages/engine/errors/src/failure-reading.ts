@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import {
   defineBattery,
   oneOf,
@@ -276,7 +277,7 @@ export async function readFailure(evidence: FailureEvidence, site: string, optio
   const current = () => {
     source?.assertCurrent(); options?.signal?.throwIfAborted();
     const checked: unknown = options?.beforeAttempt?.();
-    if (checked !== undefined) { void Promise.resolve(checked).catch(() => {}); throw new Error('Failure reading guard must be synchronous.'); }
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Failure reading guard must be synchronous.'); }
     if (port.model !== model) throw new Error('Failure judgment model changed.');
   };
   current();

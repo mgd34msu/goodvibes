@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Email style readings. Code counts settled items and composes a draft; readers never send. */
 import { types as nodeTypes } from 'node:util';
 import { defineBattery, defineCounter, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -124,7 +125,7 @@ export async function withEmailStyleSource<T, R>(
       optionsCurrent(); retained.assertCurrent();
       if (signal?.aborted) throw new StyleReplyReadingError();
       const returned: unknown = caller?.();
-      if (returned !== undefined) { void Promise.resolve(returned).catch(() => {}); throw new StyleReplyReadingError(); }
+      if (returned !== undefined) { drainOwned(returned); throw new StyleReplyReadingError(); }
       optionsCurrent(); retained.assertCurrent();
       if (signal?.aborted) throw new StyleReplyReadingError();
     };

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { redactStructuredDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -317,7 +318,7 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
   const assertCurrent = () => {
     assertSource();
     const result: unknown = callerCurrent?.();
-    if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new ToolInputProjectionError('held'); }
+    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
     assertSource();
   };
   assertCurrent();

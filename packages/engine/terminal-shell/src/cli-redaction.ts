@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * cli-redaction.ts, masking credential-bearing values out of anything a
  * front-end writes to a file a person might hand to someone else (a support
@@ -66,7 +67,7 @@ function captureConfig(config: unknown, options: JudgmentReadingOptions) {
     sourceCurrent();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) {
-      void Promise.resolve(result).catch(() => {});
+      drainOwned(result);
       throw new Error('Config ownership must be synchronous.');
     }
     sourceCurrent();

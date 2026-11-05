@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { MutationPublication } from './file-mutation.js';
 
 /** Optional restrictions on a delivery. Revocation cannot undo an accepted send. */
@@ -45,7 +46,7 @@ export function assertDeliveryCurrent(lifetime: DeliveryLifetime): void {
   lifetime.signal?.throwIfAborted();
   const result: unknown = lifetime.assertCurrent?.();
   if (result !== undefined) {
-    void Promise.resolve(result).catch(() => {});
+    drainOwned(result);
     throw new Error('Delivery ownership must be checked synchronously.');
   }
   // A currentness check may itself revoke the signal.

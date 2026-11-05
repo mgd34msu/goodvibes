@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -157,7 +158,7 @@ export async function buildLanes(
     optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) {
-      try { void Promise.resolve(result).catch(() => {}); } catch { /* A borrowed asynchronous callback has no currentness authority. */ }
+      drainOwned(result);
       throw new ToolInputProjectionError('held');
     }
     optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();

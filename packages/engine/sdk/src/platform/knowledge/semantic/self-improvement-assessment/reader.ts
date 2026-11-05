@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -59,7 +60,7 @@ export async function readSelfImprovementAssessment(kind: 'context' | 'coverage'
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held('stale');
     snapshot.assertCurrent();
     const result: unknown = ownerCurrent?.();
-    if (result !== undefined) { try { void Promise.resolve(result).catch(() => {}); } catch { /* Async callbacks cannot authorize a reading. */ } throw new Held('stale'); }
+    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
     snapshot.assertCurrent();
     if (signal?.aborted || options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held(signal?.aborted ? 'aborted' : 'stale');
   };

@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Host-process capabilities only. No wire registration and no serialized grant. */
 import { sameNativeInboundSourceRef, type NativeInboundSourceRef } from './native-inbound-source.js';
 import { SHARED_SESSION_DELEGATED_INPUT_METADATA_KEY, isDelegatedSessionInput, type SharedSessionInputRecord } from './session-intents.js';
@@ -22,7 +23,7 @@ function assertSynchronousCurrent(binding: DelegatedSessionInputBinding): void {
   const result: unknown = binding.assertCurrent();
   if (result !== null && (typeof result === 'object' || typeof result === 'function')
     && 'then' in result && typeof result.then === 'function') {
-    void Promise.resolve(result).catch(() => {});
+    drainOwned(result);
     throw new Error('Delegated input currentness assertion must be synchronous');
   }
 }

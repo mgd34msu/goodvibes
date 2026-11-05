@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as crypto from 'node:crypto';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { assertJudgmentInput, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
 import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
@@ -83,6 +84,17 @@ async function unchanged(store: KnowledgeStore, before: ReturnType<typeof snapsh
 }
 
 describe('prepared answer-gap universe and write guards', () => {
+  test('new gap identifiers cannot accidentally resemble payment card material', async () => {
+    const item = await fixture(); readings(0.01);
+    expect(() => assertJudgmentInput({ value: '8111-111111111112' })).toThrow(JudgmentInputError);
+    const uuid = spyOn(crypto, 'randomUUID').mockReturnValue('aaaaaaaa-aaaa-4aaa-8111-111111111112');
+    try {
+      const result = await (await prepare(item).read()).persist(reason);
+      expect(result).toBeDefined();
+      expect(() => prepareKnowledgeRecordAdmission(item.store, 'node', result!)).not.toThrow();
+    } finally { uuid.mockRestore(); }
+  });
+
   test('matching an active legacy row retains its node and issue identities', async () => {
     const item = await fixture(); const fake = readings();
     expect(item.existing.metadata.subjectFingerprint).toBeUndefined();
@@ -127,7 +139,7 @@ describe('prepared answer-gap universe and write guards', () => {
     const oldNode = structuredClone(item.existing), oldIssue = structuredClone(item.issue);
     const result = await (await prepare(item).read()).persist(reason);
     expect(result).not.toBeNull(); expect(result?.id).not.toBe(oldNode.id);
-    expect(result?.id).toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+    expect(result?.id).toMatch(/^sem-answer-gap-[a-p-]+$/);
     expect(item.store.getNode(oldNode.id)).toEqual(oldNode); expect(item.store.getIssue(oldIssue.id)).toEqual(oldIssue);
     expect(item.store.listIssues().filter((issue) => issue.nodeId === result?.id)).toHaveLength(1);
     expect(item.store.listEdges().filter((edge) => edge.toId === result?.id && edge.relation === 'has_gap')).toHaveLength(2);

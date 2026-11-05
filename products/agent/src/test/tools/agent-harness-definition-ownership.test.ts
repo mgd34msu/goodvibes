@@ -169,7 +169,9 @@ test('native compaction preserves original compacted bytes and ordinary definiti
   compactRegisteredToolDefinitions(ordinaryRegistry);
   compactRegisteredToolDefinitions(f.registry);
 
-  expect(ordinary.definition).toBe(ordinaryRoot);
+  expect(ordinary.definition).not.toBe(ordinaryRoot);
+  expect(ordinaryRoot.description).toBe(original.description);
+  expect(ordinaryRoot.parameters).toEqual(original.parameters);
   expect(f.tool.definition).not.toBe(original);
   expect(JSON.stringify(f.tool.definition)).toBe(JSON.stringify(ordinary.definition));
   expect(Object.keys(f.tool.definition)).toEqual(Object.keys(ordinary.definition));
@@ -239,13 +241,15 @@ test('equal caller replacements do not inherit native compaction ownership', asy
   const replacement: Tool['definition'] = { ...owned, parameters: { ...owned.parameters } };
   f.tool.definition = replacement;
   compactRegisteredToolDefinitions(f.registry);
-  expect(f.tool.definition).toBe(replacement);
-  expect(Object.isFrozen(replacement)).toBe(false);
-  expect(Object.isFrozen(replacement.parameters)).toBe(false);
+  const compacted = f.tool.definition;
+  expect(compacted).not.toBe(replacement);
+  expect(replacement.description).toBe(owned.description);
+  expect(Object.isFrozen(compacted)).toBe(false);
+  expect(Object.isFrozen(compacted.parameters)).toBe(false);
   const projected = await f.registry.projectCall('native-caller-replacement', 'agent_harness', { mode: 'summary' });
   try {
     f.registry.assertProjectedSnapshot(projected);
-    replacement.description = 'Changed caller metadata after compaction.';
+    compacted.description = 'Changed caller metadata after compaction.';
     expect(() => f.registry.assertProjectedSnapshot(projected)).toThrow();
   } finally { await f.registry.releaseProjected(projected); }
 });

@@ -26,7 +26,8 @@ test('actual tui graph public terminal control preserves Jev ownership and lifet
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { localRequests++; return new Response('owned-local-preview'); } });
   let humanAsks = 0; let phase: 'allow' | 'aba' | 'dispose' = 'allow'; let intercepted = false;
   services.localPromptRef.requestPermission = async () => { humanAsks++; return { approved: false }; };
-  const answers = fakePort((name, question, state) => {
+  const answers = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition') return choiceAnswer(question, question.type === 'choice' && 'revise_0' in question.criteria && !('act' in question.criteria) ? 'revise_0' : 'act', 0.98);
     if (name === 'family' || name === 'capability') return choiceAnswer(question, 'generic', 0.98);
     if (name === 'kind') return choiceAnswer(question, 'other', 0.98);

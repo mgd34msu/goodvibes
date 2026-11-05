@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Encode newly generated answer-gap identifiers without digits so random UUID
+  suffixes cannot trigger payment-card screening during queued refinement.
 - Keep compacted Agent catalog descriptions separate from shared SDK definitions
   so one conversation cannot rewrite another conversation's tool metadata.
 - Seed new hosted conversations from the configured execution mode while intake

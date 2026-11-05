@@ -192,7 +192,7 @@
       "path": "core/agent-view-render.ts",
       "baselineTuiLines": 169,
       "baselineSimilarity": 0.9193,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/bookmark-navigation.ts",
@@ -222,13 +222,13 @@
       "path": "core/conversation-render-context.ts",
       "baselineTuiLines": 116,
       "baselineSimilarity": 0.7945,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/conversation-rendering.ts",
       "baselineTuiLines": 340,
       "baselineSimilarity": 0.7319,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/conversation-types.ts",
@@ -1651,7 +1651,7 @@
       "path": "utils/splash-lines.ts",
       "baselineTuiLines": 103,
       "baselineSimilarity": 0.6211,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "utils/terminal-width.ts",

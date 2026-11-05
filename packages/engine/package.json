@@ -1998,6 +1998,31 @@
       "bun": "./terminal-shell/src/renderer/shortcuts-overlay.ts",
       "types": "./terminal-shell/dist/renderer/shortcuts-overlay.d.ts",
       "import": "./terminal-shell/dist/renderer/shortcuts-overlay.js"
+    },
+    "./terminal-shell/splash-lines": {
+      "bun": "./terminal-shell/src/splash-lines.ts",
+      "types": "./terminal-shell/dist/splash-lines.d.ts",
+      "import": "./terminal-shell/dist/splash-lines.js"
+    },
+    "./terminal-shell/conversation-render-context": {
+      "bun": "./terminal-shell/src/conversation-render-context.ts",
+      "types": "./terminal-shell/dist/conversation-render-context.d.ts",
+      "import": "./terminal-shell/dist/conversation-render-context.js"
+    },
+    "./terminal-shell/conversation-compaction-render": {
+      "bun": "./terminal-shell/src/conversation-compaction-render.ts",
+      "types": "./terminal-shell/dist/conversation-compaction-render.d.ts",
+      "import": "./terminal-shell/dist/conversation-compaction-render.js"
+    },
+    "./terminal-shell/conversation-rendering": {
+      "bun": "./terminal-shell/src/conversation-rendering.ts",
+      "types": "./terminal-shell/dist/conversation-rendering.d.ts",
+      "import": "./terminal-shell/dist/conversation-rendering.js"
+    },
+    "./terminal-shell/agent-view-render": {
+      "bun": "./terminal-shell/src/agent-view-render.ts",
+      "types": "./terminal-shell/dist/agent-view-render.d.ts",
+      "import": "./terminal-shell/dist/agent-view-render.js"
     }
   },
   "publishConfig": {

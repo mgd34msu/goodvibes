@@ -213,7 +213,8 @@ jobs:
   # ---------------------------------------------------------------------------
   platform-matrix:
     name: Platform matrix (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    # Process-group timeout proofs require GNU coreutils, supplied by this image.
+    runs-on: ubuntu-24.04
     # Preserve the existing per-leg budgets, test deadlines and stall watchdog.
     # Partition 1 also owns judgment and the deterministic fake-IMAP sweep.
     timeout-minutes: ${{ matrix.platform == 'bun' && 20 || 15 }}

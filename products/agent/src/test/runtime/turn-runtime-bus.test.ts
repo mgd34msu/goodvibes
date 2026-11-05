@@ -56,9 +56,11 @@ describe('runtime turn substrate', () => {
   const savedStream = configManager.get('display.stream') as boolean;
   let previousJudgmentPort: ReturnType<typeof installJudgmentPort>;
   beforeEach(() => {
-    previousJudgmentPort = installJudgmentPort(fakePort((name, question) => {
+    previousJudgmentPort = installJudgmentPort(fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'intent') return choiceAnswer(question, 'chat', 0.97);
       if (name === 'needs_plan') return noulAnswer(0.03);
+      if (name === 'completion_required') return noulAnswer(.99);
       if (['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission'].includes(name)) return noulAnswer(0.001);
       if (name === 'risk') return scoreAnswer(question, 0, 0.97);
       throw new Error(`Unexpected turn reading: ${name}`);

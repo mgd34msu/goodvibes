@@ -130,8 +130,10 @@ describe('runtime substrate gate', () => {
     forgetFailureReadings();
     rateLimited = false;
     judgmentLog = new SqliteDecisionLog(':memory:');
-    previousJudgmentPort = installJudgmentPort(withDecisionLog(fakePort((name, question) => {
+    previousJudgmentPort = installJudgmentPort(withDecisionLog(fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'disposition') return choiceAnswer(question, 'act', 0.97);
+      if (name === 'completion_required') return noulAnswer(.99);
       if (name === 'intent') return choiceAnswer(question, 'chat', 0.97);
       if (name === 'risk') return scoreAnswer(question, 0, 0.97);
       if (name === 'family') return choiceAnswer(question, 'generic', 0.97);

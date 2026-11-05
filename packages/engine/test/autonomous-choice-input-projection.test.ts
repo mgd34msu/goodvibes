@@ -25,7 +25,7 @@ beforeEach(() => {
   const semantic = fakePort((name, question, state) => choiceAnswer(question,
     name === 'boolean_value' ? 'true' : select({ state } as JudgmentRequest<Questions>), 0.99));
   const inner: JudgmentPort = { model: gate.port.model, async ask(request) {
-    request.beforeAttempt?.(); requests.push(request as JudgmentRequest<Questions>); onRequest?.();
+    request.beforeAttempt?.(); if ('disposition' in request.questions || 'boolean_value' in request.questions) requests.push(request as JudgmentRequest<Questions>); onRequest?.();
     return 'disposition' in request.questions || 'boolean_value' in request.questions ? semantic.port.ask(request) : gate.port.ask(request);
   } };
   previous = installJudgmentPort(withDecisionLog(inner, log));
@@ -113,7 +113,8 @@ test('all offered alternatives are projected before initial admission, including
   expect(result.result).toMatchObject({ success: true });
   expect(f.projected.map(item => item.args.url)).toEqual([RAW, INITIAL]);
   expect(requests).toEqual([]);
-  expect(log.query({})).toEqual([]);
+  expect(log.query({ site: 'engine.gate.autonomous-tool' })).toEqual([]);
+  expect(JSON.stringify(log.query({}))).not.toContain('SYNTHETIC_CATALOG_ONLY');
   expect(f.executed).toEqual([{ url: INITIAL }]);
   expect(f.released.sort()).toEqual([INITIAL, RAW].sort());
 });

@@ -2713,6 +2713,9 @@ Return pending and historical approval records.
     "mode": {
       "type": "string",
       "enum": [
+        "safe-owner",
+        "safe-jev",
+        "yolo",
         "default",
         "plan",
         "allow-all",
@@ -159700,6 +159703,7 @@ Shared-session lifecycle broadcast. Every session created / closed / deleted / r
         "session-closed",
         "session-deleted",
         "session-reopened",
+        "session-permission-mode-changed",
         "session-agent-bound",
         "session-agent-completed",
         "session-message-appended",

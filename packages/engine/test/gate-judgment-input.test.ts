@@ -411,8 +411,8 @@ describe('semantic readings and automatic calls retain original execution argume
     expect(JSON.stringify(log.requests[0]?.state)).toContain('/home/example/.ssh/id_rsa');
   });
 
-  test('YOLO and its legacy auto-approve alias bypass surface and command safety decisions', async () => {
-    expect((await gate({ mode: 'yolo', surface: 'email' }).manager.checkDetailed('write', { path: 'a.txt', content: 'hello' })).approved).toBe(true);
+  test('YOLO retains surface authority and its legacy alias bypasses general command safety', async () => {
+    expect((await gate({ mode: 'yolo', surface: 'email' }).manager.checkDetailed('write', { path: 'a.txt', content: 'hello' })).approved).toBe(false);
     expect((await gate({ auto: true }).manager.checkDetailed('exec', { command: 'rm -rf /' })).approved).toBe(true);
     expect(log.requests).toHaveLength(0);
   });

@@ -66,7 +66,7 @@ async function settingsPage(query: string, extra: Record<string, unknown> = {}):
     // settings reader's complete catalog, including rejected rows.
     const catalogRequests = fake.requests.filter(request => request.context?.battery === 'engine.tools.registry-rank'
       && request.context.site === 'agent.harness.settings');
-    expect(catalogRequests).toHaveLength(CONFIG_SCHEMA.length);
+    expect(catalogRequests).toHaveLength(CONFIG_SCHEMA.filter(setting => !setting.deprecated).length);
     expect(catalogRequests.every(request => {
       const state = request.state;
       return typeof state === 'object' && state !== null && 'query' in state && state.query === query;
@@ -123,7 +123,7 @@ describe('capability discovery: the settings catalog answers in plain words', ()
   });
 
   test('total is the size of the catalog, never the size of the match', async () => {
-    const visible = CONFIG_SCHEMA.length;
+    const visible = CONFIG_SCHEMA.filter(setting => !setting.deprecated).length;
 
     const matched = await settingsPage('payment');
     expect(matched.total).toBe(visible);

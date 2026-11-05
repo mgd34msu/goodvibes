@@ -144,7 +144,7 @@ describe('collectOnboardingSnapshot', () => {
 
     expect(snapshot.capturedAt).toBe(123);
     expect(snapshot.providerRouting.primaryReasoningEffort).toBe('high');
-    expect(snapshot.config.permissions.mode).toBe('custom');
+    expect(snapshot.config.permissions.mode).toBe('safe-owner');
     expect(snapshot.config.behavior.saveHistory).toBe(false);
     expect(snapshot.config.display.showThinking).toBe(true);
     expect(snapshot.config.storage.secretPolicy).toBe('require_secure');

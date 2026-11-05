@@ -2885,6 +2885,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
                 "default",
                 "plan",
                 "allow-all",
@@ -157816,6 +157819,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "session-closed",
                 "session-deleted",
                 "session-reopened",
+                "session-permission-mode-changed",
                 "session-agent-bound",
                 "session-agent-completed",
                 "session-message-appended",

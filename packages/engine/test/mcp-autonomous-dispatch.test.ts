@@ -31,7 +31,8 @@ beforeEach(() => {
   const port: JudgmentPort = withDecisionLog({ model: 'synthetic', async ask(request) {
     request.beforeAttempt?.(); await beforeRead?.(request); request.signal?.throwIfAborted(); request.beforeAttempt?.();
     if ('disposition' in request.questions) { states.push(request.state); return semantic.port.ask(request); }
-    if (uncertainQuestion && uncertainQuestion in request.questions) return fakePort((name, question) => {
+    if (uncertainQuestion && uncertainQuestion in request.questions) return fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       if (question.type === 'noul') return noulAnswer(name === uncertainQuestion ? 0.5 : name === 'mutates' || (name === 'outward' && outward) ? 0.97 : 0.03);
       return choiceAnswer(question, name === 'family' ? 'generic' : name === 'capability' ? 'write_fs' : 'other', name === uncertainQuestion ? 0.5 : 0.99);
     }).port.ask(request);
@@ -177,7 +178,7 @@ test('revocation after first MRTR dispatch prevents the continuation write', asy
   const f = fixture(true); afterWire = () => { if (f.wire.length === 1) f.registry.setServerTrustMode('synthetic', 'blocked'); };
   await expect(f.call()).rejects.toThrow(); expect(f.wire).toHaveLength(1);
 });
-test('late schema resolution after cancellation cannot dispatch; ordinary MCP tools do not require a semantic reader', async () => {
+test('late schema resolution after cancellation cannot dispatch; unavailable safety classification holds an ordinary MCP tool', async () => {
   const f = fixture(); const controller = new AbortController();
   let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });
   let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
@@ -188,7 +189,7 @@ test('late schema resolution after cancellation cannot dispatch; ordinary MCP to
   expect(f.wire).toHaveLength(0); expect(humans).toBe(0);
   f.client.getToolSchema = schema;
   beforeRead = async () => { throw new Error('Synthetic unavailable provider'); };
-  await f.call(); expect(f.wire).toHaveLength(1);
+  await expect(f.call()).rejects.toThrow(); expect(f.wire).toHaveLength(0);
 });
 test('actual facade preserves absent call support and forwards schema with the registry receiver', async () => {
   const absent = createRuntimeMcpApi({} as never); expect(absent.callTool).toBeUndefined(); expect(absent.getToolSchema).toBeUndefined();

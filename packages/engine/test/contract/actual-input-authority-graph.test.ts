@@ -32,6 +32,7 @@ import { ContractStore } from '../../sdk/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../sdk/src/platform/agents/planner-decomposition-runner.js';
 import { createOrchestrationEngine } from '../../sdk/src/platform/orchestration/engine.js';
 import type { LLMProvider } from '../../sdk/src/platform/providers/interface.js';
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../../errors/src/index.js';
 import { makeRepo, oneUnitPlan, runnerPort, waitFor } from './runner-support.js';
@@ -98,9 +99,9 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
       // Finish the runtime's startup scan before this fixture replaces its runner.
       await resumeContracts(runtime.contractRunner, root);
       const previous = installJudgmentPort(
-        runnerPort((context) =>
-          context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined,
-        ).port,
+        withDecisionLog(runnerPort((context) =>
+          context.name.replace(/^(effect|risk|edge)__/, '') === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined,
+        ).port, runtime.judgment.decisionLog),
       );
       await runtime.userPermissionRuleStore.add({
         rule: {

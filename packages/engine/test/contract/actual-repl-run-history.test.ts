@@ -25,6 +25,9 @@ if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability
 
 test.skipIf(!availability.available)('actual wakeWithSteer reuses captured authority but starts empty REPL run history', async () => {
   const root = makeRepo();
+  // Keep this history fixture to its one captured input file; unrelated files
+  // multiply the real per-transition authority checks exercised by the REPL.
+  rmSync(join(root, 'README.md'));
   writeFileSync(join(root, 'input.txt'), 'CAPTURED_FIRST_RUN_RESULT\n');
   expect(childProcess.spawnSync('git', ['-C', root, 'add', '.']).status).toBe(0);
   expect(childProcess.spawnSync('git', ['-C', root, 'commit', '-qm', 'REPL wake source']).status).toBe(0);
@@ -48,8 +51,8 @@ test.skipIf(!availability.available)('actual wakeWithSteer reuses captured autho
   });
   await resumeContracts(runtime.contractRunner, root);
   const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => {
-    if (context.name === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
-    if (context.name === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
+    if (context.name.replace(/^(effect|risk|edge)__/, '') === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
+    if (context.name.replace(/^(effect|risk|edge)__/, '') === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
     return undefined;
   }).port, runtime.judgment.decisionLog));
   const requests: ProviderMessage[][] = [];

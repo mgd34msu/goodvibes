@@ -2579,6 +2579,9 @@
                     "mode": {
                       "type": "string",
                       "enum": [
+                        "safe-owner",
+                        "safe-jev",
+                        "yolo",
                         "default",
                         "plan",
                         "allow-all",

@@ -50,7 +50,8 @@ beforeEach(async () => {
   ].includes(method.id)).map(method => ({ type: 'tool', name: method.id, description: method.description ?? method.title ?? '', evidenceJson: JSON.stringify(method) }));
   // Dispatch parity supplies the real read boundary's offline prerequisites.
   // Unexpected decisions fail rather than receiving a blanket positive answer.
-  readings = fakePort((name, question) => {
+  readings = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'score' && ['fit', 'memoryAdequacy', 'latency', 'contextWindow', 'toolSupport', 'vision', 'cost', 'privacy'].includes(name)) {
       return scoreAnswer(question, name === 'memoryAdequacy' ? 2 : 3, 0.99);
     }
@@ -232,6 +233,13 @@ function makeParityFixture(options: { sourceOwner?: boolean } = {}) {
           defer_0: 'Wait for registered condition: Registered host condition 1 changes from its offered revision.. Obtain a fresh decision after it changes.',
         }) };
         if (!isDeepStrictEqual(request.state, expected) || !isDeepStrictEqual(request.questions, questions)) throw new Error('Unexpected complete printing disposition subject or schema.');
+        return answers.port.ask(request);
+      }
+      if (name === 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary') {
+        const selected = { effect: ['mutates', 'outward', 'secrets', 'kind', 'obfuscated'], risk: ['family', 'irreversible', 'beyondProject', 'weakensSecurity'], edge: ['catastrophic', 'cardDetails'] };
+        const batteries = { effect: 'engine.gate.side-effect', risk: 'engine.gate.risk-family', edge: 'engine.gate.boundary' };
+        const questions = Object.fromEntries(Object.entries(selected).flatMap(([prefix, keys]) => keys.map(key => [`${prefix}__${key}`, canonical.get(batteries[prefix as keyof typeof batteries])![key]])));
+        if (!isDeepStrictEqual(request.questions, questions) || !isDeepStrictEqual(request.state, expectedState)) throw new Error('Unexpected complete composite printing admission subject or schema.');
         return answers.port.ask(request);
       }
       const allQuestions = canonical.get(name);

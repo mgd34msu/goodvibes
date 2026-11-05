@@ -474,7 +474,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "awaitingDecision": false,
-      "mode": "default",
+      "mode": "safe-owner",
       "lastDecision": {
         "callId": "sample",
         "toolName": "sample",

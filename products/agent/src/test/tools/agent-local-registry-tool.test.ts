@@ -55,7 +55,7 @@ function admittedLocalTool(paths: ShellPaths, memoryRegistry: MemoryRegistry) {
   const tool: Tool = { ...rawTool, async execute(args, options) {
     const memory = memoryReadingsPort();
     const answers = fakePort((name, question) => question.type === 'noul' ? noulAnswer(0.001)
-      : choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999));
+      : choiceAnswer(question, name === 'disposition' ? 'act' : name.replace(/^(effect|risk|edge)__/, '') === 'kind' ? 'read' : 'generic', 0.999));
     using log = new SqliteDecisionLog(':memory:');
     const port = withDecisionLog({ ...answers.port, ask: request => request.context?.battery?.includes('memory')
       ? memory.port.ask(request) : answers.port.ask(request) }, log);

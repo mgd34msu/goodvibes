@@ -130,7 +130,7 @@ describe('SettingsModal', () => {
     for (const entries of modal.groups.values()) {
       for (const entry of entries) visibleKeys.add(entry.setting.key);
     }
-    const missing = CONFIG_SCHEMA.map((entry) => entry.key).filter((key) => !visibleKeys.has(key));
+    const missing = CONFIG_SCHEMA.filter(entry => !entry.deprecated).map((entry) => entry.key).filter((key) => !visibleKeys.has(key));
     expect(missing).toEqual([]);
   });
 

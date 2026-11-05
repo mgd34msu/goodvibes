@@ -119,6 +119,9 @@ export const PERMISSION_RULES_DELETE_OUTPUT_SCHEMA = objectSchema({
 }, ['deleted'], { additionalProperties: false });
 
 export const PERMISSION_MODE_SCHEMA = enumSchema([
+  'safe-owner',
+  'safe-jev',
+  'yolo',
   'default',
   'plan',
   'allow-all',

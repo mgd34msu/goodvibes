@@ -52,8 +52,8 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
     });
     await resumeContracts(runtime.contractRunner, root);
     const previous = installJudgmentPort(withDecisionLog(runnerPort(context => {
-      if (context.name === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
-      if (context.name === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
+      if (context.name.replace(/^(effect|risk|edge)__/, '') === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
+      if (context.name.replace(/^(effect|risk|edge)__/, '') === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
       return undefined;
     }).port, runtime.judgment.decisionLog));
     const hold = deferred<void>();

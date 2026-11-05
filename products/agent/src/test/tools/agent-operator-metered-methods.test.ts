@@ -18,7 +18,8 @@ let previous: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 let readings: ReturnType<typeof fakePort>['requests'];
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') return choiceAnswer(question,
       name === 'disposition' ? 'act' : name === 'kind' ? 'other' : 'generic', 0.999);
     if (question.type === 'noul') return noulAnswer(name === 'needs_review' ? 0.99 : 0.001);

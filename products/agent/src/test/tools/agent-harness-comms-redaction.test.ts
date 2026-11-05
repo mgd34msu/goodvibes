@@ -15,7 +15,7 @@ let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
   const answers = fakePort((name, question) => question.type === 'noul' ? noulAnswer(0.001)
-    : choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999));
+    : choiceAnswer(question, name === 'disposition' ? 'act' : name.replace(/^(effect|risk|edge)__/, '') === 'kind' ? 'read' : 'generic', 0.999));
   prior = installJudgmentPort(withDecisionLog(answers.port, log));
 });
 afterEach(() => { installJudgmentPort(prior); log[Symbol.dispose](); });

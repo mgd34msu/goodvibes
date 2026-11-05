@@ -3010,7 +3010,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {},
     "output": {
       "awaitingDecision": false,
-      "mode": "default",
+      "mode": "safe-owner",
       "lastDecision": {
         "callId": "sample",
         "toolName": "sample",

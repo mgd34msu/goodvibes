@@ -2882,6 +2882,9 @@
             "mode": {
               "type": "string",
               "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
                 "default",
                 "plan",
                 "allow-all",
@@ -157813,6 +157816,7 @@
                 "session-closed",
                 "session-deleted",
                 "session-reopened",
+                "session-permission-mode-changed",
                 "session-agent-bound",
                 "session-agent-completed",
                 "session-message-appended",

@@ -115,9 +115,10 @@ function orchestrator(chat: LLMProvider['chat'] = async () => finalResponse(), f
 
 test('user prompts are visible immediately and reach the model, including queued follow-ups and attachments, without Jev admission', async () => {
   let judgments = 0, completionJudgments = 0;
-  const completed = fakePort(() => noulAnswer(.01));
+  const completed = fakePort(name => noulAnswer(name === 'completion_required' ? .99 : .01));
   const previous = installJudgmentPort({ model: 'test', ask: async request => {
     judgments++;
+    if (request.context?.battery === 'engine.core.completion-applicability') return completed.port.ask(request);
     if (request.context?.battery === 'engine.core.response-completion') { completionJudgments++; return completed.port.ask(request); }
     throw new Error('Optional relevance unavailable');
   } });
@@ -156,7 +157,7 @@ test('user prompts are visible immediately and reach the model, including queued
 
 describe('native ordinary turn through the real orchestrator', () => {
   let previous: ReturnType<typeof installJudgmentPort>;
-  beforeEach(() => { previous = installJudgmentPort(fakePort(() => noulAnswer(.01)).port); });
+  beforeEach(() => { previous = installJudgmentPort(fakePort(name => noulAnswer(name === 'completion_required' ? .99 : .01)).port); });
   afterEach(() => { installJudgmentPort(previous); });
   test('queues authentic exact text once, suppresses all legacy intake/plan paths, and dedups settled delivery', async () => {
     const f = fixture(); const permit = await f.permit(); const gate = deferred<void>(); let calls = 0;

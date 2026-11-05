@@ -40,12 +40,11 @@ describe('settings C3a surfaces', () => {
     expect(entry.setting.enumValues).toEqual(['on', 'off']);
   });
 
-  test('permissions.backgroundAgents surfaces under the permissions category', () => {
+  test('deprecated background-agent override is hidden in favor of the session execution mode', () => {
     const groups = buildSettingGroups(makeConfig());
     const permissions = groups.get('permissions') ?? [];
     const keys = permissions.map((e) => e.setting.key);
-    expect(keys).toContain('permissions.backgroundAgents');
-    const entry = permissions.find((e) => e.setting.key === 'permissions.backgroundAgents')!;
-    expect(entry.setting.enumValues).toEqual(['inherit', 'allow-all']);
+    expect(keys).not.toContain('permissions.backgroundAgents');
+    expect(keys).toContain('permissions.mode');
   });
 });

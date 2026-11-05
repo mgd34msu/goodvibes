@@ -16,8 +16,8 @@ import { installAgentMcpCallRoute, resetAgentMcpCallRouteForTests } from '../../
 for (const outcome of ['act', 'reject', 'abort', 'missing-workspace-owner']) test(`real Agent route and facade reach canonical HTTP ${outcome}`, async () => {
   using log = new SqliteDecisionLog(':memory:');
   const gate = fakePort((name, question) => question.type === 'noul'
-    ? noulAnswer(name === 'mutates' || name === 'outward' ? 0.97 : 0.03)
-    : choiceAnswer(question, name === 'capability' ? 'network_write' : name === 'family' ? 'generic' : 'other', 0.99));
+    ? noulAnswer(name.replace(/^(effect|risk|edge)__/, '') === 'mutates' || name === 'outward' ? 0.97 : 0.03)
+    : choiceAnswer(question, name === 'capability' ? 'network_write' : name.replace(/^(effect|risk|edge)__/, '') === 'family' ? 'generic' : 'other', 0.99));
   let registryDispositions = 0;
   const semantic = fakePort((_name, question, state) => {
     const registryCall = (state as { input?: { tool?: string } }).input?.tool === 'mcp:synthetic:write';

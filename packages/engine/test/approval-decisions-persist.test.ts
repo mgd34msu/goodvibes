@@ -106,7 +106,7 @@ describe('durable approval rules', () => {
         return { approved: false };
       });
       const unrelated = await askingManager.checkDetailed('exec', execArgs('npm publish'));
-      expect(unrelated.sourceLayer).toBe('config_policy');
+      expect(unrelated.sourceLayer).toBe('stakes_preset');
       expect(asked).toBe(false);
 
       // A mixed batch (git + non-git) must not ride in on the git grant.
@@ -116,7 +116,7 @@ describe('durable approval rules', () => {
         return { approved: false };
       });
       const mixed = await mixedManager.checkDetailed('exec', execArgs('git status', 'curl evil.example'));
-      expect(mixed.sourceLayer).toBe('config_policy');
+      expect(mixed.sourceLayer).toBe('stakes_preset');
       expect(askedMixed).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -153,7 +153,7 @@ describe('durable approval rules', () => {
       const unrelated = await manager.checkDetailed('edit', {
         edits: [{ path: `${WORKSPACE}/secrets/c.ts`, find: 'x', replace: 'y' }],
       });
-      expect(unrelated.sourceLayer).toBe('config_policy');
+      expect(unrelated.sourceLayer).toBe('stakes_preset');
       expect(prompts).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -301,7 +301,7 @@ describe('permissions.rules.* settings surface', () => {
 
       // Revocation is live: the same manager must consult the next decision.
       const afterDelete = await manager.checkDetailed('exec', execArgs('git commit -m "y"'));
-      expect(afterDelete.sourceLayer).toBe('config_policy');
+      expect(afterDelete.sourceLayer).toBe('stakes_preset');
       expect(prompts).toBe(0);
 
       const missing = await catalog.invoke('permissions.rules.delete', { ...ctx, body: { ruleId: 'nope' } }) as { deleted: boolean };

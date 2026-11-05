@@ -61,7 +61,8 @@ export async function runRecordedImportProof(deps: AgentHarnessToolDeps, input: 
       return runCommand(deps, args, { signal: options?.signal, assertCurrent: () => assertCurrentToolExecution(args, options) }, options);
     } };
   registry.register(tool);
-  const answers = fakePort((questionName, question, state) => {
+  const answers = fakePort((wireQuestionName, question, state) => {
+    const questionName = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     assert.ok(state !== null && typeof state === 'object' && !Array.isArray(state));
     if (questionName === 'disposition') {
       assert.ok(state.input !== null && typeof state.input === 'object' && !Array.isArray(state.input));
@@ -70,8 +71,8 @@ export async function runRecordedImportProof(deps: AgentHarnessToolDeps, input: 
       return choiceAnswer(question, 'act', 0.999);
     }
     assert.equal(state.tool, name); assert.deepEqual(state.arguments, original);
-    if (question.type === 'choice' && questionName === 'kind') return choiceAnswer(question, 'network', 0.999);
-    if (question.type === 'choice' && questionName === 'family') return choiceAnswer(question, 'network-egress', 0.999);
+    if (question.type === 'choice' && questionName.replace(/^(effect|risk|edge)__/, '') === 'kind') return choiceAnswer(question, 'network', 0.999);
+    if (question.type === 'choice' && questionName.replace(/^(effect|risk|edge)__/, '') === 'family') return choiceAnswer(question, 'network-egress', 0.999);
     if (question.type === 'noul' && ['mutates', 'outward', 'beyondProject'].includes(questionName)) return noulAnswer(0.999);
     if (question.type === 'noul' && ['secrets', 'irreversible', 'weakensSecurity', 'catastrophic', 'cardDetails'].includes(questionName)) return noulAnswer(0.001);
     throw new Error(`Unscripted legacy import admission question: ${questionName}`);

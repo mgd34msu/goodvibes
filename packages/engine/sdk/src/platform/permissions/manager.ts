@@ -826,7 +826,9 @@ export class PermissionManager {
     };
     if (input.mode === 'safe-owner') {
       if (boundary.passed && reading?.stakes !== 'critical' && reading?.irreversible !== true && reading?.weakensSecurity !== true) {
-        return { result: this.result(true, false, 'stakes_preset', 'preset_allow', analysis,
+        return { result: this.result(true, input.policyResult.persisted,
+          input.policyResult.persisted ? input.policyResult.sourceLayer : 'stakes_preset',
+          input.policyResult.persisted ? input.policyResult.reasonCode : 'preset_allow', analysis,
           { boundary: boundaryResult, preset: { preset: 'safe-owner', action: 'allow' } }) };
       }
       const reply = await awaitPermission(() => this.requestPermission({

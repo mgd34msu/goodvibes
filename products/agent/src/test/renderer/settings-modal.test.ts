@@ -144,12 +144,12 @@ describe('renderSettingsModal', () => {
     modal.selectTarget('permissions.mode');
     try {
       const context=settingContextLines(modal).join('\n');
-      for (const mode of ['prompt','allow-all','plan','accept-edits','custom']) {
+      for (const mode of ['safe-owner','safe-jev','yolo','plan']) {
         expect(context).toContain(computeApprovalPosture({ mode, autoApprove: false }).detail);
       }
-      expect(context).toContain('Configured denials, read-only modes and surface authority still apply');
-      expect(context).toContain('behavior.autoApprove does not override configured denials, read-only modes or surface authority.');
-      expect(context).toContain('Read-only local shell calls may run');
+      expect(context).toContain('host containment, secret storage and payment rules still apply');
+      expect(context).toContain('Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');
+      expect(context).toContain('Planning only; execution and state changes are held');
       expect(context).not.toContain('removes an important safety gate');
       expect(context).not.toContain('every write, execute, or delegate');
       const initial=frameText(frameFromLayer(renderSettingsModal(modal,120,40),120,40));
@@ -161,10 +161,10 @@ describe('renderSettingsModal', () => {
         rendered.push(...frameText(frameFromLayer(renderSettingsModal(modal,120,40),120,40)).map(row=>row.slice(rightX).trim()));
       }
       const text=rendered.join(' ').replace(/\s+/g,' ');
-      expect(text.includes('Configured denials, read-only modes and surface authority still apply')).toBe(true);
+      expect(text.includes('host containment, secret storage and payment rules still apply')).toBe(true);
       expect(text.includes('critical calls still ask')).toBe(false);
-      expect(text.includes('behavior.autoApprove does not override configured denials, read-only modes or surface authority.')).toBe(true);
-      expect(text.includes('Read-only local shell calls may run')).toBe(true);
+      expect(text.includes('Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.')).toBe(true);
+      expect(text.includes('Planning only; execution and state changes are held')).toBe(true);
     } finally {modal.close();}
   });
 

@@ -112,10 +112,10 @@ describe('background permission gate: allow-all escape hatch exempts background 
     expect(asks).toEqual([]); // exempt, never brokered
   });
 
-  test('backgroundAgents=allow-all bypasses even a plan-mode refusal', async () => {
+  test('legacy backgroundAgents=allow-all retains the session plan-mode refusal', async () => {
     const { manager } = makeManager('plan', 'allow-all');
     const outcome = await gateBackgroundToolCall({ permissionManager: manager }, record, 'write', { path: 'a.ts' });
-    expect(outcome.approved).toBe(true);
+    expect(outcome.approved).toBe(false);
   });
 
   test('backgroundAgents=allow-all never bypasses an input-only surface boundary', async () => {

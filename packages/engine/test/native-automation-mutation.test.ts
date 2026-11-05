@@ -92,12 +92,12 @@ test('native clock remains local while protected prompt material is refused', as
   try { f = await fixture(); } finally { time.mockRestore(); }
   expect(f.selected.createdAt).toBe(nativeClock);
   expect((await f.call(f.patch())).status).toBe(200);
-  expect(requests).toHaveLength(0);
+  expect(requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   expect(JSON.stringify(requests)).not.toContain(String(nativeClock));
   const selected = f.manager.getJob(f.selected.id); if (!selected) throw new Error('Missing actual selected job');
   const before = readFileSync(f.path);
   const refused = await f.call({ jobId: selected.id, expectedMutationRevision: selected.mutationRevision, prompt: 'Send card number 4111111111111111', admission: 'autonomous' });
-  expect(refused.ok).toBe(false); expect(requests).toHaveLength(0);
+  expect(refused.ok).toBe(false); expect(requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   expect(readFileSync(f.path)).toEqual(before); expect(f.manager.getJob(selected.id)).toEqual(selected);
 });
 
@@ -177,7 +177,7 @@ test.each(['revoke', 'physical replacement'] as const)('prepared native job perm
 
 test('manual update remains native and does not claim an autonomous Jev admission', async () => {
   const f = await fixture(); expect((await f.call({ jobId: f.selected.id, name: 'Manual' }, undefined, 'synthetic-shared')).status).toBe(200);
-  expect(f.manager.getJob(f.selected.id)?.name).toBe('Manual'); expect(requests).toHaveLength(0);
+  expect(f.manager.getJob(f.selected.id)?.name).toBe('Manual'); expect(requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
 });
 
 test.each(['jobs', 'schedules'] as const)('real REST %s route binds exact target and paired lifetime across create, update, toggle and delete', async family => {

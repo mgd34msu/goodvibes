@@ -71,10 +71,10 @@ describe('remembered exec scope', () => {
     const otherConsumer = manager(async () => { asks++; return { approved: false }; }, store);
     for (const consumer of [permissions, otherConsumer]) {
       expect(await consumer.checkDetailed('exec', commit)).toMatchObject({ approved: effect === 'allow', persisted: true, sourceLayer: 'user_rule' });
-      expect(await consumer.checkDetailed('exec', push)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'config_policy' });
+      expect(await consumer.checkDetailed('exec', push)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset' });
     }
     await revoke(store);
-    for (const consumer of [permissions, otherConsumer]) expect(await consumer.checkDetailed('exec', commit)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'config_policy' });
+    for (const consumer of [permissions, otherConsumer]) expect(await consumer.checkDetailed('exec', commit)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset' });
     expect(asks).toBe(0);
   });
   test('a command-class grant covers the class and deletion takes effect for both consumers', async () => {
@@ -82,12 +82,12 @@ describe('remembered exec scope', () => {
     const consumers = [manager(async () => ({ approved: false }), store), manager(async () => ({ approved: false }), store)];
     for (const consumer of consumers) expect(await consumer.checkDetailed('exec', push)).toMatchObject({ sourceLayer: 'user_rule', approved: true });
     await revoke(store);
-    for (const consumer of consumers) expect(await consumer.checkDetailed('exec', push)).toMatchObject({ sourceLayer: 'config_policy', persisted: false });
+    for (const consumer of consumers) expect(await consumer.checkDetailed('exec', push)).toMatchObject({ sourceLayer: 'stakes_preset', persisted: false });
   });
   test('unrequested callback decisions never install session or durable grants', async () => {
     const store = new UserPermissionRuleStore(':memory:'); let asks = 0;
     const permissions = manager(async () => { asks++; return { approved: true, rememberTier: 'session' }; }, store);
-    for (const args of [commit, push]) expect(await permissions.checkDetailed('exec', args)).toMatchObject({ sourceLayer: 'config_policy', persisted: false });
+    for (const args of [commit, push]) expect(await permissions.checkDetailed('exec', args)).toMatchObject({ sourceLayer: 'stakes_preset', persisted: false });
     expect(store.list()).toEqual([]); expect(asks).toBe(0);
   });
   test('declared input-only surfaces refuse effects even with a stored grant', async () => {
@@ -175,7 +175,7 @@ describe('literal exact command authority', () => {
     for (const command of [original, 'git', ' GIT ', ' GIT ADD src/readme.md ', 'git push']) {
       expect(await permissions.checkDetailed('exec', execArgs(command))).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
     }
-    expect(await permissions.checkDetailed('exec', execArgs('gitfoo push'))).toMatchObject({ sourceLayer: 'config_policy', persisted: false });
+    expect(await permissions.checkDetailed('exec', execArgs('gitfoo push'))).toMatchObject({ sourceLayer: 'stakes_preset', persisted: false });
   });
 
   test.each([undefined, 'literal', 'unknown', null, true, { mode: 'command-class' }])('absent or invalid exact match metadata stays literal: %j', (option) => {
@@ -216,9 +216,9 @@ describe('literal exact command authority', () => {
         expect(await permissions.checkDetailed('exec', execArgs(command))).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
       }
       expect(asks).toBe(0);
-      expect((await permissions.checkDetailed('exec', execArgs('gitfoo push'))).sourceLayer).toBe('config_policy');
+      expect((await permissions.checkDetailed('exec', execArgs('gitfoo push'))).sourceLayer).toBe('stakes_preset');
       await revoke(reopened);
-      expect((await permissions.checkDetailed('exec', execArgs(' GIT '))).sourceLayer).toBe('config_policy');
+      expect((await permissions.checkDetailed('exec', execArgs(' GIT '))).sourceLayer).toBe('stakes_preset');
       expect(asks).toBe(0);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -238,7 +238,7 @@ describe('literal exact command authority', () => {
       const permissions = manager(async () => { asks++; return { approved: false }; }, reopened);
       expect((await permissions.checkDetailed('exec', execArgs(command))).approved).toBe(true);
       for (const changed of [command.trim(), command.toLowerCase(), command.toUpperCase()]) {
-        expect((await permissions.checkDetailed('exec', execArgs(changed))).sourceLayer).toBe('config_policy');
+        expect((await permissions.checkDetailed('exec', execArgs(changed))).sourceLayer).toBe('stakes_preset');
       }
       expect(asks).toBe(0);
     } finally { rmSync(dir, { recursive: true, force: true }); }

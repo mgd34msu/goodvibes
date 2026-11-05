@@ -44,7 +44,10 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
     },
     inboxFactory: (context, _routing, options) => registerInboxSurface(context, { ...options, adapters: new Map() }),
   });
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
+    if (name === 'completion_required') return noulAnswer(.99);
+    if (/^(effect|risk|edge)__/.test(wireQuestionName)) return question.type === 'noul' ? noulAnswer(.01) : choiceAnswer(question, name === 'kind' ? 'read' : 'generic', .99);
     if (COMPLETION_FINDINGS.has(name)) return noulAnswer(0.01);
     if (name === 'route') return choiceAnswer(question, 'converse', 0.99);
     if (name === 'relation') return choiceAnswer(question, 'supports', 0.99);

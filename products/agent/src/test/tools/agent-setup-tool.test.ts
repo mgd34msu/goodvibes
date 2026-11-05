@@ -191,10 +191,9 @@ describe('setup adapter', () => {
       : kind === 'unselected-field' ? { action: 'smoke', fields: { notes: 'ready', extra: 'password=private-facade' } }
       : kind === 'unrelated-action' ? { action: 'status', fields: { notes: 'apiKey=private-facade' } }
       : { action: 'smoke', itemId: 'other-item', fields: { notes: 'apiKey=private-facade' } };
-    if (kind === 'unrelated-action') expect((await f.run(args)).success).toBe(true);
-    else await expect(f.run(args)).rejects.toThrow();
+    await expect(f.run(args)).rejects.toThrow();
     expect(readings.requests).toHaveLength(0);
-    expect(f.executed).toHaveLength(kind === 'other-item' || kind === 'unrelated-action' ? 1 : 0);
+    expect(f.executed).toHaveLength(0);
     expect(f.store.list()).toHaveLength(0);
   });
 

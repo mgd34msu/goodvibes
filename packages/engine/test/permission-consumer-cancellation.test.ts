@@ -32,7 +32,9 @@ function cancelled(error: unknown): void {
   expect(JSON.stringify(error)).not.toContain(PRIVATE_REASON);
 }
 let previous: ReturnType<typeof installJudgmentPort>;
-beforeEach(() => { previous = installJudgmentPort(fakePort((name, question) => {
+beforeEach(() => { previous = installJudgmentPort(fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
+  if (name === 'kind') return choiceAnswer(question, 'write', 0.99);
   if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.99);
   if (name === 'mutates') return noulAnswer(0.99);
   if (['outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity', 'cardDetails'].includes(name)) return noulAnswer(0.01);
@@ -87,7 +89,7 @@ test('all coalesced consumers cancel, retire the shared prompt, and reject its l
 test('an unrequested permission handler cannot delay the owner or persist a grant', async () => {
   const store = new UserPermissionRuleStore(':memory:'); let asks = 0;
   const permissions = manager(() => { asks++; return new Promise(() => {}); }, store);
-  expect(await permissions.checkDetailed('write', args)).toMatchObject({ approved: true, sourceLayer: 'config_policy', persisted: false });
+  expect(await permissions.checkDetailed('write', args)).toMatchObject({ approved: true, sourceLayer: 'stakes_preset', persisted: false });
   expect(asks).toBe(0); expect(store.list()).toEqual([]);
   const controller = new AbortController(); controller.abort(new Error(PRIVATE_REASON));
   cancelled(await caught(permissions.checkDetailed('write', args, undefined, { signal: controller.signal })));
@@ -178,7 +180,7 @@ for (const cancelAll of [false, true]) test(`cancellation during initial persist
 test('unrequested callback decision getters cannot install a grant or cancel a check', async () => {
   const controller = new AbortController(); const store = new UserPermissionRuleStore(':memory:'); let asks = 0;
   const permissions = manager(async () => { asks++; return { rememberTier: 'tool', get approved() { controller.abort(); return true; } }; }, store);
-  expect(await permissions.checkDetailed('write', args, undefined, { signal: controller.signal })).toMatchObject({ approved: true, persisted: false, sourceLayer: 'config_policy' });
+  expect(await permissions.checkDetailed('write', args, undefined, { signal: controller.signal })).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset' });
   expect(controller.signal.aborted).toBe(false); expect(asks).toBe(0); expect(store.list()).toEqual([]);
 });
 

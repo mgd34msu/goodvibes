@@ -317,8 +317,10 @@ test.each(['arguments', 'source'] as const)('protected %s remain local without s
   const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
   if (location === 'source') f.source.goal = 'Read this using password=synthetic-private';
   const args = location === 'arguments' ? read('password=synthetic-private') : read('ordinary.txt');
-  await f.run('read', args).catch(() => undefined);
-  expectNoReadAdmission('synthetic-private'); expect(readBodies).toBe(1); expect(f.prompts()).toBe(0);
+  const result = await f.run('read', args).catch(() => ({ success: false }));
+  if (location === 'arguments') expect(result.success).toBe(false);
+  else expect(readBodies).toBe(1);
+  expectNoReadAdmission('synthetic-private'); expect(f.prompts()).toBe(location === 'arguments' ? 1 : 0);
 });
 
 test('changed original source during the final admission hook cannot execute', async () => {

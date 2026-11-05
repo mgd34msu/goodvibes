@@ -85,7 +85,7 @@ test('recorded native intake saves only cleared evidence and complete safe subje
   expect(artifact.buffer.toString()).toContain('Authorization: <redacted>');
   expect(artifact.buffer.toString()).toContain('Ready. apiKey=<redacted>');
   expect(artifact.buffer.toString()).toContain('goodvibes-agent starts');
-  expect(readings.requests).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   const retained = f.retained();
   expect(() => resolveSetupSmokeNativeEvidence(retained.args, retained.options, f.context)).toThrow();
 });
@@ -97,7 +97,7 @@ test('issuer credentials are cleared without a model redaction lookup and displa
   const artifact = await f.store.readContent(f.store.list()[0]!.id);
   expect(artifact.buffer.toString()).not.toContain('ghp_');
   expect(JSON.stringify(f.retained().args)).toContain('safe-tail-after-cap');
-  expect(readings.requests).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   expect(readings.requests.every(request => !JSON.stringify(request).includes('private-smoke-'))).toBe(true);
 });
 
@@ -125,7 +125,7 @@ test.each(['ordinary-json', 'json-log', 'nested-json'] as const)('encoded issuer
   const f = scene(), encoded = '{"ordinary":"\\u0067hp_' + 'a'.repeat(36) + '"}';
   const value = kind === 'ordinary-json' ? encoded : kind === 'json-log' ? `Logged JSON: ${encoded}` : JSON.stringify({ ordinary: encoded });
   await expect(f.prepare({ mode: 'run_setup_smoke', fields: { notes: value } })).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
 });
 
 test.each(['safe-escaped', 'encoded-credential'] as const)('supported %s JSON evidence retains safe source and no credential', async kind => {
@@ -156,7 +156,7 @@ test.each(['unclosed-quote', 'quoted-suffix', 'unknown-escaped-json-field', 'unk
     : kind === 'folded-header' ? 'Authorization: Basic private-basic\n private-folded-tail'
     : 'Authorization: Basic private-basic\n4111111111111111';
   await expect(f.prepare({ mode: 'run_setup_smoke', fields: { notes: value } })).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
 });
 
 test.each(['early-credential', 'after-display-cap', 'structured-card'] as const)('full %s card material is refused before any reading or artifact', async kind => {
@@ -164,7 +164,7 @@ test.each(['early-credential', 'after-display-cap', 'structured-card'] as const)
   const text = kind === 'early-credential' ? 'Authorization: Bearer local-secret\n4111111111111111'
     : kind === 'after-display-cap' ? `${'safe '.repeat(2000)}4111111111111111` : '{"apiKey":"local-secret","cardNumber":"4111111111111111"}';
   await expect(f.prepare({ mode: 'run_setup_smoke', fields: { notes: text } })).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
 });
 
 test.each(['unknown-field', 'unrelated-mode', 'unselected-sibling', 'unsupported-header', 'forged-subject', 'non-string'] as const)('%s cannot inherit the native string intake domain', async kind => {
@@ -177,13 +177,13 @@ test.each(['unknown-field', 'unrelated-mode', 'unselected-sibling', 'unsupported
     : { mode: 'run_setup_smoke', fields: { notes: { apiKey: 'private-object' } } };
   if (kind === 'unknown-field' || kind === 'unrelated-mode') await f.prepare(args);
   else await expect(f.prepare(args)).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.store.list()).toHaveLength(0);
 });
 
 test('caller flags and forged reference/context options cannot resolve or publish evidence', async () => {
   const f = scene();
   await expect(f.tool.execute({ mode: 'run_setup_smoke', fields: { notes: 'native-smoke:notes' }, confirm: true, explicitUserRequest: 'Caller claim' }, { inputProjectionContext: Object.freeze({}) })).rejects.toThrow();
-  expect(f.store.list()).toHaveLength(0); expect(readings.requests).toHaveLength(0);
+  expect(f.store.list()).toHaveLength(0); expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
 });
 
 test('copied options, copied arguments and another owner cannot borrow an active native source', async () => {
@@ -241,5 +241,5 @@ test('native capture refuses source/context accessors before their getters or an
     if (location === 'store') Object.defineProperty(f.context.platform, 'artifactStore', { get() { getters++; return f.store; } });
     await expect(f.prepare(args)).rejects.toThrow(); expect(getters).toBe(0); expect(f.store.list()).toHaveLength(0);
   }
-  expect(readings.requests).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
 });

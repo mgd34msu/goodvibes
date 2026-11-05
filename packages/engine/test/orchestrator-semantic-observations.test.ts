@@ -25,7 +25,10 @@ let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function semanticPort(answer: Parameters<typeof fakePort>[0], completion?: (name: string, state: unknown) => number) {
-  return fakePort((name, question, state) => {
+  return fakePort((wireQuestionName, question, state) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
+    if (/^(effect|risk|edge)__/.test(wireQuestionName)) return question.type === 'noul' ? noulAnswer(.01) : choiceAnswer(question, name === 'kind' ? 'read' : 'generic', .99);
+    if (name === 'completion_required') return noulAnswer(.99);
     if (['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification', 'weakened_criteria', 'missing_results', 'unresolved_conflict'].includes(name)) return noulAnswer(completion?.(name, state) ?? .01);
     if (name === 'kind') return choiceAnswer(question, 'secret', 0.99);
     if (name === 'credentialRemains') return noulAnswer(0.03);
@@ -540,7 +543,7 @@ test('prepared retirement releases only its owned projection exactly once before
 });
 
 function assertReadingPartition(requests: ReadonlyArray<{ context?: { battery?: string }; questions: object; state: unknown }>, batteries: readonly string[]) {
-  const observations = requests.filter(request => !['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation'].includes(request.context?.battery ?? ''));
+  const observations = requests.filter(request => !['engine.core.completion-applicability', 'engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation'].includes(request.context?.battery ?? ''));
   expect(observations.map(request => request.context?.battery)).toEqual([...batteries]);
   return observations;
 }

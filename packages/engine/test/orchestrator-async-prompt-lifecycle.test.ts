@@ -223,7 +223,7 @@ describe('Orchestrator async prompt lifecycle wiring', () => {
 for (const directResult of [false, true]) {
   test(`background ${directResult ? 'completed result' : 'failure notice'} resumes the original request and cannot bypass final validation`, async () => {
     const rejected = 'The requested review did not finish. No completed artifact was produced.';
-    const fake = fakePort((name, _question, state) => noulAnswer(name === 'unfinished' && (state as { response?: string }).response === rejected ? .99 : .01));
+    const fake = fakePort((name, _question, state) => noulAnswer(name === 'completion_required' || name === 'unfinished' && (state as { response?: string }).response === rejected ? .99 : .01));
     installJudgmentPort(fake.port);
     const f = fixture(() => 'current memory', [
       { content: rejected, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' },

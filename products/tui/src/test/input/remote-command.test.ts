@@ -564,7 +564,8 @@ for (const pooled of [false, true]) test(`direct owner /remote ${pooled ? 'dispa
   if (pooled) getTestRemoteRunnerRegistry().createPool({ id: 'proof', label: 'Proof' });
   const report = join(makeProjectTempDir('acp-command-wire'), 'result.json');
   const log = new SqliteDecisionLog(':memory:');
-  const synthetic = fakePort((name, question) => {
+  const synthetic = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.97 : 0.03);
     const answers: Record<string, string> = { disposition: 'act', family: 'generic', kind: 'other', capability: 'generic', hazard: 'none' };
     return choiceAnswer(question, answers[name] ?? 'none', 0.99);

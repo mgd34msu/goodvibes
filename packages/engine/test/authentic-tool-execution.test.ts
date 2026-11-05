@@ -318,6 +318,7 @@ function legacyAdmission(claim: () => void = () => {}): AutonomousPermissionAdmi
 function embeddingDeps(manager: PermissionManager, registry: ToolRegistry,
   admitAutonomous: PermissionManager['admitAutonomous']): ToolExecutionDeps {
   return { permissionManager: { check: manager.check.bind(manager), checkDetailed: manager.checkDetailed.bind(manager),
+    captureExecutionMode: manager.captureExecutionMode.bind(manager),
     autonomousPreparation: manager.autonomousPreparation.bind(manager), admitAutonomous },
   toolRegistry: registry, autonomousSource: sourceOf, hookDispatcher: null, runtimeBus: null,
   sessionId: 'embedding-fixture', emitterContext: () => ({ sessionId: 'embedding-fixture', traceId: 'synthetic', source: 'orchestrator' }) };

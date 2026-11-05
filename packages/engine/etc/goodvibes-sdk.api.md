@@ -8576,7 +8576,7 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "approvals.list": ({
         awaitingDecision: boolean;
-        mode: "allow-all" | "background-restricted" | "custom" | "default" | "plan";
+        mode: "allow-all" | "background-restricted" | "custom" | "default" | "plan" | "safe-jev" | "safe-owner" | "yolo";
         lastDecision?: {
             callId: string;
             toolName: string;

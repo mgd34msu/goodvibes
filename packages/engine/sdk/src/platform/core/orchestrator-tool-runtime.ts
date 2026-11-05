@@ -153,7 +153,7 @@ export async function executeToolCalls(
     deps.assertCurrent?.();
     const inheritedMode = currentExecutionMode();
     const selection = deps.permissionManager.captureExecutionMode?.();
-    const mode = selection?.mode ?? deps.permissionManager.getMode?.() ?? inheritedMode ?? 'safe-jev';
+    const mode = selection?.mode ?? deps.permissionManager.getMode?.() ?? inheritedMode ?? 'safe-owner';
     results.push(...await withExecutionMode(mode, () => executeToolCallsInMode(deps, turnId, [call]), selection?.assertCurrent));
   }
   return results;

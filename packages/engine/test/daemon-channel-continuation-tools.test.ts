@@ -273,7 +273,7 @@ describe('a served daemon offers a channel conversation the conversational tools
           harness.requests.find((request) => request.messages.some((message) => message.role === 'tool')));
         const toolResults = resultRequest.messages.filter((message) => message.role === 'tool');
         expect(toolResults).toHaveLength(2);
-        for (const result of toolResults) expect(String(result.content)).toContain("Unknown tool: 'profile'");
+        for (const result of toolResults) expect(String(result.content)).toContain("Unknown tool in autonomous preparation");
         expect(requestText(resultRequest)).not.toContain('SYNTHETIC_PRIVATE_PROFILE');
         expect(harness.profileCalls).toEqual({ reads: 0, acknowledgments: 0 });
         expect(harness.requests.every((request) => !toolNames(request).includes('profile'))).toBe(true);

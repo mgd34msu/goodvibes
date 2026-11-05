@@ -46,7 +46,8 @@ async function withRuntime(run: (runtime: {
   const tools = new ToolRegistry(manager), screening = researchScreeningFixture();
   bindAgentResearchSourceOwner(tools, screening.owner);
   registerAgentHarnessTool(tools, registry, context);
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
     if (name === 'disposition') return choiceAnswer(question, 'act', 0.999);
     if (name === 'kind') return choiceAnswer(question, 'other', 0.999);

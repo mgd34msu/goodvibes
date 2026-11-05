@@ -120,7 +120,7 @@ describe('renderSettingsModal payments category', () => {
     expect(cm.get('payments.cvvHandling')).toBe('prompt');
 
     const texts = layerText(renderSettingsModal(modal, W, 40)).join('\n');
-    expect(texts).toContain('DISABLES UNATTENDED PURCHASING');
+    expect(texts).toContain('disables unattended purchasing');
     expect(texts).toContain(CVV_PROMPT_TRADEOFF_WARNING.slice(0, 40));
   });
 

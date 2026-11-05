@@ -105,11 +105,10 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = [
     group: 'ONBOARDING',
     label: 'Tools & Permissions',
     summary: 'Set approval policy and core file/shell/network permissions.',
-    detail: 'Most users only need Permission mode and Auto-approve. The rest stay at safe defaults unless you change them.',
+    detail: 'Choose an execution mode to set who decides consequential actions. The rest stay at safe defaults unless you change them.',
     actions: [
       // Top-level approval policy
       settingAction({ id: 'permissions-mode', label: 'Execution mode', detail: 'Choose Safe owner, Safe Jev, or YOLO. Plan is a separate read-only posture.', key: 'permissions.mode' }),
-      settingAction({ id: 'permissions-auto-approve', label: 'Auto-approve tools', detail: 'Toggle automatic approval for all tool permission requests.', key: 'behavior.autoApprove' }),
       // Common per-tool overrides for file and shell work
       settingAction({ id: 'permissions-read', label: 'File reads', detail: 'Cycle allow, prompt, or deny for file read operations.', key: 'permissions.tools.read' }),
       settingAction({ id: 'permissions-write', label: 'File writes', detail: 'Cycle allow, prompt, or deny for file write operations.', key: 'permissions.tools.write' }),

@@ -22,6 +22,11 @@
 
 ### Fixed
 
+- Accept canonical execution modes in approval responses, publish session mode
+  changes in the declared event contract, and remove the retired Auto-approve
+  setting from the Agent onboarding actions.
+- Retain the provenance of remembered owner approvals after safety checks, and
+  show the payment CVV tradeoff warning before the scrollable setting details.
 - Preserve settings schema identity during prepared edits and catalog reads, and
   settle pending permission changes before capturing an invocation's execution
   mode so valid first actions are not rejected as stale.

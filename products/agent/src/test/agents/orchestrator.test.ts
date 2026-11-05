@@ -189,11 +189,13 @@ describe('AgentOrchestrator', () => {
       ],
       fields: { mock: 'other', huggingface: 'other', mistral: 'other', 'openai-subscriber': 'other', openrouter: 'other', abacus: 'other', reference: 'other' },
     });
-    previousJudgmentPort = installJudgmentPort(fakePort((name, question, state) => {
+    previousJudgmentPort = installJudgmentPort(fakePort((wireQuestionName, question, state) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       if (name !== 'kind' || (typeof state === 'object' && state !== null && 'field' in state)) {
         const diagnostic = readDiagnostic(name, question, state);
         if (diagnostic !== undefined) return diagnostic;
       }
+      if (name === 'completion_required') return noulAnswer(.99);
       if (name === 'category') return choiceAnswer(question, 'unknown', 0.97);
       if (name === 'connection_failure') return choiceAnswer(question, 'none', 0.97);
       if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.97);

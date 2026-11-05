@@ -26,9 +26,10 @@ describe('read access uses owner rules without per-path permission readings', ()
   test.each(['/home/alice/.ssh/id_rsa', `${WORKSPACE}/src/index.ts`, '/home/alice/.config/gh/hosts.yml'])('does not infer authority from %s', async path => {
     let prompts = 0;
     const manager = new PermissionManager(async () => { prompts++; return { approved: false }; }, makeConfigReader(), makePolicyRuntimeState(), null, null);
-    expect(await manager.checkDetailed('read', { path })).toMatchObject({ approved: true, sourceLayer: 'config_policy' });
+    expect(await manager.checkDetailed('read', { path })).toMatchObject({ approved: true, sourceLayer: 'stakes_preset' });
     expect(await manager.readAccess(path)).toBe('allow');
     expect(prompts).toBe(0);
-    expect(gateLog.requests).toEqual([]);
+    expect(gateLog.requests).toHaveLength(1);
+    expect(JSON.stringify(gateLog.requests[0]?.state)).toContain(path);
   });
 });

@@ -248,9 +248,9 @@ test('ACP protected or accessor input never reaches judgment or an approval call
   const protectedInput = request(); protectedInput.toolCall.rawInput = { path: 'x', password: 'sensitive' } as { path: string };
   expect(await client.requestPermission(protectedInput)).toEqual({ outcome: { outcome: 'cancelled' } }); expect(reads).toBe(0); expect(humans).toBe(0);
 });
-test('ACP permission admission succeeds without requiring an available Jev endpoint', async () => {
+test('ACP unavailable safety classification cancels before wire permission', async () => {
   beforeRead = async () => { throw new Error('synthetic unavailable'); };
-  expect(await acp().client.requestPermission(request())).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } }); expect(humans).toBe(0);
+  expect(await acp().client.requestPermission(request())).toEqual({ outcome: { outcome: 'cancelled' } }); expect(humans).toBe(0);
 });
 
 test('scripted ACP wire round-trip is autonomous with reordered permission options', async () => {
@@ -477,7 +477,8 @@ for (const field of ['args', 'destination', 'goal', 'diff', 'connection', 'genui
   if (field === 'goal') f.record.operation.source.goal = PAN_SHAPED_PROTOCOL_UUID;
   if (field === 'diff') { const source = selectedDiffSource(); source.selectedDiffContext.unifiedDiff = source.selectedDiffContext.unifiedDiff.replace('+after', '+password=synthetic-private'); Object.assign(f.record.operation.source, source); }
   if (field === 'connection') { f.record.info.id = 'password=synthetic-private'; (f.service as unknown as { records: Map<string, unknown> }).records.set(f.record.info.id, f.record); }
-  expect(await f.client.requestPermission(input)).toEqual({ outcome: ['goal', 'diff', 'connection'].includes(field) ? { outcome: 'selected', optionId: 'allow' } : { outcome: 'cancelled' } }); expect(humans).toBe(0); expect(readings).toBe(0);
+  expect(await f.client.requestPermission(input)).toEqual({ outcome: ['goal', 'diff', 'connection'].includes(field) ? { outcome: 'selected', optionId: 'allow' } : { outcome: 'cancelled' } }); expect(humans).toBe(0); expect(readings).toBe(['goal', 'diff', 'connection'].includes(field) ? 1 : 0);
+  expect(JSON.stringify(log.query())).not.toContain('password=synthetic-private');
 });
 
 import { autonomousSourceRevision, externalRequestRevision, externalSourceRequestRevision } from '../sdk/src/platform/permissions/autonomous-protocol-binding.ts';

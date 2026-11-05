@@ -161,6 +161,11 @@ function buildSettingContext(modal: SettingsModal, entry: SettingEntry): string[
     `Source: ${entry.effectiveSource ?? 'default'}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
   ];
 
+  // The SDK's own wording, not authored here, and never shown against 'stored'.
+  if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
+    lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
+  }
+
   if (entry.metadataUnavailable) lines.push(`Editing unavailable: ${entry.metadataUnavailable}`);
   else if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
   if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
@@ -197,10 +202,6 @@ function buildSettingContext(modal: SettingsModal, entry: SettingEntry): string[
     }
   }
 
-  // The SDK's own wording, not authored here, and never shown against 'stored'.
-  if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
-    lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
-  }
 
   if (isSecretConfigKey(entry.setting.key)) {
     lines.push('');

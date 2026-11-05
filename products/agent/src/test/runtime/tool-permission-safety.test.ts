@@ -107,6 +107,7 @@ describe('Agent adopts the shared permission gate without alternate authority', 
 
   test('missing preparation judgment fails before executing a captured read', async () => {
     const services = runtime();
+    services.configManager.set('permissions.mode', 'safe-owner');
     const gate = pipeline(services);
     await expect(gate.run('read', { path: 'fixture.txt' })).rejects.toThrow('No judgment port');
     expect(gate.executed).toHaveLength(0);

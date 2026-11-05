@@ -26,6 +26,7 @@ export const SESSION_UPDATE_WIRE_EVENTS = [
   'session-closed',
   'session-deleted',
   'session-reopened',
+  'session-permission-mode-changed',
   'session-agent-bound',
   'session-agent-completed',
   'session-message-appended',
@@ -50,7 +51,7 @@ export const SESSION_UPDATE_WIRE_EVENTS = [
  */
 export const SESSION_UPDATE_INTENT_MAP = {
   created: ['session-created'],
-  updated: ['session-message-appended', 'session-agent-completed', 'session-route-attached', 'session-detached', 'session-reopened'],
+  updated: ['session-permission-mode-changed', 'session-message-appended', 'session-agent-completed', 'session-route-attached', 'session-detached', 'session-reopened'],
   steered: ['session-input-queued-for-surface', 'session-input-delivered', 'session-message-forwarded'],
   closed: ['session-closed'],
   deleted: ['session-deleted'],

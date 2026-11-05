@@ -572,7 +572,7 @@ describe('spawn mode', () => {
       guarded.agentTool.definition.parameters.properties as Record<string, unknown> | undefined,
       'guarded agent schema properties',
     );
-    expect(guarded.agentTool.definition.description).toContain('Visible local Agent orchestration');
+    expect(guarded.agentTool.definition.description).toContain('Standalone agents still require native Jev completion and output checks.');
     const modeProperty = expectPresent(
       getRecordProperty(mode, 'mode'),
       'guarded agent mode property',
@@ -661,20 +661,15 @@ describe('spawn mode', () => {
     }
   });
 
-  test('Agent runtime guard narrows remote build-host tool to read-only modes', async () => {
+  test('Agent runtime guard preserves remote catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
     registry.register(makeModeTool('remote', ['create-pool', 'pools', 'assign', 'unassign', 'contracts', 'artifacts', 'review', 'import-artifact']));
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const remoteDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'remote');
-    expect(remoteDefinition?.description).toContain('Read-only remote build-host inspection');
-    expect(remoteDefinition?.description).not.toContain('remote runner');
-    const properties = remoteDefinition?.parameters.properties as Record<string, unknown>;
-    const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_REMOTE_TOOL_MODES]);
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     for (const mode of AGENT_READ_ONLY_REMOTE_TOOL_MODES) {
       const result = await registry.execute(`call-remote-${mode}`, 'remote', { mode });
@@ -689,7 +684,7 @@ describe('spawn mode', () => {
     }
   });
 
-  test('Agent runtime guard narrows channel tool to read-only inspection', async () => {
+  test('Agent runtime guard preserves channel catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
@@ -707,16 +702,9 @@ describe('spawn mode', () => {
       'authorize',
     ]));
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const channelDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'channel');
-    expect(channelDefinition?.description).toContain('Read-only channel inspection');
-    const properties = channelDefinition?.parameters.properties as Record<string, unknown>;
-    const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_CHANNEL_TOOL_MODES]);
-    expect(properties.createIfMissing).toBeUndefined();
-    expect(properties.actionId).toBeUndefined();
-    expect(properties.toolId).toBeUndefined();
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     for (const mode of AGENT_READ_ONLY_CHANNEL_TOOL_MODES) {
       const result = await registry.execute(`call-channel-${mode}`, 'channel', { mode });
@@ -738,7 +726,7 @@ describe('spawn mode', () => {
     expect(createTarget.error).toBe(AGENT_CHANNEL_ACTION_DENIAL_MESSAGE);
   });
 
-  test('Agent runtime guard narrows MCP tool to read-only security inspection', async () => {
+  test('Agent runtime guard preserves MCP catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
@@ -754,13 +742,9 @@ describe('spawn mode', () => {
       'set-role',
     ]));
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const mcpDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'mcp');
-    expect(mcpDefinition?.description).toContain('Read-only MCP inspection');
-    const properties = mcpDefinition?.parameters.properties as Record<string, unknown>;
-    const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_MCP_TOOL_MODES]);
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     for (const mode of AGENT_READ_ONLY_MCP_TOOL_MODES) {
       const result = await registry.execute(`call-mcp-${mode}`, 'mcp', { mode });
@@ -775,35 +759,15 @@ describe('spawn mode', () => {
     }
   });
 
-  test('Agent runtime guard narrows fetch to unauthenticated read-only HTTP', async () => {
+  test('Agent runtime guard preserves fetch catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
     registry.register(makeFetchModeTool());
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const fetchDefinition = expectPresent(
-      registry.getToolDefinitions().find((tool) => tool.name === 'fetch'),
-      'fetch tool definition',
-    );
-    expect(fetchDefinition.description).toContain('read-only HTTP requests');
-    const properties = fetchDefinition.parameters.properties as Record<string, unknown>;
-    expect(properties.parallel).toBeDefined();
-    expect(properties.trusted_hosts).toBeUndefined();
-    const sanitizeModeProperty = getRecordProperty(properties, 'sanitize_mode');
-    expect(sanitizeModeProperty?.enum).toEqual(['safe-text', 'strict']);
-
-    const urlsProperty = getRecordProperty(properties, 'urls');
-    const itemSchema = urlsProperty ? getRecordProperty(urlsProperty, 'items') : undefined;
-    const urlProperties = itemSchema ? getRecordProperty(itemSchema, 'properties') : undefined;
-    const fetchUrlProperties = expectPresent(urlProperties, 'fetch URL properties');
-    const methodProperty = getRecordProperty(fetchUrlProperties, 'method');
-    expect(methodProperty?.enum).toEqual([...AGENT_READ_ONLY_FETCH_METHODS]);
-    expect(fetchUrlProperties.body).toBeUndefined();
-    expect(fetchUrlProperties.headers).toBeUndefined();
-    expect(fetchUrlProperties.auth).toBeUndefined();
-    expect(fetchUrlProperties.service).toBeUndefined();
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     for (const method of AGENT_READ_ONLY_FETCH_METHODS) {
       const result = await registry.execute(`call-fetch-${method}`, 'fetch', {
@@ -854,30 +818,15 @@ describe('spawn mode', () => {
     }
   });
 
-  test('Agent runtime guard narrows state tool to read-only runtime inspection', async () => {
+  test('Agent runtime guard preserves state catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
     registry.register(makeStateModeTool());
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const stateDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'state');
-    expect(stateDefinition?.description).toContain('Inspect runtime-owned state');
-    const properties = stateDefinition?.parameters.properties as Record<string, unknown>;
-    const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_STATE_TOOL_MODES]);
-    expect(properties.values).toBeUndefined();
-    expect(properties.clearKeys).toBeUndefined();
-    expect(properties.memoryValue).toBeUndefined();
-    expect(properties.hookDefinition).toBeUndefined();
-    expect(properties.modeName).toBeUndefined();
-    expect(properties.analyticsTool).toBeUndefined();
-
-    expect(getRecordProperty(properties, 'memoryAction')?.enum).toEqual([...AGENT_READ_ONLY_STATE_MEMORY_ACTIONS]);
-    expect(getRecordProperty(properties, 'hookAction')?.enum).toEqual([...AGENT_READ_ONLY_STATE_HOOK_ACTIONS]);
-    expect(getRecordProperty(properties, 'modeAction')?.enum).toEqual([...AGENT_READ_ONLY_STATE_MODE_ACTIONS]);
-    expect(getRecordProperty(properties, 'analyticsAction')?.enum).toEqual([...AGENT_READ_ONLY_STATE_ANALYTICS_ACTIONS]);
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     const readOnlyInputs: ReadonlyArray<Record<string, unknown>> = [
       { mode: 'get', keys: ['runtime.workingDir'] },
@@ -1058,12 +1007,9 @@ describe('spawn mode', () => {
     registry.register(guarded.agentTool);
     registry.register(makeInspectTool());
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const inspectDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'inspect');
-    expect(inspectDefinition?.description).toContain('Inspect and analyze project structure');
-    const properties = inspectDefinition?.parameters.properties as Record<string, unknown>;
-    expect(properties.dryRun).toBeUndefined();
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     const plan = await registry.execute('call-inspect-scaffold-plan', 'inspect', {
       mode: 'scaffold',
@@ -1085,20 +1031,15 @@ describe('spawn mode', () => {
     expect(write.error).toBe(AGENT_INSPECT_WRITE_DENIAL_MESSAGE);
   });
 
-  test('Agent runtime guard narrows copied control tool to read-only product-control inspection', async () => {
+  test('Agent runtime guard preserves control catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
     registry.register(makeControlTool());
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-
-    const controlDefinition = registry.getToolDefinitions().find((tool) => tool.name === 'control');
-    expect(controlDefinition?.description).toContain('Read-only product-control inspection');
-    expect(controlDefinition?.sideEffects).toEqual([]);
-    const properties = controlDefinition?.parameters.properties as Record<string, unknown>;
-    const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_CONTROL_TOOL_MODES]);
+    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
     const commands = await registry.execute('call-control-commands', 'control', { mode: 'commands' });
     expect(commands.success).toBe(true);
@@ -1204,7 +1145,7 @@ describe('spawn mode', () => {
     }
   });
 
-  test('Agent runtime guard narrows copied durable workflow tools to read-only inspection', async () => {
+  test('Agent runtime guard preserves durable catalogs and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = makeAgentHarness();
     registry.register(guarded.agentTool);
@@ -1247,6 +1188,7 @@ describe('spawn mode', () => {
       'resolution',
     ]));
 
+    const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
 
     const expectations = [
@@ -1283,13 +1225,7 @@ describe('spawn mode', () => {
     ] as const;
 
     for (const expectation of expectations) {
-      const definition = registry.getToolDefinitions().find((tool) => tool.name === expectation.name);
-      expect(definition?.description).toContain('Read-only');
-      expect(definition?.description).toContain('Mutations are disabled in Agent.');
-      const properties = definition?.parameters.properties as Record<string, unknown>;
-      const modeProperty = getRecordProperty(properties, 'mode');
-      expect(modeProperty?.enum).toEqual([...expectation.allowedModes]);
-      for (const key of expectation.removed) expect(properties[key]).toBeUndefined();
+      expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
 
       for (const mode of expectation.allowedModes) {
         const result = await registry.execute(`call-${expectation.name}-${mode}`, expectation.name, { mode });

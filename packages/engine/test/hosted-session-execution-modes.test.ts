@@ -223,7 +223,7 @@ test('a hosted tool ignoring abort cannot reuse captured YOLO after its mode cha
     systemPrompt: 'Execute the registered synthetic operation', permissionMode: 'yolo' });
   disposals.push(() => runtime.dispose());
   runtime.toolRegistry.register({ definition: { name: 'delayed_mode_effect', description: 'Synthetic delayed operation',
-    parameters: { type: 'object', properties: {}, additionalProperties: false }, sideEffects: ['state'] },
+    parameters: { type: 'object', properties: {}, additionalProperties: false }, sideEffects: [] },
     async execute() {
       entered.resolve();
       await release.promise; // Deliberately ignores the supplied cancellation signal.
@@ -232,12 +232,14 @@ test('a hosted tool ignoring abort cannot reuse captured YOLO after its mode cha
         return { success: true, output: 'Synthetic operation' };
       } catch (error) { guarded = true; throw error; }
       finally { finished.resolve(); }
-    } });
+    } }, { inputProjection: { async project(request) {
+      return { status: 'projected', args: request.args, assertCurrent: request.assertCurrent, resultPublication: 'read-only' };
+    } } });
   const readings = installHostedSessionReadings();
   disposals.push(() => readings.restore());
   const turn = runtime.submit('Perform the synthetic delayed operation');
   try {
-    await entered.promise;
+    await Promise.race([entered.promise, turn.then(() => { throw new Error(`Hosted turn ended before its synthetic operation: ${JSON.stringify(runtime.conversation.getMessageSnapshot())}`); })]);
     await runtime.liveTurnControls.setPermissionMode('safe-owner');
   } finally { release.resolve(); }
   await finished.promise;

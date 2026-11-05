@@ -28,7 +28,7 @@
 |  ┃  Ask anything, or type / for commands and @ for files                                           |
 |  ┃                                                                                                 |
 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
-|   normal   main                       context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
+|   safe-owner   main                   context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
 @STYLES
 0 1 fg=0;255;255
 0 1 bold=1
@@ -2877,10 +2877,14 @@
 29 6 fg=#94a3b8
 29 7 fg=#94a3b8
 29 8 fg=#94a3b8
-29 12 fg=#4e5c6f
-29 13 fg=#4e5c6f
-29 14 fg=#4e5c6f
-29 15 fg=#4e5c6f
+29 9 fg=#94a3b8
+29 10 fg=#94a3b8
+29 11 fg=#94a3b8
+29 12 fg=#94a3b8
+29 16 fg=#4e5c6f
+29 17 fg=#4e5c6f
+29 18 fg=#4e5c6f
+29 19 fg=#4e5c6f
 29 39 fg=#94a3b8
 29 40 fg=#94a3b8
 29 41 fg=#94a3b8

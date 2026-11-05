@@ -37,7 +37,8 @@ function fixture(settings: { held?: boolean; suspend?: boolean } = {}) {
   const note = notes.create({ title: 'Restore verification', body }); notes.markReviewed(note.id);
   const entered = barrier(), released = barrier();
   let paused = false;
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'score') return scoreAnswer(question, name === 'link' ? 0 : 3, 0.9999);
     if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
     const value = name === 'target' ? 'skill' : name === 'disposition' ? 'act'

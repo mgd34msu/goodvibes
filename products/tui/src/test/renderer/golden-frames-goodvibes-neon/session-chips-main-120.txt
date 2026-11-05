@@ -7,7 +7,7 @@
 |  ┃  Ask anything, or type / for commands and @ for files                                                               |
 |  ┃                                                                                                                     |
 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
-|   normal   ◐ 1 agent running · 1 process running                                                        ctrl+p  menu   |
+|   safe-owner   ◐ 1 agent running · 1 process running                                                    ctrl+p  menu   |
 @STYLES
 0 1 fg=0;255;255
 0 1 bold=1
@@ -856,14 +856,10 @@
 8 6 fg=#94a3b8
 8 7 fg=#94a3b8
 8 8 fg=#94a3b8
-8 12 fg=#00ffff
-8 12 bold=1
-8 13 fg=#00ffff
-8 13 bold=1
-8 14 fg=#00ffff
-8 14 bold=1
-8 15 fg=#00ffff
-8 15 bold=1
+8 9 fg=#94a3b8
+8 10 fg=#94a3b8
+8 11 fg=#94a3b8
+8 12 fg=#94a3b8
 8 16 fg=#00ffff
 8 16 bold=1
 8 17 fg=#00ffff
@@ -930,6 +926,14 @@
 8 47 bold=1
 8 48 fg=#00ffff
 8 48 bold=1
+8 49 fg=#00ffff
+8 49 bold=1
+8 50 fg=#00ffff
+8 50 bold=1
+8 51 fg=#00ffff
+8 51 bold=1
+8 52 fg=#00ffff
+8 52 bold=1
 8 104 fg=#e2e8f0
 8 104 bg=#64748b
 8 104 bold=1

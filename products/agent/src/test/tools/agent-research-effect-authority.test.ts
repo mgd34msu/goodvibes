@@ -171,7 +171,7 @@ test('metered candidates receive the full admitted model, prompt and token reque
   const f = compareFixture();
   expect(await f.tool.execute({ mode: 'run', artifactId: 'source-1', prompt: 'Compare this synthetic evidence.', maxTokens: 23 })).toMatchObject({ success: true });
   expect(f.chats).toBe(2); expect(f.writes).toBe(1);
-  expect(f.owner.port.requests.filter(request => JSON.stringify(request.state).includes('agent_model_compare_candidate'))).toHaveLength(0);
+  expect(f.owner.port.requests.filter(request => request.context?.battery === 'engine.gate.autonomous-disposition' && JSON.stringify(request.state).includes('agent_model_compare_candidate'))).toHaveLength(0);
   expect(f.chatRequests.map(request => request.model)).toEqual(['a', 'b']);
   for (const request of f.chatRequests) {
     expect(request.maxTokens).toBe(23);

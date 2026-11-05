@@ -238,7 +238,7 @@ test('a hosted turn runs authorized tools without a semantic permission receipt'
   } finally { installJudgmentPort(previous); session.dispose(); }
 });
 
-test('safe-owner hosted sessions execute ordinary writes without a blanket service-surface veto', async () => {
+test('safe-owner hosted sessions retain the host service-surface restriction', async () => {
   readings.restore();
   readings = installHostedSessionReadings({ disposition: 'reject' });
   const session = cancellationSession();
@@ -247,8 +247,8 @@ test('safe-owner hosted sessions execute ordinary writes without a blanket servi
   answers.push({ content: '', toolCalls: [{ id: 'ordinary-write', name: 'write', arguments: { files: [{ path: 'written.txt', content: 'ordinary hosted write' }] } }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('The requested file was written.'));
   try {
     await session.submit('write written.txt');
-    expect(executed).toEqual(['ordinary-write']);
-    expect(readFileSync(join(workspace, 'written.txt'), 'utf8')).toBe('ordinary hosted write');
+    expect(executed).toEqual([]);
+    expect(existsSync(join(workspace, 'written.txt'))).toBe(false);
     expect(workspaceTrust.isDecided()).toBe(false);
     expect(readings.requests.some(request => request.context?.site === 'engine.gate.autonomous-tool')).toBe(false);
     expect(approvalRequests).toBe(0);

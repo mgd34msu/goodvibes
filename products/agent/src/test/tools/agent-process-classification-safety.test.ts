@@ -73,7 +73,7 @@ function fixture(owner = ordinaryResearchOwner()) {
     try { sourcePort = judgmentPort('process-classification-test'); } catch { /* Missing lifetime reader remains a classifier failure. */ }
     const sourceAsk = sourcePort?.ask;
     const admission = fakePort((name, question) => question.type === 'noul' ? noulAnswer(0.01)
-      : choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999));
+      : choiceAnswer(question, name === 'disposition' ? 'act' : name.replace(/^(effect|risk|edge)__/, '') === 'kind' ? 'read' : 'generic', 0.999));
     using log = new SqliteDecisionLog(':memory:');
     const wrapper = withDecisionLog({ ...admission.port, async ask(request) {
       if (request.context?.battery === 'agent.tools.long-lived-process' || request.context?.battery === 'engine.tools.credential-env' || request.context?.battery === 'engine.gate.sandbox-needs') {
@@ -306,8 +306,8 @@ describe('protected process lifetime classification', () => {
       if (name === 'agent_harness') registerAgentHarnessTool(registry, new CommandRegistry(), f.context);
       else registerAgentTerminalProcessTools(registry, f.context);
       const fake = fakePort((questionName, question) => question.type === 'noul'
-        ? noulAnswer(questionName === 'long_lived' || questionName === 'mutates' ? 0.99 : 0.01)
-        : choiceAnswer(question, questionName === 'disposition' ? 'act' : questionName === 'family' || questionName === 'capability' ? 'generic' : questionName === 'hazard' ? 'none' : 'other', 0.99));
+        ? noulAnswer(questionName === 'long_lived' || questionName.replace(/^(effect|risk|edge)__/, '') === 'mutates' ? 0.99 : 0.01)
+        : choiceAnswer(question, questionName === 'disposition' ? 'act' : questionName.replace(/^(effect|risk|edge)__/, '') === 'family' || questionName === 'capability' ? 'generic' : questionName === 'hazard' ? 'none' : 'other', 0.99));
       using log = new SqliteDecisionLog(':memory:');
       installJudgmentPort(withDecisionLog({ ...fake.port, async ask(request) {
         if (request.context?.battery === 'agent.tools.long-lived-process') { pending.started(); await pending.gate; }
@@ -370,8 +370,8 @@ describe('protected process lifetime classification', () => {
     const permissions = new PermissionManager(undefined, config, new PolicyRuntimeState());
     const registry = new ToolRegistry(permissions); bindAgentResearchSourceOwner(registry, ordinaryResearchOwner());
     registerAgentTerminalProcessTools(registry, f.context);
-    const fake = fakePort((name, question) => question.type === 'noul' ? noulAnswer(name === 'long_lived' || name === 'mutates' ? 0.99 : 0.01)
-      : choiceAnswer(question, name === 'disposition' ? 'act' : name === 'family' || name === 'capability' ? 'generic' : name === 'hazard' ? 'none' : 'other', 0.99));
+    const fake = fakePort((name, question) => question.type === 'noul' ? noulAnswer(name === 'long_lived' || name.replace(/^(effect|risk|edge)__/, '') === 'mutates' ? 0.99 : 0.01)
+      : choiceAnswer(question, name === 'disposition' ? 'act' : name.replace(/^(effect|risk|edge)__/, '') === 'family' || name === 'capability' ? 'generic' : name === 'hazard' ? 'none' : 'other', 0.99));
     using log = new SqliteDecisionLog(':memory:');
     installJudgmentPort(withDecisionLog(fake.port, log));
     let entered = false;

@@ -1269,6 +1269,7 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
         "session-closed",
         "session-deleted",
         "session-reopened",
+        "session-permission-mode-changed",
         "session-agent-bound",
         "session-agent-completed",
         "session-message-appended",

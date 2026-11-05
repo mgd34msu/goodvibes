@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { codeChunkView } from '../sdk/src/platform/state/batteries/code-search-rerank.js';
@@ -84,7 +85,8 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       codeChunkView({ path, symbol, kind, startLine: 1, endLine: 1 }, code),
       codeChunkView({ path, symbol: '', kind: 'window', startLine: 1, endLine: 2 }, `${code}\n`),
     ]);
-    const relevance = fakePort((name, question, state) => {
+    const relevance = fakePort((wireQuestionName, question, state) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       const value = state as { query?: unknown; candidate?: unknown };
       const candidate = candidates.find(candidate => isDeepStrictEqual(candidate, value.candidate));
       if (name !== 'match' || question.type !== 'noul' || typeof value.query !== 'string'
@@ -99,7 +101,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       judgments.push(JSON.stringify(context.state));
       return context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined;
     });
-    const previous = installJudgmentPort({ ...semantic.port, ask(request) {
+    const previous = installJudgmentPort(withDecisionLog({ ...semantic.port, ask(request) {
       if (request.context?.battery !== 'engine.state.code-search') return semantic.port.ask(request);
       judgments.push(JSON.stringify(request.state));
       if (request.context.site !== 'state.code-injection-relevance') {
@@ -108,7 +110,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
         throw new Error(`Unexpected captured passive code site: ${diagnostic}`);
       }
       return relevance.port.ask(request);
-    } });
+    } }, runtime.judgment.decisionLog));
     await runtime.userPermissionRuleStore.add({
       rule: { id: 'deny-original-private-passive', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [join(root, 'private.ts')] },
       createdAt: Date.now(), tier: 'path', tool: 'read',
@@ -229,6 +231,10 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       codeIndexReindexScheduler: { onToolExecuted: () => { ownerReindex++; } },
     });
     const opens = spyOn(fs, 'openSync');
+    // Passive code descriptors are nonblocking; native settlement also hashes
+    // the complete tree locally without publishing file contents. Count only
+    // the passive reader here, and check every model/embedding payload below.
+    const passiveOpens = () => opens.mock.calls.filter(([, flags]) => typeof flags === 'number' && (flags & fs.constants.O_NONBLOCK) !== 0);
     let id: string | undefined;
     try {
       id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'passive-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
@@ -257,7 +263,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
         expect(unexpectedCodeReadings).toEqual([]);
         expect(result.status).not.toBe('passed');
         expect([ownerStats, ownerSearch, ownerReindex]).toEqual([0, 0, 0]);
-        expect(opens.mock.calls.filter(([path]) => String(path).endsWith('/private.ts'))).toHaveLength(0);
+        expect(passiveOpens().filter(([path]) => String(path).endsWith('/private.ts'))).toHaveLength(0);
         for (const observed of [...embeddings, ...judgments, ...requests.map((r) => r.text)]) expect(observed).not.toContain(PRIVATE);
         if (scenario === 'retry-revoked') {
           expect(retryRejected, `${result.error}; requests=${requests.length}`).toBe(1);
@@ -282,7 +288,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       // Snapshot capture uses async descriptors. The passive adapter's bounded
       // descriptors are synchronous, and a stored original-path denial must
       // exclude every captured copy before its descriptor can be opened.
-      expect(opens.mock.calls.filter(([path]) => String(path).endsWith('/private.ts'))).toHaveLength(0);
+      expect(passiveOpens().filter(([path]) => String(path).endsWith('/private.ts'))).toHaveLength(0);
       for (const observed of [...embeddings, ...judgments, ...requests.map((r) => r.text)]) expect(observed).not.toContain(PRIVATE);
       const members = requests.filter((request) => !request.planner);
       expect(members.length).toBeGreaterThan(0);
@@ -303,7 +309,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
         expect(relevance.requests.length).toBeGreaterThan(0);
         expect(relevance.requests.every(request => request.context?.battery === 'engine.state.code-search'
           && request.context.site === 'state.code-injection-relevance')).toBe(true);
-        expect(opens.mock.calls.some(([path]) => String(path).endsWith('/allowed.ts'))).toBe(true);
+        expect(passiveOpens().some(([path]) => String(path).endsWith('/allowed.ts'))).toBe(true);
         expect(embeddings.some((text) => text.includes(ORIGINAL))).toBe(true);
         expect(members[0]!.prompt).toContain('## Injected Code Context');
         // Planner owns the immutable receipt view; member owns its mutable copy.
@@ -314,7 +320,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
         expect(records.some((record) => record.injectedSources.includes('code-index') && record.tokenCost > 0)).toBe(true);
       } else {
         expect(embeddings).toEqual([]);
-        expect(opens.mock.calls.filter(([path]) => String(path).endsWith('/allowed.ts'))).toHaveLength(0);
+        expect(passiveOpens().filter(([path]) => String(path).endsWith('/allowed.ts'))).toHaveLength(0);
         expect(requests.every((request) => !request.prompt.includes('## Injected Code Context'))).toBe(true);
       }
       if (scenario === 'mutable') {

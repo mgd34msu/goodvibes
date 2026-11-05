@@ -119,6 +119,9 @@ export function planningPort(override: (context: AnswerContext) => unknown = () 
     const scripted = override({ name, question, state: (state ?? {}) as Record<string, unknown> });
     if (scripted !== undefined) return scripted;
     switch (name) {
+      case 'completion_required': return noulAnswer(0.99);
+      case 'kind': return choiceAnswer(question, 'read', 0.99);
+      case 'family': case 'capability': return choiceAnswer(question, 'generic', 0.99);
       case 'disposition': {
         const choices = question.type === 'choice' ? Object.keys(question.criteria) : [];
         return choiceAnswer(question, choices.includes('act') ? 'act' : choices.find(key => key.startsWith('revise_')) ?? 'reject', 0.99);

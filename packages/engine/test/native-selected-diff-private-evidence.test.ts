@@ -306,6 +306,8 @@ test('protocol digests retain private identity without triggering card scans whi
 
 
 test('real tool admission accepts protocol-only numeric evidence and fences identity-only mutation', async () => {
+  const previous = installJudgmentPort(gateReadingsPort().port);
+  try {
   for (const mutate of [false, true]) {
     let selected = selectedDiff();
     const config = { getAutonomousSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} }, autoApprove: false, directory: '/synthetic' }),
@@ -321,4 +323,5 @@ test('real tool admission accepts protocol-only numeric evidence and fences iden
       expect(() => admission.claim()).toThrow('changed');
     } else expect(() => admission.claim()).not.toThrow();
   }
+  } finally { installJudgmentPort(previous); }
 });

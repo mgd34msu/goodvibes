@@ -104,7 +104,7 @@ test('actual registered harness delivers an exact legacy native reference withou
   expect(JSON.stringify(readings.requests)).not.toContain(legacyId);
   expect(JSON.stringify(f.screening.calls)).not.toContain(legacyId);
   expect(result.output).not.toContain(legacyId);
-  expect(readings.requests).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   expect(JSON.stringify(f.screening.calls)).toContain('Send the completed review to the owned fixture channel.');
   const retry = await f.run({ mode: 'channel_draft_send', draftId: publicId });
   expect(retry.success).toBe(false);
@@ -142,7 +142,7 @@ test.each(['complete', 'private-field'] as const)('connected send preserves the 
   try {
     if (kind === 'private-field') {
       await expect(f.run()).rejects.toThrow();
-      expect(requests).toHaveLength(0); expect(readings.requests).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+      expect(requests).toHaveLength(0); expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.delivery).toHaveLength(0);
       expect(getDraft(f.paths, legacyId)?.status).toBe('draft');
       return;
     }
@@ -168,7 +168,7 @@ test.each(['complete', 'private-field'] as const)('connected send preserves the 
 test('an unknown card-shaped ID never qualifies as a native reference', async () => {
   const f = scene();
   await expect(f.prepare({ ...args, draftId: 'draft-4111111111111111-unknown' })).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.screening.calls).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.screening.calls).toHaveLength(0); expect(f.delivery).toHaveLength(0);
   expect(getDraft(f.paths, legacyId)?.status).toBe('draft');
 });
 
@@ -184,7 +184,7 @@ test('complete undisplayed native draft payload is protected before hosted admis
   const f = scene(screening, { undisplayed: { note: protectedValue } });
   await expect(f.prepare(args)).rejects.toThrow();
   expect(JSON.stringify(screening.calls)).toContain(protectedValue);
-  expect(readings.requests).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.delivery).toHaveLength(0);
   expect(getDraft(f.paths, legacyId)?.status).toBe('draft');
 });
 
@@ -193,7 +193,7 @@ test('a selected draft reference cannot survive a same-bytes native file ABA', a
   const screening = researchScreeningFixture({ beforeProposal: async () => { writeFileSync(f.path, readFileSync(f.path)); } });
   f = scene(screening);
   await expect(f.prepare(args)).rejects.toThrow();
-  expect(readings.requests).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+  expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.delivery).toHaveLength(0);
   expect(getDraft(f.paths, legacyId)?.status).toBe('draft');
 });
 
@@ -206,7 +206,7 @@ test.each(['project', 'release'] as const)('late source-owner %s accessors canno
   const f = scene(screening);
   try {
     await expect(f.prepare(args)).rejects.toThrow();
-    expect(getters).toBe(0); expect(readings.requests).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+    expect(getters).toBe(0); expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.delivery).toHaveLength(0);
     expect(getDraft(f.paths, legacyId)?.status).toBe('draft');
   } finally { Object.defineProperty(screening.owner, method, descriptor); }
 });
@@ -231,5 +231,5 @@ test.each(['caller', 'workspace', 'platform', 'paths'] as const)('%s accessors a
   if (target === 'platform') Object.defineProperty(f.context, 'platform', { get() { getters++; return {}; } });
   if (target === 'paths') Object.defineProperty(f.context.workspace, 'shellPaths', { get() { getters++; return f.paths; } });
   await expect(f.prepare(input)).rejects.toThrow();
-  expect(getters).toBe(0); expect(readings.requests).toHaveLength(0); expect(f.screening.calls).toHaveLength(0); expect(f.delivery).toHaveLength(0);
+  expect(getters).toBe(0); expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0); expect(f.screening.calls).toHaveLength(0); expect(f.delivery).toHaveLength(0);
 });

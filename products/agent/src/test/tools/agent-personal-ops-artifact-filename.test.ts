@@ -74,7 +74,8 @@ let previous: ReturnType<typeof installJudgmentPort>;
 let decisions: SqliteDecisionLog;
 let privacyReadings: ReturnType<typeof fakePort>;
 beforeEach(() => {
-  const readings = fakePort((name, question, rawState) => {
+  const readings = fakePort((wireQuestionName, question, rawState) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
     if (rawState && typeof rawState === 'object' && !Array.isArray(rawState) && 'context' in rawState && 'candidates' in rawState) {
       const context = rawState.context;
       if (context && typeof context === 'object' && !Array.isArray(context) && 'purpose' in context && typeof context.purpose === 'string') {
@@ -167,7 +168,7 @@ describe('Personal Ops generated review artifact filenames', () => {
   test('genuine protected filename material is refused before admission or artifact creation', async () => {
     const f = fixture();
     const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
-    await expect(f.save('inbox', 'review-4111111111111111')).rejects.toThrow();
+    expect((await f.save('inbox', 'review-4111111111111111')).success).toBe(false);
     expect(f.records).toHaveLength(0);
     expect(JSON.stringify(fake.requests)).not.toContain('4111111111111111');
   });

@@ -154,7 +154,7 @@ describe('throbber: it follows the activity and is gone at rest', () => {
     expect(status).not.toContain('⠋');
     expect(status).toContain('esc  interrupt');
     expect(status).toContain('context');
-    expect(status).toContain('balanced');
+    expect(status).toContain('Safe — owner');
     const resting = footer();
     expect(text(resting[resting.length - 1]!)).not.toContain('interrupt');
   });

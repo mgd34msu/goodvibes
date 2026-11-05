@@ -69,13 +69,15 @@ describe('Orchestrator', () => {
     // Core turn and tool-permission semantics are external readings. Keep
     // this suite focused on token accounting, hooks and turn-loop behavior.
     judgmentLog = new SqliteDecisionLog(':memory:');
-    previousJudgmentPort = installJudgmentPort(withDecisionLog(fakePort((name, question) => {
+    previousJudgmentPort = installJudgmentPort(withDecisionLog(fakePort((wireQuestionName, question) => {
+    const name = wireQuestionName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'disposition') return choiceAnswer(question, 'act', 0.97);
       if (name === 'intent') return choiceAnswer(question, 'chat', 0.97);
       if (name === 'risk') return scoreAnswer(question, 0, 0.97);
       if (name === 'family') return choiceAnswer(question, 'generic', 0.97);
       if (name === 'kind') return choiceAnswer(question, 'other', 0.97);
       if (name === 'capability') return choiceAnswer(question, 'generic', 0.97);
+      if (name === 'completion_required') return noulAnswer(.99);
       if (name === 'category') return choiceAnswer(question, 'unknown', 0.97);
       if (name === 'connection_failure') return choiceAnswer(question, 'none', 0.97);
       if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.97 : 0.03);
@@ -274,7 +276,7 @@ describe('Orchestrator', () => {
     beforeEach(() => {
       savedAutoApprove = (configManager.get('behavior.autoApprove') as boolean | undefined) ?? false;
       savedStream = (configManager.get('display.stream') as boolean | undefined) ?? true;
-      configManager.set('behavior.autoApprove', true);
+      configManager.set('behavior.autoApprove', false);
     });
 
     afterEach(() => {
@@ -633,7 +635,7 @@ describe('Orchestrator', () => {
 
     beforeEach(() => {
       savedAutoApprove = (configManager.get('behavior.autoApprove') as boolean | undefined) ?? false;
-      configManager.set('behavior.autoApprove', true);
+      configManager.set('behavior.autoApprove', false);
     });
 
     afterEach(() => {
@@ -843,7 +845,7 @@ describe('Orchestrator', () => {
 
     beforeEach(() => {
       savedAutoApprove = (configManager.get('behavior.autoApprove') as boolean | undefined) ?? false;
-      configManager.set('behavior.autoApprove', true);
+      configManager.set('behavior.autoApprove', false);
     });
 
     afterEach(() => {

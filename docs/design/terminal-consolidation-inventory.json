@@ -330,7 +330,7 @@
       "path": "core/work-tree-render.ts",
       "baselineTuiLines": 403,
       "baselineSimilarity": 0.9295,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/work-tree-sources.ts",
@@ -342,13 +342,13 @@
       "path": "core/work-tree-wiring.ts",
       "baselineTuiLines": 146,
       "baselineSimilarity": 0.8997,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/autocomplete.ts",
       "baselineTuiLines": 122,
       "baselineSimilarity": 0.8716,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/bookmark-modal.ts",
@@ -696,7 +696,7 @@
       "path": "input/handler-session-view-route.ts",
       "baselineTuiLines": 152,
       "baselineSimilarity": 0.9767,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/handler-shortcuts.ts",
@@ -888,7 +888,7 @@
       "path": "renderer/autocomplete-overlay.ts",
       "baselineTuiLines": 55,
       "baselineSimilarity": 0.8833,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/back-to-bottom.ts",
@@ -942,7 +942,7 @@
       "path": "renderer/context-inspector.ts",
       "baselineTuiLines": 174,
       "baselineSimilarity": 0.9136,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/conversation-layout.ts",
@@ -960,7 +960,7 @@
       "path": "renderer/conversation-surface.ts",
       "baselineTuiLines": 285,
       "baselineSimilarity": 0.81,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/diff-tint.ts",
@@ -1200,7 +1200,7 @@
       "path": "renderer/system-message.ts",
       "baselineTuiLines": 43,
       "baselineSimilarity": 0.8095,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/term-caps.ts",
@@ -1254,7 +1254,7 @@
       "path": "renderer/thinking.ts",
       "baselineTuiLines": 24,
       "baselineSimilarity": 0.8511,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/throbber.ts",

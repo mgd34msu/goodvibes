@@ -1763,6 +1763,51 @@
       "bun": "./terminal-shell/src/renderer/layout.ts",
       "types": "./terminal-shell/dist/renderer/layout.d.ts",
       "import": "./terminal-shell/dist/renderer/layout.js"
+    },
+    "./terminal-shell/conversation-surface": {
+      "bun": "./terminal-shell/src/renderer/conversation-surface.ts",
+      "types": "./terminal-shell/dist/renderer/conversation-surface.d.ts",
+      "import": "./terminal-shell/dist/renderer/conversation-surface.js"
+    },
+    "./terminal-shell/system-message": {
+      "bun": "./terminal-shell/src/renderer/system-message.ts",
+      "types": "./terminal-shell/dist/renderer/system-message.d.ts",
+      "import": "./terminal-shell/dist/renderer/system-message.js"
+    },
+    "./terminal-shell/thinking": {
+      "bun": "./terminal-shell/src/renderer/thinking.ts",
+      "types": "./terminal-shell/dist/renderer/thinking.d.ts",
+      "import": "./terminal-shell/dist/renderer/thinking.js"
+    },
+    "./terminal-shell/work-tree-render": {
+      "bun": "./terminal-shell/src/work-tree-render.ts",
+      "types": "./terminal-shell/dist/work-tree-render.d.ts",
+      "import": "./terminal-shell/dist/work-tree-render.js"
+    },
+    "./terminal-shell/work-tree-wiring": {
+      "bun": "./terminal-shell/src/work-tree-wiring.ts",
+      "types": "./terminal-shell/dist/work-tree-wiring.d.ts",
+      "import": "./terminal-shell/dist/work-tree-wiring.js"
+    },
+    "./terminal-shell/context-inspector": {
+      "bun": "./terminal-shell/src/renderer/context-inspector.ts",
+      "types": "./terminal-shell/dist/renderer/context-inspector.d.ts",
+      "import": "./terminal-shell/dist/renderer/context-inspector.js"
+    },
+    "./terminal-shell/session-view-input": {
+      "bun": "./terminal-shell/src/session-view-input.ts",
+      "types": "./terminal-shell/dist/session-view-input.d.ts",
+      "import": "./terminal-shell/dist/session-view-input.js"
+    },
+    "./terminal-shell/autocomplete": {
+      "bun": "./terminal-shell/src/autocomplete.ts",
+      "types": "./terminal-shell/dist/autocomplete.d.ts",
+      "import": "./terminal-shell/dist/autocomplete.js"
+    },
+    "./terminal-shell/autocomplete-overlay": {
+      "bun": "./terminal-shell/src/renderer/autocomplete-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/autocomplete-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/autocomplete-overlay.js"
     }
   },
   "publishConfig": {

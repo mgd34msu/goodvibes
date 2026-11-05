@@ -72,7 +72,7 @@ async function settingsPage(query: string, extra: Record<string, unknown> = {}):
       return typeof state === 'object' && state !== null && 'query' in state && state.query === query;
     })).toBe(true);
     expect(new Set(catalogRequests.map(request => (request.state as unknown as { candidate: { name: string } }).candidate.name)))
-      .toEqual(new Set(CONFIG_SCHEMA.map(setting => setting.key)));
+      .toEqual(new Set(CONFIG_SCHEMA.filter(setting => !setting.deprecated).map(setting => setting.key)));
     return page;
   } finally { installJudgmentPort(previous); }
 }

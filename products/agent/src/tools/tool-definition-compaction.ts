@@ -124,7 +124,9 @@ export function compactRegisteredToolDefinitions(toolRegistry: ToolRegistry): vo
   for (const tool of toolRegistry.list()) {
     const definition = tool.definition;
     if (!ownedDefinitions.has(definition)) {
-      compactToolDefinition(definition);
+      const compacted = { ...definition };
+      compactToolDefinition(compacted);
+      tool.definition = compacted;
       continue;
     }
     const descriptors = Object.getOwnPropertyDescriptors(definition);

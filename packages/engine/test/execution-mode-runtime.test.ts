@@ -8,7 +8,7 @@ import { PermissionManager, createPermissionConfigReader } from '../sdk/src/plat
 import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
 import { ToolRegistry, isInvocationAdmitted } from '../sdk/src/platform/tools/registry.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../sdk/src/platform/core/orchestrator-tool-runtime.ts';
-import { currentExecutionMode, currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
+import { currentExecutionMode, currentExecutionModeOwner, withExecutionMode, withRetainedExecutionMode, withInvocationExecutionMode, withExecutionModeOwner, type ExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
 import { createFetchTool } from '../sdk/src/platform/tools/fetch/runtime.ts';
 import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.ts';
 import { AgentExecutionLedger } from '../sdk/src/platform/gate/policy/execution-ledger.ts';
@@ -108,4 +108,19 @@ test('queued background wakes retain their originating session mode owner', asyn
   release.resolve();
   await awakened.promise;
   expect(observed).toEqual([{ owner, mode: 'safe-owner' }, { owner, mode: 'yolo' }]);
+});
+
+
+for (const revoked of [false, true]) test(`retained execution keeps host mode checks after the initiating tool returns: ${revoked}`, async () => {
+  const resume = Promise.withResolvers<void>();
+  let hostCurrent = true, toolCurrent = true;
+  let pending!: Promise<unknown>;
+  await withExecutionMode('yolo', async () => {
+    await withInvocationExecutionMode('yolo', async () => {
+      pending = withRetainedExecutionMode(async () => { await resume.promise; return currentExecutionMode(); });
+    }, () => { if (!toolCurrent) throw new Error('tool expired'); });
+  }, () => { if (!hostCurrent) throw new Error('host mode changed'); });
+  toolCurrent = false; hostCurrent = !revoked; resume.resolve();
+  if (revoked) await expect(pending).rejects.toThrow('host mode changed');
+  else expect(await pending).toBe('yolo');
 });

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { currentExecutionMode, withExecutionMode } from '../gate/execution-context.js';
+import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { types as nodeTypes } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -1002,7 +1002,8 @@ export class ToolRegistry {
         if (!proof?.active) throw new ToolInputProjectionError('stale');
         proof.assertCurrent();
       } : undefined;
-      const result = await (mode === undefined ? invoke() : withExecutionMode(mode, invoke, assertModeCurrent));
+      const retainedMode = registryPermissionOwners.get(this)?.captureExecutionMode();
+      const result = await (mode === undefined ? invoke() : withInvocationExecutionMode(mode, invoke, assertModeCurrent, retainedMode?.assertCurrent));
       assertProjectionCurrent(callerCurrent);
       if (proof?.settingsReceipt) { assertProjectionSignal(signal); assertAdmissionCurrent?.(); }
       if (proof?.settingsRetired) throw new ToolInputProjectionError('stale');

@@ -49,7 +49,7 @@ describe('remembered permission persistence', () => {
       const error = await store.add(record('first')).then(() => null, (cause: unknown) => cause);
       expect(error).toMatchObject({ code: 'EISDIR', syscall: 'rename' });
       expect(await permissions.checkDetailed('exec', args(command))).toMatchObject({
-        approved: true, persisted: false, sourceLayer: 'config_policy',
+        approved: true, persisted: false, sourceLayer: 'stakes_preset',
       });
       expect(store.list()).toEqual([]);
       expect(store.rules()).toEqual([]);
@@ -82,7 +82,7 @@ describe('remembered permission persistence', () => {
       let asks = 0;
       const matching = manager(store, async () => { asks++; return { approved: false }; });
       expect(await matching.checkDetailed('exec', args(command))).toMatchObject({
-        approved: true, persisted: false, sourceLayer: 'config_policy',
+        approved: true, persisted: false, sourceLayer: 'stakes_preset',
       });
       expect(asks).toBe(0);
       expect(await pending).toMatchObject({ message: 'store unavailable' });

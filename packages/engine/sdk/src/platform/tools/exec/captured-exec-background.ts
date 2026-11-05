@@ -1,4 +1,5 @@
 import { assertContractInputAuthority } from '../../contract/input-authority.js';
+import { withRetainedExecutionMode } from '../../gate/execution-context.js';
 /** Retained captured jobs use the runtime's ProcessManager, never host spawn. */
 import type { ProcessManager } from '../shared/process-manager.js';
 import type { ExecCommandInput, ExecCommandResult } from './schema.js';
@@ -28,9 +29,9 @@ export async function startCapturedBackground(
   // transient unhandled-rejection window before that owner subscribes.
   void started.catch(() => {});
   const commandInput = input.background ? { ...input, background: false, until: undefined } : { ...input, background: false };
-  const completion = runCapturedCommand(binding, command, commandInput, workingDirectory, timeoutMs,
+  const completion = withRetainedExecutionMode(() => runCapturedCommand(binding, command, commandInput, workingDirectory, timeoutMs,
     combined, network, environment, { beforeSpawn, beforePublish, onStarted: (active) => { lease = active; if (!commandInput.until) resolveStarted({ pid: active.pid }); },
-      onUntilMatched: () => { if (lease) resolveStarted({ pid: lease.pid }); } })
+      onUntilMatched: () => { if (lease) resolveStarted({ pid: lease.pid }); } }))
     .then((completed) => {
       result = completed;
       return completed;

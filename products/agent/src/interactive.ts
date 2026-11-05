@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { readExecutionMode } from './permissions/execution-mode.ts';
+import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
@@ -278,7 +278,7 @@ async function main() {
   const unsubs: Array<() => void> = [];
   commandContext.nativeWorkLedger = createNativeWorkLedgerView(() => {
     const host = resolveNativeLedgerHost({ configManager, homeDirectory: ctx.services.shellPaths.homeDirectory });
-    return 'reason' in host ? host : { ...host, workspace: ctx.services.workingDirectory, journalPath: ctx.services.shellPaths.resolveUserPath('agent', 'native-work-submission.json'), readExecutionMode: () => { const mode = readExecutionMode(configManager); if (!mode) throw new Error('The active execution mode is unavailable.'); return mode; } };
+    return 'reason' in host ? host : { ...host, workspace: ctx.services.workingDirectory, journalPath: ctx.services.shellPaths.resolveUserPath('agent', 'native-work-submission.json'), readExecutionMode: () => readInitialExecutionMode(configManager) };
   }, () => render());
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.close());

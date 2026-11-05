@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { normalizePermissionMode, type GatePresetName } from './presets.js';
 
-const executionMode = new AsyncLocalStorage<{ readonly mode: GatePresetName; readonly assertCurrent: (() => void) | undefined; active: boolean; checking: boolean }>();
+const executionMode = new AsyncLocalStorage<{ readonly mode: GatePresetName; readonly assertCurrent: (() => void) | undefined; readonly retainedCurrent: (() => void) | undefined; active: boolean; checking: boolean }>();
 export { isInvocationAdmitted } from '../tools/registry.js';
 
 export interface ExecutionModeOwner {
@@ -14,7 +14,11 @@ const executionOwner = new AsyncLocalStorage<ExecutionModeOwner>();
 export function withExecutionMode<T>(mode: unknown, run: () => Promise<T>, assertCurrent?: () => void): Promise<T>;
 export function withExecutionMode<T>(mode: unknown, run: () => T, assertCurrent?: () => void): T;
 export function withExecutionMode(mode: unknown, run: () => unknown, assertCurrent?: () => void): unknown {
-  const scope = { mode: normalizePermissionMode(mode), assertCurrent, active: true, checking: false };
+  return runInMode(mode, run, assertCurrent, assertCurrent);
+}
+
+function runInMode(mode: unknown, run: () => unknown, assertCurrent?: () => void, retainedCurrent?: () => void): unknown {
+  const scope = { mode: normalizePermissionMode(mode), assertCurrent, retainedCurrent, active: true, checking: false };
   return executionMode.run(scope, () => {
     try {
       const result = run();
@@ -40,6 +44,13 @@ export function currentExecutionMode(): GatePresetName | undefined {
   return scope?.mode ?? currentExecutionModeOwner()?.getMode();
 }
 
+/** Transfer host mode checks into a separately owned asynchronous lifetime. */
+export function withRetainedExecutionMode<T>(run: () => Promise<T>): Promise<T> {
+  const mode = currentExecutionMode();
+  if (mode === undefined) return run();
+  return withExecutionMode(mode, run, executionMode.getStore()?.retainedCurrent);
+}
+
 export function isYoloExecution(): boolean {
   return currentExecutionMode() === 'yolo';
 }
@@ -54,4 +65,9 @@ export function currentExecutionModeOwner(): ExecutionModeOwner | undefined {
   const owner = executionOwner.getStore();
   owner?.getRevision();
   return owner;
+}
+
+/** Tool proof expires at return; a retained job keeps only the host mode owner. */
+export function withInvocationExecutionMode<T>(mode: unknown, run: () => Promise<T>, assertCurrent?: () => void, retainedCurrent?: () => void): Promise<T> {
+  return runInMode(mode, run, assertCurrent, retainedCurrent ?? executionMode.getStore()?.retainedCurrent) as Promise<T>;
 }

@@ -150,7 +150,7 @@ describe('collectOnboardingSnapshot', () => {
     expect(snapshot.config.storage.secretPolicy).toBe('require_secure');
     expect(snapshot.runtimeDefaults).toEqual({
       providerReasoningEffort: 'high',
-      permissionsMode: 'custom',
+      permissionsMode: 'safe-owner',
       behavior: snapshot.config.behavior,
       display: snapshot.config.display,
       secretStoragePolicy: 'require_secure',

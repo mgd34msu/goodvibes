@@ -24,7 +24,7 @@ export function hasActiveExecutionMode(config: object): boolean {
 export function readExecutionMode(config: Pick<ConfigManager, 'get'>): GatePresetName | undefined {
   const owner = owners.get(config);
   if (owner && (owner.hasHostedOwner?.() ?? owner.hostedSessionId() !== null)) return owner.executionMode();
-  return effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true);
+  return readInitialExecutionMode(config);
 }
 
 export async function refreshExecutionMode(config: object): Promise<void> {
@@ -40,4 +40,9 @@ export async function setExecutionMode(config: Pick<ConfigManager, 'get' | 'set'
     return;
   }
   config.set('permissions.mode', mode);
+}
+
+/** Seed a newly authenticated session before it has a remote mode owner. */
+export function readInitialExecutionMode(config: Pick<ConfigManager, 'get'>): GatePresetName {
+  return effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true);
 }

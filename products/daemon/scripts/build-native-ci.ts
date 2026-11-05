@@ -15,7 +15,7 @@ interface GrammarBuildEffects {
 function onlyGrammarResolutionFailed(output: string): boolean {
   const errors = output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
     .map(line => line.trim()).filter(line => line.startsWith('error:'));
-  const grammar = /^error: Could not resolve: ["']tree-sitter-typescript\/tree-sitter-(?:typescript|tsx)\.wasm["'](?:\. Maybe you need to "bun install"\?)?$/;
+  const grammar = /^error: Could not resolve: ["'](?:tree-sitter-typescript\/tree-sitter-(?:typescript|tsx)|tree-sitter-(javascript|python|json|css)\/tree-sitter-\1|web-tree-sitter\/web-tree-sitter)\.wasm["'](?:\. Maybe you need to "bun install"\?)?$/;
   return errors.some(line => grammar.test(line))
     && errors.every(line => grammar.test(line) || /^error: script "build:binary" exited with code [1-9][0-9]*$/.test(line));
 }
@@ -25,7 +25,7 @@ export async function buildWithGrammarRecovery(effects: GrammarBuildEffects): Pr
   const first = await effects.build();
   if (first.exitCode === 0) return;
   if (!onlyGrammarResolutionFailed(first.output)) throw new Error(`Native compilation failed without a recoverable grammar error:\n${first.output}`);
-  effects.report('Native grammar resolution failed; validating installed TypeScript and TSX before one fresh compilation.');
+  effects.report('Native grammar resolution failed; validating all embedded language grammars before one fresh compilation.');
   try { await effects.probe(); }
   catch {
     effects.report('Installed grammars are incomplete; performing one forced frozen-lockfile install.');
@@ -36,7 +36,7 @@ export async function buildWithGrammarRecovery(effects: GrammarBuildEffects): Pr
   if (recovered.exitCode !== 0) throw new Error(`Native compilation still failed after its single recovery attempt:\n${recovered.output}`);
 }
 
-/** Exercise both actual languages; the presence of a file alone is insufficient. */
+/** Exercise every embedded language; the presence of a file alone is insufficient. */
 export async function probeInstalledNativeGrammars(repository: string): Promise<void> {
   // A failed lookup can remain cached in Bun after a package is repaired.
   // Each probe must observe the actual current installation in a fresh process.
@@ -52,10 +52,14 @@ async function parseInstalledNativeGrammars(repository: string): Promise<void> {
   const { Parser, Language } = await import(require.resolve('web-tree-sitter'));
   await Parser.init({ locateFile: () => require.resolve('web-tree-sitter/web-tree-sitter.wasm') });
   for (const [file, code] of [
-    ['tree-sitter-typescript.wasm', 'type Item = { value: string };'],
-    ['tree-sitter-tsx.wasm', 'const item = <div>{value}</div>;'],
+    ['tree-sitter-typescript/tree-sitter-typescript.wasm', 'type Item = { value: string };'],
+    ['tree-sitter-typescript/tree-sitter-tsx.wasm', 'const item = <div>{value}</div>;'],
+    ['tree-sitter-javascript/tree-sitter-javascript.wasm', 'const item = 1;'],
+    ['tree-sitter-python/tree-sitter-python.wasm', 'item = 1'],
+    ['tree-sitter-json/tree-sitter-json.wasm', '{"item":1}'],
+    ['tree-sitter-css/tree-sitter-css.wasm', 'body { color: red; }'],
   ] as const) {
-    const language = await Language.load(require.resolve(`tree-sitter-typescript/${file}`));
+    const language = await Language.load(require.resolve(file));
     const parser = new Parser();
     try {
       parser.setLanguage(language);

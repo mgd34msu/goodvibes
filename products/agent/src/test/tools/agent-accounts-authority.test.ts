@@ -24,7 +24,8 @@ beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
   const fake = fakePort((wireName, question) => {
     const name = wireName.replace(/^(effect|risk|edge)__/, '');
-    readings++; duringReading?.(name);
+    if (!/^(effect|risk|edge)__/.test(wireName)) readings++;
+    duringReading?.(name);
     if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999);
     if (question.type === 'noul') return noulAnswer(0.001);
     throw new Error(`Unexpected question ${name}`);

@@ -22,6 +22,13 @@
 
 ### Fixed
 
+- Keep compacted Agent catalog descriptions separate from shared SDK definitions
+  so one conversation cannot rewrite another conversation's tool metadata.
+- Seed new hosted conversations from the configured execution mode while intake
+  is pending. Retained captured commands keep host mode revocation checks after
+  the initiating tool returns, without retaining its expired tool proof.
+- Validate and repair every embedded parser grammar during native builds,
+  including JSON, with one bounded retry.
 - Accept canonical execution modes in approval responses, publish session mode
   changes in the declared event contract, and remove the retired Auto-approve
   setting from the Agent onboarding actions.

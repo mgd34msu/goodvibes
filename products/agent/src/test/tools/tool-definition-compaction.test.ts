@@ -111,3 +111,14 @@ describe('compactRegisteredToolDefinitions', () => {
     expect(parametersJson).not.toContain('"description"');
   });
 });
+
+test('compacting one catalog preserves a shared definition used by another tool instance', () => {
+  const first = makeTool('agent', 'Original full subagent instructions.');
+  const second = { ...first };
+  const original = structuredClone(second.definition);
+  const registry = new ToolRegistry(); registry.register(first);
+  compactRegisteredToolDefinitions(registry);
+  expect(second.definition).toEqual(original);
+  expect(first.definition.description).toBe('Inspect explicit subagent tasks.');
+  expect(first.definition.parameters).not.toBe(second.definition.parameters);
+});

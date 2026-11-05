@@ -7,24 +7,28 @@ import { dirname, join, resolve } from 'node:path';
 import { buildWithGrammarRecovery, probeInstalledNativeGrammars } from '../../../scripts/build-native-ci.ts';
 
 const require = createRequire(resolve(import.meta.dir, '../../../../../packages/engine/package.json'));
-const grammars = ['tree-sitter-typescript.wasm', 'tree-sitter-tsx.wasm'];
+const grammars = ['tree-sitter-typescript/tree-sitter-typescript.wasm', 'tree-sitter-typescript/tree-sitter-tsx.wasm',
+  'tree-sitter-javascript/tree-sitter-javascript.wasm', 'tree-sitter-python/tree-sitter-python.wasm',
+  'tree-sitter-json/tree-sitter-json.wasm', 'tree-sitter-css/tree-sitter-css.wasm'];
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'native-grammar-recovery-')); roots.push(root);
   const engine = join(root, 'packages/engine'), modules = join(engine, 'node_modules');
-  const grammar = join(modules, 'tree-sitter-typescript'); mkdirSync(grammar, { recursive: true });
+  const grammar = modules;
+  for (const name of new Set(grammars.map(file => file.split('/')[0]!))) {
+    mkdirSync(join(modules, name), { recursive: true });
+    writeFileSync(join(modules, name, 'package.json'), JSON.stringify({ name }));
+  }
   writeFileSync(join(engine, 'package.json'), '{"name":"owned-grammar-fixture","type":"module"}');
-  writeFileSync(join(grammar, 'package.json'), '{"name":"tree-sitter-typescript","version":"0.23.2"}');
   symlinkSync(dirname(require.resolve('web-tree-sitter/web-tree-sitter.wasm')), join(modules, 'web-tree-sitter'), 'dir');
   const entry = join(engine, 'entry.ts');
-  const program = `import ts from 'tree-sitter-typescript/tree-sitter-typescript.wasm' with { type: 'file' };
-import tsx from 'tree-sitter-typescript/tree-sitter-tsx.wasm' with { type: 'file' };
-export const embedded = [ts, tsx];`;
+  const program = grammars.map((file, index) => `import grammar${index} from '${file}' with { type: 'file' };`).join('\n')
+    + `\nexport const embedded = [${grammars.map((_, index) => `grammar${index}`).join(', ')}];`;
   writeFileSync(entry, program);
   let builds = 0, installs = 0;
-  const restore = () => { for (const file of grammars) copyFileSync(require.resolve(`tree-sitter-typescript/${file}`), join(grammar, file)); };
+  const restore = () => { for (const file of grammars) copyFileSync(require.resolve(file), join(grammar, file)); };
   const build = async () => {
     builds++;
     const result = spawnSync(process.execPath, ['build', entry, '--target=bun', '--outdir', join(root, 'output')], { encoding: 'utf8', timeout: 10_000 });
@@ -86,5 +90,12 @@ test('a repeated real resolution failure stops after the single recovery attempt
     if (f.counts().builds === 1) rmSync(join(f.grammar, grammars[0]!));
     return f.build();
   } })).rejects.toThrow('single recovery attempt');
+  expect(f.counts()).toEqual({ builds: 2, installs: 1 });
+});
+
+test('a missing JSON grammar receives the same bounded repair as TypeScript', async () => {
+  const f = fixture(); f.restore();
+  rmSync(join(f.grammar, 'tree-sitter-json/tree-sitter-json.wasm'));
+  await buildWithGrammarRecovery(f.effects);
   expect(f.counts()).toEqual({ builds: 2, installs: 1 });
 });

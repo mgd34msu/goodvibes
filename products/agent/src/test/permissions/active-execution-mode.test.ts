@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { bindActiveExecutionMode, readExecutionMode, setExecutionMode } from '../../permissions/execution-mode.ts';
+import { bindActiveExecutionMode, readExecutionMode, readInitialExecutionMode, setExecutionMode } from '../../permissions/execution-mode.ts';
 import { readApprovalPostureFromConfig } from '../../permissions/approval-posture.ts';
 import { setHarnessSetting, resetHarnessSetting } from '../../agent/harness-control.ts';
 
@@ -68,4 +68,14 @@ test('detaching an old binding cannot clear its replacement owner', async () => 
   expect(readExecutionMode(manager)).toBe('yolo');
   second();
   expect(readExecutionMode(manager)).toBe('safe-owner');
+});
+
+test('a new hosted session uses the configured initial mode while its intake is pending', async () => {
+  const manager = config(); manager.set('permissions.mode', 'safe-jev');
+  const unbind = bindActiveExecutionMode(manager, { hostedSessionId: () => null, hasHostedOwner: () => true, executionMode: () => undefined, setExecutionMode: async () => { throw new Error('No session yet'); } });
+  try {
+    expect(readExecutionMode(manager)).toBeUndefined();
+    expect(readInitialExecutionMode(manager)).toBe('safe-jev');
+    expect(manager.get('permissions.mode')).toBe('safe-jev');
+  } finally { unbind(); }
 });

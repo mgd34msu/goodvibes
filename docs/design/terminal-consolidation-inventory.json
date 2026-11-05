@@ -204,7 +204,7 @@
       "path": "core/composer-state.ts",
       "baselineTuiLines": 67,
       "baselineSimilarity": 0.8438,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "core/conversation-display-only.ts",
@@ -216,7 +216,7 @@
       "path": "core/conversation-line-cache.ts",
       "baselineTuiLines": 338,
       "baselineSimilarity": 0.9233,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "core/conversation-render-context.ts",
@@ -396,7 +396,7 @@
       "path": "input/commands/conversation-runtime.ts",
       "baselineTuiLines": 220,
       "baselineSimilarity": 0.9977,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/experience-runtime.ts",
@@ -840,13 +840,13 @@
       "path": "input/submission-intent.ts",
       "baselineTuiLines": 18,
       "baselineSimilarity": 0.8824,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/submission-router.ts",
       "baselineTuiLines": 62,
       "baselineSimilarity": 0.7652,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/surface-modal-host.ts",

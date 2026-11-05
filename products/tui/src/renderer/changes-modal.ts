@@ -1,3 +1,4 @@
+import { DIFF_GUTTER as GUTTER } from '@goodvibes-jev/engine/terminal-shell/diff-rows';
 /**
  * renderChangesModal, files, a tinted diff and review actions (replaces the
  * Git, Diff and Review views).

@@ -1858,6 +1858,31 @@
       "bun": "./terminal-shell/src/audio/activation-sound.ts",
       "types": "./terminal-shell/dist/audio/activation-sound.d.ts",
       "import": "./terminal-shell/dist/audio/activation-sound.js"
+    },
+    "./terminal-shell/conversation-line-cache": {
+      "bun": "./terminal-shell/src/conversation-line-cache.ts",
+      "types": "./terminal-shell/dist/conversation-line-cache.d.ts",
+      "import": "./terminal-shell/dist/conversation-line-cache.js"
+    },
+    "./terminal-shell/submission-intent": {
+      "bun": "./terminal-shell/src/submission-intent.ts",
+      "types": "./terminal-shell/dist/submission-intent.d.ts",
+      "import": "./terminal-shell/dist/submission-intent.js"
+    },
+    "./terminal-shell/submission-router": {
+      "bun": "./terminal-shell/src/submission-router.ts",
+      "types": "./terminal-shell/dist/submission-router.d.ts",
+      "import": "./terminal-shell/dist/submission-router.js"
+    },
+    "./terminal-shell/composer-state": {
+      "bun": "./terminal-shell/src/composer-state.ts",
+      "types": "./terminal-shell/dist/composer-state.d.ts",
+      "import": "./terminal-shell/dist/composer-state.js"
+    },
+    "./terminal-shell/conversation-runtime-command": {
+      "bun": "./terminal-shell/src/conversation-runtime-command.ts",
+      "types": "./terminal-shell/dist/conversation-runtime-command.d.ts",
+      "import": "./terminal-shell/dist/conversation-runtime-command.js"
     }
   },
   "publishConfig": {

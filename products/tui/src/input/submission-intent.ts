@@ -1,18 +1,1 @@
-export type SubmissionIntentKind =
-  | 'empty'
-  | 'prompt'
-  | 'slash-command'
-  | 'orchestration'
-  | 'plan'
-  | 'review'
-  | 'view-action'
-  | 'shell'
-  | 'memory-pin';
-
-export interface SubmissionIntent {
-  readonly kind: SubmissionIntentKind;
-  readonly label: string;
-  readonly commandName?: string;
-  readonly hasAttachments: boolean;
-}
-
+export * from '@goodvibes-jev/engine/terminal-shell/submission-intent';

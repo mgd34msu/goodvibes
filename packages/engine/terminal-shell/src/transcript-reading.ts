@@ -2,17 +2,18 @@
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { TranscriptSourceChangedError, TranscriptReadingLifetime } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-export interface TranscriptCommandContext {
+export type TranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex'>;
+export interface TranscriptCommandContext<Conversation extends TranscriptConversation = TranscriptConversation> {
     readonly session: {
-        readonly sessionManager: unknown;
-        readonly conversationManager: Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex'>;
+        readonly sessionManager?: unknown;
+        readonly conversationManager: Conversation;
         readonly runtime?: ({
             readonly sessionId?: unknown | undefined;
         } | null) | undefined;
     };
 }
 export const TRANSCRIPT_UNAVAILABLE = 'Transcript index is unavailable right now. Try again; your messages are unchanged.';
-export function captureTranscriptSource(ctx: TranscriptCommandContext, signal?: AbortSignal | undefined) {
+export function captureTranscriptSource<Conversation extends TranscriptConversation>(ctx: TranscriptCommandContext<Conversation>, signal?: AbortSignal | undefined) {
     const lifetime = new TranscriptReadingLifetime();
     const manager = ctx.session.sessionManager;
     const conversation = ctx.session.conversationManager;

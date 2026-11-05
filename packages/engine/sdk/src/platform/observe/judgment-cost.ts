@@ -27,7 +27,7 @@ export interface JudgmentCost {
   readonly costState: CostAttributionState;
 }
 
-/** The usage record an answered call contributes; a failed call used no tokens. */
+/** Retained usage from an answered call. Failed calls have unknown usage, which must not be certified as zero. */
 export function judgmentUsageRecord(entry: DecisionEntry): CostUsageRecord | undefined {
   if (entry.status !== 'answered') return undefined;
   return {
@@ -79,6 +79,7 @@ export function judgmentCost(entries: readonly DecisionEntry[], resolvePricing: 
       tally.latencyMs += entry.latencyMs;
       if (record === undefined) {
         tally.failed += 1;
+        tally.unpriced += 1;
         continue;
       }
       tally.inputTokens += record.inputTokens;

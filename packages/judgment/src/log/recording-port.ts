@@ -56,16 +56,17 @@ function projectLineage(value: unknown): JudgmentLineage | undefined {
   for (let index = 0; index < rawAttempts.length; index += 1) {
     const item: unknown = rawAttempts[index];
     if (!object(item)) throw invalidResponse();
-    const { attempt, endpointIndex, endpointKind, latencyMs, outcome, status } = item;
+    const { attempt, endpointIndex, endpointKind, latencyMs, outcome, status, dispatched } = item;
     const requestedModel = identifier(item.requestedModel, true);
     if (!nonnegative(attempt) || !Number.isInteger(attempt) || attempt < 1
       || !nonnegative(endpointIndex) || !Number.isInteger(endpointIndex)
       || (endpointKind !== 'hosted' && endpointKind !== 'local') || requestedModel === undefined
       || !nonnegative(latencyMs) || (outcome !== 'answered' && !failureKind(outcome))
-      || (status !== undefined && !statusCode(status))) throw invalidResponse();
+      || (status !== undefined && !statusCode(status)) || (dispatched !== undefined && typeof dispatched !== 'boolean')) throw invalidResponse();
     const requestId = identifier(item.requestId);
     attempts.push({
       attempt, endpointIndex, endpointKind, requestedModel, latencyMs, outcome,
+      ...(dispatched === undefined ? {} : { dispatched }),
       ...(requestId === undefined ? {} : { requestId }),
       ...(statusCode(status) ? { status } : {}),
     });

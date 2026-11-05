@@ -30,3 +30,6 @@ export {
   type SessionPricer,
   type TrackedAgentCost,
 } from './cost-tracker.js';
+
+export { judgmentVolume, judgmentVolumeBreaches, captureJudgmentVolumeBudgets } from './judgment-volume.js';
+export type { JudgmentVolume, JudgmentVolumeRow, JudgmentVolumeBudget, JudgmentVolumeBreach } from './judgment-volume.js';

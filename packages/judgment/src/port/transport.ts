@@ -130,6 +130,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             attemptCount += 1;
             const attemptStarted = performance.now();
             let requestId: string | undefined;
+            let dispatched = false;
             const attemptController = new AbortController();
             const abortAttempt = () => attemptController.abort(controller.signal.reason);
             controller.signal.addEventListener('abort', abortAttempt, { once: true });
@@ -142,7 +143,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 throw new JudgmentError('unavailable', 'this judgment target has no resolved credential');
               }
               const response = await interruptible(withRequestId(
-                () => askBackend({ ...target, timeoutMs, retry: {}, ...(fetch ? { fetch } : {}) }, body, attemptController.signal, headers),
+                () => askBackend({ ...target, timeoutMs, retry: {}, fetch: (input, init) => { dispatched = true; return fetch ? fetch(input, init) : globalThis.fetch(input, init); } }, body, attemptController.signal, headers),
                 (id) => { requestId = safeId(id); },
               ), attemptController.signal);
               checkCancellation();
@@ -155,7 +156,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               catch { throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions'); }
               if (!acceptsBackendModel(target.endpoint, targetModel, result.model)) throw new JudgmentError('invalid-response', 'the decision model does not match this configured target or its declared alias');
               const attempt: JudgmentAttempt = {
-                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel,
+                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
                 latencyMs: performance.now() - attemptStarted, outcome: 'answered', ...(requestId ? { requestId } : {}),
               };
               remember(attempt);
@@ -171,7 +172,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               lastFailure = last;
               requestId = safeId(last.requestId) ?? requestId;
               remember({
-                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel,
+                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
                 latencyMs: performance.now() - attemptStarted, outcome: last.kind,
                 ...(last.status === undefined ? {} : { status: last.status }), ...(requestId ? { requestId } : {}),
               });

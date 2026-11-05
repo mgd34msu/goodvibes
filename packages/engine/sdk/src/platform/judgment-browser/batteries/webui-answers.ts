@@ -103,13 +103,16 @@ function safeLineage(raw: unknown, models: ReadonlySet<string>): JudgmentLineage
       const endpointKind = attempt['endpointKind'];
       const outcome = attempt['outcome'];
       const status = attempt['status'];
+      const dispatched = attempt['dispatched'];
       if (!Number.isInteger(number) || number < 1 || !Number.isInteger(endpointIndex)
         || (endpointKind !== 'hosted' && endpointKind !== 'local')
         || typeof attempt['requestedModel'] !== 'string' || !models.has(attempt['requestedModel'])
         || (outcome !== 'answered' && !ERROR_KINDS.includes(outcome as JudgmentErrorKind))
-        || (status !== undefined && (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599))) return INVALID();
+        || (status !== undefined && (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599))
+        || (dispatched !== undefined && typeof dispatched !== 'boolean')) return INVALID();
       return { attempt: number, endpointIndex, endpointKind, requestedModel: attempt['requestedModel'],
         latencyMs: nonnegative(attempt['latencyMs']), outcome: outcome as 'answered' | JudgmentErrorKind,
+        ...(dispatched === undefined ? {} : { dispatched }),
         ...(status === undefined ? {} : { status: status as number }) };
     }),
   };

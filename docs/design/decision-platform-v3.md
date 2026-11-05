@@ -30,8 +30,8 @@ Historical changelogs identify retired packages as `legacy-package:name`.
 - [ ] Show the actual route and attribute actual model usage and cost in products.
 - [ ] Consolidate duplicated terminal behavior into the engine platform and
   existing terminal-shell, preserving product-specific adapters and views.
-- [ ] Share equivalent rejected-promise draining without hiding meaningful errors.
-- [ ] Add deterministic judgment-call budgets for representative operations,
+- [x] Share equivalent rejected-promise draining without hiding meaningful errors.
+- [x] Add deterministic judgment-call budgets for representative operations,
   distinguishing logical decisions from wire attempts. Live calibration is optional.
 - [ ] Clarify current versus target behavior in docs; retain justified negative
   type tests and guarded optional-import shims. Refresh test navigation.

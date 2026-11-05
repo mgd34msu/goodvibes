@@ -1,3 +1,4 @@
+import { judgmentVolume, judgmentVolumeBreaches, type JudgmentVolume, type JudgmentVolumeBudget, type JudgmentVolumeBreach } from './judgment-volume.js';
 import { CALIBRATION_SITE, truthOf, type DecisionEntry, type DecisionLog, type NamedDecision } from '@goodvibes-jev/judgment';
 import type { ResolvePricing } from '../runtime/cost/attribution.js';
 import { batteryAccuracy, thresholdSweeps, type BatteryAccuracy, type BatterySweep } from './accuracy.js';
@@ -8,6 +9,7 @@ import { loggedReadings } from './log-readings.js';
 import { OBSERVE_THRESHOLDS } from './thresholds.js';
 
 export interface ObserveOptions {
+  readonly volumeBudgets?: readonly JudgmentVolumeBudget[];
   /** Inclusive ISO lower bound on when a call was made. */
   readonly since?: string;
   /** Exclusive ISO upper bound. */
@@ -35,6 +37,8 @@ export interface ObserveOptions {
 
 /** Every analysis the observe subsystem reads from a decision log. */
 export interface ObserveReport {
+  readonly volume: JudgmentVolume;
+  readonly volumeBreaches: readonly JudgmentVolumeBreach[];
   readonly window: { readonly since: string | undefined; readonly until: string | undefined; readonly first: string | null; readonly last: string | null };
   readonly entries: number;
   readonly answered: number;
@@ -57,7 +61,9 @@ export interface ObserveReport {
 export function analyzeEntries(entries: readonly DecisionEntry[], options: Omit<ObserveOptions, 'since' | 'until' | 'battery' | 'site' | 'limit'> = {}): Omit<ObserveReport, 'window' | 'truncated'> {
   const readings = loggedReadings(entries);
   const floors = new Map((options.registered ?? []).map((decision) => [decision.name, decision.accuracyFloor]));
+  const volume = judgmentVolume(entries);
   return {
+    volume, volumeBreaches: judgmentVolumeBreaches(entries, options.volumeBudgets ?? []),
     entries: entries.length,
     answered: entries.filter((entry) => entry.status === 'answered').length,
     failed: entries.filter((entry) => entry.status === 'failed').length,

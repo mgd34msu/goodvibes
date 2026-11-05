@@ -78,8 +78,10 @@ export interface JudgmentRequest<Q extends Questions> {
   readonly context?: DecisionContext;
 }
 
-/** Credential-free evidence of one actual wire attempt in a logical reading. */
+/** Credential-free evidence of one configured target attempt in a logical reading. */
 export interface JudgmentAttempt {
+  /** True once handed to fetch; false for a locally rejected target. Absent on older records. */
+  readonly dispatched?: boolean;
   readonly attempt: number;
   /** Zero is the primary, then the configured fallback order. No addresses are stored. */
   readonly endpointIndex: number;

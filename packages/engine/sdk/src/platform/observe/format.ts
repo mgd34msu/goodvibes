@@ -104,6 +104,9 @@ export function formatObserveReport(report: ObserveReport, source?: string): str
     ...driftSection(report.drift),
     ...stuckSection(report.stuck),
     ...unregisteredSection(report.unregistered),
+    ...heading('Decision call volume (logical readings / configured target attempts / transport dispatches)'),
+    ...report.volume.rows.map(row => `${row.battery} @ ${row.site}  logical ${row.logicalDecisions}  targets ${row.targetAttempts}  wire ${row.wireAttempts}  dispatch unknown ${row.unknownDispatchAttempts}  calls without lineage ${row.callsWithoutAttemptEvidence}`),
+    ...report.volumeBreaches.map(breach => `BUDGET EXCEEDED ${breach.budget}: ${breach.kind} ${breach.observed}, maximum ${breach.maximum}`),
     ...costSection(report.cost),
   );
   return lines.join('\n');

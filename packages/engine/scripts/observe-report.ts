@@ -4,6 +4,7 @@
 //   bun run observe:report [--log <decisions.sqlite>] [--workspace <dir>] [--surface <name>]
 //                          [--since <iso>] [--until <iso>] [--battery <name>] [--site <site>]
 //                          [--no-calibration] [--thresholds 0.6,0.7,0.8]
+//                          [--budgets <json-file>] [--check-volume]
 //                          [--window 30m|6h|1d | --windows <n>] [--limit <n>] [--json] [--check]
 //
 // Prints every observe analysis of the log: accuracy against confidence where
@@ -20,12 +21,12 @@
 // place when opened. --check exits 1 when a decision is below its floor or a
 // logged call was made outside a registered battery.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import {
-  analyzeDecisionLog,
+  analyzeDecisionLog, captureJudgmentVolumeBudgets,
   formatObserveReport,
   JUDGMENT_EVAL_SUITE,
   judgmentEvalScenarios,
@@ -39,6 +40,8 @@ const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     log: { type: 'string' },
+    budgets: { type: 'string' },
+    'check-volume': { type: 'boolean' },
     workspace: { type: 'string' },
     surface: { type: 'string' },
     since: { type: 'string' },
@@ -96,7 +99,9 @@ if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) fail('--limi
 const sweepAt = thresholds();
 
 using log = new SqliteDecisionLog(path);
+if (values['check-volume'] && values.budgets === undefined) fail('--check-volume requires --budgets with explicit limits');
 const report = analyzeDecisionLog(log, {
+  ...(values.budgets === undefined ? {} : { volumeBudgets: captureJudgmentVolumeBudgets(JSON.parse(readFileSync(resolve(values.budgets), 'utf8'))) }),
   ...(values.since === undefined ? {} : { since: values.since }),
   ...(values.until === undefined ? {} : { until: values.until }),
   ...(values.battery === undefined ? {} : { battery: values.battery }),
@@ -125,4 +130,13 @@ if (values.check === true) {
     process.exit(1);
   }
   console.log('[observe-report] CHECK PASSED: every decision with ground truth is at or above its floor, and every call names a registered decision');
+}
+
+if (values['check-volume'] === true) {
+  if (report.truncated) fail('The volume window is truncated; narrow the window or raise --limit before checking budgets');
+  if (report.volumeBreaches.length) {
+    console.error(`[observe-report] VOLUME CHECK FAILED: ${report.volumeBreaches.length} budget violation(s)`);
+    process.exit(1);
+  }
+  console.error('[observe-report] VOLUME CHECK PASSED');
 }

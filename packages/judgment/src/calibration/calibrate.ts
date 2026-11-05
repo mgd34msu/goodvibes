@@ -1,4 +1,4 @@
-import { CALIBRATION_SITE, type FixtureCheck, type NamedDecision } from '../batteries/decision.ts';
+import { CALIBRATION_SITE, FixtureRunError, type FixtureCheck, type NamedDecision } from '../batteries/decision.ts';
 import type { DecisionEntry, DecisionLog } from '../log/types.ts';
 import type { JudgmentPort } from '../port/types.ts';
 import { summarize, type CalibrationReport, type DecisionReport } from './report.ts';
@@ -87,17 +87,33 @@ export async function calibrate(
     const before = new Set(log === undefined ? [] : recentCalls(log).map((entry) => entry.id));
     const returned = new Set<string>();
     const models = new Set<string>();
+    let checks: readonly FixtureCheck[] = [];
+    let failure: string | undefined;
+    let fixtureExecutions: DecisionReport['fixtureExecutions'];
     try {
-      const checks = await decision.checkFixtures(fixturePort(port, returned, models), options.signal === undefined ? {} : { signal: options.signal });
-      const report = { ...summarize(decision, model, checks), resolvedModels: [...models] };
-      reports.push(log === undefined ? report : { ...report, truthRecorded: recordFixtureTruth(log, decision, checks, before, returned) });
+      checks = await decision.checkFixtures(fixturePort(port, returned, models), options.signal === undefined ? {} : { signal: options.signal });
     } catch (error) {
-      reports.push({
-        ...summarize(decision, model, []),
-        resolvedModels: [...models],
-        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-      });
+      if (error instanceof FixtureRunError) {
+        checks = error.checks;
+        fixtureExecutions = error.fixtureExecutions;
+      }
+      failure = error instanceof FixtureRunError ? error.message : error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     }
+    let truthRecorded: number | undefined;
+    if (log !== undefined) {
+      try { truthRecorded = recordFixtureTruth(log, decision, checks, before, returned); }
+      catch (error) {
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        failure = failure === undefined ? message : `${failure}; fixture truth recording failed: ${message}`;
+      }
+    }
+    const report = summarize(decision, model, checks);
+    reports.push({ ...report, passed: failure === undefined && report.passed,
+      resolvedModels: [...models],
+      ...(truthRecorded === undefined ? {} : { truthRecorded }),
+      ...(fixtureExecutions === undefined ? {} : { fixtureExecutions }),
+      ...(failure === undefined ? {} : { error: failure }),
+    });
   }
   return {
     at: (options.now ?? (() => new Date()))().toISOString(),

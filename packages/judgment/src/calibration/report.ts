@@ -1,4 +1,4 @@
-import type { FixtureCheck, NamedDecision } from '../batteries/decision.ts';
+import type { FixtureCheck, FixtureExecution, NamedDecision } from '../batteries/decision.ts';
 import type { Outcome } from '../readings/bands.ts';
 
 /** Accuracy for checks whose signal fell in [from, to). */
@@ -25,8 +25,10 @@ export interface DecisionReport {
   /** Accuracy of the checks code would have acted on without asking anyone. */
   readonly automaticAccuracy: number | null;
   readonly bins: readonly ConfidenceBin[];
-  /** Set when the decision could not be run at all. */
+  /** Set when execution failed, even if earlier fixtures produced valid checks. */
   readonly error?: string;
+  /** Complete fixture progress when execution was interrupted. */
+  readonly fixtureExecutions?: readonly FixtureExecution[];
   /** Fixtures whose checks reached the decision log as ground truth, when calibration was given the log. */
   readonly truthRecorded?: number;
 }
@@ -116,6 +118,9 @@ export function formatReport(report: CalibrationReport): string {
       `${status} ${decision.name} v${decision.version} (${decision.model}${decision.resolvedModels?.length ? ` → ${decision.resolvedModels.join(", ")}` : ""})  accuracy ${pct(decision.accuracy)} floor ${pct(decision.accuracyFloor)}  checks ${decision.checks.length}  act/confirm/escalate ${decision.outcomes.act}/${decision.outcomes.confirm}/${decision.outcomes.escalate}  automatic accuracy ${pct(decision.automaticAccuracy)}`,
     );
     if (decision.error !== undefined) lines.push(`      ${decision.error}`);
+    for (const fixture of decision.fixtureExecutions ?? []) {
+      if (fixture.status !== 'completed') lines.push(`      ${fixture.status} ${fixture.fixture}`);
+    }
     for (const check of decision.checks) {
       lines.push(
         `      ${check.correct ? 'ok  ' : 'MISS'} ${check.fixture} [${check.aspect}] expected ${check.expected} got ${check.got}  signal ${check.signal.toFixed(2)} ${check.outcome}`,

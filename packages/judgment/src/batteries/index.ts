@@ -33,6 +33,7 @@ export {
 } from './battery.ts';
 export {
   CALIBRATION_SITE,
+  FixtureRunError,
   checkEachFixture,
   decisionHeader,
   type CalibrationRun,
@@ -40,6 +41,7 @@ export {
   type DecisionIdentity,
   fixtureCheck,
   type FixtureCheck,
+  type FixtureExecution,
   type NamedDecision,
   type PatternHeader as DecisionHeader,
 } from './decision.ts';

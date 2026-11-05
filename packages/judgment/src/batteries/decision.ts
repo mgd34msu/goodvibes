@@ -138,6 +138,26 @@ export interface CalibrationRun {
   readonly fixture: string;
 }
 
+/** What actually happened to each fixture in a sequential run. */
+export type FixtureExecution =
+  | { readonly fixture: string; readonly status: 'completed' | 'not-run' }
+  | { readonly fixture: string; readonly status: 'failed' | 'cancelled'; readonly error: string };
+
+/** Retains observed checks when a later fixture cannot finish. */
+export class FixtureRunError extends Error {
+  readonly checks: readonly FixtureCheck[];
+  readonly fixtureExecutions: readonly FixtureExecution[];
+
+  constructor(checks: readonly FixtureCheck[], fixtureExecutions: readonly FixtureExecution[], failure: unknown) {
+    super(failure instanceof Error ? `${failure.name}: ${failure.message}` : String(failure));
+    this.name = 'FixtureRunError';
+    this.checks = Object.freeze(checks.map(check => Object.freeze({ ...check,
+      ...(check.answers === undefined ? {} : { answers: Object.freeze([...check.answers]) }),
+    })));
+    this.fixtureExecutions = Object.freeze(fixtureExecutions.map(fixture => Object.freeze({ ...fixture })));
+  }
+}
+
 /** Runs every fixture live, one at a time, and gathers the checks each one produces. */
 export async function checkEachFixture<F extends { readonly name: string }>(
   fixtures: readonly F[],
@@ -145,9 +165,23 @@ export async function checkEachFixture<F extends { readonly name: string }>(
   check: (fixture: F, run: CalibrationRun) => Promise<FixtureCheck | readonly FixtureCheck[]>,
 ): Promise<FixtureCheck[]> {
   const checks: FixtureCheck[] = [];
-  for (const fixture of fixtures) {
+  const completed: FixtureExecution[] = [];
+  for (const [index, fixture] of fixtures.entries()) {
     const run: CalibrationRun = { ...options, site: CALIBRATION_SITE, fixture: fixture.name };
-    checks.push(...[await check(fixture, run)].flat());
+    try {
+      options.signal?.throwIfAborted();
+      const observed = await check(fixture, run);
+      options.signal?.throwIfAborted();
+      checks.push(...[observed].flat());
+      completed.push({ fixture: fixture.name, status: 'completed' });
+    } catch (failure) {
+      const error = failure instanceof Error ? `${failure.name}: ${failure.message}` : String(failure);
+      throw new FixtureRunError(checks, [
+        ...completed,
+        { fixture: fixture.name, status: options.signal?.aborted ? 'cancelled' : 'failed', error },
+        ...fixtures.slice(index + 1).map(next => ({ fixture: next.name, status: 'not-run' as const })),
+      ], failure);
+    }
   }
   return checks;
 }

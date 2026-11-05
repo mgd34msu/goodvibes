@@ -306,7 +306,7 @@
       "path": "core/work-tree-contract.ts",
       "baselineTuiLines": 139,
       "baselineSimilarity": 0.9928,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/work-tree-focus.ts",
@@ -324,7 +324,7 @@
       "path": "core/work-tree-model.ts",
       "baselineTuiLines": 749,
       "baselineSimilarity": 0.9873,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/work-tree-render.ts",
@@ -1002,7 +1002,7 @@
       "path": "renderer/lane-graph/bead.ts",
       "baselineTuiLines": 804,
       "baselineSimilarity": 0.9819,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/lane-graph/glyphs.ts",

@@ -1618,6 +1618,26 @@
       "bun": "./terminal-shell/src/work-tree-fold-store.ts",
       "types": "./terminal-shell/dist/work-tree-fold-store.d.ts",
       "import": "./terminal-shell/dist/work-tree-fold-store.js"
+    },
+    "./terminal-shell/bead": {
+      "bun": "./terminal-shell/src/renderer/bead.ts",
+      "types": "./terminal-shell/dist/renderer/bead.d.ts",
+      "import": "./terminal-shell/dist/renderer/bead.js"
+    },
+    "./terminal-shell/bead-content-cache": {
+      "bun": "./terminal-shell/src/bead-content-cache.ts",
+      "types": "./terminal-shell/dist/bead-content-cache.d.ts",
+      "import": "./terminal-shell/dist/bead-content-cache.js"
+    },
+    "./terminal-shell/work-tree-contract": {
+      "bun": "./terminal-shell/src/work-tree-contract.ts",
+      "types": "./terminal-shell/dist/work-tree-contract.d.ts",
+      "import": "./terminal-shell/dist/work-tree-contract.js"
+    },
+    "./terminal-shell/work-tree-model": {
+      "bun": "./terminal-shell/src/work-tree-model.ts",
+      "types": "./terminal-shell/dist/work-tree-model.d.ts",
+      "import": "./terminal-shell/dist/work-tree-model.js"
     }
   },
   "publishConfig": {

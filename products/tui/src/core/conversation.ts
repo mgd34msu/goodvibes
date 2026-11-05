@@ -881,6 +881,9 @@ export class ConversationManager extends SdkConversationManager {
     // Do NOT re-render here, display stays blank until the next message is added.
     // The lastRenderedWidth is kept so subsequent appends use the correct width.
   }
+
+  public markSearchExpanded(key: string): void { this.searchExpansion.markSearchExpanded(key); }
+  public restoreSearchExpansions(): void { this.searchExpansion.restoreOnto(this); }
 }
 
 export { parseDiffForApply, applyDiffContent } from '@goodvibes-jev/engine/sdk/platform/core';

@@ -1,3 +1,5 @@
+import { SearchExpansionTracker } from '@goodvibes-jev/engine/terminal-shell/conversation-search-expansion';
+import { nearestBlock, resolveTranscriptEventLine } from '@goodvibes-jev/engine/terminal-shell/conversation-event-navigation';
 import type { RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
 import { readTreeGlyphSet, TREE_GLYPHS_CONFIG_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
@@ -54,6 +56,8 @@ type Message = ConversationMessageSnapshot;
 export type NoticeSink = (content: string, options: { readonly restored: boolean; readonly runtimeEvent?: RuntimeEventProvenance | undefined }) => void;
 
 export class ConversationManager extends SdkConversationManager {
+  public readonly searchExpansion = new SearchExpansionTracker();
+
   public history = new InfiniteBuffer();
   /** Display-only output kept for redraw (conversation-display-only.ts). */
   private readonly displayOnly = new DisplayOnlyOutput();
@@ -504,22 +508,7 @@ export class ConversationManager extends SdkConversationManager {
   public setUnicodeCapable(capable: boolean): void { this.unicodeCapable = capable; this.markDirty(); }
 
   /** Find the nearest block to a given line index, optionally filtered by type. */
-  public findNearestBlock(lineIndex: number, typeFilter?: string): BlockMeta | null {
-    let nearest: BlockMeta | null = null;
-    let nearestDist = Infinity;
-    for (const block of this.blockRegistry) {
-      if (typeFilter !== undefined && block.type !== typeFilter) continue;
-      if (lineIndex >= block.startLine && lineIndex < block.startLine + block.lineCount) {
-        return block;
-      }
-      const dist = Math.abs(block.startLine - lineIndex);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = block;
-      }
-    }
-    return nearest;
-  }
+  public findNearestBlock(lineIndex: number, typeFilter?: string): BlockMeta | null { return nearestBlock(this.blockRegistry, lineIndex, typeFilter); }
 
   /**
    * isCollapsed - Returns whether the block at blockIndex is collapsed.
@@ -573,47 +562,21 @@ export class ConversationManager extends SdkConversationManager {
     return nearest.blockIndex;
   }
 
-  /**
-   * Collapse keys currently expanded because the user NAVIGATED to a search
-   * match hidden inside them (see search.ts's revealCurrentMatch), never
-   * because they were expanded by typing, and never keys the user touched
-   * some other way (see noteUserTouch, which removes a key from this set).
-   * restoreSearchExpansions() re-folds everything still in this set when
-   * search closes, so the transcript the user had collapsed comes back
-   * exactly as they left it.
-   */
-  private searchExpandedKeys = new Set<string>();
 
-  /**
-   * Collapse keys the user has explicitly acted on at least once (Tab
-   * toggle via toggleCollapseAtLine, Ctrl+Y copy, Ctrl+B bookmark, see
-   * handler-content-actions.ts). Membership here permanently exempts a key
-   * from restoreSearchExpansions()'s auto-re-collapse, even if search
-   * originally opened it, an explicit user action always outranks search's
-   * own bookkeeping. Grows for the life of the conversation; never pruned,
-   * since membership only ever gates one decision (whether to
-   * auto-re-collapse) and a stale positive is harmless.
-   */
-  private userTouchedKeys = new Set<string>();
 
   /** Record that `collapseKey` was expanded because the user navigated to a
    *  search match hidden inside it, so restoreSearchExpansions() knows to
    *  fold it back up on close (unless the user separately touches it while
    *  it's open, see noteUserTouch). No-op for a key the user already
    *  touched explicitly, since that ownership always wins. */
-  public markSearchExpanded(collapseKey: string): void {
-    if (!this.userTouchedKeys.has(collapseKey)) this.searchExpandedKeys.add(collapseKey);
-  }
+  public markSearchExpanded(collapseKey: string): void { this.searchExpansion.markSearchExpanded(collapseKey); }
 
   /** Record an explicit user action on `collapseKey` (toggle/copy/bookmark).
    *  Exempts it from restoreSearchExpansions()'s auto-re-collapse for the
    *  rest of the session, the user's own choice always wins over search's
    *  bookkeeping, whether they acted on it before search touched it or while
    *  it was sitting auto-expanded. */
-  public noteUserTouch(collapseKey: string): void {
-    this.userTouchedKeys.add(collapseKey);
-    this.searchExpandedKeys.delete(collapseKey);
-  }
+  public noteUserTouch(collapseKey: string): void { this.searchExpansion.noteUserTouch(collapseKey); }
 
   /**
    * Re-collapse every key search auto-expanded during the just-closed search
@@ -622,14 +585,7 @@ export class ConversationManager extends SdkConversationManager {
    * collapse state without disturbing any collapse state search never
    * touched in the first place.
    */
-  public restoreSearchExpansions(): void {
-    if (this.searchExpandedKeys.size === 0) return;
-    for (const key of this.searchExpandedKeys) {
-      this.collapseState.set(key, true);
-    }
-    this.searchExpandedKeys.clear();
-    this.markDirty();
-  }
+  public restoreSearchExpansions(): void { this.searchExpansion.restoreOnto(this); }
 
   /** First rendered line for message `absoluteIdx` (undefined if never
    *  rendered). For a folded tool-group member this is the group's own
@@ -691,15 +647,7 @@ export class ConversationManager extends SdkConversationManager {
     const index = await this.getTranscriptEventIndex({ ...options, lifetime });
     lifetime.assertCurrent();
     this.flushHistory();
-    const events = kind === 'all' ? index.events : index.events.filter((event) => event.kind === kind);
-    if (events.length === 0) return -1;
-    const lines = events
-      .map((event) => this.messageLineRegistry[event.messageIndex] ?? -1)
-      .filter((line) => line >= 0)
-      .sort((a, b) => a - b);
-    if (lines.length === 0) return -1;
-    const after = lines.find((line) => line > currentLine);
-    return after ?? lines[0]!;
+    return resolveTranscriptEventLine(index.events, kind, this.messageLineRegistry, currentLine, 'next');
   }
 
   public async prevTranscriptEventLine(currentLine: number, kind: TranscriptEventKind | 'all' = 'all', options: TranscriptReadingOptions = {}): Promise<number> {
@@ -708,15 +656,7 @@ export class ConversationManager extends SdkConversationManager {
     const index = await this.getTranscriptEventIndex({ ...options, lifetime });
     lifetime.assertCurrent();
     this.flushHistory();
-    const events = kind === 'all' ? index.events : index.events.filter((event) => event.kind === kind);
-    if (events.length === 0) return -1;
-    const lines = events
-      .map((event) => this.messageLineRegistry[event.messageIndex] ?? -1)
-      .filter((line) => line >= 0)
-      .sort((a, b) => a - b);
-    if (lines.length === 0) return -1;
-    const before = [...lines].reverse().find((line) => line < currentLine);
-    return before ?? lines[lines.length - 1]!;
+    return resolveTranscriptEventLine(index.events, kind, this.messageLineRegistry, currentLine, 'prev');
   }
 
   /** True while the last rebuild drew the splash (the shell centers it vertically). */

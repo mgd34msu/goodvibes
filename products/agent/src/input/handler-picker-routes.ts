@@ -1,15 +1,12 @@
-import { readFileSync } from 'node:fs';
+export { handleFilePickerToken, handleBlockActionsToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { CapabilityFilter, CategoryFilter, ModelPickerModal } from './model-picker.ts';
 import { MODEL_PICKER_CHROME_LINES } from '../renderer/model-workspace.ts';
 import { isLocalFitRecommendation, isProviderSignInRow } from '../input/model-picker-local-fit.ts';
 import { offersConfigurableEffort, requestedEffortLevel, servingEffortForLevel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { isTextBackspace } from '@goodvibes-jev/engine/terminal-shell';
 import type { ProcessEntry } from '../renderer/process-modal.ts';
-import type { BlockActionId } from '../renderer/block-actions.ts';
 
 type ModelPickerRouteState = {
   modelPicker: ModelPickerModal;
@@ -315,158 +312,6 @@ export function handleEscapeOnlyModalToken(state: EscapeOnlyModalRouteState, tok
     else if (token.logicalName === 'pageup') state.scroll(10);
     else if (token.logicalName === 'pagedown') state.scroll(-10);
   }
-  state.requestRender();
-  return true;
-}
-
-type FilePickerRouteState = {
-  filePicker: {
-    active: boolean;
-    query: string;
-    searchFocused: boolean;
-    insertPos: number;
-    injectMode: boolean;
-    close: () => void;
-    setQuery: (query: string) => void;
-    focusSearch: () => void;
-    blurSearch: () => void;
-    getSelected: () => string | null;
-    selectedIndex: number;
-    moveUp: () => void;
-    moveDown: () => void;
-  };
-  prompt: string;
-  cursorPos: number;
-  commandContext?: CommandContext;
-  imageRegistry: Map<string, { data: string; mediaType: string }>;
-  nextImageId: number;
-  requestRender: () => void;
-  handleEscape: () => void;
-  saveUndoState: () => void;
-  ensureInputCursorVisible: () => void;
-  formatFileSize: (bytes: number) => string;
-  mediaTypeFromExt: (ext: string) => string;
-  imageExtensions: string[];
-};
-
-export function handleFilePickerToken(state: FilePickerRouteState, token: InputToken): boolean {
-  if (!state.filePicker.active) return false;
-
-  // The query is always live: typing filters, arrows move, Esc closes.
-  if (token.type === 'text') {
-    if (token.value === ' ' && state.filePicker.query === '') {
-      state.filePicker.close();
-    } else {
-      state.filePicker.focusSearch();
-      state.filePicker.setQuery(state.filePicker.query + token.value);
-    }
-  } else if (token.type === 'key') {
-    if (token.logicalName === 'escape') {
-      state.handleEscape();
-      return true;
-    } else if (token.logicalName === 'enter') {
-      const selected = state.filePicker.getSelected();
-      if (selected) {
-        state.saveUndoState();
-        const atPos = state.filePicker.insertPos;
-        const injectMode = state.filePicker.injectMode;
-        const prefixLen = injectMode ? 2 : 1;
-        const queryLen = state.filePicker.query.length + prefixLen;
-        const ext = selected.slice(selected.lastIndexOf('.'));
-        if (!injectMode && state.imageExtensions.some(e => e === ext.toLowerCase())) {
-          try {
-            const projectRoot = state.commandContext?.workspace.shellPaths?.workingDirectory
-              ?? state.commandContext?.platform.configManager.getWorkingDirectory();
-            if (!projectRoot) {
-              throw new Error('working directory is unavailable');
-            }
-            const resolvedPath = resolveAndValidatePath(selected, projectRoot);
-            const data = readFileSync(resolvedPath);
-            const base64 = data.toString('base64');
-            const mediaType = state.mediaTypeFromExt(ext);
-            const filename = selected.split('/').pop() ?? selected;
-            const id = `img${state.nextImageId++}`;
-            state.imageRegistry.set(id, { data: base64, mediaType });
-            const marker = `[IMAGE: ${id}, ${filename}, ${state.formatFileSize(data.length)}]`;
-            state.prompt = state.prompt.slice(0, atPos) + marker + ' ' + state.prompt.slice(atPos + queryLen);
-            state.cursorPos = atPos + marker.length + 1;
-          } catch (err) {
-            logger.debug('file-picker: could not read image file', { err });
-            state.prompt = state.prompt.slice(0, atPos) + '@' + selected + ' ' + state.prompt.slice(atPos + queryLen);
-            state.cursorPos = atPos + selected.length + 2;
-          }
-        } else if (injectMode) {
-          const marker = `!@${selected}`;
-          state.prompt = state.prompt.slice(0, atPos) + marker + ' ' + state.prompt.slice(atPos + queryLen);
-          state.cursorPos = atPos + marker.length + 1;
-        } else {
-          state.prompt = state.prompt.slice(0, atPos) + '@' + selected + ' ' + state.prompt.slice(atPos + queryLen);
-          state.cursorPos = atPos + selected.length + 2;
-        }
-        state.ensureInputCursorVisible();
-      }
-      state.filePicker.close();
-    } else if (token.logicalName === 'up') {
-      state.filePicker.moveUp();
-    } else if (token.logicalName === 'down') {
-      state.filePicker.moveDown();
-    } else if (token.logicalName === 'backspace') {
-      if (state.filePicker.query.length > 0) {
-        state.filePicker.setQuery(state.filePicker.query.slice(0, -1));
-      } else {
-        const removeCount = state.filePicker.injectMode ? 2 : 1;
-        if (state.cursorPos >= removeCount) {
-          state.prompt = state.prompt.slice(0, state.cursorPos - removeCount) + state.prompt.slice(state.cursorPos);
-          state.cursorPos -= removeCount;
-        }
-        state.filePicker.close();
-      }
-    }
-  }
-
-  state.requestRender();
-  return true;
-}
-
-type BlockActionsRouteState = {
-  blockActionsMenu: {
-    active: boolean;
-    moveUp: () => void;
-    moveDown: () => void;
-    getSelected: () => { id: BlockActionId } | null;
-    close: () => void;
-    getActionForKey: (key: string) => { id: BlockActionId } | null;
-  };
-  executeBlockAction: (id: BlockActionId) => void;
-  requestRender: () => void;
-  handleEscape: () => void;
-};
-
-export function handleBlockActionsToken(state: BlockActionsRouteState, token: InputToken): boolean {
-  if (!state.blockActionsMenu.active) return false;
-
-  if (token.type === 'key') {
-    if (token.logicalName === 'escape') {
-      state.handleEscape();
-      return true;
-    }
-    if (token.logicalName === 'up') state.blockActionsMenu.moveUp();
-    else if (token.logicalName === 'down') state.blockActionsMenu.moveDown();
-    else if (token.logicalName === 'enter') {
-      const action = state.blockActionsMenu.getSelected();
-      state.blockActionsMenu.close();
-      if (action) state.executeBlockAction(action.id);
-    } else if (token.logicalName === 'tab') {
-      const action = state.blockActionsMenu.getActionForKey('Tab');
-      state.blockActionsMenu.close();
-      if (action) state.executeBlockAction(action.id);
-    }
-  } else if (token.type === 'text') {
-    const action = state.blockActionsMenu.getActionForKey(token.value);
-    state.blockActionsMenu.close();
-    if (action) state.executeBlockAction(action.id);
-  }
-
   state.requestRender();
   return true;
 }

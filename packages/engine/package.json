@@ -1948,6 +1948,31 @@
       "bun": "./terminal-shell/src/theme-settings-actions.ts",
       "types": "./terminal-shell/dist/theme-settings-actions.d.ts",
       "import": "./terminal-shell/dist/theme-settings-actions.js"
+    },
+    "./terminal-shell/modal-input-routes": {
+      "bun": "./terminal-shell/src/modal-input-routes.ts",
+      "types": "./terminal-shell/dist/modal-input-routes.d.ts",
+      "import": "./terminal-shell/dist/modal-input-routes.js"
+    },
+    "./terminal-shell/conversation-rewind-port": {
+      "bun": "./terminal-shell/src/conversation-rewind-port.ts",
+      "types": "./terminal-shell/dist/conversation-rewind-port.d.ts",
+      "import": "./terminal-shell/dist/conversation-rewind-port.js"
+    },
+    "./terminal-shell/conversation-event-navigation": {
+      "bun": "./terminal-shell/src/conversation-event-navigation.ts",
+      "types": "./terminal-shell/dist/conversation-event-navigation.d.ts",
+      "import": "./terminal-shell/dist/conversation-event-navigation.js"
+    },
+    "./terminal-shell/conversation-search-expansion": {
+      "bun": "./terminal-shell/src/conversation-search-expansion.ts",
+      "types": "./terminal-shell/dist/conversation-search-expansion.d.ts",
+      "import": "./terminal-shell/dist/conversation-search-expansion.js"
+    },
+    "./terminal-shell/transcript-search": {
+      "bun": "./terminal-shell/src/transcript-search.ts",
+      "types": "./terminal-shell/dist/transcript-search.d.ts",
+      "import": "./terminal-shell/dist/transcript-search.js"
     }
   },
   "publishConfig": {

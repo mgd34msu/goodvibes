@@ -246,7 +246,12 @@
       "path": "core/conversation.ts",
       "baselineTuiLines": 886,
       "baselineSimilarity": 0.6939,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "search-expansion bookkeeping",
+        "nearestBlock",
+        "resolveTranscriptEventLine"
+      ]
     },
     {
       "path": "core/notices.ts",
@@ -666,7 +671,11 @@
       "path": "input/handler-modal-routes.ts",
       "baselineTuiLines": 686,
       "baselineSimilarity": 0.7284,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "handleSelectionModalToken",
+        "handleBookmarkModalToken"
+      ]
     },
     {
       "path": "input/handler-modal-stack.ts",
@@ -684,7 +693,11 @@
       "path": "input/handler-picker-routes.ts",
       "baselineTuiLines": 410,
       "baselineSimilarity": 0.7596,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "handleFilePickerToken",
+        "handleBlockActionsToken"
+      ]
     },
     {
       "path": "input/handler-prompt-buffer.ts",
@@ -786,7 +799,7 @@
       "path": "input/search.ts",
       "baselineTuiLines": 298,
       "baselineSimilarity": 0.9144,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/selection-modal.ts",
@@ -1368,7 +1381,7 @@
       "path": "runtime/conversation-rewind-port.ts",
       "baselineTuiLines": 158,
       "baselineSimilarity": 0.7296,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/index.ts",

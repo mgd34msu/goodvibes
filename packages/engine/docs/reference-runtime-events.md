@@ -1204,6 +1204,15 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
         "originSurface": {
           "type": "string"
         },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
         "contractIds": {
           "type": "array",
           "items": {
@@ -1765,6 +1774,9 @@ The `contracts` domain carries one named event per step of a contract (docs/desi
 | `gates[].gate` | string | yes |
 | `gates[].passed` | boolean | yes |
 | `gates[].skipped` | boolean | yes |
+| `gates[].outcome` | enum: `passed`, `failed`, `unverified` | optional |
+| `gates[].required` | boolean | optional |
+| `gates[].reason` | string | optional |
 | `claims` | enum: `files_verified`, `git_corroborated`, `verified_empty`, `unverifiable_no_claims`, `unverified` | optional |
 | `decisionIds` | string[] | yes |
 
@@ -1864,6 +1876,9 @@ The `contracts` domain carries one named event per step of a contract (docs/desi
 | `passed` | boolean | yes |
 | `skipped` | boolean | yes |
 | `durationMs` | number | yes |
+| `outcome` | enum: `passed`, `failed`, `unverified` | optional |
+| `required` | boolean | optional |
+| `reason` | string | optional |
 
 ### `CONTRACT_UNIT_SILENT`
 

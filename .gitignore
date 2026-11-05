@@ -12,6 +12,7 @@ coverage/
 packages/engine/.tmp/
 
 # Local release and test scratch directories
+/.test-tmp/
 packages/engine/.test-tmp/
 packages/engine/test/.test-tmp/
 # The hoisted providers-favorites fixture owns this exact local scratch root.
@@ -38,3 +39,6 @@ __pycache__/
 *-verification.md
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+
+# Local Plat workspace, specs, and generated indexes
+.plat/

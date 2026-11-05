@@ -24797,10 +24797,10 @@ Return the profile binding for a channel (surfaceKind plus optional channelId). 
         "permissionMode": {
           "type": "string",
           "enum": [
-            "plan",
-            "normal",
-            "accept-edits",
-            "auto"
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
           ]
         },
         "updatedAt": {
@@ -24902,10 +24902,10 @@ Return every per-channel profile binding (the model/permission defaults applied 
           "permissionMode": {
             "type": "string",
             "enum": [
-              "plan",
-              "normal",
-              "accept-edits",
-              "auto"
+              "safe-owner",
+              "safe-jev",
+              "yolo",
+              "plan"
             ]
           },
           "updatedAt": {
@@ -24990,10 +24990,10 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
     "permissionMode": {
       "type": "string",
       "enum": [
-        "plan",
-        "normal",
-        "accept-edits",
-        "auto"
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
       ]
     },
     "metadata": {
@@ -25058,10 +25058,10 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
         "permissionMode": {
           "type": "string",
           "enum": [
-            "plan",
-            "normal",
-            "accept-edits",
-            "auto"
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
           ]
         },
         "updatedAt": {
@@ -34234,6 +34234,111 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                       },
                       "skipped": {
                         "type": "boolean"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "unverified"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "completion": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "command-exit"
+                                ]
+                              },
+                              "exitCode": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "exitCode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assertions"
+                                ]
+                              },
+                              "runner": {
+                                "type": "string",
+                                "enum": [
+                                  "bun-junit",
+                                  "registered-protocol"
+                                ]
+                              },
+                              "checks": {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "number"
+                                  },
+                                  "failed": {
+                                    "type": "number"
+                                  },
+                                  "skipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "skipped"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "runner",
+                              "checks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "provenance": {
+                        "type": "object",
+                        "properties": {
+                          "sourceBefore": {
+                            "type": "string"
+                          },
+                          "sourceAfter": {
+                            "type": "string"
+                          },
+                          "definitionBefore": {
+                            "type": "string"
+                          },
+                          "definitionAfter": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceBefore",
+                          "sourceAfter",
+                          "definitionBefore",
+                          "definitionAfter"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -34976,6 +35081,111 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                       },
                       "skipped": {
                         "type": "boolean"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "unverified"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "completion": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "command-exit"
+                                ]
+                              },
+                              "exitCode": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "exitCode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assertions"
+                                ]
+                              },
+                              "runner": {
+                                "type": "string",
+                                "enum": [
+                                  "bun-junit",
+                                  "registered-protocol"
+                                ]
+                              },
+                              "checks": {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "number"
+                                  },
+                                  "failed": {
+                                    "type": "number"
+                                  },
+                                  "skipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "skipped"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "runner",
+                              "checks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "provenance": {
+                        "type": "object",
+                        "properties": {
+                          "sourceBefore": {
+                            "type": "string"
+                          },
+                          "sourceAfter": {
+                            "type": "string"
+                          },
+                          "definitionBefore": {
+                            "type": "string"
+                          },
+                          "definitionAfter": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceBefore",
+                          "sourceAfter",
+                          "definitionBefore",
+                          "definitionAfter"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -36133,6 +36343,111 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                             },
                             "skipped": {
                               "type": "boolean"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "unverified"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "completion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command-exit"
+                                      ]
+                                    },
+                                    "exitCode": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "exitCode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "assertions"
+                                      ]
+                                    },
+                                    "runner": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bun-junit",
+                                        "registered-protocol"
+                                      ]
+                                    },
+                                    "checks": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "number"
+                                        },
+                                        "failed": {
+                                          "type": "number"
+                                        },
+                                        "skipped": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed",
+                                        "skipped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "runner",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "sourceBefore": {
+                                  "type": "string"
+                                },
+                                "sourceAfter": {
+                                  "type": "string"
+                                },
+                                "definitionBefore": {
+                                  "type": "string"
+                                },
+                                "definitionAfter": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceBefore",
+                                "sourceAfter",
+                                "definitionBefore",
+                                "definitionAfter"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -37290,6 +37605,111 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 },
                 "skipped": {
                   "type": "boolean"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "unverified"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "completion": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "command-exit"
+                          ]
+                        },
+                        "exitCode": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "exitCode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "assertions"
+                          ]
+                        },
+                        "runner": {
+                          "type": "string",
+                          "enum": [
+                            "bun-junit",
+                            "registered-protocol"
+                          ]
+                        },
+                        "checks": {
+                          "type": "object",
+                          "properties": {
+                            "passed": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "skipped": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "passed",
+                            "failed",
+                            "skipped"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "runner",
+                        "checks"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "sourceBefore": {
+                      "type": "string"
+                    },
+                    "sourceAfter": {
+                      "type": "string"
+                    },
+                    "definitionBefore": {
+                      "type": "string"
+                    },
+                    "definitionAfter": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sourceBefore",
+                    "sourceAfter",
+                    "definitionBefore",
+                    "definitionAfter"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -41311,6 +41731,111 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                             },
                             "skipped": {
                               "type": "boolean"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "unverified"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "completion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command-exit"
+                                      ]
+                                    },
+                                    "exitCode": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "exitCode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "assertions"
+                                      ]
+                                    },
+                                    "runner": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bun-junit",
+                                        "registered-protocol"
+                                      ]
+                                    },
+                                    "checks": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "number"
+                                        },
+                                        "failed": {
+                                          "type": "number"
+                                        },
+                                        "skipped": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed",
+                                        "skipped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "runner",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "sourceBefore": {
+                                  "type": "string"
+                                },
+                                "sourceAfter": {
+                                  "type": "string"
+                                },
+                                "definitionBefore": {
+                                  "type": "string"
+                                },
+                                "definitionAfter": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceBefore",
+                                "sourceAfter",
+                                "definitionBefore",
+                                "definitionAfter"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -42053,6 +42578,111 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                             },
                             "skipped": {
                               "type": "boolean"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "unverified"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "completion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command-exit"
+                                      ]
+                                    },
+                                    "exitCode": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "exitCode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "assertions"
+                                      ]
+                                    },
+                                    "runner": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bun-junit",
+                                        "registered-protocol"
+                                      ]
+                                    },
+                                    "checks": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "number"
+                                        },
+                                        "failed": {
+                                          "type": "number"
+                                        },
+                                        "skipped": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed",
+                                        "skipped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "runner",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "sourceBefore": {
+                                  "type": "string"
+                                },
+                                "sourceAfter": {
+                                  "type": "string"
+                                },
+                                "definitionBefore": {
+                                  "type": "string"
+                                },
+                                "definitionAfter": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceBefore",
+                                "sourceAfter",
+                                "definitionBefore",
+                                "definitionAfter"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -43210,6 +43840,111 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                   },
                                   "skipped": {
                                     "type": "boolean"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "passed",
+                                      "failed",
+                                      "unverified"
+                                    ]
+                                  },
+                                  "required": {
+                                    "type": "boolean"
+                                  },
+                                  "reason": {
+                                    "type": "string"
+                                  },
+                                  "completion": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "command-exit"
+                                            ]
+                                          },
+                                          "exitCode": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "exitCode"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "assertions"
+                                            ]
+                                          },
+                                          "runner": {
+                                            "type": "string",
+                                            "enum": [
+                                              "bun-junit",
+                                              "registered-protocol"
+                                            ]
+                                          },
+                                          "checks": {
+                                            "type": "object",
+                                            "properties": {
+                                              "passed": {
+                                                "type": "number"
+                                              },
+                                              "failed": {
+                                                "type": "number"
+                                              },
+                                              "skipped": {
+                                                "type": "number"
+                                              }
+                                            },
+                                            "required": [
+                                              "passed",
+                                              "failed",
+                                              "skipped"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "runner",
+                                          "checks"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "provenance": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceBefore": {
+                                        "type": "string"
+                                      },
+                                      "sourceAfter": {
+                                        "type": "string"
+                                      },
+                                      "definitionBefore": {
+                                        "type": "string"
+                                      },
+                                      "definitionAfter": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceBefore",
+                                      "sourceAfter",
+                                      "definitionBefore",
+                                      "definitionAfter"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -44367,6 +45102,111 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       },
                       "skipped": {
                         "type": "boolean"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "unverified"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "completion": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "command-exit"
+                                ]
+                              },
+                              "exitCode": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "exitCode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assertions"
+                                ]
+                              },
+                              "runner": {
+                                "type": "string",
+                                "enum": [
+                                  "bun-junit",
+                                  "registered-protocol"
+                                ]
+                              },
+                              "checks": {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "number"
+                                  },
+                                  "failed": {
+                                    "type": "number"
+                                  },
+                                  "skipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "skipped"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "runner",
+                              "checks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "provenance": {
+                        "type": "object",
+                        "properties": {
+                          "sourceBefore": {
+                            "type": "string"
+                          },
+                          "sourceAfter": {
+                            "type": "string"
+                          },
+                          "definitionBefore": {
+                            "type": "string"
+                          },
+                          "definitionAfter": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceBefore",
+                          "sourceAfter",
+                          "definitionBefore",
+                          "definitionAfter"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -48496,6 +49336,111 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                           },
                           "skipped": {
                             "type": "boolean"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "unverified"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "completion": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command-exit"
+                                    ]
+                                  },
+                                  "exitCode": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "exitCode"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "assertions"
+                                    ]
+                                  },
+                                  "runner": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bun-junit",
+                                      "registered-protocol"
+                                    ]
+                                  },
+                                  "checks": {
+                                    "type": "object",
+                                    "properties": {
+                                      "passed": {
+                                        "type": "number"
+                                      },
+                                      "failed": {
+                                        "type": "number"
+                                      },
+                                      "skipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "passed",
+                                      "failed",
+                                      "skipped"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "runner",
+                                  "checks"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "sourceBefore": {
+                                "type": "string"
+                              },
+                              "sourceAfter": {
+                                "type": "string"
+                              },
+                              "definitionBefore": {
+                                "type": "string"
+                              },
+                              "definitionAfter": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceBefore",
+                              "sourceAfter",
+                              "definitionBefore",
+                              "definitionAfter"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -49238,6 +50183,111 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                           },
                           "skipped": {
                             "type": "boolean"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "unverified"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "completion": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command-exit"
+                                    ]
+                                  },
+                                  "exitCode": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "exitCode"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "assertions"
+                                    ]
+                                  },
+                                  "runner": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bun-junit",
+                                      "registered-protocol"
+                                    ]
+                                  },
+                                  "checks": {
+                                    "type": "object",
+                                    "properties": {
+                                      "passed": {
+                                        "type": "number"
+                                      },
+                                      "failed": {
+                                        "type": "number"
+                                      },
+                                      "skipped": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "passed",
+                                      "failed",
+                                      "skipped"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "runner",
+                                  "checks"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "provenance": {
+                            "type": "object",
+                            "properties": {
+                              "sourceBefore": {
+                                "type": "string"
+                              },
+                              "sourceAfter": {
+                                "type": "string"
+                              },
+                              "definitionBefore": {
+                                "type": "string"
+                              },
+                              "definitionAfter": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceBefore",
+                              "sourceAfter",
+                              "definitionBefore",
+                              "definitionAfter"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -50395,6 +51445,111 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                                 },
                                 "skipped": {
                                   "type": "boolean"
+                                },
+                                "outcome": {
+                                  "type": "string",
+                                  "enum": [
+                                    "passed",
+                                    "failed",
+                                    "unverified"
+                                  ]
+                                },
+                                "required": {
+                                  "type": "boolean"
+                                },
+                                "reason": {
+                                  "type": "string"
+                                },
+                                "completion": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "command-exit"
+                                          ]
+                                        },
+                                        "exitCode": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "exitCode"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "assertions"
+                                          ]
+                                        },
+                                        "runner": {
+                                          "type": "string",
+                                          "enum": [
+                                            "bun-junit",
+                                            "registered-protocol"
+                                          ]
+                                        },
+                                        "checks": {
+                                          "type": "object",
+                                          "properties": {
+                                            "passed": {
+                                              "type": "number"
+                                            },
+                                            "failed": {
+                                              "type": "number"
+                                            },
+                                            "skipped": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "passed",
+                                            "failed",
+                                            "skipped"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "runner",
+                                        "checks"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "provenance": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourceBefore": {
+                                      "type": "string"
+                                    },
+                                    "sourceAfter": {
+                                      "type": "string"
+                                    },
+                                    "definitionBefore": {
+                                      "type": "string"
+                                    },
+                                    "definitionAfter": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "sourceBefore",
+                                    "sourceAfter",
+                                    "definitionBefore",
+                                    "definitionAfter"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -51552,6 +52707,111 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     },
                     "skipped": {
                       "type": "boolean"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "passed",
+                        "failed",
+                        "unverified"
+                      ]
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "completion": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "command-exit"
+                              ]
+                            },
+                            "exitCode": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "exitCode"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "assertions"
+                              ]
+                            },
+                            "runner": {
+                              "type": "string",
+                              "enum": [
+                                "bun-junit",
+                                "registered-protocol"
+                              ]
+                            },
+                            "checks": {
+                              "type": "object",
+                              "properties": {
+                                "passed": {
+                                  "type": "number"
+                                },
+                                "failed": {
+                                  "type": "number"
+                                },
+                                "skipped": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "passed",
+                                "failed",
+                                "skipped"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "runner",
+                            "checks"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "provenance": {
+                      "type": "object",
+                      "properties": {
+                        "sourceBefore": {
+                          "type": "string"
+                        },
+                        "sourceAfter": {
+                          "type": "string"
+                        },
+                        "definitionBefore": {
+                          "type": "string"
+                        },
+                        "definitionAfter": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sourceBefore",
+                        "sourceAfter",
+                        "definitionBefore",
+                        "definitionAfter"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -123284,6 +124544,19 @@ Mark a shared session as closed.
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -123660,6 +124933,19 @@ Create a shared session for a surface, route, or web client.
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -123907,6 +125193,19 @@ Remove a surface's participant and its route binding from a session so that surf
         },
         "retainedMessageCount": {
           "type": "number"
+        },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
         },
         "pendingInputCount": {
           "type": "number"
@@ -124210,6 +125509,19 @@ Queue a deferred follow-up for a shared session so it runs after the current age
             },
             "retainedMessageCount": {
               "type": "number"
+            },
+            "channelPermissionMode": {
+              "type": "string",
+              "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
+              ]
+            },
+            "channelPermissionModeRevision": {
+              "type": "integer",
+              "minimum": 0
             },
             "pendingInputCount": {
               "type": "number"
@@ -124726,6 +126038,19 @@ Return metadata for a shared session.
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -125061,6 +126386,15 @@ Join a hosted session and receive its transcript so far, so a client that was ne
         "originSurface": {
           "type": "string"
         },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
         "contractIds": {
           "type": "array",
           "items": {
@@ -125265,6 +126599,15 @@ Compose a full conversation loop INSIDE the daemon for a workspace: the same orc
         "originSurface": {
           "type": "string"
         },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
         "contractIds": {
           "type": "array",
           "items": {
@@ -125422,6 +126765,15 @@ Leave a hosted session. When other clients are still attached, nothing else happ
         "originSurface": {
           "type": "string"
         },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
         "contractIds": {
           "type": "array",
           "items": {
@@ -125575,6 +126927,15 @@ End a hosted session regardless of who is attached or what its detach policy say
         "originSurface": {
           "type": "string"
         },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
         "contractIds": {
           "type": "array",
           "items": {
@@ -125726,6 +127087,15 @@ Every session this daemon hosts, most recently updated first. Terminated session
           },
           "originSurface": {
             "type": "string"
+          },
+          "permissionMode": {
+            "type": "string",
+            "enum": [
+              "safe-owner",
+              "safe-jev",
+              "yolo",
+              "plan"
+            ]
           },
           "contractIds": {
             "type": "array",
@@ -126389,6 +127759,19 @@ Return explicit session inputs, including queued follow-ups and delivered steeri
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -126893,6 +128276,19 @@ Return shared-session integration state.
           "retainedMessageCount": {
             "type": "number"
           },
+          "channelPermissionMode": {
+            "type": "string",
+            "enum": [
+              "safe-owner",
+              "safe-jev",
+              "yolo",
+              "plan"
+            ]
+          },
+          "channelPermissionModeRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
           "pendingInputCount": {
             "type": "number"
           },
@@ -127222,6 +128618,19 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
                 },
                 "retainedMessageCount": {
                   "type": "number"
+                },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "pendingInputCount": {
                   "type": "number"
@@ -127749,6 +129158,19 @@ Return a page of retained session messages. Offset counts backward from the newe
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -127958,7 +129380,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the permission mode currently in effect for a session (plan/normal/accept-edits/auto, or custom for a bespoke rule set). Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.
+Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -127999,11 +129421,10 @@ Return the permission mode currently in effect for a session (plan/normal/accept
     "mode": {
       "type": "string",
       "enum": [
-        "plan",
-        "normal",
-        "accept-edits",
-        "auto",
-        "custom"
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
       ]
     }
   },
@@ -128017,7 +129438,7 @@ Return the permission mode currently in effect for a session (plan/normal/accept
 
 #### `sessions.permissionMode.set`
 
-Set a session's gate preset to plan, normal, accept-edits, or auto. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.
+Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -128041,10 +129462,10 @@ Set a session's gate preset to plan, normal, accept-edits, or auto. Emits runtim
     "mode": {
       "type": "string",
       "enum": [
-        "plan",
-        "normal",
-        "accept-edits",
-        "auto"
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
       ]
     }
   },
@@ -128068,21 +129489,19 @@ Set a session's gate preset to plan, normal, accept-edits, or auto. Emits runtim
     "mode": {
       "type": "string",
       "enum": [
-        "plan",
-        "normal",
-        "accept-edits",
-        "auto",
-        "custom"
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
       ]
     },
     "previousMode": {
       "type": "string",
       "enum": [
-        "plan",
-        "normal",
-        "accept-edits",
-        "auto",
-        "custom"
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
       ]
     }
   },
@@ -128427,6 +129846,19 @@ Idempotently register (or heartbeat) a session keyed on a caller-supplied id, ca
         "retainedMessageCount": {
           "type": "number"
         },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
         "pendingInputCount": {
           "type": "number"
         },
@@ -128637,6 +130069,19 @@ Reopen a previously closed shared session.
         },
         "retainedMessageCount": {
           "type": "number"
+        },
+        "channelPermissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
+        },
+        "channelPermissionModeRevision": {
+          "type": "integer",
+          "minimum": 0
         },
         "pendingInputCount": {
           "type": "number"
@@ -128853,6 +130298,19 @@ Paginated, filtered query over shared sessions: free-text query (matches id/titl
           },
           "retainedMessageCount": {
             "type": "number"
+          },
+          "channelPermissionMode": {
+            "type": "string",
+            "enum": [
+              "safe-owner",
+              "safe-jev",
+              "yolo",
+              "plan"
+            ]
+          },
+          "channelPermissionModeRevision": {
+            "type": "integer",
+            "minimum": 0
           },
           "pendingInputCount": {
             "type": "number"
@@ -129167,6 +130625,19 @@ Deliver a live steering message to the active agent for a shared session, option
             },
             "retainedMessageCount": {
               "type": "number"
+            },
+            "channelPermissionMode": {
+              "type": "string",
+              "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
+              ]
+            },
+            "channelPermissionModeRevision": {
+              "type": "integer",
+              "minimum": 0
             },
             "pendingInputCount": {
               "type": "number"
@@ -155200,7 +156671,7 @@ Read authoritative native session ownership. Only an explicit legacy result perm
 
 #### `workLedger.turn.start`
 
-Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the WebUI settings owner. Accepts source identity only. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.
+Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the WebUI settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.
 
 - Title: `Start Native Hosted Turn`
 - Source: `builtin`
@@ -155233,6 +156704,15 @@ Deliver an already admitted native conversation input at most once through a hos
       "type": "string",
       "minLength": 1,
       "maxLength": 200
+    },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
+      ]
     }
   },
   "required": [
@@ -155355,7 +156835,7 @@ Deliver an already admitted native conversation input at most once through a hos
 
 #### `workLedger.turn.startAgent`
 
-Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the Agent settings owner. Accepts source identity only. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.
+Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the Agent settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.
 
 - Title: `Start Agent Native Hosted Turn`
 - Source: `builtin`
@@ -155388,6 +156868,15 @@ Deliver an already admitted native conversation input at most once through a hos
       "type": "string",
       "minLength": 1,
       "maxLength": 200
+    },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "safe-owner",
+        "safe-jev",
+        "yolo",
+        "plan"
+      ]
     }
   },
   "required": [
@@ -158095,6 +159584,15 @@ Every lifecycle transition of a session whose loop runs INSIDE the daemon: creat
         },
         "originSurface": {
           "type": "string"
+        },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "safe-owner",
+            "safe-jev",
+            "yolo",
+            "plan"
+          ]
         },
         "contractIds": {
           "type": "array",

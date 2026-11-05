@@ -1,10 +1,54 @@
 # Changelog
 
-## Unreleased
+## [2.0.25] - 2026-11-05
+
+### Added
+
+- Share `safe-owner`, `safe-jev`, and `yolo` execution modes across foreground,
+  background, hosted and channel work, with session-owner binding and fresh
+  authority after mode changes. Keep the non-executing `plan` posture separate.
+- Report Agent and TUI session activity, native hooks, owner waits and resume
+  identity to the owning Herdr pane through the shared terminal-shell reporter.
+- Bind contract completion to immutable judgment inputs, recorded gate receipts
+  and coverage of the original obligations, including obligations added during
+  execution.
+
+### Changed
+
+- Select and attribute independent questions in shared judgment requests while
+  preserving decision identity and evidence for each reading.
+- Refresh setup, pairing, contract-runner and completion-verification guides and
+  generated operator contracts for the current monorepo interfaces.
 
 ### Fixed
 
+- Retain completed calibration evidence when later fixtures fail, including
+  partial reports rather than discarding successful readings.
+- Check completion against the owner's original request and current execution
+  evidence. Bound permanently unsettled observation audits as disclosed
+  limitations, localize counterevidence to its requirement, and break repeated
+  equivalent-draft repair loops without treating uncertainty as acceptance.
+- Bind project reviews to the native file inventory and preserve captured API
+  inspection progress across policy-denied files. Report reads as failed when
+  every requested file fails.
+- Preserve independent worker acceptance requirements and current plan and peer
+  receipts when delegated work resumes.
+- Align TUI payment snapshots with spending guardrails and refresh stored
+  permission-setting classification metadata.
+- Keep completion bells out of piped JSON output, retain current execution
+  evidence, and support contained Go toolchains.
+
 - Honor the existing auto-approve mode for reads, file searches, and repository maps outside the project directory, including symlink targets. Apply mode changes to subsequent calls without restarting.
+
+### Migration
+
+- Existing saved execution-mode aliases normalize at configuration boundaries.
+  Select the desired current mode in settings; changing modes invalidates pending
+  authority. Payment budgets, merchant rules and approval/veto rules remain
+  separate from execution modes.
+- Engine, Judgment and Daemon share version `2.0.25`. Agent and TUI retain their
+  independent product versions; their native assets belong to this workspace
+  release through the verified source commit and CI artifact receipts.
 
 ## [2.0.24] - 2026-10-23
 

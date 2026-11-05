@@ -6,7 +6,7 @@
       "path": "audio/activation-sound.ts",
       "baselineTuiLines": 117,
       "baselineSimilarity": 0.8448,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "audio/capture.ts",
@@ -144,7 +144,7 @@
       "path": "cli/provider-auth-routes.ts",
       "baselineTuiLines": 22,
       "baselineSimilarity": 0.9333,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "cli/service-posture.ts",
@@ -198,7 +198,7 @@
       "path": "core/bookmark-navigation.ts",
       "baselineTuiLines": 50,
       "baselineSimilarity": 0.7525,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/composer-state.ts",
@@ -618,7 +618,7 @@
       "path": "input/concealed-input.ts",
       "baselineTuiLines": 128,
       "baselineSimilarity": 0.8604,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/feed-context-factory.ts",
@@ -690,7 +690,7 @@
       "path": "input/handler-prompt-buffer.ts",
       "baselineTuiLines": 348,
       "baselineSimilarity": 0.9581,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/handler-session-view-route.ts",
@@ -726,7 +726,7 @@
       "path": "input/input-history.ts",
       "baselineTuiLines": 379,
       "baselineSimilarity": 0.8356,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/keybindings.ts",
@@ -804,13 +804,13 @@
       "path": "input/settings-modal-behavior.ts",
       "baselineTuiLines": 39,
       "baselineSimilarity": 0.7907,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/settings-modal-search.ts",
       "baselineTuiLines": 99,
       "baselineSimilarity": 0.9543,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/settings-modal-secrets.ts",
@@ -882,7 +882,7 @@
       "path": "providers/reasoning-effort-surface.ts",
       "baselineTuiLines": 399,
       "baselineSimilarity": 0.9449,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/autocomplete-overlay.ts",
@@ -1536,13 +1536,13 @@
       "path": "runtime/store/domains/index.ts",
       "baselineTuiLines": 1,
       "baselineSimilarity": 0.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "runtime/store/index.ts",
       "baselineTuiLines": 11,
       "baselineSimilarity": 0.125,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "runtime/store/selectors/index.ts",
@@ -1554,7 +1554,7 @@
       "path": "runtime/store/state.ts",
       "baselineTuiLines": 1,
       "baselineSimilarity": 0.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "runtime/ui-read-models.ts",
@@ -1620,7 +1620,7 @@
       "path": "utils/clipboard.ts",
       "baselineTuiLines": 22,
       "baselineSimilarity": 0.8571,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "utils/format-elapsed.ts",

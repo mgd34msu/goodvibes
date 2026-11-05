@@ -374,3 +374,6 @@ export function selectRunningTaskCountByKind(
   }
   return counts as Partial<Record<TaskKind, number>>;
 }
+
+/** Historical UI name for the canonical host-surface performance slice. */
+export const selectUiPerf = selectSurfacePerf;

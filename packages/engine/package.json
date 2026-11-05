@@ -1808,6 +1808,56 @@
       "bun": "./terminal-shell/src/renderer/autocomplete-overlay.ts",
       "types": "./terminal-shell/dist/renderer/autocomplete-overlay.d.ts",
       "import": "./terminal-shell/dist/renderer/autocomplete-overlay.js"
+    },
+    "./sdk/platform/providers/reasoning-effort-surface": {
+      "bun": "./sdk/src/platform/providers/reasoning-effort-surface.ts",
+      "types": "./sdk/dist/platform/providers/reasoning-effort-surface.d.ts",
+      "import": "./sdk/dist/platform/providers/reasoning-effort-surface.js"
+    },
+    "./sdk/platform/providers/auth-route-presentation": {
+      "bun": "./sdk/src/platform/providers/provider-auth-route-presentation.ts",
+      "types": "./sdk/dist/platform/providers/provider-auth-route-presentation.d.ts",
+      "import": "./sdk/dist/platform/providers/provider-auth-route-presentation.js"
+    },
+    "./terminal-shell/clipboard": {
+      "bun": "./terminal-shell/src/clipboard.ts",
+      "types": "./terminal-shell/dist/clipboard.d.ts",
+      "import": "./terminal-shell/dist/clipboard.js"
+    },
+    "./terminal-shell/concealed-input": {
+      "bun": "./terminal-shell/src/concealed-input.ts",
+      "types": "./terminal-shell/dist/concealed-input.d.ts",
+      "import": "./terminal-shell/dist/concealed-input.js"
+    },
+    "./terminal-shell/input-history": {
+      "bun": "./terminal-shell/src/input-history.ts",
+      "types": "./terminal-shell/dist/input-history.d.ts",
+      "import": "./terminal-shell/dist/input-history.js"
+    },
+    "./terminal-shell/bookmark-navigation": {
+      "bun": "./terminal-shell/src/bookmark-navigation.ts",
+      "types": "./terminal-shell/dist/bookmark-navigation.d.ts",
+      "import": "./terminal-shell/dist/bookmark-navigation.js"
+    },
+    "./terminal-shell/prompt-buffer": {
+      "bun": "./terminal-shell/src/prompt-buffer.ts",
+      "types": "./terminal-shell/dist/prompt-buffer.d.ts",
+      "import": "./terminal-shell/dist/prompt-buffer.js"
+    },
+    "./terminal-shell/settings-search": {
+      "bun": "./terminal-shell/src/settings-search.ts",
+      "types": "./terminal-shell/dist/settings-search.d.ts",
+      "import": "./terminal-shell/dist/settings-search.js"
+    },
+    "./terminal-shell/settings-behavior": {
+      "bun": "./terminal-shell/src/settings-behavior.ts",
+      "types": "./terminal-shell/dist/settings-behavior.d.ts",
+      "import": "./terminal-shell/dist/settings-behavior.js"
+    },
+    "./terminal-shell/activation-sound": {
+      "bun": "./terminal-shell/src/audio/activation-sound.ts",
+      "types": "./terminal-shell/dist/audio/activation-sound.d.ts",
+      "import": "./terminal-shell/dist/audio/activation-sound.js"
     }
   },
   "publishConfig": {

@@ -154,7 +154,15 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
   let id: string | undefined;
   try {
     id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-npx-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
-    await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), `actual Node/npm ${mode} settlement`, mode === 'direct' ? 120_000 : 180_000);
+    try {
+      // The real dependency capture and two compiler runs took 135 seconds on
+      // the development host and exceeded 180 on hosted CI. Keep a bounded
+      // settlement deadline with cleanup room inside the enclosing test timer.
+      await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), `actual Node/npm ${mode} settlement`, mode === 'direct' ? 120_000 : 240_000);
+    } catch (error) {
+      throw new Error(`Actual runtime did not settle: ${JSON.stringify({ mode, contract: runner.get(id), results: [...results], calls,
+        members: runtime.agentManager.list().map(member => ({ id: member.id, status: member.status })) })}`, { cause: error });
+    }
     await runner.join(id); const result = runner.get(id)!;
     expect(result.status, JSON.stringify({ error: result.error, results: [...results], calls })).toBe('passed'); expect(calls).toBe(mode === 'direct' ? 2 : 3); expect(checked).toBe(true);
     expect(result.commit?.status, result.commit?.note).toBe('applied'); expect(readFileSync(join(root, 'src/csv.ts'), 'utf8')).toBe(changed);
@@ -171,4 +179,4 @@ for (const mode of ['direct', 'validators'] as const)
   test.skipIf(!supported)(mode === 'direct'
     ? 'actual default member direct Node/npm commands admit their runtime without prior validators'
     : 'actual default member typecheck/lint validators use admitted Node/npm and real project dependencies',
-  () => assertActualRuntimeFlow(mode), mode === 'direct' ? 150_000 : 240_000);
+  () => assertActualRuntimeFlow(mode), mode === 'direct' ? 150_000 : 300_000);

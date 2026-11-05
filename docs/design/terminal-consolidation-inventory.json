@@ -210,7 +210,7 @@
       "path": "core/conversation-display-only.ts",
       "baselineTuiLines": 86,
       "baselineSimilarity": 0.9767,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "core/conversation-line-cache.ts",
@@ -894,7 +894,7 @@
       "path": "renderer/back-to-bottom.ts",
       "baselineTuiLines": 82,
       "baselineSimilarity": 0.9753,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/block-actions-overlay.ts",
@@ -906,13 +906,13 @@
       "path": "renderer/block-actions.ts",
       "baselineTuiLines": 74,
       "baselineSimilarity": 0.9595,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/bookmark-modal.ts",
       "baselineTuiLines": 70,
       "baselineSimilarity": 0.8889,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/buffer.ts",
@@ -948,7 +948,7 @@
       "path": "renderer/conversation-layout.ts",
       "baselineTuiLines": 103,
       "baselineSimilarity": 0.9239,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/conversation-overlays.ts",
@@ -978,7 +978,7 @@
       "path": "renderer/file-picker-overlay.ts",
       "baselineTuiLines": 74,
       "baselineSimilarity": 0.9,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/header-line.ts",
@@ -1032,7 +1032,7 @@
       "path": "renderer/layout.ts",
       "baselineTuiLines": 19,
       "baselineSimilarity": 0.9189,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/markdown-inline.ts",
@@ -1098,7 +1098,7 @@
       "path": "renderer/selection-modal-overlay.ts",
       "baselineTuiLines": 115,
       "baselineSimilarity": 0.8952,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/semantic-diff.ts",
@@ -1158,7 +1158,7 @@
       "path": "renderer/status-line.ts",
       "baselineTuiLines": 482,
       "baselineSimilarity": 0.9969,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/surface-compose.ts",
@@ -1410,7 +1410,7 @@
       "path": "runtime/native-conversation-intake-preflight.ts",
       "baselineTuiLines": 24,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "runtime/native-conversation-intake.ts",
@@ -1548,7 +1548,7 @@
       "path": "runtime/store/selectors/index.ts",
       "baselineTuiLines": 331,
       "baselineSimilarity": 0.997,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "runtime/store/state.ts",

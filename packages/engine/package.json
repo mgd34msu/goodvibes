@@ -1698,6 +1698,71 @@
       "bun": "./terminal-shell/src/work-tree-input.ts",
       "types": "./terminal-shell/dist/work-tree-input.d.ts",
       "import": "./terminal-shell/dist/work-tree-input.js"
+    },
+    "./sdk/platform/runtime/store/domains/ui-perf": {
+      "bun": "./sdk/src/platform/runtime/store/domains/ui-perf.ts",
+      "types": "./sdk/dist/platform/runtime/store/domains/ui-perf.d.ts",
+      "import": "./sdk/dist/platform/runtime/store/domains/ui-perf.js"
+    },
+    "./terminal-shell/delete-key-policy": {
+      "bun": "./terminal-shell/src/delete-key-policy.ts",
+      "types": "./terminal-shell/dist/delete-key-policy.d.ts",
+      "import": "./terminal-shell/dist/delete-key-policy.js"
+    },
+    "./terminal-shell/prompt-content-width": {
+      "bun": "./terminal-shell/src/prompt-content-width.ts",
+      "types": "./terminal-shell/dist/prompt-content-width.d.ts",
+      "import": "./terminal-shell/dist/prompt-content-width.js"
+    },
+    "./terminal-shell/conversation-display-only": {
+      "bun": "./terminal-shell/src/conversation-display-only.ts",
+      "types": "./terminal-shell/dist/conversation-display-only.d.ts",
+      "import": "./terminal-shell/dist/conversation-display-only.js"
+    },
+    "./terminal-shell/status-line": {
+      "bun": "./terminal-shell/src/renderer/status-line.ts",
+      "types": "./terminal-shell/dist/renderer/status-line.d.ts",
+      "import": "./terminal-shell/dist/renderer/status-line.js"
+    },
+    "./terminal-shell/back-to-bottom": {
+      "bun": "./terminal-shell/src/renderer/back-to-bottom.ts",
+      "types": "./terminal-shell/dist/renderer/back-to-bottom.d.ts",
+      "import": "./terminal-shell/dist/renderer/back-to-bottom.js"
+    },
+    "./terminal-shell/block-actions": {
+      "bun": "./terminal-shell/src/renderer/block-actions.ts",
+      "types": "./terminal-shell/dist/renderer/block-actions.d.ts",
+      "import": "./terminal-shell/dist/renderer/block-actions.js"
+    },
+    "./terminal-shell/native-action-preflight": {
+      "bun": "./terminal-shell/src/native/native-action-preflight.ts",
+      "types": "./terminal-shell/dist/native/native-action-preflight.d.ts",
+      "import": "./terminal-shell/dist/native/native-action-preflight.js"
+    },
+    "./terminal-shell/conversation-layout": {
+      "bun": "./terminal-shell/src/renderer/conversation-layout.ts",
+      "types": "./terminal-shell/dist/renderer/conversation-layout.d.ts",
+      "import": "./terminal-shell/dist/renderer/conversation-layout.js"
+    },
+    "./terminal-shell/render-bookmark-modal": {
+      "bun": "./terminal-shell/src/renderer/bookmark-modal.ts",
+      "types": "./terminal-shell/dist/renderer/bookmark-modal.d.ts",
+      "import": "./terminal-shell/dist/renderer/bookmark-modal.js"
+    },
+    "./terminal-shell/render-file-picker-overlay": {
+      "bun": "./terminal-shell/src/renderer/file-picker-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/file-picker-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/file-picker-overlay.js"
+    },
+    "./terminal-shell/render-selection-modal-overlay": {
+      "bun": "./terminal-shell/src/renderer/selection-modal-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/selection-modal-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/selection-modal-overlay.js"
+    },
+    "./terminal-shell/layout": {
+      "bun": "./terminal-shell/src/renderer/layout.ts",
+      "types": "./terminal-shell/dist/renderer/layout.d.ts",
+      "import": "./terminal-shell/dist/renderer/layout.js"
     }
   },
   "publishConfig": {

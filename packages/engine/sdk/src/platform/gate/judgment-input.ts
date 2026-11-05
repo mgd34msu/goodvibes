@@ -17,6 +17,7 @@ import { findCredentialScopeDeclaration, isDaemonNeededSecretKey } from '../conf
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
+import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
 
 export type JudgmentInputProblem = 'credential-material' | 'card-material' | 'unsupported-input';
 
@@ -428,6 +429,71 @@ export function snapshotJudgmentEvidence(value: unknown): unknown {
   const problem = snapshotProblem(snapshot, '', false, true);
   if (problem) throw new JudgmentInputError(problem);
   return snapshot;
+}
+
+/** Convert captured data using the JSON wire's undefined/array rules, without invoking hooks. */
+function projectJson(value: unknown): JsonValue {
+  const result: Record<string, JsonValue> = {};
+  type Container = JsonValue[] | Record<string, JsonValue>;
+  type Work = { entry: unknown; parent: Container; key: string } | { finish: Container };
+  const pending: Work[] = [{ entry: value, parent: result, key: 'value' }];
+  while (pending.length) {
+    const work = pending.pop()!;
+    if ('finish' in work) { Object.freeze(work.finish); continue; }
+    const { entry, parent, key } = work;
+    const assign = (child: JsonValue) => Object.defineProperty(parent, key, { value: child, enumerable: true });
+    if (entry === undefined || entry === null) { assign(null); continue; }
+    if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') { assign(entry); continue; }
+    if (typeof entry !== 'object') throw new JudgmentInputError('unsupported-input');
+    const array = Array.isArray(entry);
+    const copy: Container = array ? new Array<JsonValue>(entry.length) : {};
+    if (!array) Object.setPrototypeOf(copy, null);
+    assign(copy);
+    pending.push({ finish: copy });
+    for (const [childKey, child] of Object.entries(entry).reverse()) {
+      if (array) {
+        const index = Number(childKey);
+        // JSON serializes only indexed array slots. Preserve sparse length
+        // without allocating entries for every absent slot.
+        if (!Number.isInteger(index) || index < 0 || index >= entry.length || String(index) !== childKey) continue;
+      } else if (child === undefined) continue;
+      pending.push({ entry: child, parent: copy, key: childKey });
+    }
+  }
+  const projected = result['value'];
+  if (projected === undefined) throw new JudgmentInputError('unsupported-input');
+  rememberCapturedRoot(projected);
+  return projected;
+}
+
+function projectJsonRoot(value: unknown): JsonValue {
+  if (value === undefined) throw new JudgmentInputError('unsupported-input');
+  return projectJson(value);
+}
+
+/** Structurally owned JSON for protocol adapters whose semantic fields are inspected separately. */
+export function captureJsonValue(value: unknown): JsonValue {
+  return projectJsonRoot(captureOwnedJson(value));
+}
+
+function entryOf(value: JsonValue): EntryType {
+  if (typeof value === 'number' || typeof value === 'boolean') throw new JudgmentInputError('unsupported-input');
+  return value;
+}
+
+/** Structurally owned state, restricted to the System One entry vocabulary. */
+export function captureJsonEntry(value: unknown): EntryType {
+  return entryOf(captureJsonValue(value));
+}
+
+/** Privacy-inspected JSON with a type derived from the captured values. */
+export function snapshotJudgmentJson(value: unknown, toolName = ''): JsonValue {
+  return projectJsonRoot(snapshotJudgmentInput(value, toolName));
+}
+
+/** Privacy-inspected state, restricted to text, object, array or null. */
+export function snapshotJudgmentEntry(value: unknown, toolName = ''): EntryType {
+  return entryOf(snapshotJudgmentJson(value, toolName));
 }
 
 /** Return a fixed refusal kind without exposing input or executing its accessors. */

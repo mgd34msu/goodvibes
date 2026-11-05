@@ -1,7 +1,7 @@
 /** Shared recorded semantic evaluator. It selects host-owned operations; it executes none. */
-import { JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { JudgmentError, type EntryType, type JsonValue, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { captureJevDecisionContext, JEV_DECISION_BINDING_KEYS, validateJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
-import { snapshotJudgmentInput } from './judgment-input.js';
+import { snapshotJudgmentEntry, snapshotJudgmentInput } from './judgment-input.js';
 import { autonomousDisposition, autonomousRefusal } from './batteries/autonomous.js';
 
 export interface AutonomousContinuation {
@@ -88,35 +88,41 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
     evidence: input.evidence, continuations: input.continuations.map(item => item.ref), resumeConditions: input.conditions.map(item => item.ref),
   });
   inspectDecisionProtocolReferences(metadata);
-  const state = snapshotJudgmentInput(input.state) as EntryType;
-  const continuations = input.continuations.map((item, index) => Object.freeze({ ref: metadata.continuations[index]!,
-    description: snapshotJudgmentInput(item.description) as string, input: snapshotJudgmentInput(item.input) as EntryType }));
-  const conditions = input.conditions.map((item, index) => Object.freeze({ ref: metadata.resumeConditions[index]!, description: snapshotJudgmentInput(item.description) as string }));
+  const state = snapshotJudgmentEntry(input.state);
+  const continuations = input.continuations.map((item, index) => Object.freeze({ ref: Object.freeze({ ...metadata.continuations[index]! }),
+    description: inspectedDescription(item.description), input: snapshotJudgmentEntry(item.input) }));
+  const conditions = input.conditions.map((item, index) => Object.freeze({ ref: Object.freeze({ ...metadata.resumeConditions[index]! }), description: inspectedDescription(item.description) }));
+  const evidence = metadata.evidence.map(ref => Object.freeze({ ...ref }));
+  Object.freeze(continuations);
+  Object.freeze(conditions);
+  Object.freeze(evidence);
+  const binding = Object.freeze({ ...metadata.binding });
   if (continuations.length + conditions.length > 253 || new Set(continuations.map(item => item.ref.id)).size !== continuations.length) throw new JudgmentError('invalid-request', 'autonomous host catalog is invalid');
   const options: Record<string, string> = { ...(allowAct ? { act: input.actionDescription } : {}), reject: 'Refuse this action. Do not execute it or ask a human for approval.' };
   continuations.forEach((item, index) => { options[`revise_${index}`] = item.description; });
   conditions.forEach((item, index) => { options[`defer_${index}`] = `Wait for registered condition: ${item.description}. Obtain a fresh decision after it changes.`; });
   const ids: string[] = [...metadata.judgmentDecisionIds];
   const active = () => { signal?.throwIfAborted(); assertCurrent(); };
-  if (!port.recorder) throw new JudgmentError('unrecorded', 'autonomous decisions require the recorded judgment port');
+  const recorder = port.recorder;
+  if (!recorder) throw new JudgmentError('unrecorded', 'autonomous decisions require the recorded judgment port');
   const ask = async (criteria: Record<string, string>, resolving = false) => {
     active();
     if (Object.keys(criteria).length === 1) {
-      const result = await autonomousRefusal.ask(port, { state: { input: state, deterministicConstraints: 'No action or continuation is eligible. Refusal is the only executable semantic disposition.' } as unknown as EntryType,
+      const result = await autonomousRefusal.ask(port, { state: { input: state, deterministicConstraints: 'No action or continuation is eligible. Refusal is the only executable semantic disposition.' },
         instructions: input.instructions }, { site: input.site, beforeAttempt: active,
         ...(signal === undefined ? {} : { signal }), ...(onRetry === undefined ? {} : { onRetry }) });
       active();
       if (!result.decisionId) throw new JudgmentError('unrecorded', 'autonomous refusal requires recorded provenance');
       ids.push(result.decisionId);
       const reading = autonomousRefusal.read(result);
-      port.recorder!.recordReadings(result.decisionId, { refusal: reading.verdict, probability: reading.probability, bandOutcome: reading.outcome });
+      recorder.recordReadings(result.decisionId, { refusal: reading.verdict, probability: reading.probability, bandOutcome: reading.outcome });
       if (reading.verdict !== 'yes' || reading.outcome !== 'act') throw new JudgmentError('invalid-response', 'Jev did not settle refusal and no permissible continuation exists');
       return { choice: 'reject', confidence: reading.probability, outcome: reading.outcome };
     }
     const result = await autonomousDisposition.ask(port, {
-      state: Object.freeze({ input: state, binding: metadata.binding, evidence: metadata.evidence,
+      state: Object.freeze({ input: state, binding, evidence,
         offeredChoices: Object.freeze({ continuations, resumeConditions: conditions }),
-        ...(resolving ? { uncertainty: 'The prior act candidate did not reach the high-stakes band. Select a legal non-executing outcome.' } : {}) }) as unknown as EntryType,
+        ...(resolving ? { uncertainty: 'The prior act candidate did not reach the high-stakes band. Select a legal non-executing outcome.' } : {}) }),
       instructions: input.instructions, criteria,
     }, { site: input.site, beforeAttempt: active, ...(signal === undefined ? {} : { signal }), ...(onRetry === undefined ? {} : { onRetry }),
     });
@@ -124,7 +130,7 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
     if (!result.decisionId) throw new JudgmentError('unrecorded', 'autonomous decisions require recorded call provenance');
     ids.push(result.decisionId);
     const reading = autonomousDisposition.read(result, criteria);
-    port.recorder!.recordReadings(result.decisionId, { choice: reading.choice, confidence: reading.confidence, bandOutcome: reading.outcome });
+    recorder.recordReadings(result.decisionId, { choice: reading.choice, confidence: reading.confidence, bandOutcome: reading.outcome });
     return reading;
   };
   let selected = await ask(options);
@@ -142,17 +148,42 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
     evidence: context.evidence, summary: `Jev selected ${outcome} for the bound action.`, outcome,
     ...(continuation ? { next: continuation.ref } : {}), ...(condition ? { until: condition.ref } : {}) }, context);
   active();
+  const recordedDecision = decisionRecord(decision);
   for (const id of ids) {
-    port.recorder.recordReadings(id, { autonomousDecision: decision } as unknown as import('@goodvibes-jev/judgment').JsonValue);
-    port.recorder.recordAction(id, `autonomous:${outcome}:${context.decisionId}`);
+    recorder.recordReadings(id, recordedDecision);
+    recorder.recordAction(id, `autonomous:${outcome}:${context.decisionId}`);
   }
   return Object.freeze({ decision, context,
     assertCurrent() { active(); validateJevDecision(decision, context); },
     recordClaim() {
       active();
       if (decision.outcome !== 'act') throw new JudgmentError('invalid-request', 'only an act decision records a claim');
-      for (const id of ids) port.recorder!.recordAction(id, `autonomous:claim:${context.decisionId}`);
+      for (const id of ids) recorder.recordAction(id, `autonomous:claim:${context.decisionId}`);
       active();
     },
   });
+}
+
+function inspectedDescription(value: string): string {
+  const description = snapshotJudgmentInput(value);
+  if (typeof description !== 'string') throw new JudgmentError('invalid-request', 'autonomous description must be text');
+  return description;
+}
+
+function decisionRecord(decision: JevDecision): JsonValue {
+  const judgmentDecisionIds = [...decision.judgmentDecisionIds];
+  const evidence = decision.evidence.map(ref => Object.freeze({ ...ref }));
+  Object.freeze(judgmentDecisionIds);
+  Object.freeze(evidence);
+  return Object.freeze({ autonomousDecision: Object.freeze({
+    schemaVersion: decision.schemaVersion,
+    decisionId: decision.decisionId,
+    binding: Object.freeze({ ...decision.binding }),
+    judgmentDecisionIds,
+    evidence,
+    summary: decision.summary,
+    outcome: decision.outcome,
+    ...(decision.outcome === 'revise' ? { next: Object.freeze({ ...decision.next }) } : {}),
+    ...(decision.outcome === 'defer' ? { until: Object.freeze({ ...decision.until }) } : {}),
+  }) });
 }

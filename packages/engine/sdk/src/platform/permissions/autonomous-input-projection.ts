@@ -1,5 +1,6 @@
 /** Manager-owned host-alternative projection. Raw catalogs never become model evidence. */
-import { hashState, type EntryType } from '@goodvibes-jev/judgment';
+import { hashState } from '@goodvibes-jev/judgment';
+import { captureJsonEntry } from '../gate/judgment-input.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ProjectedToolCall } from '../tools/input-projection.js';
 import { captureCurrentAutonomousChoices, type AutonomousToolChoices } from './autonomous.js';
@@ -27,7 +28,7 @@ interface CapturedCatalog {
   releasePromise?: Promise<void>;
 }
 
-const authorityRevision = (authority: CatalogAuthority): string => hashState(authority as unknown as EntryType);
+const authorityRevision = (authority: CatalogAuthority): string => hashState(captureJsonEntry(authority));
 function stale(): never { throw new Error('Autonomous choice projection is stale or belongs to another source or manager'); }
 function authorityChanged(): never { throw new Error('Autonomous admission authority, source or scope changed'); }
 
@@ -61,10 +62,10 @@ export class AutonomousChoiceProjectionOwner {
         assertCurrent();
         registry.assertProjected(projected);
         revisions.push(Object.freeze({
-          ref: Object.freeze({ ...revision.ref, revision: hashState({
+          ref: Object.freeze({ ...revision.ref, revision: hashState(captureJsonEntry({
             host: revision.ref, toolName: revision.toolName, args: projected.args,
             schemaRevision: projected.schemaRevision, projectionRevision: projected.projectionRevision,
-          } as unknown as EntryType) }),
+          })) }),
           toolName: revision.toolName, args: projected.args,
         }));
       }

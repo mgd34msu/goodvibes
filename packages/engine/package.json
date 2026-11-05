@@ -1898,6 +1898,21 @@
       "bun": "./terminal-shell/src/audio/wake-inference.ts",
       "types": "./terminal-shell/dist/audio/wake-inference.d.ts",
       "import": "./terminal-shell/dist/audio/wake-inference.js"
+    },
+    "./terminal-shell/native-intake-journal": {
+      "bun": "./terminal-shell/src/native/native-conversation-intake-journal.ts",
+      "types": "./terminal-shell/dist/native/native-conversation-intake-journal.d.ts",
+      "import": "./terminal-shell/dist/native/native-conversation-intake-journal.js"
+    },
+    "./terminal-shell/native-hosted-turn": {
+      "bun": "./terminal-shell/src/native/native-hosted-turn.ts",
+      "types": "./terminal-shell/dist/native/native-hosted-turn.d.ts",
+      "import": "./terminal-shell/dist/native/native-hosted-turn.js"
+    },
+    "./terminal-shell/native-intake": {
+      "bun": "./terminal-shell/src/native/native-conversation-intake.ts",
+      "types": "./terminal-shell/dist/native/native-conversation-intake.d.ts",
+      "import": "./terminal-shell/dist/native/native-conversation-intake.js"
     }
   },
   "publishConfig": {

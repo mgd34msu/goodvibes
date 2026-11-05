@@ -1404,7 +1404,7 @@
       "path": "runtime/native-conversation-intake-journal.ts",
       "baselineTuiLines": 259,
       "baselineSimilarity": 0.8977,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/native-conversation-intake-preflight.ts",
@@ -1416,7 +1416,7 @@
       "path": "runtime/native-conversation-intake.ts",
       "baselineTuiLines": 208,
       "baselineSimilarity": 0.7324,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/native-work-execution.ts",

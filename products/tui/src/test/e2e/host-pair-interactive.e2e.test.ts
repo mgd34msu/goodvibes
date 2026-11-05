@@ -528,7 +528,7 @@ describe(`compiled interactive TUI native ${command === '/workstream start' ? 'w
       const session = await f.launch();
       const original = '  Repair  界 e\u0301 😀 @source.ts  ';
       const since = session.command(`${command} ${original}`);
-      await session.find('native capture uncertainty', text => text.includes('Prompt preparation failed (capture): Owned fixture lost capture acknowledgement'), since);
+      await session.find('native capture uncertainty', text => text.includes('Native intake outcome is unknown or unavailable.'), since);
       expect(f.nativeCaptures).toHaveLength(1);
       expect(f.nativeCaptures[0]).toMatchObject({ status: 200, body: {
         text: original, unsupportedSources: [{ kind: 'context', label: '@source.ts' }],

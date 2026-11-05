@@ -45,6 +45,8 @@
  */
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { findContentTaint, describeContentTaint, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
+import { judgmentInputProblem } from '../gate/judgment-input.js';
+import { isYoloExecution } from '../gate/execution-context.js';
 import {
   checkOwnerApproval,
   grantOwnerApproval,
@@ -234,6 +236,18 @@ const MAX_RETAINED_CONTENT_CHARS = 20_000;
  */
 const MAX_RETAINED_INGESTS = 1_000;
 
+export type TaintEvidenceWindow = 'turn' | 'since-last-boundary' | 'retained';
+
+export interface TaintEvidence {
+  readonly sources: readonly TaintSource[];
+  readonly complete: boolean;
+  readonly missing: boolean;
+  readonly truncated: boolean;
+  readonly evicted: boolean;
+  readonly revision: number;
+  assertCurrent(): void;
+}
+
 /**
  * What untrusted content has entered the conversation, and when.
  *
@@ -243,8 +257,9 @@ const MAX_RETAINED_INGESTS = 1_000;
 export class UntrustedContentLedger {
   #publicationRevision = 0;
   private readonly ingests: UntrustedIngest[] = [];
-  private turnStartIndex = 0;
-  private incompleteTurnEvidence = false;
+  private readonly incompleteIngests = new WeakMap<UntrustedIngest, 'missing' | 'truncated'>();
+  private ingestSequence = 0;
+  private turnStartSequence = 0;
   /**
    * Where the CURRENT turn's predecessor began.
    *
@@ -258,40 +273,40 @@ export class UntrustedContentLedger {
    * being judged cleared the evidence against itself. See
    * {@link UntrustedContentLedger.taintSourcesSinceLastTurnBoundary}.
    */
-  private previousTurnStartIndex = 0;
+  private previousTurnStartSequence = 0;
 
   record(ingest: UntrustedIngest): void {
     this.#publicationRevision++;
-    if (ingest.content === undefined || !ingest.content.trim() || ingest.content.length > MAX_RETAINED_CONTENT_CHARS) {
-      this.incompleteTurnEvidence = true;
-    }
-    this.ingests.push(
-      ingest.content === undefined
-        ? ingest
-        : { ...ingest, content: ingest.content.slice(0, MAX_RETAINED_CONTENT_CHARS) },
-    );
+    this.ingestSequence++;
+    const content = ingest.content;
+    const retained: UntrustedIngest = Object.freeze({ surface: ingest.surface, origin: ingest.origin, at: ingest.at,
+      ...(content === undefined ? {} : { content: content.slice(0, MAX_RETAINED_CONTENT_CHARS) }) });
+    if (content === undefined || !content.trim()) this.incompleteIngests.set(retained, 'missing');
+    else if (content.length > MAX_RETAINED_CONTENT_CHARS) this.incompleteIngests.set(retained, 'truncated');
+    this.ingests.push(retained);
     if (this.ingests.length > MAX_RETAINED_INGESTS) {
       const discarded = this.ingests.length - MAX_RETAINED_INGESTS;
-      if (discarded > this.turnStartIndex) this.incompleteTurnEvidence = true;
       this.ingests.splice(0, discarded);
-      this.turnStartIndex = Math.max(0, this.turnStartIndex - discarded);
-      this.previousTurnStartIndex = Math.max(0, this.previousTurnStartIndex - discarded);
     }
   }
 
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
   startTurn(): void {
     this.#publicationRevision++;
-    this.previousTurnStartIndex = this.turnStartIndex;
-    this.turnStartIndex = this.ingests.length;
-    this.incompleteTurnEvidence = false;
+    this.previousTurnStartSequence = this.turnStartSequence;
+    this.turnStartSequence = this.ingestSequence;
   }
 
   /** Native turn/source incarnation, including an empty turn or same-value ingest. */
   getPublicationRevision(): number { return this.#publicationRevision; }
 
   ingestedThisTurn(): readonly UntrustedIngest[] {
-    return this.ingests.slice(this.turnStartIndex);
+    return this.ingestedSince(this.turnStartSequence);
+  }
+
+  private ingestedSince(sequence: number): readonly UntrustedIngest[] {
+    const firstRetained = this.ingestSequence - this.ingests.length;
+    return this.ingests.slice(Math.max(0, sequence - firstRetained));
   }
 
   all(): readonly UntrustedIngest[] {
@@ -313,7 +328,7 @@ export class UntrustedContentLedger {
     const seen = new Set<string>();
     const exposures: UntrustedExposure[] = [];
     for (const entry of this.ingestedThisTurn()) {
-      const key = `${entry.surface} ${entry.origin}`;
+      const key = `${entry.surface}\0${entry.origin}`;
       if (seen.has(key)) continue;
       seen.add(key);
       exposures.push({ surface: entry.surface, origin: entry.origin });
@@ -337,7 +352,24 @@ export class UntrustedContentLedger {
 
   /** Every exposure must still have its complete text before a clean comparison can clear an effect. */
   hasCompleteTaintSourcesThisTurn(): boolean {
-    return !this.incompleteTurnEvidence && this.hasTaintSourcesThisTurn();
+    const evidence = this.captureTaintEvidence();
+    return evidence.complete && evidence.sources.length > 0;
+  }
+
+  /** One immutable coverage model for semantic turn windows and retained exact comparisons. */
+  captureTaintEvidence(window: TaintEvidenceWindow = 'turn'): TaintEvidence {
+    const revision = this.#publicationRevision;
+    const start = window === 'turn' ? this.turnStartSequence : window === 'since-last-boundary' ? this.previousTurnStartSequence : 0;
+    const ingests = this.ingestedSince(start);
+    const missing = ingests.some(ingest => this.incompleteIngests.get(ingest) === 'missing');
+    const truncated = ingests.some(ingest => this.incompleteIngests.get(ingest) === 'truncated');
+    const evicted = start < this.ingestSequence - this.ingests.length;
+    return Object.freeze({ sources: toTaintSources(ingests), complete: !missing && !truncated && !evicted,
+      missing, truncated, evicted, revision,
+      assertCurrent: () => {
+        if (revision !== this.#publicationRevision) throw new JudgmentError('rejected', 'untrusted content evidence changed during comparison');
+      },
+    });
   }
 
   /**
@@ -358,7 +390,7 @@ export class UntrustedContentLedger {
    * legitimate work and gets switched off.
    */
   taintSourcesSinceLastTurnBoundary(): readonly TaintSource[] {
-    return toTaintSources(this.ingests.slice(this.previousTurnStartIndex));
+    return toTaintSources(this.ingestedSince(this.previousTurnStartSequence));
   }
 
   /**
@@ -378,9 +410,36 @@ export class UntrustedContentLedger {
 
 /** Ingests that carried their text, as taint sources. */
 function toTaintSources(ingests: readonly UntrustedIngest[]): readonly TaintSource[] {
-  return ingests
+  return Object.freeze(ingests
     .filter((entry): entry is UntrustedIngest & { content: string } => typeof entry.content === 'string')
-    .map((entry) => ({ surface: entry.surface, origin: entry.origin, text: entry.content }));
+    .map((entry) => Object.freeze({ surface: entry.surface, origin: entry.origin, text: entry.content })));
+}
+
+export type OutwardContentAssessment =
+  | { readonly kind: 'clean'; readonly findings: readonly TaintFinding[] }
+  | { readonly kind: 'tainted'; readonly findings: readonly TaintFinding[] }
+  | { readonly kind: 'incomplete'; readonly findings: readonly TaintFinding[]; readonly reason: 'missing-content' | 'missing-sources' | 'protected-input' };
+
+/** Shared evidence comparison; callers select the relevant window without widening semantic reads. */
+export async function assessOutwardContent(
+  ledger: UntrustedContentLedger,
+  content: Readonly<Record<string, string | undefined>> | undefined,
+  options: TaintOptions = {},
+  window: TaintEvidenceWindow = 'turn',
+): Promise<OutwardContentAssessment> {
+  if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+  const evidence = ledger.captureTaintEvidence(window);
+  if (!evidence.complete) return { kind: 'incomplete', findings: [], reason: 'missing-sources' };
+  if (evidence.sources.length === 0) return { kind: 'clean', findings: [] };
+  if (content === undefined) return { kind: 'incomplete', findings: [], reason: 'missing-content' };
+  const fields = Object.freeze({ ...content });
+  if (judgmentInputProblem(fields) || evidence.sources.some(source => judgmentInputProblem(source))) {
+    return { kind: 'incomplete', findings: [], reason: 'protected-input' };
+  }
+  const findings = await findContentTaint(fields, evidence.sources, options);
+  if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+  evidence.assertCurrent();
+  return { kind: findings.length === 0 ? 'clean' : 'tainted', findings };
 }
 
 /** An outward effect: something that reaches the world outside this machine. */
@@ -486,30 +545,31 @@ export async function evaluateOutwardEffect(input: {
   readonly requestedBy?: AuthoritySurface | undefined;
   /** How the owner clears this on THIS surface. Absent = no path is wired here. */
   readonly ownerRemedy?: OwnerRemedy | undefined;
+  /** Persistent domain records may require source policy even when general execution safety is bypassed. */
+  readonly sourcePolicy?: 'required';
   readonly now?: () => Date;
 }): Promise<OutwardEffectDecision> {
   if (input.taintOptions?.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+  if (input.sourcePolicy !== 'required' && isYoloExecution()) {
+    return { allowed: true, reason: null, fix: null, untrustedOrigins: input.ledger.originsThisTurn(), taint: [] };
+  }
   const origins = input.ledger.originsThisTurn();
   if (origins.length === 0) {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: [], taint: [] };
   }
   const exposures = input.ledger.exposuresThisTurn();
   const ownerAsked = input.requestedBy === 'owner-direct';
+  const assessment = await assessOutwardContent(input.ledger, input.content, input.taintOptions);
+  if (assessment.kind === 'clean') {
+    return { allowed: true, reason: null, fix: null, untrustedOrigins: origins, taint: [] };
+  }
 
   // Content-level derivation, when the caller named its fields and the ledger
   // retained the text. This is the check that lets a scheduled report which
   // composed nothing from a stranger proceed, while refusing a send whose body
   // repeats what was just read.
-  if (input.content !== undefined && input.ledger.hasCompleteTaintSourcesThisTurn()) {
-    const taint = await findContentTaint(input.content, input.ledger.taintSourcesThisTurn(), input.taintOptions);
-    if (input.taintOptions?.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
-    if (taint.length === 0) {
-      // The allowed case this whole mechanism exists to protect: exposure in
-      // the turn, but nothing of it in what is about to leave. It proceeds
-      // silently, no prompt, no receipt line, no friction, because a check
-      // that interrupts work it has just cleared is a check that gets removed.
-      return { allowed: true, reason: null, fix: null, untrustedOrigins: origins, taint: [] };
-    }
+  if (assessment.kind === 'tainted') {
+    const taint = assessment.findings;
     const approved = checkOwnerApproval({
       approval: input.approval,
       action: input.request.action,
@@ -557,9 +617,11 @@ export async function evaluateOutwardEffect(input: {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: origins, taint: [] };
   }
   const mismatch = describeApprovalMismatch(approved.mismatch);
-  const unanswerable = input.content === undefined
+  const unanswerable = assessment.reason === 'missing-content'
     ? 'this action did not say which of its fields are about to leave'
-    : 'some source text is missing, empty, truncated, or no longer retained';
+    : assessment.reason === 'protected-input'
+      ? 'protected material cannot be sent for a derivation reading'
+      : 'some source text is missing, empty, truncated, or no longer retained';
   return {
     allowed: false,
     untrustedOrigins: origins,

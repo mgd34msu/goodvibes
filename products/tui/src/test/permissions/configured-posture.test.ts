@@ -3,24 +3,23 @@ import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { describePermissionMode, describeConfiguredPermissions } from '../../permissions/configured-posture.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 
-test('every supported mode describes configured denials and per-call authority', () => {
+test('every mode displays the shared authoritative label and summary', () => {
   for (const preset of Object.values(GATE_PRESETS)) {
-    const description = describePermissionMode(preset.mode);
-    expect(description.detail).toContain('Configured denials');
-    expect(description.detail).toContain('authority');
-    expect(description.detail).not.toContain('still ask');
-    expect(description.detail).toContain('not a per-call permission decision');
+    expect(describePermissionMode(preset.mode)).toEqual({ label: preset.label, detail: preset.summary });
   }
 });
-test('unknown mode values are reported without claiming a known preset', () => {
-  for (const mode of [undefined, false, 'unrecognized']) {
-    expect(describePermissionMode(mode).detail).toContain('Unrecognized permission mode');
+
+test('legacy and unknown modes match the shared runtime normalization', () => {
+  expect(describePermissionMode('allow-all')).toEqual(describePermissionMode('yolo'));
+  expect(describePermissionMode('auto')).toEqual(describePermissionMode('safe-jev'));
+  for (const mode of [undefined, false, 'unrecognized', 'prompt', 'custom', 'accept-edits']) {
+    expect(describePermissionMode(mode)).toEqual(describePermissionMode('safe-owner'));
   }
 });
-test('only explicit automatic approval enables the broad-autonomy description', () => {
-  const enabled = describeConfiguredPermissions({ get: configGetStub({ 'behavior.autoApprove': true }) });
-  expect(enabled.label).toContain('Auto-approve ON');
-  expect(enabled.detail).toContain('Configured denials');
-  const disabled = describeConfiguredPermissions({ get: configGetStub({ 'behavior.autoApprove': false, 'permissions.mode': 'allow-all' }) });
-  expect(disabled.label).toBe('Allow all configured actions');
+
+test('configured posture reports the effective legacy auto-approve override', () => {
+  const enabled = describeConfiguredPermissions({ get: configGetStub({ 'behavior.autoApprove': true, 'permissions.mode': 'safe-owner' }) });
+  expect(enabled).toEqual(describePermissionMode('yolo'));
+  const disabled = describeConfiguredPermissions({ get: configGetStub({ 'behavior.autoApprove': false, 'permissions.mode': 'safe-jev' }) });
+  expect(disabled).toEqual(describePermissionMode('safe-jev'));
 });

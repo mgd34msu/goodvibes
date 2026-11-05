@@ -6,7 +6,7 @@ import { FOLLOWUP_SESSION, STEERABLE_SESSION } from './support/seed';
 
 const MODE_PATH = `/api/sessions/${STEERABLE_SESSION.id}/permission-mode`;
 // Public wire values and visible labels are asserted independently of the implementation.
-const CHOICES = ['Plan', 'Normal', 'Accept edits', 'Auto'];
+const CHOICES = ['Safe — owner', 'Safe — Jev', 'YOLO', 'Plan'];
 
 function permissionFact(detail: Locator): Locator {
   return detail.locator('.dv-facts__row').filter({
@@ -21,7 +21,7 @@ async function openSession(page: Page): Promise<Locator> {
 
 async function openPicker(page: Page): Promise<Locator> {
   await page.getByRole('button', { name: 'Change permission mode', exact: true }).click();
-  const sheet = page.getByRole('dialog', { name: 'Set permission mode', exact: true });
+  const sheet = page.getByRole('dialog', { name: 'Set execution mode', exact: true });
   await expect(sheet).toBeVisible();
   return sheet;
 }
@@ -65,15 +65,15 @@ async function closeSessionDetail(page: Page): Promise<void> {
 test('each preset writes its session route, refetches the mode, and reopens with the current selection', async ({ page }, testInfo) => {
   const daemon = await installMockDaemon(page);
   const detail = await openSession(page);
-  await expect(permissionFact(detail)).toContainText('Normal');
-  let previousMode = 'normal';
+  await expect(permissionFact(detail)).toContainText('Safe — owner');
+  let previousMode = 'safe-owner';
   const expectedWrites: { path: string; body: { mode: string } }[] = [];
 
   for (const [mode, label] of [
-    ['plan', 'Plan'], ['accept-edits', 'Accept edits'], ['auto', 'Auto'], ['normal', 'Normal'],
+    ['safe-jev', 'Safe — Jev'], ['yolo', 'YOLO'], ['plan', 'Plan'], ['safe-owner', 'Safe — owner'],
   ] as const) {
     const sheet = await openPicker(page);
-    const choices = sheet.getByRole('group', { name: 'Permission modes', exact: true });
+    const choices = sheet.getByRole('group', { name: 'Execution modes', exact: true });
     await expect(choices.getByRole('button')).toHaveText(CHOICES);
     await expect(choices.locator('[aria-pressed="true"]')).toHaveCount(1);
     const write = modeResponse(page, 'POST');
@@ -105,31 +105,47 @@ test('each preset writes its session route, refetches the mode, and reopens with
   expectNoConfigWrites(daemon);
 });
 
-test('custom is displayed but never offered as a settable preset', async ({ page }) => {
-  const daemon = await installMockDaemon(page, { initialPermissionMode: 'custom' });
+test('an unknown wire mode never becomes an active or default selection', async ({ page }) => {
+  const daemon = await installMockDaemon(page);
+  await page.route(`**${MODE_PATH}`, async route => {
+    if (route.request().method() === 'GET') return route.fulfill({
+      status: 200, json: { sessionId: STEERABLE_SESSION.id, mode: 'future-mode' },
+    });
+    return route.fallback();
+  });
   const detail = await openSession(page);
-  await expect(permissionFact(detail)).toContainText('Custom');
+  await expect(permissionFact(detail)).toContainText('future-mode');
   const sheet = await openPicker(page);
-  const choices = sheet.getByRole('group', { name: 'Permission modes', exact: true });
+  const choices = sheet.getByRole('group', { name: 'Execution modes', exact: true });
   await expect(choices.getByRole('button')).toHaveText(CHOICES);
-  await expect(choices.getByRole('button', { name: 'Custom', exact: true })).toHaveCount(0);
   await expect(choices.locator('[aria-pressed="true"]')).toHaveCount(0);
+  await expect(choices.getByRole('button', { name: 'future-mode', exact: true })).toHaveCount(0);
+  await sheet.locator('.gv-dialog__footer').getByRole('button', { name: 'Close', exact: true }).click();
   expect(modeWrites(daemon)).toEqual([]);
-  const write = modeResponse(page, 'POST');
-  const read = modeResponse(page, 'GET');
-  await choices.getByRole('button', { name: 'Normal', exact: true }).click();
-  expect(await (await write).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'normal', previousMode: 'custom' });
-  expect(await (await read).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'normal' });
-  await expect(sheet).toHaveCount(0);
-  await expect(permissionFact(detail)).toContainText('Normal');
-  expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'normal' } }]);
+  expectNoConfigWrites(daemon);
+});
+
+test('retired and unknown wire writes cannot change the selected session mode', async ({ page }) => {
+  const daemon = await installMockDaemon(page);
+  const detail = await openSession(page);
+  await expect(permissionFact(detail)).toContainText('Safe — owner');
+  for (const mode of ['custom', 'normal', 'auto', 'accept-edits', 'allow-all', 'future-mode']) {
+    const result = await page.evaluate(async ({ path, mode }) => {
+      const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode }) });
+      return { status: response.status, body: await response.json() };
+    }, { path: MODE_PATH, mode });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ code: 'INVALID_ARGUMENT' });
+  }
+  const actual = await page.evaluate(async path => (await fetch(path)).json(), MODE_PATH);
+  expect(actual).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'safe-owner' });
   expectNoConfigWrites(daemon);
 });
 
 test('a nonlocal session shows the SESSION_NOT_LOCAL refusal without inheriting the local picker', async ({ page }) => {
   const daemon = await installMockDaemon(page);
   const local = await openSession(page);
-  await expect(permissionFact(local)).toContainText('Normal');
+  await expect(permissionFact(local)).toContainText('Safe — owner');
   await closeSessionDetail(page);
   const response = modeResponse(page, 'GET', `/api/sessions/${FOLLOWUP_SESSION.id}/permission-mode`);
   const remote = await openRow(page, FOLLOWUP_SESSION.title);
@@ -138,10 +154,10 @@ test('a nonlocal session shows the SESSION_NOT_LOCAL refusal without inheriting 
   expect(await refusal.json()).toMatchObject({ code: 'SESSION_NOT_LOCAL' });
   await expect(permissionFact(remote)).toHaveText('Unavailable here');
   await expect(remote.getByRole('button', { name: 'Change permission mode', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: 'Set permission mode', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Set execution mode', exact: true })).toHaveCount(0);
   await closeSessionDetail(page);
   const returned = await openRow(page, STEERABLE_SESSION.title);
-  await expect(permissionFact(returned)).toContainText('Normal');
+  await expect(permissionFact(returned)).toContainText('Safe — owner');
   await expect(returned.getByRole('button', { name: 'Change permission mode', exact: true })).toBeEnabled();
   expect(modeWrites(daemon)).toEqual([]);
   expectNoConfigWrites(daemon);
@@ -158,7 +174,7 @@ test('the picker stays disabled until the initial session mode has been read', a
     await expect(detail.getByRole('button', { name: 'Change permission mode', exact: true })).toBeDisabled();
     expect(modeWrites(daemon)).toEqual([]);
     pending.release();
-    await expect(permissionFact(detail)).toContainText('Normal');
+    await expect(permissionFact(detail)).toContainText('Safe — owner');
     await expect(detail.getByRole('button', { name: 'Change permission mode', exact: true })).toBeEnabled();
     await openPicker(page);
   } finally { pending.release(); }
@@ -169,12 +185,12 @@ test('a pending write disables repeated selections and cannot be dismissed befor
   const pending = await holdModeRequest(page, 'POST');
   try {
     const detail = await openSession(page);
-    await expect(permissionFact(detail)).toContainText('Normal');
+    await expect(permissionFact(detail)).toContainText('Safe — owner');
     const sheet = await openPicker(page);
-    const choices = sheet.getByRole('group', { name: 'Permission modes', exact: true });
-    await choices.getByRole('button', { name: 'Auto', exact: true }).click();
+    const choices = sheet.getByRole('group', { name: 'Execution modes', exact: true });
+    await choices.getByRole('button', { name: 'YOLO', exact: true }).click();
     await expect.poll(pending.started).toBe(true);
-    await expect(choices.getByRole('button', { name: 'Auto…', exact: true })).toBeDisabled();
+    await expect(choices.getByRole('button', { name: 'YOLO…', exact: true })).toBeDisabled();
     for (const choice of await choices.getByRole('button').all()) await expect(choice).toBeDisabled();
     const footerClose = sheet.locator('.gv-dialog__footer').getByRole('button', { name: 'Close', exact: true });
     await expect(footerClose).toBeDisabled();
@@ -190,16 +206,16 @@ test('a pending write disables repeated selections and cannot be dismissed befor
     await page.locator('.gv-overlay > .scrim').click({ position: { x: 8, y: 8 } });
     await nextFrames(page);
     await expect(sheet).toBeVisible();
-    await expect(permissionFact(detail)).toContainText('Normal');
-    expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'auto' } }]);
+    await expect(permissionFact(detail)).toContainText('Safe — owner');
+    expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'yolo' } }]);
     await expectNoHorizontalScroll(page);
     await testInfo.attach('session-mode-pending', { body: await page.screenshot(), contentType: 'image/png' });
     const read = modeResponse(page, 'GET');
     pending.release();
-    expect(await (await read).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'auto' });
+    expect(await (await read).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'yolo' });
     await expect(sheet).toHaveCount(0);
-    await expect(permissionFact(detail)).toContainText('Auto');
-    expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'auto' } }]);
+    await expect(permissionFact(detail)).toContainText('YOLO');
+    expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'yolo' } }]);
     expectNoConfigWrites(daemon);
   } finally { pending.release(); }
 });
@@ -215,7 +231,7 @@ test('a rejected write preserves the current selection and a deliberate retry re
     return route.fallback();
   });
   const detail = await openSession(page);
-  await expect(permissionFact(detail)).toContainText('Normal');
+  await expect(permissionFact(detail)).toContainText('Safe — owner');
   const sheet = await openPicker(page);
   const plan = sheet.getByRole('button', { name: 'Plan', exact: true });
   const failure = modeResponse(page, 'POST');
@@ -225,14 +241,14 @@ test('a rejected write preserves the current selection and a deliberate retry re
   await expect(sheet).toBeVisible();
   await expect(plan).toBeEnabled();
   await expect(plan).toHaveAttribute('aria-pressed', 'false');
-  await expect(sheet.getByRole('button', { name: 'Normal', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sheet.getByRole('button', { name: 'Safe — owner', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sheet.locator('.gv-dialog__footer').getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
   await nextFrames(page);
   expect(modeWrites(daemon)).toEqual([{ path: MODE_PATH, body: { mode: 'plan' } }]);
   const write = modeResponse(page, 'POST');
   const read = modeResponse(page, 'GET');
   await plan.click();
-  expect(await (await write).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'plan', previousMode: 'normal' });
+  expect(await (await write).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'plan', previousMode: 'safe-owner' });
   expect(await (await read).json()).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'plan' });
   await expect(sheet).toHaveCount(0);
   await expect(permissionFact(detail)).toContainText('Plan');
@@ -251,7 +267,7 @@ test('Close, header close, Escape and scrim preserve the session, focus and hist
   const sessionUrl = page.url();
   for (const dismissal of ['footer', 'header', 'escape', 'scrim']) {
     const sheet = await openPicker(page);
-    await expect(sheet.getByRole('button', { name: 'Normal', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: 'Safe — owner', exact: true })).toHaveAttribute('aria-pressed', 'true');
     if (dismissal === 'footer' || dismissal === 'header') {
       await sheet.locator(`.gv-dialog__${dismissal}`).getByRole('button', { name: 'Close', exact: true }).click();
     } else if (dismissal === 'escape') {

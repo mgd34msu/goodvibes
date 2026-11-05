@@ -27,6 +27,14 @@ import { googleSetupControl, ownGoogleBrowser } from '../sdk/src/platform/google
 import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
 import { browserCredentialPage } from '../sdk/src/platform/browser/browser-control-identity.js';
 import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
+import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { PermissionManager, createPermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
+import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
+import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
+import { executeToolCalls } from '../sdk/src/platform/core/orchestrator-tool-runtime.js';
+import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
+import { gateReadingsPort } from './_helpers/gate-readings.js';
+import { makeProjectTempDir } from './_helpers/project-temp.js';
 import type { CardFieldGuard } from '../sdk/src/platform/browser/browser-types.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -140,7 +148,7 @@ function pageState(url: string, title: string, elements: readonly RawElement[]) 
 function fakePage(url: string, elements: readonly RawElement[], options: PageFixtureOptions = {}) {
   const entered = new Map<string, string>();
   const title = () => options.title ?? (url === EMAIL_STEP_URL ? 'Sign in' : 'Dashboard');
-  const raw = (identityOnly = false) => elements.map(element => ({ ...element, value: identityOnly ? null : entered.get(element.selector) ?? element.value, documentUrl: url, control: element.control ?? attributes() }));
+  const raw = (identityOnly = false) => elements.map(element => ({ ...element, value: identityOnly || element.control?.type === 'password' ? null : entered.get(element.selector) ?? element.value, documentUrl: url, control: element.control ?? attributes() }));
   const action = async (method: string, actionOptions: { readonly signal?: AbortSignal | undefined }, effect: () => void): Promise<void> => {
     await options.onAction?.(method, actionOptions.signal);
     actionOptions.signal?.throwIfAborted(); effect();
@@ -246,6 +254,52 @@ const ORDINARY_URL = 'https://example.com/dashboard';
 const ORDINARY_ELEMENTS: readonly RawElement[] = [
   { tag: 'button', role: 'button', name: 'Refresh', selector: '#refresh', value: null, disabled: false, checked: null, depth: 2, submits: false },
 ];
+
+test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s executes its exact admitted credential-form action without a second safety reading', async mode => {
+  const effects: string[] = [];
+  const engine = await buildEngine(EMAIL_STEP_URL, PASSWORD_STEP_ELEMENTS, { effects });
+  await engine.snapshot({});
+  const gate = gateReadingsPort();
+  const decisions = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
+  const identities = fakePort(() => noulAnswer(0.99));
+  const log = new SqliteDecisionLog(':memory:');
+  const port: JudgmentPort = { model: gate.port.model, ask: request => {
+    if ('disposition' in request.questions) return decisions.port.ask(request);
+    if (request.context?.battery === 'browser.control.same-identity') return identities.port.ask(request);
+    return request.context?.battery?.startsWith('engine.gate') ? gate.port.ask(request) : installed.ask(request);
+  } };
+  installJudgmentPort(withDecisionLog(port, log));
+  const config = new ConfigManager({ configDir: makeProjectTempDir('browser-admitted-form') });
+  config.set('permissions.mode', mode);
+  let prompts = 0;
+  const manager = new PermissionManager(async () => { prompts++; return { approved: false }; },
+    createPermissionConfigReader(config), new PolicyRuntimeState());
+  const registry = new ToolRegistry(manager);
+  registry.register({ definition: { name: 'browser', description: 'Fill the exact owner-requested form control.',
+    parameters: { type: 'object', properties: { action: { type: 'string' }, ref: { type: 'string' }, text: { type: 'string' } }, required: ['action', 'ref', 'text'] } },
+  async execute(args, options) {
+    if (!options || typeof args.ref !== 'string' || typeof args.text !== 'string') throw new Error('Fixture invocation missing');
+    const ownership = engine.retainAdmittedToolAction(args, options, () => {});
+    expect(ownership).toBeDefined();
+    if (mode !== 'yolo') {
+      await expect(engine.type({}, { ref: args.ref, text: 'different-unapproved-input' }, ownership)).rejects.toThrow('password input');
+      expect(effects).toHaveLength(0);
+    }
+    return { success: true, output: JSON.stringify(await engine.type({}, { ref: args.ref, text: args.text }, ownership)) };
+  } });
+  try {
+    const [result] = await executeToolCalls({ permissionManager: manager, toolRegistry: registry,
+      autonomousSource: () => ({ goal: 'Fill the exact requested fixture form control', criteria: ['Use the requested control and value'] }),
+      runtimeBus: null, hookDispatcher: null, sessionId: 'browser-admitted-form',
+      emitterContext: () => ({ sessionId: 'browser-admitted-form', traceId: 'fixture', source: 'orchestrator' }) },
+    'turn', [{ id: 'credential-form', name: 'browser', arguments: { action: 'type', ref: 'e1', text: 'synthetic-form-input' } }]);
+    expect(result).toMatchObject({ success: true });
+    expect(effects).toEqual(['fill']);
+    expect(pages.requests).toHaveLength(0);
+    expect(prompts).toBe(0);
+    expect(JSON.stringify(await engine.snapshot({}))).not.toContain('synthetic-form-input');
+  } finally { installJudgmentPort(installed); log[Symbol.dispose](); }
+});
 
 describe('looksLikeCredentialPage', () => {
   test('a password field on any host is a credential page', () => {

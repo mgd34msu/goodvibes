@@ -1,20 +1,21 @@
+import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
 import {
-  nativeHostedTurnLookupSchema, nativeHostedTurnRequestSchema,
-  type NativeHostedTurnLookup, type NativeHostedTurnRequest,
+  nativeHostedTurnLookupSchema, nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema,
+  type NativeHostedTurnLookup, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest,
 } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
 
-export type { NativeHostedTurnLookup, NativeHostedTurnRequest };
+export type { NativeHostedTurnLookup, NativeHostedTurnRequest, NativeHostedTurnStartRequest };
 export interface NativeHostedTurnClient {
   status(target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }): Promise<NativeHostedTurnLookup>;
-  start(target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }): Promise<NativeHostedTurnLookup>;
+  start(target: NativeHostedTurnStartRequest, options?: { readonly signal?: AbortSignal }): Promise<NativeHostedTurnLookup>;
   cancel(target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }): Promise<NativeHostedTurnLookup>;
 }
 
 /** Agent-owned source identity only. The daemon owns the turn permit and dispatch claim. */
-export function createNativeHostedTurnClient(operator: Pick<OperatorRemoteClient, 'invoke'>, projectId: string): NativeHostedTurnClient {
+export function createNativeHostedTurnClient(operator: Pick<OperatorRemoteClient, 'invoke'>, projectId: string, readMode?: () => GatePresetName): NativeHostedTurnClient {
   const run = async (action: 'status' | 'start' | 'cancel', target: NativeHostedTurnRequest, options: { readonly signal?: AbortSignal } = {}): Promise<NativeHostedTurnLookup> => {
-    const request = nativeHostedTurnRequestSchema.parse(target);
+    const request = action === 'start' ? nativeHostedTurnStartRequestSchema.parse({ ...target, ...(readMode ? { permissionMode: readMode() } : {}) }) : nativeHostedTurnRequestSchema.parse(target);
     if (request.projectId !== projectId) throw new Error('Native hosted turn project changed');
     options.signal?.throwIfAborted();
     const found = nativeHostedTurnLookupSchema.parse(await operator.invoke<unknown>(action === 'start' ? 'workLedger.turn.startAgent' : `workLedger.turn.${action}`, request, options));
@@ -26,7 +27,7 @@ export function createNativeHostedTurnClient(operator: Pick<OperatorRemoteClient
   };
   return Object.freeze({
     status: (target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }) => run('status', target, options),
-    start: (target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }) => run('start', target, options),
+    start: (target: NativeHostedTurnStartRequest, options?: { readonly signal?: AbortSignal }) => run('start', target, options),
     cancel: (target: NativeHostedTurnRequest, options?: { readonly signal?: AbortSignal }) => run('cancel', target, options),
   });
 }

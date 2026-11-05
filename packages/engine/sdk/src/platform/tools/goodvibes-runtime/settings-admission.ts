@@ -46,7 +46,7 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
     async project(request) {
       request.assertCurrent(); request.signal?.throwIfAborted();
       const args = request.args;
-      if (args.confirm !== true || (args.mode !== 'set' && args.mode !== 'reset') || typeof args.key !== 'string') throw new ToolInputProjectionError('invalid');
+      if ((args.mode !== 'set' && args.mode !== 'reset') || typeof args.key !== 'string') throw new ToolInputProjectionError('invalid');
       const key = args.key.trim();
       if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
       // Validate the declared credential storage format before preparing any local or remote write.

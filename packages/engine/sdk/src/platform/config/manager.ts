@@ -678,6 +678,10 @@ export class ConfigManager {
    * Preparation never recovers, quarantines, cleans up, or writes a store.
    */
   prepareSettingMutation(request: PreparedConfigMutationRequest): PreparedConfigMutation {
+    return this.prepareSettingMutationPlan([request]);
+  }
+
+  private prepareSingleSettingMutation(request: PreparedConfigMutationRequest): PreparedConfigMutation {
     this.requireWritable();
     const incarnation = this.permissionIncarnation;
     if (request.operation !== 'set' && request.operation !== 'reset') throw new ConfigError('Unsupported prepared operation.');
@@ -703,13 +707,21 @@ export class ConfigManager {
 
   /** Capture every companion before admission; never re-prepare after an earlier effect. */
   prepareSettingMutationPlan(requests: readonly PreparedConfigMutationRequest[]): PreparedConfigMutation {
-    const knownKeys = new Set([...this.getSchema(), ...this.getHostSettingsSchema()].map(setting => setting.key));
+    if (requests.some(request => request.key === 'permissions.mode' && request.operation === 'set')
+      && this.get('behavior.autoApprove')) {
+      const override = requests.find(request => request.key === 'behavior.autoApprove');
+      if (override && (override.operation !== 'set' || override.value !== false)) {
+        throw new ConfigError('Selecting an execution mode must clear the legacy auto-approve override.');
+      }
+      if (!override) requests = [...requests, { operation: 'set', key: 'behavior.autoApprove', value: false }];
+    }
+    const knownKeys = new Set([...CONFIG_SCHEMA, ...this.getHostSettingsSchema()].map(setting => setting.key));
     if (requests.length < 1 || requests.length > knownKeys.size || new Set(requests.map(request => request.key)).size !== requests.length
       || requests.some(request => !knownKeys.has(request.key))) {
       throw new ConfigError('Invalid prepared settings plan.');
     }
-    if (requests.length === 1) return this.prepareSettingMutation(requests[0]!);
-    const steps = Object.freeze(requests.map(request => this.prepareSettingMutation(request)));
+    if (requests.length === 1) return this.prepareSingleSettingMutation(requests[0]!);
+    const steps = Object.freeze(requests.map(request => this.prepareSingleSettingMutation(request)));
     const first = this.preparedRecord(steps[0]!);
     const effects = steps.map(step => this.inspectPreparedMutation(step));
     const handle = Object.freeze({}) as PreparedConfigMutation;
@@ -1019,6 +1031,9 @@ export class ConfigManager {
     if (readStrictManagedSettingLock(key, this.configDir)) {
       throw new ConfigError(`Setting ${key} is managed and cannot be changed.`);
     }
+    if (!isDefault && key === 'permissions.mode' && this.get('behavior.autoApprove')) {
+      this.setRuntimeInput('behavior.autoApprove', false, false);
+    }
     const previous = readDotPath(this.config, key).value;
     const staged = this.runtimeState.fork();
     (isDefault ? staged.defaults : staged.overrides).set(key, owned);
@@ -1094,6 +1109,10 @@ export class ConfigManager {
       return;
     }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+
+    if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
+      this.set('behavior.autoApprove', false, options);
+    }
 
     const previousValue = readDotPath(this.config, key).value;
     const previousHost = this.hostSettings.has(key) ? this.hostSettings.snapshot(this.config) : null;
@@ -1184,6 +1203,9 @@ export class ConfigManager {
       return;
     }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
+      this.setProjectValue('behavior.autoApprove', false, options);
+    }
     const previousValue = readDotPath(this.config, key).value;
     const previousHost = this.hostSettings.has(key) ? this.hostSettings.snapshot(this.config) : null;
     const staged = this.runtimeState.fork();
@@ -1327,7 +1349,7 @@ export class ConfigManager {
 
   /** Return the builtin schema; host descriptors are a separate typed surface. */
   getSchema(): ConfigSetting[] {
-    return CONFIG_SCHEMA;
+    return CONFIG_SCHEMA.filter(setting => !setting.deprecated);
   }
 
   /** Immutable descriptors for the boolean settings registered by this host. */

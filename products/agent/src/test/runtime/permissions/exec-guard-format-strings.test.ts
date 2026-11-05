@@ -1,7 +1,7 @@
 /**
  * Format and encoded arguments reach the canonical gate unchanged. The AST
- * verdict describes runnable segments; Jev reads obfuscation and the preset
- * asks the owner at critical stakes. The exec guard repeats only catastrophe.
+ * verdict describes runnable segments; Jev reads obfuscation and safe modes
+ * route critical stakes to their selected decision owner. YOLO allows them.
  *
  * Scripted judgments test that composition, not a replacement text classifier.
  */
@@ -24,7 +24,8 @@ async function withCommandReading(
   obfuscated: boolean | 'uncertain',
   check: (reading: Awaited<ReturnType<typeof readToolCall>>) => Promise<void>,
 ): Promise<void> {
-  const { port, requests } = fakePort((name, question) => {
+  const { port, requests } = fakePort((wireName, question) => {
+    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     if (name === 'family') return choiceAnswer(question, 'generic', 0.97);
     if (question.type !== 'noul') throw new Error(`Unexpected gate question: ${name}`);
     return noulAnswer(name === 'obfuscated'
@@ -39,7 +40,7 @@ async function withCommandReading(
     for (const request of requests) {
       expect(request.state).toEqual({ tool: 'exec', arguments: { command } });
     }
-    expect(requests.some((request) => Object.hasOwn(request.questions, 'obfuscated'))).toBe(true);
+    expect(requests.some((request) => Object.hasOwn(request.questions, 'effect__obfuscated'))).toBe(true);
     await check(reading);
   } finally {
     installJudgmentPort(previous);
@@ -74,7 +75,7 @@ describe('exec guard: format specifiers are not an independent denial rule', () 
       expect(verdict.segments).toHaveLength(1);
       await withCommandReading(command, false, async (reading) => {
         expect(reading.stakes).toBe('low');
-        expect(decideByPreset(GATE_PRESETS.auto, {
+        expect(decideByPreset(GATE_PRESETS['safe-owner'], {
           stakes: reading.stakes,
           family: reading.family,
           changesState: reading.mutates || reading.outward,
@@ -88,7 +89,7 @@ describe('exec guard: format specifiers are not an independent denial rule', () 
   }
 });
 
-describe('encoded arguments: obfuscation readings still require the owner', () => {
+describe('encoded arguments: critical readings follow the selected execution mode', () => {
   for (const [label, command] of encodedCommands) {
     it(`escalates a reading of ${label} to critical stakes`, async () => {
       // These bytes must survive parsing so the gate can interpret their use.
@@ -97,12 +98,13 @@ describe('encoded arguments: obfuscation readings still require the owner', () =
       expect(verdict.segments[0]?.raw).toBe(command);
       await withCommandReading(command, true, async (reading) => {
         expect(reading.stakes).toBe('critical');
+        const expected = { 'safe-owner': 'ask', 'safe-jev': 'ask', yolo: 'allow', plan: 'ask' } as const;
         for (const preset of Object.values(GATE_PRESETS)) {
           expect(decideByPreset(preset, {
             stakes: reading.stakes,
             family: reading.family,
             changesState: reading.mutates || reading.outward,
-          }).action).toBe('ask');
+          }).action).toBe(expected[preset.name]);
         }
         // After gate approval, exec must not add the retired percent regex.
         expect((await guardExecCommand(command, AST_FLAGS)).allowed).toBe(true);
@@ -110,15 +112,18 @@ describe('encoded arguments: obfuscation readings still require the owner', () =
     });
   }
 
-  it('asks the owner when the obfuscation reading is uncertain', async () => {
+  it('routes uncertain obfuscation to the safe owner while YOLO remains unrestricted', async () => {
     await withCommandReading('bash %2Fbin%2Fsh', 'uncertain', async (reading) => {
       expect(reading.uncertain).toContain('obfuscated');
       expect(reading.stakes).toBe('critical');
-      expect(decideByPreset(GATE_PRESETS.auto, {
+      expect(decideByPreset(GATE_PRESETS['safe-owner'], {
         stakes: reading.stakes,
         family: reading.family,
         changesState: reading.mutates || reading.outward,
       }).action).toBe('ask');
+      expect(decideByPreset(GATE_PRESETS.yolo, {
+        stakes: reading.stakes, family: reading.family, changesState: reading.mutates || reading.outward,
+      }).action).toBe('allow');
     });
   });
 });

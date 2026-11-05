@@ -1,3 +1,4 @@
+import { readExecutionMode } from '../permissions/execution-mode.ts';
 // Sub-builders extracted out of the single ~516-line `buildAgentWorkspaceRuntimeSnapshot`
 // function in agent-workspace-snapshot.ts (per the design ruling's
 // giant-single-function-assembler verdict: "splitting into cohesive sub-builders...
@@ -414,7 +415,7 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
     operationalMessages: readConfigString(context, 'ui.operationalMessages', '(default)'),
     systemMessages: readConfigString(context, 'ui.systemMessages', '(default)'),
     releaseChannel: readConfigString(context, 'release.channel', '(default)'),
-    permissionMode: readConfigString(context, 'permissions.mode', '(default)'),
+    permissionMode: readExecutionMode(context.platform.configManager) ?? 'unavailable',
     toolAutoHeal: readConfigBoolean(context, 'tools.autoHeal', false),
     toolsDefaultTokenBudget: readConfigNumber(context, 'tools.defaultTokenBudget', 0),
     artifactMaxBytes: readConfigNumber(context, 'storage.artifacts.maxBytes', 512 * 1024 * 1024),

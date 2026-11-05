@@ -1,3 +1,4 @@
+import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';
 import { runChannelPairing } from './channel-pairing.ts';
@@ -77,7 +78,7 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
     const surfaceKind = positional[0];
     const channelId = positional[1];
     if (!surfaceKind) {
-      ctx.print('Usage: /channel profiles set <surfaceKind> [channelId] [--model x] [--provider x] [--permission-mode plan|normal|accept-edits|auto]');
+      ctx.print('Usage: /channel profiles set <surfaceKind> [channelId] [--model x] [--provider x] [--permission-mode safe-owner|safe-jev|yolo|plan]');
       return;
     }
     const flags = new Map<string, string>();
@@ -97,12 +98,16 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       return;
     }
     try {
+      const permissionMode = flags.get('permission-mode');
+      if (permissionMode !== undefined && !isSettableGatePresetName(permissionMode)) {
+        throw new Error(`Permission mode must be one of: ${SESSION_GATE_PRESET_NAMES.join(', ')}`);
+      }
       const { binding } = await rpc.sdk.operator.invoke('channels.profiles.set', {
         surfaceKind,
         ...(channelId ? { channelId } : {}),
         ...(flags.has('model') ? { model: flags.get('model')! } : {}),
         ...(flags.has('provider') ? { provider: flags.get('provider')! } : {}),
-        ...(flags.has('permission-mode') ? { permissionMode: flags.get('permission-mode') as 'plan' | 'normal' | 'accept-edits' | 'auto' } : {}),
+        ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
       ctx.print(`[channel profiles set] bound ${binding.id}\n${renderProfileBinding(binding)}`);
     } catch (error) {

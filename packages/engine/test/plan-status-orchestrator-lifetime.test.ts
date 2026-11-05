@@ -30,7 +30,7 @@ function fixture() {
     recordContextWindowRejection() {}, reconcileObservedContextWindow() {}, resolveModelPricing: () => UNKNOWN_MODEL_PRICING,
   } as unknown as OrchestratorCoreServices['providerRegistry'];
   const instance = new Orchestrator({ conversation, getViewportHeight: () => 0, scrollToEnd() {}, toolRegistry: new ToolRegistry(),
-    permissionManager: { getMode: () => 'prompt' } as OrchestratorOptions['permissionManager'],
+    permissionManager: { getMode: () => 'safe-owner' } as OrchestratorOptions['permissionManager'],
     sessionId: 'session',
     services: { agentManager: { list: () => [], spawn: (input) => { spawned.push(input.task ?? ''); return { id: 'agent' } as never; } }, contractRunner: { list: () => [] }, contractIntake: { intake: async () => ({ kind: 'turn' }) } } });
   instance.setCoreServices({ configManager, providerRegistry, planManager });

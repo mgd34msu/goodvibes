@@ -1,21 +1,4 @@
-/**
- * Gate presets: the stakes table, in one reviewable place.
- *
- * Every side-effecting tool call is read by Jev (gate/reading.ts) and given a
- * stakes level. A preset says, for each stakes level, whether the gate allows
- * the call, asks the owner, or denies it. The presets replace the old
- * permission modes; the `permissions.mode` setting keeps its old values, and
- * each value names a preset, so existing settings files, the Shift+Tab cycle
- * and the mode pill keep working unchanged.
- *
- * The boundary (gate/boundary.ts) runs before any preset and no
- * preset can relax it. Explicit owner decisions (remembered approvals, user
- * and managed policy rules, and the custom preset's per-tool settings) are
- * applied before the reading and stand as given.
- *
- * The vocabulary and cycle below were hoisted from the TUI's
- * src/core/permission-mode.ts so every surface shares one definition.
- */
+/** Shared execution modes for the engine and every product surface. */
 import type { PermissionMode } from '../config/schema-types-permissions.js';
 import type { Stakes } from '@goodvibes-jev/judgment';
 import type { GateRiskFamily } from './batteries/risk-family.js';
@@ -24,7 +7,7 @@ import type { GateRiskFamily } from './batteries/risk-family.js';
 export type GateAction = 'allow' | 'ask' | 'deny';
 
 /** The preset names, as the mode pill shows them. */
-export type GatePresetName = 'normal' | 'accept-edits' | 'plan' | 'auto' | 'custom';
+export type GatePresetName = 'safe-owner' | 'safe-jev' | 'yolo' | 'plan';
 
 export type { Stakes as GateStakes } from '@goodvibes-jev/judgment';
 
@@ -44,13 +27,7 @@ export interface GatePreset {
    * machine is denied with the plan-mode denial, whatever its stakes.
    */
   readonly readOnly: boolean;
-  /**
-   * Accept-edits preset: calls in these risk families are allowed through
-   * this stakes level; above it the stakes row applies.
-   */
-  readonly edits?: { readonly families: readonly GateRiskFamily[]; readonly through: Stakes };
-  /** Custom preset: the per-tool settings (`permissions.tools.*`) decide first. */
-  readonly perTool: boolean;
+
 }
 
 /** A gate preset with its shared human-readable picker label. */
@@ -58,78 +35,39 @@ export interface GatePresetDefinition extends GatePreset {
   readonly label: string;
 }
 
-/** The families accept-edits treats as edits. */
-export const EDIT_FAMILIES: readonly GateRiskFamily[] = ['file-mutation', 'notebook-edit', 'config-mutation'];
-
-/**
- * The stakes table. Rows are presets; columns are stakes levels.
- *
- * | preset       | low   | medium | high  | critical | notes                                   |
- * |--------------|-------|--------|-------|----------|-----------------------------------------|
- * | normal       | allow | ask    | ask   | ask      |                                         |
- * | accept-edits | allow | ask    | ask   | ask      | edits allowed through high              |
- * | plan         | allow | ask    | ask   | ask      | any call that changes state is denied   |
- * | auto         | allow | allow  | allow | ask      |                                         |
- * | custom       | allow | ask    | ask   | ask      | per-tool settings decide first          |
- */
+/** Safe modes permit ordinary work; only consequential risk needs a decision. */
 export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>> = {
-  normal: {
-    name: 'normal',
-    label: 'Normal',
-    mode: 'prompt',
-    summary: 'Low-stakes calls run; anything that changes state asks first.',
-    stakes: { low: 'allow', medium: 'ask', high: 'ask', critical: 'ask' },
-    readOnly: false,
-    perTool: false,
-  },
-  'accept-edits': {
-    name: 'accept-edits',
-    label: 'Accept edits',
-    mode: 'accept-edits',
-    summary: 'File, notebook and configuration edits run up to high stakes; other changes ask.',
-    stakes: { low: 'allow', medium: 'ask', high: 'ask', critical: 'ask' },
-    readOnly: false,
-    edits: { families: EDIT_FAMILIES, through: 'high' },
-    perTool: false,
-  },
-  plan: {
-    name: 'plan',
-    label: 'Plan',
-    mode: 'plan',
-    summary: 'Read-only: calls that change anything or reach outside the machine are refused.',
-    stakes: { low: 'allow', medium: 'ask', high: 'ask', critical: 'ask' },
-    readOnly: true,
-    perTool: false,
-  },
-  auto: {
-    name: 'auto',
-    label: 'Auto',
-    mode: 'allow-all',
-    summary: 'Everything below critical stakes runs; critical calls still ask.',
+  'safe-owner': {
+    name: 'safe-owner', label: 'Safe — owner', mode: 'safe-owner',
+    summary: 'Ordinary actions run automatically; dangerous actions ask the owner.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
-    perTool: false,
   },
-  custom: {
-    name: 'custom',
-    label: 'Custom',
-    mode: 'custom',
-    summary: 'Per-tool settings decide; tools without a setting follow the normal row.',
-    stakes: { low: 'allow', medium: 'ask', high: 'ask', critical: 'ask' },
+  'safe-jev': {
+    name: 'safe-jev', label: 'Safe — Jev', mode: 'safe-jev',
+    summary: 'Jev stands in for the owner, allowing justified actions and refusing genuinely harmful ones.',
+    stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
-    perTool: true,
+  },
+  yolo: {
+    name: 'yolo', label: 'YOLO', mode: 'yolo',
+    summary: 'Runs authorized actions without general safety decisions; host containment, secret storage and payment rules still apply.',
+    stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'allow' },
+    readOnly: false,
+  },
+  plan: {
+    name: 'plan', label: 'Plan', mode: 'plan',
+    summary: 'Planning only; execution and state changes are held until an execution mode is selected.',
+    stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
+    readOnly: true,
   },
 };
 
-/**
- * Session picker order in the operator wire vocabulary. Custom remains readable
- * but is not accepted by sessions.permissionMode.set. This is intentionally
- * separate from the config-valued Shift+Tab cycle below.
- */
-export const SESSION_GATE_PRESET_NAMES = ['plan', 'normal', 'accept-edits', 'auto'] as const satisfies readonly GatePresetName[];
+/** Plan is a separate non-executing posture, outside the execution-mode cycle. */
+export const SESSION_GATE_PRESET_NAMES = ['safe-owner', 'safe-jev', 'yolo', 'plan'] as const satisfies readonly GatePresetName[];
 export type SettableGatePresetName = (typeof SESSION_GATE_PRESET_NAMES)[number];
 
-/** Exact operator preset membership; unknown values must not be relabeled normal. */
+/** Exact canonical mode membership; unknown wire values remain invalid. */
 export function isGatePresetName(value: string): value is GatePresetName {
   return Object.hasOwn(GATE_PRESETS, value);
 }
@@ -144,18 +82,28 @@ export function gatePresetLabel(name: string): string {
   return isGatePresetName(name) ? GATE_PRESETS[name].label : (name || 'Unknown');
 }
 
-const PRESET_BY_MODE: Readonly<Record<PermissionMode, GatePresetName>> = {
-  prompt: 'normal',
-  'accept-edits': 'accept-edits',
-  plan: 'plan',
-  'allow-all': 'auto',
-  custom: 'custom',
-};
+/** Decode saved legacy settings into the single current mode vocabulary. */
+export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
+  switch (mode) {
+    case 'safe-owner': case 'safe-jev': case 'yolo': case 'plan': return mode;
+    case 'auto': return 'safe-jev';
+    case 'allow-all': return 'yolo';
+    case 'prompt': case 'normal': case 'accept-edits': case 'custom': return 'safe-owner';
+    default: return undefined;
+  }
+}
 
-/** The preset a `permissions.mode` value selects; an unknown value selects normal. */
-export function presetForMode(mode: PermissionMode | string | undefined): GatePreset {
-  const name = PRESET_BY_MODE[mode as PermissionMode] ?? 'normal';
-  return GATE_PRESETS[name];
+export function normalizePermissionMode(mode: unknown): GatePresetName {
+  return parsePermissionMode(mode) ?? 'safe-owner';
+}
+
+/** The old auto-approve switch is a saved alias for YOLO. */
+export function effectivePermissionMode(mode: unknown, autoApprove = false): GatePresetName {
+  return autoApprove ? 'yolo' : normalizePermissionMode(mode);
+}
+
+export function presetForMode(mode: unknown): GatePresetDefinition {
+  return GATE_PRESETS[normalizePermissionMode(mode)];
 }
 
 /** The stakes level one higher than `stakes`, or critical. */
@@ -179,16 +127,12 @@ export interface PresetInput {
 /** What a preset decides for one read call, and why. */
 export interface PresetDecision {
   readonly action: GateAction;
-  readonly reason: 'stakes' | 'plan-read-only' | 'accepted-edit';
+  readonly reason: 'stakes' | 'plan-read-only';
 }
 
 /** Applies a preset's row to one read call. */
 export function decideByPreset(preset: GatePreset, input: PresetInput): PresetDecision {
   if (preset.readOnly && input.changesState) return { action: 'deny', reason: 'plan-read-only' };
-  const edits = preset.edits;
-  if (edits && edits.families.includes(input.family) && GATE_STAKES.indexOf(input.stakes) <= GATE_STAKES.indexOf(edits.through)) {
-    return { action: 'allow', reason: 'accepted-edit' };
-  }
   return { action: preset.stakes[input.stakes], reason: 'stakes' };
 }
 
@@ -197,40 +141,28 @@ export function decideByPreset(preset: GatePreset, input: PresetInput): PresetDe
 /** The config `permissions.mode` values, exactly as the schema defines them. */
 export type PermissionModeValue = PermissionMode;
 
-/**
- * The Shift+Tab cycle order over the four session presets. `custom` is a
- * per-tool policy rather than a session posture, so it is left out; cycling
- * from custom starts at the first entry (normal).
- *
- * Order (escalating autonomy, then wrap): normal, accept-edits, plan, auto.
- */
-export const PERMISSION_MODE_CYCLE: readonly PermissionModeValue[] = ['prompt', 'accept-edits', 'plan', 'allow-all'] as const;
+/** The three execution modes, shared by keyboard and graphical controls. */
+export const PERMISSION_MODE_CYCLE = ['safe-owner', 'safe-jev', 'yolo'] as const satisfies readonly PermissionModeValue[];
 
 /** User-facing label for a mode value: the preset name the pill shows. */
 export function permissionModeLabel(mode: PermissionModeValue | string | undefined): GatePresetName {
   return presetForMode(mode).name;
 }
 
-/**
- * A coarse tone key for the pill, so the renderer can color presets without
- * importing the value vocabulary: `neutral` for normal, `caution` for the
- * autonomy-raising presets, `info` for plan (read-only).
- */
+/** Presentation tone shared by every mode control. */
 export type PermissionModeTone = 'neutral' | 'info' | 'caution';
 
 export function permissionModeTone(mode: PermissionModeValue | string | undefined): PermissionModeTone {
-  switch (mode) {
+  switch (normalizePermissionMode(mode)) {
     case 'plan': return 'info';
-    case 'accept-edits': return 'caution';
-    case 'allow-all': return 'caution';
-    case 'custom': return 'caution';
+    case 'safe-jev': case 'yolo': return 'caution';
     default: return 'neutral';
   }
 }
 
-/** Next mode in the Shift+Tab cycle; an unknown or `custom` value maps to the first entry. */
+/** Cycle execution modes; unknown values and the planning posture enter safe-owner. */
 export function nextPermissionMode(current: PermissionModeValue | string | undefined): PermissionModeValue {
-  const idx = PERMISSION_MODE_CYCLE.indexOf(current as PermissionModeValue);
+  const idx = PERMISSION_MODE_CYCLE.findIndex(mode => mode === parsePermissionMode(current));
   if (idx < 0) return PERMISSION_MODE_CYCLE[0]!;
   return PERMISSION_MODE_CYCLE[(idx + 1) % PERMISSION_MODE_CYCLE.length]!;
 }
@@ -240,7 +172,7 @@ export function isPlanMode(mode: PermissionModeValue | string | undefined): bool
   return mode === 'plan';
 }
 
-/** The `/plan` toggle target: plan from any other preset, back to normal from plan. */
+/** Enter the planning posture, or return to safe-owner from planning. */
 export function togglePlanMode(current: PermissionModeValue | string | undefined): PermissionModeValue {
-  return isPlanMode(current) ? 'prompt' : 'plan';
+  return isPlanMode(current) ? 'safe-owner' : 'plan';
 }

@@ -1,12 +1,20 @@
+import { resolve } from 'node:path';
+import { types as nodeTypes } from 'node:util';
+import { canonicalJson } from '@goodvibes-jev/judgment';
+import { captureJsonValue, captureOwnedJson } from '../../gate/judgment-input.js';
+import { isInvocationAdmitted } from '../../gate/execution-context.js';
+import type { AppendProfileProseInput, ForgetProfileInput, SetProfileFieldInput, UndoProfileInput } from '../../owner-profile/store-types.js';
+import type { OccasionProfileMutation } from '../../occasions/capture.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { normalizeContext } from '../host-handlers.js';
 import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation, type NativeMutationHost } from '../native-mutation.js';
-import { bindProfileDelegationToInvocation, captureNativeProfileDelegation, profileDelegationForInvocation, profileMutationOptionsForInvocation } from '../../owner-profile/delegation.js';
+import { bindProfileDelegationToInvocation, captureNativeProfileDelegation, profileDelegationForInvocation, profileMutationOptionsForInvocation, readProfileAdmittedInvocation, readProfileDelegation, type ProfileMutationOptions, type RecordedProfileDelegation, type RecordedProfileMutation } from '../../owner-profile/delegation.js';
 import type { OccasionMutationOptions } from '../../occasions/operation.js';
 import { readStoppedNativeNudge } from '../../occasions/push.js';
 import { captureFileMutation, captureMutationDescriptors } from '../../utils/file-mutation.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { readInvocationParams } from './invocation-params.js';
 
 export interface NativeProfileTarget {
   readonly profilePath: string;
@@ -14,6 +22,7 @@ export interface NativeProfileTarget {
   readonly captureProfileRead: () => { readonly assertCurrent: () => void };
   readonly captureStateRead?: (() => { readonly assertCurrent: () => void }) | undefined;
   readonly assertOwnerCurrent: () => void;
+  readonly projectProfileMutation?: ((method: string, request: Readonly<Record<string, unknown>>) => OccasionProfileMutation | undefined) | undefined;
 }
 type NativeProfileOptions = OccasionMutationOptions;
 type NativeNudgeDelivery = NonNullable<OccasionMutationOptions['withNudgeDelivery']>;
@@ -50,7 +59,32 @@ export function profileMutationOptions(invocation: GatewayMethodInvocation, scop
 export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: string, handler: GatewayMethodHandler,
   host: NativeMutationHost | undefined, target: NativeProfileTarget | undefined, provenance = true): GatewayMethodHandler {
   return async invocation => {
-    if (!requestsNativeAdmission(invocation.body)) return handler(invocation);
+    if (!requestsNativeAdmission(invocation.body)) {
+      const delegation = profileDelegationForInvocation(invocation);
+      const retained = profileMutationOptionsForInvocation(invocation);
+      if (delegation && retained && target && targets.get(catalog)?.get(method) === target) {
+        const requestCurrent = retainNativeMutationRequest({ body: invocation.body ?? null, query: invocation.query ?? null });
+        const targetCurrent = captureMutationDescriptors(target, ['profilePath', 'captureProfileRead', 'assertOwnerCurrent', 'projectProfileMutation']);
+        const profileRead = target.captureProfileRead();
+        const profileFile = captureFileMutation(target.profilePath);
+        let publishing = false;
+        const current = () => {
+          if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
+          requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); retained.signal?.throwIfAborted(); retained.assertCurrent?.();
+          if (!publishing) profileRead.assertCurrent();
+          profileFile.assertCurrent();
+        };
+        const lifetime: ProfileMutationOptions = { ...retained, delegation, assertCurrent: current,
+          onWriteIntent: () => { current(); retained.onWriteIntent?.(); publishing = true; current(); },
+          onEffect: published => { retained.onEffect?.(published); profileFile.onEffect(published); requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); },
+        };
+        const admittedMutation = captureProfileMutationAdmission(delegation, invocation, method, target, lifetime);
+        mutationOptions.set(invocation, { ...lifetime, admittedMutation });
+        try { return await handler(invocation); }
+        finally { mutationOptions.delete(invocation); }
+      }
+      return handler(invocation);
+    }
     const sourceCurrent = retainNativeMutationRequest({ body: invocation.body ?? null, query: invocation.query ?? null, context: invocation.context });
     sourceCurrent();
     const body = invocation.body;
@@ -58,16 +92,17 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
       || ('said' in body && body.said !== ''))) {
       throw new GatewayVerbError('Native autonomous provenance requires authority autonomous and no claimed human quote.', 'INVALID_ARGUMENT', 400);
     }
-    if (!target) throw new GatewayVerbError('Native profile target is unavailable.', 'NATIVE_MUTATION_FORBIDDEN', 403);
+    if (!target || targets.get(catalog)?.get(method) !== target) throw new GatewayVerbError('Native profile target is unavailable.', 'NATIVE_MUTATION_FORBIDDEN', 403);
     const descriptor = catalog.get(method);
     const invocationCurrent = captureMutationDescriptors(invocation, ['body', 'query', 'context', 'signal', 'isAuthorized', 'nativeExecutionAuthority']);
-    const ownerCurrent = captureMutationDescriptors(target, ['profilePath', 'statePath', 'captureProfileRead', 'captureStateRead', 'assertOwnerCurrent']);
+    const ownerCurrent = captureMutationDescriptors(target, ['profilePath', 'statePath', 'captureProfileRead', 'captureStateRead', 'assertOwnerCurrent', 'projectProfileMutation']);
     const profileRead = target.captureProfileRead();
     const profileFile = captureFileMutation(target.profilePath);
     const stateRead = target.captureStateRead?.();
     const stateFile = target.statePath ? captureFileMutation(target.statePath) : undefined;
     let profileIntent = false, stateIntent = false;
     const assertTargetCurrent = () => {
+      if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
       sourceCurrent(); invocationCurrent(); ownerCurrent(); target.assertOwnerCurrent();
       if (catalog.get(method) !== descriptor) throw new Error('Native profile method changed.');
       if (!profileIntent) profileRead.assertCurrent();
@@ -82,7 +117,7 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
         if (!admission) throw new Error('Recorded native profile admission is unavailable.');
         const delegation = captureNativeProfileDelegation(admission, invocation);
         bindProfileDelegationToInvocation(delegation, invocation);
-        mutationOptions.set(invocation, { assertCurrent, delegation, withPublication,
+        const lifetime: NativeProfileOptions = { assertCurrent, delegation, withPublication,
           onWriteIntent: () => { assertCurrent(); profileIntent = true; },
           onEffect: published => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); profileFile.onEffect(published); stateFile?.onEffect(); },
           onStateWriteIntent: () => { assertCurrent(); stateIntent = true; },
@@ -106,7 +141,9 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
                 withPublication: withDeliveryPublication,
               }) });
           } } : {}),
-        });
+        };
+        const admittedMutation = captureProfileMutationAdmission(delegation, invocation, method, target, lifetime);
+        mutationOptions.set(invocation, { ...lifetime, admittedMutation });
         try { return await handler(invocation); }
         catch (error) {
           const delivery = mutationOptions.get(invocation)?.withNudgeDelivery;
@@ -117,4 +154,99 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
         finally { mutationOptions.delete(invocation); }
       } });
   };
+}
+
+type ProfileMethod = 'profile.set' | 'profile.append' | 'profile.forget' | 'profile.undo';
+type ProfileInput = SetProfileFieldInput | AppendProfileProseInput | ForgetProfileInput | UndoProfileInput;
+const mutations = new WeakMap<RecordedProfileMutation, {
+  readonly method: ProfileMethod;
+  readonly path: string;
+  readonly payload: string;
+  readonly options: ProfileMutationOptions;
+  consumed: boolean;
+}>();
+
+function payload(method: ProfileMethod, input: object): string {
+  captureOwnedJson(input, nodeTypes.isProxy);
+  const read = (key: string): unknown => Object.getOwnPropertyDescriptor(input, key)?.value;
+  const keys = method === 'profile.set' ? ['fieldId', 'value', 'authority', 'said', 'surface', 'date']
+    : method === 'profile.append' ? ['section', 'text', 'authority', 'said', 'surface', 'date']
+      : method === 'profile.forget' ? ['fieldId', 'section', 'text', 'lineIndex', 'authority']
+        : ['fieldId', 'authority'];
+  return canonicalJson(captureJsonValue(Object.fromEntries(keys.map(key => [key, read(key)]))));
+}
+
+function toolRequest(name: 'profile' | 'occasions', args: Record<string, unknown>): { readonly method: string; readonly input: object } | undefined {
+  const text = (key: string): string => typeof args[key] === 'string' ? args[key].trim() : '';
+  const action = text('action') || text('mode');
+  const authority = !text('authority') || text('authority') === 'owner-direct' ? 'autonomous' : text('authority');
+  const identity = { authority, said: authority === 'autonomous' ? '' : text('said'), surface: 'agent' };
+  const fieldId = text('fieldId') || text('field');
+  if (name === 'occasions') {
+    if (action === 'confirm') return { method: 'occasions.confirm', input: { title: text('title'), date: text('date'), kind: text('kind'),
+      ...(text('person') ? { person: text('person') } : {}), ...(text('recurrence') ? { recurrence: text('recurrence') } : {}),
+      ...(typeof args.leadDays === 'number' ? { leadDays: args.leadDays } : {}), ...identity } };
+    if (action === 'plan_confirm') return { method: 'occasions.plans.confirm', input: { title: text('title'), from: text('from'), to: text('to'),
+      ...(args.away === undefined ? {} : { away: args.away === true }), ...(text('destination') ? { destination: text('destination') } : {}), ...identity } };
+    if (action === 'remove') return { method: 'occasions.remove', input: { occasionId: text('occasionId'), confirmed: args.confirmed === true, authority } };
+    return undefined;
+  }
+  if (action === 'set') return { method: 'profile.set', input: { fieldId, value: text('value'), ...identity } };
+  if (action === 'append') return { method: 'profile.append', input: { section: text('section'), text: text('text'), ...identity } };
+  if (action === 'forget') return { method: 'profile.forget', input: fieldId ? { fieldId, authority } : { section: text('section'), text: text('text'), authority } };
+  if (action === 'undo') return { method: 'profile.undo', input: { fieldId, authority } };
+  return undefined;
+}
+
+/** The actual native registrar binds an exact admitted request to its selected file owner. */
+function captureProfileMutationAdmission(
+  delegation: RecordedProfileDelegation,
+  invocation: GatewayMethodInvocation,
+  method: string,
+  target: NativeProfileTarget,
+  lifetime: ProfileMutationOptions,
+): RecordedProfileMutation | undefined {
+  const input = readInvocationParams(invocation);
+  const source = readProfileAdmittedInvocation(delegation);
+  const current = readProfileDelegation(delegation);
+  if (!source || !current) return undefined;
+  if (source.kind === 'native') {
+    if (source.invocation !== invocation || source.method !== method) return undefined;
+  } else {
+    if (!isInvocationAdmitted(source.name, source.args)) return undefined;
+    const expected = toolRequest(source.name, source.args);
+    if (!expected || expected.method !== method) return undefined;
+    if (method === 'profile.set' || method === 'profile.append' || method === 'profile.forget' || method === 'profile.undo') {
+      if (payload(method, expected.input) !== payload(method, input)) return undefined;
+    } else if (canonicalJson(captureJsonValue(expected.input)) !== canonicalJson(captureJsonValue(input))) return undefined;
+  }
+  const assertCurrent = () => { current.assertCurrent(); lifetime.signal?.throwIfAborted(); lifetime.assertCurrent?.(); };
+  assertCurrent();
+  const effect: { readonly method: ProfileMethod; readonly input: object } | undefined = method === 'profile.set' || method === 'profile.append' || method === 'profile.forget' || method === 'profile.undo'
+    ? { method, input } : target.projectProfileMutation?.(method, input);
+  if (!effect) return undefined;
+  const captured = payload(effect.method, effect.input);
+  assertCurrent();
+  const token: RecordedProfileMutation = Object.freeze({ kind: 'recorded-profile-mutation' });
+  mutations.set(token, { method: effect.method, path: resolve(target.profilePath), payload: captured, options: Object.freeze({ ...lifetime, delegation, assertCurrent }), consumed: false });
+  return token;
+}
+
+/** Consume once for the actual store, target, operation and complete effect payload. */
+export function consumeProfileMutationAdmission(token: RecordedProfileMutation | undefined,
+  method: ProfileMethod, path: string, input: ProfileInput): ProfileMutationOptions | undefined {
+  if (!token) return undefined;
+  const mutation = mutations.get(token);
+  if (!mutation || mutation.consumed) throw new Error('Unknown or consumed profile mutation admission.');
+  mutation.options.assertCurrent?.();
+  if (mutation.method !== method || mutation.path !== resolve(path) || mutation.payload !== payload(method, input)) {
+    throw new Error('Profile mutation does not match the admitted effect.');
+  }
+  mutation.consumed = true;
+  const assertCurrent = () => {
+    mutation.options.signal?.throwIfAborted();
+    mutation.options.assertCurrent?.();
+    if (mutation.payload !== payload(method, input)) throw new Error('Profile mutation input changed after admission.');
+  };
+  return Object.freeze({ ...mutation.options, assertCurrent });
 }

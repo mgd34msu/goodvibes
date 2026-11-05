@@ -1,4 +1,5 @@
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
+import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
 import { hashState } from '@goodvibes-jev/judgment';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { UnknownPreparedToolError } from '../tools/preparation-error.js';
@@ -93,7 +94,7 @@ export type ToolExecutionDeps = {
   onToolSettled?: ((result: ToolResult) => void) | undefined;
   toolRegistry: ToolRegistry;
   permissionManager: Pick<PermissionManager, 'checkDetailed' | 'check' | 'admitAutonomous' | 'autonomousPreparation'>
-    & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices'>>;
+    & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'getMode' | 'captureExecutionMode'>>;
   hookDispatcher: HookDispatcherLike | null;
   runtimeBus: RuntimeEventBus | null;
   sessionId: string;
@@ -146,6 +147,21 @@ export async function executeToolCalls(
   calls: ToolCall[],
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = [];
+  for (const call of calls) {
+    const inheritedMode = currentExecutionMode();
+    const selection = deps.permissionManager.captureExecutionMode?.();
+    const mode = selection?.mode ?? deps.permissionManager.getMode?.() ?? inheritedMode ?? 'safe-jev';
+    results.push(...await withExecutionMode(mode, () => executeToolCallsInMode(deps, turnId, [call]), selection?.assertCurrent));
+  }
+  return results;
+}
+
+async function executeToolCallsInMode(
+  deps: ToolExecutionDeps,
+  turnId: string,
+  calls: ToolCall[],
+): Promise<ToolResult[]> {
+  const results: ToolResult[] = [];
   const turnSignal = deps.turnSignal;
   const callerCurrent = deps.assertCurrent;
   const assertTurnActive = () => { turnSignal?.throwIfAborted(); callerCurrent?.(); };
@@ -167,7 +183,7 @@ export async function executeToolCalls(
     // These are protocol references, never the request or tool arguments. Use
     // the existing typed-reference privacy checks before hashing: UUID digit
     // runs are not payment-card input. Non-identity content still fails closed.
-    captureAutonomousChoices({ resumeConditions: [
+    if (!isYoloExecution()) captureAutonomousChoices({ resumeConditions: [
       { id: sourceIdentity.session, revision: sourceIdentity.turn },
       { id: sourceIdentity.call, revision: 'tool-call' },
     ] });
@@ -188,7 +204,7 @@ export async function executeToolCalls(
               { signal: admissionSignal, assertCurrent: () => { assertTurnActive(); originalPreparation.assertCurrent(); } });
             call = { id: inputProjection.callId, name: inputProjection.name, arguments: inputProjection.args };
           }
-          if (deps.permissionManager.projectAutonomousChoices && deps.permissionManager.releaseAutonomousChoices) {
+          if (!isYoloExecution() && deps.permissionManager.projectAutonomousChoices && deps.permissionManager.releaseAutonomousChoices) {
             choiceProjection = await deps.permissionManager.projectAutonomousChoices(sourceId, call.id, sourceOf!, deps.toolRegistry, admissionSignal);
           }
           originalPreparation.assertCurrent();
@@ -300,7 +316,7 @@ export async function executeToolCalls(
       }
 
       assertTurnActive();
-      if (deps.hookDispatcher) {
+      if (deps.hookDispatcher && !isYoloExecution()) {
         try {
           const preEvent: HookEvent = {
             path: `Pre:tool:${call.name}`,
@@ -313,7 +329,7 @@ export async function executeToolCalls(
           };
           const preResult = await deps.hookDispatcher.fire(preEvent);
           assertTurnActive();
-          if (preResult.decision === 'deny') {
+          if (preResult.decision === 'deny' && !isYoloExecution()) {
             const deniedResult: ToolResult = {
               callId: call.id,
               success: false,

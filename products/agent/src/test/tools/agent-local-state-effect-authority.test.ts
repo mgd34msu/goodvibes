@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
-import type { PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
+import { ConfigManager, type PermissionMode } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
@@ -11,7 +11,8 @@ import { createAgentVibeTool, registerAgentVibeTool } from '../../tools/agent-vi
 import { admitLocalState } from '../helpers/local-state-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { OwnerProfileStore, parseProfileDocument, profileDelegationForInvocation, type ProfileMutationOptions } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import { OwnerProfileStore, parseProfileDocument, type ProfileMutationOptions } from '@goodvibes-jev/engine/sdk/platform/owner-profile';
+import { composeOccasions } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { resetProcessUntrustedContentLedgerForTests } from '@goodvibes-jev/engine/sdk/platform/security';
 import { createOccasionsGatewayInvoke, type OccasionsGatewayInvoke } from '../../agent/occasions-gateway.ts';
 import { createAgentOccasionsTool, registerAgentOccasionsTool } from '../../tools/agent-occasions-tool.ts';
@@ -19,7 +20,8 @@ import { createAgentOccasionsTool, registerAgentOccasionsTool } from '../../tool
 beforeEach(() => { resetProcessUntrustedContentLedgerForTests(); });
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const closers: (() => Promise<void>)[] = [];
+afterEach(async () => { for (const close of closers.splice(0)) await close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
   const root = makeProjectTempDir('agent-local-state-authority'); roots.push(root);
   const home = join(root, 'home'), workspace = join(root, 'workspace');
@@ -103,19 +105,10 @@ function occasionsFixture() {
   const f = fixture(), profilePath = join(f.home, 'owner-profile.md'), statePath = join(f.home, 'occasions-state.json');
   writeFileSync(profilePath, '# Owner profile\n\n## Important dates\n');
   const profile = new OwnerProfileStore({ path: profilePath }); profile.loadSync();
-  const config = { get: (key: string) => key === 'daemon.timezone' ? 'UTC' : undefined, set() {} };
-  const catalog = new GatewayMethodCatalog({ includeBuiltins: false });
-  catalog.register({ id: 'occasions.confirm', title: 'Synthetic local profile capture', description: 'Isolated actual profile writer',
-    category: 'test', source: 'plugin', access: 'authenticated', transport: ['internal'], scopes: [] }, async invocation => {
-    const body = invocation.body;
-    if (!body || typeof body !== 'object' || !('title' in body) || typeof body.title !== 'string'
-      || !('date' in body) || typeof body.date !== 'string' || !('kind' in body) || typeof body.kind !== 'string'
-      || !('authority' in body) || body.authority !== 'autonomous') throw new Error('Unexpected synthetic capture');
-    const result = await profile.append({ section: 'Important dates', text: `${body.title} · ${body.date} · annual · ${body.kind}`,
-      surface: 'agent', authority: 'autonomous', said: '' }, { signal: invocation.signal,
-      delegation: profileDelegationForInvocation(invocation), assertCurrent: () => { invocation.isAuthorized?.([]); } });
-    return { ...result, occasionId: 'family-day', droppedRecords: 0 };
-  });
+  const config = new ConfigManager({ homeDir: f.home, workingDir: f.workspace, surfaceRoot: 'taint-fixture' });
+  const catalog = new GatewayMethodCatalog();
+  const composed = composeOccasions(catalog, { ownerProfile: profile, configManager: config, statePath });
+  closers.push(composed.dispose);
   const invoke = createOccasionsGatewayInvoke({ gatewayMethods: catalog, configManager: config, homeDirectory: f.home });
   const register = (registry: Parameters<typeof registerAgentOccasionsTool>[0]) => registerAgentOccasionsTool(registry, { invoke });
   return { ...f, profile, catalog, invoke, register, profilePath, statePath };

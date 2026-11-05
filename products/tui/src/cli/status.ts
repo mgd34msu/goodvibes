@@ -455,15 +455,15 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     });
   }
 
-  if (permissionMode === 'allow-all') {
+  if (permissionMode === 'yolo' || permissionMode === 'allow-all') {
     findings.push({
       id: 'allow-all-permissions',
       area: 'security',
       severity: 'risk',
-      summary: 'Automatic permission mode is active.',
-      cause: 'permissions.mode is allow-all.',
+      summary: 'YOLO execution mode is active.',
+      cause: 'The selected execution mode is YOLO.',
       impact: describeConfiguredPermissions(config).detail,
-      action: 'Use Plan only for read-only work or Custom rules to restrict particular tools.',
+      action: 'Select Safe owner or Safe Jev when dangerous actions need a safety decision.',
     });
   }
 

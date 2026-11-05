@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { readExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
@@ -264,7 +265,7 @@ async function main() {
   const unsubs: Array<() => void> = [];
   commandContext.nativeWorkLedger = createNativeWorkLedgerView(() => {
     const host = resolveNativeLedgerHost({ configManager, homeDirectory: ctx.services.shellPaths.homeDirectory });
-    return 'reason' in host ? host : { ...host, workspace: ctx.services.workingDirectory, journalPath: ctx.services.shellPaths.resolveUserPath('agent', 'native-work-submission.json') };
+    return 'reason' in host ? host : { ...host, workspace: ctx.services.workingDirectory, journalPath: ctx.services.shellPaths.resolveUserPath('agent', 'native-work-submission.json'), readExecutionMode: () => { const mode = readExecutionMode(configManager); if (!mode) throw new Error('The active execution mode is unavailable.'); return mode; } };
   }, () => render());
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.close());
@@ -642,9 +643,9 @@ async function main() {
       workingDir, homeDirectory, view: viewFrame?.footer ?? null,
       contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel), // null: unknown, the meter says so
       compactThreshold: configManager.get('behavior.autoCompactThreshold') as number,
-      // Warn about broad automatic approvals even though boundaries or critical
-      // stakes can still ask. The shared posture also drives status and explain.
+      // The footer and status report the same effective execution mode.
       dangerMode: readApprovalPostureFromConfig(configManager).automaticApprovals,
+      executionMode: readApprovalPostureFromConfig(configManager).mode,
       powerNote: describePowerStatus(ctx.services.powerManager.getState()) ?? undefined, // see power-status.ts
       lastInputTokens: orchestrator.lastInputTokens,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),

@@ -66,7 +66,7 @@ function describeEvent(event: ContractEvent): string {
     case 'CONTRACT_OWNER_REPLIED':
       return `reply to ${event.escalationId} read as ${event.reading} (${event.outcome}): ${event.action}`;
     case 'CONTRACT_GATE_RESULT':
-      return `gate ${event.gate} on ${event.targetId}: ${event.skipped ? 'skipped' : event.passed ? 'passed' : 'failed'} (${event.durationMs} ms)`;
+      return `gate ${event.gate} on ${event.targetId}: ${event.outcome ?? (event.skipped ? 'unverified (skipped)' : event.passed ? 'passed' : 'failed')}${event.reason ? `: ${event.reason}` : ''} (${event.durationMs} ms)`;
     case 'CONTRACT_UNIT_SILENT':
       return `unit ${event.unitId} agent ${event.agentId} silent for ${Math.round(event.silentMs / 1000)} s: ${event.action}`;
     case 'CONTRACT_MERGE_CONFLICT':

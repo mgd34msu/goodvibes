@@ -1,3 +1,4 @@
+import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
 import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
@@ -98,6 +99,7 @@ export interface ShellFooterBuildOptions {
    */
   readonly compactThreshold?: number;
   readonly dangerMode?: boolean;
+  readonly executionMode?: GatePresetName | 'unavailable';
   readonly lastInputTokens?: number;
   readonly contextUsageAvailable?: boolean;
   readonly commandArgsHint?: string;
@@ -173,7 +175,7 @@ function composerModeStyle(options: ShellFooterBuildOptions): { label: string; c
     case 'orchestration':
       return { label: intent, color: activeUiTones().chrome.remote };
     case 'memory pin': return { label: 'memory pin', color: t.secondary };
-    default: return { label: options.hitlMode || 'prompt', color: t.brand };
+    default: return options.executionMode === 'unavailable' ? { label: 'Mode unavailable', color: t.warning } : { label: presetForMode(options.executionMode).label, color: t.brand };
   }
 }
 
@@ -193,7 +195,7 @@ function modeChips(label: string, dangerMode: boolean): StatusChip[] {
     const fg = label === 'plan' ? t.info : remote ? activeUiTones().chrome.remote : t.textMuted;
     chips.push({ text: label, fg, bold: label === 'plan' || remote, keep: true });
   }
-  if (dangerMode) chips.push({ text: '! auto-approve', fg: t.error, bold: true, keep: true });
+  if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   return chips;
 }
 
@@ -216,7 +218,7 @@ export function statusCostText(usage: ShellFooterBuildOptions['usage'], model: s
 function safetyChips(options: ShellFooterBuildOptions): StatusChip[] {
   const t = activeTokens();
   const chips: StatusChip[] = [];
-  if (options.dangerMode) chips.push({ text: '! auto-approve', fg: t.error, bold: true, keep: true });
+  if (options.dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   const voice = options.voiceCapture ?? null;
   if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
   if (options.powerNote) chips.push({ text: options.powerNote, fg: t.warning, bold: true, keep: true });

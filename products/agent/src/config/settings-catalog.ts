@@ -1,3 +1,4 @@
+import { readExecutionMode } from '../permissions/execution-mode.ts';
 import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
 import { isAgentHostSettingKey, type AgentHostSettingKey } from './host-settings.ts';
 
@@ -24,5 +25,6 @@ export function getAgentSettingsSchema(config: AgentSettingsCatalog): AgentConfi
 }
 
 export function readAgentSettingValue(config: Pick<ConfigManager, 'get' | 'getHostBooleanSetting'>, setting: AgentConfigSetting): unknown {
+  if (setting.key === 'permissions.mode') return readExecutionMode(config);
   return setting.kind === 'host' ? config.getHostBooleanSetting(setting.key).get() : config.get(setting.key);
 }

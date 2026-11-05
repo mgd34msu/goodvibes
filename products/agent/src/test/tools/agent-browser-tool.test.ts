@@ -210,10 +210,11 @@ function admittedBrowser(tool: Tool) {
   };
   const manager = new PermissionManager(undefined, reader, new PolicyRuntimeState()), registry = new ToolRegistry(manager);
   registry.register(tool);
-  const synthetic = fakePort((name, question) => {
+  const synthetic = fakePort((wireName, question) => {
+    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type === 'choice') {
-      const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;
+      const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'hazard' ? 'none' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (!label || !Object.hasOwn(question.criteria, label)) throw new Error('Unexpected native browser admission question');
       return choiceAnswer(question, label, 0.999);
     }

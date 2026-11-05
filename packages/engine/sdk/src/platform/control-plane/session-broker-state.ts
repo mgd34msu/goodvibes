@@ -6,6 +6,7 @@ import {
 import type { SharedSessionStoreSnapshot } from './session-broker-helpers.js';
 import type { SharedSessionMessage, SharedSessionParticipant, SharedSessionRecord } from './session-types.js';
 import { isRecord } from '../utils/record-coerce.js';
+import { isSettableGatePresetName } from '../gate/presets.js';
 
 const SESSION_KINDS = new Set<SharedSessionRecord['kind']>(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
 const SESSION_STATUSES = new Set<SharedSessionRecord['status']>(['active', 'closed']);
@@ -107,6 +108,14 @@ function normalizeSessionRecord(
   validateOptionalString(value['activeAgentId']);
   validateOptionalString(value['lastAgentId']);
   validateOptionalString(value['lastError']);
+  const channelPermissionMode = value['channelPermissionMode'];
+  validateOptionalNumber(value['channelPermissionModeRevision']);
+  const channelPermissionModeRevision = value['channelPermissionModeRevision'];
+  if (channelPermissionModeRevision !== undefined && (typeof channelPermissionModeRevision !== 'number'
+    || !Number.isSafeInteger(channelPermissionModeRevision) || channelPermissionModeRevision < 0)) throwInvalidSessionSnapshot();
+  if (channelPermissionMode !== undefined && (typeof channelPermissionMode !== 'string' || !isSettableGatePresetName(channelPermissionMode))) {
+    throwInvalidSessionSnapshot();
+  }
   if (value['routeIds'] !== undefined && !isStringArray(value['routeIds'])) throwInvalidSessionSnapshot();
   if (value['surfaceKinds'] !== undefined && !isStringArray(value['surfaceKinds'])) throwInvalidSessionSnapshot();
   if (value['participants'] !== undefined && !Array.isArray(value['participants'])) throwInvalidSessionSnapshot();
@@ -143,6 +152,8 @@ function normalizeSessionRecord(
   const closedAt = isFiniteNumber(value['closedAt']) ? value['closedAt'] : undefined;
   return {
     id,
+    ...(channelPermissionMode === undefined ? {} : { channelPermissionMode }),
+    ...(typeof channelPermissionModeRevision === 'number' ? { channelPermissionModeRevision } : {}),
     kind: typeof value['kind'] === 'string' && SESSION_KINDS.has(value['kind'] as SharedSessionRecord['kind'])
       ? value['kind'] as SharedSessionRecord['kind']
       : 'tui',

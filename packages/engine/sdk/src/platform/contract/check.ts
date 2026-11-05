@@ -29,7 +29,7 @@ import { unmetSeverity } from './batteries/unmet-severity.js';
 import { responseFinding } from '../core/batteries/response-finding.js';
 import type { ContractAcceptanceStakes, ContractConfig } from './config.js';
 import { judgeState, qualityState, type UnitEvidence } from './evidence.js';
-import { failedGates } from './gates.js';
+import { failedGates, refreshGateResults, unverifiedGates } from './gates.js';
 import { buildNudge, checkNumberOf, type NudgeFindings } from './nudge.js';
 import {
   consecutiveUnsettledChecks,
@@ -240,7 +240,8 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
  * `judgment-unavailable`; there is no other path.
  */
 export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
-  const { unit, evidence, settings } = input;
+  const { unit, settings } = input;
+  let evidence = input.evidence.gates === undefined ? input.evidence : { ...input.evidence, gates: refreshGateResults(input.evidence.gates) };
   const usage = emptyJudgmentUsage();
   const judged = unit.criteria.filter((criterion) => criterion.disposition === 'judged');
   const signal = input.signal === undefined ? {} : { signal: input.signal };
@@ -258,6 +259,7 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
     quality.recordAction('discarded: unit cancelled');
     return { discarded: true, usage };
   }
+  if (evidence.gates !== undefined) evidence = { ...evidence, gates: refreshGateResults(evidence.gates) };
 
   const checkId = `${unit.id}.k${unit.checks.length + 1}`;
   const verdicts = new Map(judged.map((criterion, index) => [criterion.id, criterionVerdict(judgment.criteria[index]!)]));
@@ -272,10 +274,11 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
     judgment.criteria[index]!.outcome === 'act' ? [[criterion.id, verdicts.get(criterion.id)!] as const] : [])));
   const regressed = new Set(regressions.map((regression) => regression.criterionId));
   const failing = failedGates(evidence.gates);
+  const unverified = unverifiedGates(evidence.gates);
   const claimsDidFail = claimsFailed(input);
   const kinds = problemKinds({
     unmet: goalVerdict === 'unmet' || [...verdicts].some(([id, verdict]) => verdict === 'unmet' && !regressed.has(id)),
-    unshown: goalVerdict === 'unshown' || qualityUnshown.length > 0 || [...verdicts.values()].includes('unshown'),
+    unshown: goalVerdict === 'unshown' || qualityUnshown.length > 0 || [...verdicts.values()].includes('unshown') || unverified.length > 0,
     regression: regressions.length > 0,
     quality: qualityProblems.length > 0,
     gate: failing.length > 0,
@@ -333,6 +336,8 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
       ...(evidence.claims === undefined ? {} : { claims: { missingPaths: evidence.claims.missingPaths, noChanges: evidence.claims.missingPaths.length === 0 && claimsDidFail } }),
     };
     nudge = { text: buildNudge(unit, nudgeFindings), kinds: chosen.nudgeKinds, criterionIds: nudgedCriteria(findings, chosen.nudgeKinds) };
+    if (unverified.length) nudge = { ...nudge, text: nudge.text + '\n\nRequired checks still need current execution evidence:\n'
+      + unverified.map(gate => `- ${gate.gate}: ${gate.reason ?? 'unverified check completion'}`).join('\n') };
     const host = evidence.orchestration;
     const requirements = host && typeof host === 'object' && !Array.isArray(host) ? host['requirements'] : undefined;
     const comparisons = requirements && typeof requirements === 'object' && !Array.isArray(requirements)

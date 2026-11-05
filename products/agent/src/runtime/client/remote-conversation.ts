@@ -1,3 +1,4 @@
+import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 /**
  * remote-conversation.ts, running this surface's own conversation turns inside
  * the connected daemon.
@@ -91,6 +92,8 @@ import {
 } from './hosted-frame-render.ts';
 
 /** The reason given when the person has turned routing off themselves. */
+class HostedExecutionModeError extends Error {}
+
 export const ROUTING_DISABLED_REASON =
   'hostedSessions.routeConversationTurns is off, so this turn ran in this process.';
 
@@ -201,6 +204,9 @@ export interface RemoteConversationRouter {
   observeNative(snapshot: NativeHostedTurnSnapshot, cancel: () => Promise<void>, current?: () => boolean): Promise<RemoteTurnOutcome>;
   /** The hosted session this conversation is bound to, if any. */
   hostedSessionId(): string | null;
+  executionMode(): GatePresetName | undefined;
+  refreshExecutionMode(): Promise<void>;
+  setExecutionMode(mode: GatePresetName): Promise<void>;
   /** Request Stop for this submission only; true means the hosted path owns it. */
   cancelTurn(): boolean;
   /** Stop watching. Leaves the hosted session alone, detaching is separate. */
@@ -209,7 +215,7 @@ export interface RemoteConversationRouter {
 
 /** The daemon's reply to `sessions.hosted.create`. Only the id is read. */
 interface HostedCreateReply {
-  readonly session?: { readonly id?: unknown } | undefined;
+  readonly session?: { readonly id?: unknown; readonly permissionMode?: unknown } | undefined;
 }
 
 /**
@@ -257,6 +263,54 @@ export function createRemoteConversationRouter(
     selectionTimer?: ReturnType<typeof setInterval> | undefined;
   }
   let hostedId: string | null = null;
+  let hostedConnection: Extract<ConnectedHostResolution, { readonly baseUrl: string }> | undefined;
+  let hostedMode: GatePresetName | undefined;
+  let modeObservation = 0;
+  let modeRequest = 0;
+  const currentModeOwner = () => {
+    const connection = options.resolveConnection();
+    if (disposed || !hostedId || !hostedConnection || !sameNativeRemoteConnection(hostedConnection, connection)) throw new HostedExecutionModeError('The active hosted execution owner is unavailable or changed.');
+    return { id: hostedId, connection: hostedConnection };
+  };
+  const refreshExecutionMode = async (): Promise<void> => {
+    const owner = currentModeOwner();
+    const revision = ++modeObservation;
+    const operator = createOperatorSdk({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    try {
+      const reply = await operator.invoke('sessions.permissionMode.get', { sessionId: owner.id });
+      const current = currentModeOwner();
+      if (revision !== modeObservation) return;
+      if (current.id !== owner.id || !sameNativeRemoteConnection(current.connection, owner.connection) || reply.sessionId !== owner.id || !isGatePresetName(reply.mode)) {
+        throw new HostedExecutionModeError('The host returned an unconfirmed session execution mode.');
+      }
+      hostedMode = reply.mode;
+      options.requestRender();
+    } catch (error) {
+      if (revision === modeObservation) { hostedMode = undefined; options.requestRender(); }
+      throw error;
+    } finally { operator.dispose(); }
+  };
+  const setRemoteExecutionMode = async (mode: GatePresetName): Promise<void> => {
+    if (!isGatePresetName(mode)) throw new HostedExecutionModeError('Invalid execution mode.');
+    const owner = currentModeOwner();
+    const revision = ++modeRequest;
+    modeObservation++;
+    hostedMode = undefined;
+    options.requestRender();
+    const operator = createOperatorSdk({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    try {
+      const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode });
+      const current = currentModeOwner();
+      if (revision !== modeRequest || current.id !== owner.id || !sameNativeRemoteConnection(current.connection, owner.connection)) throw new HostedExecutionModeError('The hosted execution owner changed during the mode update.');
+      if (reply.sessionId !== owner.id || !isGatePresetName(reply.mode) || reply.mode !== mode) throw new HostedExecutionModeError('The host did not confirm the requested session execution mode.');
+      modeObservation++;
+      hostedMode = reply.mode;
+      options.requestRender();
+    } catch {
+      if (revision === modeRequest) { hostedMode = undefined; modeObservation++; options.requestRender(); }
+      throw new HostedExecutionModeError('The hosted execution mode update is unconfirmed. No local default was changed.');
+    } finally { operator.dispose(); }
+  };
   let active: WatchedTurn | null = null;
   let disposed = false;
   let submissionGeneration = 0;
@@ -425,6 +479,10 @@ export function createRemoteConversationRouter(
         // the positively correlated execution.
         const lifecycle = readTurnLifecycleFrame(frame.sessionId, frame.payload);
         if (lifecycle && !gate.accepts(lifecycle)) return;
+        if (frame.type === 'PRESET_CHANGED') {
+          hostedMode = undefined;
+          void refreshExecutionMode().catch(() => undefined);
+        }
         try { options.onFrame?.(frame); } catch (error) {
           logger.debug('[remote-conversation] a hosted-frame observer threw', { error: String(error) });
         }
@@ -464,6 +522,10 @@ export function createRemoteConversationRouter(
       + 'conversation takes text only, routing it would have dropped them.');
     const connection = options.resolveConnection();
     if ('reason' in connection) return refuse(`this turn ran in this process because ${connection.reason}`);
+    if (hostedConnection && !sameNativeRemoteConnection(hostedConnection, connection)) {
+      hostedId = null; hostedConnection = undefined; hostedMode = undefined;
+      modeObservation++; modeRequest++;
+    }
     if (!options.workspaceRoot.startsWith('/')) return refuse('a hosted conversation needs an absolute workspace path and this process resolved '
       + `'${options.workspaceRoot}', so this turn ran here.`);
     let operator: OperatorSdk;
@@ -486,7 +548,20 @@ export function createRemoteConversationRouter(
       });
       const id = reply.session?.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error('the connected host returned no session id this build could read');
-      if (isCurrent(turn)) hostedId = id;
+      if (isCurrent(turn)) {
+        modeObservation++; modeRequest++;
+        hostedId = id;
+        hostedConnection = connection;
+        const createdMode = reply.session?.permissionMode;
+        hostedMode = typeof createdMode === 'string' && isGatePresetName(createdMode) ? createdMode : undefined;
+        const configuredMode = options.configManager.get('permissions.mode');
+        const autoApprove = options.configManager.get('behavior.autoApprove') === true;
+        if (typeof configuredMode === 'string' || autoApprove) {
+          // A new legacy-hosted session has not received input yet. Apply the
+          // surface's explicit choice before its first steer can run tools.
+          await setRemoteExecutionMode(effectivePermissionMode(configuredMode, autoApprove));
+        } else if (hostedMode === undefined) void refreshExecutionMode().catch(() => undefined);
+      }
       return id;
     };
     const stopBeforeSteer = (): RemoteTurnOutcome | null => {
@@ -540,6 +615,10 @@ export function createRemoteConversationRouter(
       return { routed: true, hostedSessionId: id, action, completion: renderer.completion() };
     } catch (error) {
       turn.submissionPending = false;
+      if (error instanceof HostedExecutionModeError) {
+        release(turn);
+        return { routed: false, chosen: true, cancelled: true, reason: 'The hosted execution mode could not be confirmed. This message was not run locally or remotely.' };
+      }
       if (turn.cancelRequested && turn.steerAttempted && turn.sessionId && turn.renderer && !turn.settledByHost) {
         abandon(turn, 'The submission response failed after Stop; remote admission and cancellation are unconfirmed. The message was not run locally.');
         return { routed: true, hostedSessionId: turn.sessionId, action, completion: turn.renderer.completion() };
@@ -590,7 +669,13 @@ export function createRemoteConversationRouter(
       ...(snapshot.state === 'completed' || snapshot.state === 'cancelled' ? { nativeTerminal: snapshot.state } : {}),
     };
     active = turn;
+    if (hostedId !== snapshot.sessionId || !hostedConnection || !sameNativeRemoteConnection(hostedConnection, connection)) {
+      modeObservation++; modeRequest++;
+      hostedMode = undefined;
+    }
     hostedId = snapshot.sessionId;
+    hostedConnection = connection;
+    void refreshExecutionMode().catch(() => undefined);
     turn.selectionTimer = setInterval(() => {
       if (!isCurrent(turn) && !turn.finished) abandon(turn, 'Selected host or credentials changed. Detached from this native turn; its remote outcome is unconfirmed.');
     }, 100);
@@ -614,6 +699,11 @@ export function createRemoteConversationRouter(
     submit,
     observeNative,
     hostedSessionId: () => hostedId,
+    executionMode: () => {
+      try { currentModeOwner(); return hostedMode; } catch { return undefined; }
+    },
+    setExecutionMode: setRemoteExecutionMode,
+    refreshExecutionMode,
     cancelTurn: () => {
       const turn = active;
       if (!turn || !isCurrent(turn) || (!turn.submissionPending && turn.renderer?.isTurnFinished())) return false;

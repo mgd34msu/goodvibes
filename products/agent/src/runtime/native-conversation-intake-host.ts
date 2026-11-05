@@ -1,3 +1,4 @@
+import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import { createNativeHostFetch } from './client/native-host-fetch.ts';
 import { createNativeHostedTurnClient } from './native-hosted-turn.ts';
 import { isNativePairedPrincipal } from './native-paired-principal.ts';
@@ -7,7 +8,7 @@ import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/eng
 import type { NativeSubmissionHost } from './native-work-submission-host.ts';
 import type { NativeConversationIntakeBinding } from './native-conversation-intake.ts';
 
-export function createNativeConversationIntakeBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true): NativeConversationIntakeBinding {
+export function createNativeConversationIntakeBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true, readMode?: () => GatePresetName): NativeConversationIntakeBinding {
   // The engine may verify a queued permit after this intake operation has detached.
   // Each verification opens a fresh connection, fenced to the exact selected host.
   const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
@@ -41,7 +42,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
   const client = createOperatorNativeConversationIntakeClient({ invoke }, projectId);
   const execution = createOperatorNativeWorkExecutionClient({ invoke }, projectId);
   return {
-    client, execution, hostedTurn: createNativeHostedTurnClient({ invoke: hostedInvoke }, projectId),
+    client, execution, hostedTurn: createNativeHostedTurnClient({ invoke: hostedInvoke }, projectId, readMode),
     async readPrincipal(signal) {
       const auth = await invoke('control.auth.current', {}, { signal });
       if (!isNativePairedPrincipal(auth, host.expectedPrincipalId)) {

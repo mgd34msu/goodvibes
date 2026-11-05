@@ -103,11 +103,24 @@ function CheckEvidence({ check }: { check: Check }) {
     <DetailSection title={`Gates (${check.gates?.length ?? 0})`}>
       {!check.gates?.length ? <Empty>No gates recorded.</Empty> : <ul className="contract-tree__list" aria-label="Gates">
         {check.gates.map((gate, i) => <li key={`${gate.gate}-${i}`}>
-          <Disclosure summary={<Summary title={gate.gate} status={gate.skipped === true ? 'skipped' : `passed: ${gate.passed}`} />}>
+          <Disclosure summary={<Summary title={gate.gate} status={gate.outcome ?? (gate.skipped === true ? 'unverified (skipped)' : gate.passed ? 'passed' : 'failed')} />}>
             <Facts items={[
-              { label: 'Passed', value: String(gate.passed) }, { label: 'Skipped', value: gate.skipped === undefined ? 'Not recorded' : String(gate.skipped) },
+              { label: 'Accepted as current check', value: String(gate.passed) }, { label: 'Skipped', value: gate.skipped === undefined ? 'Not recorded' : String(gate.skipped) },
+              { label: 'Required', value: gate.required === undefined ? 'Not recorded' : String(gate.required) },
+              { label: 'Reason', value: gate.reason },
               { label: 'Duration (ms)', value: String(gate.durationMs) },
             ]} />
+            {gate.completion?.kind === 'assertions' ? <Facts items={[
+              { label: 'Assertion runner', value: gate.completion.runner },
+              { label: 'Checks passed', value: String(gate.completion.checks.passed) },
+              { label: 'Checks failed', value: String(gate.completion.checks.failed) },
+              { label: 'Checks skipped', value: String(gate.completion.checks.skipped) },
+            ]} /> : gate.completion?.kind === 'command-exit' ? <Text>{`Command exited ${gate.completion.exitCode}; no assertion count or test coverage is established by that exit code.`}</Text>
+              : <Empty>No structured completion recorded.</Empty>}
+            {gate.provenance && <Disclosure summary="Checked source and definition identities"><Facts items={[
+              { label: 'Source before', value: gate.provenance.sourceBefore }, { label: 'Source after', value: gate.provenance.sourceAfter },
+              { label: 'Definition before', value: gate.provenance.definitionBefore }, { label: 'Definition after', value: gate.provenance.definitionAfter },
+            ]} /></Disclosure>}
             {gate.output ? <CodeFrame label="Recorded output">{gate.output}</CodeFrame> : <Empty>No gate output recorded.</Empty>}
           </Disclosure>
         </li>)}

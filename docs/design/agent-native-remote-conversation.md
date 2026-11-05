@@ -28,9 +28,13 @@ The first authoritative source reference is also durably bound before hosted
 mutation. A changed revision,
 principal, project or continuation identity is refused.
 
-Native conversational delivery sends only project ID, input ID and source
-revision through `workLedger.turn.status` and the server-defined
-`workLedger.turn.startAgent`. It never serializes a native permit or a body.
+Native conversational delivery identifies its source by project ID, input ID and
+source revision. Status and cancellation accept only that identity. The
+server-defined `workLedger.turn.startAgent` additionally accepts the selected
+canonical execution mode to initialize a new session before its first turn.
+Continuation and replay preserve the current session mode. Later mode changes
+use `sessions.permissionMode.set` against that actual session, independently of
+the client's default configuration. No native permit or body is serialized.
 The latter chooses the Agent settings namespace in the host; caller text and
 metadata cannot choose it. The host's atomic dispatch claim retains this
 surface, rejects cross-surface replay, and binds one original to one broker

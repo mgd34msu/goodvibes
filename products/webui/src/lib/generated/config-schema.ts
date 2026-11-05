@@ -174,12 +174,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) pinned by the provider optimizer at startup when provider.optimizerMode is \"pinned\". Empty leaves the optimizer unpinned (falls back to manual)."
   },
   {
-    "key": "behavior.autoApprove",
-    "type": "boolean",
-    "default": false,
-    "description": "Auto-approve all tool permission requests (--no-worries-just-vibes)"
-  },
-  {
     "key": "behavior.autoCompactThreshold",
     "type": "number",
     "default": 80,
@@ -258,24 +252,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "permissions.mode",
     "type": "enum",
-    "default": "prompt",
-    "description": "Session permission mode. prompt (default/\"normal\"): auto-approve reads, ask for the rest. plan: read-only tools allowed, every mutating/exec tool is refused with a structured plan-mode denial. accept-edits: file write/edit tools auto-approve, exec and other risky classes still ask. allow-all (\"auto\"): every tool auto-approved. custom: per-tool config actions apply.",
+    "default": "safe-owner",
+    "description": "Execution mode: safe-owner permits ordinary work and asks the owner about dangerous actions; safe-jev lets Jev decide instead; yolo runs every action without safety denials. plan is a separate read-only planning posture.",
     "enumValues": [
-      "prompt",
-      "allow-all",
-      "custom",
-      "plan",
-      "accept-edits"
-    ]
-  },
-  {
-    "key": "permissions.backgroundAgents",
-    "type": "enum",
-    "default": "inherit",
-    "description": "How background/subagent tool calls consult the permission layer. inherit (default): background tool execution runs through the same session permission mode as the foreground turn loop (allow-all changes nothing; prompt/plan/accept-edits/custom apply their matrices; asks broker through the same blocked-on-user machinery with subagent attribution). allow-all: background agents are exempt, their tool calls auto-approve regardless of the session mode.",
-    "enumValues": [
-      "inherit",
-      "allow-all"
+      "safe-owner",
+      "safe-jev",
+      "yolo",
+      "plan"
     ]
   },
   {
@@ -306,7 +289,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.read",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for file read operations (read, find, analyze)",
+    "description": "Permission for file read operations (read, find, analyze). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -317,7 +300,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.write",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file write operations",
+    "description": "Permission for file write operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -328,7 +311,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.edit",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file edit/patch operations",
+    "description": "Permission for file edit/patch operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -339,7 +322,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.exec",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for shell command execution",
+    "description": "Permission for shell command execution. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -350,7 +333,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.find",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for file/directory search operations",
+    "description": "Permission for file/directory search operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -361,7 +344,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.fetch",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for outbound network fetch requests (custom mode only)",
+    "description": "Permission for outbound network fetch requests. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -372,7 +355,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.analyze",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for code/project analysis operations",
+    "description": "Permission for code/project analysis operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -383,7 +366,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.inspect",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for inspecting runtime state and objects",
+    "description": "Permission for inspecting runtime state and objects. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -394,7 +377,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.agent",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for spawning subagents or delegating tasks",
+    "description": "Permission for spawning subagents or delegating tasks. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -405,7 +388,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.state",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for reading runtime/session state",
+    "description": "Permission for reading runtime/session state. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -416,7 +399,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.workflow",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for executing multi-step workflow automation",
+    "description": "Permission for executing multi-step workflow automation. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -427,7 +410,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.registry",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for querying the tool/skill registry",
+    "description": "Permission for querying the tool/skill registry. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -438,7 +421,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.mcp",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for MCP tool calls (external server tools)",
+    "description": "Permission for MCP tool calls (external server tools). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -449,7 +432,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.delegate",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for unknown or unregistered tools (safe default: prompt)",
+    "description": "Permission for unknown or unregistered tools (safe default: prompt). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",

@@ -91,7 +91,7 @@ export interface ConfigSchemaSnapshot {
 
 /** Read the real schema + feature-settings tables from the installed SDK. */
 export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
-  const entries: ConfigSchemaEntrySnapshot[] = CONFIG_SCHEMA.map((s) => ({
+  const entries: ConfigSchemaEntrySnapshot[] = CONFIG_SCHEMA.filter(s => !s.deprecated).map((s) => ({
     key: s.key,
     type: s.type,
     default: s.default,

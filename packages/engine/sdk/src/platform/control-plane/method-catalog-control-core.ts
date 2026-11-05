@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -447,32 +448,32 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.permissionMode.get',
     title: 'Get Session Permission Mode',
-    description: 'Return the permission mode currently in effect for a session (plan/normal/accept-edits/auto, or custom for a bespoke rule set). Only the daemon\'s live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.',
+    description: 'Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon\'s live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/permission-mode' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
-      mode: { type: 'string', enum: ['plan', 'normal', 'accept-edits', 'auto', 'custom'] },
+      mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
     }, ['sessionId', 'mode']),
   }),
   methodDescriptor({
     id: 'sessions.permissionMode.set',
     title: 'Set Session Permission Mode',
-    description: 'Set a session\'s gate preset to plan, normal, accept-edits, or auto. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon\'s live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.',
+    description: 'Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon\'s live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/sessions/{sessionId}/permission-mode' },
     events: [runtimeEventId('gate')],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
-      mode: { type: 'string', enum: ['plan', 'normal', 'accept-edits', 'auto'] },
+      mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
     }, ['sessionId', 'mode']),
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
-      mode: { type: 'string', enum: ['plan', 'normal', 'accept-edits', 'auto', 'custom'] },
-      previousMode: { type: 'string', enum: ['plan', 'normal', 'accept-edits', 'auto', 'custom'] },
+      mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
+      previousMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
     }, ['sessionId', 'mode', 'previousMode']),
   }),
   methodDescriptor({

@@ -161,7 +161,7 @@ describe('SettingsModal', () => {
         expect(modal.subscriptionEntries.map((entry) => entry.provider)).toContain('openai');
         continue;
       }
-      const expectedKeys: string[] = CONFIG_SCHEMA
+      const expectedKeys: string[] = cm.getSchema()
         .filter((entry) => !isAgentHiddenSettingKey(entry.key))
         .filter((entry) => entry.key.split('.')[0] === cat)
         .map((entry) => entry.key);
@@ -180,7 +180,7 @@ describe('SettingsModal', () => {
       for (const [root, target] of Object.entries(CROSS_LISTED_SETTING_ROOTS)) {
         if (target !== cat) continue;
         expectedKeys.push(
-          ...CONFIG_SCHEMA
+          ...cm.getSchema()
             .filter((entry) => !isAgentHiddenSettingKey(entry.key))
             .filter((entry) => entry.key.split('.')[0] === root)
             .map((entry) => entry.key),
@@ -197,7 +197,7 @@ describe('SettingsModal', () => {
     for (const entries of modal.groups.values()) {
       for (const entry of entries) visibleKeys.add(entry.setting.key);
     }
-    const missing = CONFIG_SCHEMA.map((entry) => entry.key).filter((key) => !isAgentHiddenSettingKey(key) && !visibleKeys.has(key));
+    const missing = cm.getSchema().map((entry) => entry.key).filter((key) => !isAgentHiddenSettingKey(key) && !visibleKeys.has(key));
     expect(missing).toEqual([]);
   });
 

@@ -24655,10 +24655,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "plan",
-                    "normal",
-                    "accept-edits",
-                    "auto"
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
                   ]
                 },
                 "updatedAt": {
@@ -24756,10 +24756,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "permissionMode": {
                     "type": "string",
                     "enum": [
-                      "plan",
-                      "normal",
-                      "accept-edits",
-                      "auto"
+                      "safe-owner",
+                      "safe-jev",
+                      "yolo",
+                      "plan"
                     ]
                   },
                   "updatedAt": {
@@ -24845,10 +24845,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "permissionMode": {
               "type": "string",
               "enum": [
-                "plan",
-                "normal",
-                "accept-edits",
-                "auto"
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
               ]
             },
             "metadata": {
@@ -24908,10 +24908,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "plan",
-                    "normal",
-                    "accept-edits",
-                    "auto"
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
                   ]
                 },
                 "updatedAt": {
@@ -33845,6 +33845,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "skipped": {
                                 "type": "boolean"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "passed",
+                                  "failed",
+                                  "unverified"
+                                ]
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "completion": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "command-exit"
+                                        ]
+                                      },
+                                      "exitCode": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "exitCode"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "assertions"
+                                        ]
+                                      },
+                                      "runner": {
+                                        "type": "string",
+                                        "enum": [
+                                          "bun-junit",
+                                          "registered-protocol"
+                                        ]
+                                      },
+                                      "checks": {
+                                        "type": "object",
+                                        "properties": {
+                                          "passed": {
+                                            "type": "number"
+                                          },
+                                          "failed": {
+                                            "type": "number"
+                                          },
+                                          "skipped": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "passed",
+                                          "failed",
+                                          "skipped"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "runner",
+                                      "checks"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "provenance": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceBefore": {
+                                    "type": "string"
+                                  },
+                                  "sourceAfter": {
+                                    "type": "string"
+                                  },
+                                  "definitionBefore": {
+                                    "type": "string"
+                                  },
+                                  "definitionAfter": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceBefore",
+                                  "sourceAfter",
+                                  "definitionBefore",
+                                  "definitionAfter"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -34587,6 +34692,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "skipped": {
                                 "type": "boolean"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "passed",
+                                  "failed",
+                                  "unverified"
+                                ]
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "completion": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "command-exit"
+                                        ]
+                                      },
+                                      "exitCode": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "exitCode"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "assertions"
+                                        ]
+                                      },
+                                      "runner": {
+                                        "type": "string",
+                                        "enum": [
+                                          "bun-junit",
+                                          "registered-protocol"
+                                        ]
+                                      },
+                                      "checks": {
+                                        "type": "object",
+                                        "properties": {
+                                          "passed": {
+                                            "type": "number"
+                                          },
+                                          "failed": {
+                                            "type": "number"
+                                          },
+                                          "skipped": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "passed",
+                                          "failed",
+                                          "skipped"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "runner",
+                                      "checks"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "provenance": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceBefore": {
+                                    "type": "string"
+                                  },
+                                  "sourceAfter": {
+                                    "type": "string"
+                                  },
+                                  "definitionBefore": {
+                                    "type": "string"
+                                  },
+                                  "definitionAfter": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceBefore",
+                                  "sourceAfter",
+                                  "definitionBefore",
+                                  "definitionAfter"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -35744,6 +35954,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "skipped": {
                                       "type": "boolean"
+                                    },
+                                    "outcome": {
+                                      "type": "string",
+                                      "enum": [
+                                        "passed",
+                                        "failed",
+                                        "unverified"
+                                      ]
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "completion": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "command-exit"
+                                              ]
+                                            },
+                                            "exitCode": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "exitCode"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "assertions"
+                                              ]
+                                            },
+                                            "runner": {
+                                              "type": "string",
+                                              "enum": [
+                                                "bun-junit",
+                                                "registered-protocol"
+                                              ]
+                                            },
+                                            "checks": {
+                                              "type": "object",
+                                              "properties": {
+                                                "passed": {
+                                                  "type": "number"
+                                                },
+                                                "failed": {
+                                                  "type": "number"
+                                                },
+                                                "skipped": {
+                                                  "type": "number"
+                                                }
+                                              },
+                                              "required": [
+                                                "passed",
+                                                "failed",
+                                                "skipped"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "runner",
+                                            "checks"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "provenance": {
+                                      "type": "object",
+                                      "properties": {
+                                        "sourceBefore": {
+                                          "type": "string"
+                                        },
+                                        "sourceAfter": {
+                                          "type": "string"
+                                        },
+                                        "definitionBefore": {
+                                          "type": "string"
+                                        },
+                                        "definitionAfter": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "sourceBefore",
+                                        "sourceAfter",
+                                        "definitionBefore",
+                                        "definitionAfter"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -36901,6 +37216,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "skipped": {
                           "type": "boolean"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "passed",
+                            "failed",
+                            "unverified"
+                          ]
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "completion": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command-exit"
+                                  ]
+                                },
+                                "exitCode": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "exitCode"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "assertions"
+                                  ]
+                                },
+                                "runner": {
+                                  "type": "string",
+                                  "enum": [
+                                    "bun-junit",
+                                    "registered-protocol"
+                                  ]
+                                },
+                                "checks": {
+                                  "type": "object",
+                                  "properties": {
+                                    "passed": {
+                                      "type": "number"
+                                    },
+                                    "failed": {
+                                      "type": "number"
+                                    },
+                                    "skipped": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "passed",
+                                    "failed",
+                                    "skipped"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "runner",
+                                "checks"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "provenance": {
+                          "type": "object",
+                          "properties": {
+                            "sourceBefore": {
+                              "type": "string"
+                            },
+                            "sourceAfter": {
+                              "type": "string"
+                            },
+                            "definitionBefore": {
+                              "type": "string"
+                            },
+                            "definitionAfter": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "sourceBefore",
+                            "sourceAfter",
+                            "definitionBefore",
+                            "definitionAfter"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -40918,6 +41338,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "skipped": {
                                       "type": "boolean"
+                                    },
+                                    "outcome": {
+                                      "type": "string",
+                                      "enum": [
+                                        "passed",
+                                        "failed",
+                                        "unverified"
+                                      ]
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "completion": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "command-exit"
+                                              ]
+                                            },
+                                            "exitCode": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "exitCode"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "assertions"
+                                              ]
+                                            },
+                                            "runner": {
+                                              "type": "string",
+                                              "enum": [
+                                                "bun-junit",
+                                                "registered-protocol"
+                                              ]
+                                            },
+                                            "checks": {
+                                              "type": "object",
+                                              "properties": {
+                                                "passed": {
+                                                  "type": "number"
+                                                },
+                                                "failed": {
+                                                  "type": "number"
+                                                },
+                                                "skipped": {
+                                                  "type": "number"
+                                                }
+                                              },
+                                              "required": [
+                                                "passed",
+                                                "failed",
+                                                "skipped"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "runner",
+                                            "checks"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "provenance": {
+                                      "type": "object",
+                                      "properties": {
+                                        "sourceBefore": {
+                                          "type": "string"
+                                        },
+                                        "sourceAfter": {
+                                          "type": "string"
+                                        },
+                                        "definitionBefore": {
+                                          "type": "string"
+                                        },
+                                        "definitionAfter": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "sourceBefore",
+                                        "sourceAfter",
+                                        "definitionBefore",
+                                        "definitionAfter"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -41660,6 +42185,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "skipped": {
                                       "type": "boolean"
+                                    },
+                                    "outcome": {
+                                      "type": "string",
+                                      "enum": [
+                                        "passed",
+                                        "failed",
+                                        "unverified"
+                                      ]
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "completion": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "command-exit"
+                                              ]
+                                            },
+                                            "exitCode": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "exitCode"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "assertions"
+                                              ]
+                                            },
+                                            "runner": {
+                                              "type": "string",
+                                              "enum": [
+                                                "bun-junit",
+                                                "registered-protocol"
+                                              ]
+                                            },
+                                            "checks": {
+                                              "type": "object",
+                                              "properties": {
+                                                "passed": {
+                                                  "type": "number"
+                                                },
+                                                "failed": {
+                                                  "type": "number"
+                                                },
+                                                "skipped": {
+                                                  "type": "number"
+                                                }
+                                              },
+                                              "required": [
+                                                "passed",
+                                                "failed",
+                                                "skipped"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "runner",
+                                            "checks"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "provenance": {
+                                      "type": "object",
+                                      "properties": {
+                                        "sourceBefore": {
+                                          "type": "string"
+                                        },
+                                        "sourceAfter": {
+                                          "type": "string"
+                                        },
+                                        "definitionBefore": {
+                                          "type": "string"
+                                        },
+                                        "definitionAfter": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "sourceBefore",
+                                        "sourceAfter",
+                                        "definitionBefore",
+                                        "definitionAfter"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -42817,6 +43447,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                           },
                                           "skipped": {
                                             "type": "boolean"
+                                          },
+                                          "outcome": {
+                                            "type": "string",
+                                            "enum": [
+                                              "passed",
+                                              "failed",
+                                              "unverified"
+                                            ]
+                                          },
+                                          "required": {
+                                            "type": "boolean"
+                                          },
+                                          "reason": {
+                                            "type": "string"
+                                          },
+                                          "completion": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "command-exit"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "exitCode"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "assertions"
+                                                    ]
+                                                  },
+                                                  "runner": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "bun-junit",
+                                                      "registered-protocol"
+                                                    ]
+                                                  },
+                                                  "checks": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "passed": {
+                                                        "type": "number"
+                                                      },
+                                                      "failed": {
+                                                        "type": "number"
+                                                      },
+                                                      "skipped": {
+                                                        "type": "number"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "passed",
+                                                      "failed",
+                                                      "skipped"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "runner",
+                                                  "checks"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          },
+                                          "provenance": {
+                                            "type": "object",
+                                            "properties": {
+                                              "sourceBefore": {
+                                                "type": "string"
+                                              },
+                                              "sourceAfter": {
+                                                "type": "string"
+                                              },
+                                              "definitionBefore": {
+                                                "type": "string"
+                                              },
+                                              "definitionAfter": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "sourceBefore",
+                                              "sourceAfter",
+                                              "definitionBefore",
+                                              "definitionAfter"
+                                            ],
+                                            "additionalProperties": false
                                           }
                                         },
                                         "required": [
@@ -43974,6 +44709,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "skipped": {
                                 "type": "boolean"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "passed",
+                                  "failed",
+                                  "unverified"
+                                ]
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "completion": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "command-exit"
+                                        ]
+                                      },
+                                      "exitCode": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "exitCode"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "assertions"
+                                        ]
+                                      },
+                                      "runner": {
+                                        "type": "string",
+                                        "enum": [
+                                          "bun-junit",
+                                          "registered-protocol"
+                                        ]
+                                      },
+                                      "checks": {
+                                        "type": "object",
+                                        "properties": {
+                                          "passed": {
+                                            "type": "number"
+                                          },
+                                          "failed": {
+                                            "type": "number"
+                                          },
+                                          "skipped": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "passed",
+                                          "failed",
+                                          "skipped"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "runner",
+                                      "checks"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "provenance": {
+                                "type": "object",
+                                "properties": {
+                                  "sourceBefore": {
+                                    "type": "string"
+                                  },
+                                  "sourceAfter": {
+                                    "type": "string"
+                                  },
+                                  "definitionBefore": {
+                                    "type": "string"
+                                  },
+                                  "definitionAfter": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceBefore",
+                                  "sourceAfter",
+                                  "definitionBefore",
+                                  "definitionAfter"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -48095,6 +48935,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "skipped": {
                                     "type": "boolean"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "passed",
+                                      "failed",
+                                      "unverified"
+                                    ]
+                                  },
+                                  "required": {
+                                    "type": "boolean"
+                                  },
+                                  "reason": {
+                                    "type": "string"
+                                  },
+                                  "completion": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "command-exit"
+                                            ]
+                                          },
+                                          "exitCode": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "exitCode"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "assertions"
+                                            ]
+                                          },
+                                          "runner": {
+                                            "type": "string",
+                                            "enum": [
+                                              "bun-junit",
+                                              "registered-protocol"
+                                            ]
+                                          },
+                                          "checks": {
+                                            "type": "object",
+                                            "properties": {
+                                              "passed": {
+                                                "type": "number"
+                                              },
+                                              "failed": {
+                                                "type": "number"
+                                              },
+                                              "skipped": {
+                                                "type": "number"
+                                              }
+                                            },
+                                            "required": [
+                                              "passed",
+                                              "failed",
+                                              "skipped"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "runner",
+                                          "checks"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "provenance": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceBefore": {
+                                        "type": "string"
+                                      },
+                                      "sourceAfter": {
+                                        "type": "string"
+                                      },
+                                      "definitionBefore": {
+                                        "type": "string"
+                                      },
+                                      "definitionAfter": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceBefore",
+                                      "sourceAfter",
+                                      "definitionBefore",
+                                      "definitionAfter"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -48837,6 +49782,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "skipped": {
                                     "type": "boolean"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "passed",
+                                      "failed",
+                                      "unverified"
+                                    ]
+                                  },
+                                  "required": {
+                                    "type": "boolean"
+                                  },
+                                  "reason": {
+                                    "type": "string"
+                                  },
+                                  "completion": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "command-exit"
+                                            ]
+                                          },
+                                          "exitCode": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "exitCode"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "assertions"
+                                            ]
+                                          },
+                                          "runner": {
+                                            "type": "string",
+                                            "enum": [
+                                              "bun-junit",
+                                              "registered-protocol"
+                                            ]
+                                          },
+                                          "checks": {
+                                            "type": "object",
+                                            "properties": {
+                                              "passed": {
+                                                "type": "number"
+                                              },
+                                              "failed": {
+                                                "type": "number"
+                                              },
+                                              "skipped": {
+                                                "type": "number"
+                                              }
+                                            },
+                                            "required": [
+                                              "passed",
+                                              "failed",
+                                              "skipped"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "runner",
+                                          "checks"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "provenance": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sourceBefore": {
+                                        "type": "string"
+                                      },
+                                      "sourceAfter": {
+                                        "type": "string"
+                                      },
+                                      "definitionBefore": {
+                                        "type": "string"
+                                      },
+                                      "definitionAfter": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "sourceBefore",
+                                      "sourceAfter",
+                                      "definitionBefore",
+                                      "definitionAfter"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -49994,6 +51044,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "skipped": {
                                           "type": "boolean"
+                                        },
+                                        "outcome": {
+                                          "type": "string",
+                                          "enum": [
+                                            "passed",
+                                            "failed",
+                                            "unverified"
+                                          ]
+                                        },
+                                        "required": {
+                                          "type": "boolean"
+                                        },
+                                        "reason": {
+                                          "type": "string"
+                                        },
+                                        "completion": {
+                                          "anyOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "command-exit"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "exitCode"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "assertions"
+                                                  ]
+                                                },
+                                                "runner": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "bun-junit",
+                                                    "registered-protocol"
+                                                  ]
+                                                },
+                                                "checks": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "passed": {
+                                                      "type": "number"
+                                                    },
+                                                    "failed": {
+                                                      "type": "number"
+                                                    },
+                                                    "skipped": {
+                                                      "type": "number"
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "passed",
+                                                    "failed",
+                                                    "skipped"
+                                                  ],
+                                                  "additionalProperties": false
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "runner",
+                                                "checks"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          ]
+                                        },
+                                        "provenance": {
+                                          "type": "object",
+                                          "properties": {
+                                            "sourceBefore": {
+                                              "type": "string"
+                                            },
+                                            "sourceAfter": {
+                                              "type": "string"
+                                            },
+                                            "definitionBefore": {
+                                              "type": "string"
+                                            },
+                                            "definitionAfter": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "sourceBefore",
+                                            "sourceAfter",
+                                            "definitionBefore",
+                                            "definitionAfter"
+                                          ],
+                                          "additionalProperties": false
                                         }
                                       },
                                       "required": [
@@ -51151,6 +52306,111 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "skipped": {
                               "type": "boolean"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "unverified"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "completion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command-exit"
+                                      ]
+                                    },
+                                    "exitCode": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "exitCode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "assertions"
+                                      ]
+                                    },
+                                    "runner": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bun-junit",
+                                        "registered-protocol"
+                                      ]
+                                    },
+                                    "checks": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "number"
+                                        },
+                                        "failed": {
+                                          "type": "number"
+                                        },
+                                        "skipped": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed",
+                                        "skipped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "runner",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "sourceBefore": {
+                                  "type": "string"
+                                },
+                                "sourceAfter": {
+                                  "type": "string"
+                                },
+                                "definitionBefore": {
+                                  "type": "string"
+                                },
+                                "definitionAfter": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceBefore",
+                                "sourceAfter",
+                                "definitionBefore",
+                                "definitionAfter"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -121539,6 +122799,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -121910,6 +123183,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -122155,6 +123441,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "retainedMessageCount": {
                   "type": "number"
+                },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "pendingInputCount": {
                   "type": "number"
@@ -122457,6 +123756,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "retainedMessageCount": {
                       "type": "number"
+                    },
+                    "channelPermissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "safe-owner",
+                        "safe-jev",
+                        "yolo",
+                        "plan"
+                      ]
+                    },
+                    "channelPermissionModeRevision": {
+                      "type": "integer",
+                      "minimum": 0
                     },
                     "pendingInputCount": {
                       "type": "number"
@@ -122969,6 +124281,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -123298,6 +124623,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "originSurface": {
                   "type": "string"
                 },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
                 "contractIds": {
                   "type": "array",
                   "items": {
@@ -123497,6 +124831,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "originSurface": {
                   "type": "string"
                 },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
                 "contractIds": {
                   "type": "array",
                   "items": {
@@ -123648,6 +124991,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "originSurface": {
                   "type": "string"
                 },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
                 "contractIds": {
                   "type": "array",
                   "items": {
@@ -123796,6 +125148,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "originSurface": {
                   "type": "string"
                 },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
                 "contractIds": {
                   "type": "array",
                   "items": {
@@ -123938,6 +125299,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "originSurface": {
                     "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string",
+                    "enum": [
+                      "safe-owner",
+                      "safe-jev",
+                      "yolo",
+                      "plan"
+                    ]
                   },
                   "contractIds": {
                     "type": "array",
@@ -124595,6 +125965,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -125094,6 +126477,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "retainedMessageCount": {
                     "type": "number"
                   },
+                  "channelPermissionMode": {
+                    "type": "string",
+                    "enum": [
+                      "safe-owner",
+                      "safe-jev",
+                      "yolo",
+                      "plan"
+                    ]
+                  },
+                  "channelPermissionModeRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "pendingInputCount": {
                     "type": "number"
                   },
@@ -125422,6 +126818,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "retainedMessageCount": {
                           "type": "number"
+                        },
+                        "channelPermissionMode": {
+                          "type": "string",
+                          "enum": [
+                            "safe-owner",
+                            "safe-jev",
+                            "yolo",
+                            "plan"
+                          ]
+                        },
+                        "channelPermissionModeRevision": {
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "pendingInputCount": {
                           "type": "number"
@@ -125945,6 +127354,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -126155,7 +127577,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.get",
         "title": "Get Session Permission Mode",
-        "description": "Return the permission mode currently in effect for a session (plan/normal/accept-edits/auto, or custom for a bespoke rule set). Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.",
+        "description": "Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Only the daemon's live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -126191,11 +127613,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "plan",
-                "normal",
-                "accept-edits",
-                "auto",
-                "custom"
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
               ]
             }
           },
@@ -126210,7 +127631,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.set",
         "title": "Set Session Permission Mode",
-        "description": "Set a session's gate preset to plan, normal, accept-edits, or auto. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.",
+        "description": "Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -126237,10 +127658,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "plan",
-                "normal",
-                "accept-edits",
-                "auto"
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
               ]
             }
           },
@@ -126259,21 +127680,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "plan",
-                "normal",
-                "accept-edits",
-                "auto",
-                "custom"
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
               ]
             },
             "previousMode": {
               "type": "string",
               "enum": [
-                "plan",
-                "normal",
-                "accept-edits",
-                "auto",
-                "custom"
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
               ]
             }
           },
@@ -126611,6 +128030,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -126821,6 +128253,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "retainedMessageCount": {
                   "type": "number"
                 },
+                "channelPermissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "channelPermissionModeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "pendingInputCount": {
                   "type": "number"
                 },
@@ -127027,6 +128472,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "retainedMessageCount": {
                     "type": "number"
+                  },
+                  "channelPermissionMode": {
+                    "type": "string",
+                    "enum": [
+                      "safe-owner",
+                      "safe-jev",
+                      "yolo",
+                      "plan"
+                    ]
+                  },
+                  "channelPermissionModeRevision": {
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "pendingInputCount": {
                     "type": "number"
@@ -127340,6 +128798,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "retainedMessageCount": {
                       "type": "number"
+                    },
+                    "channelPermissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "safe-owner",
+                        "safe-jev",
+                        "yolo",
+                        "plan"
+                      ]
+                    },
+                    "channelPermissionModeRevision": {
+                      "type": "integer",
+                      "minimum": 0
                     },
                     "pendingInputCount": {
                       "type": "number"
@@ -153232,7 +154703,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "workLedger.turn.start",
         "title": "Start Native Hosted Turn",
-        "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the WebUI settings owner. Accepts source identity only. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
+        "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the WebUI settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
         "category": "work-ledger",
         "source": "builtin",
         "access": "admin",
@@ -153267,6 +154738,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "permissionMode": {
+              "type": "string",
+              "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
+              ]
             }
           },
           "required": [
@@ -153388,7 +154868,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "workLedger.turn.startAgent",
         "title": "Start Agent Native Hosted Turn",
-        "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the Agent settings owner. Accepts source identity only. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
+        "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the Agent settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
         "category": "work-ledger",
         "source": "builtin",
         "access": "admin",
@@ -153423,6 +154903,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "permissionMode": {
+              "type": "string",
+              "enum": [
+                "safe-owner",
+                "safe-jev",
+                "yolo",
+                "plan"
+              ]
             }
           },
           "required": [
@@ -156206,6 +157695,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "originSurface": {
                   "type": "string"
+                },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "safe-owner",
+                    "safe-jev",
+                    "yolo",
+                    "plan"
+                  ]
                 },
                 "contractIds": {
                   "type": "array",

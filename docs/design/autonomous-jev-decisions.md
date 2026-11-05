@@ -1,14 +1,33 @@
 # Autonomous Jev decision contract
 
-Status: shared contract foundation. This adds no live provider call or side effect, and does not claim that legacy callers have been migrated.
+Status: shared semantic receipt contract. Execution mode selects who makes the safety decision; the schema does not itself authorize an effect.
 
-## Current direction
+## Execution modes
 
-Mike's direction on 2026-10-03 supersedes the older product human-confirmation and escalation semantics: “there will be NO human in the loop with goodvibes-jev --- NONE. Jev will make all of the decisions”. He also specified one shared retry implementation, retrying until Jev is available with backoff. Work is tracked in [THE-116](https://linear.app/the-artificery/issue/THE-116/define-autonomous-jev-decision-contract).
+The current execution-mode requirement supersedes the earlier blanket removal
+of runtime owner replies:
 
-This is the GoodVibes Jev product contract. It does not change the permissions of development tools or authorize live external actions by a developer.
+- `safe-owner` permits ordinary actions automatically and asks the owner about
+  dangerous actions. An answer applies to the exact current operation. Edited
+  arguments receive fresh preparation and binding before execution.
+- `safe-jev` uses Jev in the owner's place. Elevated stakes, network access,
+  state changes or irreversibility alone do not justify refusal; the decision
+  considers the actual requested action and harmful consequences.
+- `yolo` bypasses execution-safety decisions and denials, including downstream
+  tool policies. It makes no Jev safety request and opens no approval prompt.
 
-Jev owns semantic decisions. Code still validates deterministic authentication, capability/scope membership, revocation, fixed formats, monetary arithmetic, version equality and execution idempotency. A model cannot grant itself a capability or erase a revoked authorization by describing an action as safe. These checks do not ask a human to decide semantics.
+`plan` remains a separate non-executing posture. The same execution modes apply
+to foreground, background, hosted and channel work. Modes belong to the actual
+session owner, and changing a mode invalidates pending authority. Saved aliases
+normalize to these modes; they do not create additional execution paths.
+
+Semantic Jev decisions still use the receipts below. Owner and YOLO execution
+use the existing authentic invocation and single-use claim without inventing
+model decisions or call lineage. Cancellation, exact prepared-input identity,
+external authentication and execution idempotency remain mechanical checks.
+
+This product contract does not change development-tool permissions or authorize
+live external actions by a developer.
 
 ## Shared consumer interface
 
@@ -79,9 +98,9 @@ Operational progress is separate from `JevDecision`. While a logical reading is 
 
 Semantic reconsideration is a new Jev reading with new recorded lineage, not an HTTP retry of a failed request. Source, action, evidence or authority changes require a new snapshot. All such calls still go through the same central port transport implementation.
 
-## First executable vertical slice
+## Autonomous execution binding
 
-The native/engine owner should compose these interfaces before broad product migration:
+A `safe-jev` execution composes these interfaces:
 
 1. Capture a host-owned immutable action/input snapshot, current authority/scope revisions, actual evidence, and legal continuation/condition choices.
 2. Ask the shared Jev port with lifecycle cancellation and live authority checks before each transport attempt. Relay its operational waiting notifications unchanged to product progress.
@@ -91,22 +110,27 @@ The native/engine owner should compose these interfaces before broad product mig
 
 Acceptance fixtures for that slice must prove: invalid or unavailable Jev produces zero actions; eventual recovery produces one current action; cancellation/supersession/revocation during backoff produces zero actions; old input/action/scope/authority revisions are rejected; unknown or stale evidence/steps/conditions are rejected; repeated delivery cannot execute twice; `revise`/`defer` never execute the original action; no human approval UI or synthesized permission result is created.
 
-This module supplies the common contract and structural/binding fixtures. The ledger, condition owner, central retry implementation, semantic evaluator and product composition are required consumers, not functionality silently provided by the schema.
+The schema supplies structural and binding validation. The execution ledger, semantic evaluator and product composition supply the live ownership checks and effect boundary.
 
-## Legacy migration map
+## Historical observations and current execution
 
-The old `Outcome = act | confirm | escalate` remains readable for historical batteries, logs and persisted data. It is not the autonomous consumer contract. Do not rename those enum values in old records or convert `confirm`/`escalate` into `act`.
+The old `Outcome = act | confirm | escalate` remains readable in batteries,
+logs and persisted data. It is not an execution-mode selection or an autonomous
+receipt. Historical observations cannot authorize a new effect, and their
+stored vocabulary must not be rewritten into `act`.
 
-- `packages/judgment/src/readings/bands.ts`: historical confidence-band vocabulary. New autonomous evaluations decide how to reconsider, gather evidence, defer or refuse instead of opening an approval flow.
-- `packages/engine/sdk/src/platform/gate/` and `permissions/manager.ts`: replace semantic approval dispatch with current autonomous decisions while preserving deterministic boundaries, grant scope/revocation and current execution ownership.
-- `packages/engine/sdk/src/platform/contract/{planner,escalation,steps}.ts`: replace owner-reply correction/escalation loops with autonomous correction/evidence/refusal outcomes. Never write an owner confirmation or mark criteria met without evidence.
-- Decision log/query APIs, daemon wire contracts and generated product facades: version/migrate explicitly; add new semantic receipts and operational progress without recasting historical readings.
-- TUI, Agent and Web UI: render the shared decisions and port progress, remove semantic human approval wait paths only when their engine/native owners are migrated and proven.
+`permissions/manager.ts` selects the shared execution mode and binds its result
+to the prepared invocation. Products render that owner's decisions and port
+progress. They do not add a second approval or retry implementation.
 
-The presence of this additive contract does not mean those paths are already autonomous. Their migration is a release gate, not a fallback mode.
+General action admission does not replace domain authorization. Settings and
+local profile effects retain secret-storage, provenance and derivation rules as
+well as exact input, target, cancellation and currentness checks. Payments retain
+their separate [spending contract](../../packages/engine/docs/payments.md),
+including configured budgets, merchant rules and opposite approval/veto silence
+rules in every mode. General Jev approval and YOLO cannot bypass those rules. Saved legacy mode aliases normalize at configuration
+boundaries; selecting a current mode clears the old automatic-approval alias.
 
-### Settings evidence migration seam
-
-`gate/policy/settings-write-evidence.ts` exposes `readSettingsWriteEvidence(args, port, signal)` for the central admission owner. It asks the existing settings-hazard battery about a protected-format-checked, immutable, complete invocation and returns the hazard/request observations plus the actual recorded call ID when the port supplies one. The observations do not grant permission. The autonomous owner must require recorded provenance, bind that evidence to its current prepared action/authority/scope, and claim a fresh semantic `act` before execution.
-
-The legacy settings policy now requires both `requested.verdict === 'yes'` and `requested.outcome === 'act'`; a yes/confirm observation at probability 0.75 cannot allow a hazardous setting. Its wrapper also executes the immutable arguments it checked, rather than rereading borrowed arguments after the asynchronous judgment. This closes the historical confidence and argument-mutation bypasses; it does not itself supply the autonomous capability/claim protocol. The legacy denial text and standalone policy explanation remain historical consumers until the central admission capability is wired through them. They must not be presented as an autonomous settings workflow or used as a human-approval fallback in that workflow.
+Task acceptance has its own evidence contract. A safe-mode approval or YOLO
+selection does not establish that a task passed its required checks or fulfilled
+the original request. See [contract runner evidence](../contracts/contract-runner-evidence.md).

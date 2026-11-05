@@ -18,22 +18,33 @@ The scope of record is [`goodvibes-jev-intent.md`](goodvibes-jev-intent.md).
 
 ## Current decision contract
 
-The [autonomous Jev decision contract](docs/design/autonomous-jev-decisions.md)
-records the October 3 direction and supersedes older human-confirmation and
-owner-escalation designs. These are target requirements, not a claim that all
-callers already implement them:
+Execution uses one of three modes across local, hosted and channel sessions:
 
-- Jev automates interpretation, planning, repairs and execution choices. It does not decide whether a user prompt reaches the model or whether the model may use a tool. Tool permissions follow explicit owner configuration; Jev uncertainty or unavailability cannot veto a valid tool call.
-- One shared judgment-port transport implementation owns transient Jev
-  unavailability. A primary-only route retries until recovery or cancellation.
-  An explicit failover chain tries compatible targets once and returns typed
-  `unavailable` when every target fails. Products render waiting progress and
-  terminal errors. They must not add local retry loops, prompt for approval or
-  synthesize a semantic answer during an outage. Permanent
-  request/authentication/format failures remain explicit operational failures.
-- Code still enforces authentication, capability/scope membership, revocation,
-  fixed formats, monetary arithmetic and execution idempotency. A Jev receipt
-  cannot grant authority or bypass these boundaries.
+| Mode | Behavior |
+| --- | --- |
+| `safe-owner` | Ordinary work runs automatically. Dangerous actions wait for the owner's reply, bound to the exact action. |
+| `safe-jev` | Jev stands in for the owner, permitting ordinary work and justified risk while refusing genuinely harmful actions. |
+| `yolo` | General execution safety adds no denial, approval prompt or Jev safety call. |
+
+`plan` is a separate read-only planning posture. Selecting an execution mode
+replaces the legacy automatic-approval override. Background work uses its
+session's current mode. A mode change invalidates pending execution authority.
+
+Jev handles interpretation, planning, repair and task verification. Its
+[autonomous receipts](docs/design/autonomous-jev-decisions.md) carry actual
+recorded decisions; owner approval and YOLO do not fabricate Jev receipts.
+Authentication, supported input formats, cancellation, exact invocation identity
+and duplicate-execution protection remain execution mechanics in every mode.
+Host containment and workspace scope, explicit blocked destinations, and
+secret-storage requirements remain binding. The separate
+[payment contract](packages/engine/docs/payments.md) retains its spending limits,
+merchant rules, owner authorization and distinct approval/veto windows in every
+mode. A general tool decision cannot authorize spending outside that contract.
+
+The shared judgment port owns transient availability handling. Primary-only
+routes wait for recovery or cancellation; explicit compatible failover chains
+return typed `unavailable` on exhaustion. Products consume that lifecycle
+without adding retry loops or inventing semantic answers.
 
 Provisioning, account login and user cancellation remain legitimate product
 interactions. This runtime contract does not change development-tool permissions

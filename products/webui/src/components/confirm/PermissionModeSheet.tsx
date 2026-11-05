@@ -6,10 +6,7 @@
  * after onSelect fires and owns pendingMode (the list is disabled while a write
  * is in flight).
  *
- * Only the engine's SESSION_GATE_PRESET_NAMES render as choices: 'custom' is a read-only wire
- * state (a bespoke rule set), never a value `sessions.permissionMode.set`
- * accepts. In custom mode no choice is marked current,
- * which is honest: none of them is.
+ * Choices and labels come from the engine's shared execution-mode definitions.
  */
 import { Check } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -32,12 +29,12 @@ export function PermissionModeSheet({ open, currentMode, pendingMode, onSelect, 
     <Dialog
       open={open}
       onClose={busy ? () => undefined : onCancel}
-      title="Set permission mode"
+      title="Set execution mode"
       description="Applies to this session's live runtime, while it is the daemon's own local session."
       size="confirm"
       footer={<Button variant="secondary" onClick={onCancel} disabled={busy}>Close</Button>}
     >
-      <div className="gv-choice-list" role="group" aria-label="Permission modes">
+      <div className="gv-choice-list" role="group" aria-label="Execution modes">
         {SESSION_GATE_PRESET_NAMES.map((mode) => {
           const current = mode === currentMode;
           return (

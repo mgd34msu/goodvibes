@@ -846,8 +846,16 @@ export interface ContractCheckedCriterion {
 export interface ContractCheckedGate {
     // (undocumented)
     readonly gate: string;
+    // Warning: (ae-forgotten-export) The symbol "GateResultOutcome" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly outcome?: GateResultOutcome;
     // (undocumented)
     readonly passed: boolean;
+    // (undocumented)
+    readonly reason?: string;
+    // (undocumented)
+    readonly required?: boolean;
     // (undocumented)
     readonly skipped: boolean;
 }
@@ -1011,6 +1019,9 @@ export type ContractEvent = ({
     passed: boolean;
     skipped: boolean;
     durationMs: number;
+    outcome?: GateResultOutcome;
+    required?: boolean;
+    reason?: string;
 } | {
     type: 'CONTRACT_UNIT_SILENT';
     contractId: string;
@@ -4342,7 +4353,7 @@ export interface OperatorMethodInputMap {
         channelId?: string;
         model?: string;
         provider?: string;
-        permissionMode?: "accept-edits" | "auto" | "normal" | "plan";
+        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
         metadata?: ({} & {
             readonly [key: string]: ({} & {
                 readonly [key: string]: JsonValue;
@@ -7397,7 +7408,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "sessions.permissionMode.set": {
         sessionId: string;
-        mode: "accept-edits" | "auto" | "normal" | "plan";
+        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
     };
     // (undocumented)
     "sessions.queuedMessages.delete": {
@@ -8075,12 +8086,14 @@ export interface OperatorMethodInputMap {
         projectId: string;
         inputId: string;
         sourceRevision: string;
+        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
     };
     // (undocumented)
     "workLedger.turn.startAgent": {
         projectId: string;
         inputId: string;
         sourceRevision: string;
+        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
     };
     // (undocumented)
     "workLedger.turn.status": {
@@ -11992,7 +12005,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "accept-edits" | "auto" | "normal" | "plan";
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -12009,7 +12022,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "accept-edits" | "auto" | "normal" | "plan";
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -12026,7 +12039,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "accept-edits" | "auto" | "normal" | "plan";
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -12813,6 +12826,16 @@ export interface OperatorMethodOutputMap {
             };
         };
         taskEvidence?: string;
+        reviewInventory?: {
+            paths: readonly string[];
+            digest: string;
+            source: "filesystem" | "git";
+            errors: readonly string[];
+        };
+        reviewExclusions?: readonly ({
+            files: readonly string[];
+            reason: string;
+        })[];
         nativeSource?: {
             sourceId: string;
             sourceRevision: string;
@@ -13235,6 +13258,11 @@ export interface OperatorMethodOutputMap {
             origin: "derived" | "fix" | "integration" | "owner" | "stated";
             quote?: string;
             serves: readonly string[];
+            contribution?: {
+                kind: "outcome" | "scaffolding" | "secondary" | "support";
+                reason: string;
+                verification: string;
+            };
             disposition: "excluded" | "judged" | "met-by-structure";
             dispositionReason?: string;
             status: "met" | "unmet" | "unread" | "unshown";
@@ -13266,6 +13294,11 @@ export interface OperatorMethodOutputMap {
                 origin: "derived" | "fix" | "integration" | "owner" | "stated";
                 quote?: string;
                 serves: readonly string[];
+                contribution?: {
+                    kind: "outcome" | "scaffolding" | "secondary" | "support";
+                    reason: string;
+                    verification: string;
+                };
                 disposition: "excluded" | "judged" | "met-by-structure";
                 dispositionReason?: string;
                 status: "met" | "unmet" | "unread" | "unshown";
@@ -13296,6 +13329,27 @@ export interface OperatorMethodOutputMap {
                     output: string;
                     durationMs: number;
                     skipped?: boolean;
+                    outcome?: "failed" | "passed" | "unverified";
+                    required?: boolean;
+                    reason?: string;
+                    completion?: {
+                        kind: "command-exit";
+                        exitCode: number;
+                    } | {
+                        kind: "assertions";
+                        runner: "bun-junit" | "registered-protocol";
+                        checks: {
+                            passed: number;
+                            failed: number;
+                            skipped: number;
+                        };
+                    };
+                    provenance?: {
+                        sourceBefore: string;
+                        sourceAfter: string;
+                        definitionBefore: string;
+                        definitionAfter: string;
+                    };
                 })[];
                 goal: {
                     probabilityUnmet: number;
@@ -13333,6 +13387,10 @@ export interface OperatorMethodOutputMap {
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
                 evidenceDigest: string;
+                reviewedFiles?: readonly ({
+                    path: string;
+                    sha256: string;
+                })[];
             })[];
             fixRounds: number;
             baseline?: {
@@ -13372,6 +13430,11 @@ export interface OperatorMethodOutputMap {
                 origin: "derived" | "fix" | "integration" | "owner" | "stated";
                 quote?: string;
                 serves: readonly string[];
+                contribution?: {
+                    kind: "outcome" | "scaffolding" | "secondary" | "support";
+                    reason: string;
+                    verification: string;
+                };
                 disposition: "excluded" | "judged" | "met-by-structure";
                 dispositionReason?: string;
                 status: "met" | "unmet" | "unread" | "unshown";
@@ -13415,6 +13478,27 @@ export interface OperatorMethodOutputMap {
                     output: string;
                     durationMs: number;
                     skipped?: boolean;
+                    outcome?: "failed" | "passed" | "unverified";
+                    required?: boolean;
+                    reason?: string;
+                    completion?: {
+                        kind: "command-exit";
+                        exitCode: number;
+                    } | {
+                        kind: "assertions";
+                        runner: "bun-junit" | "registered-protocol";
+                        checks: {
+                            passed: number;
+                            failed: number;
+                            skipped: number;
+                        };
+                    };
+                    provenance?: {
+                        sourceBefore: string;
+                        sourceAfter: string;
+                        definitionBefore: string;
+                        definitionAfter: string;
+                    };
                 })[];
                 goal: {
                     probabilityUnmet: number;
@@ -13452,6 +13536,10 @@ export interface OperatorMethodOutputMap {
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
                 evidenceDigest: string;
+                reviewedFiles?: readonly ({
+                    path: string;
+                    sha256: string;
+                })[];
             })[];
             nudges: readonly ({
                 id: string;
@@ -13578,6 +13666,11 @@ export interface OperatorMethodOutputMap {
                     origin: "derived" | "fix" | "integration" | "owner" | "stated";
                     quote?: string;
                     serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
                     disposition: "excluded" | "judged" | "met-by-structure";
                     dispositionReason?: string;
                     status: "met" | "unmet" | "unread" | "unshown";
@@ -13621,6 +13714,27 @@ export interface OperatorMethodOutputMap {
                         output: string;
                         durationMs: number;
                         skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                        };
                     })[];
                     goal: {
                         probabilityUnmet: number;
@@ -13658,6 +13772,10 @@ export interface OperatorMethodOutputMap {
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
                     evidenceDigest: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    })[];
                 })[];
                 nudges: readonly ({
                     id: string;
@@ -13791,6 +13909,11 @@ export interface OperatorMethodOutputMap {
                 probability: number;
                 outcome: "act" | "confirm" | "escalate";
             };
+            project_review?: {
+                verdict: "no" | "uncertain" | "yes";
+                probability: number;
+                outcome: "act" | "confirm" | "escalate";
+            };
             decisionIds: readonly string[];
         };
         status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -13810,6 +13933,27 @@ export interface OperatorMethodOutputMap {
                 output: string;
                 durationMs: number;
                 skipped?: boolean;
+                outcome?: "failed" | "passed" | "unverified";
+                required?: boolean;
+                reason?: string;
+                completion?: {
+                    kind: "command-exit";
+                    exitCode: number;
+                } | {
+                    kind: "assertions";
+                    runner: "bun-junit" | "registered-protocol";
+                    checks: {
+                        passed: number;
+                        failed: number;
+                        skipped: number;
+                    };
+                };
+                provenance?: {
+                    sourceBefore: string;
+                    sourceAfter: string;
+                    definitionBefore: string;
+                    definitionAfter: string;
+                };
             })[];
             goal: {
                 probabilityUnmet: number;
@@ -13847,6 +13991,10 @@ export interface OperatorMethodOutputMap {
             qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
             decisionIds: readonly string[];
             evidenceDigest: string;
+            reviewedFiles?: readonly ({
+                path: string;
+                sha256: string;
+            })[];
         })[];
         fixRounds: number;
         escalations: readonly ({
@@ -13955,6 +14103,16 @@ export interface OperatorMethodOutputMap {
                 };
             };
             taskEvidence?: string;
+            reviewInventory?: {
+                paths: readonly string[];
+                digest: string;
+                source: "filesystem" | "git";
+                errors: readonly string[];
+            };
+            reviewExclusions?: readonly ({
+                files: readonly string[];
+                reason: string;
+            })[];
             nativeSource?: {
                 sourceId: string;
                 sourceRevision: string;
@@ -14377,6 +14535,11 @@ export interface OperatorMethodOutputMap {
                 origin: "derived" | "fix" | "integration" | "owner" | "stated";
                 quote?: string;
                 serves: readonly string[];
+                contribution?: {
+                    kind: "outcome" | "scaffolding" | "secondary" | "support";
+                    reason: string;
+                    verification: string;
+                };
                 disposition: "excluded" | "judged" | "met-by-structure";
                 dispositionReason?: string;
                 status: "met" | "unmet" | "unread" | "unshown";
@@ -14408,6 +14571,11 @@ export interface OperatorMethodOutputMap {
                     origin: "derived" | "fix" | "integration" | "owner" | "stated";
                     quote?: string;
                     serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
                     disposition: "excluded" | "judged" | "met-by-structure";
                     dispositionReason?: string;
                     status: "met" | "unmet" | "unread" | "unshown";
@@ -14438,6 +14606,27 @@ export interface OperatorMethodOutputMap {
                         output: string;
                         durationMs: number;
                         skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                        };
                     })[];
                     goal: {
                         probabilityUnmet: number;
@@ -14475,6 +14664,10 @@ export interface OperatorMethodOutputMap {
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
                     evidenceDigest: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    })[];
                 })[];
                 fixRounds: number;
                 baseline?: {
@@ -14514,6 +14707,11 @@ export interface OperatorMethodOutputMap {
                     origin: "derived" | "fix" | "integration" | "owner" | "stated";
                     quote?: string;
                     serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
                     disposition: "excluded" | "judged" | "met-by-structure";
                     dispositionReason?: string;
                     status: "met" | "unmet" | "unread" | "unshown";
@@ -14557,6 +14755,27 @@ export interface OperatorMethodOutputMap {
                         output: string;
                         durationMs: number;
                         skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                        };
                     })[];
                     goal: {
                         probabilityUnmet: number;
@@ -14594,6 +14813,10 @@ export interface OperatorMethodOutputMap {
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
                     evidenceDigest: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    })[];
                 })[];
                 nudges: readonly ({
                     id: string;
@@ -14720,6 +14943,11 @@ export interface OperatorMethodOutputMap {
                         origin: "derived" | "fix" | "integration" | "owner" | "stated";
                         quote?: string;
                         serves: readonly string[];
+                        contribution?: {
+                            kind: "outcome" | "scaffolding" | "secondary" | "support";
+                            reason: string;
+                            verification: string;
+                        };
                         disposition: "excluded" | "judged" | "met-by-structure";
                         dispositionReason?: string;
                         status: "met" | "unmet" | "unread" | "unshown";
@@ -14763,6 +14991,27 @@ export interface OperatorMethodOutputMap {
                             output: string;
                             durationMs: number;
                             skipped?: boolean;
+                            outcome?: "failed" | "passed" | "unverified";
+                            required?: boolean;
+                            reason?: string;
+                            completion?: {
+                                kind: "command-exit";
+                                exitCode: number;
+                            } | {
+                                kind: "assertions";
+                                runner: "bun-junit" | "registered-protocol";
+                                checks: {
+                                    passed: number;
+                                    failed: number;
+                                    skipped: number;
+                                };
+                            };
+                            provenance?: {
+                                sourceBefore: string;
+                                sourceAfter: string;
+                                definitionBefore: string;
+                                definitionAfter: string;
+                            };
                         })[];
                         goal: {
                             probabilityUnmet: number;
@@ -14800,6 +15049,10 @@ export interface OperatorMethodOutputMap {
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
                         evidenceDigest: string;
+                        reviewedFiles?: readonly ({
+                            path: string;
+                            sha256: string;
+                        })[];
                     })[];
                     nudges: readonly ({
                         id: string;
@@ -14933,6 +15186,11 @@ export interface OperatorMethodOutputMap {
                     probability: number;
                     outcome: "act" | "confirm" | "escalate";
                 };
+                project_review?: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
                 decisionIds: readonly string[];
             };
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -14952,6 +15210,27 @@ export interface OperatorMethodOutputMap {
                     output: string;
                     durationMs: number;
                     skipped?: boolean;
+                    outcome?: "failed" | "passed" | "unverified";
+                    required?: boolean;
+                    reason?: string;
+                    completion?: {
+                        kind: "command-exit";
+                        exitCode: number;
+                    } | {
+                        kind: "assertions";
+                        runner: "bun-junit" | "registered-protocol";
+                        checks: {
+                            passed: number;
+                            failed: number;
+                            skipped: number;
+                        };
+                    };
+                    provenance?: {
+                        sourceBefore: string;
+                        sourceAfter: string;
+                        definitionBefore: string;
+                        definitionAfter: string;
+                    };
                 })[];
                 goal: {
                     probabilityUnmet: number;
@@ -14989,6 +15268,10 @@ export interface OperatorMethodOutputMap {
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
                 evidenceDigest: string;
+                reviewedFiles?: readonly ({
+                    path: string;
+                    sha256: string;
+                })[];
             })[];
             fixRounds: number;
             escalations: readonly ({
@@ -15106,6 +15389,16 @@ export interface OperatorMethodOutputMap {
                 };
             };
             taskEvidence?: string;
+            reviewInventory?: {
+                paths: readonly string[];
+                digest: string;
+                source: "filesystem" | "git";
+                errors: readonly string[];
+            };
+            reviewExclusions?: readonly ({
+                files: readonly string[];
+                reason: string;
+            })[];
             nativeSource?: {
                 sourceId: string;
                 sourceRevision: string;
@@ -15528,6 +15821,11 @@ export interface OperatorMethodOutputMap {
                 origin: "derived" | "fix" | "integration" | "owner" | "stated";
                 quote?: string;
                 serves: readonly string[];
+                contribution?: {
+                    kind: "outcome" | "scaffolding" | "secondary" | "support";
+                    reason: string;
+                    verification: string;
+                };
                 disposition: "excluded" | "judged" | "met-by-structure";
                 dispositionReason?: string;
                 status: "met" | "unmet" | "unread" | "unshown";
@@ -15559,6 +15857,11 @@ export interface OperatorMethodOutputMap {
                     origin: "derived" | "fix" | "integration" | "owner" | "stated";
                     quote?: string;
                     serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
                     disposition: "excluded" | "judged" | "met-by-structure";
                     dispositionReason?: string;
                     status: "met" | "unmet" | "unread" | "unshown";
@@ -15589,6 +15892,27 @@ export interface OperatorMethodOutputMap {
                         output: string;
                         durationMs: number;
                         skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                        };
                     })[];
                     goal: {
                         probabilityUnmet: number;
@@ -15626,6 +15950,10 @@ export interface OperatorMethodOutputMap {
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
                     evidenceDigest: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    })[];
                 })[];
                 fixRounds: number;
                 baseline?: {
@@ -15665,6 +15993,11 @@ export interface OperatorMethodOutputMap {
                     origin: "derived" | "fix" | "integration" | "owner" | "stated";
                     quote?: string;
                     serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
                     disposition: "excluded" | "judged" | "met-by-structure";
                     dispositionReason?: string;
                     status: "met" | "unmet" | "unread" | "unshown";
@@ -15708,6 +16041,27 @@ export interface OperatorMethodOutputMap {
                         output: string;
                         durationMs: number;
                         skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                        };
                     })[];
                     goal: {
                         probabilityUnmet: number;
@@ -15745,6 +16099,10 @@ export interface OperatorMethodOutputMap {
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
                     evidenceDigest: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    })[];
                 })[];
                 nudges: readonly ({
                     id: string;
@@ -15871,6 +16229,11 @@ export interface OperatorMethodOutputMap {
                         origin: "derived" | "fix" | "integration" | "owner" | "stated";
                         quote?: string;
                         serves: readonly string[];
+                        contribution?: {
+                            kind: "outcome" | "scaffolding" | "secondary" | "support";
+                            reason: string;
+                            verification: string;
+                        };
                         disposition: "excluded" | "judged" | "met-by-structure";
                         dispositionReason?: string;
                         status: "met" | "unmet" | "unread" | "unshown";
@@ -15914,6 +16277,27 @@ export interface OperatorMethodOutputMap {
                             output: string;
                             durationMs: number;
                             skipped?: boolean;
+                            outcome?: "failed" | "passed" | "unverified";
+                            required?: boolean;
+                            reason?: string;
+                            completion?: {
+                                kind: "command-exit";
+                                exitCode: number;
+                            } | {
+                                kind: "assertions";
+                                runner: "bun-junit" | "registered-protocol";
+                                checks: {
+                                    passed: number;
+                                    failed: number;
+                                    skipped: number;
+                                };
+                            };
+                            provenance?: {
+                                sourceBefore: string;
+                                sourceAfter: string;
+                                definitionBefore: string;
+                                definitionAfter: string;
+                            };
                         })[];
                         goal: {
                             probabilityUnmet: number;
@@ -15951,6 +16335,10 @@ export interface OperatorMethodOutputMap {
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
                         evidenceDigest: string;
+                        reviewedFiles?: readonly ({
+                            path: string;
+                            sha256: string;
+                        })[];
                     })[];
                     nudges: readonly ({
                         id: string;
@@ -16084,6 +16472,11 @@ export interface OperatorMethodOutputMap {
                     probability: number;
                     outcome: "act" | "confirm" | "escalate";
                 };
+                project_review?: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
                 decisionIds: readonly string[];
             };
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -16103,6 +16496,27 @@ export interface OperatorMethodOutputMap {
                     output: string;
                     durationMs: number;
                     skipped?: boolean;
+                    outcome?: "failed" | "passed" | "unverified";
+                    required?: boolean;
+                    reason?: string;
+                    completion?: {
+                        kind: "command-exit";
+                        exitCode: number;
+                    } | {
+                        kind: "assertions";
+                        runner: "bun-junit" | "registered-protocol";
+                        checks: {
+                            passed: number;
+                            failed: number;
+                            skipped: number;
+                        };
+                    };
+                    provenance?: {
+                        sourceBefore: string;
+                        sourceAfter: string;
+                        definitionBefore: string;
+                        definitionAfter: string;
+                    };
                 })[];
                 goal: {
                     probabilityUnmet: number;
@@ -16140,6 +16554,10 @@ export interface OperatorMethodOutputMap {
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
                 evidenceDigest: string;
+                reviewedFiles?: readonly ({
+                    path: string;
+                    sha256: string;
+                })[];
             })[];
             fixRounds: number;
             escalations: readonly ({
@@ -28147,6 +28565,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28211,6 +28631,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28253,6 +28675,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28292,6 +28716,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28393,6 +28819,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28459,6 +28887,7 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             contractIds: readonly string[];
         };
         history: readonly ({
@@ -28489,6 +28918,7 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             contractIds: readonly string[];
         };
     };
@@ -28514,6 +28944,7 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             contractIds: readonly string[];
         };
     };
@@ -28539,6 +28970,7 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             contractIds: readonly string[];
         };
     };
@@ -28564,6 +28996,7 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
+            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
             contractIds: readonly string[];
         })[];
     };
@@ -28676,6 +29109,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28775,6 +29210,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28816,6 +29253,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28917,6 +29356,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -28964,13 +29405,13 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "sessions.permissionMode.get": {
         sessionId: string;
-        mode: "accept-edits" | "auto" | "custom" | "normal" | "plan";
+        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
     };
     // (undocumented)
     "sessions.permissionMode.set": {
         sessionId: string;
-        mode: "accept-edits" | "auto" | "custom" | "normal" | "plan";
-        previousMode: "accept-edits" | "auto" | "custom" | "normal" | "plan";
+        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        previousMode: "plan" | "safe-jev" | "safe-owner" | "yolo";
     };
     // (undocumented)
     "sessions.queuedMessages.delete": {
@@ -29008,6 +29449,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -29049,6 +29492,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -29088,6 +29533,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];
@@ -29127,6 +29574,8 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
+            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
             surfaceKinds: readonly string[];

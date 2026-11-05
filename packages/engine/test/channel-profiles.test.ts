@@ -6,6 +6,10 @@
  * to attribute and enrich a channel-originated session.
  */
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SESSION_GATE_PRESET_NAMES } from '../sdk/src/platform/gate/presets.ts';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
 import { registerChannelProfilesGatewayMethods } from '../sdk/src/platform/control-plane/routes/channel-profiles.ts';
 import {
@@ -30,6 +34,43 @@ function makeCatalog(registry: ChannelProfileRegistry): GatewayMethodCatalog {
 const ctx = { context: { admin: true } } as const;
 
 describe('channels.profiles.* registry + verbs', () => {
+  test.each([...SESSION_GATE_PRESET_NAMES])('canonical %s round-trips through channel wire schemas and persistence', async mode => {
+    const registry = makeRegistry();
+    const catalog = makeCatalog(registry);
+    const result = await catalog.invoke('channels.profiles.set', {
+      ...ctx, body: { surfaceKind: 'slack', permissionMode: mode },
+    });
+    expect(result).toMatchObject({ binding: { permissionMode: mode } });
+    expect(await registry.resolve('slack')).toEqual({ permissionMode: mode });
+  });
+
+  test.each(['normal', 'accept-edits', 'auto', 'custom', 'allow-all'])('new channel writes reject retired mode %s', async mode => {
+    const registry = makeRegistry();
+    await expect(makeCatalog(registry).invoke('channels.profiles.set', {
+      ...ctx, body: { surfaceKind: 'slack', permissionMode: mode },
+    })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await registry.list()).toEqual([]);
+  });
+
+  test('stored legacy modes normalize before channel intake reads them', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'channel-execution-modes-'));
+    try {
+      const path = join(directory, 'profiles.json');
+      await writeFile(path, JSON.stringify({ version: 1, bindings: [
+        { id: 'slack', surfaceKind: 'slack', permissionMode: 'auto', updatedAt: 1 },
+        { id: 'email', surfaceKind: 'email', permissionMode: 'accept-edits', updatedAt: 1 },
+        { id: 'telegram', surfaceKind: 'telegram', permissionMode: 'allow-all', updatedAt: 1 },
+      ] }));
+      const registry = new ChannelProfileRegistry(new ChannelProfileStore(path));
+      expect(await registry.resolve('slack')).toEqual({ permissionMode: 'safe-jev' });
+      expect(await registry.resolve('email')).toEqual({ permissionMode: 'safe-owner' });
+      expect(await registry.resolve('telegram')).toEqual({ permissionMode: 'yolo' });
+      await registry.set({ surfaceKind: 'slack', permissionMode: 'safe-owner' });
+      const reloaded = new ChannelProfileRegistry(new ChannelProfileStore(path));
+      expect((await reloaded.list()).map(binding => binding.permissionMode)).toEqual(['safe-owner', 'safe-owner', 'yolo']);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   test('all four verbs are cataloged with handlers attached', () => {
     const catalog = makeCatalog(makeRegistry());
     for (const id of ['channels.profiles.list', 'channels.profiles.get', 'channels.profiles.set', 'channels.profiles.delete']) {
@@ -60,10 +101,10 @@ describe('channels.profiles.* registry + verbs', () => {
   test('a channel-scoped binding wins over the surface-wide default on resolve', async () => {
     const registry = makeRegistry();
     await registry.set({ surfaceKind: 'slack', model: 'wide-default' });
-    await registry.set({ surfaceKind: 'slack', channelId: 'C1', model: 'channel-specific', permissionMode: 'auto' });
+    await registry.set({ surfaceKind: 'slack', channelId: 'C1', model: 'channel-specific', permissionMode: 'safe-jev' });
 
     const specific = await registry.resolve('slack', 'C1');
-    expect(specific).toEqual({ model: 'channel-specific', permissionMode: 'auto' });
+    expect(specific).toEqual({ model: 'channel-specific', permissionMode: 'safe-jev' });
 
     // A different channel with no scoped binding falls back to the surface-wide default.
     const fallback = await registry.resolve('slack', 'C-other');
@@ -120,7 +161,7 @@ describe('channel intake enrichment', () => {
     const principals = new PrincipalRegistry(new PrincipalStore(':memory:'));
     await principals.create({ name: 'Avery', kind: 'user', identities: [{ channel: 'slack', value: 'U1' }] });
     const channelProfiles = makeRegistry();
-    await channelProfiles.set({ surfaceKind: 'slack', channelId: 'C1', model: 'm', permissionMode: 'accept-edits' });
+    await channelProfiles.set({ surfaceKind: 'slack', channelId: 'C1', model: 'm', permissionMode: 'safe-owner' });
 
     const enrichment = await buildInboundIntakeEnrichment(
       { principals, channelProfiles },
@@ -128,7 +169,7 @@ describe('channel intake enrichment', () => {
     );
     expect(enrichment.sessionMetadata.attributedPrincipalName).toBe('Avery');
     expect(enrichment.spawnOverrides).toEqual({ model: 'm' });
-    expect(enrichment.permissionMode).toBe('accept-edits');
+    expect(enrichment.permissionMode).toBe('safe-owner');
     expect(enrichment.principal?.known).toBe(true);
   });
 });

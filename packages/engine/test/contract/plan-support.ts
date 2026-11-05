@@ -113,7 +113,9 @@ export interface AnswerContext {
  * shape question no), unless `override` returns an answer.
  */
 export function planningPort(override: (context: AnswerContext) => unknown = () => undefined) {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const separator = wireName.lastIndexOf('__');
+    const name = separator < 0 ? wireName : wireName.slice(separator + 2);
     const scripted = override({ name, question, state: (state ?? {}) as Record<string, unknown> });
     if (scripted !== undefined) return scripted;
     switch (name) {

@@ -527,7 +527,19 @@ export function listedPaths(paths: readonly string[]): string[] {
 /** The evidence object the judge reads beside the output. */
 /** The gate results a check state carries. */
 function gateEvidence(gates: NonNullable<UnitEvidence['gates']>): JsonValue {
-  return gates.map((gate) => ({ gate: gate.gate, passed: gate.passed, skipped: gate.skipped === true, output: gate.output }));
+  return gates.map<JsonValue>(gate => {
+    const record: Record<string, JsonValue> = { gate: gate.gate, passed: gate.passed, skipped: gate.skipped === true, output: gate.output };
+    if (gate.outcome === undefined) return record;
+    record['outcome'] = gate.outcome;
+    record['required'] = gate.required === true;
+    record['meaning'] = 'Process success and assertion verification are separate observations. Unverified required checks leave acceptance open; a skipped check proves no behavior.';
+    if (gate.reason !== undefined) record['reason'] = gate.reason;
+    if (gate.completion?.kind === 'assertions') record['completion'] = { kind: gate.completion.kind, runner: gate.completion.runner, checks: { ...gate.completion.checks } };
+    else if (gate.completion?.kind === 'command-exit') record['completion'] = { kind: gate.completion.kind, exitCode: gate.completion.exitCode,
+      meaning: 'This configured command completed with this exit code. It establishes no assertion count or test coverage.' };
+    if (gate.provenance) record['provenance'] = { ...gate.provenance };
+    return record;
+  });
 }
 
 export function judgeEvidence(evidence: UnitEvidence): JsonValue {

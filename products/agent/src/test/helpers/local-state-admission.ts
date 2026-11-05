@@ -26,8 +26,8 @@ export async function admitLocalState(register: (registry: ToolRegistry) => void
   const answers = fakePort((name, question) => {
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type === 'choice') {
-      const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read'
-        : name === 'family' || name === 'capability' ? 'generic' : undefined;
+      const label = name === 'disposition' ? 'act' : (name === 'kind' || name === 'effect__kind') ? 'read'
+        : name === 'family' || name === 'risk__family' || name === 'capability' ? 'generic' : undefined;
       if (label === undefined || !Object.hasOwn(question.criteria, label)) throw new Error(`Unexpected permission choice ${name}`);
       return choiceAnswer(question, label, 0.999);
     }

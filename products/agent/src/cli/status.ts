@@ -9,7 +9,7 @@ import type { CliConnectedHostMetricsSnapshot } from './connected-host-metrics.t
 import { getProviderIdFromModel } from '../config/provider-model.ts';
 import { formatAgentRecordSource } from '../agent/record-labels.ts';
 import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
-import { computeApprovalPosture, type ApprovalPosture } from '../permissions/approval-posture.ts';
+import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
 export interface CliStatusOptions {
@@ -168,24 +168,9 @@ function connectedHostMetricsLines(snapshot: CliConnectedHostMetricsSnapshot | n
 }
 
 /** permissions.tools.* keys, mirrors PermissionsToolConfig in the SDK config schema. */
-const PERMISSION_TOOL_KEYS = [
-  'read', 'write', 'edit', 'exec', 'find', 'fetch', 'analyze',
-  'inspect', 'agent', 'state', 'workflow', 'registry', 'delegate', 'mcp',
-] as const;
-
-/**
- * Reads the configured posture, including behavior.autoApprove rather than
- * permissions.mode alone (the original display bug). Per-call readings and
- * boundary checks still decide whether any individual action can run.
- */
+/** Display the same effective execution preset used by the permission owner. */
 function readApprovalPosture(config: Pick<ConfigManager, 'get'>): ApprovalPosture {
-  const customTools: Record<string, unknown> = {};
-  for (const key of PERMISSION_TOOL_KEYS) customTools[key] = config.get(`permissions.tools.${key}`);
-  return computeApprovalPosture({
-    autoApprove: config.get('behavior.autoApprove') === true,
-    mode: config.get('permissions.mode'),
-    customTools,
-  });
+  return readApprovalPostureFromConfig(config);
 }
 
 function secretPolicyLabel(policy: unknown): string {
@@ -299,22 +284,22 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       id: 'auto-approve-enabled',
       area: 'security',
       severity: 'risk',
-      summary: 'Auto-approve is on; boundary checks still apply.',
+      summary: 'YOLO execution is enabled by auto-approve.',
       cause: 'behavior.autoApprove is true.',
-      impact: 'Configured actions can run automatically. Configured denials, read-only modes and surface authority still apply; auto-approve cannot override them.',
+      impact: posture.detail,
       action: 'Disable behavior.autoApprove unless this is an intentionally trusted environment.',
     });
   }
 
-  if (permissionMode === 'allow-all') {
+  if (posture.mode === 'yolo') {
     findings.push({
       id: 'allow-all-permissions',
       area: 'security',
       severity: 'risk',
-      summary: 'Allow-all permission mode is active; configured actions run automatically.',
-      cause: 'permissions.mode is allow-all.',
+      summary: 'YOLO execution mode is active.',
+      cause: 'The selected execution mode is YOLO.',
       impact: 'Powerful write, edit, network, and execution tools can run without a Human-in-the-Loop (HITL) approval prompt.',
-      action: 'Use Plan mode for read-only work or Custom rules to deny specific tools unless this is an intentionally trusted environment.',
+      action: 'Select Safe owner or Safe Jev when dangerous actions need a safety decision.',
     });
   }
 

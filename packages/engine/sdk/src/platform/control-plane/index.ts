@@ -217,3 +217,5 @@ export type { DelegatedSessionInputBinding, DelegatedSessionTransferReceipt, Del
 export type { OwnerApprovalGuard, RaisedOwnerApproval, ResolveOwnerApprovalInput, ResolveSharedApprovalInput } from './approval-broker-owner.js';
 
 export { prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from './scope-policy-bootstrap.js';
+export { composeOccasions } from './routes/occasions-composition.js';
+export type { OccasionsComposition, OccasionsCompositionDeps } from './routes/occasions-composition.js';

@@ -1,3 +1,4 @@
+import { isGatePresetName } from '../gate/presets.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 /**
@@ -93,6 +94,7 @@ export function describeInvalidPersistedHostedSession(value: unknown): string | 
     const contractIds = record['contractIds'];
     if (!Array.isArray(contractIds) || !contractIds.every((id) => typeof id === 'string')) return 'the contract id list is missing or not a list of ids';
   }
+  if (record['permissionMode'] !== undefined && (typeof record['permissionMode'] !== 'string' || !isGatePresetName(record['permissionMode']))) return 'invalid session execution mode';
   if (record['nativeConversation'] !== undefined && record['nativeConversation'] !== true) return 'invalid native conversation classification';
   const id = record['id'];
   if (typeof id !== 'string' || !SAFE_ID.test(id)) return 'the session id is missing or not a safe file name';

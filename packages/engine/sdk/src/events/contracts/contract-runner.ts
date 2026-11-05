@@ -22,6 +22,7 @@ import {
   ESCALATION_REASONS,
   ESCALATION_SCOPES,
   GROUP_KINDS,
+  GATE_RESULT_OUTCOMES,
   NUDGE_DELIVERIES,
   NUDGE_KINDS,
   OWNER_REPLY_READINGS,
@@ -74,7 +75,8 @@ const CHECKED_CRITERION: readonly FieldSpec[] = [
   oneOf('outcome', CONTRACT_OUTCOMES),
 ];
 const CHECKED_QUALITY: readonly FieldSpec[] = [oneOf('item', QUALITY_ITEMS), oneOf('verdict', YES_NO_VERDICTS), oneOf('outcome', CONTRACT_OUTCOMES)];
-const CHECKED_GATE: readonly FieldSpec[] = [str('gate'), bool('passed'), bool('skipped')];
+const CHECKED_GATE: readonly FieldSpec[] = [str('gate'), bool('passed'), bool('skipped'), optOneOf('outcome', GATE_RESULT_OUTCOMES),
+  { key: 'required', kind: 'boolean', optional: true }, optStr('reason')];
 const ROUTE_SUMMARY: readonly FieldSpec[] = [str('model'), str('provider'), optStr('reasoningEffort'), str('reason')];
 
 /** The required and optional fields of every contract event, beside `type`. */
@@ -189,7 +191,8 @@ export const CONTRACT_EVENT_FIELD_SPECS: { readonly [T in ContractEventType]: re
     oneOf('outcome', CONTRACT_OUTCOMES),
     str('action'),
   ],
-  CONTRACT_GATE_RESULT: [optStr('occurrenceId'), str('contractId'), str('targetId'), str('gate'), bool('passed'), bool('skipped'), num('durationMs')],
+  CONTRACT_GATE_RESULT: [optStr('occurrenceId'), str('contractId'), str('targetId'), str('gate'), bool('passed'), bool('skipped'), num('durationMs'),
+    optOneOf('outcome', GATE_RESULT_OUTCOMES), { key: 'required', kind: 'boolean', optional: true }, optStr('reason')],
   CONTRACT_UNIT_SILENT: [optStr('occurrenceId'), str('contractId'), str('unitId'), str('agentId'), num('silentMs'), oneOf('action', UNIT_SILENCE_ACTIONS)],
   CONTRACT_MERGE_CONFLICT: [optStr('occurrenceId'), str('contractId'), str('unitId'), str('branch'), str('path'), strs('files')],
   CONTRACT_ATTEMPTS_SELECTED: [

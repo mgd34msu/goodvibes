@@ -1,8 +1,8 @@
-/** Identity-only authenticated entry; authority is supplied solely by the transport. */
+/** Authenticated native delivery; authority is supplied solely by the transport. */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { NATIVE_HOSTED_TURN_SCOPES, NativeHostedTurnError, type NativeHostedTurnHost } from '../../hosted-sessions/native-turn-host.js';
-import { nativeHostedTurnRequestSchema, nativeHostedTurnLookupSchema, nativeHostedSessionRequestSchema, nativeHostedSessionLookupSchema } from '../../hosted-sessions/native-turn-wire.js';
+import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, nativeHostedTurnLookupSchema, nativeHostedSessionRequestSchema, nativeHostedSessionLookupSchema } from '../../hosted-sessions/native-turn-wire.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 function authorize(invocation: GatewayMethodInvocation) {
@@ -43,7 +43,7 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
       try {
         const authority = authorize(invocation), input = readInvocationParams(invocation);
         if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 2048) throw new GatewayVerbError('Native hosted turn identity exceeds the limit', 'INVALID_ARGUMENT', 400);
-        const parsed = nativeHostedTurnRequestSchema.safeParse(input);
+        const parsed = (operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema).safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid native hosted turn identity', 'INVALID_ARGUMENT', 400);
         invocation.signal?.throwIfAborted();
         const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => {

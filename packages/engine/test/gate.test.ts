@@ -46,8 +46,6 @@ function gate(mode: PermissionMode, options: { approve?: boolean; surface?: stri
   return { manager, asks };
 }
 
-const CARD = '4111 1111 1111 1111';
-
 describe('the stakes rule (composed in code from the readings)', () => {
   const none = { mutates: false, outward: false, secrets: false, irreversible: false, beyondProject: false, weakensSecurity: false, obfuscated: false };
   test('each fact moves the stakes as the rule says', () => {
@@ -71,27 +69,26 @@ describe('the stakes rule (composed in code from the readings)', () => {
   });
 });
 
-describe('the stakes table', () => {
-  test('every old mode value selects its preset', () => {
-    expect(presetForMode('prompt').name).toBe('normal');
-    expect(presetForMode('accept-edits').name).toBe('accept-edits');
+describe('the shared execution presets', () => {
+  test('saved modes normalize to one of the three execution policies', () => {
+    expect(presetForMode('prompt').name).toBe('safe-owner');
+    expect(presetForMode('accept-edits').name).toBe('safe-owner');
     expect(presetForMode('plan').name).toBe('plan');
-    expect(presetForMode('allow-all').name).toBe('auto');
-    expect(presetForMode('custom').name).toBe('custom');
-    expect(presetForMode('something-else').name).toBe('normal');
+    expect(presetForMode('allow-all').name).toBe('yolo');
+    expect(presetForMode('auto').name).toBe('safe-jev');
+    expect(presetForMode('custom').name).toBe('safe-owner');
+    expect(presetForMode('something-else').name).toBe('safe-owner');
   });
 
-  test('rows map stakes to actions; plan refuses changes; accept-edits runs edits through high', () => {
-    const at = (preset: keyof typeof GATE_PRESETS, stakes: 'low' | 'medium' | 'high' | 'critical', family = 'generic' as const, changesState = true) =>
-      decideByPreset(GATE_PRESETS[preset], { stakes, family, changesState }).action;
-    expect(at('normal', 'low')).toBe('allow');
-    expect(at('normal', 'medium')).toBe('ask');
-    expect(at('auto', 'high')).toBe('allow');
-    expect(at('auto', 'critical')).toBe('ask');
-    expect(at('plan', 'low', 'generic', true)).toBe('deny');
-    expect(at('plan', 'low', 'generic', false)).toBe('allow');
-    expect(decideByPreset(GATE_PRESETS['accept-edits'], { stakes: 'high', family: 'file-mutation', changesState: true }).action).toBe('allow');
-    expect(decideByPreset(GATE_PRESETS['accept-edits'], { stakes: 'critical', family: 'file-mutation', changesState: true }).action).toBe('ask');
+  test('ordinary actions are permitted in both safe modes and YOLO permits critical actions too', () => {
+    for (const mode of ['safe-owner', 'safe-jev'] as const) {
+      for (const stakes of ['low', 'medium', 'high'] as const) {
+        expect(decideByPreset(GATE_PRESETS[mode], { stakes, family: 'generic', changesState: true }).action).toBe('allow');
+      }
+      expect(decideByPreset(GATE_PRESETS[mode], { stakes: 'critical', family: 'generic', changesState: true }).action).toBe('ask');
+    }
+    expect(decideByPreset(GATE_PRESETS.yolo, { stakes: 'critical', family: 'shell-destructive', changesState: true }).action).toBe('allow');
+    expect(decideByPreset(GATE_PRESETS.plan, { stakes: 'low', family: 'generic', changesState: true }).action).toBe('deny');
   });
 });
 
@@ -145,21 +142,36 @@ describe('the boundary composition', () => {
   });
 });
 
-describe('tool access follows owner configuration without a Jev veto', () => {
-  const readings = useGateReadings([['ls', { catastrophic: true }]]);
-  test('ordinary tools execute without risk readings or human prompts', async () => {
-    const { manager, asks } = gate('prompt');
+describe('execution-mode decisions', () => {
+  const readings = useGateReadings([['synthetic-danger', { catastrophic: true, weakensSecurity: true }]]);
+  test('owner safety permits ordinary tool effects without human prompts', async () => {
+    const { manager, asks } = gate('safe-owner');
     for (const tool of ['read', 'repo_map', 'find', 'exec', 'write', 'edit']) {
-      expect((await manager.checkDetailed(tool, { path: '.', command: 'ls' })).approved).toBe(true);
+      expect((await manager.checkDetailed(tool, { path: '.', command: 'synthetic-ordinary' })).approved).toBe(true);
     }
     expect(asks).toEqual([]);
+  });
+
+  test.each([false, true])('owner safety honors reply %s for the exact dangerous invocation', async approved => {
+    const { manager, asks } = gate('safe-owner', { approve: approved });
+    const args = { command: 'synthetic-danger', target: '/synthetic/fixture' };
+    const result = await manager.checkDetailed('exec', args);
+    expect(result.approved).toBe(approved);
+    expect(result.reasonCode).toBe(approved ? 'user_approved' : 'user_denied');
+    expect(asks).toHaveLength(1);
+    expect(asks[0]?.args).toEqual(args);
+    expect(asks[0]?.args).not.toBe(args);
+  });
+
+  test('YOLO bypasses surface and catastrophic safety vetoes without a judgment request', async () => {
+    const { manager, asks } = gate('yolo', { surface: 'web-page' });
+    expect((await manager.checkDetailed('write', { path: '/synthetic/file', content: 'synthetic-danger' })).approved).toBe(true);
+    expect((await manager.checkDetailed('exec', { command: 'synthetic-danger' })).approved).toBe(true);
+    expect(asks).toHaveLength(0);
     expect(readings.requests).toHaveLength(0);
   });
-  test('an explicitly input-only surface cannot direct a change', async () => {
-    const { manager } = gate('allow-all', { surface: 'web-page' });
-    expect((await manager.checkDetailed('write', { path: '/tmp/file', content: 'x' })).approved).toBe(false);
-  });
-  test('MCP calls do not depend on Jev classification or confidence', async () => {
+
+  test('standalone MCP configuration keeps its explicit allow/deny contract', async () => {
     const before = readings.requests.length;
     const manager = new McpPermissionManager();
     manager.registerServer('fixture');
@@ -173,11 +185,11 @@ describe('tool access follows owner configuration without a Jev veto', () => {
 describe('the tool pipeline emits the gate events', () => {
   useGateReadings([['"ls"', READ_ONLY]]);
 
-  test('boundary, stakes, preset and decision events for a read call', async () => {
+  test('YOLO reports the execution decision without pretending a boundary or stakes reading ran', async () => {
     const bus = new RuntimeEventBus();
     const seen: string[] = [];
     bus.onDomain('gate', (env) => { seen.push(env.type); });
-    const { manager } = gate('prompt');
+    const { manager } = gate('yolo');
     const result = await permissionPhase(
       { id: 'c1', name: 'exec', arguments: { command: 'ls' } },
       {} as never,
@@ -185,6 +197,10 @@ describe('the tool pipeline emits the gate events', () => {
       {} as never,
     );
     expect(result.success).toBe(true);
-    expect(seen).toEqual(['GATE_REQUESTED', 'DECISION_EMITTED']);
+    await Promise.resolve();
+    expect(seen[0]).toBe('GATE_REQUESTED');
+    expect(seen.at(-1)).toBe('DECISION_EMITTED');
+    expect(seen).not.toContain('BOUNDARY_CHECKED');
+    expect(seen).not.toContain('STAKES_READ');
   });
 });

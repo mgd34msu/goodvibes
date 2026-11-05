@@ -203,16 +203,17 @@ test('a tool the model calls actually runs, rooted at this session\'s workspace'
   session.dispose();
 });
 
-test('configured read denial returns a refusal without entering the tool body', async () => {
+test('saved custom tool denials remain binding after mode normalization', async () => {
   services.configManager.set('permissions.mode', 'custom'); services.configManager.set('permissions.tools.read', 'deny');
   const session = cancellationSession(); const calls: string[] = [];
   session.toolRegistry.unregister('read');
   session.toolRegistry.register({ definition: { name: 'read', description: 'Read a synthetic note.', parameters: { type: 'object', properties: {} } }, execute: async () => { calls.push('read'); return { success: true, output: 'fixture' }; } });
-  answers.push({ content: '', toolCalls: [{ id: 'refused-read', name: 'read', arguments: {} }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('The read was not admitted.'));
+  answers.push({ content: '', toolCalls: [{ id: 'ordinary-read', name: 'read', arguments: {} }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('The synthetic note was read.'));
   try {
     await session.submit('read the synthetic note');
+    expect(services.configManager.get('permissions.mode')).toBe('safe-owner');
     expect(calls).toEqual([]); expect(requests).toHaveLength(2);
-    expect(JSON.stringify(requests[1]!.messages)).toContain('config_deny');
+    expect(JSON.stringify(requests[1]!.messages)).not.toContain('\"output\":\"fixture\"');
     expect(approvalRequests).toBe(0);
     expect(readings.log.query({ site: 'engine.gate.autonomous-tool' })).toEqual([]);
   } finally { session.dispose(); }
@@ -237,17 +238,17 @@ test('a hosted turn runs authorized tools without a semantic permission receipt'
   } finally { installJudgmentPort(previous); session.dispose(); }
 });
 
-test('the real hosted service boundary still excludes a mutating write from admission', async () => {
+test('safe-owner hosted sessions execute ordinary writes without a blanket service-surface veto', async () => {
   readings.restore();
   readings = installHostedSessionReadings({ disposition: 'reject' });
   const session = cancellationSession();
   const executed: string[] = [];
   runtimeBus.on('TOOL_EXECUTING', (event) => { if (event.payload.type === 'TOOL_EXECUTING') executed.push(event.payload.callId); });
-  answers.push({ content: '', toolCalls: [{ id: 'blocked-write', name: 'write', arguments: { files: [{ path: 'blocked.txt', content: 'must not appear' }] } }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('The write was not admitted.'));
+  answers.push({ content: '', toolCalls: [{ id: 'ordinary-write', name: 'write', arguments: { files: [{ path: 'written.txt', content: 'ordinary hosted write' }] } }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('The requested file was written.'));
   try {
-    await session.submit('write blocked.txt');
-    expect(executed).toEqual([]);
-    expect(existsSync(join(workspace, 'blocked.txt'))).toBe(false);
+    await session.submit('write written.txt');
+    expect(executed).toEqual(['ordinary-write']);
+    expect(readFileSync(join(workspace, 'written.txt'), 'utf8')).toBe('ordinary hosted write');
     expect(workspaceTrust.isDecided()).toBe(false);
     expect(readings.requests.some(request => request.context?.site === 'engine.gate.autonomous-tool')).toBe(false);
     expect(approvalRequests).toBe(0);

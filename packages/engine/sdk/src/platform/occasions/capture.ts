@@ -23,7 +23,8 @@
  */
 import type { AuthoritySurface } from '../security/untrusted-content.js';
 import type { ProfileMutationOptions } from '../owner-profile/delegation.js';
-import type { ProfileSurface } from '../owner-profile/types.js';
+import { isProfileSurface, type ProfileSurface } from '../owner-profile/types.js';
+import type { AppendProfileProseInput, ForgetProfileInput } from '../owner-profile/store-types.js';
 import { parseOccasionDate, renderOccasionDate } from './dates.js';
 import {
   normalizePlanDetail,
@@ -57,6 +58,44 @@ export interface OccasionProfileWriter {
     readonly text?: string | undefined;
     readonly authority: AuthoritySurface | 'autonomous';
   }, options?: ProfileMutationOptions): Promise<import('../owner-profile/types.js').ProfileWriteResult>;
+}
+
+export type OccasionProfileMutation =
+  | { readonly method: 'profile.append'; readonly input: AppendProfileProseInput }
+  | { readonly method: 'profile.forget'; readonly input: ForgetProfileInput };
+
+/** Project the exact profile effect using the same formatters as the actual operation. */
+export function projectOccasionProfileMutation(source: OccasionProfileSource, method: string, request: Readonly<Record<string, unknown>>): OccasionProfileMutation | undefined {
+  const authority = request.authority;
+  if (authority !== 'autonomous' && authority !== 'owner-direct' && authority !== 'web-page' && authority !== 'email'
+    && authority !== 'channel-message' && authority !== 'document') return undefined;
+  if (method === 'occasions.remove') {
+    if (typeof request.occasionId !== 'string' || request.confirmed !== true) return undefined;
+    const occasion = readOccasionDeclarations(source).occasions.find(entry => entry.id === request.occasionId);
+    return occasion ? { method: 'profile.forget', input: { section: OCCASIONS_SECTION, text: occasion.text, authority } } : undefined;
+  }
+  const surface = request.surface;
+  if (typeof surface !== 'string' || !isProfileSurface(surface) || typeof request.said !== 'string') return undefined;
+  const identity: Pick<AppendProfileProseInput, 'surface' | 'said' | 'authority'> = { surface, said: authority === 'autonomous' ? '' : request.said, authority };
+  if (method === 'occasions.confirm') {
+    const { title, date, kind, person, recurrence, leadDays } = request;
+    if (typeof title !== 'string' || typeof date !== 'string' || typeof kind !== 'string') return undefined;
+    const proposal = proposeOccasion(source, { title, date, kind,
+      ...(typeof person === 'string' ? { person } : {}), ...(typeof recurrence === 'string' ? { recurrence } : {}),
+      ...(typeof leadDays === 'number' ? { leadDays } : {}),
+    });
+    return proposal.ok && !proposal.needsKind
+      ? { method: 'profile.append', input: { section: OCCASIONS_SECTION, text: proposal.line, ...identity } } : undefined;
+  }
+  if (method === 'occasions.plans.confirm') {
+    const { title, from, to, away, destination } = request;
+    if (typeof title !== 'string' || typeof from !== 'string' || typeof to !== 'string') return undefined;
+    const proposal = proposePlan({ title, from, to, ...(away === undefined ? {} : { away: away === true }),
+      ...(typeof destination === 'string' ? { destination } : {}),
+    });
+    return proposal.ok ? { method: 'profile.append', input: { section: PLANS_SECTION, text: proposal.line, ...identity } } : undefined;
+  }
+  return undefined;
 }
 
 /** What a capture proposes, before anything is written. */

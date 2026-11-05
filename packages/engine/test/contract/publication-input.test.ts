@@ -173,6 +173,36 @@ test('permission revocation after compatibility approval still prevents owner pu
   } finally { rmSync(setup.root, { recursive: true, force: true }); }
 });
 
+test.each([false, true])('acceptance revoked during apply admission preserves the owner and permits fresh validation (already applied: %s)', async alreadyApplied => {
+  const setup = await fixture();
+  try {
+    if (alreadyApplied) writeFileSync(join(setup.root, 'review.md'), 'Accepted report.\n');
+    const admission = await admitPublicationInput(setup.contract, async () => true, setup.signal, async () => () => {});
+    expect(admission).not.toBeNull();
+    const index = readFileSync(join(setup.root, '.git/index'));
+    const head = git(setup.root, 'rev-parse', 'HEAD');
+    let current = true, guarded = 0;
+    const assertAcceptedCurrent = () => {
+      guarded++;
+      if (!current) throw new Error('Required check evidence is stale.');
+    };
+    await expect(applyCapturedInputDelta(setup.contract, async () => {
+      current = false;
+      return true;
+    }, setup.signal, admission!, assertAcceptedCurrent)).rejects.toThrow('Required check evidence is stale.');
+    expect(guarded).toBe(1);
+    expect(existsSync(join(setup.root, 'review.md'))).toBe(alreadyApplied);
+    expect(readFileSync(join(setup.root, 'README.md'), 'utf8')).toBe('Later owner note.\n');
+    expect(readFileSync(join(setup.root, '.git/index'))).toEqual(index);
+    expect(git(setup.root, 'rev-parse', 'HEAD')).toBe(head);
+    current = true;
+    expect(await applyCapturedInputDelta(setup.contract, async () => true, setup.signal, admission!, assertAcceptedCurrent))
+      .toBe(alreadyApplied ? 0 : 1);
+    expect(guarded).toBe(2);
+    expect(readFileSync(join(setup.root, 'review.md'), 'utf8')).toBe('Accepted report.\n');
+  } finally { rmSync(setup.root, { recursive: true, force: true }); }
+});
+
 test.each(['scope', 'result', 'answer', 'check'] as const)('a changed %s cannot reuse a pending publication assessment', async changed => {
   const setup = await fixture();
   try {

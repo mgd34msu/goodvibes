@@ -9,6 +9,7 @@ import type { TaskDomainState, RuntimeTask, TaskLifecycleState } from '../../dom
 import type { AgentDomainState, RuntimeAgent, AgentLifecycleState } from '../../domains/agents.js';
 import type { PermissionCategory } from '../../../../permissions/manager.js';
 import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds } from './shared.js';
+import { parsePermissionMode } from '../../../../gate/presets.js';
 
 function permissionMachineStateForEvent(
   event: Exclude<GateEvent, { type: 'PRESET_CHANGED' }>,
@@ -78,10 +79,12 @@ export function updatePermissionState(
 ): PermissionDomainState {
   const base = updateDomainMetadata(domain, event.type);
   switch (event.type) {
-    case 'PRESET_CHANGED':
+    case 'PRESET_CHANGED': {
       // Session-level preset switch, not part of the per-call decision
       // machine: record the new setting and preset, leave the decision alone.
-      return { ...base, mode: event.mode as PermissionDomainState['mode'], preset: event.preset as PermissionDomainState['preset'] };
+      const mode = parsePermissionMode(event.mode);
+      return mode ? { ...base, mode, preset: mode } : base;
+    }
     case 'GATE_REQUESTED':
       return { ...base, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event), totalChecks: domain.totalChecks + 1 };
     case 'RULES_COLLECTED':

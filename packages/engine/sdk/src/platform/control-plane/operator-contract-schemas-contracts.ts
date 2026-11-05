@@ -31,6 +31,7 @@ import {
   ESCALATION_REASONS,
   ESCALATION_SCOPES,
   GROUP_KINDS,
+  GATE_RESULT_OUTCOMES,
   NUDGE_DELIVERIES,
   NUDGE_KINDS,
   OWNER_REPLY_ACTIONS,
@@ -124,6 +125,17 @@ const GATE_RESULT_SCHEMA = objectSchema({
   output: STRING_SCHEMA,
   durationMs: NUMBER_SCHEMA,
   skipped: BOOLEAN_SCHEMA,
+  outcome: enumSchema(GATE_RESULT_OUTCOMES),
+  required: BOOLEAN_SCHEMA,
+  reason: STRING_SCHEMA,
+  completion: { anyOf: [
+    objectSchema({ kind: enumSchema(['command-exit']), exitCode: NUMBER_SCHEMA }, ['kind', 'exitCode']),
+    objectSchema({ kind: enumSchema(['assertions']), runner: enumSchema(['bun-junit', 'registered-protocol']), checks: objectSchema({
+      passed: NUMBER_SCHEMA, failed: NUMBER_SCHEMA, skipped: NUMBER_SCHEMA,
+    }, ['passed', 'failed', 'skipped']) }, ['kind', 'runner', 'checks']),
+  ] },
+  provenance: objectSchema({ sourceBefore: STRING_SCHEMA, sourceAfter: STRING_SCHEMA, definitionBefore: STRING_SCHEMA, definitionAfter: STRING_SCHEMA },
+    ['sourceBefore', 'sourceAfter', 'definitionBefore', 'definitionAfter']),
 }, ['gate', 'passed', 'output', 'durationMs']);
 
 const QUALITY_READING_SCHEMA = objectSchema({

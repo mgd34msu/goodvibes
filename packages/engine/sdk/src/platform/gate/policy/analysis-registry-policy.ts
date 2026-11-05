@@ -8,6 +8,8 @@
  * .goodvibes/agents), not a reading of any call's content.
  */
 import type { Tool } from '../../types/tools.js';
+import { assertCurrentToolExecution } from '../../tools/registry.js';
+import { isYoloExecution } from '../execution-context.js';
 
 type AnalyzeToolArgs = {
   readonly mode?: unknown;
@@ -75,6 +77,7 @@ export function wrapRegistryToolForAgentPolicy(tool: Tool): void {
   const originalExecute = tool.execute.bind(tool);
   tool.execute = async (args, options) => {
     options?.signal?.throwIfAborted();
+    if (assertCurrentToolExecution(args, options) || isYoloExecution()) return originalExecute(args, options);
     const denial = validateRegistryToolInvocationForAgentPolicy(args as RegistryToolArgs);
     if (denial) return { success: false, error: denial };
     options?.signal?.throwIfAborted();

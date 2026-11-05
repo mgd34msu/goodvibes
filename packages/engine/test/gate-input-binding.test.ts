@@ -31,18 +31,18 @@ test('complete nested JSON is owned and immutable without dropping long string s
 test('a short complete command retains the gate cache fast path', async () => {
   const reading = await readToolCall({ toolName: 'exec', args: { command: original }, askObfuscated: true });
   expect(reading.boundary.catastrophic).toBe('no');
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
   expect(log.requests.every(request => JSON.stringify(request.state).includes(original))).toBe(true);
   expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: true });
   expect((await guardExecCommand(original)).allowed).toBe(true);
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
 });
 
 test.each(['command', 'cmd', 'commands'] as const)('the full %s suffix reaches explicit readings without introducing an exec permission gate', async shape => {
   const command = `echo ${'x'.repeat(5000)} ${marker}`;
   const args = shape === 'commands' ? { commands: [{ cmd: command }] } : { [shape]: command };
   const reading = await readToolCall({ toolName: 'exec', args, askObfuscated: true });
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
   expect(log.requests.every(request => JSON.stringify(request.state).includes(marker))).toBe(true);
   expect(reading.boundary.catastrophic).toBe('yes');
   expect(await readCatastrophic(command)).toEqual({ verdict: 'yes', readByGate: true });
@@ -51,7 +51,7 @@ test.each(['command', 'cmd', 'commands'] as const)('the full %s suffix reaches e
     expect(guard.allowed).toBe(true);
     expect(guard.astModeActive).toBe(astMode);
   }
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
 });
 
 test('exec-time reading without an earlier gate also sees the complete command', async () => {
@@ -78,7 +78,7 @@ test('the cache remains associated with the owned command that was actually judg
   args.commands[0]!.cmd = changed;
   await pending;
   expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: true });
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
 });
 
 test('one batch reading is not cached as separate per-command judgments', async () => {
@@ -95,7 +95,7 @@ test('interpretation uses the options that requested the readings, not later bor
   const reading = await pending;
   expect(reading.kind).toBe('write');
   expect(reading.obfuscated).toBe(true);
-  expect(log.requests.flatMap(request => Object.keys(request.questions ?? {}))).toContain('kind');
+  expect(log.requests.flatMap(request => Object.keys(request.questions ?? {}))).toContain('effect__kind');
 });
 
 test('cancellation cannot publish a late cache entry even if the borrowed signal is replaced', async () => {
@@ -111,7 +111,7 @@ test('cancellation cannot publish a late cache entry even if the borrowed signal
 test('large complete inputs reach explicit readings without clipping', async () => {
   const command = 'x'.repeat(1_000_001);
   await readToolCall({ toolName: 'exec', args: { command }, askObfuscated: true });
-  expect(log.requests).toHaveLength(3);
+  expect(log.requests).toHaveLength(1);
   for (const request of log.requests) expect(request.state).toMatchObject({ arguments: { command } });
 });
 

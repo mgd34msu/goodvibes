@@ -1,22 +1,20 @@
-/**
- * session-modes.test.ts
- *
- * The four session permission modes (plan / normal / accept-edits / auto) as
- * first-class policy sets: the allow/refuse matrix at both the layered
- * evaluator and the authoritative PermissionManager, the structured plan-mode
- * denial, the mode-change runtime event, and the plan-mode standing
- * instruction (injected + survives compaction).
- */
-import { useGateReadings } from './_helpers/gate-readings.ts';
-import { describe, expect, test } from 'bun:test';
+/** Execution modes, persisted selections and live mode-change events. */
+import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
+import { withDecisionLog, SqliteDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { LayeredPolicyEvaluator } from '../sdk/src/platform/runtime/permissions/evaluator.js';
 import { PermissionManager, type PermissionConfigReader } from '../sdk/src/platform/permissions/manager.js';
 import type { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.js';
 import type { PermissionMode } from '../sdk/src/platform/config/schema.js';
 import { buildToolDenial, buildDenialErrorMessage, PLAN_MODE_DENIAL_REASON } from '../sdk/src/platform/permissions/denial.js';
 import { bindPermissionModeChangeEvent } from '../sdk/src/platform/permissions/mode-change-emitter.js';
-import type { ConfigManager, ConfigChangeCallback } from '../sdk/src/platform/config/manager.js';
-import type { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
+import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
 import {
   appendPlanModeInstruction,
   PLAN_MODE_INSTRUCTION_MARKER,
@@ -25,18 +23,14 @@ import { buildReinjectedInstructions } from '../sdk/src/platform/core/compaction
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-/**
- * A minimal RuntimeEventBus whose emit() records (channel, payload) into the
- * supplied sink. The double-cast through the emit shape is the repo's standard
- * bus-fixture bridge (see makeRuntimeBus in the plugins observability test),
- * a typed factory, not an `any` suppression.
- */
-function makeCapturingBus(sink: Array<{ channel: string; payload: unknown }>): RuntimeEventBus {
-  return {
-    emit(channel: string, env: { payload: unknown }) {
-      sink.push({ channel, payload: env.payload });
-    },
-  } as unknown as RuntimeEventBus;
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+function configFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'gv-execution-mode-'));
+  roots.push(root);
+  return new ConfigManager({ configDir: join(root, 'config'), surfaceRoot: 'agent' });
 }
 
 function makeConfigReader(mode: PermissionMode): PermissionConfigReader {
@@ -111,17 +105,58 @@ describe('LayeredPolicyEvaluator mode matrix', () => {
 // ── PermissionManager mode matrix (authoritative path) ───────────────────────
 
 describe('configured permission modes', () => {
-  const readings = useGateReadings();
-  test.each(['prompt', 'accept-edits', 'allow-all'] as const)('%s runs authorized calls without a secondary approval gate', async mode => {
+  let previous: ReturnType<typeof installJudgmentPort>;
+  let log: SqliteDecisionLog;
+  let requests: JudgmentRequest<Questions>[];
+  let choice: 'act' | 'reject';
+  beforeEach(() => {
+    forgetGateReadings();
+    log = new SqliteDecisionLog(':memory:'); requests = []; choice = 'act';
+    const gate = gateReadingsPort([['synthetic-danger', { catastrophic: true, weakensSecurity: true }]]);
+    const semantic = fakePort((_name, question) => choiceAnswer(question, choice, 0.99));
+    const port: JudgmentPort = { model: gate.port.model, async ask(request) {
+      requests.push(request);
+      return 'disposition' in request.questions ? semantic.port.ask(request) : gate.port.ask(request);
+    } };
+    previous = installJudgmentPort(withDecisionLog(port, log));
+  });
+  afterEach(() => { installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings(); });
+
+  test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s permits ordinary tools without an owner prompt', async mode => {
     const { manager, prompts } = makeManager(mode);
     for (const tool of ['read', 'write', 'edit', 'agent', 'exec', 'goodvibes_settings']) {
-      const result = await manager.checkDetailed(tool, { path: 'a', task: 'x', command: 'synthetic command' });
-      expect(result).toMatchObject({ approved: true, reasonCode: 'config_allow' });
+      expect((await manager.checkDetailed(tool, { path: 'a', task: 'x', command: 'synthetic command' })).approved).toBe(true);
     }
     expect(prompts).toEqual([]);
-    expect(readings.requests).toEqual([]);
+    if (mode === 'yolo') expect(requests).toHaveLength(0);
   });
-  test('plan mode allows read tools and structurally refuses effectful tools', async () => {
+
+  test.each([false, true])('owner safety uses the owner reply %s for a dangerous action', async approved => {
+    const { manager, prompts } = makeManager('safe-owner', approved);
+    expect(await manager.checkDetailed('exec', { command: 'synthetic-danger' }))
+      .toMatchObject({ approved, sourceLayer: 'user_prompt', reasonCode: approved ? 'user_approved' : 'user_denied' });
+    expect(prompts).toEqual(['exec']);
+  });
+
+  test.each(['act', 'reject'] as const)('Jev safety uses the recorded %s decision without asking a human', async outcome => {
+    choice = outcome;
+    const { manager, prompts } = makeManager('safe-jev', true);
+    const result = await manager.checkDetailed('exec', { command: 'synthetic-danger' });
+    expect(result).toMatchObject({ approved: outcome === 'act', sourceLayer: 'jev_decision', reasonCode: `jev_${outcome}` });
+    expect(result.autonomousDecision?.outcome).toBe(outcome);
+    expect(result.autonomousDecision?.judgmentDecisionIds.length).toBeGreaterThan(0);
+    expect(prompts).toEqual([]);
+  });
+
+  test('YOLO skips safety decisions even when the installed judgment port cannot answer', async () => {
+    installJudgmentPort({ model: 'unavailable-fixture', async ask() { throw new Error('A safety reading ran in YOLO'); } });
+    const { manager, prompts } = makeManager('yolo');
+    expect(await manager.checkDetailed('exec', { command: 'synthetic-danger' }))
+      .toMatchObject({ approved: true, reasonCode: 'mode_allow_all' });
+    expect(prompts).toEqual([]);
+  });
+
+  test('plan mode allows reads and refuses execution without consulting Jev or the owner', async () => {
     const { manager, prompts } = makeManager('plan');
     expect((await manager.checkDetailed('read', { path: 'a' })).approved).toBe(true);
     for (const tool of ['write', 'edit', 'agent', 'exec']) {
@@ -129,12 +164,14 @@ describe('configured permission modes', () => {
         .toMatchObject({ approved: false, reasonCode: 'plan_mode', sourceLayer: 'runtime_mode' });
     }
     expect(prompts).toEqual([]);
-    expect(readings.requests).toEqual([]);
+    expect(requests).toHaveLength(0);
   });
-  test('getMode reflects the setting and getPreset names its preset', () => {
+
+  test('getMode and getPreset decode saved aliases into canonical execution modes', () => {
     expect(makeManager('plan').manager.getMode()).toBe('plan');
-    expect(makeManager('allow-all').manager.getPreset().name).toBe('auto');
-    expect(makeManager('prompt').manager.getPreset().name).toBe('normal');
+    expect(makeManager('allow-all').manager.getMode()).toBe('yolo');
+    expect(makeManager('allow-all').manager.getPreset().name).toBe('yolo');
+    expect(makeManager('prompt').manager.getPreset().name).toBe('safe-owner');
   });
 });
 
@@ -159,26 +196,42 @@ describe('structured plan-mode denial', () => {
 // ── mode-change runtime event ────────────────────────────────────────────────
 
 describe('permission mode-change event', () => {
-  test('bindPermissionModeChangeEvent emits the gate PRESET_CHANGED event on real transitions', () => {
-    let listener: ConfigChangeCallback<'permissions.mode'> | null = null;
-    const configManager: Pick<ConfigManager, 'subscribe'> = {
-      subscribe: (_key, cb) => {
-        listener = cb as unknown as ConfigChangeCallback<'permissions.mode'>;
-        return () => {};
-      },
-    };
-    const emitted: Array<{ channel: string; payload: unknown }> = [];
-    const bus = makeCapturingBus(emitted);
+  test('real config changes publish only effective canonical transitions and unsubscribe cleanly', async () => {
+    const manager = configFixture();
+    const bus = new RuntimeEventBus();
+    const events: unknown[] = [];
+    bus.onDomain('gate', envelope => { if (envelope.payload.type === 'PRESET_CHANGED') events.push(envelope.payload); });
+    const unsub = bindPermissionModeChangeEvent(manager, bus, 'sess-1');
+    manager.set('permissions.mode', 'plan');
+    manager.set('permissions.mode', 'plan');
+    await Promise.resolve();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'PRESET_CHANGED', mode: 'plan', previousMode: 'safe-owner', preset: 'plan', previousPreset: 'safe-owner' });
+    unsub();
+    manager.set('permissions.mode', 'safe-jev');
+    await Promise.resolve();
+    expect(events).toHaveLength(1);
+  });
 
-    const unsub = bindPermissionModeChangeEvent(configManager, bus, 'sess-1');
-    expect(typeof listener).toBe('function');
-
-    listener!('plan', 'prompt');
-    listener!('plan', 'plan'); // no-op transition, must not emit
-
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]!.channel).toBe('gate');
-    expect(emitted[0]!.payload).toMatchObject({ type: 'PRESET_CHANGED', mode: 'plan', previousMode: 'prompt', preset: 'plan', previousPreset: 'normal' });
+  test('legacy auto-approve alone changes the effective mode and selecting safety clears it', async () => {
+    const manager = configFixture();
+    const bus = new RuntimeEventBus();
+    const transitions: Array<{ mode: string; previous: string }> = [];
+    bus.onDomain('gate', envelope => {
+      const event = envelope.payload;
+      if (event.type === 'PRESET_CHANGED') transitions.push({ mode: event.mode, previous: event.previousMode });
+    });
+    const unsub = bindPermissionModeChangeEvent(manager, bus, 'sess-2');
+    manager.set('behavior.autoApprove', true);
+    await Promise.resolve();
+    expect(transitions).toEqual([{ mode: 'yolo', previous: 'safe-owner' }]);
+    manager.set('permissions.mode', 'safe-owner');
+    expect(manager.get('behavior.autoApprove')).toBe(false);
+    await Promise.resolve();
+    expect(transitions).toEqual([
+      { mode: 'yolo', previous: 'safe-owner' },
+      { mode: 'safe-owner', previous: 'yolo' },
+    ]);
     unsub();
   });
 });

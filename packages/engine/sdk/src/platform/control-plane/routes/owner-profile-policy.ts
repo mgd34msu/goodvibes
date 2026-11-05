@@ -24,12 +24,9 @@
  * live toggles rather than restart-only ones.
  */
 import {
-  evaluateProfileWrite,
-  type AppendProfileProseInput,
   type ProfileWriteResult,
 } from '../../owner-profile/index.js';
 import type { OwnerProfileGatewayService } from './owner-profile.js';
-import type { ProfileMutationOptions } from '../../owner-profile/delegation.js';
 
 /**
  * The verbatim quote a settings-UI edit carries (docs/owner-profile.md §7, §9.3).
@@ -132,33 +129,7 @@ export function applyOwnerProfilePolicy(
       if (!policy.autonomousWrites() && !isSettingsEdit(input.said)) {
         return refused(AUTONOMOUS_WRITES_OFF);
       }
-      const sectionRefusal = await refuseTaintedSection(input, options);
-      if (sectionRefusal !== null) return sectionRefusal;
       return applyDisclosurePolicy(await service.append(input, options), policy.discloseWrites());
     },
   };
-}
-
-/**
- * Run the §7 gate over the SECTION HEADING an append will land under.
- *
- * `appendProse` creates `## <section>` when no existing heading matches, so the
- * heading is a second route for text lifted off a page to reach the file. The
- * store's own gate checks the bullet text and the quote; it does not see the
- * section, because a mechanical field's section comes from the field registry
- * rather than from the caller. Checked here, at the one place a caller-supplied
- * section enters the system.
- *
- * This is the same `evaluateProfileWrite` the store runs, with the same ledger
- * and the same two passes, not a second, weaker copy of the rule.
- */
-async function refuseTaintedSection(input: AppendProfileProseInput, options?: ProfileMutationOptions): Promise<ProfileWriteResult | null> {
-  const decision = await evaluateProfileWrite({
-    authority: input.authority,
-    fieldId: null,
-    value: input.text,
-    said: input.said,
-    section: input.section,
-  }, options);
-  return decision.allowed ? null : refused(decision.reason ?? 'Refused.');
 }

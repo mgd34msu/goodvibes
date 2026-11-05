@@ -21,7 +21,11 @@ import type {
   EscalationScope,
   GroupKind,
   UnitRole,
+  ContractEvent,
 } from '../../../../events/contract.js';
+
+export type ContractGateRecord = Pick<Extract<ContractEvent, { type: 'CONTRACT_GATE_RESULT' }>,
+  'targetId' | 'gate' | 'passed' | 'skipped' | 'durationMs' | 'outcome' | 'required' | 'reason'>;
 
 /** A criterion as the plan states it, with its latest verdict once a check has read it. */
 export interface ContractCriterionRecord {
@@ -75,6 +79,8 @@ export interface ContractRecord {
   readonly criteria: readonly ContractCriterionRecord[];
   readonly groups: ReadonlyMap<string, ContractGroupRecord>;
   readonly units: ReadonlyMap<string, ContractUnitRecord>;
+  /** Latest result per target/check identity; invalidation replaces an earlier observed pass. */
+  readonly gateResults?: ReadonlyMap<string, ContractGateRecord>;
   readonly lastCheck?: { readonly scope: CheckScope; readonly targetId: string; readonly checkId: string; readonly result: CheckResult } | undefined;
   readonly nudges: number;
   /** Escalations still waiting for the owner. */

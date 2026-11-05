@@ -15,6 +15,7 @@ import { GatewayMethodCatalog, type GatewayMethodInvocationContext } from '../sd
 import { assertCurrentToolEffect } from '../sdk/src/platform/tools/registry.ts';
 import { captureFileMutation, type MutationPublication } from '../sdk/src/platform/utils/file-mutation.ts';
 import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { projectOccasionProfileMutation } from '../sdk/src/platform/occasions/capture.ts';
 import { admitLocalState } from './helpers/local-state-admission.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 import type { ToolRegistry } from '../sdk/src/platform/tools/registry.ts';
@@ -31,10 +32,13 @@ function fixture(persistIo?: ProfilePersistIo, withPublication?: MutationPublica
   const state = new OccasionStateStore(statePath);
   const config = { get: (key: string) => key === 'daemon.timezone' ? 'UTC' : undefined, set() {} };
   const service = new OccasionsService({ profile, writer: profile, state, config, now: () => Date.parse('2026-03-01T10:00:00Z') });
-  const catalog = new GatewayMethodCatalog(); registerOccasionsGatewayMethods(catalog, service);
+  const catalog = new GatewayMethodCatalog(); registerOccasionsGatewayMethods(catalog, service, { target: {
+    profilePath, statePath, captureProfileRead: () => profile.captureRead(), captureStateRead: () => state.captureRead(),
+    projectProfileMutation: (method, request) => projectOccasionProfileMutation(profile, method, request), assertOwnerCurrent() {},
+  } });
   let retained: ProfileMutationOptions | undefined;
   const register = (registry: ToolRegistry) => registry.register({
-    definition: { name: 'native_occasion_fixture', description: 'Recorded isolated native occasion request', parameters: { type: 'object', properties: {}, additionalProperties: true }, sideEffects: ['state'], concurrency: 'serial' },
+    definition: { name: 'occasions', description: 'Recorded isolated native occasion request', parameters: { type: 'object', properties: {}, additionalProperties: true }, sideEffects: ['state'], concurrency: 'serial' },
     async execute(args, options) {
       const assertCurrent = () => { options?.signal?.throwIfAborted(); if (!assertCurrentToolEffect(args, options, 'write')) throw new Error('Held'); current?.(); };
       assertCurrent();
@@ -71,7 +75,7 @@ function fixture(persistIo?: ProfilePersistIo, withPublication?: MutationPublica
 
 test('recorded native relay confirms an actual occasion with truthful autonomous provenance', async () => {
   const f = fixture();
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, { directory: f.root });
+  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root });
   expect(result.success).toBe(true); expect(result.output).toContain('"ok":true');
   const text = readFileSync(f.profilePath, 'utf8'); expect(text).toContain('Family day · 03-14');
   const provenance = parseProfileDocument({ path: f.profilePath, text, exists: true }).sections.find(section => section.heading === 'Important dates')?.prose[0]?.provenance;
@@ -84,14 +88,14 @@ test('actual recorded profile publication retains its native final restriction e
     publications += 1;
     return operation(() => { checks += 1; });
   });
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, { directory: f.root });
+  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root });
   expect(result.success).toBe(true); expect(result.output).toContain('"ok":true');
   expect(publications).toBe(1); expect(checks).toBeGreaterThan(0);
   expect(readFileSync(f.profilePath, 'utf8')).toContain('Family day · 03-14');
 });
 
 test('native profile provenance evidence retires with its real registry invocation', async () => {
-  const f = fixture(); expect((await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, { directory: f.root })).success).toBe(true);
+  const f = fixture(); expect((await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root })).success).toBe(true);
   const before = readFileSync(f.profilePath, 'utf8');
   await expect(f.profile.append({ authority: 'autonomous', surface: 'agent', said: '', section: 'Notes', text: 'After retirement' }, f.retained)).rejects.toThrow();
   expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
@@ -99,7 +103,7 @@ test('native profile provenance evidence retires with its real registry invocati
 
 test.each(['file', 'parent'] as const)('native pre-admission profile %s ABA is refused', async kind => {
   const f = fixture(), before = readFileSync(f.profilePath, 'utf8');
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, { directory: f.root,
+  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root,
     afterCapture() { const path = kind === 'file' ? f.profilePath : f.root, saved = `${path}.saved`; renameSync(path, saved); renameSync(saved, path); } });
   expect(result.success).toBe(false); expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
 });
@@ -110,7 +114,7 @@ test.each(['cancel', 'revoke'] as const)('actual native state write holds %s acr
     steps: [{ id: 'step-1', prompt: 'What did you choose?', opensFrom: '' }], answers: [] });
   const before = readFileSync(f.statePath, 'utf8'), read = f.state.interview.bind(f.state);
   f.state.interview = async id => { const value = await read(id); if (action === 'cancel') controller.abort(); else mode = 'plan'; return value; };
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'interview_answer' }, { directory: f.root, signal: controller.signal, currentMode: () => mode });
+  const result = await admitLocalState(f.register, 'occasions', { action: 'interview_answer' }, { directory: f.root, signal: controller.signal, currentMode: () => mode });
   expect(result.success).toBe(false); expect(readFileSync(f.statePath, 'utf8')).toBe(before);
 });
 
@@ -130,7 +134,7 @@ test.each([
     async remove(path) { await rm(path, { force: true }); },
   };
   const f = fixture(io), before = readFileSync(f.profilePath, 'utf8');
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, {
+  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, {
     directory: f.root, signal: controller.signal, currentMode: () => mode,
   });
   expect(reached).toBe(true); expect(result.success).toBe(false); expect(publications).toBe(0);
@@ -145,7 +149,7 @@ test('recorded profile publication cannot adopt an external replacement across r
     async rename(from, to) { await rename(from, to); await writeFile(to, foreign, 'utf8'); },
     async remove(path) { await rm(path, { force: true }); },
   });
-  const result = await admitLocalState(f.register, 'native_occasion_fixture', { action: 'confirm' }, { directory: f.root });
+  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root });
   expect(readFileSync(f.profilePath, 'utf8')).toBe(foreign);
   expect(result.success).toBe(false);
   expect(f.profile.importantDates().some(line => line.text.includes('Family day'))).toBe(false);

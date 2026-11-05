@@ -22,6 +22,9 @@ import type { NativePairedExecutionAuthority, NativePairedExecutionSnapshot } fr
 import type { ChatRequest, ChatResponse, LLMProvider } from '../sdk/src/platform/providers/interface.ts';
 import type { ModelDefinition } from '../sdk/src/platform/providers/registry.ts';
 import { installHostedSessionReadings } from './_helpers/hosted-session-readings.ts';
+import { currentExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
+import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema } from '../sdk/src/platform/hosted-sessions/native-turn-wire.ts';
+import { SESSION_GATE_PRESET_NAMES } from '../sdk/src/platform/gate/presets.ts';
 
 const exactText = '  Answer café e\u0301 🧭\r\n\tPreserve this source.  ';
 const cleanups: (() => Promise<void>)[] = [];
@@ -156,6 +159,34 @@ async function fixture(options: {
 }
 
 describe('native hosted owner through real broker, manager and runtime', () => {
+  test.each(SESSION_GATE_PRESET_NAMES.filter(mode => mode !== 'plan'))('the first native Agent turn starts under its authenticated %s selection', async permissionMode => {
+    const observed: string[] = [];
+    const f = await fixture({ chat: async () => {
+      const owner = currentExecutionModeOwner();
+      if (!owner) throw new Error('Native hosted execution mode owner is missing');
+      observed.push(owner.getMode());
+      return answer();
+    } });
+    const started = snapshot(await f.host.startAgent({ ...f.request, permissionMode }, f.authority, f.access));
+    await f.settled();
+    expect(observed).toEqual([permissionMode]);
+    expect(f.manager.get(started.sessionId!)?.permissionMode).toBe(permissionMode);
+    const changed = permissionMode === 'yolo' ? 'safe-owner' : 'yolo';
+    await f.runtime(started.sessionId!).liveTurnControls.setPermissionMode(changed);
+    await f.host.startAgent({ ...f.request, permissionMode }, f.authority, f.access);
+    expect(f.manager.get(started.sessionId!)?.permissionMode).toBe(changed);
+    expect(f.counts.creates).toBe(1);
+    expect(f.counts.deliveries).toBe(1);
+  });
+
+  test('execution selection is a canonical start-only field, never a status identity or embedded permission receipt', () => {
+    const identity = { projectId: 'project', inputId: 'input', sourceRevision: 'revision' };
+    expect(nativeHostedTurnStartRequestSchema.safeParse({ ...identity, permissionMode: 'yolo' }).success).toBe(true);
+    expect(nativeHostedTurnRequestSchema.safeParse({ ...identity, permissionMode: 'yolo' }).success).toBe(false);
+    expect(nativeHostedTurnStartRequestSchema.safeParse({ ...identity, permissionMode: 'allow-all' }).success).toBe(false);
+    expect(nativeHostedTurnStartRequestSchema.safeParse({ ...identity, metadata: { permissionMode: 'yolo' } }).success).toBe(false);
+  });
+
   test('preserves exact source bytes, canonical broker identity, and consumes only the real completed turn', async () => {
     const gate = deferred();
     const f = await fixture({ chat: async () => { await gate.promise; return answer(); } });

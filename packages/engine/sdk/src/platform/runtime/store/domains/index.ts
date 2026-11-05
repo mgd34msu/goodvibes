@@ -79,6 +79,7 @@ export type {
   ContractGroupRecord,
   ContractEscalationRecord,
   ContractRecord,
+  ContractGateRecord,
   ContractDomainState,
 } from './contracts.js';
 export { createInitialContractsState } from './contracts.js';

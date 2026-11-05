@@ -118,7 +118,7 @@ export class AgentWorktree {
    * to this staging attempt. Omit (or pass an empty array) to keep the legacy
    * `git add --all` sweep for back-compat.
    */
-  async commitWorkingTree(message: string, paths?: string[]): Promise<CommitWorkingTreeResult> {
+  async commitWorkingTree(message: string, paths?: string[], beforeCommit?: () => void): Promise<CommitWorkingTreeResult> {
     const git = await createSimpleGit({ baseDir: this.git.getCwd() });
     const scoped = paths && paths.length > 0 ? paths : null;
     let stagedPathspecs: string[];
@@ -194,7 +194,7 @@ export class AgentWorktree {
       const result = await this.git.commit(message, {
         fallbackIdentity: { name: 'GoodVibes', email: 'goodvibes@local' },
         paths: stagedPathspecs,
-      });
+      }, beforeCommit);
       if (result.hash) {
         logger.debug('AgentWorktree.commitWorkingTree: committed direct working tree changes', {
           hash: result.hash,

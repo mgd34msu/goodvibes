@@ -304,6 +304,7 @@ export class GitService {
       paths?: readonly string[];
       fallbackIdentity?: { name: string; email: string } | undefined;
     },
+    beforeCommit?: () => void,
   ): Promise<{ hash: string; summary: string }> {
     await this.firePre('commit', { message, options });
     try {
@@ -332,6 +333,8 @@ export class GitService {
           ]);
         }
       }
+      // The host guard runs after asynchronous hooks and identity preparation.
+      beforeCommit?.();
       const result = await commitGit.commit(message, undefined, flags);
       const output = { hash: result.commit, summary: JSON.stringify(result.summary) };
       await this.firePost('commit', { message, ...output });

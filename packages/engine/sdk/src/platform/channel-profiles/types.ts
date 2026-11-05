@@ -9,20 +9,11 @@
  * (ProfileData excludes permissions), scoped to a channel rather than the host.
  */
 
-/**
- * The settable operator permission vocabulary (mirrors the session-runtime
- * OperatorPermissionMode minus the read-only `custom`). A channel binding names
- * the default posture for the sessions it originates; the intake path maps this
- * onto the runtime's own PermissionMode when it spawns.
- */
-export type ChannelPermissionMode = 'plan' | 'normal' | 'accept-edits' | 'auto';
+import { SESSION_GATE_PRESET_NAMES, type SettableGatePresetName } from '../gate/presets.js';
 
-export const CHANNEL_PERMISSION_MODES: readonly ChannelPermissionMode[] = [
-  'plan',
-  'normal',
-  'accept-edits',
-  'auto',
-];
+/** A channel uses the same execution modes as a live session. */
+export type ChannelPermissionMode = SettableGatePresetName;
+export const CHANNEL_PERMISSION_MODES = SESSION_GATE_PRESET_NAMES;
 
 /**
  * One channel→profile binding. `surfaceKind` is required; `channelId` narrows

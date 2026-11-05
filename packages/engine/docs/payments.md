@@ -6,6 +6,11 @@ Choices made under zero-deferrals where no owner ruling existed are listed in
 §12.1 as rulings taken, with their reasoning, so they can be overturned
 deliberately rather than discovered.
 
+Payment authorization is a separate domain contract and applies in every general
+execution mode, including `safe-owner`, `safe-jev` and `yolo`. Those modes do not
+bypass payment enablement, direct-owner origin, budgets, merchant checks, or the
+payment-specific approval and veto windows described below.
+
 A card turns a successful prompt injection from "sends an email" into "buys
 something". The platform has just spent a round hardening against exactly that
 (`docs/decisions/2026-07-27-daemon-refuses-derived-sends.md`), and this

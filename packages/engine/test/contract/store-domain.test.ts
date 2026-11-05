@@ -85,9 +85,22 @@ describe('the contracts store domain', () => {
   test('the spawn guard is counted, and events the record does not keep change nothing', () => {
     const base = fold([SAMPLES.CONTRACT_CREATED]);
     expect(updateContractsState(base, SAMPLES.CONTRACT_SPAWN_GUARD_TRIGGERED).spawnGuardTrips).toBe(1);
-    for (const kept of [SAMPLES.CONTRACT_SHAPED, SAMPLES.CONTRACT_PLAN_CHECKED, SAMPLES.CONTRACT_NUDGE_CONSUMED, SAMPLES.CONTRACT_GATE_RESULT, SAMPLES.CONTRACT_MERGE_CONFLICT]) {
+    for (const kept of [SAMPLES.CONTRACT_SHAPED, SAMPLES.CONTRACT_PLAN_CHECKED, SAMPLES.CONTRACT_NUDGE_CONSUMED, SAMPLES.CONTRACT_MERGE_CONFLICT]) {
       expect(updateContractsState(base, kept)).toBe(base);
     }
+  });
+
+  test('gate invalidation replaces the earlier target/check result without adding completed work', () => {
+    const observation: ContractEvent = { type: 'CONTRACT_GATE_RESULT', contractId: CTR, targetId: 'u1', gate: 'tests',
+      passed: true, skipped: false, outcome: 'passed', required: true, durationMs: 5 };
+    const state = fold([SAMPLES.CONTRACT_CREATED, observation,
+      { ...observation, passed: false, outcome: 'unverified', reason: 'source-changed-after-check' }]);
+    const record = state.contracts.get(CTR)!;
+    expect(record.gateResults?.size).toBe(1);
+    expect([...record.gateResults!.values()][0]).toMatchObject({ outcome: 'unverified', passed: false, required: true,
+      reason: 'source-changed-after-check', targetId: 'u1', gate: 'tests' });
+    expect(state.totalPassed).toBe(0);
+    expect(record.status).toBe('queued');
   });
 
   test('every event type folds without throwing, through the store dispatch', () => {

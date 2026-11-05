@@ -1,4 +1,5 @@
 import { bindContractInputAuthority } from '../../contract/input-authority.js';
+import { currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
 import type { AgentConstructionBinding } from './contract-binding.js';
@@ -154,6 +155,7 @@ interface AgentExecutionState {
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
+  private readonly executionModeOwners = new WeakMap<AgentRecord, ExecutionModeOwner>();
   private readonly restoredContractUnits = new Set<string>();
   private readonly executionBoundaries = new Map<string, NonNullable<ContractUnitBinding['withCurrentExecution']>>();
   /** Actual per-agent invocations; terminal records alone do not prove cleanup. */
@@ -390,6 +392,7 @@ export class AgentManager {
   }
 
   private spawnInternal(input: AgentInput, spawnBinding?: AgentConstructionBinding, owned?: OwnedSpawnContext): AgentRecord {
+    const executionModeOwner = currentExecutionModeOwner();
     const { unit: binding, owner: ownerBinding } = splitContractBinding(spawnBinding);
     const task = input.task;
     if (!task || typeof task !== 'string' || task.trim() === '') {
@@ -568,6 +571,7 @@ export class AgentManager {
           throw new Error(admission.reason ?? 'Shared fleet admission refused');
         }
       }
+      if (executionModeOwner) this.executionModeOwners.set(record, executionModeOwner);
       this.agents.set(id, record);
       return this.reserveExecution(id);
     };
@@ -630,7 +634,11 @@ export class AgentManager {
 
       if (this.executor && record.status !== 'cancelled') {
         const executor = this.executor;
-        const execute = () => controller.signal.aborted || record.status === 'cancelled' ? Promise.resolve() : executor.runAgent(record);
+        const execute = () => {
+          if (controller.signal.aborted || record.status === 'cancelled') return Promise.resolve();
+          const owner = this.executionModeOwners.get(record);
+          return owner ? withExecutionModeOwner(owner, () => executor.runAgent(record)) : executor.runAgent(record);
+        };
         const boundary = this.executionBoundaries.get(id);
         begin((boundary === undefined ? execute() : Promise.resolve().then(() => boundary(execute))).catch((error) => {
           record.status = 'failed';
@@ -756,7 +764,11 @@ export class AgentManager {
       record.failureReason = undefined;
       record.turnBudget = undefined;
       record.completedAt = undefined;
-      const execute = () => controller.signal.aborted || record.status === 'cancelled' ? Promise.resolve() : executor.runAgent(record);
+      const execute = () => {
+        if (controller.signal.aborted || record.status === 'cancelled') return Promise.resolve();
+        const owner = this.executionModeOwners.get(record);
+        return owner ? withExecutionModeOwner(owner, () => executor.runAgent(record)) : executor.runAgent(record);
+      };
       const boundary = this.executionBoundaries.get(agentId);
       return boundary === undefined ? execute() : boundary(execute);
     };

@@ -106,7 +106,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           homeDir: root,
         });
         config.set('permissions.engine', 'policy-engine');
-        config.set('permissions.mode', 'prompt');
+        config.set('permissions.mode', 'safe-owner');
         config.set('behavior.autoApprove', false);
         const runtime = createClientRuntimeServices({
           surfaceRoot: 'agent',
@@ -144,7 +144,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
             if (name === 'connection_failure') return choiceAnswer(question, 'none', 0.99);
           }
           if (question.type === 'choice') {
-            if (name !== 'family' || !('file-mutation' in question.criteria))
+            if ((name !== 'family' && name !== 'risk__family') || !('file-mutation' in question.criteria))
               throw new Error('unexpected fixture choice');
             return choiceAnswer(question, 'file-mutation', 0.99);
           }

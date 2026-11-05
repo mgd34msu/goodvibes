@@ -3291,6 +3291,111 @@
                       },
                       "skipped": {
                         "type": "boolean"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "unverified"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "completion": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "command-exit"
+                                ]
+                              },
+                              "exitCode": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "exitCode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assertions"
+                                ]
+                              },
+                              "runner": {
+                                "type": "string",
+                                "enum": [
+                                  "bun-junit",
+                                  "registered-protocol"
+                                ]
+                              },
+                              "checks": {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "number"
+                                  },
+                                  "failed": {
+                                    "type": "number"
+                                  },
+                                  "skipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "skipped"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "runner",
+                              "checks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "provenance": {
+                        "type": "object",
+                        "properties": {
+                          "sourceBefore": {
+                            "type": "string"
+                          },
+                          "sourceAfter": {
+                            "type": "string"
+                          },
+                          "definitionBefore": {
+                            "type": "string"
+                          },
+                          "definitionAfter": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceBefore",
+                          "sourceAfter",
+                          "definitionBefore",
+                          "definitionAfter"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -4033,6 +4138,111 @@
                       },
                       "skipped": {
                         "type": "boolean"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "unverified"
+                        ]
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "completion": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "command-exit"
+                                ]
+                              },
+                              "exitCode": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "exitCode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assertions"
+                                ]
+                              },
+                              "runner": {
+                                "type": "string",
+                                "enum": [
+                                  "bun-junit",
+                                  "registered-protocol"
+                                ]
+                              },
+                              "checks": {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "number"
+                                  },
+                                  "failed": {
+                                    "type": "number"
+                                  },
+                                  "skipped": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "skipped"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "runner",
+                              "checks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "provenance": {
+                        "type": "object",
+                        "properties": {
+                          "sourceBefore": {
+                            "type": "string"
+                          },
+                          "sourceAfter": {
+                            "type": "string"
+                          },
+                          "definitionBefore": {
+                            "type": "string"
+                          },
+                          "definitionAfter": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sourceBefore",
+                          "sourceAfter",
+                          "definitionBefore",
+                          "definitionAfter"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -5190,6 +5400,111 @@
                             },
                             "skipped": {
                               "type": "boolean"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "unverified"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "completion": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command-exit"
+                                      ]
+                                    },
+                                    "exitCode": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "exitCode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "assertions"
+                                      ]
+                                    },
+                                    "runner": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bun-junit",
+                                        "registered-protocol"
+                                      ]
+                                    },
+                                    "checks": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "number"
+                                        },
+                                        "failed": {
+                                          "type": "number"
+                                        },
+                                        "skipped": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed",
+                                        "skipped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "runner",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "sourceBefore": {
+                                  "type": "string"
+                                },
+                                "sourceAfter": {
+                                  "type": "string"
+                                },
+                                "definitionBefore": {
+                                  "type": "string"
+                                },
+                                "definitionAfter": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceBefore",
+                                "sourceAfter",
+                                "definitionBefore",
+                                "definitionAfter"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -6347,6 +6662,111 @@
                 },
                 "skipped": {
                   "type": "boolean"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "unverified"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "completion": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "command-exit"
+                          ]
+                        },
+                        "exitCode": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "exitCode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "assertions"
+                          ]
+                        },
+                        "runner": {
+                          "type": "string",
+                          "enum": [
+                            "bun-junit",
+                            "registered-protocol"
+                          ]
+                        },
+                        "checks": {
+                          "type": "object",
+                          "properties": {
+                            "passed": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "skipped": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "passed",
+                            "failed",
+                            "skipped"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "runner",
+                        "checks"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "sourceBefore": {
+                      "type": "string"
+                    },
+                    "sourceAfter": {
+                      "type": "string"
+                    },
+                    "definitionBefore": {
+                      "type": "string"
+                    },
+                    "definitionAfter": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sourceBefore",
+                    "sourceAfter",
+                    "definitionBefore",
+                    "definitionAfter"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [

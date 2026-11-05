@@ -1,3 +1,4 @@
+import { normalizePermissionMode } from '@goodvibes-jev/engine/sdk/platform/gate';
 import type { OnboardingAcknowledgementTarget, OnboardingApplyOperation, OnboardingApplyRequest } from '../../runtime/onboarding/index.ts';
 import { formatProviderModel } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
@@ -147,7 +148,7 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // and adding one here would clobber a non-default choice with the stock
     // mode when the batch flushes.
     setConfig('behavior.guidanceMode', controller.getStringFieldValue('experience.guidance', controller.runtimeSnapshot?.runtimeDefaults.behavior.guidanceMode ?? 'minimal'));
-    setConfig('permissions.mode', controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'prompt'));
+    setConfig('permissions.mode', normalizePermissionMode(controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'safe-owner')));
     setConfig('storage.secretPolicy', controller.getStringFieldValue('external-services.secret-policy', controller.runtimeSnapshot?.runtimeDefaults.secretStoragePolicy ?? 'preferred_secure'));
 
     // Provider-agnostic key capture: store each entered key under the provider's

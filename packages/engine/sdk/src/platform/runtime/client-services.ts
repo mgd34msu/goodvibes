@@ -410,6 +410,8 @@ export interface ClientRuntimeServicesOptions {
  * for the two graphs to drift on it.
  */
 export function createClientRuntimeServices(options: ClientRuntimeServicesOptions): ClientRuntimeServices {
+  // An embedding without a workspace policy has no separate trust constraint.
+  const workspaceTrust = options.workspaceTrust ?? null;
   const disposalScope = createAsyncDisposalScope('ClientRuntimeServices');
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
@@ -492,7 +494,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
   const userPermissionRuleStore = createUserPermissionRuleStore(configManager);
   const permissionManager = createBrokeredPermissionManager({
-    workspaceTrust: options.workspaceTrust,
+    workspaceTrust,
     requestApproval: options.requestApproval,
     configManager,
     policyRuntimeState,
@@ -502,7 +504,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   });
   const externalPermissionLifetime = new AbortController();
   disposalScope.registry.add('external protocol permission lifetime', () => externalPermissionLifetime.abort());
-  const externalPermissionHost = { port: judgment.port, permissionManager, config: configManager, signal: externalPermissionLifetime.signal, workspaceTrust: options.workspaceTrust, workspaceRoot: workingDirectory };
+  const externalPermissionHost = { port: judgment.port, permissionManager, config: configManager, signal: externalPermissionLifetime.signal, workspaceTrust, workspaceRoot: workingDirectory };
   const announcementStore = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
   const approvalHandlers = createApprovalDerivedHandlers({
     autonomousHost: externalPermissionHost,
@@ -621,7 +623,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
     : null;
 
   return {
-    workspaceTrust: options.workspaceTrust,
+    workspaceTrust,
     workingDirectory,
     homeDirectory,
     surfaceRoot,

@@ -1,57 +1,13 @@
+import { effectivePermissionMode, isSettableGatePresetName, type GatePresetName } from '../gate/presets.js';
+import { withExecutionModeOwner, type ExecutionModeOwner } from '../gate/execution-context.js';
+import { emitPresetChanged } from '../runtime/emitters/gate.js';
 import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { readNativeConversationTurnStatus } from '../core/native-turn-admission.js';
 /**
- * session-runtime.ts, the per-session half of a hosted session: the loop.
- *
- * The workspace floor (workspace-floor.ts) supplies everything a turn needs
- * that is shared, the model stack, the agent graph, hooks, plugins, the file
- * cache and project index, the permission manager with the product's trust
- * gate on its ask seam. This file builds what a turn needs that is NOT shared:
- *
- *  - a `ConversationManager`, this session's history, restorable from disk;
- *  - a `ToolRegistry` populated by the SAME `registerAllTools` a terminal
- *    calls, rooted at THIS session's workspace, with this session's id
- *    resolving for the task tool;
- *  - a `ContextAccountingHolder` bound to this session's orchestrator, so the
- *    context_accounting tool reports this conversation rather than another;
- *  - the `Orchestrator` itself.
- *
- * The permission path is deliberately NOT rebuilt here. `floor.services
- * .permissionManager` is the manager the product composed, with the ask seam
- * the product chose (for the daemon: the workspace trust gate in front of the
- * approval broker, so a hosted run's ask becomes an approval record any
- * attached surface can answer). Building a second manager here would give
- * hosted runs a different gate from the one the product's own composition
- * documents, which is the exact defect the trust-gated seam was added to fix.
- *
- * The approval-DERIVED handlers (sandbox escalation, exec terminal prompts, the
- * localhost-fetch one-tap) are rebuilt from that same `requestApproval` seam,
- * because the floor exposes the seam rather than the handlers. Same seam, same
- * gate, so a hosted run asks exactly like a terminal run.
- *
- * ── The exec posture, and why it is not the terminal's ──────────────────────
- *
- * A hosted turn's exec tool is composed by the same `registerAllTools` a
- * terminal calls, from the same `sandbox.*` config and the same `exec-sandbox`
- * gate, so the boundary a hosted command runs inside is the boundary a local
- * command runs inside, network, PID and filesystem namespacing, the
- * `sandbox.egressAllowlist` escape hatch, and the self-labelling note on the
- * result. That much is sameness.
- *
- * The difference is what happens when there is NO boundary. A terminal falls
- * back to the host and says so, because a person asked for the command and is
- * reading the answer. A hosted CONVERSATIONAL turn has nobody in that chair, so
- * it refuses instead ({@link HostedSessionExecPosture} `conversational`): a
- * turn that cannot be contained does not run uncontained. That is the defect
- * this closes, a hosted conversational turn reached the whole host, forked a
- * second agent onto a live home, and typed into the owner's terminal, and every
- * one of those was a command the composition never said it minded.
- *
- * `workstream` is the other posture, and it is granted PER SPAWN by the product
- * composing that spawn, a real work chain the owner authorized, which may
- * legitimately need the machine itself. It is never reachable from a
- * conversational turn, from the wire, or from a tool argument, because nothing
- * on those paths can set it.
+ * Each hosted session owns its conversation, orchestrator, tool registry and
+ * execution-mode revision. Model providers, permissions and workspace services
+ * stay on the shared floor. A session-owned dynamic context selects policy for
+ * its turns without mutating daemon configuration or another session's mode.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -113,6 +69,8 @@ export interface HostedSessionRuntimeOptions {
   readonly sessionId: string;
   readonly workspaceRoot: string;
   readonly floor: HostedWorkspaceFloor;
+  readonly permissionMode?: GatePresetName | undefined;
+  readonly permissionModeChanged?: ((mode: GatePresetName) => Promise<void>) | undefined;
   /**
    * The base system prompt for this session's turns. The orchestrator appends
    * the runtime-awareness block itself, so this is the product's own operator
@@ -173,7 +131,10 @@ export interface HostedSessionRuntime {
   readonly toolRegistry: ToolRegistry;
   readonly orchestrator: Orchestrator;
   /** The per-call cancel / queued-message surface the session verbs act on. */
-  readonly liveTurnControls: SessionLiveTurnControls;
+  readonly liveTurnControls: SessionLiveTurnControls & {
+    getPermissionMode(): GatePresetName;
+    setPermissionMode(mode: GatePresetName): Promise<void>;
+  };
   /** True while a turn is in flight. */
   isRunning(): boolean;
   /**
@@ -193,6 +154,16 @@ export interface HostedSessionRuntime {
 /** Compose one hosted session's loop over an already-acquired workspace floor. */
 export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions): HostedSessionRuntime {
   const services = options.floor.services;
+  let permissionMode = options.permissionMode ?? effectivePermissionMode(services.configManager.get('permissions.mode'), services.configManager.get('behavior.autoApprove') === true);
+  let modeRevision = 0;
+  let permissionModePersisted = true;
+  let pendingModeWrite: Promise<void> | undefined;
+  let disposed = false;
+  const assertModeLive = (): void => { if (disposed) throw new Error('Hosted execution mode owner is disposed'); };
+  const modeOwner: ExecutionModeOwner = {
+    getMode() { assertModeLive(); return permissionMode; },
+    getRevision() { assertModeLive(); return modeRevision; },
+  };
   const originSurface = options.originSurface?.trim() || services.surfaceRoot;
   const clientOwnedStore = resolveClientOwnedStore(services, originSurface);
   const sessionId = options.sessionId;
@@ -329,6 +300,38 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     toolRegistry,
     orchestrator,
     liveTurnControls: {
+      getPermissionMode: () => modeOwner.getMode(),
+      setPermissionMode: async mode => {
+        assertModeLive();
+        if (!isSettableGatePresetName(mode)) throw new Error('Invalid hosted execution mode');
+        const previousMode = permissionMode;
+        if (previousMode === mode && pendingModeWrite) return pendingModeWrite;
+        if (previousMode === mode && permissionModePersisted) return;
+        const changed = previousMode !== mode;
+        if (changed) {
+          permissionMode = mode;
+          modeRevision++;
+          // An admission belongs to its captured mode. Retire the pending turn
+          // before persistence can await, including a return to the prior mode.
+          if (orchestrator.isTurnInFlight) orchestrator.abort();
+        }
+        const revision = modeRevision;
+        permissionModePersisted = false;
+        const write = Promise.resolve().then(() => options.permissionModeChanged?.(mode)).then(() => {
+          assertModeLive();
+          if (modeRevision === revision) permissionModePersisted = true;
+        });
+        pendingModeWrite = write;
+        try { await write; }
+        finally {
+          if (pendingModeWrite === write) pendingModeWrite = undefined;
+          // A failed durable write rejects the operator request. The in-memory
+          // selection remains real and observable; a same-mode retry saves it.
+          if (changed && !disposed) emitPresetChanged(services.runtimeBus, { sessionId, traceId: randomUUID(), source: 'hosted-session-mode' }, {
+            mode, previousMode, preset: mode, previousPreset: previousMode,
+          });
+        }
+      },
       cancelTurn: (expectedTurnId: string) => orchestrator.cancelTurn(expectedTurnId),
       cancelToolCall: (callId: string) => orchestrator.cancelToolCall(callId),
       listQueuedMessages: () => orchestrator.listQueuedMessages(),
@@ -337,11 +340,12 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     },
     isRunning: () => orchestrator.isTurnInFlight,
     submit: async (text: string, correlationId?: string): Promise<void> => {
+      if (disposed) return;
       // `ownerDirect` is deliberately unset. It attests that the transport
       // authenticated the OWNER himself, and a verb call carrying an operator
       // token cannot honestly claim that, leaving it unset keeps the
       // untrusted-content window open, which is the safe direction.
-      await orchestrator.handleUserInput(text, undefined, {
+      await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
         origin: {
           source: 'hosted-session',
           surface: 'service',
@@ -349,15 +353,15 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
           // actual turn with its submitting input; it conveys no authority.
           ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
         },
-      });
+      }));
     },
     submitNative: async (permit, inputId, correlationId): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);
       if (orchestrator.isTurnInFlight || orchestrator.isThinking
         || readNativeConversationTurnStatus(permit) !== 'unclaimed') throw new Error('Native turn cannot be queued or replayed');
       orchestrator.bindNativeConversationProject(source.projectId);
-      await orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
-        origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } });
+      await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
+        origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } }));
       if (readNativeConversationTurnStatus(permit) !== 'settled') throw new Error('Native hosted turn did not complete');
     },
     cancelNative: permit => orchestrator.cancelNativeConversationTurn(permit),
@@ -367,6 +371,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       return true;
     },
     dispose: (): void => {
+      disposed = true;
+      modeRevision++;
       promptLifetime.abort();
       stopContracts();
       try {

@@ -6,6 +6,7 @@ import { isCardFieldDescriptor } from '../security/card-fields.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
 
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
+import { hasAdmittedBrowserWork } from './browser-action-admission.js';
 import type { BrowserElementRef, BrowserSnapshot, CardFieldGuard } from './browser-types.js';
 
 /** How many card-field readings a snapshot runs at once. */
@@ -769,7 +770,7 @@ export async function resolveRef(
   let agrees = false;
   if (actual.tag === recorded.tag && actual.submits === recorded.submits
     && (actual.role === null || actual.role === recorded.role)
-    && actual.type !== 'password' && actual.disabled !== true
+    && (actual.type !== 'password' || hasAdmittedBrowserWork(work)) && actual.disabled !== true
     && (metadata?.documentUrl === undefined || actual.documentUrl === metadata.documentUrl)) {
     const left = (metadata?.name ?? recorded.name).trim().toLowerCase(), right = actual.name.trim().toLowerCase();
     agrees = left.length > 0 && right.length > 0 && left === right;
@@ -791,6 +792,7 @@ export async function resolveRef(
   const approved = JSON.stringify(actual);
   const revalidate = async () => {
     current();
+    if (actual.type === 'password' && !hasAdmittedBrowserWork(work)) throw new StaleElementError('The password control has no current action decision.', 'Obtain a decision for the exact browser action.');
     const count = await work.wait(() => scope.locator(recorded.selector).count());
     current();
     if (count !== 1) throw new StaleElementError('The selected control is no longer unique.', 'Call action:"snapshot" again.');

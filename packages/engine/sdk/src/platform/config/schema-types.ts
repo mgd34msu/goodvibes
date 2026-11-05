@@ -212,6 +212,8 @@ export interface ConfigSetting {
   type: 'boolean' | 'number' | 'string' | 'enum' | 'object';
   default: unknown;
   description: string;
+  /** Retained for saved-config compatibility, excluded from current settings controls. */
+  deprecated?: boolean;
   enumValues?: string[] | undefined;
   validate?: ((value: unknown) => boolean) | undefined;
   /** Hint appended to the validation-failure message when `validate` returns false, e.g. `'finite number in [0.25, 4.0]'`. */

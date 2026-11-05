@@ -22,8 +22,9 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 import { METADATA_SCHEMA } from './operator-contract-schemas-shared.js';
+import { CHANNEL_PERMISSION_MODES } from '../channel-profiles/types.js';
 
-const CHANNEL_PERMISSION_MODE_SCHEMA = { type: 'string', enum: ['plan', 'normal', 'accept-edits', 'auto'] } as const;
+const CHANNEL_PERMISSION_MODE_SCHEMA = { type: 'string', enum: CHANNEL_PERMISSION_MODES } as const;
 
 /** One channel→profile binding record. */
 export const CHANNEL_PROFILE_BINDING_SCHEMA = objectSchema({

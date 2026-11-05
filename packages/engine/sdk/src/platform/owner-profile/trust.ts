@@ -33,15 +33,16 @@
  */
 import {
   describeContentTaint,
-  findContentTaint,
   findExactContainment,
   type TaintFinding,
 } from '../security/content-taint.js';
 import {
   getProcessUntrustedContentLedger,
+  assessOutwardContent,
   surfaceHasCommandAuthority,
   type AuthoritySurface,
   type UntrustedContentLedger,
+  type OutwardContentAssessment,
 } from '../security/untrusted-content.js';
 import { canonicalProfileSection, profileFieldById } from './fields.js';
 import { readProfileDelegation, type ProfileMutationOptions } from './delegation.js';
@@ -123,8 +124,9 @@ async function findProfileTaint(
   said: string,
   section: string | undefined,
   ledger: UntrustedContentLedger,
+  options: ProfileMutationOptions,
   autonomousSource?: string,
-): Promise<readonly TaintFinding[]> {
+): Promise<OutwardContentAssessment> {
   // Pass 1, the derivation reading, over a window one turn boundary wide.
   //
   // NOT `taintSourcesThisTurn()`. The gateway starts a turn as the first
@@ -139,16 +141,10 @@ async function findProfileTaint(
   // is one short word, and exact containment of "Notes" against any page that
   // happens to use that word would refuse every legitimate note, while the
   // reading can tell a common heading from a sentence lifted off a page.
-  const recent = ledger.taintSourcesSinceLastTurnBoundary();
-  if (recent.length > 0) {
-    const derived = await findContentTaint(
-      { value, said, ...(section === undefined ? {} : { section }),
-        ...(autonomousSource === undefined ? {} : { autonomousSource }) },
-      recent,
-      {},
-    );
-    if (derived.length > 0) return derived;
-  }
+  const recent = await assessOutwardContent(ledger,
+    { value, said, ...(section === undefined ? {} : { section }),
+      ...(autonomousSource === undefined ? {} : { autonomousSource }) }, options, 'since-last-boundary');
+  if (recent.kind !== 'clean') return recent;
 
   // Pass 2, exact containment, over EVERYTHING retained.
   //
@@ -161,18 +157,20 @@ async function findProfileTaint(
   // A non-canonical section is included here too, a made-up heading lifted
   // verbatim is a value like any other, while a canonical one is left out for
   // the "Notes" reason above.
-  const retained = ledger.taintSourcesRetained();
-  if (retained.length === 0) return [];
+  const retained = ledger.captureTaintEvidence('retained');
+  if (!retained.complete) return { kind: 'incomplete', findings: [], reason: 'missing-sources' };
   const madeUpSection = section !== undefined && canonicalProfileSection(section) === null
     ? section
     : undefined;
-  return madeUpSection === undefined
-    ? findExactContainment({ value }, retained, { exactMatchFields: ['value'] })
+  const findings = madeUpSection === undefined
+    ? findExactContainment({ value }, retained.sources, { exactMatchFields: ['value'] })
     : findExactContainment(
       { value, section: madeUpSection },
-      retained,
+      retained.sources,
       { exactMatchFields: ['value', 'section'] },
     );
+  retained.assertCurrent();
+  return { kind: findings.length === 0 ? 'clean' : 'tainted', findings };
 }
 
 /**
@@ -196,11 +194,14 @@ export async function evaluateProfileWrite(input: ProfileWriteAttempt, options: 
 
   // Layer 2, derivation, which does not take the caller's word for layer 1.
   const ledger = input.ledger ?? getProcessUntrustedContentLedger();
-  const taint = await findProfileTaint(input.value, input.said, input.section, ledger,
+  const assessment = await findProfileTaint(input.value, input.said, input.section, ledger, options,
     delegated && JSON.stringify({ goal: delegated.goal, criteria: delegated.criteria }));
   current();
-  if (taint.length > 0) {
-    return refuse(describeContentTaint(describeTarget(input.fieldId), taint), taint);
+  if (assessment.kind === 'incomplete') {
+    return refuse(`Refused ${describeTarget(input.fieldId)}: complete untrusted-source evidence is unavailable for comparison.`);
+  }
+  if (assessment.kind === 'tainted') {
+    return refuse(describeContentTaint(describeTarget(input.fieldId), assessment.findings), assessment.findings);
   }
 
   // Layer 3, a verbatim quote must exist.

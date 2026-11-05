@@ -1,3 +1,4 @@
+import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -123,6 +124,8 @@ export const SHARED_SESSION_RECORD_SCHEMA = objectSchema({
   lastActivityAt: NUMBER_SCHEMA,
   messageCount: NUMBER_SCHEMA,
   retainedMessageCount: NUMBER_SCHEMA,
+  channelPermissionMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
+  channelPermissionModeRevision: { type: 'integer', minimum: 0 },
   pendingInputCount: NUMBER_SCHEMA,
   routeIds: STRING_LIST_SCHEMA,
   surfaceKinds: STRING_LIST_SCHEMA,

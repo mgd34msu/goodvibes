@@ -41,6 +41,7 @@ async function applyDelta(
   filter: ReadAccessFilter | undefined,
   signal: AbortSignal,
   publication?: PublicationInputAdmission,
+  assertAcceptedCurrent?: () => void,
 ): Promise<number> {
   const snapshot = contract.inputSnapshot;
   const view = contract.worktreePath;
@@ -108,6 +109,7 @@ async function applyDelta(
       await assertContractInputAuthority(authority, view, signal);
       await assertContractInputOwner(owner, signal);
       signal.throwIfAborted();
+      assertAcceptedCurrent?.();
       if (publication) consumePublicationInput(publication, contract);
       return 0;
     }
@@ -140,6 +142,7 @@ async function applyDelta(
     if (git(view, ['rev-parse', 'HEAD']).toString('utf8').trim() !== resultHead)
       throw new Error('captured result changed during apply admission');
     signal.throwIfAborted();
+    assertAcceptedCurrent?.();
     if (publication) consumePublicationInput(publication, contract);
     // No await between the final admission and synchronous Git application.
     // External noncooperating filesystem writers remain outside this transaction.
@@ -157,12 +160,13 @@ export async function applyCapturedInputDelta(
   filter: ReadAccessFilter | undefined,
   signal: AbortSignal,
   publication?: PublicationInputAdmission,
+  assertAcceptedCurrent?: () => void,
 ): Promise<number> {
   const root = contract.projectRoot;
   const previous = applyTails.get(root) ?? Promise.resolve();
   const operation = previous.then(() => {
     signal.throwIfAborted();
-    return applyDelta(contract, filter, signal, publication);
+    return applyDelta(contract, filter, signal, publication, assertAcceptedCurrent);
   });
   const tail = operation.then(
     () => undefined,

@@ -1,125 +1,97 @@
-// Ported from goodvibes-tui src/test/core/permission-mode.test.ts. The mode
-// vocabulary and Shift+Tab cycle now live in gate/presets.ts, where each
-// `permissions.mode` value names a preset; the preset rows are pinned here in
-// full, alongside the spot checks in gate.test.ts.
 import { describe, expect, test } from 'bun:test';
 import {
-  decideByPreset,
-  GATE_PRESETS,
-  GATE_STAKES,
-  isPlanMode,
-  nextPermissionMode,
-  PERMISSION_MODE_CYCLE,
-  permissionModeLabel,
-  permissionModeTone,
-  presetForMode,
-  togglePlanMode,
-  type GateAction,
-  type GatePresetName,
+  decideByPreset, effectivePermissionMode, GATE_PRESETS, GATE_STAKES,
+  isPlanMode, nextPermissionMode, normalizePermissionMode, parsePermissionMode,
+  PERMISSION_MODE_CYCLE, permissionModeLabel, permissionModeTone, presetForMode,
+  SESSION_GATE_PRESET_NAMES, togglePlanMode,
 } from '../sdk/src/platform/gate/presets.ts';
 
-describe('permission-mode', () => {
-  test('cycle order is normal → accept-edits → plan → auto → normal', () => {
-    expect([...PERMISSION_MODE_CYCLE]).toEqual(['prompt', 'accept-edits', 'plan', 'allow-all']);
-    expect(nextPermissionMode('prompt')).toBe('accept-edits');
-    expect(nextPermissionMode('accept-edits')).toBe('plan');
-    expect(nextPermissionMode('plan')).toBe('allow-all');
-    expect(nextPermissionMode('allow-all')).toBe('prompt');
+describe('shared execution modes', () => {
+  test('the execution cycle contains exactly owner safety, Jev safety and YOLO', () => {
+    expect([...PERMISSION_MODE_CYCLE]).toEqual(['safe-owner', 'safe-jev', 'yolo']);
+    expect(nextPermissionMode('safe-owner')).toBe('safe-jev');
+    expect(nextPermissionMode('safe-jev')).toBe('yolo');
+    expect(nextPermissionMode('yolo')).toBe('safe-owner');
+    expect(SESSION_GATE_PRESET_NAMES).toEqual(['safe-owner', 'safe-jev', 'yolo', 'plan']);
   });
 
-  test('cycling from custom or unknown starts at normal', () => {
-    expect(nextPermissionMode('custom')).toBe('prompt');
-    expect(nextPermissionMode(undefined)).toBe('prompt');
-    expect(nextPermissionMode('nonsense')).toBe('prompt');
+  test.each([undefined, 'nonsense', 'plan'])('cycling from %s starts with owner safety', mode => {
+    expect(nextPermissionMode(mode)).toBe('safe-owner');
   });
 
-  test('labels map config values to user-facing names', () => {
-    expect(permissionModeLabel('prompt')).toBe('normal');
-    expect(permissionModeLabel('allow-all')).toBe('auto');
-    expect(permissionModeLabel('plan')).toBe('plan');
-    expect(permissionModeLabel('accept-edits')).toBe('accept-edits');
-    expect(permissionModeLabel('custom')).toBe('custom');
-    expect(permissionModeLabel(undefined)).toBe('normal');
+  test.each([
+    ['prompt', 'safe-owner'], ['normal', 'safe-owner'], ['accept-edits', 'safe-owner'],
+    ['custom', 'safe-owner'], ['auto', 'safe-jev'], ['allow-all', 'yolo'],
+  ] as const)('saved %s selects %s without retaining a separate execution policy', (saved, canonical) => {
+    expect(parsePermissionMode(saved)).toBe(canonical);
+    expect(normalizePermissionMode(saved)).toBe(canonical);
+    expect(presetForMode(saved)).toBe(GATE_PRESETS[canonical]);
+    expect(permissionModeLabel(saved)).toBe(canonical);
+    expect(nextPermissionMode(saved)).toBe(nextPermissionMode(canonical));
   });
 
-  test('tones: normal neutral, plan info, autonomy modes caution', () => {
-    expect(permissionModeTone('prompt')).toBe('neutral');
-    expect(permissionModeTone('plan')).toBe('info');
-    expect(permissionModeTone('accept-edits')).toBe('caution');
-    expect(permissionModeTone('allow-all')).toBe('caution');
-    expect(permissionModeTone('custom')).toBe('caution');
+  test('unrecognized mutations remain distinguishable from an absent saved mode', () => {
+    expect(parsePermissionMode('ALLOW-ALL')).toBeUndefined();
+    expect(parsePermissionMode({ mode: 'yolo' })).toBeUndefined();
+    expect(presetForMode(undefined)).toBe(GATE_PRESETS['safe-owner']);
+    expect(presetForMode('nonsense')).toBe(GATE_PRESETS['safe-owner']);
   });
 
-  test('plan-mode toggle enters plan from any non-plan and leaves to normal', () => {
-    expect(isPlanMode('plan')).toBe(true);
-    expect(isPlanMode('prompt')).toBe(false);
-    expect(togglePlanMode('prompt')).toBe('plan');
-    expect(togglePlanMode('accept-edits')).toBe('plan');
-    expect(togglePlanMode('allow-all')).toBe('plan');
-    expect(togglePlanMode('plan')).toBe('prompt');
+  test('legacy auto-approve is an effective YOLO alias', () => {
+    expect(effectivePermissionMode('safe-owner', true)).toBe('yolo');
+    expect(effectivePermissionMode('safe-jev', true)).toBe('yolo');
+    expect(effectivePermissionMode('safe-owner', false)).toBe('safe-owner');
   });
-});
 
-describe('modes select presets', () => {
-  test('each preset names the mode that selects it, and that mode selects it back', () => {
+  test('every canonical preset selects itself and carries the same mode', () => {
     for (const preset of Object.values(GATE_PRESETS)) {
+      expect(preset.mode).toBe(preset.name);
       expect(presetForMode(preset.mode)).toBe(preset);
-      expect(permissionModeLabel(preset.mode)).toBe(preset.name);
     }
   });
 
-  test('every mode in the Shift+Tab cycle selects a distinct preset, custom excluded', () => {
-    const names = PERMISSION_MODE_CYCLE.map((mode) => presetForMode(mode).name);
-    expect(names).toEqual(['normal', 'accept-edits', 'plan', 'auto']);
-    expect(new Set(names).size).toBe(PERMISSION_MODE_CYCLE.length);
+  test('mode colors distinguish planning and unconstrained execution', () => {
+    expect(permissionModeTone('safe-owner')).toBe('neutral');
+    expect(permissionModeTone('safe-jev')).toBe('caution');
+    expect(permissionModeTone('yolo')).toBe('caution');
+    expect(permissionModeTone('plan')).toBe('info');
   });
 
-  test('an unset or unknown mode selects normal, the conservative preset', () => {
-    expect(presetForMode(undefined).name).toBe('normal');
-    expect(presetForMode('ALLOW-ALL').name).toBe('normal');
+  test('planning is a separate read-only posture with a return to owner safety', () => {
+    expect(isPlanMode('plan')).toBe(true);
+    for (const mode of PERMISSION_MODE_CYCLE) {
+      expect(isPlanMode(mode)).toBe(false);
+      expect(togglePlanMode(mode)).toBe('plan');
+    }
+    expect(togglePlanMode('plan')).toBe('safe-owner');
   });
 });
 
-describe('decideByPreset: every row', () => {
-  const EXPECTED: Readonly<Record<GatePresetName, readonly GateAction[]>> = {
-    normal: ['allow', 'ask', 'ask', 'ask'],
-    'accept-edits': ['allow', 'ask', 'ask', 'ask'],
-    plan: ['allow', 'ask', 'ask', 'ask'],
-    auto: ['allow', 'allow', 'allow', 'ask'],
-    custom: ['allow', 'ask', 'ask', 'ask'],
-  };
+describe('execution stakes policy', () => {
+  test.each(['safe-owner', 'safe-jev'] as const)('%s permits ordinary writes, commands and network effects', mode => {
+    for (const stakes of ['low', 'medium', 'high'] as const) {
+      for (const family of ['generic', 'file-mutation', 'network-egress'] as const) {
+        expect(decideByPreset(GATE_PRESETS[mode], { stakes, family, changesState: true }))
+          .toEqual({ action: 'allow', reason: 'stakes' });
+      }
+    }
+    expect(decideByPreset(GATE_PRESETS[mode], { stakes: 'critical', family: 'generic', changesState: true }))
+      .toEqual({ action: 'ask', reason: 'stakes' });
+  });
 
-  test('a read-only generic call follows each preset\'s stakes row, for the stakes reason', () => {
-    for (const name of Object.keys(EXPECTED) as GatePresetName[]) {
-      const row = GATE_STAKES.map((stakes) => decideByPreset(GATE_PRESETS[name], { stakes, family: 'generic', changesState: false }));
-      expect(row.map((decision) => decision.action)).toEqual([...EXPECTED[name]]);
-      expect(row.every((decision) => decision.reason === 'stakes')).toBe(true);
+  test('YOLO never asks or denies at any stakes level', () => {
+    for (const stakes of GATE_STAKES) {
+      expect(decideByPreset(GATE_PRESETS.yolo, { stakes, family: 'shell-destructive', changesState: true }))
+        .toEqual({ action: 'allow', reason: 'stakes' });
     }
   });
 
-  test('plan refuses any change at every stakes level, naming the plan reason', () => {
+  test('planning refuses every state-changing action even at low stakes', () => {
     for (const stakes of GATE_STAKES) {
       expect(decideByPreset(GATE_PRESETS.plan, { stakes, family: 'generic', changesState: true }))
         .toEqual({ action: 'deny', reason: 'plan-read-only' });
     }
-  });
-
-  test('accept-edits allows each edit family through high, and only those families', () => {
-    for (const family of ['file-mutation', 'notebook-edit', 'config-mutation'] as const) {
-      for (const stakes of ['low', 'medium', 'high'] as const) {
-        expect(decideByPreset(GATE_PRESETS['accept-edits'], { stakes, family, changesState: true }))
-          .toEqual({ action: 'allow', reason: 'accepted-edit' });
-      }
-      expect(decideByPreset(GATE_PRESETS['accept-edits'], { stakes: 'critical', family, changesState: true }))
-        .toEqual({ action: 'ask', reason: 'stakes' });
-    }
-    expect(decideByPreset(GATE_PRESETS['accept-edits'], { stakes: 'medium', family: 'generic', changesState: true }))
-      .toEqual({ action: 'ask', reason: 'stakes' });
-  });
-
-  test('no preset allows a critical call without asking', () => {
-    for (const preset of Object.values(GATE_PRESETS)) {
-      expect(decideByPreset(preset, { stakes: 'critical', family: 'file-mutation', changesState: true }).action).not.toBe('allow');
-    }
+    expect(decideByPreset(GATE_PRESETS.plan, { stakes: 'low', family: 'generic', changesState: false }).action)
+      .toBe('allow');
   });
 });

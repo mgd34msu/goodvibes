@@ -3,11 +3,14 @@ import { currentToolAutonomySource } from '../tools/registry.js';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { readNativeMutationAdmission, type NativeMutationAdmission } from '../control-plane/native-mutation.js';
 import type { MutationPublication } from '../utils/file-mutation.js';
+import { isInvocationAdmitted } from '../gate/execution-context.js';
 
 /** Opaque invocation-bound evidence. Serialized copies have no authority. */
 export interface RecordedProfileDelegation { readonly kind: 'recorded-autonomous' }
+export interface RecordedProfileMutation { readonly kind: 'recorded-profile-mutation' }
 export interface ProfileMutationOptions extends JudgmentReadingOptions {
   readonly delegation?: RecordedProfileDelegation | undefined;
+  readonly admittedMutation?: RecordedProfileMutation | undefined;
   /** Trusted backing mutation receipts. These callbacks never grant authority. */
   readonly onWriteIntent?: (() => void) | undefined;
   readonly onEffect?: ((published?: boolean) => void) | undefined;
@@ -21,6 +24,9 @@ interface DelegationSource {
 const sources = new WeakMap<RecordedProfileDelegation, DelegationSource>();
 const invocations = new WeakMap<object, RecordedProfileDelegation>();
 const invocationOptions = new WeakMap<object, ProfileMutationOptions>();
+const admittedInvocations = new WeakMap<RecordedProfileDelegation,
+  { readonly kind: 'tool'; readonly name: 'profile' | 'occasions'; readonly args: Record<string, unknown> }
+  | { readonly kind: 'native'; readonly method: string; readonly invocation: object }>();
 
 /** Issuance requires the exact active registry proof, independently of caller flags. */
 export function captureProfileDelegation(args: Record<string, unknown>, options?: ToolExecuteOptions): RecordedProfileDelegation {
@@ -29,6 +35,8 @@ export function captureProfileDelegation(args: Record<string, unknown>, options?
   source.assertCurrent();
   const token: RecordedProfileDelegation = Object.freeze({ kind: 'recorded-autonomous' });
   sources.set(token, source);
+  if (isInvocationAdmitted('profile', args)) admittedInvocations.set(token, Object.freeze({ kind: 'tool', name: 'profile', args }));
+  else if (isInvocationAdmitted('occasions', args)) admittedInvocations.set(token, Object.freeze({ kind: 'tool', name: 'occasions', args }));
   return token;
 }
 
@@ -39,7 +47,14 @@ export function captureNativeProfileDelegation(admission: NativeMutationAdmissio
   const token: RecordedProfileDelegation = Object.freeze({ kind: 'recorded-autonomous' });
   sources.set(token, Object.freeze({ goal: captured.source.goal, criteria: Object.freeze([...captured.source.criteria]),
     assertCurrent: captured.assertCurrent }));
+  admittedInvocations.set(token, Object.freeze({ kind: 'native', method: captured.method, invocation }));
   return token;
+}
+
+/** Exact source identity available only to the native profile registrar. */
+export function readProfileAdmittedInvocation(token: RecordedProfileDelegation) {
+  readProfileDelegation(token);
+  return admittedInvocations.get(token);
 }
 
 export function readProfileDelegation(token?: RecordedProfileDelegation): DelegationSource | undefined {
@@ -66,4 +81,31 @@ export function bindProfileMutationOptionsToInvocation(options: ProfileMutationO
 }
 export function profileMutationOptionsForInvocation(invocation: object): ProfileMutationOptions | undefined {
   return invocationOptions.get(invocation);
+}
+
+/** Compose caller restrictions with the mandatory native admission lifetime. */
+export function restrictProfileMutationOptions(admitted: ProfileMutationOptions, supplied: ProfileMutationOptions): ProfileMutationOptions {
+  const signal = admitted.signal && supplied.signal ? AbortSignal.any([admitted.signal, supplied.signal]) : admitted.signal ?? supplied.signal;
+  const current = () => {
+    signal?.throwIfAborted(); admitted.assertCurrent?.();
+    if (supplied.assertCurrent !== admitted.assertCurrent) supplied.assertCurrent?.();
+    admitted.assertCurrent?.();
+  };
+  const ownerPublication = admitted.withPublication, callerPublication = supplied.withPublication;
+  const withPublication = ownerPublication && callerPublication && ownerPublication !== callerPublication
+    ? (<T>(operation: (assertCurrent: () => void) => T | Promise<T>) => ownerPublication(ownerCurrent => callerPublication(callerCurrent =>
+      operation(() => { ownerCurrent(); callerCurrent(); current(); }))))
+    : ownerPublication ?? callerPublication;
+  return { ...supplied, ...admitted, signal, assertCurrent: current, withPublication,
+    onWriteIntent: () => {
+      current(); admitted.onWriteIntent?.();
+      if (supplied.onWriteIntent !== admitted.onWriteIntent) supplied.onWriteIntent?.();
+      current();
+    },
+    onEffect: published => {
+      admitted.onEffect?.(published);
+      if (supplied.onEffect !== admitted.onEffect) supplied.onEffect?.(published);
+      current();
+    },
+  };
 }

@@ -126,7 +126,7 @@ describe('shell surface: the composer', () => {
     const result = footer({ permissionMode: 'plan', dangerMode: true, powerKeepAwake: true, width: 120 });
     const composer = result.lines.slice(0, 5).map(lineToString).join('\n');
     expect(composer).toContain('hello');
-    for (const word of ['plan', 'gpt-test', 'openai', 'auto-approve', 'sleep disabled']) expect(composer).not.toContain(word);
+    for (const word of ['plan', 'gpt-test', 'openai', 'YOLO', 'sleep disabled']) expect(composer).not.toContain(word);
     expect(lineToString(result.lines[1]!).trim()).toBe('┃');
     expect(lineToString(result.lines[3]!).trim()).toBe('┃');
   });
@@ -135,7 +135,7 @@ describe('shell surface: the composer', () => {
     const t = activeTokens();
     expect(footer({ permissionMode: 'prompt' }).lines[0]![2]!.fg).toBe(t.brand);
     expect(footer({ permissionMode: 'plan' }).lines[0]![2]!.fg).toBe(t.info);
-    expect(footer({ permissionMode: 'accept-edits' }).lines[0]![2]!.fg).toBe(t.warning);
+    expect(footer({ permissionMode: 'safe-jev' }).lines[0]![2]!.fg).toBe(t.warning);
     expect(footer({ permissionMode: 'allow-all' }).lines[0]![2]!.fg).toBe(t.warning);
     const shell = footer({ permissionMode: 'prompt', composerPendingRisk: 'shell', promptText: '!ls' });
     expect(shell.lines[0]![2]!.fg).toBe(t.accent);
@@ -156,46 +156,46 @@ describe('shell surface: always-visible safety', () => {
   test('the mode chip opens the status line: muted, plan in the info color', () => {
     const t = activeTokens();
     const normal = statusRow(footer({ permissionMode: 'prompt', width: 120 }));
-    expect(lineToString(normal).slice(3)).toMatch(/^normal {3}\/tmp\/demo · main/);
+    expect(lineToString(normal).slice(3)).toMatch(/^safe-owner {3}\/tmp\/demo · main/);
     expect(normal[3]!.fg).toBe(t.textMuted);
     const plan = statusRow(footer({ permissionMode: 'plan', width: 120 }));
     expect(lineToString(plan).slice(3, 7)).toBe('plan');
     expect(plan[3]!.fg).toBe(t.info);
   });
 
-  test('auto-approve takes the mode chip in the error color', () => {
+  test('YOLO takes the mode chip in the error color', () => {
     const row = statusRow(footer({ permissionMode: 'allow-all', dangerMode: true }));
-    expect(lineToString(row).slice(3)).toMatch(/^! auto-approve/);
+    expect(lineToString(row).slice(3)).toMatch(/^! YOLO/);
     expect(row[3]!.fg).toBe(activeTokens().error);
     expect(lineToString(row)).not.toMatch(/\bauto {2}!/);
   });
 
-  test('plan keeps its name beside the auto-approve warning; normal does not contradict it', () => {
-    expect(lineToString(statusRow(footer({ permissionMode: 'plan', dangerMode: true })))).toContain('plan  ! auto-approve');
+  test('plan keeps its name beside the YOLO warning; normal does not contradict it', () => {
+    expect(lineToString(statusRow(footer({ permissionMode: 'plan', dangerMode: true })))).toContain('plan  ! YOLO');
     const normal = lineToString(statusRow(footer({ permissionMode: 'prompt', dangerMode: true })));
-    expect(normal.slice(3)).toMatch(/^! auto-approve/);
+    expect(normal.slice(3)).toMatch(/^! YOLO/);
     expect(normal).not.toContain('normal');
   });
 
-  test('no auto-approve warning when it is off', () => {
-    expect(text(footer())).not.toContain('auto-approve');
+  test('no YOLO warning when it is off', () => {
+    expect(text(footer())).not.toContain('YOLO');
   });
 
   test('a running turn\'s esc hint follows the mode chip', () => {
     const row = lineToString(statusRow(footer({ width: 120, dangerMode: true, permissionMode: 'allow-all', promptText: '', turnRunning: true })));
-    expect(row).toMatch(/! auto-approve {3} ?esc +interrupt/);
+    expect(row).toMatch(/! YOLO {3} ?esc +interrupt/);
   });
 
-  test.each([60, 80, 120])('the mode chip, auto-approve and sleep-disabled survive %i columns', (width) => {
+  test.each([60, 80, 120])('the mode chip, YOLO and sleep-disabled survive %i columns', (width) => {
     const row = lineToString(statusRow(footer({ width, permissionMode: 'plan', powerKeepAwake: true, dangerMode: true, contextWindow: 200_000, lastInputTokens: 150_000, usage: { up: 1, down: 1, fleetCostUsd: 1 } })));
     expect(row).toContain('plan');
-    expect(row).toContain('! auto-approve');
+    expect(row).toContain('! YOLO');
     expect(row).toContain('sleep disabled');
     expect(text(footer({ width, powerKeepAwake: false }))).not.toContain('sleep disabled');
   });
 
   test('composer flags ride after the safety chips and are the first to go on a short row', () => {
-    expect(lineToString(statusRow(footer({ width: 120, composerFlags: ['attachments'] })))).toContain('normal  attachments');
+    expect(lineToString(statusRow(footer({ width: 120, composerFlags: ['attachments'] })))).toContain('safe-owner  attachments');
     const narrow = lineToString(statusRow(footer({ width: 50, dangerMode: true, powerKeepAwake: true, composerFlags: ['attachments'] })));
     expect(narrow).toContain('sleep disabled');
     expect(narrow).not.toContain('attachments');

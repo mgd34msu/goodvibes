@@ -1,3 +1,4 @@
+import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import { createNativeHostFetch } from './client/native-host-fetch.ts';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.ts';
 import { NativeConversationIntakeControls, type NativeConversationIntakeState } from './native-conversation-intake.ts';
@@ -14,7 +15,7 @@ import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/pl
 import { createOperatorNativeWorkExecutionClient, getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import { NativeWorkLedgerModel, type NativeWorkLedgerView, type NativeWorkLedgerBinding } from './native-work-ledger.ts';
 
-export type NativeLedgerHost = NativeSubmissionHost | { readonly reason: string };
+export type NativeLedgerHost = (NativeSubmissionHost & { readonly readExecutionMode?: () => GatePresetName }) | { readonly reason: string };
 export type NativeLedgerBindingFactory = (host: Exclude<NativeLedgerHost, { reason: string }>, project: string, unavailable: (error: Error) => void, current?: () => boolean) => NativeWorkLedgerBinding;
 export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, onUnavailable, current = () => true) => {
   const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
@@ -85,7 +86,7 @@ export function createNativeWorkLedgerView(
     const identity = nativeSubmissionIdentity(host, selected?.project ?? '');
     if (!host.journalPath || !selected || !same(host, selected.host)) return { available: false, identity, reason: 'Native conversation intake requires its durable journal and selected daemon project.' };
     const projectId = selected.project;
-    return { available: true, identity, endpoint: host.baseUrl, projectId, workspace: realpathSync(host.workspace), journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`), bind: () => createNativeConversationIntakeBinding(host, projectId, () => { const now = resolve(); return !('reason' in now) && nativeSubmissionIdentity(now, projectId) === identity && selected?.project === projectId; }) };
+    return { available: true, identity, endpoint: host.baseUrl, projectId, workspace: realpathSync(host.workspace), journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`), bind: () => createNativeConversationIntakeBinding(host, projectId, () => { const now = resolve(); return !('reason' in now) && nativeSubmissionIdentity(now, projectId) === identity && selected?.project === projectId; }, host.readExecutionMode) };
   });
   const preflight = new NativeWorkSubmissionPreflight(() => {
     const host = resolve();

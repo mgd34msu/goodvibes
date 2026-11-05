@@ -19,6 +19,8 @@ import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } 
  * resolve is refused, since nothing was checked.
  */
 import { lookup } from 'node:dns/promises';
+import { currentExecutionMode, isYoloExecution } from '../../gate/execution-context.js';
+import { isAdmittedFetchSocket } from './invocation.js';
 import { isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
@@ -57,7 +59,9 @@ export async function resolveCheckedAddresses(
 ): Promise<readonly ResolvedAddress[]> {
   const parsed = new URL(url);
   const host = bareHost(parsed);
-  const writtenLoopback = classifyHostTrustTier(host, options.trustTierConfig).tier === 'localhost';
+  const writtenTrust = classifyHostTrustTier(host, options.trustTierConfig);
+  if (writtenTrust.tier === 'blocked' && !writtenTrust.isSsrf) throw new Error(`Request blocked: ${writtenTrust.reason}`);
+  const writtenLoopback = writtenTrust.tier === 'localhost';
   let answers: readonly ResolvedAddress[];
   if (isIP(host)) {
     answers = [{ address: host, family: isIP(host) }];
@@ -69,6 +73,11 @@ export async function resolveCheckedAddresses(
     }
   }
   if (answers.length === 0) throw new Error(`Request blocked: host "${host}" resolved to no address`);
+  for (const answer of answers) {
+    const trust = classifyHostTrustTier(answer.address, options.trustTierConfig);
+    if (trust.tier === 'blocked' && !trust.isSsrf) throw new Error(`Request blocked: ${trust.reason}`);
+  }
+  if (isYoloExecution() || isAdmittedFetchSocket(url)) return answers;
   for (const answer of answers) {
     const range = classifyResolvedAddress(answer.address);
     if (range === null) continue;
@@ -100,7 +109,10 @@ export async function pinnedFetch(
   withPublication?: DeliveryLifetime['withPublication'],
 ): Promise<Response> {
   const host = bareHost(new URL(url));
-  const lifetime = { signal: init.signal ?? undefined, assertCurrent, withPublication };
+  const lifetime = { signal: init.signal ?? undefined, assertCurrent: () => {
+    currentExecutionMode();
+    assertCurrent?.();
+  }, withPublication };
   assertDeliveryCurrent(lifetime);
   if (isIP(host)) return runDeliveryPublication(lifetime, () => instrumentedFetch(url, init, diagnosticMode));
   let lastError: unknown;

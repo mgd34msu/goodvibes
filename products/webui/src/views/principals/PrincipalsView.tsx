@@ -35,6 +35,7 @@ import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Select } from '../../components/ui/Select';
 import '../../styles/components/principals.css';
+import { GATE_PRESETS, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = Principal['kind'];
@@ -42,7 +43,7 @@ type ChannelBinding = OperatorMethodOutput<'channels.profiles.list'>['bindings']
 type PermissionMode = NonNullable<ChannelBinding['permissionMode']>;
 
 const PRINCIPAL_KINDS: readonly PrincipalKind[] = ['user', 'bot', 'service', 'token'];
-const PERMISSION_MODES: readonly PermissionMode[] = ['plan', 'normal', 'accept-edits', 'auto'];
+const PERMISSION_MODES: readonly PermissionMode[] = SESSION_GATE_PRESET_NAMES;
 
 function identitiesFromDraft(draft: string): OperatorMethodInput<'principals.create'>['identities'] {
   // One "channel:value" pair per line, the simplest phone-friendly encoding for a
@@ -327,7 +328,7 @@ function ChannelProfileForm({
           value={permissionMode}
           onChange={setPermissionMode}
           disabled={submitting}
-          options={[{ value: '', label: 'Unset' }, ...PERMISSION_MODES.map((mode) => ({ value: mode, label: mode }))]}
+          options={[{ value: '', label: 'Unset' }, ...PERMISSION_MODES.map((mode) => ({ value: mode, label: GATE_PRESETS[mode].label }))]}
         />
       </Field>
       <div className="principals-form__actions">

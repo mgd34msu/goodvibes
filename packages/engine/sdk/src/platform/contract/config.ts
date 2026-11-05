@@ -95,7 +95,12 @@ const ISOLATION_SETTINGS: readonly string[] = ['auto', 'worktree', 'shared'];
 function isQualityGate(value: unknown): value is QualityGate {
   if (value === null || typeof value !== 'object') return false;
   const gate = value as Record<string, unknown>;
-  return typeof gate['name'] === 'string' && typeof gate['command'] === 'string' && typeof gate['enabled'] === 'boolean';
+  if (typeof gate['name'] !== 'string' || typeof gate['command'] !== 'string' || typeof gate['enabled'] !== 'boolean') return false;
+  if ((gate['required'] !== undefined && typeof gate['required'] !== 'boolean')
+    || (gate['verification'] !== undefined && gate['verification'] !== 'command' && gate['verification'] !== 'assertions')) {
+    throw new Error('Invalid contract gate completion options.');
+  }
+  return true;
 }
 
 /**

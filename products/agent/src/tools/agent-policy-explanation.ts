@@ -7,25 +7,10 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { readPermissionCategory } from '@goodvibes-jev/engine/sdk/platform/gate/policy';
 import { HARNESS_MODE_DESCRIPTORS } from './agent-harness-mode-catalog.ts';
 import { explainAgentToolPolicyInvocation } from './agent-tool-policy-guard.ts';
-import { computeApprovalPosture, type ApprovalPosture } from '../permissions/approval-posture.ts';
+import { computeApprovalPosture, readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 
 type PolicyExplanationStatus = 'held' | 'confirmation_required' | 'denied';
 type PermissionPredictionOutcome = 'unknown';
-type PermissionToolKey =
-  | 'read'
-  | 'write'
-  | 'edit'
-  | 'exec'
-  | 'find'
-  | 'fetch'
-  | 'analyze'
-  | 'inspect'
-  | 'agent'
-  | 'state'
-  | 'workflow'
-  | 'registry'
-  | 'delegate'
-  | 'mcp';
 
 export interface AgentPolicyExplainArgs {
   readonly toolName?: unknown;
@@ -48,27 +33,8 @@ interface PermissionPrediction {
   readonly reasonCode: 'live_check_required';
   readonly mode: string;
   readonly reason: string;
-  readonly configuredAction?: string;
 }
 
-const TOOL_CONFIG_KEYS: Readonly<Record<string, PermissionToolKey>> = {
-  read: 'read',
-  write: 'write',
-  edit: 'edit',
-  exec: 'exec',
-  find: 'find',
-  fetch: 'fetch',
-  analyze: 'analyze',
-  inspect: 'inspect',
-  agent: 'agent',
-  state: 'state',
-  workflow: 'workflow',
-  registry: 'registry',
-  goodvibes_context: 'state',
-  goodvibes_settings: 'write',
-  delegate: 'delegate',
-  mcp: 'mcp',
-};
 
 const SECRET_KEY_RE = /(?:api[_-]?key|token|secret|password|authorization|auth|bearer|webhook)/i;
 
@@ -175,13 +141,6 @@ function readPermissionMode(context: CommandContext): string {
   return typeof mode === 'string' && mode ? mode : 'prompt';
 }
 
-function readPermissionToolAction(context: CommandContext, key: PermissionToolKey): string | null {
-  const configured = readString(readConfigValue(context, `permissions.tools.${key}`));
-  if (configured) return configured;
-  const action = context.platform.config?.permissions?.tools?.[key];
-  return typeof action === 'string' && action ? action : null;
-}
-
 function readAutoApprove(context: CommandContext): boolean {
   const configured = readConfigValue(context, 'behavior.autoApprove');
   if (typeof configured === 'boolean') return configured;
@@ -195,19 +154,7 @@ function readAutoApprove(context: CommandContext): boolean {
  * with what those other surfaces say about auto-approve / permission mode.
  */
 function readEffectivePosture(context: CommandContext): ApprovalPosture {
-  const mode = readPermissionMode(context);
-  const customTools: Record<string, unknown> = {};
-  if (mode === 'custom') {
-    for (const key of Object.values(TOOL_CONFIG_KEYS)) {
-      if (key in customTools) continue;
-      customTools[key] = readPermissionToolAction(context, key) ?? undefined;
-    }
-  }
-  return computeApprovalPosture({
-    autoApprove: readAutoApprove(context),
-    mode,
-    customTools,
-  });
+  return context.platform.configManager ? readApprovalPostureFromConfig(context.platform.configManager) : computeApprovalPosture({ autoApprove: readAutoApprove(context), mode: readPermissionMode(context) });
 }
 
 /**
@@ -216,22 +163,14 @@ function readEffectivePosture(context: CommandContext): ApprovalPosture {
  * is therefore not an approval, and a category cannot predict the stakes.
  * Retain configured intent without running judgment I/O or asking the owner.
  */
-function predictPermission(context: CommandContext, toolName: string): PermissionPrediction {
+function predictPermission(context: CommandContext): PermissionPrediction {
   const posture = readEffectivePosture(context);
-  const toolConfigKey = TOOL_CONFIG_KEYS[toolName];
-  const configuredAction = posture.mode === 'custom' && toolConfigKey
-    ? readPermissionToolAction(context, toolConfigKey) ?? 'prompt'
-    : undefined;
-  const configuredRule = configuredAction === undefined
-    ? ''
-    : ` Configured rule permissions.tools.${toolConfigKey} is ${configuredAction}; this is configuration, not an evaluated decision.`;
   return {
     outcome: 'unknown',
     sourceLayer: 'not_evaluated',
     reasonCode: 'live_check_required',
     mode: posture.mode,
-    reason: `${posture.detail}${configuredRule} The live permission gate must evaluate this exact call before execution.`,
-    ...(configuredAction === undefined ? {} : { configuredAction }),
+    reason: `${posture.detail} This report does not evaluate the supplied action.`,
   };
 }
 
@@ -323,7 +262,7 @@ export async function explainAgentPolicyDecision(
   const category = categoryReading.category;
   const analysis = analyzePermissionRequest(toolName, toolArgs, category);
   const guard = explainAgentToolPolicyInvocation(toolName, toolArgs);
-  const permission = predictPermission(context, toolName);
+  const permission = predictPermission(context);
   const confirmation = confirmationState(toolName, toolArgs, definition, category);
   const status = statusFor(guard, confirmation);
   const requiredActions = [
@@ -370,7 +309,6 @@ export async function explainAgentPolicyDecision(
           sourceLayer: permission.sourceLayer,
           reasonCode: permission.reasonCode,
           reason: permission.reason,
-          ...(permission.configuredAction ? { configuredAction: permission.configuredAction } : {}),
         },
         {
           layer: confirmation.recordedAdmissionRequired ? 'Recorded effect admission' : 'Tool confirmation',

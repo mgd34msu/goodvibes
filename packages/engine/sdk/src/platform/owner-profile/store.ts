@@ -4,7 +4,8 @@
  * lifetime restrictions through their final publication.
  */
 import { watch, type FSWatcher } from 'node:fs';
-import { readProfileDelegation, type ProfileMutationOptions } from './delegation.js';
+import { readProfileDelegation, restrictProfileMutationOptions, type ProfileMutationOptions } from './delegation.js';
+import { consumeProfileMutationAdmission } from '../control-plane/routes/native-profile-mutation.js';
 import { captureFileMutation, captureMutationDescriptors } from '../utils/file-mutation.js';
 import { readProfilePerson, type ProfilePersonReadingOptions } from './person-reading.js';
 import { basename, dirname } from 'node:path';
@@ -311,9 +312,6 @@ export class OwnerProfileStore {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Reads, pure in-memory, no syscalls
-  // -------------------------------------------------------------------------
 
   /** One mechanical field, or `undefined` when unset, unavailable or disabled. */
   get(fieldId: string): ProfileFieldValue | undefined {
@@ -476,14 +474,14 @@ export class OwnerProfileStore {
     return PROFILE_SECTIONS;
   }
 
-  // -------------------------------------------------------------------------
-  // Writes, gated, then surgical, then atomic
-  // -------------------------------------------------------------------------
 
   /** Write or supersede a mechanical field. */
   async set(input: SetProfileFieldInput, options: ProfileMutationOptions = {}): Promise<ProfileWriteResult> {
+    const admitted = consumeProfileMutationAdmission(options.admittedMutation, 'profile.set', this.filePath, input);
+    if (admitted) options = restrictProfileMutationOptions(admitted, options);
     const lifetime = this.mutationLifetime(options);
     lifetime?.assertCurrent();
+    if (input.authority === 'autonomous' && !admitted) return refusal('Autonomous profile mutations require exact selected-owner admission; source provenance alone cannot authorize a write.');
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 
@@ -494,8 +492,8 @@ export class OwnerProfileStore {
       said: input.said,
       ...(this.options.ledger === undefined ? {} : { ledger: this.options.ledger }),
     }, options);
-    lifetime?.assertCurrent();
     if (!decision.allowed) return refusal(decision.reason ?? 'Refused.');
+    lifetime?.assertCurrent();
 
     const provenance = this.provenanceFor(input, options);
     return this.commit((current) => setField(current, {
@@ -508,8 +506,11 @@ export class OwnerProfileStore {
 
   /** Add a prose bullet to a section. */
   async append(input: AppendProfileProseInput, options: ProfileMutationOptions = {}): Promise<ProfileWriteResult> {
+    const admitted = consumeProfileMutationAdmission(options.admittedMutation, 'profile.append', this.filePath, input);
+    if (admitted) options = restrictProfileMutationOptions(admitted, options);
     const lifetime = this.mutationLifetime(options);
     lifetime?.assertCurrent();
+    if (input.authority === 'autonomous' && !admitted) return refusal('Autonomous profile mutations require exact selected-owner admission; source provenance alone cannot authorize a write.');
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 
@@ -521,8 +522,8 @@ export class OwnerProfileStore {
       section: input.section,
       ...(this.options.ledger === undefined ? {} : { ledger: this.options.ledger }),
     }, options);
-    lifetime?.assertCurrent();
     if (!decision.allowed) return refusal(decision.reason ?? 'Refused.');
+    lifetime?.assertCurrent();
 
     const provenance = this.provenanceFor(input, options);
     return this.commit((current) => appendProse(current, {
@@ -534,8 +535,11 @@ export class OwnerProfileStore {
 
   /** Delete a line and, for a field, every history comment it left behind. */
   async forget(input: ForgetProfileInput, options: ProfileMutationOptions = {}): Promise<ProfileWriteResult> {
+    const admitted = consumeProfileMutationAdmission(options.admittedMutation, 'profile.forget', this.filePath, input);
+    if (admitted) options = restrictProfileMutationOptions(admitted, options);
     const lifetime = this.mutationLifetime(options);
     lifetime?.assertCurrent();
+    if (input.authority === 'autonomous' && !admitted) return refusal('Autonomous profile mutations require exact selected-owner admission; source provenance alone cannot authorize a write.');
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 
@@ -567,8 +571,11 @@ export class OwnerProfileStore {
 
   /** Promote the most recent superseded value back to an active line. */
   async undo(input: UndoProfileInput, options: ProfileMutationOptions = {}): Promise<ProfileWriteResult> {
+    const admitted = consumeProfileMutationAdmission(options.admittedMutation, 'profile.undo', this.filePath, input);
+    if (admitted) options = restrictProfileMutationOptions(admitted, options);
     const lifetime = this.mutationLifetime(options);
     lifetime?.assertCurrent();
+    if (input.authority === 'autonomous' && !admitted) return refusal('Autonomous profile mutations require exact selected-owner admission; source provenance alone cannot authorize a write.');
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 

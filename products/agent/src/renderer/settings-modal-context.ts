@@ -5,7 +5,7 @@
  * text builders; settings-modal.ts lays them out with the surface kit.
  */
 
-import { computeApprovalPosture } from '../permissions/approval-posture.ts';
+import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import type { SettingsModal, SettingEntry, FlagEntry, McpEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { describeUiRouting, formatValue, getSettingLabel, inferSubscriptionRouteReason } from './settings-modal-helpers.ts';
@@ -87,16 +87,9 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     minimal: 'Show concise guidance only when it helps avoid mistakes.',
     guided: 'Provide more explanation and next-step context during configuration and operations.',
   },
-  'permissions.mode': Object.fromEntries(
-    ['prompt', 'allow-all', 'custom', 'plan', 'accept-edits'].map((mode) => {
-      const posture = computeApprovalPosture({ mode, autoApprove: false });
-      const warning = posture.automaticApprovals ? 'Broad automatic approvals. ' : '';
-      const example = mode === 'plan' ? ' Read-only local shell calls may run, subject to their readings and boundary checks.' : '';
-      return [mode, `${warning}${posture.detail}${example}`];
-    }),
-  ),
+  'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map(preset => [preset.mode, preset.summary])),
   'permissions.backgroundAgents': {
-    inherit: 'Background/subagent tool calls consult the same session permission mode as the foreground turn, prompt/plan/accept-edits/custom apply their matrices, and any resulting ask still brokers through the normal approval prompt with subagent attribution.',
+    inherit: 'Background/subagent tool calls consult the same session permission mode as the foreground turn, Safe owner asks the owner about dangerous actions; Safe Jev resolves them autonomously; YOLO has no execution-safety denials.',
     'allow-all': 'Background/subagent tool calls are exempt from the session permission mode and auto-approve regardless of it.',
   },
   'diagnostics.postEdit': {
@@ -173,9 +166,8 @@ function buildSettingContext(modal: SettingsModal, entry: SettingEntry): string[
   if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
 
   if (entry.setting.key === 'permissions.mode') {
-    lines.push('', 'Choose the configured action policy. Permitted actions run automatically; Plan mode restricts work to reads, and Custom rules can deny specific tools.',
-      'behavior.autoApprove does not override configured denials, read-only modes or surface authority.');
-  } else lines.push('', entry.setting.description);
+    lines.push('', 'Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');
+  }
 
   if (
     entry.setting.key === 'ui.systemMessages'

@@ -55,7 +55,8 @@ async function withCommandReading(
   answers: CommandReadingAnswers,
   check: (reading: Awaited<ReturnType<typeof readToolCall>>) => Promise<void>,
 ): Promise<void> {
-  const { port, requests } = fakePort((name, question) => {
+  const { port, requests } = fakePort((wireName, question) => {
+    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     if (name === 'family') return choiceAnswer(question, 'generic', 0.97);
     if (question.type !== 'noul') throw new Error(`Unexpected gate question: ${name}`);
     switch (name) {
@@ -74,7 +75,7 @@ async function withCommandReading(
     const reading = await readToolCall({ toolName: 'exec', args: { command }, askObfuscated: true });
     expect(requests.length).toBeGreaterThan(0);
     for (const request of requests) expect(request.state).toEqual({ tool: 'exec', arguments: { command } });
-    expect(requests.some((request) => Object.hasOwn(request.questions, 'obfuscated'))).toBe(true);
+    expect(requests.some((request) => Object.hasOwn(request.questions, 'effect__obfuscated'))).toBe(true);
     await check(reading);
   } finally {
     installJudgmentPort(previous);
@@ -224,7 +225,7 @@ describe('canonical gate: classifications and command safety', () => {
       expect(classificationFromReading(reading)).toBe('write');
       const input = { stakes: reading.stakes, family: reading.family, changesState: reading.mutates || reading.outward };
       expect(decideByPreset(GATE_PRESETS.plan, input).action).toBe('deny');
-      expect(decideByPreset(GATE_PRESETS.auto, input).action).toBe('allow');
+      expect(decideByPreset(GATE_PRESETS['safe-owner'], input).action).toBe('allow');
     });
   });
 
@@ -232,9 +233,9 @@ describe('canonical gate: classifications and command safety', () => {
     await withCommandReading('git log --oneline -5 && git reset --hard HEAD~1', { mutates: true, irreversible: true }, async (reading) => {
       expect(classificationFromReading(reading)).toBe('destructive');
       expect(reading.stakes).toBe('high');
-      expect(decideByPreset(GATE_PRESETS.normal, {
+      expect(decideByPreset(GATE_PRESETS['safe-owner'], {
         stakes: reading.stakes, family: reading.family, changesState: reading.mutates || reading.outward,
-      }).action).toBe('ask');
+      }).action).toBe('allow');
     });
     await withCommandReading('git log --oneline && git push --force origin main', { mutates: true, outward: true }, async (reading) => {
       expect(classificationFromReading(reading)).toBe('network');
@@ -260,12 +261,12 @@ describe('canonical gate: classifications and command safety', () => {
     }
   });
 
-  it('leaves non-catastrophic process and privilege decisions to the gate', async () => {
+  it('does not infer critical danger from process or privilege spelling alone', async () => {
     for (const command of ['sudo ls', 'cat file.txt | sudo tee /etc/hosts', 'echo start; kill -9 1; echo end']) {
       await withCommandReading(command, { mutates: true, beyondProject: true }, async (reading) => {
-        expect(decideByPreset(GATE_PRESETS.normal, {
+        expect(decideByPreset(GATE_PRESETS['safe-owner'], {
           stakes: reading.stakes, family: reading.family, changesState: reading.mutates || reading.outward,
-        }).action).toBe('ask');
+        }).action).toBe('allow');
         expect((await guardExecCommand(command, AST_FLAGS)).allowed).toBe(true);
       });
     }
@@ -282,7 +283,7 @@ describe('canonical gate: encoded and dynamic payloads', () => {
   ];
 
   for (const command of payloads) {
-    it(`requires an owner decision when the payload is read as obfuscated: ${JSON.stringify(command)}`, async () => {
+    it(`routes semantic obfuscation through the chosen execution mode: ${JSON.stringify(command)}`, async () => {
       // This tests the consequence of a judgment, not a lexical heuristic:
       // dynamic arguments can also be benign, depending on what they mean.
       const verdict = evalCmd(command);
@@ -291,10 +292,11 @@ describe('canonical gate: encoded and dynamic payloads', () => {
       expect(verdict.segments[0]?.raw).toBe(command);
       await withCommandReading(command, { obfuscated: true }, async (reading) => {
         expect(reading.stakes).toBe('critical');
+        const expected = { 'safe-owner': 'ask', 'safe-jev': 'ask', yolo: 'allow', plan: 'ask' } as const;
         for (const preset of Object.values(GATE_PRESETS)) {
           expect(decideByPreset(preset, {
             stakes: reading.stakes, family: reading.family, changesState: reading.mutates || reading.outward,
-          }).action).toBe('ask');
+          }).action).toBe(expected[preset.name]);
         }
       });
     });

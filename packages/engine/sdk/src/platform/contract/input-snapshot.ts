@@ -83,6 +83,11 @@ function paths(root: string, exclusions: readonly string[]): string[] {
     return !excluded(path, exclusions);
   }).sort();
 }
+
+/** Read-only source inventory using the same Git routing and ignore rules as native input capture. */
+export function listContractInputPaths(root: string, exclusions: readonly string[] = CONTRACT_INPUT_EXCLUSIONS): readonly string[] {
+  return paths(root, exclusions);
+}
 /** Git omits untracked FIFOs/sockets; inspect eligible directory entries without following links. */
 async function assertNoSpecialFiles(root: string, exclusions: readonly string[], signal?: AbortSignal): Promise<void> {
   let queue = [''];

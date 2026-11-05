@@ -1,3 +1,4 @@
+import type { GatePresetName } from '../gate/presets.js';
 import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
 import { createHash } from 'node:crypto';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
@@ -377,8 +378,18 @@ export class HostedSessionManager {
     return live.record;
   }
 
+  private async savePermissionMode(sessionId: string, permissionMode: GatePresetName): Promise<void> {
+    const live = this.requireLive(sessionId);
+    this.assertSessionUsable(live);
+    live.record = { ...live.record, permissionMode, updatedAt: this.now() };
+    // An acknowledged mode change must survive restart. Unlike routine history
+    // snapshots, failure is returned to the operator rather than logged away.
+    await this.options.store.save(live.record, live.runtime?.conversation.toJSON() ?? live.restoredConversation, { durable: true });
+    this.assertSessionUsable(live);
+  }
+
   /** Create a hosted session and compose its loop. */
-  async create(input: CreateHostedSessionInput, ownership?: { readonly nativeConversation: true }): Promise<HostedSessionRecord> {
+  async create(input: CreateHostedSessionInput, ownership?: { readonly nativeConversation: true; readonly permissionMode?: GatePresetName }): Promise<HostedSessionRecord> {
     this.assertUsable();
     // Own the operation before a factory, registration, or saver can request
     // shutdown. Its final write must never land after shutdown's final record.
@@ -391,7 +402,7 @@ export class HostedSessionManager {
     }
   }
 
-  private async createSession(input: CreateHostedSessionInput, ownership?: { readonly nativeConversation: true }): Promise<HostedSessionRecord> {
+  private async createSession(input: CreateHostedSessionInput, ownership?: { readonly nativeConversation: true; readonly permissionMode?: GatePresetName }): Promise<HostedSessionRecord> {
     this.assertUsable();
     const workspaceRoot = this.requireWorkspace(input.workspaceRoot);
     this.assertSessionCapacity();
@@ -410,10 +421,12 @@ export class HostedSessionManager {
       const at = this.now();
       const runtime = createHostedSessionRuntime({
         sessionId, workspaceRoot, floor: lease.floor,
+        ...(ownership?.permissionMode === undefined ? {} : { permissionMode: ownership.permissionMode }),
         systemPrompt: this.options.systemPrompt({ sessionId, workspaceRoot }),
         ...(model === undefined ? {} : { model }),
         ...(input.originSurface ? { originSurface: input.originSurface } : {}),
         contracts: this.sessionContracts(sessionId),
+        permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
       });
       const record: HostedSessionRecord = {
         id: sessionId,
@@ -429,6 +442,7 @@ export class HostedSessionManager {
         restoredFromDisk: false,
         ...(input.originSurface ? { originSurface: input.originSurface } : {}),
         contractIds: [],
+        permissionMode: runtime.liveTurnControls.getPermissionMode(),
       };
       live = {
         record,
@@ -796,6 +810,8 @@ export class HostedSessionManager {
         // Rebuilding as the host would move client-owned settings mid-life.
         ...(live.record.originSurface ? { originSurface: live.record.originSurface } : {}),
         contracts: this.sessionContracts(live.record.id),
+        ...(live.record.permissionMode ? { permissionMode: live.record.permissionMode } : {}),
+        permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
       });
       live.runtime = runtime;
       live.lease = lease;
@@ -806,6 +822,7 @@ export class HostedSessionManager {
       live.record = {
         ...live.record,
         restoredFromDisk: false,
+        permissionMode: runtime.liveTurnControls.getPermissionMode(),
         messageCount: runtime.conversation.getMessageCount(),
         updatedAt: this.now(),
       };

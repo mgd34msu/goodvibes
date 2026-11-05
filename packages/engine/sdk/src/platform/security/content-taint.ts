@@ -196,44 +196,50 @@ export async function findContentTaint(
 ): Promise<readonly TaintFinding[]> {
   assertTaintActive(options.signal);
   if (sources.length === 0) return [];
-  const exact = findExactContainment(fields, sources, options);
+  const ownedFields = Object.freeze({ ...fields });
+  const ownedSources = sources.map(source => Object.freeze({ surface: source.surface, origin: source.origin, text: source.text }));
+  const exact = findExactContainment(ownedFields, ownedSources, options);
   const settled = new Set(exact.map((finding) => finding.field));
   const allowedReplies = new Set((options.replyToEnvelopeSenders ?? []).map(normalizeAddress));
   const exactFields = new Set(options.exactMatchFields ?? []);
   const replyFields = new Set(options.stripQuotedFields ?? []);
 
-  const pairs: { readonly field: string; readonly text: string; readonly source: TaintSource }[] = [];
-  for (const [field, text] of Object.entries(fields)) {
-    if (text === undefined || text.trim().length === 0 || settled.has(field)) continue;
-    // Replying to where a message actually came from is the one allowed use
-    // of an address that appears in it.
-    if (exactFields.has(field) && allowedReplies.has(normalizeAddress(text))) continue;
-    for (const source of sources) {
-      if (source.text.trim().length > 0) pairs.push({ field, text, source });
+  function* comparisons() {
+    for (const [field, text] of Object.entries(ownedFields)) {
+      if (text === undefined || text.trim().length === 0 || settled.has(field)) continue;
+      if (exactFields.has(field) && allowedReplies.has(normalizeAddress(text))) continue;
+      for (const source of ownedSources) {
+        if (settled.has(field)) break;
+        if (source.text.trim().length > 0) yield { field, text, source };
+      }
     }
   }
 
   // Preflight the whole pass before any reading: a late oversized source must
   // not leave earlier pairs classified against incomplete evidence.
-  const views = pairs.map(pair => derivationView(pair.field, pair.text, pair.source));
-  const derived = await mapLimit(pairs, DERIVATION_CONCURRENCY, (pair, index) =>
-    readsAsDerived(views[index]!, replyFields.has(pair.field), options.signal, options.port));
-  assertTaintActive(options.signal);
-
+  for (const pair of comparisons()) derivationView(pair.field, pair.text, pair.source);
   const findings: TaintFinding[] = [...exact];
-  pairs.forEach((pair, index) => {
-    if (!derived[index] || settled.has(pair.field)) return;
-    settled.add(pair.field);
-    findings.push({
-      field: pair.field,
-      surface: pair.source.surface,
-      origin: pair.source.origin,
-      excerpt: truncate(pair.text.trim()),
-      kind: 'derived',
+  const pending = comparisons();
+  for (;;) {
+    const batch = [];
+    for (let i = 0; i < DERIVATION_CONCURRENCY; i++) {
+      const next = pending.next();
+      if (next.done) break;
+      batch.push(next.value);
+    }
+    if (batch.length === 0) break;
+    const derived = await mapLimit(batch, DERIVATION_CONCURRENCY, pair =>
+      readsAsDerived(derivationView(pair.field, pair.text, pair.source), replyFields.has(pair.field), options.signal, options.port));
+    assertTaintActive(options.signal);
+    batch.forEach((pair, index) => {
+      if (!derived[index] || settled.has(pair.field)) return;
+      settled.add(pair.field);
+      findings.push({ field: pair.field, surface: pair.source.surface, origin: pair.source.origin,
+        excerpt: truncate(pair.text.trim()), kind: 'derived' });
     });
-  });
+  }
   // Report in the caller's field order.
-  const order = Object.keys(fields);
+  const order = Object.keys(ownedFields);
   return findings.sort((a, b) => order.indexOf(a.field) - order.indexOf(b.field));
 }
 

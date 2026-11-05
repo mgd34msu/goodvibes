@@ -53,8 +53,9 @@ test('typed capture never executes accessors or serialization hooks', () => {
 test('typed protocol capture keeps reserved property names as detached data', () => {
   const raw: unknown = JSON.parse('{"__proto__":{"marker":"ordinary"},"constructor":"data"}');
   const state = captureJsonEntry(raw);
-  expect(state).toEqual(raw);
+  expect<unknown>(state).toEqual(raw);
   expect(state).not.toBe(raw);
+  if (state === null || typeof state !== 'object') throw new Error('Expected object state');
   expect(Object.getPrototypeOf(state)).toBeNull();
   expect(Object.hasOwn(state, '__proto__')).toBe(true);
 });

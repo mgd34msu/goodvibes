@@ -536,9 +536,9 @@ test('a final-content receipt resolves its own pending requirement through a gen
   expect(order).toEqual(['original-requirements', 'final-answer-content', 'requirements-with-review']);
   const check = done.checks.at(-1)!;
   expect(check.result).toBe('pass');
-  expect(check.decisionIds).toHaveLength(3);
+  expect(check.decisionIds).toHaveLength(4);
   const records = check.decisionIds.map(id => log.get(id)!);
-  expect(records.map(record => record.context.site)).toEqual(['contract.check.deliverable-judge', 'contract.check.final-answer-review', 'contract.check.deliverable-judge']);
+  expect(records.map(record => record.context.site)).toEqual(['contract.check.deliverable-judge', 'contract.check.final-answer-review', 'contract.check.deliverable-judge', 'contract.check.original-obligation-coverage']);
   expect(done.criteria[0]!.readings.at(-1)!.decisionId).toBe(check.decisionIds[2]);
   const unavailable = done.units[0]!.checks.at(-1)!.decisionIds[0]!;
   const proof = judgmentExecutionEvidence(done, { get: id => id === unavailable ? undefined : log.get(id) }, [check.decisionIds[1]!]);
@@ -641,6 +641,38 @@ describe('the commit (6.5)', () => {
     expect(h.manager.getStatus(owner.id)?.fullOutput).toBe('export const parse = 9;');
   }, 20_000);
 
+  test('source changed after final acceptance is checked again before publication without rerunning accepted work', async () => {
+    let deliverableChecks = 0;
+    const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { isolation: 'auto', autoCommit: false,
+      gates: [{ name: 'acceptance', command: 'true', enabled: true, required: true }] },
+      scripts: { u1: finishes('export const parse = 9;') },
+    }));
+    h.runner.on(event => {
+      if (event.type !== 'CONTRACT_CHECKED' || event.scope !== 'deliverable' || event.result !== 'pass') return;
+      deliverableChecks++;
+      if (deliverableChecks !== 1) return;
+      const current = contractOf(h, event.contractId);
+      writeFileSync(join(current.worktreePath!, 'src/csv.ts'), 'export const parse = 10;\n');
+      git(current.worktreePath!, 'add', 'src/csv.ts');
+      git(current.worktreePath!, 'commit', '-qm', 'Source changed after acceptance');
+    });
+    const { contract, owner } = startContract(h);
+    await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'stale acceptance held before publication');
+    expect(h.manager.getStatus(owner.id)?.status).not.toBe('completed');
+    expect(existsSync(join(h.root, 'src/csv.ts'))).toBe(false);
+    const agents = h.agentsOf('u1');
+    expect(contractOf(h, contract.id).units[0]?.status).toBe('passed');
+    await waitFor(() => terminal(h, contract.id), 'fresh check before retained publication', 10_000);
+    const done = contractOf(h, contract.id);
+    expect(done.status).toBe('passed');
+    expect(done.commit?.status).toBe('applied');
+    expect(deliverableChecks).toBe(2);
+    expect(done.checks).toHaveLength(2);
+    expect(done.checks.at(-1)?.gates?.[0]).toMatchObject({ outcome: 'passed', required: true });
+    expect(h.agentsOf('u1')).toEqual(agents);
+    expect(readFileSync(join(h.root, 'src/csv.ts'), 'utf8')).toBe('export const parse = 10;\n');
+  }, 20_000);
+
   test('shared mode: exactly the touched paths are committed; a file already dirty at launch and untouched stays out', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('export const parse = 3;') } }));
     writeFileSync(join(h.root, 'README.md'), '# demo, edited by hand\n');
@@ -650,6 +682,54 @@ describe('the commit (6.5)', () => {
     expect(done.commit?.status).toBe('committed');
     expect(git(h.root, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe('src/csv.ts');
     expect(git(h.root, 'status', '--porcelain').trim()).toBe('M README.md');
+  }, 20_000);
+
+  test.each([
+    ['scoped', 'none'], ['scoped', 'optional'], ['scoped', 'required'],
+    ['all', 'none'], ['all', 'optional'], ['all', 'required'],
+  ])('shared %s commit with %s gates preserves HEAD and index when accepted source changes', async (commitScope, gateMode) => {
+    const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { commitScope,
+      gates: gateMode === 'none' ? [] : [{ name: 'acceptance', command: 'true', enabled: true, required: gateMode === 'required' }] },
+      scripts: { u1: finishes('export const parse = 9;') },
+    }));
+    const head = git(h.root, 'rev-parse', 'HEAD').trim();
+    const index = readFileSync(join(h.root, '.git/index'));
+    h.runner.on(event => {
+      if (event.type === 'CONTRACT_STATUS_CHANGED' && event.to === 'committing')
+        writeFileSync(join(h.root, 'src/csv.ts'), 'NEVER_CHECKED\n');
+    });
+    const { contract, owner } = startContract(h);
+    await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'stale source refused before shared commit');
+    expect(git(h.root, 'rev-parse', 'HEAD').trim()).toBe(head);
+    expect(readFileSync(join(h.root, '.git/index'))).toEqual(index);
+    expect(readFileSync(join(h.root, 'src/csv.ts'), 'utf8')).toBe('NEVER_CHECKED\n');
+    expect(h.manager.getStatus(owner.id)?.status).not.toBe('completed');
+    expect(contractOf(h, contract.id).commit).toBeUndefined();
+    expect(contractOf(h, contract.id).units[0]?.status).toBe('passed');
+    h.runner.cancel(contract.id, 'Fixture captured stale commit admission');
+  }, 20_000);
+
+  test('a source change during final semantic acceptance is held even with no command gates', async () => {
+    let changed = false;
+    const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { gates: [] },
+      scripts: { u1: finishes('export const parse = 9;') },
+      port: context => {
+        if (context.name === 'original_obligations_unmet' && !changed) {
+          changed = true;
+          writeFileSync(join(h.root, 'src/csv.ts'), 'NEVER_CHECKED\n');
+        }
+        return undefined;
+      },
+    }));
+    const head = git(h.root, 'rev-parse', 'HEAD').trim();
+    const { contract, owner } = startContract(h);
+    await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'changed semantic source held');
+    expect(changed).toBe(true);
+    expect(git(h.root, 'rev-parse', 'HEAD').trim()).toBe(head);
+    expect(contractOf(h, contract.id).checks).toHaveLength(0);
+    expect(h.manager.getStatus(owner.id)?.status).not.toBe('completed');
+    expect(contractOf(h, contract.id).units[0]?.status).toBe('passed');
+    h.runner.cancel(contract.id, 'Fixture captured semantic source mutation');
   }, 20_000);
 
   test('a commit that fails is a warning: the contract passes, and the commit and status line say so', async () => {

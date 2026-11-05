@@ -31,6 +31,7 @@
  * end it, and list what exists.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -66,6 +67,7 @@ export const HOSTED_SESSION_RECORD_SCHEMA = objectSchema({
   terminatedReason: STRING_SCHEMA,
   restoredFromDisk: BOOLEAN_SCHEMA,
   originSurface: STRING_SCHEMA,
+  permissionMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
   contractIds: arraySchema(STRING_SCHEMA),
 }, [
   'id', 'workspaceRoot', 'title', 'status', 'detachPolicy', 'effectiveDetachPolicy',

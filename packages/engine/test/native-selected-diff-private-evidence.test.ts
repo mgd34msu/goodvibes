@@ -260,7 +260,7 @@ test('real hosted native turn provider and tool admission retain private selecte
     getTokenLimitsForModel: () => ({ maxOutputTokens: 1024, maxToolResultTokens: 10_000, maxToolCalls: 10, maxReasoningTokens: 0 }),
     recordContextWindowRejection() {}, reconcileObservedContextWindow() {}, resolveModelPricing: () => UNKNOWN_MODEL_PRICING } as unknown as OrchestratorCoreServices['providerRegistry'];
   const instance = new Orchestrator({ conversation, getViewportHeight: () => 0, scrollToEnd() {}, toolRegistry: new ToolRegistry(),
-    permissionManager: { getMode: () => 'prompt' } as OrchestratorOptions['permissionManager'],
+    permissionManager: { getMode: () => 'safe-owner' } as OrchestratorOptions['permissionManager'],
     services: { agentManager: { list: () => [], spawn() { throw new Error('No legacy spawn'); } }, contractRunner: { list: () => [] },
       contractIntake: { async intake() { throw new Error('No legacy intake'); } } } });
   instance.setCoreServices({ configManager, providerRegistry }); instance.bindNativeConversationProject('native-project');

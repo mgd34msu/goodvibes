@@ -1,12 +1,12 @@
 /**
- * The gate: the one path every side effect takes. Jev reads the call
- * (reading.ts), the boundary refuses what no preset may allow (boundary.ts),
- * then graduated autonomy: the active preset (presets.ts) allows, asks or
- * denies on the reading's stakes. The
- * decision pipeline itself runs in permissions/manager.ts (PermissionManager).
+ * Shared execution modes and risk evidence. PermissionManager routes dangerous
+ * actions to the owner or Jev in safe modes; YOLO bypasses safety decisions.
+ * All modes retain the same prepared action and current execution owner.
  */
 export * from './boundary.js';
 export * from './presets.js';
+export { currentExecutionMode, isYoloExecution, isInvocationAdmitted } from './execution-context.js';
+export { withExecutionModeOwner, currentExecutionModeOwner, type ExecutionModeOwner } from './execution-context.js';
 export * from './reading.js';
 export * from './surface-authority.js';
 export { riskFamily, RISK_FAMILY_OPTIONS, type GateRiskFamily } from './batteries/risk-family.js';

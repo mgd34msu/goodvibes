@@ -350,9 +350,9 @@ export function makeHarness(options: HarnessOptions): Harness {
   });
   runner.on((event) => events.push(event));
   const fake = runnerPort(options.port);
-  const nativeLog = options.recordNative && options.decisionLog === undefined ? new SqliteDecisionLog(':memory:') : undefined;
-  const log = options.decisionLog ?? nativeLog;
-  const previous = installJudgmentPort(log === undefined ? fake.port : withDecisionLog(fake.port, log));
+  let ownedLog: SqliteDecisionLog | undefined;
+  const log = options.decisionLog ?? (ownedLog = new SqliteDecisionLog(':memory:'));
+  const previous = installJudgmentPort(withDecisionLog(fake.port, log));
 
   return {
     root,
@@ -366,7 +366,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     agentsOf: (unitId) => manager.list().filter((record) => record.contractUnitId === unitId).sort((a, b) => a.startedAt - b.startedAt).map((record) => record.id),
     dispose: () => {
       runner.dispose();
-      if (nativeLog !== undefined) void Promise.all(runner.list({ includeTerminal: true }).map(contract => runner.join(contract.id))).finally(() => nativeLog[Symbol.dispose]());
+      if (ownedLog !== undefined) void Promise.all(runner.list({ includeTerminal: true }).map(contract => runner.join(contract.id))).finally(() => ownedLog?.[Symbol.dispose]());
       installJudgmentPort(previous);
       if (options.root === undefined) rmSync(root, { recursive: true, force: true });
     },

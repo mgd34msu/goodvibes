@@ -46,18 +46,19 @@ beforeEach(() => {
   selected = 'act'; humans = 0; writes = 0; admissions = 0; invalidations = new Set(); judgments = [];
   forgetGateReadings(); log = new SqliteDecisionLog(':memory:');
   const gate = gateReadingsPort();
+  const dangerousGate = gateReadingsPort([['localhost', { irreversible: true, outward: true }]]);
   const semantic = fakePort((_name, question) => choiceAnswer(question, selected, 0.99));
   const port: JudgmentPort = withDecisionLog({ model: gate.port.model, async ask(request) {
     request.beforeAttempt?.(); request.signal?.throwIfAborted(); judgments.push(JSON.stringify(request));
-    return 'disposition' in request.questions ? semantic.port.ask(request) : gate.port.ask(request);
+    return 'disposition' in request.questions ? semantic.port.ask(request) : (denyFetch ? dangerousGate : gate).port.ask(request);
   } }, log);
   restore = installJudgmentPort(port);
   const config = {
     isAutoApproveEnabled: () => false, getWorkingDirectory: () => '/synthetic/project',
-    getSnapshot: () => ({ permissions: { mode: denyFetch ? 'custom' : 'prompt', tools: denyFetch ? { fetch: 'deny' } : {} } }),
-    getAutonomousSnapshot: () => ({ permissions: { mode: denyFetch ? 'custom' : 'prompt', tools: denyFetch ? { fetch: 'deny' } : {} }, autoApprove: false, directory: '/synthetic/project' }),
+    getSnapshot: () => ({ permissions: { mode: denyFetch ? 'safe-owner' : 'safe-jev', tools: {} } }),
+    getAutonomousSnapshot: () => ({ permissions: { mode: denyFetch ? 'safe-owner' : 'safe-jev', tools: {} }, autoApprove: false, directory: '/synthetic/project' }),
   } as PermissionConfigReader;
-  const manager = new PermissionManager(async () => { humans++; throw new Error('No human'); }, config, new PolicyRuntimeState());
+  const manager = new PermissionManager(async () => { humans++; return { approved: false }; }, config, new PolicyRuntimeState());
   host = { port, workspaceTrust: null,
     permissionManager: { admitAutonomous(...args) { admissions++; admittedArgs.push(structuredClone(args[2])); return manager.admitAutonomous(...args); } },
     signal: new AbortController().signal,
@@ -99,12 +100,12 @@ test('canonical admission records every redirect hop without human or persistent
   expect(humans).toBe(0); expect(writes).toBe(0); expect(invalidations.size).toBe(0);
 });
 
-test('configured fetch denial refuses despite stored allow and never prompts', async () => {
+test('safe-owner decline prevents a dangerous fetch despite a stored localhost grant', async () => {
   denyFetch = true; let sends = 0;
   globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => { sends++; return new Response('unsafe'); }) as typeof fetch;
   const output = await fetchLocal();
   expect(output.results?.[0]?.error).toBeDefined(); expect(sends).toBe(0); expect(admissions).toBe(1);
-  expect(humans).toBe(0); expect(writes).toBe(0); expect(invalidations.size).toBe(0);
+  expect(humans).toBe(1); expect(writes).toBe(0); expect(invalidations.size).toBe(0);
 });
 
 test('permit is frozen, one-use, revocable after claim, and closes listeners', async () => {
@@ -219,12 +220,10 @@ test('missing workspace capability, originating source or context fails closed',
   expect(admissions).toBe(0); expect(invalidations.size).toBe(0);
 });
 
-test('localhost permission does not require a semantic decision recorder', async () => {
+test('safe-jev localhost permission requires recorded semantic provenance', async () => {
   const result = await withExternalOperationSource(source, () => admitLocalhostFetch(
     { ...host, port: { ask: host.port.ask, model: host.port.model } }, request(), { assertCurrent() {} }));
-  expect(result).not.toBe(false);
-  if (result === false) throw new Error('Expected native permission');
-  result.claim(); result.close();
+  expect(result).toBe(false);
   expect(admissions).toBe(1); expect(invalidations.size).toBe(0);
 });
 

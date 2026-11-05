@@ -15,6 +15,7 @@ import type { ConfigSetting, GoodVibesConfig } from './schema.js';
 import { DEFAULT_CONFIG } from './schema.js';
 import { ConfigError } from '../types/errors.js';
 import { coerceMoneyAmount } from './money-value.js';
+import { parsePermissionMode } from '../gate/presets.js';
 
 /**
  * Cloned ONCE at module load, then cloned again per manager.
@@ -87,6 +88,7 @@ export function ensureSharedConfig(sharedPath: string): void {
  * setting rather than surfacing as an unhandled parser error.
  */
 export function coerceSchemaValue(key: string, schema: Pick<ConfigSetting, 'unit'> | undefined, value: unknown): unknown {
+  if (key === 'permissions.mode') return parsePermissionMode(value) ?? value;
   if (schema?.unit !== 'money') return value;
   try {
     return coerceMoneyAmount(key, value);

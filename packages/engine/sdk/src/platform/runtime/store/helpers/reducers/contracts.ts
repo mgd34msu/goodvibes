@@ -194,13 +194,22 @@ function applyToContract(contract: ContractRecord, event: ContractEvent, timesta
       return withStatus({ ...contract, openEscalations: [], failureKind: event.failureKind, reason: event.reason }, 'failed', timestamp);
     case 'CONTRACT_CANCELLED':
       return withStatus({ ...contract, openEscalations: [], reason: event.reason }, 'cancelled', timestamp);
+    case 'CONTRACT_GATE_RESULT': {
+      const gateResults = new Map(contract.gateResults);
+      gateResults.set(JSON.stringify([event.targetId, event.gate]), {
+        targetId: event.targetId, gate: event.gate, passed: event.passed, skipped: event.skipped, durationMs: event.durationMs,
+        outcome: event.outcome ?? (event.skipped ? 'unverified' : event.passed ? 'passed' : 'failed'),
+        ...(event.required === undefined ? {} : { required: event.required }),
+        ...(event.reason === undefined ? {} : { reason: event.reason }),
+      });
+      return { ...contract, gateResults };
+    }
     case 'CONTRACT_SHAPED':
     case 'CONTRACT_PLAN_CHECKED':
     case 'CONTRACT_NUDGE_CONSUMED':
     case 'CONTRACT_CRITERION_REGRESSED':
     case 'CONTRACT_STALLED':
     case 'CONTRACT_FIX_PLANNED':
-    case 'CONTRACT_GATE_RESULT':
     case 'CONTRACT_UNIT_SILENT':
     case 'CONTRACT_MERGE_CONFLICT':
     case 'CONTRACT_ATTEMPTS_SELECTED':

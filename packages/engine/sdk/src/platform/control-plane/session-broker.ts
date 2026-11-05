@@ -1,5 +1,7 @@
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { logger } from '../utils/logger.js';
+import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
+import type { GatePresetName } from '../gate/presets.js';
 import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
 import { PersistentStore } from '../state/persistent-store.js';
@@ -199,7 +201,47 @@ export class SharedSessionBroker {
   }
 
   setContinuationRunner(runner: SharedSessionContinuationRunner | null): void {
-    this.continuationRunner = runner;
+    this.continuationRunner = runner === null ? null
+      : input => withChannelExecutionMode(this, input.sessionId, () => runner(input));
+  }
+
+  /** Host composition binds a channel default once, after trusted profile resolution. */
+  async bindChannelExecutionMode(sessionId: string, mode: GatePresetName): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== 'active') throw new Error('Channel execution session is not active');
+    if (session.channelPermissionMode !== undefined && session.channelPermissionMode !== mode) {
+      throw new Error('Channel execution mode is already bound');
+    }
+    const bound = { ...session, channelPermissionMode: mode, channelPermissionModeRevision: 1 };
+    this.sessions.set(sessionId, bound);
+    try { await this.persist(true); }
+    catch (error) {
+      if (this.sessions.get(sessionId) === bound) this.sessions.set(sessionId, session);
+      throw error;
+    }
+  }
+
+  /** The authenticated session-mode endpoint updates the existing host-owned binding. */
+  async setChannelExecutionMode(sessionId: string, mode: GatePresetName): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== 'active' || session.channelPermissionMode === undefined) {
+      throw new Error('Channel execution session is not active');
+    }
+    if (session.channelPermissionMode === mode) return;
+    const updated = { ...session, channelPermissionMode: mode,
+      channelPermissionModeRevision: (session.channelPermissionModeRevision ?? 0) + 1 };
+    this.sessions.set(sessionId, updated);
+    try { await this.persist(true); }
+    catch (error) {
+      // Retain the advanced revision when restoring the previous mode so an ABA
+      // transition can never revive an admission captured before this attempt.
+      if (this.sessions.get(sessionId) === updated) this.sessions.set(sessionId, {
+        ...session, channelPermissionModeRevision: updated.channelPermissionModeRevision + 1,
+      });
+      throw error;
+    }
+    this.publishUpdate('session-permission-mode-changed', { sessionId, mode,
+      previousMode: session.channelPermissionMode });
   }
 
   /**
@@ -383,7 +425,10 @@ export class SharedSessionBroker {
     if (!session) return null;
     this.touch(sessionId);
     const touched = this.sessions.get(sessionId)!; // re-fetch after touch
-    const updated = closeSharedSessionRecord(touched);
+    const closed = closeSharedSessionRecord(touched);
+    const updated = touched.channelPermissionMode === undefined || touched.status === 'closed' ? closed : {
+      ...closed, channelPermissionModeRevision: (touched.channelPermissionModeRevision ?? 0) + 1,
+    };
     this.sessions.set(sessionId, updated);
     await this.persist();
     sessionsActive.set(this.sessions.size);
@@ -395,7 +440,10 @@ export class SharedSessionBroker {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
-    const updated = reopenSharedSessionRecord(session);
+    const reopened = reopenSharedSessionRecord(session);
+    const updated = session.channelPermissionMode === undefined || session.status === 'active' ? reopened : {
+      ...reopened, channelPermissionModeRevision: (session.channelPermissionModeRevision ?? 0) + 1,
+    };
     this.sessions.set(sessionId, updated);
     await this.persist();
     this.publishUpdate('session-reopened', updated);

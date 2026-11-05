@@ -3,7 +3,7 @@
 // Extracted from orchestrator-runner.ts so the runner stays focused on the
 // turn loop. This module owns the single rule: a background agent's tool calls
 // are brokered through the SAME session permission mode as the foreground turn
-// loop, unless the escape-hatch config exempts them.
+// loop.
 import type { PermissionManager } from '../permissions/manager.js';
 import type { PermissionAttribution } from '../permissions/prompt.js';
 import { buildToolDenial, buildDenialErrorMessage } from '../permissions/denial.js';
@@ -15,25 +15,16 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
 export type BackgroundPermissionManager = Pick<
   PermissionManager,
   'checkDetailed' | 'check' | 'getBackgroundAgentsMode' | 'passesBoundary'
-> & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation' | 'projectAutonomousChoices' | 'releaseAutonomousChoices'>>;
+> & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'getMode' | 'captureExecutionMode'>>;
 
 export type BackgroundPermissionOutcome =
   | { readonly approved: true; readonly modifiedArgs?: Record<string, unknown> | undefined }
   | { readonly approved: false; readonly error: string; readonly denial: ToolDenial };
 
 /**
- * Broker a background/subagent tool call through the session permission mode.
- *
- * Mirrors the foreground tool-runtime's permission handling so a background
- * agent is subject to the SAME mode: 'inherit' (default) applies the mode's
- * allow/ask/refuse matrix (allow-all approves everything with zero new
- * friction; prompt/plan/accept-edits/custom apply as configured, with any ask
- * bubbling through the injected requestPermission handler carrying subagent
- * attribution). The escape-hatch `permissions.backgroundAgents: 'allow-all'`
- * exempts background agents from the presets and prompts, never from the
- * gate's deterministic boundary: a call the boundary refuses goes through the
- * full gate, which refuses it (or, for a tainted outward call, asks the owner).
- * When no manager is wired the call is left ungated (isolated contexts/tests).
+ * Background calls use the same owner/Jev/YOLO mode as foreground calls.
+ * The retired backgroundAgents override cannot create a second execution policy.
+ * An absent manager preserves isolated embedding contexts.
  */
 export async function gateBackgroundToolCall(
   context: { readonly permissionManager?: BackgroundPermissionManager | undefined },
@@ -56,9 +47,6 @@ export async function gateBackgroundToolCall(
   assertPermissionActive(signal);
   const manager = context.permissionManager;
   if (!manager) return { approved: true };
-  if (manager.getBackgroundAgentsMode() === 'allow-all'
-    && await awaitPermission(() => manager.passesBoundary(toolName, args, { signal }), signal)) return { approved: true };
-
   const attribution: PermissionAttribution = {
     kind: 'background-agent',
     agentId: record.id,

@@ -100,6 +100,21 @@ describe('judge', () => {
     expect(got.unmet).toEqual([1]);
   });
 
+  test('generic goal and criterion questions do not carry engine publication or original-source policy', async () => {
+    const judge = defineJudge({ ...header, name: 'test.assigned-goal', band: STAKES_BANDS.high.yesNo,
+      fixtures: [{ name: 'f', goal: 'Implement the parser.', criteria: ['CSV parses.'], output: 'Parser implemented.', expect: { verdict: 'pass' } }] });
+    const { port, requests } = fakePort(() => noulAnswer(0.03));
+    await judge.judge(port, { goal: 'Implement the parser.', criteria: ['CSV parses.'], output: 'Parser implemented.',
+      evidence: { originalRequest: 'Implement and deploy the application.', orchestration: { currentValidation: { scope: 'deliverable' } } } });
+    const questions = requests[0]!.questions;
+    expect(questions['goal']).toMatchObject({ type: 'noul' });
+    const questionText = JSON.stringify(questions);
+    expect(questionText).toContain('assigned');
+    for (const protocol of ['currentValidation', 'originalRequest', 'staged artifacts', 'publication', 'native acceptance']) {
+      expect(questionText).not.toContain(protocol);
+    }
+  });
+
   test('explicit overflow partitions every original question with complete stable evidence and exact decision provenance', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const judge = defineJudge({ ...header, name: 'test.batched-judge', band: STAKES_BANDS.high.yesNo, partitionOnContextLimit: true,

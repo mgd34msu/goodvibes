@@ -1,3 +1,4 @@
+import { bindActiveExecutionMode } from '../permissions/execution-mode.ts';
 /**
  * remote-conversation-wiring.ts, the composer's one decision about WHERE a
  * turn runs.
@@ -80,6 +81,7 @@ export function installRemoteConversationRouting(
   let disposed = false;
   type PendingNativeAdmission = { readonly intake: NativeConversationIntakeActions; readonly sequence: number; request?: { readonly requestId: string; readonly inputId: string } };
   let nativePending: PendingNativeAdmission | undefined;
+  let nativeOwnerUnconfirmed = false;
   const nativeMirrored = new Set<string>();
   // The waiting state a hosted turn shows is the orchestrator's own, driven on
   // the orchestrator's own cadence, see hosted-turn-activity.ts. Nothing in
@@ -195,6 +197,15 @@ export function installRemoteConversationRouting(
     },
   });
 
+  const unbindExecutionMode = bindActiveExecutionMode(ctx.services.configManager, {
+    hostedSessionId: () => router.hostedSessionId(),
+    hasHostedOwner: () => ctx.services.configManager.get('hostedSessions.routeConversationTurns') !== false
+      && (nativePending !== undefined || nativeOwnerUnconfirmed || router.hostedSessionId() !== null),
+    executionMode: () => router.executionMode(),
+    refreshExecutionMode: () => router.refreshExecutionMode(),
+    setExecutionMode: mode => router.setExecutionMode(mode),
+  });
+
   const detachedHandle = (): RoutedTurnHandle => ({
     hostedSessionId: router.hostedSessionId(),
     completion: Promise.resolve({ status: 'abandoned', response: '',
@@ -202,6 +213,8 @@ export function installRemoteConversationRouting(
   });
 
   const report = (state: NativeConversationIntakeState | undefined): void => {
+    if (state?.result && state.result.kind !== 'turn') nativeOwnerUnconfirmed = false;
+    if ((state?.status === 'invalid' || state?.status === 'unavailable') && !state.request) nativeOwnerUnconfirmed = false;
     for (const line of nativeConversationIntakeLines(state)) options.notify(line);
     options.render();
   };
@@ -237,6 +250,7 @@ export function installRemoteConversationRouting(
       options.notify(outcome.reason); options.render();
       return detachedHandle();
     }
+    nativeOwnerUnconfirmed = false;
     const finish = (): void => {
       if (!current()) return;
       if (sequence === routeSequence) activity.end();
@@ -262,6 +276,7 @@ export function installRemoteConversationRouting(
       const sequence = ++routeSequence;
       const pending: PendingNativeAdmission = { intake, sequence };
       nativePending = pending;
+      nativeOwnerUnconfirmed = true;
       try {
         // Own the operation before rendering: render callbacks may reenter
         // submission, Stop, or disposal synchronously.
@@ -361,6 +376,7 @@ export function installRemoteConversationRouting(
       routeSequence += 1;
       nativePending?.intake.close(); nativePending = undefined;
       activity.dispose();
+      unbindExecutionMode();
       router.dispose();
     },
   };

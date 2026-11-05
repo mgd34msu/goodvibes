@@ -56,6 +56,7 @@ import { registerOccasionsGatewayMethods } from './occasions.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 import type { NativeMutationHost } from '../native-mutation.js';
 import { captureMutationDescriptors } from '../../utils/file-mutation.js';
+import { projectOccasionProfileMutation } from '../../occasions/capture.js';
 
 /** What the composition needs from the runtime graph. */
 export interface OccasionsCompositionDeps {
@@ -152,6 +153,7 @@ export function composeOccasions(
   const configCurrent = captureMutationDescriptors(deps.configManager, ['get', 'getConfigurationIncarnation']);
   registerOccasionsGatewayMethods(catalog, service, { host: deps.nativeMutationHost, target: Object.freeze({
     profilePath: profile.path, statePath: state.path,
+    projectProfileMutation: (method: string, request: Readonly<Record<string, unknown>>) => projectOccasionProfileMutation(profile, method, request),
     captureProfileRead: () => profile.captureRead(), captureStateRead: () => state.captureRead(),
     assertOwnerCurrent: () => { lifecycle.signal.throwIfAborted(); profileCurrent(); stateCurrent(); serviceCurrent(); configCurrent(); },
   }) });

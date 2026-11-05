@@ -11,7 +11,8 @@ import type { NativePairedExecutionAuthority, NativePairedExecutionSnapshot } fr
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import type { HostedSessionManager } from './manager.js';
 import { NativeHostedTurnJournal, NativeHostedTurnJournalError, type NativeHostedTurnIdentity, type NativeHostedTurnDispatch, type NativeHostedTurnOriginSurface } from './native-turn-journal.js';
-import { nativeHostedTurnRequestSchema, type NativeHostedTurnRequest, type NativeHostedTurnLookup, type NativeHostedTurnSnapshot, type NativeHostedSessionLookup } from './native-turn-wire.js';
+import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest, type NativeHostedTurnLookup, type NativeHostedTurnSnapshot, type NativeHostedSessionLookup } from './native-turn-wire.js';
+import type { GatePresetName } from '../gate/presets.js';
 
 export const NATIVE_HOSTED_TURN_SCOPES = ['read:work-ledger', 'write:work-ledger', 'write:sessions'] as const;
 export class NativeHostedTurnError extends Error {
@@ -185,25 +186,26 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     const record = await journal.read(identity); authorize(authority, options);
     return record ? project(record) : { kind: 'not-found' };
   }
-  async function start(input: NativeHostedTurnRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
+  async function start(input: NativeHostedTurnStartRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
     return startForSurface('webui', input, authority, options);
   }
-  async function startAgent(input: NativeHostedTurnRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
+  async function startAgent(input: NativeHostedTurnStartRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
     return startForSurface('agent', input, authority, options);
   }
-  async function startForSurface(originSurface: NativeHostedTurnOriginSurface, input: NativeHostedTurnRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
+  async function startForSurface(originSurface: NativeHostedTurnOriginSurface, input: NativeHostedTurnStartRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
     options.signal?.throwIfAborted();
-    const { source, identity, binding } = await sourceOf(input, authority, options);
+    const { permissionMode, ...sourceRequest } = nativeHostedTurnStartRequestSchema.parse(input);
+    const { source, identity, binding } = await sourceOf(sourceRequest, authority, options);
     const key = keyOf(identity), pending = starting.get(key);
     if (pending) {
       if (pending.originSurface !== originSurface || JSON.stringify(pending.identity) !== JSON.stringify(identity)) throw new NativeHostedTurnError('stale');
       return pending.promise;
     }
-    const run = prepare(source, identity, originSurface, authority, binding, options);
+    const run = prepare(source, identity, originSurface, authority, binding, options, permissionMode);
     starting.set(key, { identity, originSurface, promise: run });
     try { return await run; } finally { if (starting.get(key)?.promise === run) starting.delete(key); }
   }
-  async function prepare(source: NativeConversationTurnSource, identity: NativeHostedTurnIdentity, originSurface: NativeHostedTurnOriginSurface, authority: NativePairedExecutionAuthority, binding: NativePairedExecutionSnapshot, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
+  async function prepare(source: NativeConversationTurnSource, identity: NativeHostedTurnIdentity, originSurface: NativeHostedTurnOriginSurface, authority: NativePairedExecutionAuthority, binding: NativePairedExecutionSnapshot, options: NativeHostedTurnOptions, permissionMode?: GatePresetName): Promise<NativeHostedTurnLookup> {
     const key = keyOf(identity);
     let contextReady = false;
     const assertCurrent = () => {
@@ -257,7 +259,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       if (owned.cancelled) throw new NativeHostedTurnError('closed');
       const session = source.continuation
         ? await proveSession(source.continuation.sessionId, identity.principalId, false, originSurface)
-        : await deps.manager.create({ workspaceRoot: projectRoot, title: 'Native conversation', originSurface, detachPolicy: 'survive' }, { nativeConversation: true });
+        : await deps.manager.create({ workspaceRoot: projectRoot, title: 'Native conversation', originSurface, detachPolicy: 'survive' }, { nativeConversation: true, ...(permissionMode === undefined ? {} : { permissionMode }) });
       createdNewSession = !source.continuation;
       owned.sessionId = session.id;
       if (session.originSurface !== originSurface || realpathSync(session.workspaceRoot) !== projectRoot || realpathSync(deps.projectRoot) !== projectRoot) throw new NativeHostedTurnError('stale');

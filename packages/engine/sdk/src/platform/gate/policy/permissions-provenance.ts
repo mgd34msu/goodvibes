@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema-types.js';
 import { CONFIG_SCHEMA } from '../../config/schema.js';
+import { READ_SECRETS_SITE } from '../../permissions/credential-read-defaults.js';
+import { effectivePermissionMode, gatePresetLabel } from '../presets.js';
 
 // ---------------------------------------------------------------------------
 // /permissions provenance panel.
@@ -41,38 +43,18 @@ export interface PermissionProvenance {
   readonly sessionMode: string;
   readonly sessionModeLabel: string;
   readonly rows: readonly PermissionProvenanceRow[];
+  readonly readSecretsSite: string;
 }
 
 /** The permission-relevant settings, in the order the panel lists them. */
 const PERMISSION_KEYS: readonly { readonly key: string; readonly label: string; readonly note?: string }[] = [
-  { key: 'permissions.mode', label: 'Permission mode', note: 'also the current session mode' },
-  { key: 'permissions.backgroundAgents', label: 'Background-agent mode' },
-  { key: 'behavior.autoApprove', label: 'Auto-approve everything' },
+  { key: 'permissions.mode', label: 'Execution mode' },
   { key: 'permissions.engine', label: 'Permission evaluator', note: 'baseline or policy-engine' },
-  { key: 'permissions.tools.read', label: 'Tool rule: read' },
-  { key: 'permissions.tools.write', label: 'Tool rule: write' },
-  { key: 'permissions.tools.edit', label: 'Tool rule: edit' },
-  { key: 'permissions.tools.exec', label: 'Tool rule: exec' },
-  { key: 'permissions.tools.find', label: 'Tool rule: find' },
-  { key: 'permissions.tools.fetch', label: 'Tool rule: fetch' },
-  { key: 'permissions.tools.analyze', label: 'Tool rule: analyze' },
-  { key: 'permissions.tools.inspect', label: 'Tool rule: inspect' },
-  { key: 'permissions.tools.agent', label: 'Tool rule: agent' },
-  { key: 'permissions.tools.state', label: 'Tool rule: state' },
-  { key: 'permissions.tools.workflow', label: 'Tool rule: workflow' },
-  { key: 'permissions.tools.registry', label: 'Tool rule: registry' },
-  { key: 'permissions.tools.delegate', label: 'Tool rule: delegate' },
-  { key: 'permissions.tools.mcp', label: 'Tool rule: mcp' },
+  ...CONFIG_SCHEMA.filter(setting => setting.key.startsWith('permissions.tools.') && !setting.deprecated).map(setting => ({
+    key: setting.key, label: `Tool restriction: ${setting.key.slice('permissions.tools.'.length)}`,
+    note: 'Deny restricts safe execution modes; other values follow the selected mode.',
+  })),
 ];
-
-function permissionModeLabel(mode: unknown): string {
-  if (mode === 'prompt') return 'Ask before powerful actions';
-  if (mode === 'allow-all') return 'Allow everything';
-  if (mode === 'plan') return 'Plan only (read-only)';
-  if (mode === 'accept-edits') return 'Auto-accept file edits';
-  if (mode === 'custom') return 'Custom rules';
-  return String(mode ?? 'unknown');
-}
 
 /** Read a dotted key out of a parsed JSON object; segments may themselves contain hyphens. */
 function readDotPath(obj: unknown, key: string): { present: boolean; value: unknown } {
@@ -191,11 +173,19 @@ function buildRow(
 }
 
 export function buildPermissionProvenance(configManager: ConfigProvenanceManager): PermissionProvenance {
-  const mode = configManager.get('permissions.mode' as ConfigKey);
+  const savedAutoApprove = configManager.get('behavior.autoApprove');
+  const mode = effectivePermissionMode(configManager.get('permissions.mode'), savedAutoApprove === true);
   return {
-    sessionMode: String(mode ?? 'prompt'),
-    sessionModeLabel: permissionModeLabel(mode),
-    rows: PERMISSION_KEYS.map((entry) => buildRow(configManager, entry)),
+    sessionMode: mode,
+    sessionModeLabel: gatePresetLabel(mode),
+    rows: [
+      ...PERMISSION_KEYS.map((entry) => buildRow(configManager, entry)),
+      ...(savedAutoApprove === true ? [buildRow(configManager, {
+        key: 'behavior.autoApprove', label: 'Saved YOLO alias',
+        note: 'Legacy saved setting selects YOLO. Selecting an execution mode clears this alias.',
+      })] : []),
+    ],
+    readSecretsSite: READ_SECRETS_SITE,
   };
 }
 
@@ -234,8 +224,9 @@ export function renderPermissionProvenance(provenance: PermissionProvenance): st
   lines.push('  Tiers: shared / project / global config file, or the built-in default.');
 
   lines.push('');
-  lines.push('Reads of secret or credential material: read by Jev for each read, not a shipped path list.');
-  lines.push('A read that touches secrets is high stakes; the active preset decides it, and a user allow-rule wins.');
+  lines.push(`Read-only secret-material checks: ${provenance.readSecretsSite}`);
+  lines.push('Safe modes use the shared secret-material reading; uncertain readings use the full permission gate.');
+  lines.push('YOLO skips execution safety readings and approval prompts.');
 
   return lines.join('\n');
 }

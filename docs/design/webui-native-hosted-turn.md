@@ -15,7 +15,11 @@ original source from its real intake owner, checks project/input/revision, and
 pins the paired principal, authority revision and scope set across asynchronous
 preparation. Neither wire fields nor serialized snapshots grant authority.
 
-The request contains only project ID, original input ID and source revision.
+Status and cancellation requests contain only project ID, original input ID and
+source revision. Start may additionally select a canonical execution mode for a
+new session; omitted selection follows the host's current default. Continuation
+and replay retain the session's current mode. A start request never changes an
+existing session's mode; the authenticated session-mode endpoint owns that change.
 The browser confirms its existing strict source journal before mutation and
 rechecks the selected endpoint, native project, paired owner and client lifetime.
 A separate browser dispatch journal is unnecessary: the host owns the durable

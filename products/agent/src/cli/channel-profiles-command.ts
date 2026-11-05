@@ -1,3 +1,4 @@
+import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
 import {
   formatOperatorGatewayFailure,
@@ -16,11 +17,10 @@ const CHANNEL_PROFILES_ROUTE = '/api/channels/profiles';
 const CHANNEL_PROFILE_ROUTE = '/api/channels/profiles/{surfaceKind}';
 
 const CHANNEL_PROFILES_GET_USAGE = 'Usage: goodvibes-agent channel-profiles get <surfaceKind> [--channel-id <id>]';
-const CHANNEL_PROFILES_SET_USAGE = 'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <plan|normal|accept-edits|auto>] --yes';
+const CHANNEL_PROFILES_SET_USAGE = 'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <safe-owner|safe-jev|yolo|plan>] --yes';
 const CHANNEL_PROFILES_DELETE_USAGE = 'Usage: goodvibes-agent channel-profiles delete <surfaceKind> [--channel-id <id>] --yes';
 const CHANNEL_PROFILES_USAGE = 'Usage: goodvibes-agent channel-profiles [list|get <surfaceKind> [--channel-id <id>]|set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes|delete <surfaceKind> [--channel-id <id>] --yes]';
 
-const PERMISSION_MODES = new Set(['plan', 'normal', 'accept-edits', 'auto']);
 
 type ChannelProfile = OperatorMethodOutput<'channels.profiles.list'>['bindings'][number];
 type PermissionMode = NonNullable<OperatorMethodInput<'channels.profiles.set'>['permissionMode']>;
@@ -39,8 +39,8 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
 function parsePermissionMode(value: string | undefined, usage: string): PermissionMode | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim().toLowerCase();
-  if (!PERMISSION_MODES.has(normalized)) throw new Error(`${usage}\n--permission-mode must be one of: plan, normal, accept-edits, auto.`);
-  return normalized as PermissionMode;
+  if (!isSettableGatePresetName(normalized)) throw new Error(`${usage}\n--permission-mode must be one of: ${SESSION_GATE_PRESET_NAMES.join(', ')}.`);
+  return normalized;
 }
 
 function renderChannelProfile(binding: ChannelProfile): string {

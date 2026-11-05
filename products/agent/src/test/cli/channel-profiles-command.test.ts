@@ -53,7 +53,7 @@ describe('channel-profiles CLI command', () => {
     let calls = 0;
     globalThis.fetch = mockFetch(async () => { calls += 1; return jsonResponse({}); });
     try {
-      const result = await handleChannelProfilesCommand(runtime(['set', 'slack', '--permission-mode', 'yolo', '--yes']));
+      const result = await handleChannelProfilesCommand(runtime(['set', 'slack', '--permission-mode', 'unsafe', '--yes']));
       expect(result.exitCode).toBe(2);
       expect(result.output).toContain('--permission-mode must be one of');
       expect(calls).toBe(0);

@@ -11,7 +11,8 @@ export interface SyntheticGateReading {
   readonly names_host?: boolean;
 }
 export function gateReadingsPort(table: ReadonlyArray<readonly [string, SyntheticGateReading]> = []) {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     const reading = { mutates: true, ...(table.find(([match]) => JSON.stringify(state).includes(match))?.[1] ?? {}) };
     if (name === 'family') return choiceAnswer(question, reading.family ?? 'generic', 0.95);
     if (name === 'kind') return choiceAnswer(question, reading.kind ?? 'other', 0.95);

@@ -1,4 +1,7 @@
 import { assertCurrentExecInvocation, captureCurrentExecWorkspaceConstraint } from '../registry.js';
+import { isInvocationAdmitted, isYoloExecution } from '../../gate/execution-context.js';
+import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
+import { assertProjectionCurrent, captureProjectionStructure, projectionFunction, projectionProperty } from '../input-projection.js';
 import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from './sandbox-runtimes.js';
 import { startCapturedBackground } from './captured-exec-background.js';
 import { capturedExecUnsupportedOptions, runCapturedCommand, type CapturedExecAuthority } from './captured-exec.js';
@@ -990,12 +993,26 @@ export function createExecTool(
     async execute(args: Record<string, unknown>, opts?: { readonly signal?: AbortSignal | undefined }) {
       let signal: AbortSignal | undefined;
       try {
+        const rawYolo = isYoloExecution() && !isInvocationAdmitted('exec', args);
+        const rawCallerCurrent = rawYolo && opts !== undefined
+          ? projectionFunction<() => void>(projectionProperty(opts, 'assertCurrent')) : undefined;
+        if (rawYolo) args = captureProjectionStructure(args);
         const lifecycleSignal = policy.capturedInput?.signal;
-        signal = lifecycleSignal && opts?.signal ? AbortSignal.any([lifecycleSignal, opts.signal]) : lifecycleSignal ?? opts?.signal;
+        const parentSignal = rawYolo ? currentExternalOperationSource()?.signal : undefined;
+        const callerSignal = opts?.signal;
+        const signals = [lifecycleSignal, parentSignal, callerSignal].filter((candidate): candidate is AbortSignal => candidate !== undefined);
+        signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
         signal?.throwIfAborted();
-        const assertCurrent = () => { signal?.throwIfAborted(); assertCurrentExecInvocation(args, opts); };
+        const assertCurrent = () => {
+          signal?.throwIfAborted();
+          if (rawYolo) {
+            if (!isYoloExecution()) throw new Error('Execution mode changed during raw command invocation');
+            assertProjectionCurrent(rawCallerCurrent);
+          } else assertCurrentExecInvocation(args, opts);
+        };
         assertCurrent();
-        const executionPolicy = { ...policy, assertCurrent, assertWorkspaceCurrent: captureCurrentExecWorkspaceConstraint(args, opts) };
+        const executionPolicy = { ...policy, assertCurrent,
+          assertWorkspaceCurrent: rawYolo ? undefined : captureCurrentExecWorkspaceConstraint(args, opts) };
         if (!Array.isArray(args['commands']) || (args['commands'] as unknown[]).length === 0) {
           return { success: false, error: 'commands must be a non-empty array' };
         }

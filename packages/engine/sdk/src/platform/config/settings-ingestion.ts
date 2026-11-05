@@ -44,6 +44,7 @@
  */
 
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from './schema.js';
+import { parsePermissionMode } from '../gate/presets.js';
 import type { ConfigSetting } from './schema.js';
 import { listDaemonOwnedConfigPaths } from './config-ownership.js';
 import { deleteRawDotPath } from './settings-io.js';
@@ -330,7 +331,11 @@ function screenSchemaValues(
   for (const setting of CONFIG_SCHEMA) {
     const hit = readDotPath(raw, setting.key);
     if (!hit.present) continue;
-    const failure = schemaFailure(setting, hit.value);
+    if (setting.key === 'permissions.mode') {
+      const mode = parsePermissionMode(hit.value);
+      if (mode && isPlainObject(raw.permissions)) raw.permissions.mode = mode;
+    }
+    const failure = schemaFailure(setting, readDotPath(raw, setting.key).value);
     if (!failure) continue;
     found.push(notice(file, setting.key, failure, 'fix the value or remove the key'));
     deleteRawDotPath(raw, setting.key);

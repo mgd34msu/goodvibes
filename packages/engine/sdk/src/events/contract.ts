@@ -133,6 +133,9 @@ export const CLAIM_VERIFICATION_KINDS = [
 ] as const;
 export type ClaimVerificationKind = (typeof CLAIM_VERIFICATION_KINDS)[number];
 
+export const GATE_RESULT_OUTCOMES = ['passed', 'failed', 'unverified'] as const;
+export type GateResultOutcome = (typeof GATE_RESULT_OUTCOMES)[number];
+
 export const NUDGE_KINDS = ['unmet', 'unshown', 'regression', 'quality', 'gate', 'claims'] as const;
 export type NudgeKind = (typeof NUDGE_KINDS)[number];
 
@@ -259,6 +262,9 @@ export interface ContractCheckedGate {
   readonly gate: string;
   readonly passed: boolean;
   readonly skipped: boolean;
+  readonly outcome?: GateResultOutcome;
+  readonly required?: boolean;
+  readonly reason?: string;
 }
 
 export interface ContractUnitRouteSummary {
@@ -360,7 +366,7 @@ export type ContractEvent = (
       unmetCriterionIds: readonly string[];
     }
   | { type: 'CONTRACT_OWNER_REPLIED'; contractId: string; escalationId: string; reading: OwnerReplyReading; outcome: ContractOutcome; action: string }
-  | { type: 'CONTRACT_GATE_RESULT'; contractId: string; targetId: string; gate: string; passed: boolean; skipped: boolean; durationMs: number }
+  | { type: 'CONTRACT_GATE_RESULT'; contractId: string; targetId: string; gate: string; passed: boolean; skipped: boolean; durationMs: number; outcome?: GateResultOutcome; required?: boolean; reason?: string }
   | { type: 'CONTRACT_UNIT_SILENT'; contractId: string; unitId: string; agentId: string; silentMs: number; action: UnitSilenceAction }
   | { type: 'CONTRACT_MERGE_CONFLICT'; contractId: string; unitId: string; branch: string; path: string; files: readonly string[] }
   | {

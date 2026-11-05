@@ -509,9 +509,35 @@ interface UnitEvidence {
 
 - **Diff of touched paths.** Worktree mode: `IsolatedWorktree.diff()` (`agents/worktree.ts:486`) for the unit's worktree, which gives `files`, `unifiedDiff` and `stat`. Shared mode: the unit's `baseline` is taken when its agent is spawned (`snapshotDirtyTree(cwd)` from `orchestration/dirty-guard.ts:104` and `AgentWorktree.currentHead()`); changed paths are those whose `hashWorkingTreeFile` differs from the baseline or that are new; the diff is `GitService.diffFile(path, false)` (`git/service.ts:200`) for tracked files and the file's text for new ones. Outside a git repository, changed paths are the `path` arguments of the unit's `write` and `edit` calls seen by `onTurnEnd`, with their current text. `ContractUnit.touchedPaths` is the union of every check's `changedPaths`.
 - **Claim verification.** At `completion`, `parseUnitCompletionReport(record.fullOutput)` (moved `parseEngineerCompletionReport`) and `verifyUnitClaims(report, cwd)` (moved `verifyEngineerClaims`, unchanged logic, `cwd` = the unit's worktree or the project root). Its result is evidence for Jev and a deterministic input to the outcome (4.6).
-- **Gates.** At `completion`, `agent-failed`, `fix-passed`, `resume` and `owner-amend`, `runContractGates({ configManager, cwd, runtimeBus, contractId, unitId })` runs the enabled `contract.gates` with the moved skip detection and the `contract.gateTimeoutMs` timeout. Gate output is evidence and a deterministic input to the outcome.
-- **Agent output and commands.** The final output, and the `exec` commands the agent ran this unit with success and the first 20 lines of output, from the `onTurnEnd` records.
-- **Budget.** The Jev request limits are 64k tokens per request and 32k for the state plus the longest question (`LIMITS`, `packages/judgment/src/port/limits.ts`). `trimEvidence` keeps the whole state under 24k estimated tokens by `estimateTokens`: output capped at 12,000 characters (head and tail), gate output at 4,000 characters per gate (tail, where failures print), and the diff filled file by file in order of the unit's `files` list then size, each file capped at 8,000 characters, until the budget is used; the rest are listed in `omitted`. The caps are constants in `evidence.ts`.
+- **Gates.** At `completion`, `agent-failed`, `fix-passed`, `resume` and `owner-amend`, `runContractGates` runs enabled `contract.gates` in the checked tree. Results distinguish `passed`, `failed`, and `unverified`. A failed command blocks acceptance. A required unverified check also blocks acceptance, even when Jev reads every criterion as met. An unavailable optional check supplies no confirmation.
+- **Agent output and commands.** The final output and complete observed command results from the unit's retained turn records. A host execution envelope distinguishes child exit status from the outer tool-call status.
+- **Evidence size.** Collection retains complete output, command records, gate output, and diffs. The native verification and judgment layers handle provider context limits; collection does not truncate those records.
+
+#### Gate completion receipts
+
+Each gate accepts optional `required` and `verification` fields. `verification: "command"` records process completion and its exit code. It establishes no assertion count. `verification: "assertions"` requires structured check completion. Gates named `test` always require assertion evidence. Test gates and assertion profiles are required by default; other gates can opt in with `required: true`.
+
+The runner collects Bun's JUnit reporter for a direct `bun test` command or `bun run test` with a plain Bun test script. It checks testcase counts against the XML totals. A zero-test run, skipped-only run, missing report, malformed report, runner error, or timeout stays `unverified`.
+
+Other assertion runners print a final JSON object using this protocol. Counts and observations come from the actual check execution:
+
+```js
+{
+  kind: "goodvibes-gate-result",
+  schemaVersion: 1,
+  gate: process.env.GOODVIBES_GATE_NAME,
+  runId: process.env.GOODVIBES_GATE_RUN_ID,
+  outcome: failed === 0 ? "passed" : "failed",
+  checks: { passed, failed, skipped },
+  observation
+}
+```
+
+`observation` is an object. The gate identity and invocation ID must match the current execution. At least one check must have run. A successful process exit without a valid completion record supplies no assertion evidence.
+
+Receipts bind the observed source bytes and configured check definitions before and after execution. The inventory uses native input-capture Git routing and ignore rules, excludes known runtime/dependency directories, and refuses unsupported links or incomplete reads. The package script used for reporter selection comes from those same captured bytes. A later gate or callback that changes source or definitions invalidates earlier receipts. Judgment and publication revalidate live receipts; saved receipts remain historical until the check runs against current input.
+
+`CONTRACT_GATE_RESULT`, recorded checks, command output, and the Web UI expose unverified results and their reasons. An invalidation replaces the earlier result for the same target and gate.
 
 ### 4.4 The questions
 

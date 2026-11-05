@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '../../errors/src/index.js';
 import { ConfigManager } from '../../sdk/src/platform/config/index.js';
 import { judgmentInputBoundary } from '../../sdk/src/platform/gate/boundary.js';
@@ -82,7 +83,7 @@ async function fixture(mode: Mode, outcome: Outcome) {
   const ownerIndex = readFileSync(join(root, '.git/index'));
   const ownerHead = git(root, 'rev-parse', 'HEAD');
   const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(root, '.goodvibes', 'cfg'), workingDir: root, homeDir: root });
-  config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt');
+  config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'safe-owner');
   config.set('behavior.autoApprove', false); config.set('contract.isolation', 'worktree');
   config.set('tools.autoHeal', true); config.set('tools.llmEnabled', true);
   config.set('tools.llmProvider', 'captured-heal-fixture'); config.set('tools.llmModel', 'fixture');
@@ -94,7 +95,7 @@ async function fixture(mode: Mode, outcome: Outcome) {
   });
   await resumeContracts(runtime.contractRunner, root);
   const acceptance: { name: string; state: Record<string, unknown> }[] = [];
-  const previous = installJudgmentPort(runnerPort((context) => {
+  const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => {
     if (context.name === 'family') return choiceAnswer(context.question, 'file-mutation', 0.99);
     // A denied mutation can legitimately reach the runner's stall battery.
     // Return that question's complete choice distribution, never a noul stub.
@@ -106,7 +107,7 @@ async function fixture(mode: Mode, outcome: Outcome) {
       return noulAnswer(outcome === 'reject' && context.name === 'only_the_fix' ? 0.03 : 0.97);
     }
     return undefined;
-  }).port);
+  }).port, runtime.judgment.decisionLog));
   async function denyOriginal(path: string, id: string): Promise<void> {
     await runtime.userPermissionRuleStore.add({ rule: {
       id, type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [join(root, path)],

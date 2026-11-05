@@ -96,6 +96,9 @@ export type SharedSessionKind =
 export type SharedSessionCloseReason = 'idle-reaped' | 'boot-orphaned' | 'user' | 'surface';
 
 export interface SharedSessionRecord {
+  /** Host-resolved channel default; request metadata never grants execution mode. */
+  readonly channelPermissionMode?: import('../gate/presets.js').GatePresetName | undefined;
+  readonly channelPermissionModeRevision?: number | undefined;
   readonly id: string;
   readonly kind: SharedSessionKind;
   /**

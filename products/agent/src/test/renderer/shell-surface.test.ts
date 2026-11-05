@@ -97,7 +97,7 @@ describe('shell footer: layout', () => {
     const lines = footer({ promptText: 'hello', composerMode: 'plan', dangerMode: true, powerNote: 'sleep disabled', composerFlags: ['attachments'] }).lines;
     const composer = lines.slice(0, 5).map(text).join('\n');
     expect(composer).toContain('hello');
-    for (const word of ['plan', 'balanced', 'claude-opus-4', 'anthropic', 'auto-approve', 'sleep disabled', 'image attached']) expect(composer).not.toContain(word);
+    for (const word of ['plan', 'balanced', 'claude-opus-4', 'anthropic', 'YOLO', 'sleep disabled', 'image attached']) expect(composer).not.toContain(word);
   });
 
   test('the bar keeps the mode color: shell accent, command and plan info, delegation remote', () => {
@@ -180,7 +180,7 @@ describe('shell footer: layout', () => {
 describe('shell footer: the status line', () => {
   test('at rest: the mode chip, the directory, the cost, the context bar and the ctrl+p keycap', () => {
     const status = text(footer({ usage: { up: 10_000, down: 1_000 } }).lines[STATUS]);
-    expect(status.slice(3)).toMatch(/^balanced {3}\/tmp\/demo/);
+    expect(status.slice(3)).toMatch(/^Safe — owner {3}\/tmp\/demo/);
     expect(status).toContain('context');
     expect(status).toContain('25%');
     expect(status).toContain('ctrl+p');
@@ -200,7 +200,7 @@ describe('shell footer: the status line', () => {
   test('a running turn\'s esc interrupt keycap follows the mode chip; the spinner and phrase are the throbber\'s', () => {
     const lines = footer({ turnRunning: true, throbber: { spinner: '⠋', frame: 0, activity: { kind: 'model', phrase: 'Thinking', elapsedMs: 12_400 } } }).lines;
     const status = text(lines[lines.length - 1]);
-    expect(status).toMatch(/balanced {3} ?esc +interrupt/);
+    expect(status).toMatch(/Safe — owner {3} ?esc +interrupt/);
     expect(status).not.toContain('Thinking');
     expect(text(lines[1])).toContain('⠋ Thinking · 12s');
   });
@@ -213,7 +213,7 @@ describe('shell footer: the status line', () => {
   });
 
   test('background work shows on the status line, and its focus hands the keys to it', () => {
-    const idle = text(footer({ runningAgentCount: 1, runningProcessCount: 2 }).lines[STATUS]);
+    const idle = text(footer({ runningAgentCount: 1, runningProcessCount: 2, width: 140 }).lines[STATUS]);
     expect(idle).toContain('1 agent running · 2 processes running');
     const focused = footer({ runningAgentCount: 1, indicatorFocused: true });
     expect(text(focused.lines[STATUS])).toContain('open');
@@ -224,9 +224,9 @@ describe('shell footer: the status line', () => {
 
   test('the exit guard and the copy receipt follow the safety chips, which stay', () => {
     const exiting = text(footer({ showExitNotice: true, dangerMode: true }).lines[STATUS]);
-    expect(exiting).toMatch(/! auto-approve {3}Press Ctrl\+C again to exit/);
+    expect(exiting).toMatch(/! YOLO {3}Press Ctrl\+C again to exit/);
     const copied = text(footer({ lastCopyTime: Date.now(), powerNote: 'sleep disabled' }).lines[STATUS]);
-    expect(copied).toMatch(/balanced {2}sleep disabled {3}Copied/);
+    expect(copied).toMatch(/Safe — owner {2}sleep disabled {3}Copied/);
   });
 });
 
@@ -234,7 +234,7 @@ describe('shell footer: the mode chip and safety chips', () => {
   test('the mode chip opens the status line: muted, plan in the info color', () => {
     const t = activeTokens();
     const normal = footer().lines[STATUS]!;
-    expect(text(normal).slice(3, 11)).toBe('balanced');
+    expect(text(normal).slice(3, 15)).toBe('Safe — owner');
     expect(normal[3]!.fg).toBe(t.textMuted);
     const plan = footer({ composerMode: 'plan' }).lines[STATUS]!;
     expect(text(plan).slice(3, 7)).toBe('plan');
@@ -247,40 +247,40 @@ describe('shell footer: the mode chip and safety chips', () => {
     expect(text(footer({ composerMode: 'delegation' }).lines[STATUS]).slice(3)).toMatch(/^delegation /);
   });
 
-  test('auto-approve takes the mode chip in the error color', () => {
+  test('YOLO takes the mode chip in the error color', () => {
     const row = footer({ dangerMode: true }).lines[STATUS]!;
-    expect(text(row).slice(3)).toMatch(/^! auto-approve/);
+    expect(text(row).slice(3)).toMatch(/^! YOLO/);
     expect(row[3]!.fg).toBe(activeTokens().error);
     expect(text(row)).not.toContain('balanced');
   });
 
-  test('plan keeps its name beside the auto-approve warning', () => {
-    expect(text(footer({ composerMode: 'plan', dangerMode: true }).lines[STATUS])).toContain('plan  ! auto-approve');
+  test('plan keeps its name beside the YOLO warning', () => {
+    expect(text(footer({ composerMode: 'plan', dangerMode: true }).lines[STATUS])).toContain('plan  ! YOLO');
   });
 
-  test('auto-approve and the power note render together; neither suppresses the other', () => {
+  test('YOLO and the power note render together; neither suppresses the other', () => {
     const row = text(footer({ dangerMode: true, powerNote: 'sleep disabled' }).lines[STATUS]);
-    expect(row).toContain('! auto-approve  sleep disabled');
+    expect(row).toContain('! YOLO  sleep disabled');
   });
 
-  test.each([50, 60, 80, 120])('the mode chip, auto-approve and the power note survive %i columns', (width) => {
+  test.each([50, 60, 80, 120])('the mode chip, YOLO and the power note survive %i columns', (width) => {
     const row = text(footer({ width, composerMode: 'plan', dangerMode: true, powerNote: 'held: backup running', lastInputTokens: 150_000, usage: { up: 1_000_000, down: 1_000_000 } }).lines[STATUS]);
     expect(row).toContain('plan');
-    expect(row).toContain('! auto-approve');
+    expect(row).toContain('! YOLO');
     expect(row).toContain('held: backup running');
   });
 
   test('the attachment flag rides after the safety chips and is the first to go on a short row', () => {
-    expect(text(footer({ composerFlags: ['attachments'] }).lines[STATUS])).toContain('balanced  image attached');
+    expect(text(footer({ composerFlags: ['attachments'] }).lines[STATUS])).toContain('Safe — owner  image attached');
     const narrow = text(footer({ width: 50, dangerMode: true, powerNote: 'sleep disabled', composerFlags: ['attachments'] }).lines[STATUS]);
     expect(narrow).toContain('sleep disabled');
     expect(narrow).not.toContain('image attached');
   });
 
   test('each chip alone', () => {
-    expect(allText(footer({ dangerMode: true }).lines)).toContain('! auto-approve');
+    expect(allText(footer({ dangerMode: true }).lines)).toContain('! YOLO');
     expect(allText(footer({ powerNote: 'sleep disabled' }).lines)).toContain('sleep disabled');
-    expect(allText(footer().lines)).not.toContain('auto-approve');
+    expect(allText(footer().lines)).not.toContain('YOLO');
   });
 });
 
@@ -292,7 +292,7 @@ describe('shell footer: the live microphone', () => {
     expect(live.height).toBe(6);
     const row = text(live.lines[STATUS]);
     // The chip sits right after the mode chip, 2 columns apart (its marker, a space, the words).
-    expect(row.indexOf('mic listening')).toBe(3 + 'balanced'.length + 2 + 2);
+    expect(row.indexOf('mic listening')).toBe(3 + 'Safe — owner'.length + 2 + 2);
   });
 
   test('voice.wake.indicator "off" shows nothing', () => {

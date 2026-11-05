@@ -36,7 +36,8 @@
  * action, returns `allowed: true` FOR TAINTED CONTENT. That escape hatch is
  * right for email, the owner can decide to forward something a stranger wrote,
  * and wrong for money. The reliable way to guarantee it cannot fire is to not be
- * on that code path, so this module calls `findContentTaint` directly. A test
+ * on that code path, so this module uses the shared evidence assessment without
+ * the outward-effect approval handler. A test
  * passes a valid `OwnerApproval` for the same action and asserts a
  * content-initiated purchase is still refused.
  *
@@ -60,8 +61,8 @@
  * See docs/decisions/2026-07-27-a-discovered-merchant-is-graded-not-refused.md
  * for the full record of the override, and docs/payments.md §9.1.
  */
-import { findContentTaint, type TaintFinding } from '../security/content-taint.js';
-import type { UntrustedContentLedger } from '../security/untrusted-content.js';
+import type { TaintFinding } from '../security/content-taint.js';
+import { assessOutwardContent, type UntrustedContentLedger } from '../security/untrusted-content.js';
 
 /**
  * A purchase the OWNER asked for.
@@ -139,7 +140,6 @@ export async function evaluatePaymentTaint(input: {
   }
 
   const intent = input.intent;
-  const sources = input.ledger.taintSourcesThisTurn();
 
   // What must be the owner's, always. A page supplying the thing to buy, or the
   // ceiling to buy it under, is initiating a purchase whatever else is true.
@@ -162,14 +162,14 @@ export async function evaluatePaymentTaint(input: {
 
   const checkedFields = Object.keys(fields).filter((key) => fields[key] !== undefined);
 
-  if (sources.length === 0) {
+  const assessment = await assessOutwardContent(input.ledger, fields, { exactMatchFields });
+  if (assessment.kind === 'clean') {
     return { allowed: true, findings: [], reason: null, checkedFields };
   }
-
-  const findings = await findContentTaint(fields, sources, { exactMatchFields });
-  if (findings.length === 0) {
-    return { allowed: true, findings: [], reason: null, checkedFields };
+  if (assessment.kind === 'incomplete') {
+    return { allowed: false, findings: [], reason: 'Refused this purchase: complete untrusted-source evidence is unavailable for comparison.', checkedFields };
   }
+  const findings = assessment.findings;
   return { allowed: false, findings, reason: describePaymentTaint(findings), checkedFields };
 }
 

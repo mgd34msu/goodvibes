@@ -1,3 +1,4 @@
+import type { GatePresetName } from '../gate/presets.js';
 /**
  * types.ts, the vocabulary of a daemon-hosted session.
  *
@@ -81,6 +82,8 @@ export interface HostedSessionRecord {
   readonly attachedClients: readonly string[];
   readonly providerId?: string | undefined;
   readonly modelId?: string | undefined;
+  /** Session-owned execution policy, independent of the shared workspace floor. */
+  readonly permissionMode?: GatePresetName | undefined;
   readonly createdAt: number;
   readonly updatedAt: number;
   /** Turns completed, errored or cancelled, every turn that ran. */

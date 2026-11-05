@@ -31,8 +31,9 @@ import type { TurnCancellationResult } from '../../core/turn-cancellation.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { PermissionMode } from '../../config/schema-types.js';
-import { GATE_PRESETS, isSettableGatePresetName, type GatePresetName, type SettableGatePresetName } from '../../gate/presets.js';
+import { effectivePermissionMode, GATE_PRESETS, isSettableGatePresetName, normalizePermissionMode, type GatePresetName, type SettableGatePresetName } from '../../gate/presets.js';
 import { deriveContextUsage } from '../../runtime/context-usage.js';
+import type { InboundIntakeBroker } from '../../channel-profiles/install-inbound-intake.js';
 import { readCurrentContextWindow } from '../../providers/context-window-reading.js';
 import type { ContextWindowOrigin, ContextWindowProvenance } from '../../providers/registry-types.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
@@ -40,34 +41,21 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
 /**
- * The operator-facing permission-mode vocabulary. `custom` is read-only
- * (surfaced by get when a session is in a custom rule set) and is never a
- * settable value.
+ * The shared execution modes and the separate read-only planning posture.
  */
 export type OperatorPermissionMode = GatePresetName;
 export type SettableOperatorPermissionMode = SettableGatePresetName;
 
 /** Map the internal config permission mode onto the operator vocabulary. */
 export function toOperatorPermissionMode(mode: PermissionMode): OperatorPermissionMode {
-  switch (mode) {
-    case 'prompt':
-      return 'normal';
-    case 'allow-all':
-      return 'auto';
-    case 'plan':
-      return 'plan';
-    case 'accept-edits':
-      return 'accept-edits';
-    case 'custom':
-      return 'custom';
-  }
+  return normalizePermissionMode(mode);
 }
 
 /** Map a settable operator mode back onto the internal config permission mode. */
 export function toConfigPermissionMode(mode: string): PermissionMode {
   if (isSettableGatePresetName(mode)) return GATE_PRESETS[mode].mode;
   throw new GatewayVerbError(
-    `Invalid permission mode: ${String(mode)} (expected one of plan, normal, accept-edits, auto)`,
+    `Invalid permission mode: ${String(mode)} (expected safe-owner, safe-jev, yolo, or plan)`,
     'INVALID_ARGUMENT',
     400,
     'mode',
@@ -94,6 +82,8 @@ export interface SessionContextUsage {
  * methods structurally, so binding is `holder.bind(orchestrator)`.
  */
 export interface SessionLiveTurnControls {
+  getPermissionMode?(): GatePresetName;
+  setPermissionMode?(mode: SettableGatePresetName): Promise<void>;
   cancelTurn?(expectedTurnId: string): TurnCancellationResult;
   cancelToolCall(callId: string): boolean;
   listQueuedMessages(): ReadonlyArray<{ readonly id: string; readonly queuedAt: number; readonly text: string }>;
@@ -157,8 +147,8 @@ export class SessionLiveTurnControlsHolder {
  */
 export interface SessionRuntimeControls {
   isLocalSession(sessionId: string): boolean;
-  getPermissionMode(): PermissionMode;
-  setPermissionMode(mode: PermissionMode): void;
+  getPermissionMode(sessionId?: string): PermissionMode;
+  setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void>;
   getContextUsage(sessionId: string): SessionContextUsage;
   /**
    * The live-turn controls for this session id.
@@ -189,7 +179,7 @@ function requireLocalSessionId(controls: SessionRuntimeControls, params: Record<
 export function createSessionPermissionModeGetHandler(controls: SessionRuntimeControls): GatewayMethodHandler {
   return (invocation) => {
     const sessionId = requireLocalSessionId(controls, readInvocationParams(invocation));
-    return { sessionId, mode: toOperatorPermissionMode(controls.getPermissionMode()) };
+    return { sessionId, mode: toOperatorPermissionMode(controls.getPermissionMode(sessionId)) };
   };
 }
 
@@ -198,13 +188,14 @@ export function createSessionPermissionModeSetHandler(controls: SessionRuntimeCo
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
     const nextMode = toConfigPermissionMode(typeof params.mode === 'string' ? params.mode : '');
-    const previousMode = toOperatorPermissionMode(controls.getPermissionMode());
-    controls.setPermissionMode(nextMode);
-    return {
+    const previousMode = toOperatorPermissionMode(controls.getPermissionMode(sessionId));
+    const changed = controls.setPermissionMode(nextMode, sessionId);
+    const result = {
       sessionId,
       mode: toOperatorPermissionMode(nextMode),
       previousMode,
     };
+    return changed instanceof Promise ? changed.then(() => result) : result;
   };
 }
 
@@ -324,8 +315,8 @@ export function createSessionContextUsageGetHandler(controls: SessionRuntimeCont
  * `permissions.mode` to {@link PermissionMode}) satisfies this narrower shape.
  */
 export interface PermissionModeConfig {
-  get(key: 'permissions.mode'): PermissionMode;
-  set(key: 'permissions.mode', value: PermissionMode): void;
+  get(key: 'permissions.mode' | 'behavior.autoApprove'): PermissionMode | boolean;
+  set(key: 'permissions.mode' | 'behavior.autoApprove', value: PermissionMode | boolean): void;
 }
 
 /** The slice of the runtime state the session-runtime controls read. */
@@ -348,6 +339,8 @@ export function createSessionRuntimeControls(deps: {
   readonly providerRegistry?: Pick<ProviderRegistry, 'getCurrentModel' | 'getContextWindowForModel' | 'getKnownContextWindowForModel'> | undefined;
   /** Live-turn controls holder an interactive consumer binds; absent = no live-turn verbs. */
   readonly liveTurnHolder?: SessionLiveTurnControlsHolder | undefined;
+  readonly channelSessions?: Pick<InboundIntakeBroker, 'getSession' | 'setChannelExecutionMode'> | undefined;
+  readonly channelModeChanged?: ((sessionId: string, mode: GatePresetName, previousMode: GatePresetName) => void) | undefined;
 }): SessionRuntimeControls {
   const LOCAL_RUNTIME_ALIAS = 'runtime';
   return {
@@ -357,16 +350,45 @@ export function createSessionRuntimeControls(deps: {
       // this branch every hosted session's cancel and queued-message verbs
       // refused with SESSION_NOT_LOCAL while the loop ran in this very process.
       if (deps.liveTurnHolder?.hasSession(sessionId) === true) return true;
+      const channel = deps.channelSessions?.getSession?.(sessionId);
+      if (channel?.status === 'active' && channel.channelPermissionMode !== undefined) return true;
       const localId = deps.store.getState().session.id;
       return sessionId === LOCAL_RUNTIME_ALIAS || (localId.length > 0 && sessionId === localId);
     },
     getLiveTurnControls(sessionId: string): SessionLiveTurnControls | null {
-      return deps.liveTurnHolder?.getSession(sessionId) ?? deps.liveTurnHolder?.get() ?? null;
+      const hosted = deps.liveTurnHolder?.getSession(sessionId);
+      if (hosted) return hosted;
+      const localId = deps.store.getState().session.id;
+      return sessionId === LOCAL_RUNTIME_ALIAS || sessionId === localId
+        ? deps.liveTurnHolder?.get() ?? null : null;
     },
-    getPermissionMode(): PermissionMode {
-      return deps.config.get('permissions.mode');
+    getPermissionMode(sessionId?: string): PermissionMode {
+      const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
+      if (hosted) {
+        if (!hosted.getPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
+        return hosted.getPermissionMode();
+      }
+      const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
+      if (channel && channel.channelPermissionMode !== undefined) return channel.channelPermissionMode;
+      return effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true);
     },
-    setPermissionMode(mode: PermissionMode): void {
+    setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void> {
+      const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
+      if (hosted) {
+        if (!hosted.setPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
+        return hosted.setPermissionMode(normalizePermissionMode(mode));
+      }
+      const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
+      if (sessionId && channel && channel.channelPermissionMode !== undefined) {
+        const previousMode = channel.channelPermissionMode;
+        const set = deps.channelSessions?.setChannelExecutionMode;
+        if (!set) throw new GatewayVerbError('Channel execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
+        const selected = normalizePermissionMode(mode);
+        return set.call(deps.channelSessions, sessionId, selected).then(() => {
+          if (selected !== previousMode) deps.channelModeChanged?.(sessionId, selected, previousMode);
+        });
+      }
+      deps.config.set('behavior.autoApprove', false);
       deps.config.set('permissions.mode', mode);
     },
     getContextUsage(sessionId: string): SessionContextUsage {

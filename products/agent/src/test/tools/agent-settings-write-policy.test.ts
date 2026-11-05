@@ -222,7 +222,7 @@ describe('no denial is ever silent', () => {
     expect(allowed.status).toBe('allowed');
     expect(explainAgentToolPolicyInvocation('goodvibes_settings', {
       mode: 'set', key: 'display.theme', value: 'nord', confirm: false,
-    }).status).toBe('denied');
+    }).status).toBe('allowed');
   });
 
   test('a guarded registry surfaces the denial through execute()', async () => {

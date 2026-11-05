@@ -1,4 +1,5 @@
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
+import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
 import { runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
@@ -1125,7 +1126,7 @@ export class DaemonServer {
             tools: [...((input as { tools?: readonly string[] }).tools ?? [])],
           }
         : input;
-      const record = this.agentManager.spawn(spawnInput);
+      const record = withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput));
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.
       if (this.agentTaskAdapter) {

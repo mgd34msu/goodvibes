@@ -1,4 +1,4 @@
-import { describePermissionMode } from '../../permissions/configured-posture.ts';
+import { presetForMode, PERMISSION_MODE_CYCLE } from '@goodvibes-jev/engine/sdk/platform/gate';
 import type { OnboardingStep1CapabilityItem } from '../../runtime/onboarding/index.ts';
 import type { OnboardingWizardRadioOption, OnboardingWizardStepId } from './onboarding-wizard-types.ts';
 
@@ -80,11 +80,10 @@ export const GUIDANCE_MODE_OPTIONS: readonly OnboardingWizardRadioOption[] = [
   { id: 'off', label: 'Off', hint: 'Disable proactive guidance.' },
 ];
 
-export const PERMISSION_MODE_OPTIONS: readonly OnboardingWizardRadioOption[] = [
-  { id: 'prompt', label: describePermissionMode('prompt').label, hint: describePermissionMode('prompt').detail },
-  { id: 'allow-all', label: describePermissionMode('allow-all').label, hint: describePermissionMode('allow-all').detail },
-  { id: 'custom', label: 'Custom advanced rules', hint: 'Use tool-specific permission rules.' },
-];
+export const PERMISSION_MODE_OPTIONS: readonly OnboardingWizardRadioOption[] = PERMISSION_MODE_CYCLE.map(mode => {
+  const preset = presetForMode(mode);
+  return { id: preset.mode, label: preset.label, hint: preset.summary };
+});
 
 export const SECRET_POLICY_OPTIONS: readonly OnboardingWizardRadioOption[] = [
   { id: 'preferred_secure', label: 'Use secure storage when available', hint: 'Prefer the secure secret backend and fall back only when needed.' },

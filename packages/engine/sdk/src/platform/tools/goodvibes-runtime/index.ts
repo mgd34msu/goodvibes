@@ -22,12 +22,15 @@ import type { ProviderRegistry } from '../../providers/registry.js';
 import type { ChannelPluginRegistry } from '../../channels/index.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import type { ToolRegistry } from '../registry.js';
+import { assertCurrentToolExecution } from '../registry.js';
+import { isYoloExecution } from '../../gate/execution-context.js';
 import { CloudflareControlPlaneManager } from '../../cloudflare/manager.js';
 import type { CloudflareComponentSelection } from '../../cloudflare/types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { SETUP_INTENT_CONTRACT_PROMPT } from '../../runtime/setup-contract.js';
 import { isCredentialConfigKey, redactConfigValue, redactObjectByPath } from './credential-redaction.js';
+import { isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
 import { executeAdmittedAgentSettings } from './settings-admission.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -164,7 +167,7 @@ export function createGoodVibesSettingsTool(
         value: {},
         confirm: { type: 'boolean' },
       },
-      required: ['mode', 'key', 'confirm'],
+      required: ['mode', 'key'],
       additionalProperties: false,
     },
     sideEffects: ['state'],
@@ -174,7 +177,7 @@ export function createGoodVibesSettingsTool(
   async function execute(args: JsonRecord, options?: import('../../types/tools.js').ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
     try {
       if (deps.admissionPolicy === 'agent-main-conversation') return await executeAdmittedAgentSettings(args, options);
-      if (args.confirm !== true) {
+      if (!assertCurrentToolExecution(args, options) && !isYoloExecution() && args.confirm !== true) {
         return { success: false, error: 'Set confirm=true to change GoodVibes settings.' };
       }
       const key = readString(args.key);
@@ -524,7 +527,7 @@ async function redactCloudflareStatus(status: unknown): Promise<JsonRecord> {
 function rejectsRawSecretValue(value: unknown): boolean {
   if (typeof value !== 'string') return value !== '' && value !== null && value !== undefined;
   if (!value.trim()) return false;
-  return !value.trim().startsWith('goodvibes://');
+  return !isSecretReferenceValue(value);
 }
 
 function readComponents(value: unknown): CloudflareComponentSelection | undefined {

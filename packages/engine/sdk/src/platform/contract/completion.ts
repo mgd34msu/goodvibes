@@ -38,7 +38,7 @@ import { contractSourceScope } from './work-receipts.js';
 
 import { spawnSync } from 'node:child_process';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { hashState, JudgmentContextLimitError, mapLimit, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
+import { hashState, JudgmentContextLimitError, JudgmentError, mapLimit, toJson, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
 import { AgentWorktree, IsolatedWorktree } from '../agents/worktree.js';
 import { excludeUntouchedLaunchResidue } from '../orchestration/dirty-guard.js';
 import { GitService } from '../git/service.js';
@@ -57,7 +57,8 @@ import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
 import { collectChanges, commandsFromTurns, currentFileObservations, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
-import { failedGates, runContractGates } from './gates.js';
+import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates } from './gates.js';
+import { captureGateInput } from './gate-input.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
 import type { CheckTrigger, Contract, Criterion, CriterionReading, CriterionVerdict, NudgeKind, TreeBaseline, UnitCheck } from './types.js';
@@ -67,6 +68,7 @@ import { finalAnswerEvidence, finalContentEvidence } from './final-answer-eviden
 import { answerClaimScopes, completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview, type AnswerClaimScope } from './final-answer-claims.js';
 import { judgmentExecutionEvidence } from './judgment-execution-evidence.js';
 import { GOAL_OBLIGATIONS } from './batteries/goal-obligations.js';
+import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from './batteries/original-obligation-coverage.js';
 import { publicationOwner } from './batteries/publication-owner.js';
 import { goalObligationSource, goalObligationQuestion, type GoalObligationProof } from './goal-obligation-proof.js';
 
@@ -119,6 +121,18 @@ interface FinalAnswerReviewReceipt {
   readonly claimReviews?: readonly AnswerClaimReview[];
 }
 
+interface OriginalObligationReceipt {
+  readonly schemaVersion: 1;
+  readonly policy: { readonly name: string; readonly version: number };
+  readonly sourceDigest: string;
+  readonly outputDigest: string;
+  readonly evidenceDigest: string;
+  readonly stateHash: string;
+  readonly reading: Pick<YesNoReading, 'probability' | 'verdict' | 'outcome'>;
+  readonly decisionIds: readonly string[];
+  readonly passed: boolean;
+}
+
 function git(cwd: string, args: readonly string[]): { readonly ok: boolean; readonly out: string; readonly err: string } {
   const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf-8' });
   return { ok: result.status === 0, out: (result.stdout ?? '').trim(), err: (result.stderr ?? '').trim() || (result.error?.message ?? '') };
@@ -145,7 +159,7 @@ export function buildContractCommitMessage(contract: Contract): string {
 }
 
 class PublicationPending extends Error {
-  constructor() { super('The checked result has not reached the owner workspace.'); }
+  constructor(reason = 'The checked result has not reached the owner workspace.') { super(reason); }
 }
 
 export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed'>): Completion {
@@ -153,6 +167,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
   const publicationRepairs = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
   const publicationAssessments = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
+  const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: string }>();
 
   /** Retain work on an unavailable check or unpublished result. Retries validate
    * the current evidence; the owned wait ends immediately when stopped. */
@@ -220,6 +235,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const { contract } = run;
     assertOwnedContractSource(contract);
     const tree = contractTree(contract);
+    const source = input.scope === 'deliverable' ? captureGateInput(tree, []).source : undefined;
+    if (input.scope === 'deliverable') acceptedSources.delete(run);
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
     const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, turns: turnsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
@@ -318,6 +335,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         acceptanceChecksOrigin: hasDerivedAcceptanceChecks(contract.originalSource) ? 'planner-derived' : 'original-source' } : {}),
       ...(input.scope === 'group' ? { units: input.summaries } : primary === undefined ? { criteria: input.summaries } : {}) };
     const fulfillmentJudge = judges[config().acceptanceStakes];
+    const originalCoverage = ORIGINAL_OBLIGATION_COVERAGE[config().acceptanceStakes];
     const reviewBattery = FINAL_ANSWER_REVIEWS[config().acceptanceStakes];
     const reviewPolicy = { fulfillment: { name: fulfillmentJudge.name, version: fulfillmentJudge.version },
       content: { name: reviewBattery.name, version: reviewBattery.version }, stakes: config().acceptanceStakes };
@@ -326,7 +344,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const digest = hashState({ goal: input.goal, output: evidence.output, evidence: fulfillmentEvidence,
       criteria: input.criteria.map(({ id, text, serves, disposition }) => ({ id, text, serves: [...serves], disposition })),
       policy: { fulfillment: { name: fulfillmentJudge.name, version: fulfillmentJudge.version },
-        ...(input.scope === 'deliverable' ? { content: { name: reviewBattery.name, version: reviewBattery.version } } : {}) } });
+        ...(input.scope === 'deliverable' ? { content: { name: reviewBattery.name, version: reviewBattery.version },
+          originalCoverage: { name: originalCoverage.name, version: originalCoverage.version } } : {}) } });
     const prior = input.checks.at(-1);
     if (contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass' && prior.evidenceDigest === digest) {
       return { check: prior, verdicts: new Map(input.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => [criterion.id, criterion.status === 'unread' ? 'unshown' : criterion.status])), passed: false, output: evidence.output };
@@ -594,16 +613,63 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         }
       } finally { addJudgmentUsage(contract.judgmentUsage, usage); }
     }
+    let originalObligations: OriginalObligationReceipt | undefined;
+    // Only a deliverable otherwise ready for publication needs this distinct
+    // original-source assessment. Units continue to judge their assigned goal.
+    const beforeCoverageGates = refreshGateResults(evidence.gates);
+    if (input.scope === 'deliverable' && answerReview?.passed && criterionVerdict(effectiveGoal) === 'met'
+      && failedGates(beforeCoverageGates).length === 0 && unverifiedGates(beforeCoverageGates).length === 0
+      && judgment.criteria.every(reading => criterionVerdict(reading) === 'met')) {
+      const original = originalObligationSource(contract);
+      const coverageEvidence = { ...finalContentEvidence(fulfillmentEvidence),
+        finalAnswerReview: toJson(answerReview) };
+      const state = { original, assignedGoal: input.goal, output: evidence.output, evidence: coverageEvidence,
+        hostStages: ['native-acceptance', 'artifact-application', 'answer-delivery'] };
+      const binding = { sourceDigest: hashState(original), outputDigest: hashState(evidence.output), evidenceDigest: hashState(coverageEvidence) };
+      const usage = emptyJudgmentUsage();
+      try {
+        const site = 'contract.check.original-obligation-coverage';
+        const port = judgmentPort(site);
+        let stateHash: string | undefined;
+        const boundPort: typeof port = { ...port, ask(request) {
+          stateHash = hashState(request.state);
+          return port.ask(request);
+        } };
+        const result = await originalCoverage.run(
+          meteredPort(nativeContractPort(contract, context.native, boundPort, run.abort.signal), usage),
+          state, { site, signal: run.abort.signal },
+        );
+        assertOwnedContractSource(contract);
+        if (run.terminal) { result.recordAction('discarded: the contract already ended'); return null; }
+        if (!stateHash || !result.result.decisionId) throw new JudgmentError('unrecorded', 'Original-obligation coverage requires its actual recorded input and decision.');
+        const { probability, verdict, outcome } = result.readings.original_obligations_unmet;
+        originalObligations = {
+          schemaVersion: 1, policy: { name: originalCoverage.name, version: originalCoverage.version },
+          ...binding, stateHash,
+          reading: { probability, verdict, outcome },
+          decisionIds: [result.result.decisionId],
+          passed: verdict === 'no',
+        };
+        run.decide('checked', `${input.targetId}.original-obligations`, JSON.stringify(originalObligations), [...originalObligations.decisionIds]);
+        result.recordAction(originalObligations.passed
+          ? 'Original obligations supported by the staged result; actual artifact application and answer delivery remain mandatory host stages.'
+          : 'Original obligations unmet or unverified; retain staged work and withhold publication.');
+      } finally { addJudgmentUsage(contract.judgmentUsage, usage); }
+    }
     assertOwnedContractSource(contract);
     if (run.terminal) {
       judgment.recordAction('discarded: the contract already ended');
       return null;
     }
+    if (source !== undefined && captureGateInput(tree, []).source !== source)
+      throw new PublicationPending('The result source changed during acceptance; verify its current contents before publication.');
     const checkId = `${input.targetId}.k${input.checks.length + 1}`;
     const now = run.env.now();
     const verdicts = new Map(judgedCriteria.map((criterion, index) => [criterion.id, criterionVerdict(judgment.criteria[index]!)]));
     const goalVerdict = criterionVerdict(effectiveGoal);
-    const failing = failedGates(evidence.gates);
+    const currentGates = refreshGateResults(evidence.gates);
+    const failing = failedGates(currentGates);
+    const unverified = unverifiedGates(currentGates);
     judgedCriteria.forEach((criterion, index) => {
       const reading = judgment.criteria[index]!;
       const recorded: CriterionReading = { checkId, at: now, probabilityUnmet: reading.probability, verdict: verdicts.get(criterion.id)!, outcome: reading.outcome, decisionId: judgment.criteriaDecisionIds[index] };
@@ -612,8 +678,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     });
     const verdictList = [...verdicts.values()];
     const problems: NudgeKind[] = [
-      ...(verdictList.includes('unmet') || goalVerdict === 'unmet' || answerReview?.passed === false ? ['unmet' as const] : []),
-      ...(verdictList.includes('unshown') || goalVerdict === 'unshown' ? ['unshown' as const] : []),
+      ...(verdictList.includes('unmet') || goalVerdict === 'unmet' || answerReview?.passed === false
+        || originalObligations?.reading.verdict === 'yes' ? ['unmet' as const] : []),
+      ...(verdictList.includes('unshown') || goalVerdict === 'unshown'
+        || originalObligations?.reading.verdict === 'uncertain' || unverified.length > 0 ? ['unshown' as const] : []),
       ...(failing.length > 0 ? ['gate' as const] : []),
     ];
     const passed = problems.length === 0;
@@ -621,17 +689,18 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       id: checkId,
       at: now,
       trigger: input.trigger,
-      ...(evidence.gates === undefined ? {} : { gates: evidence.gates }),
+      ...(currentGates === undefined ? {} : { gates: currentGates }),
       goal: { probabilityUnmet: effectiveGoal.probability, verdict: goalVerdict, outcome: effectiveGoal.outcome },
       quality: {},
       // A check that does not pass is handed to correction: a planned fix or the owner.
       result: passed ? 'pass' : 'stall',
       problems,
       qualityProblems: [],
-      decisionIds: [...new Set([...(answerReview?.fulfillmentDecisionIds ?? []), ...(answerReview?.decisionIds ?? []), ...judgment.decisionIds, ...(goalProof?.decisionIds ?? [])])],
+      decisionIds: [...new Set([...(answerReview?.fulfillmentDecisionIds ?? []), ...(answerReview?.decisionIds ?? []), ...judgment.decisionIds, ...(goalProof?.decisionIds ?? []), ...(originalObligations?.decisionIds ?? [])])],
       evidenceDigest: digest,
     };
     input.checks.push(check);
+    if (passed && source !== undefined) acceptedSources.set(run, { checkId, tree, source });
     judgment.recordAction(`${input.scope} check ${checkId}: ${passed ? 'pass' : 'to correction'}`);
     run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${passed ? 'pass' : problems.join(', ')}`, check.decisionIds);
     run.emit({
@@ -645,12 +714,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       criteria: judgedCriteria.map((criterion, index) => ({ criterionId: criterion.id, verdict: verdicts.get(criterion.id)!, probabilityUnmet: judgment.criteria[index]!.probability, outcome: judgment.criteria[index]!.outcome })),
       goal: { verdict: goalVerdict, outcome: effectiveGoal.outcome },
       quality: [],
-      gates: (evidence.gates ?? []).map((gate) => ({ gate: gate.gate, passed: gate.passed, skipped: gate.skipped === true })),
+      gates: currentGates.map(gateEventSummary),
       decisionIds: check.decisionIds,
     });
     return { check, verdicts, passed, output: evidence.output
       + (answerReview?.passed === false ? '\n\nNative final-answer content findings (unfinished substantive work or unsupported claims):\n' + JSON.stringify(answerReview) : '')
-      + (goalFinding ? '\n\nNative original-goal obligation to investigate against retained work:\n' + JSON.stringify(goalFinding) : '') };
+      + (goalFinding ? '\n\nNative original-goal obligation to investigate against retained work:\n' + JSON.stringify(goalFinding) : '')
+      + (originalObligations?.passed === false ? '\n\nOriginal obligations remain unmet or unverified by the current staged work; preserve completed work and establish the missing original result or evidence:\n'
+        + JSON.stringify(originalObligations) : '') };
   }
 
   function finding(reading: TargetReading): Parameters<Correction['groupFailed']>[2] {
@@ -758,16 +829,32 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     await commitDeliverable(run, answer);
   }
 
+  function assertAcceptedResultCurrent(run: ContractRun): void {
+    const check = run.contract.checks.at(-1);
+    const accepted = acceptedSources.get(run);
+    let current: string | undefined;
+    try { if (accepted) current = captureGateInput(accepted.tree, []).source; }
+    catch { throw new PublicationPending('The accepted result source is unavailable; verify its current contents before publication.'); }
+    if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source !== current)
+      throw new PublicationPending('The result source changed after acceptance; verify its current contents before publication.');
+    const gates = refreshGateResults(check?.gates);
+    if (failedGates(gates).length || unverifiedGates(gates).length) {
+      throw new PublicationPending('Required check evidence changed after acceptance; verify the current result before publication.');
+    }
+  }
+
   async function commitDeliverable(run: ContractRun, checkedAnswer?: string): Promise<void> {
     const { contract } = run;
     if (run.terminal) return;
     assertOwnedContractSource(contract);
+    assertAcceptedResultCurrent(run);
     const answer = checkedAnswer ?? renderContractAnswer(contract);
     run.moveContract('committing');
     context.ownerProgress(run);
     const commit = await commitContract(run);
     if (run.terminal) return;
     assertOwnedContractSource(contract);
+    if (contract.isolation !== 'worktree') assertAcceptedResultCurrent(run);
     contract.commit = commit;
     run.decide('committed', contract.id, commit.note);
     run.emit({ type: 'CONTRACT_COMMITTED', contractId: contract.id, status: commit.status, ...(commit.hash === undefined ? {} : { hash: commit.hash }), note: commit.note });
@@ -843,7 +930,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               return null;
             }
             publicationAssessments.set(run, { evidence, decisionIds });
-            return owner.assertCurrent;
+            return () => { assertAcceptedResultCurrent(run); owner.assertCurrent(); };
           } finally { addJudgmentUsage(contract.judgmentUsage, usage); }
         });
         if (!admitted) return { status: 'failed', note: `not applied: later owner changes need focused integration verification; the work stays on branch ${branch}` };
@@ -859,12 +946,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     }
     if (contract.inputSnapshot.dirty || publication) {
       try {
-        const files = await applyCapturedInputDelta(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, publication);
+        const files = await applyCapturedInputDelta(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, publication,
+          () => assertAcceptedResultCurrent(run));
         if (files === 0) return { status: 'skipped', note: publication
           ? 'commit skipped: the exact accepted file delta is already present; owner changes preserved'
           : 'commit skipped: the contract changed no files; owner changes preserved' };
         return { status: 'applied', note: `applied ${files} file${files === 1 ? '' : 's'} as uncommitted changes; pre-existing owner edits and staging preserved${commitOn ? '; automatic commit deferred for the dirty input baseline' : ''}` };
       } catch (error) {
+        if (error instanceof PublicationPending) throw error;
         const assessment = publicationAssessments.get(run);
         if (error instanceof ContractPublicationConflictError && assessment)
           publicationRepairs.set(run, { evidence: { originalAssessment: assessment.evidence, conflictPaths: [...error.paths],
@@ -874,6 +963,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     }
     const changed = git(root, ['diff', '--name-only', `HEAD...${branch}`]);
     const files = changed.ok ? changed.out.split('\n').filter(Boolean) : [];
+    assertAcceptedResultCurrent(run);
     if (changed.ok && files.length === 0) return { status: 'skipped', note: describeCommitOutcome(null, [], true) };
     if (commitOn) {
       const merged = git(root, ['merge', '--no-ff', '-m', buildContractCommitMessage(contract), branch]);
@@ -892,12 +982,13 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     return { status: 'applied', note: `applied ${files.length} file${files.length === 1 ? '' : 's'} as uncommitted changes` };
   }
 
-  async function commitShared(contract: Contract, scope: 'scoped' | 'all'): Promise<NonNullable<Contract['commit']>> {
+  async function commitShared(run: ContractRun, scope: 'scoped' | 'all'): Promise<NonNullable<Contract['commit']>> {
+    const { contract } = run;
     const root = contract.projectRoot;
     const worktree = new AgentWorktree(root);
     const message = buildContractCommitMessage(contract);
     if (scope === 'all') {
-      const result = await worktree.commitWorkingTree(message);
+      const result = await worktree.commitWorkingTree(message, undefined, () => assertAcceptedResultCurrent(run));
       return result.hash === null
         ? { status: 'skipped', note: describeCommitOutcome(null, result.skippedIgnored, false) }
         : { status: 'committed', hash: result.hash, note: describeCommitOutcome(result.hash, result.skippedIgnored, false) };
@@ -906,7 +997,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const launch = new Map(Object.entries(contract.baseline?.dirty ?? {}));
     const { included } = excludeUntouchedLaunchResidue(root, touched, launch);
     if (included.length === 0) return { status: 'skipped', note: describeCommitOutcome(null, [], true) };
-    const result = await worktree.commitWorkingTree(message, [...included]);
+    const result = await worktree.commitWorkingTree(message, [...included], () => assertAcceptedResultCurrent(run));
     return result.hash === null
       ? { status: 'skipped', note: describeCommitOutcome(null, result.skippedIgnored, false) }
       : { status: 'committed', hash: result.hash, note: describeCommitOutcome(result.hash, result.skippedIgnored, false) };
@@ -930,8 +1021,11 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         return outcome;
       }
       if (!commitOn) return { status: 'skipped', note: 'commit off: the changes are left in the working tree' };
-      return await commitShared(contract, settings.commitScope === 'all' ? 'all' : 'scoped');
+      const outcome = await commitShared(run, settings.commitScope === 'all' ? 'all' : 'scoped');
+      assertAcceptedResultCurrent(run);
+      return outcome;
     } catch (error) {
+      if (error instanceof PublicationPending) throw error;
       const where = contract.branch === undefined ? 'the changes are left in the working tree' : `the work stays on branch ${contract.branch}`;
       return { status: 'failed', note: `commit failed: ${summarizeError(error)}; ${where}` };
     }

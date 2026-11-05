@@ -5,9 +5,48 @@ machine facts: IDs, cycles, exact formats, quote positions, counts, status moves
 file existence, exit codes, merge state, bounded queues and store validation.
 Neither class may manufacture evidence of success. The
 [autonomous decision contract](../design/autonomous-jev-decisions.md) governs new
-product semantic execution. Historical confidence bands and owner-reply data must
-remain distinguishable from autonomous receipts; they cannot authorize a new
-human semantic approval workflow or silently become `act`.
+product semantic execution. Historical confidence bands and owner-reply data
+remain distinguishable from autonomous receipts. Only the current execution
+mode can select an owner reply; an old observation cannot silently become `act`.
+
+## Executable acceptance evidence
+
+Each new gate result records `passed`, `failed` or `unverified`, with its
+completion record and source/check-definition identities. A skipped gate,
+missing completion record, empty test run, timeout or runner error supplies no
+passing assertion evidence. Tests require assertion completion by default;
+`required` and `verification` make custom gate obligations explicit.
+
+Direct `bun test` commands and plain Bun test scripts use a machine JUnit
+reporter. Other assertion runners can emit the registered completion protocol
+as their last stdout line:
+
+```json
+{
+  "kind": "goodvibes-gate-result",
+  "schemaVersion": 1,
+  "gate": "the value of GOODVIBES_GATE_NAME",
+  "runId": "the value of GOODVIBES_GATE_RUN_ID",
+  "outcome": "passed",
+  "checks": { "passed": 1, "failed": 0, "skipped": 0 },
+  "observation": { "requirement": "the behavior actually checked" }
+}
+```
+
+The runner must use the invocation's exact environment values. At least one
+assertion must execute, counts and outcome must agree, and a passing result
+requires exit zero. A generic successful command is recorded as command
+completion, without claiming assertion coverage.
+
+Gate results are revalidated after judgment and before publication. Changed
+source or check definitions make earlier passes unverified. Historical receipts
+remain readable but cannot supply current execution authority. CLI, runtime
+state and Web UI display the same outcome.
+
+The generic judge evaluates its assigned goal. Final deliverable acceptance
+separately checks the authoritative original obligations and records that
+reading's actual decision IDs and source/output/evidence binding. Host-owned
+apply and delivery stages still have to finish before the result is published.
 
 ## Completion reports and evidence
 

@@ -30,9 +30,9 @@ describe('permission provenance', () => {
 
   test('a persisted value is attributed to the global config file with its path', () => {
     const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
-    cm.set('permissions.mode', 'custom'); // set() auto-persists to disk
+    cm.set('permissions.mode', 'safe-jev'); // set() auto-persists to disk
     const mode = findRow(buildPermissionProvenance(cm), 'permissions.mode');
-    expect(mode.value).toBe('custom');
+    expect(mode.value).toBe('safe-jev');
     expect(mode.recorded).toBe(true);
     expect(mode.overridden).toBe(false);
     expect(mode.origin).toContain('config file');
@@ -42,29 +42,44 @@ describe('permission provenance', () => {
   test('a runtime --config override is labelled not-recorded-on-disk, not mis-attributed', () => {
     const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
     // Mutates the in-memory config WITHOUT persisting, exactly what CLI --config does.
-    applyRuntimeConfigValue(cm as never, 'permissions.mode', 'allow-all');
+    applyRuntimeConfigValue(cm as never, 'permissions.mode', 'yolo');
     const mode = findRow(buildPermissionProvenance(cm), 'permissions.mode');
-    expect(mode.value).toBe('allow-all');
+    expect(mode.value).toBe('yolo');
     expect(mode.overridden).toBe(true);
     expect(mode.recorded).toBe(false);
     expect(mode.origin).toContain('not recorded on disk');
     // The recorded on-disk / default value is preserved for the reader.
-    expect(mode.recordedValue).not.toBe('allow-all');
+    expect(mode.recordedValue).not.toBe('yolo');
   });
 
-  test('render shows the legend and traces every permission tool rule', () => {
+  test('render traces the execution mode and explicit tool restrictions', () => {
     const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
     const text = renderPermissionProvenance(buildPermissionProvenance(cm));
     expect(text).toContain('session mode:');
-    expect(text).toContain('Tool rule: exec');
+    expect(text).toContain('Execution mode');
+    expect(text).toContain('Tool restriction: exec');
+    expect(text).not.toContain('Background-agent mode');
     expect(text).toContain('origin not recorded');
     expect(text).toContain('origin:');
+  });
+
+  test('a saved auto-approve alias reports the effective YOLO mode until explicitly changed', () => {
+    const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
+    cm.set('behavior.autoApprove', true);
+    const legacy = buildPermissionProvenance(cm);
+    expect(legacy.sessionMode).toBe('yolo');
+    expect(findRow(legacy, 'behavior.autoApprove').label).toBe('Saved YOLO alias');
+    cm.set('permissions.mode', 'safe-owner');
+    const selected = buildPermissionProvenance(cm);
+    expect(selected.sessionMode).toBe('safe-owner');
+    expect(selected.rows.some(row => row.key === 'behavior.autoApprove')).toBe(false);
   });
 
   test('reads of secrets are described as the gate\'s reading, not a shipped path list', () => {
     const cm = new ConfigManager({ workingDir: root, homeDir: root, surfaceRoot: 'tui' });
     const text = renderPermissionProvenance(buildPermissionProvenance(cm));
-    expect(text).toContain('read by Jev for each read, not a shipped path list');
+    expect(text).toContain('engine.gate.read-secrets');
+    expect(text).toContain('YOLO skips execution safety readings');
     expect(text).not.toContain('Shipped policy rules');
   });
 });

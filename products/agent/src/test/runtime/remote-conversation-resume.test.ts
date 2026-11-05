@@ -71,6 +71,8 @@ function scriptedDaemon(streams: readonly (readonly Frame[])[]): {
   let opened = 0;
   let deliver: ((correlationId: string) => void) | undefined;
   const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    const modePath = new URL(String(_url)).pathname;
+    if (modePath.endsWith('/permission-mode')) return Response.json({ sessionId: decodeURIComponent(modePath.split('/')[3]!), mode: 'safe-owner' });
     const headers = new Headers(init?.headers ?? {});
     positions.push(headers.get('Last-Event-ID'));
     const frames = streams[opened] ?? [];

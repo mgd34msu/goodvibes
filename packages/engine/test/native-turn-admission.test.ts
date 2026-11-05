@@ -102,7 +102,7 @@ function orchestrator(chat: LLMProvider['chat'] = async () => finalResponse(), f
     recordContextWindowRejection: () => {}, reconcileObservedContextWindow: () => {}, resolveModelPricing: () => UNKNOWN_MODEL_PRICING,
   } as unknown as OrchestratorCoreServices['providerRegistry'];
   const instance = new Orchestrator({ conversation, getViewportHeight: () => 0, scrollToEnd: () => {}, toolRegistry: tools,
-    permissionManager: { getMode: () => 'prompt' } as OrchestratorOptions['permissionManager'],
+    permissionManager: { getMode: () => 'safe-owner' } as OrchestratorOptions['permissionManager'],
     services: { agentManager: { list: () => [], spawn: () => { spawned++; throw new Error('legacy spawn'); } }, contractRunner: { list: () => [] },
       contractIntake: { intake: async () => { intakeCalls++; return { kind: 'turn' }; } } } });
   instance.setCoreServices({ configManager, providerRegistry, planManager });

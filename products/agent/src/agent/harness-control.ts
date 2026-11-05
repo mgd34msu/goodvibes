@@ -1,3 +1,4 @@
+import { readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import type { Ranked } from '@goodvibes-jev/judgment';
@@ -775,6 +776,12 @@ export async function setHarnessSetting(
     handle.set(coerced);
     return { key: setting.key, action: 'set', previous, current: handle.get(), scope: 'client', appliedBy: 'local' };
   }
+  if (setting.key === 'permissions.mode') {
+    const previous = readExecutionMode(configManager);
+    const mode = coerceHarnessSettingValue(setting, value);
+    await setExecutionMode(configManager, mode);
+    return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager) };
+  }
   const previous = postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key);
   const coerced = coerceHarnessSettingValue(setting, value);
   if (setting.type === 'string' && isSecretConfigKey(setting.key)) {
@@ -834,6 +841,11 @@ export async function resetHarnessSetting(
 ): Promise<HarnessSettingMutationResult> {
   const setting = findSetting(configManager, key);
   if (!setting) throw new Error(`Unknown setting ${key || '<missing>'}.`);
+  if (setting.key === 'permissions.mode') {
+    const previous = readExecutionMode(configManager);
+    await setExecutionMode(configManager, setting.default);
+    return { key: setting.key, action: 'reset', previous, current: readExecutionMode(configManager) };
+  }
   if (setting.kind === 'host') {
     const handle = configManager.getHostBooleanSetting(setting.key);
     const previous = handle.get();

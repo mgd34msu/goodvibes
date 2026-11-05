@@ -76,8 +76,7 @@ export function handleGlobalShortcutToken(
     return true;
   }
 
-  // Shift+Tab cycles the session permission mode (normal → accept-edits → plan
-  // → auto → normal), the settled convention. Handled here, hardcoded, like
+  // Shift+Tab cycles Safe owner → Safe Jev → YOLO → Safe owner. Handled here, hardcoded, like
   // escape/f2, because it is not in the keybinding table and bare Tab is
   // already heavily overloaded. Arrives as the legacy xterm backtab literal
   // ('\x1b[Z') OR, under a kitty/CSI-u terminal, as tab-with-shift. Only when

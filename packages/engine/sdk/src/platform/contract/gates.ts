@@ -8,30 +8,115 @@
  * whether its command exited zero are file-system and process facts, so all
  * of this is code.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { CONTRACT_CONFIG_DEFAULTS, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
+import { captureGateInput, gateDefinitionIdentity, type GateInputIdentity } from './gate-input.js';
+import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
+import type { ContractCheckedGate, GateResultOutcome } from '../../events/contract.js';
 
 /** One configured gate. */
 export interface QualityGate {
   name: string;
   command: string;
   enabled: boolean;
+  /** Required unavailable checks leave their acceptance obligation unverified. Tests are required by default. */
+  required?: boolean;
+  /** Assertion checks require a supported machine reporter or the registered completion protocol. */
+  verification?: 'command' | 'assertions';
 }
 
 /** The result of running one gate. */
 export interface QualityGateResult {
   gate: QualityGate['name'];
-  /** A skipped gate is recorded as passed, with the skip reason as its output. */
+  /** Compatibility display field. Only a completed, current check is passed. */
   passed: boolean;
   output: string;
   durationMs: number;
   /** True when the gate did not apply to the tree it ran against (for example, no script of that name). */
   skipped?: boolean | undefined;
+  /** Absent on historical records; new runs always distinguish unknown execution from a failed assertion. */
+  outcome?: GateResultOutcome;
+  required?: boolean;
+  reason?: string;
+  completion?: GateCompletion;
+  provenance?: {
+    readonly sourceBefore: string;
+    readonly sourceAfter: string;
+    readonly definitionBefore: string;
+    readonly definitionAfter: string;
+  };
+}
+
+interface GateCommandResult {
+  readonly passed: boolean;
+  readonly output: string;
+  readonly stdout: string;
+  readonly exitCode: number | null;
+  readonly kind: 'completed' | 'timeout' | 'tool-error';
+}
+
+const liveGateInputs = new WeakMap<QualityGateResult, () => GateInputIdentity>();
+const gateInvalidations = new WeakMap<QualityGateResult, (result: QualityGateResult) => void>();
+const invalidatedGates = new WeakMap<QualityGateResult, QualityGateResult>();
+
+const requiredGate = (gate: QualityGate): boolean => gate.required ?? (gate.name === 'test' || gate.verification === 'assertions');
+
+/** Historical booleans remain readable; an absent required assertion receipt never proves acceptance. */
+export function gateOutcome(result: QualityGateResult): GateResultOutcome {
+  if (result.outcome) return result.outcome;
+  if (result.skipped || (result.required === true && !result.completion)) return 'unverified';
+  return result.passed ? 'passed' : 'failed';
+}
+
+function unknownResult(result: QualityGateResult, reason: string): QualityGateResult {
+  const existing = invalidatedGates.get(result);
+  if (existing) return existing;
+  const revised: QualityGateResult = { ...result, outcome: 'unverified', passed: false, reason };
+  const current = liveGateInputs.get(result);
+  if (current) liveGateInputs.set(revised, current);
+  invalidatedGates.set(result, revised);
+  gateInvalidations.get(result)?.(revised);
+  return revised;
+}
+
+export function gateEventSummary(result: QualityGateResult): ContractCheckedGate {
+  return { gate: result.gate, passed: result.passed, skipped: result.skipped === true,
+    ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
+    ...(result.required === undefined ? {} : { required: result.required }),
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
+  };
+}
+
+/** Revalidate after asynchronous judgment; a saved receipt alone is not live evidence. */
+export function refreshGateResults(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
+  const captures = new Map<() => GateInputIdentity, GateInputIdentity | undefined>();
+  return (results ?? []).map(result => {
+    const invalidated = invalidatedGates.get(result);
+    if (invalidated) return invalidated;
+    if (!result.provenance || gateOutcome(result) !== 'passed') return result;
+    const capture = liveGateInputs.get(result);
+    if (!capture) return unknownResult(result, 'historical-check-requires-current-execution');
+    try {
+      if (!captures.has(capture)) captures.set(capture, capture());
+      const current = captures.get(capture);
+      if (!current) return unknownResult(result, 'source-identity-unavailable');
+      if (current.source !== result.provenance.sourceAfter) return unknownResult(result, 'source-changed-after-check');
+      if (current.definition !== result.provenance.definitionAfter) return unknownResult(result, 'check-definition-changed-after-check');
+      return result;
+    } catch { return unknownResult(result, 'source-identity-unavailable'); }
+  });
+}
+
+/** Required unknown checks cannot be promoted by a semantic reading. */
+export function unverifiedGates(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
+  return (results ?? []).filter(result => result.required === true && gateOutcome(result) === 'unverified');
 }
 
 /** The `scripts` of `cwd`'s package.json; empty when there is none or it cannot be read. */
@@ -52,10 +137,10 @@ const ESLINT_CONFIGS = [
 ] as const;
 
 /** Why a gate does not apply to `cwd`, or null when it does. */
-export function getSkippedGateReason(gateName: string, cwd: string, pkgScripts: Record<string, string>): string | null {
+export function getSkippedGateReason(gateName: string, cwd: string, pkgScripts: Record<string, string>, command?: string): string | null {
   if (gateName === 'typecheck' && !existsSync(join(cwd, 'tsconfig.json'))) return 'Skipped: no tsconfig.json found';
   if (gateName === 'lint' && !ESLINT_CONFIGS.some((file) => existsSync(join(cwd, file)))) return 'Skipped: no ESLint config found';
-  if (gateName === 'test' && !pkgScripts['test']) return 'Skipped: no test script in package.json';
+  if (gateName === 'test' && !pkgScripts['test'] && (command === undefined || command.trim() === 'bun run test')) return 'Skipped: no test script in package.json';
   if (gateName === 'build' && !pkgScripts['build']) return 'Skipped: no build script in package.json';
   return null;
 }
@@ -84,10 +169,12 @@ export async function executeGateCommand(
   cwd?: string,
   timeoutMs: number = CONTRACT_CONFIG_DEFAULTS.gateTimeoutMs,
   signal?: AbortSignal,
-): Promise<{ passed: boolean; output: string }> {
+  environment?: Readonly<Record<string, string>>,
+): Promise<GateCommandResult> {
   try {
     signal?.throwIfAborted();
-    const proc = Bun.spawn(['/bin/sh', '-c', command], { detached: true, stdout: 'pipe', stderr: 'pipe', ...(cwd ? { cwd } : {}) });
+    const proc = Bun.spawn(['/bin/sh', '-c', command], { detached: true, stdout: 'pipe', stderr: 'pipe',
+      ...(environment ? { env: { ...process.env, ...environment } } : {}), ...(cwd ? { cwd } : {}) });
     const cancel = () => killGateProcess(proc, 'cancellation');
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
@@ -120,10 +207,10 @@ export async function executeGateCommand(
       .filter(Boolean)
       .join('\n')
       .trim();
-    return { passed: exitCode === 0 && !timedOut, output };
+    return { passed: exitCode === 0 && !timedOut, output, stdout, exitCode, kind: timedOut ? 'timeout' : 'completed' };
   } catch (error) {
     signal?.throwIfAborted();
-    return { passed: false, output: summarizeError(error) };
+    return { passed: false, output: summarizeError(error), stdout: '', exitCode: null, kind: 'tool-error' };
   }
 }
 
@@ -143,44 +230,81 @@ export interface RunContractGatesOptions {
 /**
  * Runs every enabled `contract.gates` entry in order against `cwd`, each under
  * `contract.gateTimeoutMs`. A gate that does not apply is recorded as a
- * skipped pass. Every result is emitted as CONTRACT_GATE_RESULT.
+ * unverified result when unavailable. Every result is emitted as CONTRACT_GATE_RESULT.
  */
 export async function runContractGates(options: RunContractGatesOptions): Promise<QualityGateResult[]> {
-  const gates = getEnabledContractGates(options.configManager);
+  const gates = getEnabledContractGates(options.configManager).map(gate => Object.freeze({ ...gate }));
   if (gates.length === 0) return [];
+  const expectedDefinition = gateDefinitionIdentity(gates);
   const timeoutMs = getContractGateTimeoutMs(options.configManager);
-  const pkgScripts = await loadPackageScripts(options.cwd);
   const results: QualityGateResult[] = [];
+  const capture = () => captureGateInput(options.cwd, getEnabledContractGates(options.configManager));
+  const emitResult = (result: QualityGateResult): void => {
+    emitContractEvent(options.runtimeBus, options.sessionId, {
+      type: 'CONTRACT_GATE_RESULT', contractId: options.contractId, targetId: options.targetId,
+      ...gateEventSummary(result), durationMs: result.durationMs,
+    });
+  };
 
   for (const gate of gates) {
     options.signal?.throwIfAborted();
-    const skipReason = getSkippedGateReason(gate.name, options.cwd, pkgScripts);
     const startedAt = Date.now();
-    const run = skipReason === null ? await executeGateCommand(gate.command, options.cwd, timeoutMs, options.signal) : { passed: true, output: skipReason };
-    const result: QualityGateResult = {
-      gate: gate.name,
-      passed: run.passed,
-      output: run.output,
-      durationMs: skipReason === null ? Date.now() - startedAt : 0,
-      skipped: skipReason !== null,
+    let before: GateInputIdentity | undefined;
+    try { before = capture(); } catch { /* An incomplete source inventory never proves current check evidence. */ }
+    const skipReason = before ? getSkippedGateReason(gate.name, options.cwd, { ...before.packageScripts }, gate.command) : null;
+    let result: QualityGateResult = { gate: gate.name, passed: false, outcome: 'unverified', required: requiredGate(gate),
+      output: skipReason ?? '', durationMs: 0, skipped: skipReason !== null,
+      ...(before ? {} : { reason: 'source-identity-unavailable' }),
     };
+    if (before && before.definition !== expectedDefinition) result.reason = 'check-definition-changed-before-check';
+    else if (skipReason !== null) result.reason = 'not-applicable';
+    else {
+      if (before) {
+        const directory = mkdtempSync(join(tmpdir(), 'goodvibes-gate-'));
+        const report = join(directory, 'result.xml');
+        try {
+          const assertions = gate.verification === 'assertions' || gate.name === 'test';
+          const instrumented = assertions ? bunTestCommand(gate.command, before.packageScripts, report) : undefined;
+          const runId = randomUUID();
+          const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal,
+            { GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId });
+          result.output = run.output;
+          result.durationMs = Date.now() - startedAt;
+          let completion: GateCompletion | undefined;
+          if (run.kind === 'completed') {
+            if (assertions) {
+              try { completion = instrumented ? junitCompletion(readFileSync(report, 'utf8')) : protocolCompletion(run.stdout, gate.name, runId); }
+              catch { /* Missing reporter output is unverified execution. */ }
+            } else if (run.exitCode !== null) completion = { kind: 'command-exit', exitCode: run.exitCode };
+          }
+          if (completion) result.completion = completion;
+          if (run.kind !== 'completed') result.reason = run.kind;
+          else if (!completion) result.reason = 'check-completion-unverified';
+          else if (completion.kind === 'assertions') {
+            if (completion.checks.failed > 0 && run.exitCode !== 0) { result.outcome = 'failed'; result.reason = 'assertion-failure'; }
+            else if (completion.checks.failed === 0 && run.exitCode === 0) { result.outcome = 'passed'; result.passed = true; }
+            else result.reason = 'inconsistent-check-result';
+          } else { result.outcome = run.passed ? 'passed' : 'failed'; result.passed = run.passed; }
+          try {
+            const after = capture();
+            result.provenance = { sourceBefore: before.source, sourceAfter: after.source, definitionBefore: before.definition, definitionAfter: after.definition };
+            if (before.source !== after.source) result = unknownResult(result, 'source-changed-during-check');
+            else if (before.definition !== after.definition) result = unknownResult(result, 'check-definition-changed-during-check');
+            liveGateInputs.set(result, capture);
+          } catch { result = unknownResult(result, 'source-identity-unavailable'); }
+        } finally { rmSync(directory, { recursive: true, force: true }); }
+      }
+    }
     results.push(result);
-    emitContractEvent(options.runtimeBus, options.sessionId, {
-      type: 'CONTRACT_GATE_RESULT',
-      contractId: options.contractId,
-      targetId: options.targetId,
-      gate: gate.name,
-      passed: result.passed,
-      skipped: result.skipped === true,
-      durationMs: result.durationMs,
-    });
+    gateInvalidations.set(result, emitResult);
+    emitResult(result);
     options.onResult?.(results.slice(), result);
     logger.debug('contract gates: gate result', { contractId: options.contractId, targetId: options.targetId, gate: gate.name, passed: result.passed, skipped: result.skipped });
   }
-  return results;
+  return refreshGateResults(results);
 }
 
 /** Gates that ran and failed; a skipped gate never fails. */
 export function failedGates(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
-  return (results ?? []).filter((result) => !result.passed && result.skipped !== true);
+  return (results ?? []).filter((result) => gateOutcome(result) === 'failed');
 }

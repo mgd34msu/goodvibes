@@ -3,6 +3,7 @@ import { isTerminalContractStatus } from '../contract/types.js';
 import type { ContractView } from '../contract/types.js';
 import { hashState } from '@goodvibes-jev/judgment';
 import { goalObligationSource } from '../contract/goal-obligation-proof.js';
+import { originalObligationSource } from '../contract/batteries/original-obligation-coverage.js';
 
 // Process-local provenance: copied tool JSON cannot mint a native work receipt.
 // These are work checkpoints, never final-response publication permits.
@@ -13,7 +14,7 @@ export function isNativeCompletedWorkReceipt(original: unknown, admitted: unknow
   return digest !== undefined && digest === hashState(admitted as Parameters<typeof hashState>[0]);
 }
 
-function recordedReview(contract: ContractView, target: string) {
+function recordedReview(contract: ContractView, target: 'final-answer-review' | 'goal-obligations' | 'original-obligations') {
   const decision = contract.decisions.findLast(entry => entry.targetId === `${contract.id}.${target}`);
   if (!decision) return null;
   try {
@@ -34,11 +35,17 @@ function recordedReview(contract: ContractView, target: string) {
         ? record.schemaVersion === 2 && digest(record.evidenceDigest) && ids(record.fulfillmentDecisionIds)
           && version(policy.fulfillment) && version(policy.content) && ['high', 'critical'].includes(String(policy.stakes))
           && object(record.readings) && reading(record.readings.unfinished) && reading(record.readings.unsupported)
-        : record.schemaVersion === 1 && version(policy) && digest(record.literalSourceDigest) && ids(record.sourceJudgmentDecisionIds)
-          && reading(record.reading) && reading(record.sourceGoal));
+        : target === 'original-obligations'
+          ? record.schemaVersion === 1 && version(policy) && digest(record.sourceDigest) && digest(record.evidenceDigest)
+            && object(record.reading) && reading(record.reading) && record.passed === (record.reading.verdict === 'no')
+            && ids(decision.decisionIds) && JSON.stringify(record.decisionIds) === JSON.stringify(decision.decisionIds)
+            && decision.decisionIds.every(id => contract.checks.at(-1)?.decisionIds.includes(id))
+          : record.schemaVersion === 1 && version(policy) && digest(record.literalSourceDigest) && ids(record.sourceJudgmentDecisionIds)
+            && reading(record.reading) && reading(record.sourceGoal));
     return { record, recordedDecisionId: decision.id, wellFormed,
       matchesSavedAnswer: wellFormed && typeof contract.answer === 'string' && record.outputDigest === hashState(contract.answer),
       ...(target === 'goal-obligations' ? { matchesOriginalScope: wellFormed && record.literalSourceDigest === hashState(goalObligationSource(contract)) } : {}),
+      ...(target === 'original-obligations' ? { matchesOriginalScope: wellFormed && record.sourceDigest === hashState(originalObligationSource(contract)) } : {}),
       meaning: 'Exact saved native Jev receipt with host-computed bindings. A mismatched or rejected receipt is not acceptance. A matching passed receipt establishes review of that saved result under its recorded policy; it grants no current final-response permit.' };
   } catch { return null; }
 }
@@ -50,6 +57,8 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
   return runner.list({ sessionId, includeTerminal: true, includeInputSnapshot: false })
     .filter(contract => contract.sessionId === sessionId && isTerminalContractStatus(contract.status))
     .map(contract => {
+      const originalObligationCoverage = recordedReview(contract, 'original-obligations');
+      const hasOriginalObligationCoverage = contract.decisions.some(decision => decision.targetId === `${contract.id}.original-obligations`);
       const work = {
       kind: 'host-completed-contract', id: contract.id, sessionId: contract.sessionId,
       projectRoot: contract.projectRoot, ask: contract.ask, goal: contract.goal,
@@ -64,6 +73,7 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
       savedAnswerDigest: typeof contract.answer === 'string' ? hashState(contract.answer) : null,
       contentReview: recordedReview(contract, 'final-answer-review'),
       goalCoverage: recordedReview(contract, 'goal-obligations'),
+      ...(originalObligationCoverage ? { originalObligationCoverage } : {}),
       units: contract.units.map(unit => ({ id: unit.id, goal: unit.goal, status: unit.status,
         check: unit.checks.at(-1) ?? null })),
       answer: contract.answer ?? null, publication: contract.commit ?? null,
@@ -72,8 +82,11 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
       };
       if (projectRoot && projectRoot === work.projectRoot && work.status === 'passed' && work.finalCheck?.result === 'pass'
         && work.contentReview?.wellFormed && work.contentReview.matchesSavedAnswer && work.contentReview.record.passed === true
-        && work.goalCoverage?.wellFormed && work.goalCoverage.matchesSavedAnswer && work.goalCoverage.matchesOriginalScope
-        && work.goalCoverage.record.passed === true && ['applied', 'committed'].includes(String(work.publication?.status)))
+        && ((work.originalObligationCoverage?.wellFormed && work.originalObligationCoverage.matchesSavedAnswer && work.originalObligationCoverage.matchesOriginalScope
+          && work.originalObligationCoverage.record.passed === true)
+          || (!hasOriginalObligationCoverage && work.goalCoverage?.wellFormed && work.goalCoverage.matchesSavedAnswer && work.goalCoverage.matchesOriginalScope
+            && work.goalCoverage.record.passed === true))
+        && ['applied', 'committed'].includes(String(work.publication?.status)))
         nativeWorkReceipts.set(work, hashState(work as unknown as Parameters<typeof hashState>[0]));
       return work;
     });

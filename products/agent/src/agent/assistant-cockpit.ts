@@ -1,3 +1,4 @@
+import { presetForMode } from '@goodvibes-jev/engine/sdk/platform/gate';
 import type { AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
 
 export type AssistantCockpitLaneState = 'ready' | 'attention' | 'setup';
@@ -223,7 +224,7 @@ export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentWorksp
   ].filter(Boolean).length;
   const runningWork = snapshot.researchRunRunningCount + snapshot.researchRunBlockedCount;
   const securityFindings = [
-    snapshot.permissionMode === 'allow-all',
+    presetForMode(snapshot.permissionMode).name === 'yolo',
     snapshot.rawPromptTelemetry,
     snapshot.browserToolExposureEnabled,
     snapshot.mcpQuarantinedServerCount > 0,

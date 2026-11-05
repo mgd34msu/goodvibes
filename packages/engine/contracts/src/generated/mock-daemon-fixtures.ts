@@ -4233,7 +4233,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "plan",
+        "permissionMode": "safe-owner",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -4254,7 +4254,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "channelId": "sample",
           "model": "sample",
           "provider": "sample",
-          "permissionMode": "plan",
+          "permissionMode": "safe-owner",
           "updatedAt": 0,
           "metadata": {}
         }
@@ -4275,7 +4275,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "plan",
+        "permissionMode": "safe-owner",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -5684,7 +5684,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "passed": false,
                   "output": "sample",
                   "durationMs": 0,
-                  "skipped": false
+                  "skipped": false,
+                  "outcome": "passed",
+                  "required": false,
+                  "reason": "sample",
+                  "completion": {
+                    "kind": "command-exit",
+                    "exitCode": 0
+                  },
+                  "provenance": {
+                    "sourceBefore": "sample",
+                    "sourceAfter": "sample",
+                    "definitionBefore": "sample",
+                    "definitionAfter": "sample"
+                  }
                 }
               ],
               "goal": {
@@ -5840,7 +5853,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "passed": false,
                   "output": "sample",
                   "durationMs": 0,
-                  "skipped": false
+                  "skipped": false,
+                  "outcome": "passed",
+                  "required": false,
+                  "reason": "sample",
+                  "completion": {
+                    "kind": "command-exit",
+                    "exitCode": 0
+                  },
+                  "provenance": {
+                    "sourceBefore": "sample",
+                    "sourceAfter": "sample",
+                    "definitionBefore": "sample",
+                    "definitionAfter": "sample"
+                  }
                 }
               ],
               "goal": {
@@ -6089,7 +6115,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "passed": false,
                       "output": "sample",
                       "durationMs": 0,
-                      "skipped": false
+                      "skipped": false,
+                      "outcome": "passed",
+                      "required": false,
+                      "reason": "sample",
+                      "completion": {
+                        "kind": "command-exit",
+                        "exitCode": 0
+                      },
+                      "provenance": {
+                        "sourceBefore": "sample",
+                        "sourceAfter": "sample",
+                        "definitionBefore": "sample",
+                        "definitionAfter": "sample"
+                      }
                     }
                   ],
                   "goal": {
@@ -6308,7 +6347,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "passed": false,
               "output": "sample",
               "durationMs": 0,
-              "skipped": false
+              "skipped": false,
+              "outcome": "passed",
+              "required": false,
+              "reason": "sample",
+              "completion": {
+                "kind": "command-exit",
+                "exitCode": 0
+              },
+              "provenance": {
+                "sourceBefore": "sample",
+                "sourceAfter": "sample",
+                "definitionBefore": "sample",
+                "definitionAfter": "sample"
+              }
             }
           ],
           "goal": {
@@ -6811,7 +6863,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "passed": false,
                       "output": "sample",
                       "durationMs": 0,
-                      "skipped": false
+                      "skipped": false,
+                      "outcome": "passed",
+                      "required": false,
+                      "reason": "sample",
+                      "completion": {
+                        "kind": "command-exit",
+                        "exitCode": 0
+                      },
+                      "provenance": {
+                        "sourceBefore": "sample",
+                        "sourceAfter": "sample",
+                        "definitionBefore": "sample",
+                        "definitionAfter": "sample"
+                      }
                     }
                   ],
                   "goal": {
@@ -6967,7 +7032,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "passed": false,
                       "output": "sample",
                       "durationMs": 0,
-                      "skipped": false
+                      "skipped": false,
+                      "outcome": "passed",
+                      "required": false,
+                      "reason": "sample",
+                      "completion": {
+                        "kind": "command-exit",
+                        "exitCode": 0
+                      },
+                      "provenance": {
+                        "sourceBefore": "sample",
+                        "sourceAfter": "sample",
+                        "definitionBefore": "sample",
+                        "definitionAfter": "sample"
+                      }
                     }
                   ],
                   "goal": {
@@ -7216,7 +7294,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                           "passed": false,
                           "output": "sample",
                           "durationMs": 0,
-                          "skipped": false
+                          "skipped": false,
+                          "outcome": "passed",
+                          "required": false,
+                          "reason": "sample",
+                          "completion": {
+                            "kind": "command-exit",
+                            "exitCode": 0
+                          },
+                          "provenance": {
+                            "sourceBefore": "sample",
+                            "sourceAfter": "sample",
+                            "definitionBefore": "sample",
+                            "definitionAfter": "sample"
+                          }
                         }
                       ],
                       "goal": {
@@ -7435,7 +7526,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "passed": false,
                   "output": "sample",
                   "durationMs": 0,
-                  "skipped": false
+                  "skipped": false,
+                  "outcome": "passed",
+                  "required": false,
+                  "reason": "sample",
+                  "completion": {
+                    "kind": "command-exit",
+                    "exitCode": 0
+                  },
+                  "provenance": {
+                    "sourceBefore": "sample",
+                    "sourceAfter": "sample",
+                    "definitionBefore": "sample",
+                    "definitionAfter": "sample"
+                  }
                 }
               ],
               "goal": {
@@ -7954,7 +8058,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "passed": false,
                     "output": "sample",
                     "durationMs": 0,
-                    "skipped": false
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
                   }
                 ],
                 "goal": {
@@ -8110,7 +8227,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "passed": false,
                     "output": "sample",
                     "durationMs": 0,
-                    "skipped": false
+                    "skipped": false,
+                    "outcome": "passed",
+                    "required": false,
+                    "reason": "sample",
+                    "completion": {
+                      "kind": "command-exit",
+                      "exitCode": 0
+                    },
+                    "provenance": {
+                      "sourceBefore": "sample",
+                      "sourceAfter": "sample",
+                      "definitionBefore": "sample",
+                      "definitionAfter": "sample"
+                    }
                   }
                 ],
                 "goal": {
@@ -8359,7 +8489,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                         "passed": false,
                         "output": "sample",
                         "durationMs": 0,
-                        "skipped": false
+                        "skipped": false,
+                        "outcome": "passed",
+                        "required": false,
+                        "reason": "sample",
+                        "completion": {
+                          "kind": "command-exit",
+                          "exitCode": 0
+                        },
+                        "provenance": {
+                          "sourceBefore": "sample",
+                          "sourceAfter": "sample",
+                          "definitionBefore": "sample",
+                          "definitionAfter": "sample"
+                        }
                       }
                     ],
                     "goal": {
@@ -8578,7 +8721,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "passed": false,
                 "output": "sample",
                 "durationMs": 0,
-                "skipped": false
+                "skipped": false,
+                "outcome": "passed",
+                "required": false,
+                "reason": "sample",
+                "completion": {
+                  "kind": "command-exit",
+                  "exitCode": 0
+                },
+                "provenance": {
+                  "sourceBefore": "sample",
+                  "sourceAfter": "sample",
+                  "definitionBefore": "sample",
+                  "definitionAfter": "sample"
+                }
               }
             ],
             "goal": {
@@ -21656,6 +21812,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -21723,6 +21881,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -21781,6 +21941,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -21827,6 +21989,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -21933,6 +22097,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -22005,6 +22171,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
+        "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
         ]
@@ -22045,6 +22212,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
+        "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
         ]
@@ -22078,6 +22246,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
+        "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
         ]
@@ -22111,6 +22280,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
+        "permissionMode": "safe-owner",
         "contractIds": [
           "sample"
         ]
@@ -22145,6 +22315,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "terminatedReason": "sample",
           "restoredFromDisk": false,
           "originSurface": "sample",
+          "permissionMode": "safe-owner",
           "contractIds": [
             "sample"
           ]
@@ -22281,6 +22452,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -22401,6 +22574,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
+          "channelPermissionMode": "safe-owner",
+          "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
             "sample"
@@ -22461,6 +22636,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -22515,7 +22692,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "sessionId": "sample",
-      "mode": "plan"
+      "mode": "safe-owner"
     }
   },
   "sessions.permissionMode.set": {
@@ -22527,8 +22704,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "sessionId": "sample",
-      "mode": "plan",
-      "previousMode": "plan"
+      "mode": "safe-owner",
+      "previousMode": "safe-owner"
     }
   },
   "sessions.queuedMessages.delete": {
@@ -22596,6 +22773,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -22646,6 +22825,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"
@@ -22690,6 +22871,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
+          "channelPermissionMode": "safe-owner",
+          "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
             "sample"
@@ -22739,6 +22922,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
+        "channelPermissionMode": "safe-owner",
+        "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
           "sample"

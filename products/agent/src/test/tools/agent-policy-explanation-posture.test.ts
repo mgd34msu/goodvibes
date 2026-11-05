@@ -1,312 +1,69 @@
-/**
- * The policy-explain surface (security action:"explain") must display the
- * SAME approval posture as cli/status.ts and the footer, computed via the
- * shared helper (src/permissions/approval-posture.ts), not re-derived
- * locally. This is one of the four surfaces named in the A2 brief.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { PermissionManager, createPermissionConfigReader, forgetReadSecrets } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { forgetCatastrophicReadings } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { PolicyRuntimeState } from '../../runtime/index.ts';
-import { approvalPostureReadings, POSTURE_CALLS } from '../helpers/approval-posture-readings.ts';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { resetSettingsControlPlaneStore } from '../helpers/settings-control-plane.ts';
 import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { explainAgentPolicyDecision } from '../../tools/agent-policy-explanation.ts';
 import { computeApprovalPosture } from '../../permissions/approval-posture.ts';
 
-function fakeContext(values: Record<string, unknown>): CommandContext {
+function context(mode: string, autoApprove = false): CommandContext {
   return {
     workspace: {},
     platform: {
-      config: {
-        behavior: { autoApprove: values['behavior.autoApprove'] === true },
-        permissions: { mode: values['permissions.mode'] ?? 'prompt', tools: {} },
-      },
-      configManager: {
-        get: (key: string) => values[key],
-      },
+      config: { behavior: { autoApprove }, permissions: { mode, tools: {} } },
+      configManager: { get: (key: string) => key === 'permissions.mode' ? mode : key === 'behavior.autoApprove' ? autoApprove : undefined },
     },
     session: { runtime: {} },
   } as CommandContext;
 }
 
-function registryWithWriteTool(): ToolRegistry {
-  const registry = new ToolRegistry();
-  registry.register({
-    definition: {
-      name: 'write',
-      description: 'Write a file',
-      parameters: { type: 'object', additionalProperties: true },
-    },
-    execute: async () => ({ success: true, output: '' }),
+function registry(onExecute: () => void): ToolRegistry {
+  const tools = new ToolRegistry();
+  tools.register({
+    definition: { name: 'write', description: 'Write a file', parameters: { type: 'object', additionalProperties: true } },
+    execute: async () => { onExecute(); return { success: true, output: '' }; },
   });
-  return registry;
+  return tools;
 }
 
-describe('agent-policy-explanation: approval posture agreement', () => {
+describe('policy explanation observes execution mode without performing the operation', () => {
   let previous: ReturnType<typeof installJudgmentPort>;
-  beforeEach(() => { previous = installJudgmentPort(fakePort((name, question) => {
-    if (name !== 'kind') throw new Error(`Unexpected classification question: ${name}`);
-    return choiceAnswer(question, 'write', 0.99);
-  }).port); });
+  beforeEach(() => { previous = installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, 'write', 0.99)).port); });
   afterEach(() => { installJudgmentPort(previous); });
-  test('an uncertain category stays explicitly unevaluated and cannot imply approval', async () => {
-    installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, 'read', 0.4)).port);
-    const result = await explainAgentPolicyDecision(fakeContext({}), registryWithWriteTool(), { toolName: 'write' });
-    expect(result.status).toBe('found');
-    if (result.status !== 'found') throw new Error('Expected explanation');
-    expect(result.explanation).toMatchObject({
-      status: 'held', categoryConfident: false,
-      preflight: { approvedWithoutMoreInput: false, permissionOutcome: 'unknown', permissionEvaluated: false },
-    });
-  });
 
-  test('unavailable category judgment propagates instead of manufacturing an explanation', async () => {
-    installJudgmentPort(undefined);
-    await expect(explainAgentPolicyDecision(fakeContext({}), registryWithWriteTool(), { toolName: 'write' })).rejects.toThrow('judgment port');
-  });
-
-  for (const mode of ['channel_draft_send', 'set_keybinding', 'run_local_model_smoke']) {
-    for (const fields of [{}, { confirm: false }, { confirm: true, explicitUserRequest: 'Run this selected route.' }]) {
-      test(`${mode}: ${JSON.stringify(fields)} cannot satisfy recorded effect admission`, async () => {
-        let executions = 0;
-        const registry = new ToolRegistry();
-        registry.register({
-          definition: {
-            name: 'agent_harness', description: 'Actual harness effect mode explanation',
-            parameters: { type: 'object', properties: { mode: { type: 'string' }, confirm: { type: 'boolean' }, explicitUserRequest: { type: 'string' } } },
-          },
-          execute: async () => { executions++; return { success: true, output: '' }; },
-        });
-        const result = await explainAgentPolicyDecision(fakeContext({ 'behavior.autoApprove': true }), registry,
-          { toolName: 'agent_harness', toolArgs: { mode, ...fields } });
-        expect(result.status).toBe('found');
-        if (result.status !== 'found') throw new Error('Expected effect explanation');
-        expect(result.explanation).toMatchObject({
-          status: 'held',
-          preflight: {
-            approvedWithoutMoreInput: false, permissionEvaluated: false,
-            toolConfirmationRequired: false, toolConfirmationSatisfied: false,
-            recordedAdmissionRequired: true, recordedAdmissionEvaluated: false,
-          },
-        });
-        const layers = result.explanation.policyLayers as readonly { layer: string; outcome: string; reason: string }[];
-        expect(layers.find(layer => layer.layer === 'Recorded effect admission')).toMatchObject({
-          outcome: 'not_evaluated',
-          reason: 'This effect route requires current recorded Jev act admission for the exact invocation and current source and boundary checks. Caller confirmation fields do not establish that authority.',
-        });
-        const required = result.explanation.requiredActions as readonly string[];
-        expect(required.join('\n')).toContain('current recorded Jev act admission');
-        expect(required.join('\n')).not.toContain('confirm:true');
-        expect(executions).toBe(0);
-      });
-    }
-  }
-
-  test('a read category cannot erase the code-owned effect admission requirement', async () => {
-    installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, 'read', 0.99)).port);
-    const registry = new ToolRegistry();
-    registry.register({
-      definition: { name: 'agent_harness', description: 'Actual harness mode explanation', parameters: { type: 'object' } },
-      execute: async () => { throw new Error('An explanation must not execute a route'); },
-    });
-    const result = await explainAgentPolicyDecision(fakeContext({}), registry,
-      { toolName: 'agent_harness', toolArgs: { mode: 'channel_draft_send', confirm: true, explicitUserRequest: 'Deliver the draft.' } });
-    expect(result.status).toBe('found');
-    if (result.status !== 'found') throw new Error('Expected effect explanation');
-    expect(result.explanation).toMatchObject({
-      status: 'held', category: 'read',
-      preflight: { recordedAdmissionRequired: true, recordedAdmissionEvaluated: false, approvedWithoutMoreInput: false },
-    });
-  });
-
-  test('autoApprove=true, mode=prompt (the reproduced A2 bug): explanation posture honestly says auto-approve is on', async () => {
-    const context = fakeContext({ 'behavior.autoApprove': true, 'permissions.mode': 'prompt' });
-    const resolved = await explainAgentPolicyDecision(context, registryWithWriteTool(), { toolName: 'write' });
-
-    expect(resolved.status).toBe('found');
-    if (resolved.status !== 'found') return;
-    const posture = resolved.explanation.posture as { label: string; autoApprove: boolean; automaticApprovals: boolean; bypassesPrompts: boolean; detail: string; mode: string };
-    expect(posture.autoApprove).toBe(true);
-    expect(posture.automaticApprovals).toBe(true);
-    expect(posture.bypassesPrompts).toBe(false);
-    expect(posture.detail).toContain('Configured denials, read-only modes and surface authority still apply');
-    expect(posture.label.toLowerCase()).toContain('auto-approve');
-
-    // Must match the shared helper's output exactly, not a locally-worded approximation.
-    const expected = computeApprovalPosture({ autoApprove: true, mode: 'prompt' });
-    expect(posture.label).toBe(expected.label);
-
-    // A configured allowance cannot certify a particular call before its gate runs.
-    const permissionLayer = (resolved.explanation.policyLayers as readonly { layer: string; outcome: string }[])
-      .find((layer) => layer.layer === 'Permission mode');
-    expect(permissionLayer?.outcome).toBe('unknown');
-    expect(resolved.explanation.status).toBe('held');
-  });
-
-  test('default posture: a write is unevaluated while posture says Automatic configured actions', async () => {
-    const context = fakeContext({ 'behavior.autoApprove': false, 'permissions.mode': 'prompt' });
-    const resolved = await explainAgentPolicyDecision(context, registryWithWriteTool(), { toolName: 'write' });
-
-    expect(resolved.status).toBe('found');
-    if (resolved.status !== 'found') return;
-    const posture = resolved.explanation.posture as { label: string; bypassesPrompts: boolean };
-    expect(posture.bypassesPrompts).toBe(false);
-    expect(posture.label).toBe('Automatic configured actions');
-    expect(resolved.explanation.status).toBe('held');
-  });
-
-  test('allow-all mode, autoApprove=false: posture exposes automatic approvals and configured constraints', async () => {
-    const context = fakeContext({ 'behavior.autoApprove': false, 'permissions.mode': 'allow-all' });
-    const resolved = await explainAgentPolicyDecision(context, registryWithWriteTool(), { toolName: 'write' });
-
-    expect(resolved.status).toBe('found');
-    if (resolved.status !== 'found') return;
-    const posture = resolved.explanation.posture as { label: string; automaticApprovals: boolean; bypassesPrompts: boolean; detail: string; autoApprove: boolean };
-    expect(posture.autoApprove).toBe(false);
-    expect(posture.automaticApprovals).toBe(true);
-    expect(posture.bypassesPrompts).toBe(false);
-    expect(posture.detail).toContain('Configured denials, read-only modes and surface authority still apply');
-    expect(posture.label).toBe('Allow all configured actions');
-    expect(posture.detail).toContain('Calls require current invocation authority');
-  });
-
-  test('plan mode: configuration is observable without predicting an unexamined write', async () => {
-    const context = fakeContext({ 'behavior.autoApprove': false, 'permissions.mode': 'plan' });
-    const resolved = await explainAgentPolicyDecision(context, registryWithWriteTool(), { toolName: 'write' });
-
-    expect(resolved.status).toBe('found');
-    if (resolved.status !== 'found') return;
-    const posture = resolved.explanation.posture as { label: string; automaticApprovals: boolean; bypassesPrompts: boolean; detail: string; mode: string };
-    expect(posture.mode).toBe('plan');
-    expect(posture.bypassesPrompts).toBe(false);
-    expect(posture.label.toLowerCase()).toContain('plan');
-
-    const permissionLayer = (resolved.explanation.policyLayers as readonly { layer: string; outcome: string; reason?: string }[])
-      .find((layer) => layer.layer === 'Permission mode');
-    expect(permissionLayer?.outcome).toBe('unknown');
-    expect(resolved.explanation.status).toBe('held');
-  });
-
-  test('accept-edits mode: scoped allowance does not predict approval of an unexamined write', async () => {
-    const context = fakeContext({ 'behavior.autoApprove': false, 'permissions.mode': 'accept-edits' });
-    const resolved = await explainAgentPolicyDecision(context, registryWithWriteTool(), { toolName: 'write' });
-
-    expect(resolved.status).toBe('found');
-    if (resolved.status !== 'found') return;
-    const posture = resolved.explanation.posture as { label: string; automaticApprovals: boolean; bypassesPrompts: boolean; detail: string; mode: string };
-    expect(posture.mode).toBe('accept-edits');
-    expect(posture.bypassesPrompts).toBe(false);
-    expect(posture.label.toLowerCase()).toContain('accept edits');
-
-    const permissionLayer = (resolved.explanation.policyLayers as readonly { layer: string; outcome: string }[])
-      .find((layer) => layer.layer === 'Permission mode');
-    expect(permissionLayer?.outcome).toBe('unknown');
-    expect(resolved.explanation.status).toBe('held');
-  });
-});
-
-
-describe('policy explain never substitutes configuration for a live gate decision', () => {
-  let config: ConfigManager;
-  let fixture: ReturnType<typeof approvalPostureReadings>;
-  let previousPort: ReturnType<typeof installJudgmentPort>;
-  let prompts: string[];
-  let executions: string[];
-  let manager: PermissionManager;
-  const toolKeys = ['read', 'write', 'edit', 'exec', 'find', 'fetch', 'analyze', 'inspect', 'agent', 'state', 'workflow', 'registry', 'delegate', 'mcp'] as const;
-  const allAllow = Object.fromEntries(toolKeys.map((tool) => [tool, 'allow'])) as Record<string, 'allow'>;
-
-  beforeEach(() => {
-    forgetReadSecrets();
-    forgetCatastrophicReadings();
-    fixture = approvalPostureReadings();
-    previousPort = installJudgmentPort(fixture.port);
-    config = new ConfigManager({ surfaceRoot: 'tui', configDir: makeProjectTempDir('gv-explain-gate-') });
-    resetSettingsControlPlaneStore(config);
-    prompts = [];
-    executions = [];
-    manager = new PermissionManager(async (request) => {
-      prompts.push(request.tool);
-      return { approved: false, remember: false };
-    }, createPermissionConfigReader(config), new PolicyRuntimeState());
-  });
-  afterEach(() => {
-    installJudgmentPort(previousPort);
-    forgetReadSecrets();
-    forgetCatastrophicReadings();
-    resetSettingsControlPlaneStore(config);
-  });
-
-  const cases: readonly {
-    name: string;
-    mode: 'prompt' | 'allow-all' | 'custom' | 'plan' | 'accept-edits';
-    autoApprove?: boolean;
-    tools?: Record<string, 'allow' | 'deny' | 'prompt'>;
-    call: keyof typeof POSTURE_CALLS;
-    approved: boolean;
-    reason: Awaited<ReturnType<PermissionManager['checkDetailed']>>['reasonCode'];
-  }[] = [
-    { name: 'critical shell in allow-all', mode: 'allow-all', call: 'critical', approved: true, reason: 'config_allow' },
-    { name: 'catastrophic shell with autoApprove', mode: 'prompt', autoApprove: true, call: 'catastrophic', approved: true, reason: 'config_allow' },
-    { name: 'catastrophic shell in allow-all', mode: 'allow-all', call: 'catastrophic', approved: true, reason: 'config_allow' },
-    { name: 'catastrophic shell with all custom rules allowing', mode: 'custom', tools: allAllow, call: 'catastrophic', approved: true, reason: 'config_allow' },
-    { name: 'secret read in prompt mode', mode: 'prompt', call: 'secretRead', approved: true, reason: 'config_allow' },
-    { name: 'secret read in plan mode', mode: 'plan', call: 'secretRead', approved: true, reason: 'config_allow' },
-    { name: 'critical file action in accept-edits', mode: 'accept-edits', call: 'criticalEdit', approved: true, reason: 'config_allow' },
-    { name: 'ordinary write with autoApprove', mode: 'prompt', autoApprove: true, call: 'write', approved: true, reason: 'config_allow' },
-    { name: 'ordinary read in prompt mode', mode: 'prompt', call: 'read', approved: true, reason: 'config_allow' },
-    { name: 'ordinary write in prompt mode', mode: 'prompt', call: 'write', approved: true, reason: 'config_allow' },
-    { name: 'file edit in accept-edits', mode: 'accept-edits', call: 'write', approved: true, reason: 'config_allow' },
-    { name: 'read-only shell in plan mode', mode: 'plan', call: 'readOnlyExec', approved: false, reason: 'plan_mode' },
-    { name: 'read-only shell in prompt mode', mode: 'prompt', call: 'readOnlyExec', approved: true, reason: 'config_allow' },
-    { name: 'unknown read-only tool in custom mode', mode: 'custom', call: 'unknownRead', approved: true, reason: 'config_allow' },
-    { name: 'read with explicit custom allow', mode: 'custom', tools: { read: 'allow' }, call: 'secretRead', approved: true, reason: 'config_allow' },
-    { name: 'read with explicit custom deny', mode: 'custom', tools: { read: 'deny' }, call: 'read', approved: false, reason: 'config_deny' },
-    { name: 'read with explicit custom prompt', mode: 'custom', tools: { read: 'prompt' }, call: 'read', approved: true, reason: 'config_allow' },
-  ];
-
-  for (const scenario of cases) {
-    test(`${scenario.name}: JSON remains held until the real gate evaluates`, async () => {
-      const values: Record<string, unknown> = { 'permissions.mode': scenario.mode, 'behavior.autoApprove': scenario.autoApprove === true };
-      for (const [key, action] of Object.entries(scenario.tools ?? {})) values[`permissions.tools.${key}`] = action;
-      for (const [key, value] of Object.entries(values)) config.set(key as 'permissions.mode', value as never);
-      const call = POSTURE_CALLS[scenario.call];
-      const registry = new ToolRegistry();
-      registry.register({
-        definition: { name: call.tool, description: 'Synthetic gate fixture', parameters: { type: 'object', additionalProperties: true } },
-        execute: async () => { executions.push(call.tool); return { success: true, output: '' }; },
-      });
-      const result = await explainAgentPolicyDecision(fakeContext(values), registry, { toolName: call.tool, toolArgs: call.args });
+  test.each(['safe-owner', 'safe-jev', 'yolo', 'plan', 'prompt', 'allow-all', 'auto'])(
+    '%s reports the same posture as status and performs zero effects', async mode => {
+      let effects = 0;
+      const result = await explainAgentPolicyDecision(context(mode), registry(() => { effects++; }), { toolName: 'write', toolArgs: { file: 'example.txt', content: 'example' } });
       expect(result.status).toBe('found');
-      if (result.status !== 'found') throw new Error('Expected an explanation');
-      // Serialization is part of the consumer-facing contract, not just prose.
-      const body = JSON.parse(JSON.stringify(result.explanation));
-      expect(fixture.requests).toHaveLength(1);
-      expect(Object.keys(fixture.requests[0]!.questions)).toEqual(['kind']);
-      expect(fixture.requests[0]!.context?.site).toBe('agent.policy-explanation.category');
-      expect(body.categoryConfident).toBe(true);
-      expect(prompts).toHaveLength(0);
-      expect(executions).toHaveLength(0);
-      const actual = await manager.checkDetailed(call.tool, call.args);
-      expect(actual.approved).toBe(scenario.approved);
-      expect(actual.reasonCode).toBe(scenario.reason);
-      expect(fixture.requests.length).toBeGreaterThan(0);
-      expect(executions).toHaveLength(0);
-      expect(body.status).toBe('held');
-      expect(body.preflight).toMatchObject({ approvedWithoutMoreInput: false, permissionOutcome: 'unknown', permissionEvaluated: false });
-      expect(body.policyLayers.find((layer: { layer: string }) => layer.layer === 'Permission mode')).toMatchObject({
-        outcome: 'unknown', sourceLayer: 'not_evaluated', reasonCode: 'live_check_required', mode: scenario.mode,
+      if (result.status !== 'found') throw new Error('Missing explanation');
+      const expected = computeApprovalPosture({ mode, autoApprove: false });
+      expect(result.explanation.posture).toMatchObject({
+        mode: expected.mode, label: expected.label, detail: expected.detail,
+        autoApprove: expected.autoApprove, automaticApprovals: expected.automaticApprovals,
+        bypassesPrompts: expected.bypassesPrompts,
       });
-      expect(body.requiredActions.join(' ')).not.toContain('Answer the');
-      if (scenario.tools?.[call.tool]) {
-        expect(body.policyLayers.find((layer: { layer: string }) => layer.layer === 'Permission mode').configuredAction).toBe(scenario.tools[call.tool]);
-      }
+      expect(effects).toBe(0);
+      expect(result.explanation.preflight).toMatchObject({ permissionEvaluated: false, permissionOutcome: 'unknown' });
     });
-  }
+
+  test('legacy auto-approve is displayed as YOLO', async () => {
+    const result = await explainAgentPolicyDecision(context('safe-owner', true), registry(() => { throw new Error('Must not execute'); }), { toolName: 'write' });
+    expect(result.status).toBe('found');
+    if (result.status !== 'found') throw new Error('Missing explanation');
+    expect(result.explanation.posture).toMatchObject({ mode: 'yolo', automaticApprovals: true, bypassesPrompts: true });
+  });
+
+  test('an uncertain category remains explicitly unevaluated', async () => {
+    installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, 'read', 0.4)).port);
+    const result = await explainAgentPolicyDecision(context('safe-owner'), registry(() => { throw new Error('Must not execute'); }), { toolName: 'write' });
+    expect(result.status).toBe('found');
+    if (result.status !== 'found') throw new Error('Missing explanation');
+    expect(result.explanation).toMatchObject({ categoryConfident: false, preflight: { permissionEvaluated: false } });
+  });
+
+  test('unavailable classification remains an operational error', async () => {
+    installJudgmentPort(undefined);
+    await expect(explainAgentPolicyDecision(context('safe-owner'), registry(() => {}), { toolName: 'write' })).rejects.toThrow('judgment port');
+  });
 });

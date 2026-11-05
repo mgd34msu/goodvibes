@@ -5,6 +5,7 @@
  * same PersistentStore snapshot pattern the automation and principal stores use.
  */
 import { PersistentStore } from '../state/persistent-store.js';
+import { isSettableGatePresetName, normalizePermissionMode } from '../gate/presets.js';
 import type { ChannelProfileBinding } from './types.js';
 
 interface ChannelProfilesSnapshot extends Record<string, unknown> {
@@ -21,7 +22,15 @@ function validateSnapshot(snapshot: ChannelProfilesSnapshot | null): ChannelProf
   if (snapshot.version !== 1 || !Array.isArray(snapshot.bindings)) {
     throw new Error('Channel profile store snapshot is invalid.');
   }
-  return { version: 1, bindings: snapshot.bindings };
+  const bindings = snapshot.bindings.map(binding => {
+    const mode = binding.permissionMode;
+    if (mode === undefined) return binding;
+    if (!isSettableGatePresetName(mode) && !['prompt', 'normal', 'accept-edits', 'custom', 'auto', 'allow-all'].includes(mode)) {
+      throw new Error('Channel profile store permission mode is invalid.');
+    }
+    return { ...binding, permissionMode: normalizePermissionMode(mode) };
+  });
+  return { version: 1, bindings };
 }
 
 export class ChannelProfileStore {

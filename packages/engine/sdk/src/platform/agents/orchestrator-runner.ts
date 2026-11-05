@@ -10,6 +10,7 @@ import { captureAutonomousSource } from '../permissions/autonomous.js';
 // It does not own any state beyond the duration of a single runAgentLoop() call.
 import { ConversationManager } from '../core/conversation.js';
 import { executeToolCalls as executeAutonomousToolCalls } from '../core/orchestrator-tool-runtime.js';
+import { withExecutionMode } from '../gate/execution-context.js';
 import { captureToolInputCalls, projectToolInputBatch } from '../core/tool-input-ingress.js';
 import { captureProjectionArgs } from '../tools/input-projection.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -225,7 +226,7 @@ async function executeToolCalls(
       onToolSettled({ ...result });
     };
     try {
-      if (context.autonomousSource !== undefined) {
+      if (context.autonomousSource !== undefined || (context.permissionManager?.admitAutonomous && context.permissionManager.autonomousPreparation)) {
         const manager = context.permissionManager;
         if (!manager?.admitAutonomous || !manager.autonomousPreparation) throw new Error('Native contract tool execution requires its autonomous permission owner');
         let executedName = call.name;
@@ -233,11 +234,14 @@ async function executeToolCalls(
         // Use the same prepared-action owner as foreground/native sessions. The
         // source getter is a construction binding, not agent prose or AgentInput.
         const [result] = await executeAutonomousToolCalls({
-          autonomousSource: context.autonomousSource, autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry, assertCurrent: assertCallCurrent,
+          autonomousSource: context.autonomousSource ?? (() => ({ goal: record.task, criteria: [] })),
+          autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry, assertCurrent: assertCallCurrent,
           permissionManager: { check: manager.check.bind(manager), checkDetailed: manager.checkDetailed.bind(manager),
             admitAutonomous: manager.admitAutonomous.bind(manager), autonomousPreparation: manager.autonomousPreparation.bind(manager),
             ...(manager.prepareAutonomousOwner ? { prepareAutonomousOwner: manager.prepareAutonomousOwner.bind(manager) } : {}),
             ...(manager.projectAutonomousChoices ? { projectAutonomousChoices: manager.projectAutonomousChoices.bind(manager) } : {}),
+            ...(manager.getMode ? { getMode: manager.getMode.bind(manager) } : {}),
+            ...(manager.captureExecutionMode ? { captureExecutionMode: manager.captureExecutionMode.bind(manager) } : {}),
             ...(manager.releaseAutonomousChoices ? { releaseAutonomousChoices: manager.releaseAutonomousChoices.bind(manager) } : {}) },
           hookDispatcher: null, runtimeBus: context.runtimeBus, sessionId: record.id,
           emitterContext: () => context.emitterContext(record.id),
@@ -269,7 +273,8 @@ async function executeToolCalls(
           assertCallCurrent();
           if (JSON.stringify(effectiveArgs) !== approvedArguments || (executedArgs && JSON.stringify(executedArgs) !== approvedArguments)) throw new OrchestratorObservationHeldError();
         };
-        const result = await toolRegistry.execute(call.id, call.name, effectiveArgs, { signal, assertCurrent: assertEffectiveCurrent });
+        const result = await withExecutionMode(context.permissionManager?.getMode?.(),
+          () => toolRegistry.execute(call.id, call.name, effectiveArgs, { signal, assertCurrent: assertEffectiveCurrent }));
         assertEffectiveCurrent();
         // Schedule a debounced reindex of any touched file(s). Never awaited.
         try {

@@ -5,11 +5,12 @@
  * split schema-types-payments.ts uses. Defaults and setting definitions live in
  * schema-domain-contract.ts.
  */
+import type { QualityGate } from '../contract/gates.js';
 
 export interface ContractSettings {
   autoCommit: boolean;
   commitScope: 'off' | 'scoped' | 'all';
-  gates: Array<{ name: string; command: string; enabled: boolean }>;
+  gates: QualityGate[];
   gateTimeoutMs: number;
   acceptanceStakes: 'high' | 'critical';
   midRunChecks: boolean;

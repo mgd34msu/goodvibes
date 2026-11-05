@@ -31,6 +31,10 @@ export function installHostedSessionReadings(options: {
   });
   const log = new SqliteDecisionLog(':memory:');
   const completion = fakePort(() => noulAnswer(.01));
+  const applicability = fakePort(name => {
+    if (name === 'completion_required') return noulAnswer(.99);
+    throw new Error(`hosted session applicability fixture: unexpected question ${name}`);
+  });
   const compaction = compactionQualityPort();
   const core = coreReadingsPort({ intent: 'chat', needsPlan: false, strategy: 'single' });
   const tools = toolReadingsPort(options.tools, options.gate);
@@ -43,6 +47,7 @@ export function installHostedSessionReadings(options: {
       requests.push(request as JudgmentRequest<Questions>);
       if (request.context?.site === 'engine.gate.autonomous-tool') return admission.port.ask(request);
       const battery = request.context?.battery;
+      if (battery === 'engine.core.completion-applicability') return applicability.port.ask(request);
       if (battery === 'engine.core.turn-shape' || battery === 'engine.core.execution-strategy') return core.port.ask(request);
       if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation', 'engine.agents.brief-fidelity'].includes(battery ?? '')) return completion.port.ask(request);
       if (['engine.compaction.retention', 'engine.compaction.fidelity', 'engine.compaction.collapse-keep'].includes(battery ?? '')) return compaction.port.ask(request);

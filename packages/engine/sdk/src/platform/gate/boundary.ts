@@ -46,8 +46,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
  */
 import { judgmentInputProblem, snapshotJudgmentInput, JudgmentInputError } from './judgment-input.js';
 import { checkOwnerApproval, type OwnerApproval } from '../security/owner-approval.js';
-import { getProcessUntrustedContentLedger, type UntrustedContentLedger } from '../security/untrusted-content.js';
-import { findContentTaint } from '../security/content-taint.js';
+import { assessOutwardContent, getProcessUntrustedContentLedger, type UntrustedContentLedger } from '../security/untrusted-content.js';
 import type { GateReading } from './reading.js';
 import { effectPermittedForProvenance, type AgentEffect } from './surface-authority.js';
 
@@ -112,9 +111,6 @@ function effectOf(reading: GateReading | null, declaredMutation = false): AgentE
   return reading.mutates || declaredMutation ? 'write' : 'read';
 }
 
-/** The most recent untrusted sources the call's fields are read against. */
-const MAX_UNTRUSTED_SOURCES = 8;
-
 const APPROVAL_FIX = 'The owner can approve this exact call in the prompt the gate shows; nothing typed into the conversation clears it.';
 
 /** The outward-effect check: the ledger's record, then Jev's reading of derivation. */
@@ -124,29 +120,23 @@ async function outwardCheck(input: BoundaryInput, content: Record<string, string
   if (origins.length === 0) return { check: 'outward-effect', result: 'pass', detail: 'nothing untrusted read this turn', approvable: false };
   const action = `tool:${input.toolName}`;
   const cleared = (): boolean => checkOwnerApproval({ approval: input.approval, action, contentInQuestion: content, clearingContentTaint: true }).authorized;
-  const sources = ledger.taintSourcesThisTurn();
-  if (sources.length === 0) {
+  const assessment = await assessOutwardContent(ledger, content, { signal: input.signal, port: input.port });
+  if (assessment.kind === 'incomplete') {
     if (cleared()) return { check: 'outward-effect', result: 'pass', detail: 'owner approved this exact content', approvable: false };
     return {
       check: 'outward-effect',
       result: 'refuse',
-      detail: `read ${origins.join(', ')}; no text kept to compare`,
+      detail: assessment.reason === 'protected-input' ? 'protected source withheld from judgment' : 'incomplete source text for comparison',
       approvable: true,
-      reason: `This turn read ${origins.join(', ')}, and none of that text was kept, so whether this ${input.toolName} call repeats it cannot be read. It needs the owner.`,
+      reason: assessment.reason === 'protected-input'
+        ? 'Untrusted source text contains protected material and cannot be sent for a derivation reading. The owner must approve this exact outward call.'
+        : `This turn read ${origins.join(', ')}, but the complete source text cannot be compared, so whether this ${input.toolName} call repeats it cannot be established. The owner must approve this exact outward call.`,
     };
   }
-  const recentSources = sources.slice(-MAX_UNTRUSTED_SOURCES);
-  if (judgmentInputProblem(recentSources)) {
-    if (cleared()) return { check: 'outward-effect', result: 'pass', detail: 'owner approved this exact content', approvable: false };
-    return {
-      check: 'outward-effect', result: 'refuse', detail: 'protected source withheld from judgment', approvable: true,
-      reason: 'Untrusted source text contains protected material and cannot be sent for a derivation reading. The owner must approve this exact outward call.',
-    };
-  }
-  const findings = await findContentTaint(content, recentSources, { signal: input.signal, port: input.port });
-  if (findings.length === 0) {
+  if (assessment.kind === 'clean') {
     return { check: 'outward-effect', result: 'pass', detail: 'does not derive from untrusted text', approvable: false };
   }
+  const findings = assessment.findings;
   if (cleared()) {
     return { check: 'outward-effect', result: 'pass', detail: 'owner approved this exact content', approvable: false };
   }

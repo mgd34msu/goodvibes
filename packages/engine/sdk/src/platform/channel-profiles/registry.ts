@@ -11,6 +11,7 @@
  * channel again replaces the previous binding rather than accumulating rows.
  */
 import { StoreWriteQueue } from '../state/store-write-queue.js';
+import { isSettableGatePresetName } from '../gate/presets.js';
 import type { ChannelProfileStore } from './store.js';
 import {
   CHANNEL_PERMISSION_MODES,
@@ -37,15 +38,15 @@ function requireSurfaceKind(value: unknown): string {
   return value.trim().toLowerCase();
 }
 
-function normalizePermissionMode(value: unknown): ChannelPermissionMode | undefined {
+export function parseChannelPermissionMode(value: unknown): ChannelPermissionMode | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string' || !CHANNEL_PERMISSION_MODES.includes(value as ChannelPermissionMode)) {
+  if (typeof value !== 'string' || !isSettableGatePresetName(value)) {
     throw new ChannelProfileError(
       `permissionMode must be one of ${CHANNEL_PERMISSION_MODES.join(', ')}`,
       'INVALID_ARGUMENT',
     );
   }
-  return value as ChannelPermissionMode;
+  return value;
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
@@ -98,13 +99,14 @@ export class ChannelProfileRegistry {
     const surfaceKind = requireSurfaceKind(input.surfaceKind);
     const channelId = optionalString(input.channelId, 'channelId');
     const id = channelProfileBindingId(surfaceKind, channelId);
+    const permissionMode = parseChannelPermissionMode(input.permissionMode);
     const binding: ChannelProfileBinding = {
       id,
       surfaceKind,
       ...(channelId ? { channelId } : {}),
       ...(optionalString(input.model, 'model') ? { model: optionalString(input.model, 'model') } : {}),
       ...(optionalString(input.provider, 'provider') ? { provider: optionalString(input.provider, 'provider') } : {}),
-      ...(normalizePermissionMode(input.permissionMode) ? { permissionMode: normalizePermissionMode(input.permissionMode) } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
       updatedAt: Date.now(),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     };

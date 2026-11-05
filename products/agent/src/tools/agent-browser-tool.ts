@@ -265,7 +265,9 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
         const browser = resolveEngine();
         const methodCurrent = existingMethodCurrent ?? (executionOptions && interactiveAction ? captureCatalogMethods(browser, [action]) : undefined);
         const assertCurrent = () => { methodCurrent?.(); invocationCurrent(); methodCurrent?.(); };
-        const ownership = executionOptions && interactiveAction ? { signal, assertCurrent } : undefined;
+        const ownership = executionOptions && interactiveAction
+          ? (typeof browser.retainAdmittedToolAction === 'function' ? browser.retainAdmittedToolAction(rawArgs, executionOptions, assertCurrent) : undefined)
+            ?? { signal, assertCurrent } : undefined;
         const interactive = async (run: () => Promise<Record<string, unknown>>) => {
           if (ownership) assertCurrent();
           const result = await run();

@@ -7,14 +7,8 @@ import type { PermissionCategory } from '../../../permissions/manager.js';
 import type { PermissionRiskLevel } from '../../../permissions/types.js';
 import type { GatePresetName } from '../../../gate/presets.js';
 
-/** Permission evaluation modes (maps to PermissionsToolConfig). */
-export type PermissionMode =
-  | 'default'
-  | 'plan'
-  | 'accept-edits'
-  | 'allow-all'
-  | 'custom'
-  | 'background-restricted';
+/** The effective execution mode shown by every runtime surface. */
+export type PermissionMode = GatePresetName;
 
 /** States for the permission decision machine. */
 export type PermissionDecisionMachineState =
@@ -101,7 +95,7 @@ export interface PermissionDomainState {
   // ── Mode ───────────────────────────────────────────────────────────────────
   /** Current `permissions.mode` setting value. */
   mode: PermissionMode;
-  /** The gate preset that setting selects (normal, accept-edits, plan, auto, custom). */
+  /** The canonical execution mode, or the separate planning posture. */
   preset: GatePresetName;
   /** Whether the user is currently being prompted for a permission decision. */
   awaitingDecision: boolean;
@@ -138,8 +132,8 @@ export function createInitialPermissionsState(): PermissionDomainState {
     revision: 0,
     lastUpdatedAt: 0,
     source: 'init',
-    mode: 'default',
-    preset: 'normal',
+    mode: 'safe-owner',
+    preset: 'safe-owner',
     awaitingDecision: false,
     decisionMachineState: undefined,
     sessionApprovals: new Map(),

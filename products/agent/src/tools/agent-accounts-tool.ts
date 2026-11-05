@@ -204,6 +204,7 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
               signal: execution?.signal,
             },
             requestedBy: 'owner-direct',
+            sourcePolicy: 'required',
           });
           if (execution?.signal?.aborted) return cancelled();
           if (!decision.allowed) return failure(`${decision.reason} ${decision.fix}`);

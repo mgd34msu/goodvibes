@@ -1,6 +1,9 @@
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import type { LocalhostFetchApproval, LocalhostFetchPermit } from '../../runtime/permissions/localhost-fetch-approval.js';
 import { logger } from '../../utils/logger.js';
+import { currentExecutionMode, isInvocationAdmitted, isYoloExecution } from '../../gate/execution-context.js';
+import { captureProjectionStructure } from '../input-projection.js';
+import { hasDifferentFetchInvocation, isAdmittedFetchRequest, runFetchInvocation, runFetchRequest, runFetchSocketHop, withoutFetchInvocation } from './invocation.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import { FETCH_TOOL_SCHEMA } from './schema.js';
 import type { FetchInput, FetchUrlInput, FetchAuthInput, FetchExtractMode, FetchVerbosity, FetchSanitizeMode } from './schema.js';
@@ -111,6 +114,8 @@ export class FetchRuntimeService {
   }
 
   async execute(input: FetchInput, deps: FetchRuntimeDeps = {}): Promise<FetchOutput> {
+    currentExecutionMode();
+    if (hasDifferentFetchInvocation(input)) return withoutFetchInvocation(() => this.execute(input, deps));
     const globalExtract: FetchExtractMode = input.extract ?? 'raw';
     const parallel: boolean = input.parallel !== false;
     const verbosity: FetchVerbosity = input.verbosity ?? 'standard';
@@ -146,7 +151,7 @@ export class FetchRuntimeService {
       results = await mapWithConcurrency(
         input.urls,
         MAX_PARALLEL_FETCHES,
-        (urlInput) => fetchOne(urlInput, fetchOpts, this),
+        (urlInput) => runFetchRequest(input, urlInput, buildUrl(urlInput.url, urlInput.params), () => fetchOne(urlInput, fetchOpts, this)),
       );
     } else {
       results = [];
@@ -154,7 +159,8 @@ export class FetchRuntimeService {
         if (i > 0 && rateLimitMs > 0) {
           await sleep(rateLimitMs);
         }
-        results.push(await fetchOne(input.urls[i]!, fetchOpts, this));
+        const urlInput = input.urls[i]!;
+        results.push(await runFetchRequest(input, urlInput, buildUrl(urlInput.url, urlInput.params), () => fetchOne(urlInput, fetchOpts, this)));
       }
     }
 
@@ -317,6 +323,7 @@ async function fetchWithValidatedRedirects(input: {
     const operation = currentExternalOperationSource();
     const priorPermits = [...input.permits];
     const assertCurrent = () => {
+      currentExecutionMode();
       input.signal.throwIfAborted(); operation?.signal?.throwIfAborted(); operation?.assertCurrent();
       for (const prior of priorPermits) prior.assertCurrent();
     };
@@ -325,7 +332,8 @@ async function fetchWithValidatedRedirects(input: {
     const local = host !== null && classifyHostTrustTier(host, input.trustTierConfig).tier === 'localhost';
     let permit: LocalhostFetchPermit | undefined;
     let localhostApproved = input.localhostApproved;
-    if (local && operation) {
+    const admittedInitialRequest = redirectCount === 0 && isAdmittedFetchRequest(currentUrl);
+    if (local && operation && !isYoloExecution() && !admittedInitialRequest) {
       const request: FetchUrlInput = {
         url: currentUrl, method: currentMethod as FetchUrlInput['method'], headers: { ...currentHeaders },
         ...(typeof currentBody === 'string' ? { body: currentBody } : {}),
@@ -342,11 +350,12 @@ async function fetchWithValidatedRedirects(input: {
       localhostApproved = true;
     }
     // Final claim follows checked DNS. The live guard also protects every address retry.
-    const addresses = await resolveCheckedAddresses(currentUrl, { trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost });
+    const addresses = await runFetchSocketHop(currentUrl, redirectCount, () => resolveCheckedAddresses(currentUrl,
+      { trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost }));
     assertCurrent();
     permit?.assertCurrent();
     permit?.claim();
-    const guard = () => { assertCurrent(); permit?.assertCurrent(); };
+    const guard = () => { assertCurrent(); permit?.assertCurrent(); if (admittedInitialRequest) isAdmittedFetchRequest(currentUrl); };
     const response = await pinnedFetch(currentUrl, {
       method: currentMethod,
       ...(Object.keys(currentHeaders).length > 0 ? { headers: currentHeaders as HeadersInit } : {}),
@@ -369,11 +378,11 @@ async function fetchWithValidatedRedirects(input: {
     if (nextHost !== null) {
       const trustResult = classifyHostTrustTier(nextHost, input.trustTierConfig);
       emitHostTrustTier(nextHost, nextUrl, trustResult);
-      if (trustResult.tier === 'blocked') {
+      if (trustResult.tier === 'blocked' && (!trustResult.isSsrf || !isYoloExecution())) {
         if (trustResult.isSsrf) emitSsrfDeny(nextHost, nextUrl, trustResult.reason);
         throw new Error(`Redirect blocked: ${trustResult.reason}`);
       }
-      if (trustResult.tier === 'localhost' && !input.localhostApproved && !autonomousLocalhostStart) {
+      if (trustResult.tier === 'localhost' && !input.localhostApproved && !autonomousLocalhostStart && !isYoloExecution()) {
         // A public origin redirecting into loopback is an SSRF vector; only an
         // approved-for-this-project localhost target may be followed.
         emitSsrfDeny(nextHost, nextUrl, trustResult.reason);
@@ -511,7 +520,7 @@ async function fetchOne(
     // Private-IP / metadata-endpoint blocking is absolute: no configuration,
     // approval, or kill switch relaxes it. The tool result carries the honest
     // reason; nothing else is surfaced.
-    if (initialTrustResult.tier === 'blocked') {
+    if (initialTrustResult.tier === 'blocked' && (!initialTrustResult.isSsrf || (!isYoloExecution() && !isAdmittedFetchRequest(effectiveUrl)))) {
       if (initialTrustResult.isSsrf) {
         emitSsrfDeny(hostname, urlInput.url, initialTrustResult.reason);
       }
@@ -526,7 +535,7 @@ async function fetchOne(
     // Loopback dev servers: allowed for this project, or a one-tap ask that
     // persists the approval; otherwise refused with the setting named.
     if (initialTrustResult.tier === 'localhost' && !currentExternalOperationSource()) {
-      localhostApproved = deps.isLocalhostAllowed?.() ?? false;
+      localhostApproved = isYoloExecution() || isAdmittedFetchRequest(effectiveUrl) || (deps.isLocalhostAllowed?.() ?? false);
       if (!localhostApproved && deps.approveLocalhostFetch) {
         try {
           localhostApproved = await deps.approveLocalhostFetch({ url: effectiveUrl, host: hostname, originalRequest: urlInput }) === true;
@@ -791,14 +800,15 @@ export function createFetchTool(
       args: Record<string, unknown>,
       opts?: { readonly signal?: AbortSignal | undefined },
     ): Promise<{ success: boolean; output?: string; error?: string }> {
-      if (!Array.isArray(args.urls) || args.urls.length === 0) {
-        return { success: false, error: 'Missing or empty "urls" array' };
-      }
-
       try {
+        currentExecutionMode();
+        if (!isInvocationAdmitted('fetch', args)) args = captureProjectionStructure(args);
+        if (!Array.isArray(args.urls) || args.urls.length === 0) {
+          return { success: false, error: 'Missing or empty "urls" array' };
+        }
         const input = { ...args, urls: args.urls } as unknown as FetchInput;
         const effectiveDeps = opts?.signal ? { ...deps, signal: opts.signal } : deps;
-        const output = await runtime.execute(input, effectiveDeps);
+        const output = await runFetchInvocation(args, opts, input, () => runtime.execute(input, effectiveDeps));
         return { success: true, output: JSON.stringify(output) };
       } catch (err) {
         const message = summarizeError(err);

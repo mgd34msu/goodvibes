@@ -1,3 +1,4 @@
+import { isSettableGatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import { MEMORY_REVIEW_PROBABILITIES, rankFixtureMemoryReview } from './memory-review-fixture';
 /**
  * installMockDaemon, the hermetic seam for the Playwright harness.
@@ -331,7 +332,7 @@ export interface MockDaemonOptions {
    * one session. Pass '' to make every session answer SESSION_NOT_LOCAL instead.
    */
   localSessionId?: string;
-  /** Initial session-scoped mode, including the read-only custom rule-set state. */
+  /** Initial canonical execution mode, or the separate planning posture. */
   initialPermissionMode?: OperatorMethodOutput<'sessions.permissionMode.get'>['mode'];
   /**
    * Seed override for the mutable approvals list (default: [PENDING_APPROVAL]).
@@ -993,9 +994,9 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   } = options;
   const pairingStore = options.pairingStore ?? createMockPairingStore();
   // sessions.permissionMode.get/set + sessions.contextUsage.get in-memory state, a
-  // fresh copy per installMockDaemon call, mutated by set() exactly like the daemon's
-  // real single-writer config value.
-  let permissionMode: OperatorMethodOutput<'sessions.permissionMode.get'>['mode'] = options.initialPermissionMode ?? 'normal';
+  // fresh session-owned copy per installMockDaemon call. Mode updates never
+  // mutate the daemon configuration fixture.
+  let permissionMode: OperatorMethodOutput<'sessions.permissionMode.get'>['mode'] = options.initialPermissionMode ?? 'safe-owner';
   const contextUsageState = { estimatedContextTokens: 4200, contextWindow: 200000 };
 
   function sessionNotLocal(route: Route, sessionId: string) {
@@ -1163,7 +1164,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // Channel profiles (channels.profiles.*, SDK 1.6.1's initiative family): one seeded
   // surface-wide binding so a spec has real selected-detail content to prove against.
   let channelProfileList: MockChannelBinding[] = [
-    { id: 'cp_e2e_1', surfaceKind: 'slack', model: 'claude-sonnet', permissionMode: 'normal' as const, updatedAt: 1_700_000_000_000 },
+    { id: 'cp_e2e_1', surfaceKind: 'slack', model: 'claude-sonnet', permissionMode: 'safe-owner' as const, updatedAt: 1_700_000_000_000 },
   ];
   let channelProfileIdCounter = 0;
 
@@ -1690,8 +1691,9 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       if (method === 'GET') return json(route, { sessionId, mode: permissionMode });
       if (method === 'POST') {
         const body = (request.postDataJSON?.() ?? {}) as { mode?: string };
+        if (typeof body.mode !== 'string' || !isSettableGatePresetName(body.mode)) return json(route, { code: 'INVALID_ARGUMENT', error: 'Invalid execution mode' }, 400);
         const previousMode = permissionMode;
-        if (body.mode) permissionMode = body.mode as typeof permissionMode;
+        permissionMode = body.mode;
         return json(route, { sessionId, mode: permissionMode, previousMode });
       }
     }
@@ -3109,9 +3111,11 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       const body = (request.postDataJSON?.() ?? {}) as {
         surfaceKind?: string; channelId?: string; model?: string; provider?: string; permissionMode?: string;
       };
+      const { permissionMode: mode, ...attributes } = body;
+      if (mode !== undefined && !isSettableGatePresetName(mode)) return json(route, { code: 'INVALID_ARGUMENT', error: 'Invalid execution mode' }, 400);
       const existing = channelProfileList.find((b) => b.surfaceKind === body.surfaceKind && b.channelId === body.channelId);
       if (existing) {
-        const updated = { ...existing, ...body, updatedAt: Date.now() } as typeof existing;
+        const updated = { ...existing, ...attributes, ...(mode === undefined ? {} : { permissionMode: mode }), updatedAt: Date.now() };
         channelProfileList = channelProfileList.map((b) => (b === existing ? updated : b));
         return json(route, { binding: updated });
       }
@@ -3121,7 +3125,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         ...(body.channelId ? { channelId: body.channelId } : {}),
         ...(body.model ? { model: body.model } : {}),
         ...(body.provider ? { provider: body.provider } : {}),
-        ...(body.permissionMode ? { permissionMode: body.permissionMode as 'plan' | 'normal' | 'accept-edits' | 'auto' } : {}),
+        ...(mode === undefined ? {} : { permissionMode: mode }),
         updatedAt: Date.now(),
       };
       channelProfileList = [...channelProfileList, binding];

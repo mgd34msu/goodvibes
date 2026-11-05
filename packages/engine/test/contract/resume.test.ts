@@ -897,8 +897,10 @@ describe('a later group and the whole plan', () => {
     expect(accepted).toHaveLength(1);
     expect(host.contractId).toBe(id);
     expect(host.planChecks).toEqual(accepted.map(({ at, reason, decisionIds }) => ({ at: new Date(at).toISOString(), reason, decisionIds })));
-    expect(host.units).toEqual([{ id: 'u1', goal: 'Parse CSV', status: 'passed', latestCheck: {
+    expect(host.units).toEqual([{ id: 'u1', goal: 'Parse CSV', status: 'passed', dependsOn: [],
+      criteria: [{ id: 'u1.c1', text: 'src/csv.ts parses CSV', serves: ['c1'], verdict: 'met' }], latestCheck: {
       id: done.units[0]!.checks.at(-1)!.id, result: 'pass', decisionIds: done.units[0]!.checks.at(-1)!.decisionIds,
+      evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest,
     }, acceptedAnswerDigest: hashState(done.units[0]!.answer ?? ''),
       acceptedAnswerSource: { storage: 'native-contract-store', contractId: done.id, unitId: 'u1', field: 'answer' } }]);
     expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED').map(event => [event.unitId, event.purpose])).toEqual([['u2', 'resume']]);

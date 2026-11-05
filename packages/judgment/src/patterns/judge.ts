@@ -62,7 +62,7 @@ export interface Judge extends NamedDecision {
 const CRITERION_QUESTION = (criterion: string): NoulQuestion =>
   noul(
     {
-      question: 'Does the work shown by `output` AND `evidence` fail to meet `criterion`, or lack evidence that it is met? Judge this criterion independently of other criteria and the overall goal. An actual host execution record can establish a host-owned orchestration requirement; the leaf writer need not repeat that host operation. If a requirement calls for this very native acceptance check, judge the substantive work now rather than demanding an earlier approval of this same check.',
+      question: 'Does the work shown by `output` and `evidence` fail to meet `criterion`, or lack evidence that it is met? Assess this criterion independently. Actual execution records may establish work performed by the host or another participant.',
       criterion,
     },
     {
@@ -71,7 +71,7 @@ const CRITERION_QUESTION = (criterion: string): NoulQuestion =>
     },
   );
 
-const GOAL_QUESTION: NoulQuestion = noul('Does the work shown by `output` AND `evidence` fail to achieve `goal`? Judge this assigned goal independently of other units and later orchestration stages. Original-source and parent-plan evidence interprets referenced obligations; it does not replace the assigned goal with the entire parent task. Evaluate the substantive work submitted for this check, without requiring earlier approval of this same check or later host-owned steps outside this assigned goal. Missing substantive work still fails, even when every explicit criterion is met. For an actual host-recorded deliverable validation in evidence.orchestration.currentValidation, assess the complete original obligation source as well as the assigned goal: use the literal native/original source when supplied, otherwise evidence.originalRequest. A planner rephrasing cannot narrow that original request; a display label cannot replace or extend an authoritative native source. In this deliverable validation, application of the staged artifacts and release of this same checked answer are mandatory later host operations. Assess their substantive staged result here without claiming those later operations already happened; the host cannot finish until they actually succeed. Independently requested project-side deployment, publication, execution or validation still requires real evidence; a pending host step does not establish it.', {
+const GOAL_QUESTION: NoulQuestion = noul('Does the work shown by `output` and `evidence` fail to achieve the assigned `goal`? Assess its substantive result, including obligations not fully expressed by the listed criteria. Context may explain the assigned goal but must not replace it with a larger parent task or later stages outside its scope.', {
   true: 'The work falls short of the goal or does something other than the goal asks.',
   false: 'The work shown by the output and evidence achieves what the goal asks.',
 });

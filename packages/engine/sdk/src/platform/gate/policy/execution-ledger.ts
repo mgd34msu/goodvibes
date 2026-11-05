@@ -31,6 +31,7 @@ import type { SideEffectKind } from '../batteries/side-effect.js';
 import { snapshotJudgmentInput, JudgmentInputError } from '../judgment-input.js';
 import { readSideEffectKind, shellCommandsIn } from '../reading.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { isYoloExecution } from '../execution-context.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { ledgerArg } from '../batteries/ledger-arg.js';
 
@@ -406,6 +407,11 @@ export class AgentExecutionLedger {
     }
     this.notify();
     if (this.disposed || refusal || this.records.get(record.id) !== record) return;
+    if (isYoloExecution()) {
+      record.argsPreview = '[YOLO: values withheld]';
+      this.notify();
+      return;
+    }
 
     const controller = new AbortController();
     let release: () => void = () => {};

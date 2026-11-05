@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { currentExecutionMode, withExecutionMode } from '../gate/execution-context.js';
 import { types as nodeTypes } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -110,6 +111,7 @@ export interface CurrentToolAutonomySource {
 }
 
 interface CurrentToolExecution {
+  readonly name: string;
   readonly registry: ToolRegistry;
   readonly nestedOwner: AutonomousNestedOwner;
   readonly admissionGuard: () => void;
@@ -148,6 +150,13 @@ function retiredSettingsResult(callId: string, receipt: PreparedConfigMutationRe
 // Carries the same authentic body proof across trusted wrappers. It never
 // creates authority, and cannot be cleared or replaced by a tool argument.
 const executingContext = new AsyncLocalStorage<{ readonly proof: CurrentToolExecution; readonly options: ToolExecuteOptions } | undefined>();
+
+/** True only for the exact currently executing tool and its owned arguments. */
+export function isInvocationAdmitted(toolName: string, args: Record<string, unknown>): boolean {
+  const current = executingContext.getStore();
+  if (!current || current.proof.name !== toolName || current.proof.args !== args) return false;
+  return assertCurrentToolInvocation(args, current.options);
+}
 
 /** Effectful tools must not downgrade wrapped/copied options to legacy authority. */
 export function assertCurrentToolInvocation(args: Record<string, unknown>, options?: ToolExecuteOptions): boolean {
@@ -965,7 +974,7 @@ export class ToolRegistry {
         } : undefined;
         const nestedOwner = readAutonomousNestedOwner(assertAdmissionCurrent);
         if (!nestedOwner) throw new ToolInputProjectionError('held');
-        proof = { registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, assertEffect,
+        proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, assertEffect,
           assertWorkspace: readAutonomousWorkspaceConstraint(assertAdmissionCurrent),
           settingsPresentation: readAutonomousSettingsPresentation(assertAdmissionCurrent),
           ...(mutation && commitPlan ? { ...(commitConfig && !mutation.remoteImport && !mutation.secretDeletion && !mutation.secretImport && !mutation.subscriptionImport ? { commitSettings: commitConfig } : {}), commitSettingsPlan: commitPlan } : {}), assertCurrent: () => {
@@ -987,7 +996,13 @@ export class ToolRegistry {
         this.assertExecuting(call, record); assertProjectionSignal(signal);
       };
       const execute = () => { assertProjectionCurrent(callerCurrent); return applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]); };
-      const result = await executingContext.run(proof ? { proof, options: executionOptions } : undefined, execute);
+      const mode = currentExecutionMode() ?? registryPermissionOwners.get(this)?.getMode();
+      const invoke = () => executingContext.run(proof ? { proof, options: executionOptions } : undefined, execute);
+      const assertModeCurrent = proof ? () => {
+        if (!proof?.active) throw new ToolInputProjectionError('stale');
+        proof.assertCurrent();
+      } : undefined;
+      const result = await (mode === undefined ? invoke() : withExecutionMode(mode, invoke, assertModeCurrent));
       assertProjectionCurrent(callerCurrent);
       if (proof?.settingsReceipt) { assertProjectionSignal(signal); assertAdmissionCurrent?.(); }
       if (proof?.settingsRetired) throw new ToolInputProjectionError('stale');

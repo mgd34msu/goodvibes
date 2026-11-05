@@ -3,7 +3,7 @@ import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platfo
 import { UIFactory } from './ui-factory.ts';
 import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
-import { permissionModeLabel } from '../core/permission-mode.ts';
+import { permissionModeLabel, permissionModeTone } from '../core/permission-mode.ts';
 import { SLEEP_DISABLED_CHIP } from '../core/power-status.ts';
 import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
@@ -108,8 +108,7 @@ export interface ShellFooterBuildOptions {
   readonly composerFlags?: readonly string[];
   readonly composerPendingRisk?: 'none' | 'approval-wait' | 'shell' | 'command' | 'remote';
   /**
-   * Current session permission mode (config value: 'prompt' | 'allow-all' |
-   * 'custom' | 'plan' | 'accept-edits'). Named by the status line's mode chip
+   * Current execution mode. Named by the status line's mode chip
    * and colors the composer's bar. Cycled by Shift+Tab and toggled by /plan.
    */
   readonly permissionMode?: string;
@@ -190,22 +189,15 @@ export function estimateShellFooterHeight(promptLineCount: number): number {
 function composerBarColor(permissionMode: string | undefined, shell: boolean): string {
   const t = activeTokens();
   if (shell) return t.accent;
-  switch (permissionMode) {
-    case 'plan': return t.info;
-    case 'accept-edits':
-    case 'allow-all':
-    case 'custom':
-      return t.warning;
-    default:
-      return t.brand;
-  }
+  const tone = permissionModeTone(permissionMode);
+  return tone === 'info' ? t.info : tone === 'caution' ? t.warning : t.brand;
 }
 
 /**
  * The status line's mode chip: the approval mode (muted; plan in the info
- * color), or "! auto-approve" in the error color while everything is
+ * color), or "! YOLO" in the error color while everything is
  * auto-approved. While the warning shows, only plan keeps its name beside it
- * (a read-only posture still worth knowing); "normal" or "auto" next to it
+ * (a read-only posture still worth knowing); another execution label next to it
  * would only repeat or contradict it.
  */
 function modeChips(permissionMode: string | undefined, dangerMode: boolean): StatusChip[] {
@@ -214,7 +206,7 @@ function modeChips(permissionMode: string | undefined, dangerMode: boolean): Sta
   if (!dangerMode || permissionMode === 'plan') {
     chips.push({ text: permissionModeLabel(permissionMode), fg: permissionMode === 'plan' ? t.info : t.textMuted, bold: permissionMode === 'plan', keep: true });
   }
-  if (dangerMode) chips.push({ text: '! auto-approve', fg: t.error, bold: true, keep: true });
+  if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   return chips;
 }
 
@@ -222,7 +214,7 @@ function modeChips(permissionMode: string | undefined, dangerMode: boolean): Sta
 function safetyChips(options: ShellFooterBuildOptions): StatusChip[] {
   const t = activeTokens();
   const chips: StatusChip[] = [];
-  if (options.dangerMode) chips.push({ text: '! auto-approve', fg: t.error, bold: true, keep: true });
+  if (options.dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   const voice = options.voiceCapture ?? null;
   if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
   if (options.powerKeepAwake) chips.push({ text: SLEEP_DISABLED_CHIP, fg: t.warning, bold: true, keep: true });

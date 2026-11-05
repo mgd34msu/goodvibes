@@ -110,6 +110,19 @@ describe('ContractTree read-only evidence', () => {
     expect(el.textContent).not.toContain('All checks passed');
   });
 
+  test('shows unverified receipt status and separates command exits from assertion evidence', () => {
+    const el = render(contract({ checks: [check({ gates: [
+      { gate: 'required tests', passed: false, outcome: 'unverified', required: true, reason: 'source-changed-after-check', output: 'a prior run passed', durationMs: 8,
+        completion: { kind: 'assertions', runner: 'bun-junit', checks: { passed: 3, failed: 0, skipped: 1 } },
+        provenance: { sourceBefore: 'old-source', sourceAfter: 'old-source', definitionBefore: 'check-definition', definitionAfter: 'check-definition' } },
+      { gate: 'process only', passed: true, outcome: 'passed', required: false, output: '', durationMs: 1, completion: { kind: 'command-exit', exitCode: 0 } },
+    ] })] }));
+    const gates = el.querySelector('[aria-label="Gates"]');
+    expect(gates?.querySelector('summary')?.textContent).toBe('required testsunverified');
+    for (const text of ['source-changed-after-check', 'Checks passed', '3', 'Checks skipped', '1', 'old-source', 'check-definition',
+      'Command exited 0; no assertion count or test coverage is established by that exit code.']) expect(gates?.textContent).toContain(text);
+  });
+
   test('keeps group nesting, attempt units, ungrouped units, missing references, and expandable evidence links', () => {
     const attempt = unit({ id: 'attempt-1', title: 'Candidate A', attemptOf: 'unit-1', attemptIndex: 0, status: 'held-merge', checks: [check({ id: 'attempt-check' })] });
     const el = render(contract({

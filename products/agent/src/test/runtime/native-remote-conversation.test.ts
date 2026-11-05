@@ -1,3 +1,4 @@
+import { readExecutionMode, setExecutionMode } from '../../permissions/execution-mode.ts';
 import { expect, test } from 'bun:test';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
@@ -13,11 +14,13 @@ const state = (): NativeConversationIntakeState => ({ status: 'recorded', messag
   hostedTurn: snapshot, hostedCurrent: () => true });
 
 function fixture(onRender: () => void = () => {}) {
+  const localModeWrites: unknown[] = [];
   const posts: string[] = [], transcript: string[] = [], notices: string[] = [], positions: (string | null)[] = [];
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   let event = 0, connected = true, selectionIdentity = 'selected-private-record';
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0,
     fetch(request) {
+      if (new URL(request.url).pathname.endsWith('/permission-mode')) return Response.json({ sessionId: snapshot.sessionId, mode: 'safe-owner' });
       if (request.method !== 'GET') { posts.push(new URL(request.url).pathname); return new Response('unexpected mutation', { status: 500 }); }
       positions.push(request.headers.get('Last-Event-ID'));
       return new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; controller.enqueue(new TextEncoder().encode(': ready\n\n')); } }), { headers: { 'content-type': 'text/event-stream' } });
@@ -26,7 +29,7 @@ function fixture(onRender: () => void = () => {}) {
   const connection = () => connected ? { baseUrl: server.url.origin, token: 'synthetic-native-observer-token', selectionIdentity, expectedPrincipalId: 'pairing:synthetic-native' } : { reason: 'changed' };
   const verbs = { probe: () => ({ available: true as const }), async invoke<T>(method: string): Promise<T> { posts.push(method); return { sessions: [], session: { id: snapshot.sessionId }, history: [] } as T; } };
   const conversation = { addUserMessage(text: string) { transcript.push(`user:${text}`); }, addAssistantMessage(text: string) { transcript.push(`assistant:${text}`); }, addToolResults() {}, addSystemMessage(text: string) { notices.push(text); }, startStreamingBlock() {}, updateStreamingBlock() {}, finalizeStreamingBlock() {} };
-  const configManager = { get: (() => true) as never };
+  const configManager = { get: ((key: string) => key === 'permissions.mode' ? 'safe-owner' : true) as never, set: ((key: string, value: unknown) => { localModeWrites.push({ key, value }); }) as never };
   const router = createRemoteConversationRouter({ verbs, configManager, resolveConnection: connection, conversation, requestRender() {}, workspaceRoot: '/synthetic-owned', clientId: 'agent-native-test', reconnect: { enabled: false }, onCancellationNotice: text => notices.push(text) });
   const ctx = { conversation, orchestrator: { isThinking: false, thinkingFrame: 0, streamingInputTokens: 0, streamingOutputTokens: 0 }, runtime: { sessionId: 'local', model: 'fixture', provider: 'fixture' }, runtimeBus: { emit() {} }, services: { daemonVerbs: verbs, configManager, workingDirectory: '/synthetic-owned', resolveConnectedHost: connection, sessionManager: { list: () => [] } } } as unknown as BootstrapContext;
   const wiring = installRemoteConversationRouting(ctx, { render: onRender, notify: text => notices.push(text) });
@@ -35,7 +38,7 @@ function fixture(onRender: () => void = () => {}) {
     const payload = { type, turnId, ...(type === 'TURN_SUBMITTED' ? { origin: { metadata: { correlationId } } } : {}), ...(type === 'STREAM_DELTA' ? { accumulated: text } : {}), ...(type === 'TURN_COMPLETED' ? { stopReason: 'completed' } : {}) };
     stream.enqueue(new TextEncoder().encode(`id: event-${++event}\nevent: turn\ndata: ${JSON.stringify({ type, sessionId: snapshot.sessionId, payload })}\n\n`));
   }
-  return { router, wiring, posts, transcript, notices, positions, frame, ctx, heartbeat() { stream?.enqueue(new TextEncoder().encode('event: heartbeat\ndata: {}\n\n')); }, endStream() { stream?.close(); }, replaceSelection() { selectionIdentity = 'replacement-private-record'; }, replaceHost() { connected = false; }, async close() { wiring.dispose(); router.dispose(); await server.stop(true); } };
+  return { router, wiring, posts, transcript, notices, positions, localModeWrites, frame, ctx, heartbeat() { stream?.enqueue(new TextEncoder().encode('event: heartbeat\ndata: {}\n\n')); }, endStream() { stream?.close(); }, replaceSelection() { selectionIdentity = 'replacement-private-record'; }, replaceHost() { connected = false; }, async close() { wiring.dispose(); router.dispose(); await server.stop(true); } };
 }
 async function until(predicate: () => boolean) { const end = Date.now() + 3_000; while (!predicate()) { if (Date.now() > end) throw new Error('Fixture timed out'); await Bun.sleep(5); } }
 function intake(overrides: Partial<NativeConversationIntakeActions> = {}): NativeConversationIntakeActions {
@@ -230,4 +233,24 @@ test('metadata-only credential changes stop rendering and cancellation despite a
     expect(f.router.cancelTurn()).toBe(false);
     expect((await observed.completion).status).toBe('abandoned'); expect(cancelled).toBe(0); expect(f.transcript).toEqual([]);
   } finally { await f.close(); }
+});
+
+test('pending or lost native start acknowledgement never turns a session-mode edit into a local-default write', async () => {
+  const f = fixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  try {
+    const pending = f.wiring.routeNativeOrExplain(source, intake({ submit: async () => {
+      entered.resolve(); await release.promise;
+      return { status: 'unknown', message: 'Start acknowledgement lost.', request: { requestId: snapshot.requestId, inputId: snapshot.inputId } };
+    } }));
+    await entered.promise;
+    expect(readExecutionMode(f.ctx.services.configManager)).toBeUndefined();
+    await expect(setExecutionMode(f.ctx.services.configManager, 'yolo')).rejects.toThrow('owner');
+    expect(f.localModeWrites).toEqual([]);
+    release.resolve(); await pending;
+    expect(readExecutionMode(f.ctx.services.configManager)).toBeUndefined();
+    await expect(setExecutionMode(f.ctx.services.configManager, 'safe-jev')).rejects.toThrow('owner');
+    expect(f.localModeWrites).toEqual([]);
+  } finally { release.resolve(); await f.close(); }
 });

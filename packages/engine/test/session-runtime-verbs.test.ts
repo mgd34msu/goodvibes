@@ -35,14 +35,20 @@ function invoke(body: Record<string, unknown>): GatewayMethodInvocation {
 }
 
 /** A config double storing a single permissions.mode value. */
-function makeConfig(initial: PermissionMode): PermissionModeConfig & { current: PermissionMode } {
+function makeConfig(initial: PermissionMode): PermissionModeConfig & { current: PermissionMode; autoApprove: boolean } {
   return {
-    current: initial,
-    get(_key) {
-      return this.current;
+    current: initial, autoApprove: false,
+    get(key) {
+      return key === 'behavior.autoApprove' ? this.autoApprove : this.current;
     },
-    set(_key, value) {
-      this.current = value;
+    set(key, value) {
+      if (key === 'behavior.autoApprove') {
+        if (typeof value !== 'boolean') throw new Error('Expected boolean auto-approval flag');
+        this.autoApprove = value;
+      } else {
+        if (typeof value !== 'string') throw new Error('Expected permission mode');
+        this.current = value;
+      }
     },
   };
 }
@@ -75,18 +81,19 @@ function registry(getCurrentModel: () => ModelDefinition = () => model) {
 
 describe('permission mode vocabulary', () => {
   test('config -> operator vocabulary', () => {
-    expect(toOperatorPermissionMode('prompt')).toBe('normal');
-    expect(toOperatorPermissionMode('allow-all')).toBe('auto');
+    expect(toOperatorPermissionMode('prompt')).toBe('safe-owner');
+    expect(toOperatorPermissionMode('allow-all')).toBe('yolo');
     expect(toOperatorPermissionMode('plan')).toBe('plan');
-    expect(toOperatorPermissionMode('accept-edits')).toBe('accept-edits');
-    expect(toOperatorPermissionMode('custom')).toBe('custom');
+    expect(toOperatorPermissionMode('accept-edits')).toBe('safe-owner');
+    expect(toOperatorPermissionMode('custom')).toBe('safe-owner');
   });
 
   test('operator -> config vocabulary (settable only)', () => {
-    expect(toConfigPermissionMode('normal')).toBe('prompt');
-    expect(toConfigPermissionMode('auto')).toBe('allow-all');
+    expect(toConfigPermissionMode('safe-owner')).toBe('safe-owner');
+    expect(toConfigPermissionMode('safe-jev')).toBe('safe-jev');
+    expect(toConfigPermissionMode('yolo')).toBe('yolo');
     expect(toConfigPermissionMode('plan')).toBe('plan');
-    expect(toConfigPermissionMode('accept-edits')).toBe('accept-edits');
+    expect(() => toConfigPermissionMode('accept-edits')).toThrow(GatewayVerbError);
   });
 
   test('an unknown or non-settable mode is a 400', () => {
@@ -98,15 +105,62 @@ describe('permission mode vocabulary', () => {
 // ── get / set handlers ───────────────────────────────────────────────────────
 
 describe('sessions.permissionMode get/set', () => {
+  test('a hosted mode selection changes only its owning session and awaits persistence', async () => {
+    const config = makeConfig('safe-owner');
+    const holder = new SessionLiveTurnControlsHolder();
+    let firstMode: 'safe-owner' | 'safe-jev' | 'yolo' | 'plan' = 'safe-owner';
+    let secondMode: 'safe-owner' | 'safe-jev' | 'yolo' | 'plan' = 'safe-jev';
+    let saved = false;
+    const turnControls = {
+      cancelToolCall: () => false, listQueuedMessages: () => [],
+      editQueuedMessage: () => false, deleteQueuedMessage: () => false,
+    };
+    holder.bindSession('first', { ...turnControls, getPermissionMode: () => firstMode,
+      async setPermissionMode(mode) { firstMode = mode; await Promise.resolve(); saved = true; } });
+    holder.bindSession('second', { ...turnControls, getPermissionMode: () => secondMode,
+      async setPermissionMode(mode) { secondMode = mode; } });
+    const controls = createSessionRuntimeControls({ config, store: makeStore('daemon', 0, 0), liveTurnHolder: holder });
+    const result = await createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'first', mode: 'yolo' }));
+    expect(saved).toBe(true);
+    expect(result).toEqual({ sessionId: 'first', mode: 'yolo', previousMode: 'safe-owner' });
+    expect(controls.getPermissionMode('second')).toBe('safe-jev');
+    expect(controls.getPermissionMode('daemon')).toBe('safe-owner');
+    expect(config.current).toBe('safe-owner');
+    expect(config.autoApprove).toBe(false);
+  });
+
+  test('a hosted binding without a mode owner cannot mutate daemon configuration', () => {
+    const config = makeConfig('safe-owner');
+    const holder = new SessionLiveTurnControlsHolder();
+    holder.bindSession('hosted', { cancelToolCall: () => false, listQueuedMessages: () => [],
+      editQueuedMessage: () => false, deleteQueuedMessage: () => false });
+    const controls = createSessionRuntimeControls({ config, store: makeStore('daemon', 0, 0), liveTurnHolder: holder });
+    expect(() => createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'hosted', mode: 'yolo' })))
+      .toThrow(expect.objectContaining({ code: 'LIVE_MODE_UNAVAILABLE' }));
+    expect(config.current).toBe('safe-owner');
+  });
+
+  test('an explicit safe selection exits the legacy auto-approval override', () => {
+    const config = makeConfig('safe-owner');
+    config.autoApprove = true;
+    const controls = createSessionRuntimeControls({ config, store: makeStore('sess-1', 0, 0) });
+    expect(createSessionPermissionModeGetHandler(controls)(invoke({ sessionId: 'sess-1' })))
+      .toEqual({ sessionId: 'sess-1', mode: 'yolo' });
+    expect(createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'sess-1', mode: 'safe-jev' })))
+      .toEqual({ sessionId: 'sess-1', mode: 'safe-jev', previousMode: 'yolo' });
+    expect(config.autoApprove).toBe(false);
+    expect(controls.getPermissionMode()).toBe('safe-jev');
+  });
+
   test.each([...SESSION_GATE_PRESET_NAMES])('the advertised %s preset round-trips through the real local handlers', (name) => {
     const config = makeConfig('custom');
     const controls = createSessionRuntimeControls({ config, store: makeStore('sess-1', 0, 0) });
     const get = createSessionPermissionModeGetHandler(controls);
     const set = createSessionPermissionModeSetHandler(controls);
-    expect(get(invoke({ sessionId: 'sess-1' }))).toEqual({ sessionId: 'sess-1', mode: 'custom' });
+    expect(get(invoke({ sessionId: 'sess-1' }))).toEqual({ sessionId: 'sess-1', mode: 'safe-owner' });
     expect(isSettableGatePresetName(name)).toBe(true);
     expect(set(invoke({ sessionId: 'sess-1', mode: name })))
-      .toEqual({ sessionId: 'sess-1', mode: name, previousMode: 'custom' });
+      .toEqual({ sessionId: 'sess-1', mode: name, previousMode: 'safe-owner' });
     expect(config.current).toBe(GATE_PRESETS[name].mode);
     expect(get(invoke({ sessionId: 'sess-1' }))).toEqual({ sessionId: 'sess-1', mode: name });
   });
@@ -123,7 +177,7 @@ describe('sessions.permissionMode get/set', () => {
   test('a preset choice for another session leaves the local owner configuration untouched', () => {
     const config = makeConfig('custom');
     const controls = createSessionRuntimeControls({ config, store: makeStore('sess-1', 0, 0) });
-    expect(() => createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'other-session', mode: 'auto' })))
+    expect(() => createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'other-session', mode: 'safe-jev' })))
       .toThrow(expect.objectContaining({ code: 'SESSION_NOT_LOCAL' }));
     expect(config.current).toBe('custom');
   });
@@ -132,7 +186,7 @@ describe('sessions.permissionMode get/set', () => {
     const config = makeConfig('prompt');
     const controls = createSessionRuntimeControls({ config, store: makeStore('sess-1', 0, 0) });
     const out = createSessionPermissionModeGetHandler(controls)(invoke({ sessionId: 'sess-1' }));
-    expect(out).toEqual({ sessionId: 'sess-1', mode: 'normal' });
+    expect(out).toEqual({ sessionId: 'sess-1', mode: 'safe-owner' });
   });
 
   test('the stable "runtime" alias always resolves the local runtime', () => {
@@ -146,7 +200,7 @@ describe('sessions.permissionMode get/set', () => {
     const config = makeConfig('prompt');
     const controls = createSessionRuntimeControls({ config, store: makeStore('sess-1', 0, 0) });
     const out = createSessionPermissionModeSetHandler(controls)(invoke({ sessionId: 'sess-1', mode: 'plan' }));
-    expect(out).toEqual({ sessionId: 'sess-1', mode: 'plan', previousMode: 'normal' });
+    expect(out).toEqual({ sessionId: 'sess-1', mode: 'plan', previousMode: 'safe-owner' });
     expect(config.current).toBe('plan'); // config actually mutated (fires the wire event via the binding)
   });
 
@@ -231,9 +285,9 @@ describe('session-runtime gateway registration', () => {
     const catalog = makeCatalog();
     const ctx = { context: { admin: true } } as const;
     const got = await catalog.invoke('sessions.permissionMode.get', { ...ctx, body: { sessionId: 'sess-1' } }) as { mode: string };
-    expect(got.mode).toBe('normal');
-    const set = await catalog.invoke('sessions.permissionMode.set', { ...ctx, body: { sessionId: 'sess-1', mode: 'auto' } }) as { mode: string; previousMode: string };
-    expect(set).toMatchObject({ mode: 'auto', previousMode: 'normal' });
+    expect(got.mode).toBe('safe-owner');
+    const set = await catalog.invoke('sessions.permissionMode.set', { ...ctx, body: { sessionId: 'sess-1', mode: 'safe-jev' } }) as { mode: string; previousMode: string };
+    expect(set).toMatchObject({ mode: 'safe-jev', previousMode: 'safe-owner' });
     const usage = await catalog.invoke('sessions.contextUsage.get', { ...ctx, body: { sessionId: 'sess-1' } }) as { contextUsagePct: number; estimated: boolean };
     expect(usage.contextUsagePct).toBe(40);
     expect(usage.estimated).toBe(true);
@@ -324,7 +378,7 @@ describe('nullable context arithmetic', () => {
 
 // Presentation reads the operator name, never the config-vocabulary fallback.
 describe('session gate preset presentation', () => {
-  test('known wire names resolve to their authoritative gate table labels, including custom', () => {
+  test('known wire names resolve to their authoritative gate table labels, including the separate plan posture', () => {
     for (const preset of Object.values(GATE_PRESETS)) {
       expect(isGatePresetName(preset.name)).toBe(true);
       expect(gatePresetLabel(toOperatorPermissionMode(preset.mode))).toBe(preset.label);

@@ -41,9 +41,8 @@ beforeEach(() => {
 afterEach(() => { installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings(); });
 
 const args = () => ({ commands: [{ cmd: 'git commit -m autonomous-fixture' }] });
-function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null = null, policyEnabled = false) {
+function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null = null, policyEnabled = false, mode: 'safe-owner' | 'safe-jev' | 'yolo' = 'safe-owner') {
   let directory = '/synthetic/autonomous-gate';
-  let mode = 'prompt' as const;
   const config: PermissionConfigReader = { getAutonomousSnapshot: () => ({ permissions: { mode, tools: {} }, autoApprove: false, directory }), isAutoApproveEnabled: () => false, getWorkingDirectory: () => directory,
     getSnapshot: () => ({ permissions: { mode, tools: {} } }) } as PermissionConfigReader;
   const state = new PolicyRuntimeState();
@@ -58,9 +57,9 @@ function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null =
 }
 const run = (deps: ToolExecutionDeps, input = args(), id = 'call-1') => executeToolCalls(deps, 'turn-1', [{ id, name: 'exec', arguments: input }]);
 
-test.each(['act', 'reject', 'defer_0'])('Jev %s cannot veto or rewrite a valid tool call', async selected => {
+test.each(['act', 'reject', 'defer_0'])('YOLO ignores Jev %s and runs the exact valid tool call', async selected => {
   choice = selected; confidence = 0.1;
-  const { deps, executed } = fixture();
+  const { deps, executed } = fixture({}, null, false, 'yolo');
   const [result] = await run(deps);
   expect(result?.success).toBe(true);
   expect(result?.autonomousDecision).toBeUndefined();
@@ -72,7 +71,7 @@ test.each(['act', 'reject', 'defer_0'])('Jev %s cannot veto or rewrite a valid t
 test('directory reads, search, edits, shell, settings and nested tools run without a Jev permission service', async () => {
   let judgments = 0;
   installJudgmentPort({ model: DEFAULT_MODEL, async ask() { judgments++; throw new Error('Jev unavailable'); } });
-  const { deps, manager, registry } = fixture();
+  const { deps, manager, registry } = fixture({}, null, false, 'yolo');
   deps.autonomousSource = () => ({ goal: 'give this project a code review', criteria: [] });
   const tools = ['repo_map', 'read', 'find', 'inspect', 'analyze', 'write', 'edit', 'goodvibes_settings', 'mcp'];
   const executed: string[] = [];
@@ -88,16 +87,14 @@ test('directory reads, search, edits, shell, settings and nested tools run witho
   expect(judgments).toBe(0);
 });
 
-test('owner-configured deny and read-only mode still apply without asking Jev', async () => {
-  for (const mode of ['custom', 'plan'] as const) {
-    const { deps, config, executed } = fixture();
-    config.getAutonomousSnapshot = () => ({ permissions: { mode, tools: { exec: 'deny' } }, autoApprove: false, directory: '/synthetic/autonomous-gate' }) as ReturnType<NonNullable<PermissionConfigReader['getAutonomousSnapshot']>>;
-    const [result] = await run(deps);
-    expect(result?.success).toBe(false);
-    expect(result?.denial?.reason).toBe(mode === 'plan' ? 'plan-mode' : 'config_deny');
-    expect(executed).toHaveLength(0);
-    expect(requests).toHaveLength(0);
-  }
+test('planning remains a separate non-executing posture and never asks Jev', async () => {
+  const { deps, config, executed } = fixture();
+  config.getAutonomousSnapshot = () => ({ permissions: { mode: 'plan', tools: {} }, autoApprove: false, directory: '/synthetic/autonomous-gate' }) as ReturnType<NonNullable<PermissionConfigReader['getAutonomousSnapshot']>>;
+  const [result] = await run(deps);
+  expect(result?.success).toBe(false);
+  expect(result?.denial?.reason).toBe('plan-mode');
+  expect(executed).toHaveLength(0);
+  expect(requests).toHaveLength(0);
 });
 
 test('borrowed argument mutation cannot change the prepared input that reaches the body', async () => {
@@ -156,9 +153,9 @@ test('deterministic format repair happens before semantic admission and the body
 test('a registered human handler is never invoked by the migrated real orchestrator', async () => {
   const { deps, executed } = fixture(); let humans = 0;
   deps.permissionManager = new PermissionManager(async () => { humans++; throw new Error('human callback must not run'); }, {
-    getAutonomousSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} }, autoApprove: false, directory: '/synthetic/project' }),
+    getAutonomousSnapshot: () => ({ permissions: { mode: 'safe-jev', tools: {} }, autoApprove: false, directory: '/synthetic/project' }),
     isAutoApproveEnabled: () => false, getWorkingDirectory: () => '/synthetic/project',
-    getSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} } }),
+    getSnapshot: () => ({ permissions: { mode: 'safe-jev', tools: {} } }),
   } as PermissionConfigReader, new PolicyRuntimeState());
   const [result] = await run(deps);
   expect(result?.success).toBe(true);

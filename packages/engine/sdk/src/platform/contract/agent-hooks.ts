@@ -6,6 +6,7 @@ import { assertOwnedContractSource } from './owned-source.js';
 import { hashState, JudgmentError } from '@goodvibes-jev/judgment';
 import { judgeState } from './evidence.js';
 import { nativeRecordedCheck } from './check.js';
+import { gateEventSummary } from './gates.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { nativeContractSourceForAdmission } from './native-source.js';
 /**
@@ -329,7 +330,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       criteria: [...outcome.readings].map(([criterionId, reading]) => ({ criterionId, verdict: reading.verdict, probabilityUnmet: reading.probabilityUnmet, outcome: reading.outcome })),
       goal: { verdict: check.goal.verdict, outcome: check.goal.outcome },
       quality: Object.entries(check.quality).map(([item, reading]) => ({ item: item as keyof typeof check.quality, verdict: reading.verdict, outcome: reading.outcome })),
-      gates: (check.gates ?? []).map((gate) => ({ gate: gate.gate, passed: gate.passed, skipped: gate.skipped === true })),
+      gates: (check.gates ?? []).map(gateEventSummary),
       ...(check.claims === undefined ? {} : { claims: check.claims.kind }),
       decisionIds: check.decisionIds,
     });

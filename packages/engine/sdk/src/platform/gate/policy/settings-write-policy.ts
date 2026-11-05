@@ -82,7 +82,6 @@ export function wrapSettingsToolForAgentPolicy(tool: Tool): void {
 export function validateAgentSettingsMechanics(args: SettingsToolArgs): string | null {
   if (args.mode !== 'set' && args.mode !== 'reset') return 'Settings accepts only set or reset.';
   if (typeof args.key !== 'string' || !isValidConfigKey(args.key.trim())) return 'Settings requires a registered key.';
-  if (args['confirm'] !== true) return 'Settings requires confirm=true.';
   return null;
 }
 

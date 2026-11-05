@@ -7,7 +7,7 @@ import { fakePort as baseFakePort, noulAnswer } from '@goodvibes-jev/judgment/te
 function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
   return baseFakePort((name, question, state) => name === 'completion_required' ? noulAnswer(.99) : answer(name, question, state));
 }
-import { completedContractEvidence } from '../sdk/src/platform/core/response-completion-contracts.js';
+import { completedContractEvidence, isNativeCompletedWorkReceipt } from '../sdk/src/platform/core/response-completion-contracts.js';
 import type { ContractView, UnitCheck } from '../sdk/src/platform/contract/types.js';
 import { CompletionEvidenceProjection } from '../sdk/src/platform/core/response-completion-evidence.js';
 import { verificationSources } from '../sdk/src/platform/core/verification/source.js';
@@ -15,6 +15,7 @@ import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
 import { ResponseCompletionGuard } from '../sdk/src/platform/core/response-completion.js';
 import { hashState } from '@goodvibes-jev/judgment';
 import { goalObligationSource } from '../sdk/src/platform/contract/goal-obligation-proof.js';
+import { originalObligationSource } from '../sdk/src/platform/contract/batteries/original-obligation-coverage.js';
 
 const originalPort = installJudgmentPort(undefined);
 afterEach(() => installJudgmentPort(originalPort));
@@ -196,6 +197,38 @@ test('the exact recorded Jev content review is bound to the saved answer and an 
   const malformed = contract({ decisions: [{ ...decision, reason: JSON.stringify({ ...review, decisionIds: [] }) }] });
   expect(completedContractEvidence({ list: () => [malformed] }, 'session')[0]!.contentReview!.matchesSavedAnswer).toBe(false);
   expect(completedContractEvidence({ list: () => [contract({ decisions: [{ ...decision, reason: 'invalid JSON' }] })] }, 'session')[0]!.contentReview).toBeNull();
+});
+
+test('original-obligation coverage retains exact source, answer and host call provenance', () => {
+  const source = contract();
+  const receipt = { schemaVersion: 1, passed: true, policy: { name: 'contract.original-obligation-coverage', version: 1 },
+    sourceDigest: hashState(originalObligationSource(source)), outputDigest: hashState(source.answer!),
+    evidenceDigest: hashState('actual primary evidence'), stateHash: hashState('actual original coverage request'),
+    reading: { probability: 0.03, verdict: 'no', outcome: 'act' }, decisionIds: ['actual-original-coverage'] };
+  const decision = { id: 'work.d3', targetId: 'work.original-obligations', reason: JSON.stringify(receipt), decisionIds: [...receipt.decisionIds] };
+  const content = approvedWork()[0]!.contentReview!.record;
+  const contentDecision = { id: 'work.d1', targetId: 'work.final-answer-review', reason: JSON.stringify(content), decisionIds: content.decisionIds };
+  const finalCheck = { ...check, decisionIds: [...check.decisionIds, ...receipt.decisionIds, 'actual-content-review'] };
+  const saved = contract({ decisions: [contentDecision, decision], checks: [finalCheck] });
+  const observed = completedContractEvidence({ list: () => [saved] }, 'session')[0]!.originalObligationCoverage!;
+  expect(observed).toMatchObject({ wellFormed: true, matchesOriginalScope: true, matchesSavedAnswer: true, record: receipt });
+  const staleSource = contract({ ...saved, ask: 'A different original request' });
+  expect(completedContractEvidence({ list: () => [staleSource] }, 'session')[0]!.originalObligationCoverage!.matchesOriginalScope).toBe(false);
+  const staleAnswer = contract({ ...saved, answer: 'A different final answer' });
+  expect(completedContractEvidence({ list: () => [staleAnswer] }, 'session')[0]!.originalObligationCoverage!.matchesSavedAnswer).toBe(false);
+  const unknown = contract({ ...saved, checks: [check] });
+  expect(completedContractEvidence({ list: () => [unknown] }, 'session')[0]!.originalObligationCoverage!.wellFormed).toBe(false);
+  const copied = completedContractEvidence({ list: () => [saved] }, 'session', '/project')[0]!;
+  expect(isNativeCompletedWorkReceipt(copied, copied)).toBe(true);
+  expect(isNativeCompletedWorkReceipt(structuredClone(copied), copied)).toBe(false);
+  const legacy = { ...approvedWork()[0]!.goalCoverage!.record, literalSourceDigest: hashState(goalObligationSource(saved)) };
+  const legacyDecision = { id: 'work.d2', targetId: 'work.goal-obligations', reason: JSON.stringify(legacy) };
+  for (const reason of [JSON.stringify({ ...receipt, passed: false, reading: { probability: 0.98, verdict: 'yes', outcome: 'act' } }), 'invalid JSON']) {
+    const rejected = contract({ ...saved, decisions: [contentDecision, legacyDecision, { ...decision, reason }] });
+    const work = completedContractEvidence({ list: () => [rejected] }, 'session', '/project')[0]!;
+    expect(work.goalCoverage?.matchesOriginalScope).toBe(true);
+    expect(isNativeCompletedWorkReceipt(work, work)).toBe(false);
+  }
 });
 
 test('completion checks receive scoped records but a rejection still holds publication and changed records invalidate acceptance', async () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAgentAccountsTool, registerAgentAccountsTool } from '../../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry } from '@goodvibes-jev/engine/sdk/platform/google';
@@ -10,6 +10,7 @@ import {
 } from '../../trust/untrusted-content.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
+import { withExecutionModeOwner } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -48,7 +49,7 @@ describe('the account register', () => {
     log = new SqliteDecisionLog(':memory:');
     const fake = fakePort((name, question) => {
       if (question.type === 'noul') return noulAnswer(0.001);
-      if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999);
+      if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' || name === 'effect__kind' ? 'read' : 'generic', 0.999);
       throw new Error(`Unexpected question ${name}`);
     });
     previous = installJudgmentPort(withDecisionLog(fake.port, log));
@@ -57,7 +58,7 @@ describe('the account register', () => {
       baseAddress: () => 'owner@example.com',
     };
     tool = createAgentAccountsTool(options);
-    fixture = recordedEffectFixture(tool, 'prompt', {}, home);
+    fixture = recordedEffectFixture(tool, 'safe-owner', {}, home);
     fixture.registry.unregister('accounts'); registerAgentAccountsTool(fixture.registry, options);
   });
 
@@ -144,6 +145,18 @@ describe('the account register', () => {
     // the owner-direct path and this pins it.
     expect(result.error).not.toContain('let them ask for it');
     expect(result.error).not.toContain('Tell the owner');
+  });
+
+  test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s preserves account source policy after generic admission', async mode => {
+    const path = join(home, 'accounts.json');
+    const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+    getSessionUntrustedContentLedger().record({ surface: 'web-page', origin: 'untrusted.example', at: new Date().toISOString() });
+    await withExecutionModeOwner({ getMode: () => mode, getRevision: () => 0 }, async () => {
+      const result = await run(VALID);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('untrusted.example');
+    });
+    expect(existsSync(path) ? readFileSync(path, 'utf8') : null).toBe(before);
   });
 
   test('with nothing read this turn, recording proceeds', async () => {

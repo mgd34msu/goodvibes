@@ -3,6 +3,7 @@ import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryTyp
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { awaitPermission } from '../permissions/cancellation.js';
+import { currentExecutionMode } from '../gate/execution-context.js';
 
 export const browserControlIdentity = defineBattery({
   name: 'browser.control.same-identity', version: 1, accuracyFloor: 0.95,
@@ -48,6 +49,7 @@ export class BrowserControlIdentityWork {
     this.assertCurrent();
   }
   readonly assertCurrent = (): void => {
+    currentExecutionMode();
     this.signal?.throwIfAborted();
     const result: unknown = this.callerCurrent?.();
     if (result !== undefined) { void Promise.resolve(result).catch(() => {}); throw new Error('Browser action owner must be synchronous.'); }

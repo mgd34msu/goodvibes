@@ -1,3 +1,4 @@
+import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
 
@@ -189,6 +190,19 @@ export class SettingsModal {
       }));
     }
     this.unsubscribeHostSetting = () => { for (const unsubscribe of hostSubscriptions) unsubscribe(); };
+    if (hasActiveExecutionMode(configManager)) {
+      const opened = this.secretWriteSession;
+      void refreshExecutionMode(configManager).then(() => {
+        if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
+        this._refreshAllEntries();
+        this.requestHostSettingRender?.();
+      }, () => {
+        if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
+        this.lastSettingEffectMessage = 'The active hosted execution mode is unavailable.';
+        this._refreshAllEntries();
+        this.requestHostSettingRender?.();
+      });
+    }
   }
 
   /** Replace the search query and recompute the ranked results (an empty query clears the search). */
@@ -713,7 +727,7 @@ export class SettingsModal {
       if (isAgentHiddenSettingKey(setting.key)) continue;
       const rawCat = setting.key.split('.')[0] as string;
       const cat = rawCat as SettingsCategory;
-      const display = readConfigSettingForDisplay(() => setting.kind === 'host' ? configManager.getHostBooleanSetting(setting.key).get() : configManager.get(setting.key));
+      const display = readConfigSettingForDisplay(() => setting.key === 'permissions.mode' ? readExecutionMode(configManager) : setting.kind === 'host' ? configManager.getHostBooleanSetting(setting.key).get() : configManager.get(setting.key));
       const currentValue = display.value;
       const resolved = setting.kind === 'host' || policyError ? undefined : getResolvedSettingLookup(configManager, setting.key)?.entry;
       const entry: SettingEntry = {
@@ -727,7 +741,7 @@ export class SettingsModal {
         // is gone, those keys route to the daemon that owns them.
         locked: resolved?.locked,
         conflict: resolved?.conflict,
-        sourceLabel: resolved?.sourceLabel,
+        sourceLabel: setting.key === 'permissions.mode' && hasActiveExecutionMode(configManager) ? 'Active hosted session' : resolved?.sourceLabel,
         lockReason: resolved?.lockReason,
       };
       this._refreshHostEntry(entry);
@@ -803,10 +817,11 @@ export class SettingsModal {
     for (const entries of this.groups.values()) {
       for (const entry of entries) {
         if (entry.setting.kind === 'host') { this._refreshHostEntry(entry); continue; }
-        const display = readConfigSettingForDisplay(() => this.configManager!.get(entry.setting.key as never));
+        const display = readConfigSettingForDisplay(() => entry.setting.key === 'permissions.mode' ? readExecutionMode(this.configManager!) : this.configManager!.get(entry.setting.key as never));
         entry.currentValue = display.value;
         entry.metadataUnavailable = display.held;
         entry.isDefault = entry.currentValue === entry.setting.default;
+        if (entry.setting.key === 'permissions.mode') entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
         this._refreshHostEntry(entry);
       }
     }
@@ -848,6 +863,21 @@ export class SettingsModal {
         for (const entries of this.groups.values()) for (const entry of entries) this._refreshHostEntry(entry);
         return false;
       }
+    }
+    if (key === 'permissions.mode') {
+      this.lastSettingEffectMessage = 'Saving execution mode…';
+      const owner = this.configManager;
+      const opened = this.secretWriteSession;
+      void setExecutionMode(owner, value).then(() => {
+        if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
+        this.lastSettingEffectMessage = 'Execution mode updated.';
+        this._refreshAllEntries();
+      }, error => {
+        if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
+        this.lastSettingEffectMessage = `Save failed: ${summarizeError(error)}`;
+        this.requestHostSettingRender?.();
+      });
+      return true;
     }
     const previousValue = postalConfigKey(key) ? this.configManager.getStored(key) : this.configManager.get(key);
     // A setting the DAEMON acts on is written where it is acted on. Writing it

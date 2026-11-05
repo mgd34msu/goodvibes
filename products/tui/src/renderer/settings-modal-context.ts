@@ -17,6 +17,7 @@ import { maskConcealedText } from '../input/concealed-input.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
 import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
+import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
 
 const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'display.themeMode': {
@@ -34,13 +35,7 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     minimal: 'Show concise guidance only when it helps avoid mistakes.',
     guided: 'Provide more explanation and next-step context during configuration and operations.',
   },
-  'permissions.mode': {
-    prompt: 'Normal: ask before powerful or risky actions according to tool policy.',
-    plan: 'Plan mode: read-only planning posture; writes, commands, and network calls are blocked so the model can plan without changing anything. Toggle with /plan or Shift+Tab.',
-    'accept-edits': 'Accept edits: file writes and edits are auto-approved, but exec, network, and escalations are still gated.',
-    'allow-all': 'Auto: allow all actions without prompting. Fast, but removes an important safety gate.',
-    custom: 'Use per-tool-class permission settings from the rows below.',
-  },
+  'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map(preset => [preset.mode, preset.summary])),
   'permissions.backgroundAgents': {
     inherit: 'Background and subagent tool calls run through the SAME session permission mode as foreground work.',
     'allow-all': 'Background and subagent tool calls are exempt from prompting (auto-approved) even when foreground work is gated.',

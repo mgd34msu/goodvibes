@@ -1,3 +1,4 @@
+import { presetForMode } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { nativeWorkLedgerLines } from './native-work-ledger.ts';
 import type { AgentWorkspace, AgentWorkspaceCategory, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace.ts';
 import { buildAssistantCockpitFromWorkspaceSnapshot, type AssistantCockpitLane, type AssistantCockpitLaneState, type AssistantCockpitStatus } from '../agent/assistant-cockpit.ts';
@@ -430,7 +431,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     );
   } else if (category.id === 'tools-permissions') {
     base.push(
-      { text: `Permission mode: ${snapshot.permissionMode}.`, fg: snapshot.permissionMode === 'allow-all' ? PALETTE.warn : PALETTE.info },
+      { text: `Execution mode: ${presetForMode(snapshot.permissionMode).label}.`, fg: presetForMode(snapshot.permissionMode).name === 'yolo' ? PALETTE.warn : PALETTE.info },
       { text: `Auto-approve ${snapshot.autoApprove ? 'on' : 'off'}; tool auto-heal ${snapshot.toolAutoHeal ? 'on' : 'off'}; token budget ${snapshot.toolsDefaultTokenBudget}.`, fg: snapshot.autoApprove ? PALETTE.warn : PALETTE.info },
       { text: `Artifact limit ${formatMegabytes(snapshot.artifactMaxBytes)}; raw prompt telemetry ${snapshot.rawPromptTelemetry ? 'on' : 'off'}.`, fg: snapshot.rawPromptTelemetry ? PALETTE.warn : PALETTE.muted },
       { text: `MCP servers: ${snapshot.mcpConnectedServerCount}/${snapshot.mcpServerCount} connected; quarantined ${snapshot.mcpQuarantinedServerCount}.`, fg: snapshot.mcpQuarantinedServerCount > 0 ? PALETTE.warn : PALETTE.info },

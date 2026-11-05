@@ -47,6 +47,9 @@ describe('contract event validation', () => {
     expect(validateKnownEvent({ ...SAMPLES.CONTRACT_NUDGE_CONSUMED, turn: 'four' }).violations).toEqual(['turn must be a number']);
     expect(validateKnownEvent({ ...SAMPLES.CONTRACT_FAILED, turnLimitSource: 'guess' }).valid).toBe(false);
     expect(validateKnownEvent({ ...SAMPLES.CONTRACT_CHECKED, claims: 'probably' }).valid).toBe(false);
+    expect(validateKnownEvent({ ...SAMPLES.CONTRACT_GATE_RESULT, outcome: 'unverified', required: true, reason: 'timeout' }).valid).toBe(true);
+    expect(validateKnownEvent({ ...SAMPLES.CONTRACT_GATE_RESULT, outcome: 'probably' }).valid).toBe(false);
+    expect(validateKnownEvent({ ...SAMPLES.CONTRACT_GATE_RESULT, required: 'yes' }).valid).toBe(false);
   });
 
   test('closed sets, nested objects and arrays of objects are checked element by element', () => {

@@ -10,10 +10,10 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { parseChannelPermissionMode } from '../../channel-profiles/registry.js';
 import {
   ChannelProfileError,
   ChannelProfileRegistry,
-  type ChannelPermissionMode,
 } from '../../channel-profiles/index.js';
 
 export type ChannelProfilesGatewayService = Pick<
@@ -77,7 +77,7 @@ function createSetHandler(service: ChannelProfilesGatewayService): GatewayMethod
         channelId: optionalString(params.channelId),
         model: optionalString(params.model),
         provider: optionalString(params.provider),
-        permissionMode: optionalString(params.permissionMode) as ChannelPermissionMode | undefined,
+        permissionMode: parseChannelPermissionMode(params.permissionMode),
         metadata: readMetadata(params.metadata),
       });
       return { binding };

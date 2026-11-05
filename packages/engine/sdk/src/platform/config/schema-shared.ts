@@ -6,6 +6,8 @@ export interface ConfigSettingDefinition {
   type: 'boolean' | 'number' | 'string' | 'enum';
   default: unknown;
   description: string;
+  /** Retained for saved-config compatibility, excluded from current settings controls. */
+  deprecated?: boolean;
   enumValues?: string[] | undefined;
   validate?: ((value: unknown) => boolean) | undefined;
   /**

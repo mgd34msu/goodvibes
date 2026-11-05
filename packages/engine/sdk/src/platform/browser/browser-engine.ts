@@ -1,3 +1,6 @@
+import { isAdmittedBrowserAction, retainAdmittedBrowserAction, retainAdmittedBrowserWork } from './browser-action-admission.js';
+import { isYoloExecution } from '../gate/execution-context.js';
+import type { ToolExecuteOptions } from '../types/tools.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import type { BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { mkdirSync } from 'node:fs';
@@ -385,8 +388,17 @@ export class BrowserEngine {
     return this.snapshots.get(sessionId, pageId);
   }
 
+  /** Keep the shared tool decision bound to this serving browser and original input. */
+  retainAdmittedToolAction(args: Record<string, unknown>, options: ToolExecuteOptions, current: () => void): BrowserActionLifetime | undefined {
+    const sessionId = typeof args.sessionId === 'string' && args.sessionId.trim() ? args.sessionId.trim() : this.sessions.defaultSessionId();
+    if (!sessionId) return undefined;
+    const pageId = typeof args.pageId === 'string' && args.pageId.trim() ? args.pageId.trim() : this.sessions.info(sessionId).activePageId;
+    return pageId ? retainAdmittedBrowserAction(this, args, options, current, sessionId, pageId) : undefined;
+  }
+
   /** The original action owns one complete page reading and all fresh checks. */
-  private async credentialInteraction(page: Page, sessionId: string, pageId: string, work: BrowserControlIdentityWork, current: () => void, action: string) {
+  private async credentialInteraction(page: Page, sessionId: string, pageId: string, work: BrowserControlIdentityWork, current: () => void, action: string,
+    ownership: BrowserActionLifetime | undefined, args: Readonly<Record<string, unknown>>) {
     try {
       const guard = this.cardGuard;
       const guardMethods = guard ? retainBrowserMethods(guard, ['redact', 'hasLiveMaterial']) : undefined;
@@ -398,6 +410,15 @@ export class BrowserEngine {
         guardMethods?.assertCurrent(); current();
       };
       const observation = await captureCredentialPage(page, work, current, assertMetadata); current();
+      if (isYoloExecution() || isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
+        return async () => {
+          current();
+          if (!isYoloExecution() && !isAdmittedBrowserAction(this, ownership, sessionId, pageId, action, args)) {
+            throw new BrowserSessionError('The browser action is no longer admitted.', 'Obtain a current decision for this action.');
+          }
+          await observation.assertCurrent(); current();
+        };
+      }
       if (observation.password) throw new BrowserSessionError('This page contains a native password input, so automated credential interaction is refused.', 'Only the account owner can complete authentication.');
       const verdict = await work.credentialPage(observation.state, observation.assertCurrent); current();
       if (verdict === 'yes') throw new BrowserSessionError(`This page looks like a sign-in page (${observation.url}), so the browser layer will not ${action} on it.`, `Give the owner this URL to open in their own browser and sign in there: ${observation.url}`);
@@ -411,7 +432,8 @@ export class BrowserEngine {
   }
 
   /** Bind every ref consumer to one stored snapshot and one original source. */
-  private refScope(sessionId: string, pageId: string, page: Page, work: BrowserControlIdentityWork, ownership?: BrowserActionLifetime) {
+  private refScope(sessionId: string, pageId: string, page: Page, work: BrowserControlIdentityWork, ownership?: BrowserActionLifetime,
+    action?: string, args?: Readonly<Record<string, unknown>>) {
     const snapshot = this.currentSnapshot(sessionId, pageId), expected = ownership?.snapshotId;
     const pageMethods = retainBrowserMethods(page, ['url']);
     const current = () => {
@@ -422,6 +444,7 @@ export class BrowserEngine {
         throw new StaleElementError('The selected browser snapshot is no longer current.', 'Read the page again before acting.');
       }
     };
+    if (action && args) retainAdmittedBrowserWork(work, this, ownership, sessionId, pageId, action, args, current);
     return { snapshot, current, resolve: (ref: string) => resolveRef(page, snapshot, ref, work, current, () => {
       if (this.cardGuard?.hasLiveMaterial(sessionId, pageId)) throw new StaleElementError('Cannot read changed control identity while payment material is live.', 'Use an unchanged control or finish the authorized payment flow first.');
     }) };
@@ -435,10 +458,10 @@ export class BrowserEngine {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
+    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'click', args);
     const current = scope.current;
     current();
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'click'); current();
+    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'click', ownership, args); current();
     const { locator, element, revalidate } = await scope.resolve(args.ref);
     current();
     if (element.submits) {
@@ -503,10 +526,10 @@ export class BrowserEngine {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
+    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'type', args);
     const current = scope.current;
     current();
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'type'); current();
+    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'type', ownership, args); current();
     const { locator, element, revalidate } = await scope.resolve(args.ref);
     current();
     const timeout = args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
@@ -606,8 +629,8 @@ export class BrowserEngine {
     args = { ...args, values: [...args.values] }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'select'); scope.current();
+    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'select', args);
+    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
     const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
     await revalidate(); assertCurrent();
     await credentialCurrent(); assertCurrent();
@@ -623,8 +646,8 @@ export class BrowserEngine {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press'); scope.current();
+    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'press', args);
+    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
     const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
     if (args.key === 'Enter' || args.key === 'NumpadEnter') {
       const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));

@@ -83,7 +83,8 @@ const YES_NO = ['mutates', 'outward', 'secrets', 'irreversible', 'beyondProject'
 
 /** A port answering the gate batteries from `table`, recording every request. */
 export function gateReadingsPort(table: GateReadingTable = []) {
-  return fakePort((name: string, question: Question, state: unknown) => {
+  return fakePort((wireName: string, question: Question, state: unknown) => {
+    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     const text = JSON.stringify(state);
     const reading = { ...defaultReading(state), ...(table.find(([match]) => text.includes(match))?.[1] ?? {}) };
     if (name === 'family') return choiceAnswer(question, reading.family ?? 'generic', 0.95);

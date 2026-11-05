@@ -125,7 +125,7 @@ describe('executeGateCommand', () => {
 });
 
 describe('runContractGates', () => {
-  test('runs enabled gates in order, records skips as passes, and emits a result event for each', async () => {
+  test('runs enabled gates in order, records unavailable checks honestly, and emits a result event for each', async () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: {} }));
     const bus = new RuntimeEventBus();
     const events: ContractEvent[] = [];
@@ -135,7 +135,7 @@ describe('runContractGates', () => {
     const seen: string[] = [];
     const results = await runContractGates({
       configManager: config([
-        { name: 'test', command: 'exit 1', enabled: true },
+        { name: 'test', command: 'bun run test', enabled: true },
         { name: 'custom', command: 'echo fine', enabled: true },
         { name: 'broken', command: 'echo bad; exit 2', enabled: true },
         { name: 'off', command: 'exit 1', enabled: false },
@@ -151,14 +151,15 @@ describe('runContractGates', () => {
     off();
 
     expect(results.map((result) => [result.gate, result.passed, result.skipped])).toEqual([
-      ['test', true, true],
+      ['test', false, true],
       ['custom', true, false],
       ['broken', false, false],
     ]);
     expect(results[0]!.output).toBe('Skipped: no test script in package.json');
     expect(seen).toEqual(['test', 'custom', 'broken']);
     expect(events).toEqual([
-      { type: 'CONTRACT_GATE_RESULT', contractId: 'ctr-0a1b2c3d', targetId: 'u1', gate: 'test', passed: true, skipped: true, durationMs: 0, occurrenceId: expect.any(String) },
+      { type: 'CONTRACT_GATE_RESULT', contractId: 'ctr-0a1b2c3d', targetId: 'u1', gate: 'test', passed: false, skipped: true,
+        outcome: 'unverified', required: true, reason: 'not-applicable', durationMs: 0, occurrenceId: expect.any(String) },
       expect.objectContaining({ type: 'CONTRACT_GATE_RESULT', gate: 'custom', passed: true, skipped: false }),
       expect.objectContaining({ type: 'CONTRACT_GATE_RESULT', gate: 'broken', passed: false, skipped: false }),
     ]);

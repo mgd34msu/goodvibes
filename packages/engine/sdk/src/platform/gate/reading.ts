@@ -1,7 +1,7 @@
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../permissions/external-request-evidence.js';
 /**
  * The gate's Jev reading of one tool call: the risk-family and side-effect
- * batteries asked in parallel (one request each), composed in code into the
+ * batteries combined in one request, composed in code into the
  * call's stakes. The facts are narrow yes/no questions; the composition is
  * the rule below, kept in one place (stakesFromFacts).
  *
@@ -11,7 +11,7 @@ import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../pe
 import { snapshotJudgmentInput } from './judgment-input.js';
 import { executePolicyCheck } from './execute-policy-check.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JsonValue, Stakes, YesNoReading, JudgmentPort } from '@goodvibes-jev/judgment';
+import { fanOut, type JsonValue, type Stakes, type YesNoReading, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { riskFamily, type GateRiskFamily } from './batteries/risk-family.js';
 import { sideEffect, type SideEffectKind } from './batteries/side-effect.js';
 import { boundaryReading } from './batteries/boundary.js';
@@ -132,7 +132,7 @@ export interface ReadToolCallInput {
 /** The decision site the gate's readings are logged under. */
 export const GATE_SITE = 'engine.gate';
 
-/** Reads one tool call through the gate's two batteries, in parallel. */
+/** Reads the independent gate batteries about one captured call in a shared request. */
 export async function readToolCall(input: ReadToolCallInput, site: string = GATE_SITE): Promise<GateReading> {
   const { toolName, args, workingDirectory, signal: abortSignal, askKind = false, askObfuscated = false, port: scopedPort } = input;
   const external = readExternalRequestEvidence(input.externalRequestEvidence);
@@ -143,32 +143,32 @@ export async function readToolCall(input: ReadToolCallInput, site: string = GATE
   const judgedCommands = shell ? shellCommandsIn(state.arguments as Record<string, unknown>) : [];
   const port = scopedPort ?? judgmentPort(site);
   const signal = abortSignal === undefined ? {} : { signal: abortSignal };
-  const [effect, risk, edge] = await Promise.all([
-    sideEffect.run(port, state, {
-      site,
-      only: [
+  const run = await fanOut(port, state, { effect: sideEffect, risk: riskFamily, edge: boundaryReading }, {
+    site,
+    ...signal,
+    only: {
+      effect: [
         'mutates',
         'outward',
         'secrets',
         ...(askKind ? (['kind'] as const) : []),
         ...(askObfuscated ? (['obfuscated'] as const) : []),
       ],
-      ...signal,
-    }),
-    riskFamily.run(port, state, { site, ...signal }),
-    boundaryReading.run(port, state, { site, only: shell ? ['catastrophic', 'cardDetails'] : ['cardDetails'], ...signal }),
-  ]);
+      edge: shell ? ['catastrophic', 'cardDetails'] : ['cardDetails'],
+    },
+  });
+  const { effect, risk, edge } = run.readings;
   abortSignal?.throwIfAborted();
-  const catastrophic = shell ? edge.readings.catastrophic.verdict : undefined;
+  const catastrophic = shell ? edge.catastrophic.verdict : undefined;
   if (catastrophic !== undefined) rememberCatastrophic(judgedCommands, catastrophic);
   const yesNo: Partial<Record<GateFactName, YesNoReading>> = {
-    mutates: effect.readings.mutates,
-    outward: effect.readings.outward,
-    secrets: effect.readings.secrets,
-    irreversible: risk.readings.irreversible,
-    beyondProject: risk.readings.beyondProject,
-    weakensSecurity: risk.readings.weakensSecurity,
-    ...(askObfuscated ? { obfuscated: effect.readings.obfuscated } : {}),
+    mutates: effect.mutates,
+    outward: effect.outward,
+    secrets: effect.secrets,
+    irreversible: risk.irreversible,
+    beyondProject: risk.beyondProject,
+    weakensSecurity: risk.weakensSecurity,
+    ...(askObfuscated ? { obfuscated: effect.obfuscated } : {}),
   };
   const facts = {
     obfuscated: false,
@@ -176,20 +176,18 @@ export async function readToolCall(input: ReadToolCallInput, site: string = GATE
     catastrophicUncertain: catastrophic === 'uncertain',
   } as GateFacts;
   const uncertain = (Object.keys(yesNo) as GateFactName[]).filter((name) => yesNo[name]!.verdict === 'uncertain');
-  const kindReading = askKind ? effect.readings.kind : undefined;
+  const kindReading = askKind ? effect.kind : undefined;
   return {
-    judgmentDecisionIds: Object.freeze([effect.result.decisionId, risk.result.decisionId, edge.result.decisionId].filter((id): id is string => id !== undefined)),
+    judgmentDecisionIds: Object.freeze(run.decisionId === undefined ? [] : [run.decisionId]),
     ...facts,
-    family: risk.readings.family.choice,
-    familyConfident: risk.readings.family.outcome === 'act',
+    family: risk.family.choice,
+    familyConfident: risk.family.outcome === 'act',
     stakes: stakesFromFacts(facts),
     uncertain,
     ...(kindReading ? { kind: kindReading.choice } : {}),
-    boundary: { catastrophic, cardDetails: edge.readings.cardDetails.verdict },
+    boundary: { catastrophic, cardDetails: edge.cardDetails.verdict },
     recordAction(action) {
-      effect.recordAction(action);
-      risk.recordAction(action);
-      edge.recordAction(action);
+      run.recordAction(action);
     },
   };
 }

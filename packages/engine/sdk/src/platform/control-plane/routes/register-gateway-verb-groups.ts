@@ -552,6 +552,12 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       store: deps.runtimeStore,
       providerRegistry: deps.providerRegistry,
       liveTurnHolder: deps.sessionLiveTurnControls,
+      channelSessions: deps.sessionIntake,
+      channelModeChanged: (sessionId, mode, previousMode) => {
+        deps.runtimeBus?.emit('gate', createEventEnvelope('PRESET_CHANGED', {
+          type: 'PRESET_CHANGED', mode, previousMode, preset: mode, previousPreset: previousMode,
+        }, { sessionId, source: 'channel-execution-mode' }));
+      },
     }),
   );
 

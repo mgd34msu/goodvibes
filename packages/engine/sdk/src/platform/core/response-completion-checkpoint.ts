@@ -18,7 +18,8 @@ export function nativeWorkCheckpoint(original: readonly unknown[], admitted: rea
   // A privacy projection which withholds the receipt cannot support this view.
   if (!completedWork.some(work => work.kind === 'host-completed-contract' && work.status === 'passed'
     && (work.contentReview as { matchesSavedAnswer?: unknown } | null)?.matchesSavedAnswer === true
-    && (work.goalCoverage as { matchesOriginalScope?: unknown } | null)?.matchesOriginalScope === true)) return undefined;
+    && ((work.originalObligationCoverage as { matchesOriginalScope?: unknown } | null)?.matchesOriginalScope === true
+      || (work.goalCoverage as { matchesOriginalScope?: unknown } | null)?.matchesOriginalScope === true))) return undefined;
   const instructions = verificationSources(full).filter(source => source.kind === 'instruction');
   const originalUsers = instructions.filter(source => source.messageRole === 'user').map(source => {
     if (source.completeMessage) {

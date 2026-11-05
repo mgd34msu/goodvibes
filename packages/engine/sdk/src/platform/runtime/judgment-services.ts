@@ -4,7 +4,8 @@ import {
   createSystemOnePort,
   endpointKind,
   JudgmentError,
-  judgmentConfigFromEnv,
+  captureJudgmentBackendSettings,
+  HOSTED_BASE_URL,
   DEFAULT_MODEL,
   withDecisionLog,
   type JudgmentConfig,
@@ -26,7 +27,7 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.endpoint' | 'judgment.keySource' | 'judgment.model' | 'judgment.timeoutMs' | 'judgment.fallbacks'): unknown;
+    get(key: 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks'): unknown;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;
   };
@@ -48,13 +49,28 @@ function settingsModel(source: JudgmentSettingsSource): string {
   return text(source.config.get('judgment.model')) || text(source.env['TYPESAFE_DEFAULT_MODEL']) || DEFAULT_MODEL;
 }
 
-async function settingsKey(secrets: JudgmentSettingsSource['secrets'], keySource: JudgmentKeySource, envKey: string | undefined): Promise<string | undefined> {
-  if (keySource !== 'secret') return envKey;
-  const stored = (await secrets.get(JUDGMENT_KEY_NAME))?.trim();
-  if (!stored) {
-    throw new JudgmentError('invalid-request', `judgment.keySource is secret and the secret store holds no ${JUDGMENT_KEY_NAME}; the judgment port has no key`);
+async function storedKey(secrets: JudgmentSettingsSource['secrets'], name: string, timeoutMs: number, signal?: AbortSignal): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelled = () => {};
+  try {
+    signal?.throwIfAborted();
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new JudgmentError('unavailable', 'judgment credential resolution timed out')), timeoutMs);
+      cancelled = () => reject(new JudgmentError('aborted', 'the judgment call was cancelled'));
+      signal?.addEventListener('abort', cancelled, { once: true });
+    });
+    return (await Promise.race([secrets.get(name), expired]))?.trim();
+  } catch {
+    if (signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+    return undefined;
   }
-  return stored;
+  finally { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); }
+}
+
+async function settingsKey(secrets: JudgmentSettingsSource['secrets'], keySource: JudgmentKeySource, keyName: string, envKey: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<string | undefined> {
+  if (keySource === 'none') return undefined;
+  if (keySource !== 'secret') return envKey;
+  return storedKey(secrets, keyName, timeoutMs, signal);
 }
 
 /**
@@ -62,45 +78,55 @@ async function settingsKey(secrets: JudgmentSettingsSource['secrets'], keySource
  * over the environment, with judgment.endpoint, the key from judgment.keySource
  * and judgment.model standing in for their environment variables when set.
  */
-export async function judgmentConfigFromSettings(source: JudgmentSettingsSource): Promise<JudgmentConfig> {
+export async function judgmentConfigFromSettings(source: JudgmentSettingsSource, signal?: AbortSignal): Promise<JudgmentConfig> {
   // Capture the destination and its credential source together before a secret
   // lookup can yield or invoke borrowed code. Hot reload applies to the next
   // reading, never to only part of a reading already acquiring its key.
+  signal?.throwIfAborted();
+  const keyName = text(source.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
   const env = {
-    TYPESAFE_API_KEY: source.env[JUDGMENT_KEY_NAME],
+    TYPESAFE_API_KEY: source.env[keyName],
     TYPESAFE_BASE_URL: text(source.config.get('judgment.endpoint')) || source.env['TYPESAFE_BASE_URL'],
   };
   const model = settingsModel(source);
+  const backend = captureJudgmentBackendSettings(source.config.get('judgment.backend'));
   const timeoutMs = source.config.get('judgment.timeoutMs');
   const keySource = source.config.get('judgment.keySource') as JudgmentKeySource;
   let targets: ReturnType<typeof captureJudgmentFallbackSettings>;
   try { targets = captureJudgmentFallbackSettings(source.config.get('judgment.fallbacks')); }
   catch { throw new JudgmentError('invalid-request', 'Invalid judgment fallback settings'); }
   const environmentKeys = targets.map(target => target.keySource === 'env' ? source.env[target.keyName] : undefined);
-  env.TYPESAFE_API_KEY = await settingsKey(source.secrets, keySource, env.TYPESAFE_API_KEY);
+  const keyTimeoutMs = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : 30_000;
+  env.TYPESAFE_API_KEY = await settingsKey(source.secrets, keySource, keyName, env.TYPESAFE_API_KEY, keyTimeoutMs, signal);
+  signal?.throwIfAborted();
   const fallbacks: NonNullable<JudgmentConfig['fallbacks']>[number][] = [];
   for (const [index, target] of targets.entries()) {
     let key: string | null | undefined;
-    try { key = target.keySource === 'env' ? environmentKeys[index] : await source.secrets.get(target.keyName); }
-    catch { throw new JudgmentError('invalid-request', `judgment fallback ${index + 1} credential resolution failed`); }
-    if (typeof key !== 'string' || !key.trim()) throw new JudgmentError('invalid-request', `judgment fallback ${index + 1} has no resolved credential`);
-    fallbacks.push({ endpoint: { kind: endpointKind(target.endpoint), baseURL: target.endpoint, apiKey: key.trim() }, model: target.model });
+    try { key = target.keySource === 'none' ? undefined : target.keySource === 'env' ? environmentKeys[index] : await storedKey(source.secrets, target.keyName, keyTimeoutMs, signal); }
+    catch { key = undefined; }
+    signal?.throwIfAborted();
+    fallbacks.push({ endpoint: { kind: endpointKind(target.endpoint), baseURL: target.endpoint, apiKey: key?.trim() ?? '',
+      ...(target.keySource === 'none' ? { authentication: 'none' as const } : {}), ...target.backend }, model: target.model });
   }
-  return judgmentConfigFromEnv(env, {
-    model,
-    ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
+  const baseURL = env.TYPESAFE_BASE_URL?.trim() || HOSTED_BASE_URL;
+  return {
+    endpoint: { kind: endpointKind(baseURL), baseURL, apiKey: env.TYPESAFE_API_KEY?.trim() ?? '',
+      ...(keySource === 'none' ? { authentication: 'none' as const } : {}), ...backend },
+    model, timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : 30_000, retry: {},
     ...(targets.length > 0 ? { fallbacks } : {}),
-  });
+  };
 }
 
 /** Whether two configs reach the same endpoint with the same key, model and timeout. */
 const sameConfig = (a: JudgmentConfig, b: JudgmentConfig): boolean =>
   a.endpoint.baseURL === b.endpoint.baseURL && a.endpoint.apiKey === b.endpoint.apiKey && a.model === b.model && a.timeoutMs === b.timeoutMs
+  && JSON.stringify(a.endpoint) === JSON.stringify(b.endpoint)
   && (a.fallbacks?.length ?? 0) === (b.fallbacks?.length ?? 0)
   && (a.fallbacks ?? []).every((target, index) => {
     const other = b.fallbacks?.[index];
     return other !== undefined && target.model === other.model && target.endpoint.baseURL === other.endpoint.baseURL
-      && target.endpoint.apiKey === other.endpoint.apiKey && target.endpoint.kind === other.endpoint.kind;
+      && target.endpoint.apiKey === other.endpoint.apiKey && target.endpoint.kind === other.endpoint.kind
+      && JSON.stringify(target.endpoint) === JSON.stringify(other.endpoint);
   });
 
 /** A secret-store read cannot strand runtime cancellation or its decision log. */
@@ -113,7 +139,7 @@ async function activeSettings(source: JudgmentSettingsSource, signal?: AbortSign
     signal.addEventListener('abort', cancelled, { once: true });
     if (signal.aborted) cancelled();
   });
-  try { return await Promise.race([interrupted, judgmentConfigFromSettings(source)]); }
+  try { return await Promise.race([interrupted, judgmentConfigFromSettings(source, signal)]); }
   finally { signal.removeEventListener('abort', cancelled); }
 }
 

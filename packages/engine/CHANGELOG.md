@@ -2,7 +2,27 @@
 
 ## [Unreleased]
 
+## [3.0.0-dev.0] - 2026-11-05
+
+### Changed
+
+- Support independently configured decision model backends, including Cloudflare
+  Clef and Laya protocol adapters, complete-input limits and explicit aliases.
+- Exhaust decision targets with finite deadlines, independent rate-limit cooldowns
+  and a user-facing halt diagnostic. Preserve cancellation and semantic refusals.
+- Stop completion and contract consumers from restarting exhausted decision
+  chains; retain stale-evidence rebuilding and halt tool batches before further
+  effects when a decision service fails.
+
+- Use one development version for every product, foundation and engine package,
+  including compiled fallbacks and platform package descriptors.
+- Replace retired package names with monorepo subpaths and remove the obsolete
+  Agent lockfile; install dependencies from the repository root.
+
 ### Fixed
+
+- Reject prototype paths, accessors and object coercion in workflow trigger
+  conditions while preserving own primitive and array data lookups.
 
 - Preserve ordered decision audit notes instead of overwriting prior readings,
   actions and truth. Migrate retained schema 2/3 notes to append-only schema 4
@@ -5949,7 +5969,7 @@ upgrade straight to 1.7.1, do not stay on 1.7.0.**
 ## [1.0.0] - 2026-07-06
 
 First stable release. `1.0.0` stabilizes the public operator/peer contract, the
-runtime and platform surfaces, and the nine `@pellux/goodvibes-*` workspace
+runtime and platform surfaces, and the nine `legacy-package:goodvibes-*` workspace
 packages, all published together in lockstep. It closes the goodvibes-tui
 evolution arc: the SDK is now the one platform substrate shared by
 the TUI, the agent fork, and the browser web UI, sessions, config, memory, and

@@ -458,3 +458,6 @@ export { captureRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPre
   applyRemoteSettingsImportPrecondition, assertCompletedRemoteSettingsImportPrecondition } from './settings-import-precondition-client.js';
 export type { RemoteSettingsImportPrecondition, RemoteSettingsImportPreconditionFacts, RemoteSettingsImportRestriction,
   SettingsImportPreconditionRequest, SettingsImportPreconditionReceipt } from './settings-import-precondition-client.js';
+
+export { DEFAULT_DECISION_ROUTER_SETTINGS, captureDecisionRouterSettings } from './decision-router-settings.js';
+export type { DecisionRouterSettings, DecisionRouterTarget, DecisionRouterCategory } from './decision-router-settings.js';

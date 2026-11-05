@@ -4,7 +4,7 @@ import { activeUiTones } from './theme.ts';
 /**
  * Layout constants, single source of truth for margins and content width.
  * All renderers import these instead of hardcoding indent values. The object
- * itself lives in @pellux/goodvibes-terminal-shell alongside the transcript
+ * itself lives in @goodvibes-jev/engine/terminal-shell alongside the transcript
  * tree geometry that reads LEFT_MARGIN/RIGHT_MARGIN out of it, so the margins
  * and the glyph columns derived from them cannot drift apart.
  */

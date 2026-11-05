@@ -7,7 +7,7 @@
 
 It also mirrors the npm package to GitHub Packages:
 
-- npmjs: `@pellux/goodvibes-tui`
+- npmjs: `@goodvibes-jev/tui`
 - GitHub Packages: `@mgd34msu/goodvibes-tui`
 
 The binary release is the primary distribution channel.
@@ -93,7 +93,7 @@ Release workflow behavior:
 - a native `darwin-arm64` banner smoke runs on `macos-14`, and a separate
   job installs the packed npm tarball into a clean project and asserts the
   `goodvibes` and `goodvibes-daemon` bin shims both work
-- npm publish targets `@pellux/goodvibes-tui`
+- npm publish targets `@goodvibes-jev/tui`
 - GitHub Packages publish targets `@mgd34msu/goodvibes-tui`
 - the GitHub Release is created from `docs/releases/<version>.md` when present, otherwise it falls back to the matching `CHANGELOG.md` section
 - the GitHub Release is created before the registry publish jobs so the package install script can fetch version-matched release assets immediately
@@ -103,9 +103,9 @@ Release workflow behavior:
 
 The npm package is intended to be directly installable:
 
-- `bun add -g @pellux/goodvibes-tui`
-- `npm install -g @pellux/goodvibes-tui`
-- `pnpm add -g @pellux/goodvibes-tui`
+- `bun add -g @goodvibes-jev/tui`
+- `npm install -g @goodvibes-jev/tui`
+- `pnpm add -g @goodvibes-jev/tui`
 
 Install behavior:
 
@@ -113,14 +113,14 @@ Install behavior:
 - Bun global installs require trusting the app package and the daemon package it depends on, so both postinstalls can place their binaries:
 
   ```sh
-  bun pm trust -g @pellux/goodvibes-tui @pellux/goodvibes-daemon
+  bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/daemon
   ```
 
-  Both names must be the full scoped package names; a bare `goodvibes-daemon` argument matches nothing and trusts nothing. No other dependency needs trusting for the install to work. The TUI binary arrives through the platform-specific `@pellux/goodvibes-tui-<os>-<arch>` package (registry integrity, no lifecycle script), and the tree-sitter grammar packages contribute only their prebuilt `.wasm` files. `@pellux/goodvibes-daemon` is a regular dependency, so installing this package always brings the daemon along, and its own postinstall places the `goodvibes-daemon` binary the same way this package's postinstall places `goodvibes`.
+  Both names must be the full scoped package names; a bare `goodvibes-daemon` argument matches nothing and trusts nothing. No other dependency needs trusting for the install to work. The TUI binary arrives through the platform-specific `@goodvibes-jev/tui-<os>-<arch>` package (registry integrity, no lifecycle script), and the tree-sitter grammar packages contribute only their prebuilt `.wasm` files. `@goodvibes-jev/daemon` is a regular dependency, so installing this package always brings the daemon along, and its own postinstall places the `goodvibes-daemon` binary the same way this package's postinstall places `goodvibes`.
 
 - after trusting those two, `bun pm -g untrusted` still lists a handful of transitive packages with blocked scripts (the tree-sitter grammar packages, `protobufjs`, `core-js`); their scripts are native-binding builds and housekeeping the app never needs, so they stay untrusted by design.
-- the main package declares four `@pellux/goodvibes-tui-<os>-<arch>` payload packages as `optionalDependencies` with `os`/`cpu` fields (the esbuild pattern), so the package manager installs exactly the one that matches the host, verified against the registry integrity hash. This is why plain `npm`/`pnpm` installs work, not just Bun.
-- `postinstall` prefers the platform package's binary (a plain copy into `vendor/`, no download) and falls back to the version-matched GitHub Release download (checksum-verified against `SHA256SUMS.txt`) only when no platform package is present. The `bin/goodvibes` launcher also resolves the platform package directly, so the binary runs even if the postinstall was skipped. This package ships one bin entry, `goodvibes`; the `goodvibes-daemon` binary and its launcher belong to the separate `@pellux/goodvibes-daemon` package.
+- the main package declares four `@goodvibes-jev/tui-<os>-<arch>` payload packages as `optionalDependencies` with `os`/`cpu` fields (the esbuild pattern), so the package manager installs exactly the one that matches the host, verified against the registry integrity hash. This is why plain `npm`/`pnpm` installs work, not just Bun.
+- `postinstall` prefers the platform package's binary (a plain copy into `vendor/`, no download) and falls back to the version-matched GitHub Release download (checksum-verified against `SHA256SUMS.txt`) only when no platform package is present. The `bin/goodvibes` launcher also resolves the platform package directly, so the binary runs even if the postinstall was skipped. This package ships one bin entry, `goodvibes`; the `goodvibes-daemon` binary and its launcher belong to the separate `@goodvibes-jev/daemon` package.
 - npm and pnpm installs still require `bun` to be on `PATH` for the from-source fallback; the preinstall check fails clearly if it is missing.
 - on Windows, use WSL2 (the Linux binary path applies unchanged); native Windows is beta and non-gating. See [windows.md](windows.md)
 - if Bun is available and no prebuilt binary is present, the launchers can still fall back to Bun + source
@@ -143,7 +143,7 @@ bun run publish:check
 
 `publish:check` runs four gates, in order:
 
-- The SDK-pin gate confirms `@pellux/goodvibes-sdk` is pinned to an exact
+- The SDK-pin gate confirms `@goodvibes-jev/engine/sdk` is pinned to an exact
   version in `package.json`, that no local SDK overlay is active, that the
   installed copy matches the pin, and that `bun.lock` resolves that same
   pin, then sweeps source imports for anything that reaches into the SDK by

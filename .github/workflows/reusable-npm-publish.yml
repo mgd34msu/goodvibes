@@ -13,7 +13,7 @@ name: Reusable npm publish
 #       publish:
 #         uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-npm-publish.yml@<commit-sha>
 #         with:
-#           package-name: "@pellux/goodvibes-tui"
+#           package-name: "@goodvibes-jev/tui"
 #           environment: production
 #         secrets:
 #           npm-token: ${{ secrets.NPM_TOKEN }}

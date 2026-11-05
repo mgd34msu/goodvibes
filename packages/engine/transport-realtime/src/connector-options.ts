@@ -15,7 +15,7 @@ import type { TransportObserver } from '@goodvibes-jev/engine/transport-core';
  * Typed transport observability events emitted by the WebSocket connector.
  *
  * A structural subset of the SDK-level `TransportEvent` union, the SDK
- * (`@pellux/goodvibes-sdk`) extends this with additional server-side event
+ * (`@goodvibes-jev/engine/sdk`) extends this with additional server-side event
  * types. Client code that holds a reference to the full `TransportEvent` union
  * can use this type without narrowing since the shapes are structurally
  * compatible.

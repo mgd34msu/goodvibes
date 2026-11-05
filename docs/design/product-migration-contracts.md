@@ -28,11 +28,11 @@ Each real product lives in `products/<name>`, is named
 `@goodvibes-jev/<name>`, and depends on `@goodvibes-jev/engine` through
 `workspace:*`. Imports use the declared public engine exports, for example:
 
-- `@pellux/goodvibes-sdk/platform/config` becomes
+- `@goodvibes-jev/engine/sdk/platform/config` becomes
   `@goodvibes-jev/engine/sdk/platform/config`
-- `@pellux/goodvibes-terminal-shell` becomes
+- `@goodvibes-jev/engine/terminal-shell` becomes
   `@goodvibes-jev/engine/terminal-shell`
-- `@pellux/goodvibes-daemon-sdk/remote-routes` becomes
+- `@goodvibes-jev/engine/daemon-sdk/remote-routes` becomes
   `@goodvibes-jev/engine/daemon-sdk/remote-routes`
 - The same package-to-subpath mapping applies to contracts, errors, operator
   and peer clients, transports and toolchain

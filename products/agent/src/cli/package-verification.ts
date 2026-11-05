@@ -1,5 +1,5 @@
 /**
- * Retained standalone package verification: what a published @pellux/goodvibes-agent tarball must
+ * Retained standalone package verification: what a published @goodvibes-jev/agent tarball must
  * hold, what it must never hold, and the package.json shape npm and `bun add -g`
  * rely on. publish:check and package:install-check run it per push; the
  * package-facing text rule and the version-stamp agreement run at the version
@@ -107,7 +107,7 @@ const PACKAGE_FACING_FORBIDDEN_TEXT = [
   ['home', 'assistant.home', 'Graph'].join(''),
   ['include', 'AllSpaces'].join(''),
   ['knowledge', 'SpaceId'].join(''),
-  ['@pellux/goodvibes-', 'tui'].join(''),
+  ['@goodvibes-jev/goodvibes-', 'tui'].join(''),
   // The scoped name stays banned: it is the internal library the Agent links
   // against, not something a reader installs. The UNSCOPED `goodvibes-daemon`
   // is not banned: it is this package's one declared dependency (see
@@ -116,7 +116,7 @@ const PACKAGE_FACING_FORBIDDEN_TEXT = [
   // daemon's postinstall place its binary, and `goodvibes-daemon --version` is
   // how a reader checks both commands landed. Banning the string would make
   // the README and docs/getting-started.md unwritable.
-  ['@pellux/goodvibes-', 'daemon'].join(''),
+  ['@goodvibes-jev/goodvibes-', 'daemon'].join(''),
   ['~/.goodvibes/', 'tui'].join(''),
   ['Home', ' Assistant'].join(''),
   ['Home', 'Graph'].join(''),
@@ -154,9 +154,9 @@ const EXACT_SEMVER_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+$/;
  * engine package/export names are valid references and are not legacy packages.
  */
 const ALLOWED_PACKAGE_FACING_PACKAGE_NAMES = new Set([
-  '@pellux/goodvibes-agent',
+  '@goodvibes-jev/agent',
 ]);
-const NON_BUN_INSTALL_COMMAND_PATTERN = /(?:^|[\s`])(?:npm\s+(?:install|i|exec)|npx|pnpm\s+(?:add|dlx|exec)|yarn\s+(?:add|global\s+add|dlx|exec))\b.*(?:@pellux\/goodvibes-agent|goodvibes-agent)/i;
+const NON_BUN_INSTALL_COMMAND_PATTERN = /(?:^|[\s`])(?:npm\s+(?:install|i|exec)|npx|pnpm\s+(?:add|dlx|exec)|yarn\s+(?:add|global\s+add|dlx|exec))\b.*(?:@goodvibes-jev\/agent|goodvibes-agent)/i;
 const RELEASE_NOTES_STAMP_PATTERN = /^GoodVibes Agent ([0-9]+\.[0-9]+\.[0-9]+)\s+(?:-|\u2014)\s+([0-9]{4}-[0-9]{2}-[0-9]{2})$/;
 
 /**
@@ -352,7 +352,7 @@ function verifyPackageBinIssues(root: string, pkg: Record<string, unknown>): rea
 export function verifyReleaseMetadata(root: string): readonly string[] {
   const issues: string[] = [];
   const pkg = readPackageJson(root);
-  if (pkg.name !== '@pellux/goodvibes-agent') issues.push('package.json name must be @pellux/goodvibes-agent.');
+  if (pkg.name !== '@goodvibes-jev/agent') issues.push('package.json name must be @goodvibes-jev/agent.');
   if (pkg.private !== false) issues.push('package.json private must be false for the public Agent package.');
   if (pkg.type !== 'module') issues.push('package.json type must be module.');
   if (pkg.main !== 'dist/package/main.js') issues.push('package.json main must be dist/package/main.js.');
@@ -419,7 +419,7 @@ export function verifyReleaseStamps(root: string): readonly string[] {
 function verifyPackageFacingInstallAndPackageNames(path: string, content: string): readonly string[] {
   const failures: string[] = [];
   const lines = content.split(/\r?\n/);
-  const packageNamePattern = /@pellux\/goodvibes-[a-z0-9-]+/g;
+  const packageNamePattern = /@goodvibes-jev\/goodvibes-[a-z0-9-]+/g;
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex] ?? '';
     if (NON_BUN_INSTALL_COMMAND_PATTERN.test(line)) {

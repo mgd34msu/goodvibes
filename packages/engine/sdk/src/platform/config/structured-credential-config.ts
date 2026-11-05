@@ -1,4 +1,4 @@
-import { captureJudgmentFallbackSettings, validJudgmentFallbackSettings } from './judgment-fallback-settings.js';
+import { captureJudgmentFallbackSettings, validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import type { ConfigSetting } from './schema-types.js';
 
@@ -34,5 +34,20 @@ export function structuredCredentialConfigSchemaFailures(schema: readonly Pick<C
       failures.push({ key: declaration.key, reason: 'Structured credential references require their exact object schema, canonical validator, empty array default and separate scalar-secret routing.' });
     }
   }
+  const scalar = schema.filter(setting => setting.key === 'judgment.keyName');
+  const reference = scalar[0];
+  if (scalar.length !== 1 || !reference || reference.type !== 'string' || reference.validate !== validJudgmentCredentialName
+    || reference.default !== 'TYPESAFE_API_KEY' || isSecretBearingConfigKey('judgment.keyName'))
+    failures.push({ key: 'judgment.keyName', reason: 'A scalar reference requires the canonical name validator, default name and separate secret storage.' });
   return failures;
+}
+
+/** Scalar references are names, not secret values, and must survive the plaintext sweep. */
+export function isScalarCredentialReferenceConfigKey(key: string): boolean {
+  return key === 'judgment.keyName';
+}
+
+export function assertScalarCredentialReferenceConfigValue(key: string, value: unknown): void {
+  if (!isScalarCredentialReferenceConfigKey(key) || !validJudgmentCredentialName(value))
+    throw new Error('Invalid credential reference name');
 }

@@ -274,7 +274,7 @@ describe('the browser install step on a machine with no interpreter', () => {
  * A stand-in product's install facts.
  *
  * The agent's version of these tests asserted its own release asset names and
- * its own `bun add -g @pellux/goodvibes-agent`. Those are facts about a
+ * its own `bun add -g @goodvibes-jev/agent`. Those are facts about a
  * product, and the SDK has none, so the profile is supplied here and what is
  * asserted is that each install kind is answered with ITS OWN fix and never
  * another's, which is the defect these tests exist for.

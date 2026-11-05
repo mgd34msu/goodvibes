@@ -533,15 +533,12 @@ test('retirement during post-turn work cannot publish an already checked termina
 });
 
 
-test('an unavailable final checker holds the task, retries, and remains cancellable', async () => {
-  const controller = new AbortController(), input = source('Finished.'), guard = new ResponseCompletionGuard();
-  const waiting = Promise.withResolvers<void>();
-  const pending = guard.checkUntilAvailable(() => input, { signal: controller.signal }, () => waiting.resolve());
-  const outcome = pending.then(value => ({ value }), error => ({ error }));
-  await waiting.promise;
+test('an unavailable final checker halts without publishing or starting a recovery loop', async () => {
+  const input = source('Finished.'), guard = new ResponseCompletionGuard();
+  let waits = 0;
+  await expect(guard.checkUntilAvailable(() => input, {}, () => { waits++; })).rejects.toMatchObject({ problem: 'unavailable' });
+  expect(waits).toBe(0);
   expect(() => guard.beginFinalization({ content: input.response })).toThrow();
-  controller.abort();
-  expect(await outcome).toHaveProperty('error');
 });
 
 test('account refusals hold the actual turn without publishing, retrying Jev, or regenerating the model draft', async () => {
@@ -571,12 +568,11 @@ test('progress account refusals surface the account action and cannot silently t
   expect(() => guard.beginFinalization({ content: input.response })).toThrow();
 });
 
-test('a restored final checker can approve the same held draft without a fresh model call', async () => {
+test('an explicit retry can approve the retained draft after the checker is restored', async () => {
   const input = source('Finished.'), guard = new ResponseCompletionGuard();
-  let waiting = 0;
-  const pending = guard.checkUntilAvailable(() => input, {}, () => { waiting++; installJudgmentPort(answered().port); });
-  expect(await pending).toBeNull();
-  expect(waiting).toBe(1);
+  await expect(guard.checkUntilAvailable(() => input)).rejects.toMatchObject({ problem: 'unavailable' });
+  installJudgmentPort(answered().port);
+  expect(await guard.checkUntilAvailable(() => input)).toBeNull();
   expect(guard.beginFinalization({ content: input.response })).not.toThrow();
 });
 
@@ -588,7 +584,7 @@ test('checker result and storage errors hold the same draft without requesting m
     const controller = new AbortController();
     const pending = guard.checkUntilAvailable(() => input, { signal: controller.signal }, () => { waits++; controller.abort(); });
     await expect(pending).rejects.toThrow();
-    expect(calls).toBe(1); expect(waits).toBe(1);
+    expect(calls).toBe(1); expect(waits).toBe(0);
     expect(() => guard.beginFinalization({ content: input.response })).toThrow();
   }
 });
@@ -642,7 +638,7 @@ test('transport-level retries report checker waiting while completion remains he
   expect(waits).toBe(2);
 });
 
-test('the real main loop recovers a transient checker outage with one model draft and a fresh successful validation', async () => {
+test('the main loop halts after checker exhaustion and keeps the existing draft private', async () => {
   const fake = answered(); let calls = 0;
   installJudgmentPort({ model: fake.port.model, ask: async request => {
     if (request.context?.battery === 'engine.core.response-completion' && ++calls === 1) throw new JudgmentError('unavailable', 'Synthetic HTTP 503', { status: 503 });
@@ -650,10 +646,9 @@ test('the real main loop recovers a transient checker outage with one model draf
   } });
   const f = loop(['FINISHED: original response.']);
   try {
-    await executeOrchestratorTurnLoop(f.context);
-    expect(f.requests).toHaveLength(1); expect(calls).toBe(2);
-    expect(f.context.conversation.getMessageSnapshot().at(-1)?.content).toBe('FINISHED: original response.');
-    expect(f.events).toEqual(['TURN_COMPLETED']);
+    await expect(executeOrchestratorTurnLoop(f.context)).rejects.toMatchObject({ problem: 'unavailable' });
+    expect(f.requests).toHaveLength(1); expect(calls).toBe(1); expect(f.events).toEqual([]);
+    expect(f.context.conversation.getMessageSnapshot().some(message => message.content === 'FINISHED: original response.')).toBe(false);
   } finally { f.unsubscribe(); }
 });
 

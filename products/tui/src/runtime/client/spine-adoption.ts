@@ -4,7 +4,7 @@
  *
  * ── What moved to the SDK, and what stays here ────────────────────────────
  *
- * The SDK's `@pellux/goodvibes-sdk/platform/runtime/client` now owns WHEN the
+ * The SDK's `@goodvibes-jev/engine/sdk/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
  * this terminal's own `createHttpTransport` + `createTuiSpineTransport` +

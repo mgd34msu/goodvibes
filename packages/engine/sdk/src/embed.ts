@@ -1,5 +1,5 @@
 /**
- * `@pellux/goodvibes-sdk/embed`, SDK Embedding API 1.0
+ * `@goodvibes-jev/engine/sdk/embed`, SDK Embedding API 1.0
  *
  * The supported, stability-marked surface for embedding a GoodVibes session in
  * another application: create a session against a workspace, send input, receive

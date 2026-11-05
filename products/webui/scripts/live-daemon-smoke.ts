@@ -90,7 +90,7 @@ function sessionsFrom(value: unknown): Record<string, unknown>[] {
  * `tsconfig.json`, found the REAL repo's tsconfig sitting above it instead of
  * finding none, and corrupted that test's expectations. Why that cannot happen
  * here:
- *   - ConfigManager (@pellux/goodvibes-sdk dist/platform/config/manager.js)
+ *   - ConfigManager (@goodvibes-jev/engine/sdk dist/platform/config/manager.js)
  *     builds settings.json paths by joining directly under the given
  *     workingDir/homeDirectory. It never walks upward.
  *   - Nothing in bootDaemon's construction/start path (dist/platform/daemon/

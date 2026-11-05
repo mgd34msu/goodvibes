@@ -4,7 +4,7 @@
  * ── Why this is a shipped module ─────────────────────────────────────────
  *
  * The platform's shared mock-daemon fixture set
- * (@pellux/goodvibes-contracts/testing) is generated from each method's OUTPUT
+ * (@goodvibes-jev/engine/contracts/testing) is generated from each method's OUTPUT
  * schema, so every fixture in it is a 200 carrying a schema-valid success body.
  * There is no failure shape in it for anything, and a client mocked entirely
  * from it has never once been handed a refusal.

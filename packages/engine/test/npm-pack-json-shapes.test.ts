@@ -8,19 +8,19 @@ import { describe, expect, test } from 'bun:test';
 import { parseNpmPackJson, selectPackResult } from '../scripts/release-shared.ts';
 
 const NPM_10_ARRAY = JSON.stringify([
-  { id: '@pellux/goodvibes-errors@1.14.0', name: '@pellux/goodvibes-errors', filename: 'pellux-goodvibes-errors-1.14.0.tgz' },
+  { id: '@goodvibes-jev/engine/errors@1.14.0', name: '@goodvibes-jev/engine/errors', filename: 'pellux-goodvibes-errors-1.14.0.tgz' },
 ]);
 
 const NPM_12_NAME_KEYED = JSON.stringify({
-  '@pellux/goodvibes-errors': {
-    id: '@pellux/goodvibes-errors@1.14.0',
-    name: '@pellux/goodvibes-errors',
+  '@goodvibes-jev/engine/errors': {
+    id: '@goodvibes-jev/engine/errors@1.14.0',
+    name: '@goodvibes-jev/engine/errors',
     filename: 'pellux-goodvibes-errors-1.14.0.tgz',
   },
 });
 
 const BARE_OBJECT = JSON.stringify({
-  name: '@pellux/goodvibes-errors',
+  name: '@goodvibes-jev/engine/errors',
   filename: 'pellux-goodvibes-errors-1.14.0.tgz',
 });
 
@@ -44,8 +44,8 @@ describe('npm pack --json shapes', () => {
 
   test('braces inside string values do not truncate the document', () => {
     const withBraces = JSON.stringify({
-      '@pellux/goodvibes-errors': {
-        name: '@pellux/goodvibes-errors',
+      '@goodvibes-jev/engine/errors': {
+        name: '@goodvibes-jev/engine/errors',
         integrity: 'sha512-{not-a-brace}',
         filename: 'pellux-goodvibes-errors-1.14.0.tgz',
       },

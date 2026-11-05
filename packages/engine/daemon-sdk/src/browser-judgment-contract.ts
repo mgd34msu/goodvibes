@@ -78,7 +78,7 @@ const REFUSALS = {
   JUDGMENT_ACCESS_DENIED: [403, 'The authenticated operator lacks judgment access.'],
   JUDGMENT_ORIGIN_DENIED: [403, 'This request origin is not authorized.'],
   JUDGMENT_BUSY: [429, 'The judgment service is at its concurrent request limit.'],
-  JUDGMENT_UNAVAILABLE: [503, 'The configured judgment service cannot answer.'],
+  JUDGMENT_UNAVAILABLE: [503, 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.'],
   JUDGMENT_SHUTTING_DOWN: [503, 'The judgment service is shutting down.'],
   JUDGMENT_INVALID_RESPONSE: [502, 'The judgment result did not match its registered contract.'],
   JUDGMENT_UNRECORDED: [500, 'The judgment could not be recorded and must not be used.'],

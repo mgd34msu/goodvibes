@@ -21,7 +21,7 @@ import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
  *
  * This module answers, for a batch of descriptors, whether each one's http
  * binding actually resolves against the real dispatch pipeline:
- * `dispatchDaemonApiRoutes` from @pellux/goodvibes-daemon-sdk, the function
+ * `dispatchDaemonApiRoutes` from @goodvibes-jev/engine/daemon-sdk, the function
  * DaemonHttpRouter.dispatchApiRoutes (packages/sdk/src/platform/daemon/http/
  * router.ts, read as this reconcile's route authority, never edited by it)
  * ultimately delegates to for every method-catalog family except a short

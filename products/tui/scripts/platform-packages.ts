@@ -1,6 +1,6 @@
 /**
  * Platform binary package descriptors, the one place that knows the
- * @pellux/goodvibes-tui-<os>-<arch> package set (the esbuild / biome pattern).
+ * @goodvibes-jev/tui-<os>-<arch> package set (the esbuild / biome pattern).
  *
  * Each descriptor names a per-platform npm package that carries the prebuilt
  * `goodvibes` binary (and the matching sqlite-vec native addon). It used to
@@ -36,7 +36,7 @@ export interface PlatformPackage {
   readonly sqliteVecFilename: string;
 }
 
-const SCOPE = '@pellux/goodvibes-tui';
+const SCOPE = '@goodvibes-jev/tui';
 
 export const PLATFORM_PACKAGES: readonly PlatformPackage[] = [
   {

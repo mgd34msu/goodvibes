@@ -25,14 +25,11 @@ validation are implemented; they are not a semantic evaluator, authorization
 service or atomic execution ledger. Historical band/log outcomes `confirm` and
 `escalate` remain readable and must never be converted into `act`.
 
-Primary-only transient outages stay pending through the shared port until
-recovery or owner cancellation. With configured fallbacks, the port tries the
-compatible chain once and returns typed `unavailable` if every target fails.
-Products consume waiting progress and terminal errors without local retry loops.
-Permanent request/authentication/format and decision-log failures remain terminal
-operational errors. The managed
-transport, native runtime disposal and browser/relay cancellation implement this
-lifecycle; legacy autonomous consumer migration remains unfinished. See the
+All configured decision chains use finite attempts and halt on exhaustion.
+Targets may use different supported models or protocols. A valid semantic answer
+ends the chain; cancellation, host authority and decision-log failures remain
+terminal. Products consume that shared lifecycle without local recovery loops;
+legacy autonomous consumer migration remains unfinished. See the
 [repository status](../../README.md#status) for the open admission and
 grant/revocation work. No live-provider proof is established by these interfaces.
 
@@ -98,108 +95,83 @@ concurrent calls and previously returned IDs are not a fallback source.
 
 MIT
 
-## Explicit endpoint failover
+## Decision backends and finite failover
 
-This section describes ordered configured failover, primary-only availability
-retries and owned cancellation.
+The built-in profiles cover Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B
+and Laya. Profiles describe protocols, not model accuracy. Other System One
+models may be configured with their exact served names.
 
-`createSystemOnePort` still accepts the existing single `endpoint`, `model`,
-`timeoutMs` and `retry` configuration. Add `fallbacks: [{ endpoint, model }]` to
-try other explicitly configured **System One** endpoints in order. Each endpoint
-uses the same `POST /v1/systemone` protocol, including owner-run loopback servers.
-A chat/completions provider is not a compatible substitute. Redirects are refused.
+System One servers use `POST /v1/systemone`. Cloudflare Workers AI uses the
+full account-specific `/ai/run/@cf/cloudflare/clef` or `clef-flash` URL and its
+REST success envelope. These Cloudflare URLs select their adapter automatically.
+Local Clef, Kev and DiffusionGemma deployments use the System One adapter.
+Generic chat/completions endpoints are insufficient.
 
-The transport is the one attempt owner; SDK retries are disabled for judgments.
-Every real call requires a request `signal` or a port-level `JudgmentConfig.signal`.
-If both are present, either owner cancels the call. An absent owner fails as
-`invalid-request` before transmission, including when `timeoutMs` is positive:
-an attempt deadline does not bound the complete retry or admission lifetime.
-Connection failures, per-attempt timeouts, HTTP 408, 429 and 5xx allow retry or
-failover. With no configured fallbacks, the primary retries until an answer
-arrives or the owning signal cancels. That mode has no attempt-count or elapsed
-outage ceiling.
+Laya has a separate adapter. Its native confidence is normalized entropy;
+battery bands consume its explicit `x_jev_confidence`. Disable `LAYA_JEV_STRICT`
+to retain confidence and truncation metadata. Declare `laya-rl-agent` as a
+response alias while requesting the intended checkpoint, such as `english`.
+The actual returned ID and each target's requested ID remain distinct in logs.
+No adapter fabricates probabilities or confidence.
 
-With a nonempty fallback list, the port tries the primary and compatible
-fallbacks once, in configured order. If every eligible attempt fails, the call
-throws `JudgmentError` with kind `unavailable` and its actual attempt lineage.
-It does not restart the primary cycle or wait after the final failure.
-`withDecisionLog` records one failed entry. Exhaustion provides no semantic answer
-or authority to act.
+Every reading requires a request or port `AbortSignal`; either owner can cancel
+when both are supplied. Each target gets one finite attempt (default 30 seconds;
+legacy zero also selects that default). A Jev token-limit refusal can retry the
+same complete input once in long-context mode. Host authority is rechecked before
+every transmission. Redirects are refused.
 
-The default capped exponential backoff between attempts starts at 500 ms, caps
-at 5 seconds, and applies 25% jitter; every delay is at least 1 ms. Valid
-Retry-After or Retry-After-Ms guidance is a minimum wait when another attempt
-remains, even when longer than the local cap. Both in-flight attempts and backoff
-waits are cancellable, including long waits that must fit the platform timer
-range.
+The primary receives the request's model; each fallback receives its own model.
+Connection errors, target authentication/billing/model errors, unsupported input
+capabilities, malformed responses and timeouts can advance to the next configured
+target. A valid semantic answer, including rejection, uncertainty or deferral,
+ends the chain. Cancellation and host authorization refusals never advance it.
+All configured chains, including single-target chains, run once. Exhaustion halts
+the operation and directs the user to check API keys, endpoints, model names and
+local services. Products must not invent answers or restart an endless loop.
+A single target's terminal protocol/context error retains its precise kind so
+callers can partition complete evidence when supported.
 
-Authentication and other non-transient HTTP errors terminate as `rejected`.
-Invalid configuration/input terminates as `invalid-request`; malformed response
-bodies, answer schemas or model drift terminate as `invalid-response`. A broken
-decision log terminates as `unrecorded`. These failures cannot be repaired by
-blindly replaying the same judgment and must never become a heuristic reading.
-Per-attempt `timeoutMs` is retained. Legacy `retry.maxRetries`, retry opt-outs and
-`totalTimeoutMs` are rejected; migrate to timing-only `retry` settings and an
-owner-controlled `AbortSignal` for cancellation, shutdown or real authority
-expiry. No persisted engine retry-count setting exists to migrate.
+`Retry-After` cools the failed target for at most five minutes without delaying
+independent backups. Health snapshots expose the remaining cooldown.
+Progress reports a zero delay before the next target. Credential-free lineage
+records each attempt's model, endpoint index/kind, outcome and safe request ID;
+the logical result retains the original requested model and actual returned model.
 
-State and questions are snapshotted once so retries cannot evaluate a mutated
-payload under the original logical reading. `beforeAttempt` is a synchronous,
-fail-closed authority check immediately before each wire transmission, including
-after backoff. Browser callers use it to revalidate live principal, route, source
-and outbound authorization. Callers with asynchronous permission sources may
-also supply `beforeAsyncAttempt`; every attempt awaits that admission under the
-owning cancellation signal, then runs `beforeAttempt` synchronously before
-dispatch. A refused admission sends nothing and is not an availability retry.
-The per-attempt timeout starts only after admission; cancellation also stops a
-pending admission that ignores its signal. `beforeAttempt` remains synchronous
-and rejects promise returns. A progress-only `onRetry` observer receives
-`JudgmentRetryProgress` containing the stable logical request ID, immutable last
-attempt metadata, elapsed time and next delay. Observer failures are ignored;
-progress is neither a semantic result nor authority to act. The retry loop owns
-only the judgment request. Provider writes, tools, cursor advancement and other
-business effects stay outside it and may run only after the final reading.
+Optional backend settings declare `adapter`, `maxInputBytes`, `maxQuestions` and
+explicit `responseModels` aliases. Limits apply to complete serialized input.
+Cloudflare can silently truncate state, so local admission uses a conservative
+bytes-based budget with template headroom. Over-budget input is refused before
+transmission. Reported truncation from any backend invalidates the answer.
+Partition evidence or configure a larger target; never silently shorten it.
+Set deployment limits to the actual server configuration.
 
-Native composition aborts and drains its recorded calls before closing the
-log. Awaitable disposal scopes wait for that drain; legacy synchronous scopes
-start the owned drain while preserving their synchronous API. Browser calls keep admission/concurrency limits, body-read budgets,
-capability expiry/revocation and bounded shutdown; they do not impose a separate
-Jev availability deadline. Owned browser references signal expiry/revocation
-immediately, including during long provider-directed waits. Custom authority
-sources with no invalidation signal are rechecked before every transmission. Caller cancellation or shutdown ends the pending
-reading without an answer.
+Engine settings expose `judgment.backend` for the primary and an optional
+`backend` object per `judgment.fallbacks` entry. Credentials remain references:
+`keySource: "env" | "secret"` and `keyName`, or explicit `keySource: "none"` with
+an empty `keyName` for an unauthenticated endpoint. Missing credentials disable
+that target without substituting another target's key. Destinations, capabilities
+and credential sources are captured before secret lookups yield. Credential
+lookup deadlines are finite; an owning cancellation can stop them sooner.
 
-The engine's existing endpoint, key-source, model and attempt-timeout settings
-are captured together before asynchronous credential resolution. A settings
-edit applies to the next reading; it cannot send an already acquired credential
-to a newly selected endpoint. Attempts keep their original configuration and
-model until they answer, exhaust the configured chain or their owning lifecycle
-cancels them.
+```ts
+const port = createSystemOnePort({
+  signal: owner.signal,
+  endpoint: { kind: 'hosted', baseURL: 'https://api.typesafe.ai', apiKey: jevKey },
+  model: 'jev-latest', timeoutMs: 30_000, retry: {},
+  fallbacks: [{
+    endpoint: {
+      kind: 'local', baseURL: 'http://127.0.0.1:8000', apiKey: '',
+      authentication: 'none', adapter: 'laya',
+      responseModels: ['laya-rl-agent'],
+    },
+    model: 'english',
+  }],
+});
+```
 
-Failover requires pinned `jev-X.Y.Z` model identifiers, with optional version
-suffixes. A fallback is eligible only when its model equals the logical request's
-model exactly. If all configured fallbacks are incompatible, only the primary is
-attempted and its retryable failure exhausts the call. A different returned
-version fails closed because the thresholds
-have not been calibrated for it. Moving aliases retain their previous behavior
-only in single-endpoint mode. Configuring a different version does not establish
-calibration: run the relevant batteries against that version before selecting it.
-The default model is `jev-latest`, TypeSafe's most recent stable release. Batteries
-inherit the configured model instead of pinning a release. A fallback is eligible
-only when its configured model or alias equals the request's model. Official Jev
-aliases may resolve to a versioned Jev response on any target; an explicitly
-requested version must match exactly. Decision evidence records both the
-requested alias and the resolved response model. Calibration runs against the
-same alias and records the versions observed during the run.
-
-Results and failures contain `lineage`: one logical request ID and ordered wire
-attempts with endpoint index/kind, model, latency, HTTP status, outcome and safe
-server request ID. The most recent 128 attempts are retained; `omittedAttempts`
-counts earlier attempts so an indefinite primary-only outage does not grow
-memory without bound. Attempt numbers remain absolute within the logical reading. `withDecisionLog` stores this in the one answered/failed entry
-for the logical reading. It never records endpoint URLs, credentials, upstream
-error bodies or causes as attempt metadata. `port.health()` reports per-target
-observed attempts, consecutive failures and last outcome without changing order.
+Protocol references: [Cloudflare Clef](https://developers.cloudflare.com/workers-ai/models/clef/),
+[local Clef](https://huggingface.co/Cloudflare/clef), [Kev](https://github.com/jaredpalmer/kev),
+[DiffusionGemma Jev](https://github.com/mmastrac/djev), [Laya](https://github.com/NandhaKishorM/laya).
 
 ### Recorded-port failure and answer boundary
 
@@ -226,7 +198,7 @@ decision/site context; do not match provider error text. Inspect configuration
 through the owning setup/settings surface when a provider is unconfigured.
 Managed transport cancellation remains `aborted`; the recording wrapper keeps
 `unavailable` attribution only for an explicitly timeout-typed owner signal.
-No default outage deadline is introduced. A decision-log write failure remains
+Real transport targets have finite attempt deadlines. A decision-log write failure remains
 `unrecorded`. Borrowed/injected ports own their own transport contract;
 `withDecisionLog` validates and records them but does not install another retry
 loop. Production native, browser and gateway judgment exposures all acquire the

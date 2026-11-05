@@ -41,5 +41,5 @@ import type { InstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/ope
 export function fallbackUpdateCommand(kind: Exclude<InstallKind, 'binary'>): string {
   if (IS_WORKSPACE_DISTRIBUTION) return WORKSPACE_REBUILD_COMMAND;
   void kind;
-  return 'bun add -g @pellux/goodvibes-agent';
+  return 'bun add -g @goodvibes-jev/agent';
 }

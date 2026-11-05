@@ -80,7 +80,7 @@ function importFindings(root: string, product: ProductDefinition, files: readonl
   const exports = object(json(resolve(root, 'packages/engine/package.json')).exports) ?? {};
   for (const file of files.filter((path) => /\.[cm]?[jt]sx?$/.test(path))) {
     for (const specifier of moduleSpecifiers(file, readFileSync(file, 'utf8'))) {
-      if (specifier.startsWith('@pellux/goodvibes-')) findings.push(`${relative(root, file)}: legacy import ${specifier}`);
+      if (/^@[^/]+\/goodvibes-/.test(specifier)) findings.push(`${relative(root, file)}: legacy import ${specifier}`);
       if (specifier === '@goodvibes-jev/engine' || specifier.startsWith('@goodvibes-jev/engine/')) {
         const subpath = `.${specifier.slice('@goodvibes-jev/engine'.length)}`;
         if (!Object.hasOwn(exports, subpath)) findings.push(`${relative(root, file)}: undeclared engine subpath ${specifier}`);
@@ -203,7 +203,7 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
       if (manifest.name !== definition.packageName) findings.push(`${definition.path}: package name must be ${definition.packageName}`);
       const deps = { ...object(manifest.dependencies), ...object(manifest.devDependencies), ...object(manifest.peerDependencies), ...object(manifest.optionalDependencies) };
       if (deps['@goodvibes-jev/engine'] !== 'workspace:*') findings.push(`${definition.path}: engine must be a workspace:* dependency`);
-      for (const dependency of Object.keys(deps)) if (dependency.startsWith('@pellux/goodvibes-')) findings.push(`${definition.path}: legacy dependency ${dependency}`);
+      for (const dependency of Object.keys(deps)) if (/^@[^/]+\/goodvibes-/.test(dependency)) findings.push(`${definition.path}: legacy dependency ${dependency}`);
       const scripts = Object.fromEntries(Object.entries(object(manifest.scripts) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
       for (const name of ['build', 'typecheck', 'test']) {
         const script = scripts[name]?.trim();

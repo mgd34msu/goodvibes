@@ -10,10 +10,10 @@ import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, resolveArtifactNames, sha256
 // Platform package names, mirrored from scripts/platform-packages.ts, keyed by
 // `${process.platform}-${node-arch}`.
 const PLATFORM_PACKAGE_NAMES = {
-  'linux-x64': '@pellux/goodvibes-tui-linux-x64',
-  'linux-arm64': '@pellux/goodvibes-tui-linux-arm64',
-  'darwin-x64': '@pellux/goodvibes-tui-darwin-x64',
-  'darwin-arm64': '@pellux/goodvibes-tui-darwin-arm64',
+  'linux-x64': '@goodvibes-jev/tui-linux-x64',
+  'linux-arm64': '@goodvibes-jev/tui-linux-arm64',
+  'darwin-x64': '@goodvibes-jev/tui-darwin-x64',
+  'darwin-arm64': '@goodvibes-jev/tui-darwin-arm64',
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -138,7 +138,7 @@ async function installPlatformBinaries() {
     return;
   }
 
-  // Prefer the platform package (@pellux/goodvibes-tui-<os>-<arch>): the package
+  // Prefer the platform package (@goodvibes-jev/tui-<os>-<arch>): the package
   // manager installed it with registry integrity and no lifecycle script, so its
   // binaries need no checksum download here. Copy them into vendor/ so the bin/
   // launchers find them on the fast path.

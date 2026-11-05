@@ -9,7 +9,7 @@
 //   2. Lets a client dial that same rendezvous id and opens a multiplexed pipe
 //      between the two.
 //   3. Forwards OPAQUE bytes between the paired endpoints. The end-to-end
-//      handshake (see @pellux/goodvibes-transport-core/relay) runs inside each
+//      handshake (see @goodvibes-jev/engine/transport-core/relay) runs inside each
 //      pipe before any application data, so the relay only ever sees ciphertext
 //      plus connection metadata (who paired with whom, byte counts, timing).
 //

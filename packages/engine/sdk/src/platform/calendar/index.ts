@@ -1,5 +1,5 @@
 /**
- * @pellux/goodvibes-sdk/platform/calendar
+ * @goodvibes-jev/engine/sdk/platform/calendar
  *
  * External-calendar READ connectivity, the SDK machinery behind the agent's
  * `/calendar import`, `/calendar subscribe`, and the connect wizard (see

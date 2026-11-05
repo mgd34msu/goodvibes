@@ -42,6 +42,58 @@ test('old primary-only settings and explicit empty fallback settings retain thei
   expect(await judgmentConfigFromSettings(source({ 'judgment.fallbacks': [] }))).toEqual(primary);
 });
 
+test('a missing primary credential still permits an explicitly configured local decision model', async () => {
+  const local = endpoint(200);
+  const configured = source({ 'judgment.fallbacks': [{ endpoint: local.url, model: 'kev-9b', keySource: 'none', keyName: '' }] }, { TYPESAFE_API_KEY: undefined });
+  using log = new SqliteDecisionLog(':memory:');
+  try {
+    const answer = await withDecisionLog(createSettingsJudgmentPort(configured), log).ask(request);
+    expect(answer.model).toBe('kev-9b'); expect(answer.requestedModel).toBe('jev-latest');
+    expect(local.calls).toEqual([{ authorization: null, model: 'kev-9b' }]);
+    expect(answer.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['unavailable', 'answered']);
+    expect(log.query()).toHaveLength(1);
+  } finally { local.stop(); }
+});
+
+test('a missing unused fallback credential does not prevent a healthy primary from answering', async () => {
+  const primary = endpoint(200);
+  const configured = source({ 'judgment.endpoint': primary.url, 'judgment.fallbacks': [fallback()] }, { FALLBACK_KEY: undefined });
+  try {
+    const answer = await createSettingsJudgmentPort(configured).ask(request);
+    expect(answer.answers.allowed.noul).toBe(0.001); expect(primary.calls).toHaveLength(1);
+    expect(answer.lineage?.attempts).toHaveLength(1);
+  } finally { primary.stop(); }
+});
+
+test('the primary credential reference is independent of the model and provider', async () => {
+  const configured = source({ 'judgment.keyName': 'CLOUDFLARE_API_TOKEN' }, { CLOUDFLARE_API_TOKEN: 'synthetic-cloudflare-key' });
+  const config = await judgmentConfigFromSettings(configured);
+  expect(config.endpoint.apiKey).toBe('synthetic-cloudflare-key');
+});
+
+test('backend capabilities and explicit aliases persist and revoke an old source observation', () => {
+  const f = configFixture();
+  f.config.set('judgment.backend', { adapter: 'laya', maxInputBytes: 2048, responseModels: ['laya-rl-agent'] });
+  f.config.set('judgment.fallbacks', [{ ...fallback(), backend: { adapter: 'system-one', maxQuestions: 64 } }]);
+  f.config.save(); f.config.load();
+  expect(f.config.get('judgment.backend')).toEqual({ adapter: 'laya', maxInputBytes: 2048, responseModels: ['laya-rl-agent'] });
+  expect(f.config.get('judgment.fallbacks')[0]?.backend).toEqual({ adapter: 'system-one', maxQuestions: 64 });
+  const lifetime = createJudgmentSourceLifetime({ config: f.config, env: {}, secrets: {} });
+  try {
+    const old = lifetime.capture(); f.config.set('judgment.backend', { adapter: 'system-one' });
+    expect(() => old.assertCurrent()).toThrow();
+  } finally { lifetime.dispose(); }
+});
+
+test('malformed persisted backend capabilities retain the last admitted configuration', () => {
+  const f = configFixture(); f.config.set('judgment.backend', { adapter: 'laya' });
+  mkdirSync(join(f.projectPath, '..'), { recursive: true });
+  const before = f.config.getRaw();
+  writeFileSync(f.projectPath, JSON.stringify({ judgment: { backend: { adapter: 'unknown-adapter' } } }));
+  expect(() => f.config.load()).toThrow('judgment.backend');
+  expect(f.config.getRaw()).toEqual(before);
+});
+
 test('an explicit project empty chain survives bulk save and reload, then removal restores the global chain', () => {
   const f = configFixture();
   f.config.set('judgment.fallbacks', [fallback()]);
@@ -106,6 +158,15 @@ test('accessor-shaped entries are refused without invoking borrowed code', () =>
   expect(() => captureJudgmentFallbackSettings([target])).toThrow(); expect(invoked).toBe(false);
 });
 
+test('fallback snapshots use descriptors rather than borrowed property reads', () => {
+  let reads = 0;
+  const target = new Proxy({ ...fallback(), backend: { adapter: 'laya' } }, {
+    get() { reads++; throw new Error('borrowed property access'); },
+  });
+  expect(captureJudgmentFallbackSettings([target])[0]).toMatchObject({ model: 'jev-latest', backend: { adapter: 'laya' } });
+  expect(reads).toBe(0);
+});
+
 test('fallback destination, model and environment credential are captured before a primary secret read yields', async () => {
   const targets = [fallback()];
   const settings: Record<string, unknown> = { 'judgment.keySource': 'secret', 'judgment.fallbacks': targets };
@@ -117,11 +178,14 @@ test('fallback destination, model and environment credential are captured before
   expect((await pending).fallbacks).toEqual([{ endpoint: { kind: 'hosted', baseURL: 'https://fallback.example.test', apiKey: 'synthetic-old-fallback' }, model: 'jev-latest' }]);
 });
 
-test('missing and rejected named credentials fail without silently substituting the primary key', async () => {
-  await expect(judgmentConfigFromSettings(source({ 'judgment.fallbacks': [fallback()] }, { FALLBACK_KEY: undefined }))).rejects.toThrow('no resolved credential');
+test('missing or rejected target credentials never substitute the primary key', async () => {
+  const missing = await judgmentConfigFromSettings(source({ 'judgment.fallbacks': [fallback()] }, { FALLBACK_KEY: undefined }));
+  expect(missing.endpoint.apiKey).toBe('synthetic-primary');
+  expect(missing.fallbacks?.[0]?.endpoint.apiKey).toBe('');
   const configured = source({ 'judgment.fallbacks': [{ ...fallback(), keySource: 'secret' }] });
-  await expect(judgmentConfigFromSettings({ ...configured, secrets: { get: async () => { throw new Error('SYNTHETIC_DO_NOT_LOG'); } } }))
-    .rejects.toThrow('credential resolution failed');
+  const rejected = await judgmentConfigFromSettings({ ...configured, secrets: { get: async () => { throw new Error('SYNTHETIC_DO_NOT_LOG'); } } });
+  expect(rejected.fallbacks?.[0]?.endpoint.apiKey).toBe('');
+  expect(JSON.stringify(rejected)).not.toContain('SYNTHETIC_DO_NOT_LOG');
 });
 
 test('cancellation while acquiring a fallback secret prevents every transmission even after the secret arrives', async () => {

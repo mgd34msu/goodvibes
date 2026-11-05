@@ -122,7 +122,7 @@ describe('the daemon composition installs the judgment port', () => {
 
 describe('the settings the port is built from', () => {
   const source = (settings: Record<string, unknown>, env: Record<string, string | undefined>, stored: string | null = null): JudgmentSettingsSource => ({
-    config: { get: (key) => settings[key] ?? { 'judgment.keySource': 'env', 'judgment.endpoint': '', 'judgment.model': '', 'judgment.timeoutMs': 10_000, 'judgment.fallbacks': [] }[key] },
+    config: { get: (key) => settings[key] ?? { 'judgment.keySource': 'env', 'judgment.endpoint': '', 'judgment.model': '', 'judgment.timeoutMs': 10_000, 'judgment.fallbacks': [], 'judgment.backend': {}, 'judgment.keyName': 'TYPESAFE_API_KEY' }[key] },
     secrets: { get: async () => stored },
     env,
   });
@@ -149,7 +149,7 @@ describe('the settings the port is built from', () => {
   test('keySource secret reads the key from the secret store, not the environment', async () => {
     const config = await judgmentConfigFromSettings(source({ 'judgment.keySource': 'secret' }, { TYPESAFE_API_KEY: 'env-key' }, 'stored-key'));
     expect(config.endpoint.apiKey).toBe('stored-key');
-    await expect(judgmentConfigFromSettings(source({ 'judgment.keySource': 'secret' }, { TYPESAFE_API_KEY: 'env-key' }))).rejects.toThrow('secret store holds no TYPESAFE_API_KEY');
+    expect((await judgmentConfigFromSettings(source({ 'judgment.keySource': 'secret' }, { TYPESAFE_API_KEY: 'env-key' }))).endpoint.apiKey).toBe('');
   });
 
   test('a missing key fails the judgment and the decision log records the failure', async () => {
@@ -158,12 +158,12 @@ describe('the settings the port is built from', () => {
     try {
       // Configuration inspection still names the missing setting. The recorded
       // call retains its typed failure and site, never arbitrary upstream text.
-      await expect(judgmentConfigFromSettings(source({}, {}))).rejects.toThrow('TYPESAFE_API_KEY is not set');
+      expect((await judgmentConfigFromSettings(source({}, {}))).endpoint.apiKey).toBe('');
       const { decisionLog } = composeJudgment({ ...source({}, {}), stateRoot, disposal: scope.registry });
-      await expect(readFailure(SPENT, 'test.no-key')).rejects.toMatchObject({ kind: 'invalid-request', message: 'the judgment request was invalid' });
+      await expect(readFailure(SPENT, 'test.no-key')).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('No decision models are currently available') });
       const [entry] = decisionLog.query({ site: 'test.no-key' });
       expect(entry).toMatchObject({ status: 'failed', context: { battery: 'engine.failure-reading', site: 'test.no-key' },
-        error: { kind: 'invalid-request', message: 'the judgment request was invalid' } });
+        error: { kind: 'unavailable', message: expect.stringContaining('No decision models are currently available') } });
       expect(JSON.stringify(entry)).not.toContain('TYPESAFE_API_KEY is not set');
     } finally {
       scope.dispose();

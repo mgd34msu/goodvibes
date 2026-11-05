@@ -1,8 +1,8 @@
-# @pellux/goodvibes-operator-sdk
+# @goodvibes-jev/engine/operator-sdk
 
 Public GoodVibes operator package for the contract-driven operator and control-plane HTTP client.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/operator`. Install this package directly when you only need the operator client subset.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/operator`. These modules are subpath exports of the engine package.
 
 ```ts
 import { createOperatorSdk } from '@goodvibes-jev/engine/sdk/operator';
@@ -62,7 +62,7 @@ const status = await operator.control.status();
 
 ## See also
 
-- Main SDK: [`@pellux/goodvibes-sdk`](../sdk/README.md)
+- Main SDK: [`@goodvibes-jev/engine/sdk`](../sdk/README.md)
 - [Getting Started](../../docs/getting-started.md)
 
 

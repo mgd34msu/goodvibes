@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isExactSemver } from '../src/cli/package-verification.ts';
+import { isPinnedWorkspaceVersion } from '@goodvibes-jev/engine/toolchain';
 
 const ROOT = join(import.meta.dir, '..');
 
 function readRequiredExactSemver(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !isExactSemver(value)) {
-    throw new Error(`${label} must be an exact semver like 1.2.3.`);
+  if (!isPinnedWorkspaceVersion(value)) {
+    throw new Error(`${label} must be a pinned semantic version, such as 3.0.0 or 3.0.0-dev.0.`);
   }
   return value;
 }

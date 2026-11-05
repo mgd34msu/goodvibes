@@ -8,7 +8,7 @@
  * writes over the control plane into the DAEMON's settings and then reads the
  * key back out of its OWN settings file.
  *
- * Imported from packages/daemon-sdk/dist deliberately: `@pellux/goodvibes-daemon-sdk`
+ * Imported from packages/daemon-sdk/dist deliberately: `@goodvibes-jev/engine/daemon-sdk`
  * resolves to dist, so this also proves the change is in the artifact the
  * running daemon loads, not only in the source.
  */

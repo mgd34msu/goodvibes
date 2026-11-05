@@ -3,7 +3,7 @@
  * actually installed the agent.
  *
  * This exists because every driver-missing message in 1.18.1 said `bun add -g
- * @pellux/goodvibes-agent`. That command does work, the npm package carries
+ * @goodvibes-jev/agent`. That command does work, the npm package carries
  * playwright-core, but telling someone who downloaded a release binary to
  * install the npm package silently changes their install method, and it is not
  * the fix for their situation. The fix has to name the thing they did.
@@ -46,7 +46,7 @@ export const AGENT_BROWSER_DRIVER_PROFILE: BrowserDriverInstallProfile = {
   directoryName: BROWSER_DRIVER_DIR_NAME,
   releasesUrl: RELEASES_LATEST_URL,
   installerCommand: 'curl -fsSL https://goodvibes.sh/install.sh | sh',
-  globalPackageCommand: 'bun add -g @pellux/goodvibes-agent',
+  globalPackageCommand: 'bun add -g @goodvibes-jev/agent',
   sourceInstallCommand: 'bun install',
   // The agent's own voice, restored: the hoist's neutral default said
   // "the driver is then installed automatically", which tells the reader

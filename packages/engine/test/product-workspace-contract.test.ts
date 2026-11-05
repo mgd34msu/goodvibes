@@ -96,8 +96,8 @@ test('empty shells, empty-success scripts and missing script files cannot green 
 
 test('legacy dependencies, private engine imports and cross-workspace relative imports fail', () => {
   const root = fixture();
-  mutate(root, 'products/daemon/package.json', (value) => { value.dependencies = { '@pellux/goodvibes-sdk': '2.0.23' }; });
-  write(root, 'products/daemon/src/main.ts', "import x from '@pellux/goodvibes-sdk'; import y from '@goodvibes-jev/engine/sdk/private'; import z from '../../../packages/engine/sdk/src/index.ts'; export { x, y, z };");
+  mutate(root, 'products/daemon/package.json', (value) => { value.dependencies = { '@legacy/goodvibes-sdk': '2.0.23' }; });
+  write(root, 'products/daemon/src/main.ts', "import x from '@legacy/goodvibes-sdk'; import y from '@goodvibes-jev/engine/sdk/private'; import z from '../../../packages/engine/sdk/src/index.ts'; export { x, y, z };");
   const findings = inspectProductWorkspaces(root, [definition]).findings.join('\n');
   expect(findings).toContain('engine must be a workspace:* dependency');
   expect(findings).toContain('legacy dependency');

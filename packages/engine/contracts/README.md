@@ -1,8 +1,8 @@
-# @pellux/goodvibes-contracts
+# @goodvibes-jev/engine/contracts
 
 Public runtime-neutral GoodVibes contract package for operator and peer artifacts, generated ids, lookup helpers, and schema exports.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/contracts`. Install this package directly when you only need the contracts subset.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/contracts`. These modules are subpath exports of the engine package.
 
 Consumer import:
 
@@ -84,8 +84,8 @@ import {
 } from '@goodvibes-jev/engine/sdk/contracts/node';
 ```
 
-When installing this package directly instead of the SDK facade, import from
-`@pellux/goodvibes-contracts` and `@pellux/goodvibes-contracts/node`:
+For direct contract imports from the engine package, use
+`@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/contracts/node`:
 
 ```ts
 import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/contracts';

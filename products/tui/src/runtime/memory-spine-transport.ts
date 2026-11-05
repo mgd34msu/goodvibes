@@ -4,7 +4,7 @@
  * The TUI memory-spine cutover: a thin wrapper over the SDK's own canonical
  * memory-spine REST transport
  * (`createMemorySpineRestTransport` from
- * `@pellux/goodvibes-sdk/platform/runtime/memory-spine`).
+ * `@goodvibes-jev/engine/sdk/platform/runtime/memory-spine`).
  *
  * ── Hoist provenance (2026-07-30 daemon/TUI split) ──────────────────────────
  *

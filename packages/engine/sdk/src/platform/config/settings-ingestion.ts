@@ -117,6 +117,11 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
   'policy.',
   // Dropping an invalid project chain could revive a broader inherited destination.
   'judgment.fallbacks',
+  // Losing protocol/capability or credential identity can reinterpret a reply
+  // or select a different secret. Retain the last admitted configuration.
+  'judgment.backend',
+  'provider.decisionRouter',
+  'judgment.keyName',
 ];
 
 /**

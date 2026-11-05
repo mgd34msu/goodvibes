@@ -416,7 +416,7 @@ email, any other configured channel) to the daemon to host from its first
 message onward, instead of letting it live only inside the surface process
 that received it.
 
-Ships against `@pellux/goodvibes-sdk` 2.0.0. The daemon's unified inbox verb,
+Ships against `legacy-package:goodvibes-sdk` 2.0.0. The daemon's unified inbox verb,
 `channels.inbox.list`: one merged, newest-first feed across every channel
 provider (Slack DMs, Discord messages, email threads), distinct from the
 mail-specific verbs the Mail view already uses, arrives with a real REST
@@ -631,7 +631,7 @@ to work: your choice is remembered for the release that adds microphone capture.
 Every one of those settings is reachable and searchable in the settings
 workspace like the existing ones, which is now pinned by tests.
 
-Ships against `@pellux/goodvibes-sdk` 1.15.0.
+Ships against `legacy-package:goodvibes-sdk` 1.15.0.
 
 ## [1.8.1] - 2026-07-25
 
@@ -662,18 +662,18 @@ Because this record is built from the stream this browser tab watched live, it
 is present only for turns that ran while the tab was open; it is never
 reconstructed or guessed for older turns.
 
-Ships against `@pellux/goodvibes-sdk` 1.13.1.
+Ships against `legacy-package:goodvibes-sdk` 1.13.1.
 
 ## [1.7.7] - 2026-07-25
 
-Ships against `@pellux/goodvibes-sdk` 1.12.1, which makes crash-recovery
+Ships against `legacy-package:goodvibes-sdk` 1.12.1, which makes crash-recovery
 offers respect live writers and makes snapshot retirement act on exactly one
 identified snapshot. No webui-side code changes.
 
 
 ## [1.7.6] - 2026-07-24
 
-Ships against `@pellux/goodvibes-sdk` 1.12.0, which introduces declare-once
+Ships against `legacy-package:goodvibes-sdk` 1.12.0, which introduces declare-once
 product storage surfaces, the ask-then-retire recovery lifecycle, and the
 cross-process workspace-checkpoint lock. No webui behavior depends on those
 paths (verified: the webui holds no session-persistence call sites), so this
@@ -693,13 +693,13 @@ release carries the platform pin plus documentation.
 
 ## [1.7.5] - 2026-07-18
 
-Ships against `@pellux/goodvibes-sdk` 1.11.4, which closes the secrets-store
+Ships against `legacy-package:goodvibes-sdk` 1.11.4, which closes the secrets-store
 key-mismatch class (race-safe key generation, pre-write key revalidation,
 key fingerprints in store envelopes). No webui-side code changes.
 
 ## [1.7.4] - 2026-07-17
 
-Ships against `@pellux/goodvibes-sdk` 1.11.3. Compaction-continuation user
+Ships against `legacy-package:goodvibes-sdk` 1.11.3. Compaction-continuation user
 messages, the compactor's re-injected instruction handoff after every
 automatic compaction, now render as a closed "Compaction handoff" disclosure
 in session transcripts instead of the full multi-kilobyte instruction wall.
@@ -708,8 +708,8 @@ The detection header is pinned byte-for-byte against the SDK's
 
 ## [1.7.3] - 2026-07-17
 
-Ships against `@pellux/goodvibes-sdk` 1.11.2, which now carries the shared
-release toolchain (`@pellux/goodvibes-toolchain`) as a dependency of its own.
+Ships against `legacy-package:goodvibes-sdk` 1.11.2, which now carries the shared
+release toolchain (`legacy-package:goodvibes-toolchain`) as a dependency of its own.
 The separate direct toolchain pin in this repo's `devDependencies` is gone;
 `release-gate.ts` resolves the toolchain transitively through the SDK
 package instead. Releases are now zero-touch: a green CI run on a release
@@ -719,27 +719,27 @@ only: no wire-contract changes affecting the WebUI.
 
 ## [1.7.2] - 2026-07-17
 
-Ships against `@pellux/goodvibes-sdk` 1.11.1 and adopts the platform's shared
+Ships against `legacy-package:goodvibes-sdk` 1.11.1 and adopts the platform's shared
 CI/CD system: the local release gate is a thin wrapper over the published
-`@pellux/goodvibes-toolchain` (sdk-pin-gate), CI single-sources its Bun
+`legacy-package:goodvibes-toolchain` (sdk-pin-gate), CI single-sources its Bun
 version, and a workflow-shape test suite pins the pipeline's structure. The
 SDK 1.11.x releases are release-engineering only: no wire-contract changes
 affecting the WebUI.
 
 ## [1.7.1] - 2026-07-16
 
-Ships against `@pellux/goodvibes-sdk` 1.10.1. Alignment patch: the SDK's 1.10.1
+Ships against `legacy-package:goodvibes-sdk` 1.10.1. Alignment patch: the SDK's 1.10.1
 release contains type-level additions only, with no wire-contract changes
 affecting this repo.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `1.10.1` (fresh lockfile from the registry;
+- Updated `legacy-package:goodvibes-sdk` to `1.10.1` (fresh lockfile from the registry;
   generated config schema verified unchanged).
 
 ## [1.7.0] - 2026-07-16
 
-Ships against `@pellux/goodvibes-sdk` 1.10.0. This release adds the admin
+Ships against `legacy-package:goodvibes-sdk` 1.10.0. This release adds the admin
 memory diagnostics panel and the one-act local voice setup flow, and re-pins
 from the local dev-link build onto the published 1.10.0 package.
 
@@ -758,13 +758,13 @@ from the local dev-link build onto the published 1.10.0 package.
 
 ### Changed
 
-- Re-pinned `@pellux/goodvibes-sdk` from the local dev-link build to the published
+- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the published
   `1.10.0` registry package; removed the dev-link `file:` overrides so all nested
-  `@pellux` resolutions come from the registry.
+  `the retired package scope` resolutions come from the registry.
 
 ## [1.6.0] - 2026-07-14
 
-Ships against `@pellux/goodvibes-sdk` 1.9.0. This release rolls up the pairing,
+Ships against `legacy-package:goodvibes-sdk` 1.9.0. This release rolls up the pairing,
 fleet, task-graph, voice, memory-provenance, and remote-access work accumulated
 since 1.5.0, adds the fleet review acceptance checklist, and re-pins from the
 local dev-link build onto the published 1.9.0 package.
@@ -801,13 +801,13 @@ local dev-link build onto the published 1.9.0 package.
 
 ### Changed
 
-- Re-pinned `@pellux/goodvibes-sdk` from the local dev-link build to the published
+- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the published
   `1.9.0` registry package; removed the dev-link `file:` overrides so all nested
-  `@pellux` resolutions come from the registry.
+  `the retired package scope` resolutions come from the registry.
 
 ## [1.5.0] - 2026-07-13
 
-Ships against `@pellux/goodvibes-sdk` 1.8.0. This release rolls up the
+Ships against `legacy-package:goodvibes-sdk` 1.8.0. This release rolls up the
 approvals, costs, fleet, receipts, and settings work accumulated since 1.4.0
 and re-pins from the local dev-link build onto the published 1.8.0 package.
 
@@ -839,9 +839,9 @@ and re-pins from the local dev-link build onto the published 1.8.0 package.
 
 ### Changed
 
-- Re-pinned `@pellux/goodvibes-sdk` from the local dev-link build to the
+- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the
   published `1.8.0` registry package; removed the dev-link `file:` overrides
-  so all nested `@pellux` resolutions come from the registry.
+  so all nested `the retired package scope` resolutions come from the registry.
 - Phone-width checkpoint and task mutations complete through their confirm
   sheets; the stale limitation note is gone from the docs.
 
@@ -852,7 +852,7 @@ and re-pins from the local dev-link build onto the published 1.8.0 package.
 
 ## [1.4.0] - 2026-07-11
 
-Ships against `@pellux/goodvibes-sdk` 1.7.0. This release rolls up the SDK
+Ships against `legacy-package:goodvibes-sdk` 1.7.0. This release rolls up the SDK
 adoption and surface work accumulated since 1.3.0 and re-pins from the local
 dev-link build onto the published 1.7.0 package.
 
@@ -902,9 +902,9 @@ dev-link build onto the published 1.7.0 package.
 
 ### Changed
 
-- Re-pinned `@pellux/goodvibes-sdk` from the local dev-link build to the
+- Re-pinned `legacy-package:goodvibes-sdk` from the local dev-link build to the
   published `1.7.0` registry package; removed the dev-link `file:` overrides
-  so all nested `@pellux` resolutions come from the registry. No behavior
+  so all nested `the retired package scope` resolutions come from the registry. No behavior
   change from the pin itself: the surfaces above were validated end to end
   against the published package, including a live-daemon smoke that boots a
   real daemon from `1.7.0`.
@@ -919,7 +919,7 @@ dev-link build onto the published 1.7.0 package.
 
 ## [1.3.0] - 2026-07-09
 
-Ships against `@pellux/goodvibes-sdk` 1.6.1.
+Ships against `legacy-package:goodvibes-sdk` 1.6.1.
 
 ### Added
 
@@ -941,7 +941,7 @@ Ships against `@pellux/goodvibes-sdk` 1.6.1.
 
 ## [1.2.2] - 2026-07-08
 
-Maintenance release on `@pellux/goodvibes-sdk` 1.5.0.
+Maintenance release on `legacy-package:goodvibes-sdk` 1.5.0.
 
 ### Changed
 
@@ -953,7 +953,7 @@ Maintenance release on `@pellux/goodvibes-sdk` 1.5.0.
 
 ## [1.2.1] - 2026-07-07
 
-Maintenance release on `@pellux/goodvibes-sdk` 1.4.1.
+Maintenance release on `legacy-package:goodvibes-sdk` 1.4.1.
 
 ### Changed
 
@@ -964,7 +964,7 @@ Maintenance release on `@pellux/goodvibes-sdk` 1.4.1.
 
 ## [1.2.0] - 2026-07-07
 
-The turn-control release, on `@pellux/goodvibes-sdk` 1.4.0.
+The turn-control release, on `legacy-package:goodvibes-sdk` 1.4.0.
 
 ### Added
 
@@ -1034,7 +1034,7 @@ Test-harness and CI honesty release: no product code changed.
 
 The desktop release: the web UI becomes a full chat application and operator
 console with feature parity across most of the terminal UI's surface, on the
-typed `@pellux/goodvibes-sdk` 1.3.1 contracts.
+typed `legacy-package:goodvibes-sdk` 1.3.1 contracts.
 
 ### Added
 
@@ -1087,7 +1087,7 @@ typed `@pellux/goodvibes-sdk` 1.3.1 contracts.
 ## [1.0.0] - 2026-07-06
 
 First stable release of the GoodVibes WebUI, the browser surface of the
-one-platform ecosystem, running on the typed `@pellux/goodvibes-sdk` 1.0.0
+one-platform ecosystem, running on the typed `legacy-package:goodvibes-sdk` 1.0.0
 operator contracts. It reaches the same daemon as the TUI and the agent, so a
 session, provider, or checkpoint is visible across every surface.
 
@@ -1113,7 +1113,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `1.0.0` (from `0.38.0`), the 1.0.0
+- Updated `legacy-package:goodvibes-sdk` to `1.0.0` (from `0.38.0`), the 1.0.0
   release-train pin. The operator-method contract families the webui facade
   calls (`fleet.*`, `checkpoints.*`, `sessions.search`) now carry real
   `OperatorMethodInputMap`/`OperatorMethodOutputMap` entries, so
@@ -1242,43 +1242,43 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.30`.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.30`.
 
 ## [0.1.34] - 2026-05-10
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.26`.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.26`.
 
 ## [0.1.33] - 2026-05-10
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.24`.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.24`.
 
 ## [0.1.32] - 2026-05-10
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.23` for WRFC authoritative request-scope fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.23` for WRFC authoritative request-scope fixes.
 
 ## [0.1.31] - 2026-05-09
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.22` for the WRFC owner-chain orchestration contract update.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.22` for the WRFC owner-chain orchestration contract update.
 
 ## [0.1.30] - 2026-05-09
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.21` for shared work-plan APIs and WRFC lifecycle metadata fixes.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.21` for shared work-plan APIs and WRFC lifecycle metadata fixes.
 
 ## [0.1.29] - 2026-05-09
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.19`.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.19`.
 
 ## [0.1.28] - 2026-05-08
 
@@ -1304,7 +1304,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.18` for the WRFC owner orchestration additions.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.18` for the WRFC owner orchestration additions.
 
 ## [0.1.24] - 2026-05-08
 
@@ -1328,7 +1328,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.17` for the physically separated regular Knowledge/Wiki and Home Assistant Home Graph runtime stores.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.17` for the physically separated regular Knowledge/Wiki and Home Assistant Home Graph runtime stores.
 
 ## [0.1.20] - 2026-05-08
 
@@ -1367,13 +1367,13 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.16` for the upstream default Knowledge/Wiki scoping fix while keeping WebUI on regular browser knowledge routes with no Home Assistant filters or explicit scope flags.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.16` for the upstream default Knowledge/Wiki scoping fix while keeping WebUI on regular browser knowledge routes with no Home Assistant filters or explicit scope flags.
 
 ## [0.1.14] - 2026-05-07
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.11` so regular Knowledge/Wiki routes use the upstream default knowledge-space scoping fix without WebUI-side HomeGraph filtering.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.11` so regular Knowledge/Wiki routes use the upstream default knowledge-space scoping fix without WebUI-side HomeGraph filtering.
 
 ## [0.1.13] - 2026-05-07
 
@@ -1401,7 +1401,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Added
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.10` and enabled real companion-chat file attachments through `sdk.artifacts.create` plus `sdk.chat.messages.create` attachment references.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.10` and enabled real companion-chat file attachments through `sdk.artifacts.create` plus `sdk.chat.messages.create` attachment references.
 
 ### Fixed
 
@@ -1462,7 +1462,7 @@ session, provider, or checkpoint is visible across every surface.
 
 ### Changed
 
-- Updated `@pellux/goodvibes-sdk` to `0.33.9` and switched the chat sidebar to the public `sdk.chat.sessions.list` API.
+- Updated `legacy-package:goodvibes-sdk` to `0.33.9` and switched the chat sidebar to the public `sdk.chat.sessions.list` API.
 - Removed the temporary local recent-session workaround used before SDK chat session listing existed.
 - Reworked Chat into the primary workspace with chat recents in the app sidebar, a centered conversation canvas, and an integrated composer.
 - Added subtle per-message hover actions for copy and resend plus delivery status indicators.
@@ -1493,7 +1493,7 @@ session, provider, or checkpoint is visible across every surface.
 - Initial Bun, Vite, React, and TypeScript WebUI for the GoodVibes daemon.
 - Browser SDK auth flow using daemon login/session auth and token storage.
 - Dashboard, provider, work, admin, and base knowledge/wiki operator views.
-- Standalone daemon-owned companion chat via `@pellux/goodvibes-sdk@0.33.8` `sdk.chat`.
+- Standalone daemon-owned companion chat via `legacy-package:goodvibes-sdk@0.33.8` `sdk.chat`.
 - Provider-qualified model routing for new companion chat sessions.
 - Local and GitHub CI for tests, typecheck, and production build.
 

@@ -30,7 +30,7 @@ flagged ambiguity. There is no boolean flag, env var, or feature flag gating the
 The "escape hatch" is `syncSessionSpineToHostStatus` in `src/runtime/bootstrap.ts:393-441`,
 a branch on the daemon's `HostServiceMode` (`'disabled' | 'embedded' | 'external' |
 'blocked' | 'incompatible' | 'unavailable'`, from
-`@pellux/goodvibes-sdk/platform/runtime/bootstrap-services.ts:127`):
+`@goodvibes-jev/engine/sdk/platform/runtime/bootstrap-services.ts:127`):
 
 - `mode !== 'external'` (bootstrap.ts:394-407): the spine stays dormant/deactivated and
   `sessionUnionCache` stays local-only (or marks itself embedded, see below). This is the

@@ -1,7 +1,7 @@
 import { APIConnectionError, APIError, APITimeoutError } from '@typesafe-ai/sdk';
 import { JudgmentError } from './errors.ts';
 
-/** Timing only: temporary unavailability never exhausts an attempt budget. */
+/** Cooldown timing for failed targets; independent backups do not wait for it. */
 export interface JudgmentRetryPolicy {
   readonly backoffInitialMs: number;
   readonly backoffMaxMs: number;
@@ -26,7 +26,7 @@ export function retryable(error: unknown): boolean {
     || (error instanceof APIError && transientStatus(error.status));
 }
 
-/** Provider rate guidance is a minimum, never shortened by local backoff caps. */
+/** Bound provider-controlled cooldowns to five minutes; calls themselves never wait for them. */
 export function retryDelay(error: unknown, attempt: number, policy: JudgmentRetryPolicy): number {
   // Clamp the exponent before multiplication: arbitrarily long outages must not overflow.
   const backoff = Math.max(1, Math.round(Math.min(policy.backoffInitialMs * 2 ** Math.min(attempt, 30), policy.backoffMaxMs)
@@ -39,7 +39,7 @@ export function retryDelay(error: unknown, attempt: number, policy: JudgmentRetr
     raw !== null && raw.trim() ? (Number.isFinite(Number(raw)) ? Number(raw) * 1_000 : Date.parse(raw) - Date.now()) : NaN,
   ];
   const guidance = delays.find((value) => Number.isFinite(value) && value >= 0);
-  return guidance === undefined ? backoff : Math.max(backoff, Math.min(guidance, Number.MAX_SAFE_INTEGER));
+  return guidance === undefined ? backoff : Math.max(backoff, Math.min(guidance, 5 * 60_000));
 }
 
 /** Race even an injected fetch that ignores AbortSignal, and always clean listeners. */

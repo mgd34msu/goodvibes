@@ -2,7 +2,7 @@
 // code-index-services.ts, repo source-tree code index wiring.
 //
 // Constructs a product's repo source-tree code index: CodeIndexStore
-// (@pellux/goodvibes-sdk/platform/state). Extracted into its own module rather than built inline in
+// (@goodvibes-jev/engine/sdk/platform/state). Extracted into its own module rather than built inline in
 // services.ts: services.ts sits at the architecture check's 800-line cap
 // (scripts/check-architecture.ts), so any new service gets its own
 // construction module and a single wiring call there (mirrors

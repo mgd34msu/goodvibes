@@ -8,12 +8,12 @@ import type { GoodVibesSdk } from './client.js';
  * Options for {@link createWebGoodVibesSdk}.
  *
  * This type is an alias for {@link BrowserGoodVibesSdkOptions} and carries the
- * same shape. It exists so that code importing from `@pellux/goodvibes-sdk/web`
+ * same shape. It exists so that code importing from `@goodvibes-jev/engine/sdk/web`
  * has a semantically accurate name without requiring an empty-interface declaration.
  *
- * Use `WebGoodVibesSdkOptions` when importing from `@pellux/goodvibes-sdk/web`;
+ * Use `WebGoodVibesSdkOptions` when importing from `@goodvibes-jev/engine/sdk/web`;
  * use {@link BrowserGoodVibesSdkOptions} when importing from
- * `@pellux/goodvibes-sdk/browser`.
+ * `@goodvibes-jev/engine/sdk/browser`.
  */
 export type WebGoodVibesSdkOptions = BrowserGoodVibesSdkOptions;
 

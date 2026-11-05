@@ -9,7 +9,7 @@
  * sentence and race the operating system for a device that is already held.
  *
  * The framing arithmetic, the recorder argv and the utterance policy all live in
- * the SDK (`@pellux/goodvibes-sdk/platform/voice/capture`), because getting any
+ * the SDK (`@goodvibes-jev/engine/sdk/platform/voice/capture`), because getting any
  * of them subtly wrong is SILENT: a container header out of byte alignment, or a
  * short frame, still "works" and simply never detects. What is local is the one
  * thing that cannot be shared, actually starting a process. That mirrors

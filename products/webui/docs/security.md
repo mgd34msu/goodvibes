@@ -87,12 +87,12 @@ the daemon and selected model route to process them.
 
 ## Dependency and SDK safety
 
-- Use the npm-published `@pellux/goodvibes-sdk` package.
+- Use the npm-published `@goodvibes-jev/engine/sdk` package.
 - Do not point WebUI to a local SDK checkout for validation.
 - Verify the installed SDK version with:
 
 ```bash
-node -p "require('./node_modules/@pellux/goodvibes-sdk/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/sdk/package.json').version"
 ```
 
 ## Security issue checklist

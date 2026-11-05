@@ -1,8 +1,8 @@
-# @pellux/goodvibes-transport-realtime
+# @goodvibes-jev/engine/transport-realtime
 
 Public GoodVibes realtime transport package for event-domain connectors over SSE and WebSocket.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/transport-realtime`. Install this package directly when you only need realtime connectors.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/transport-realtime`. These modules are subpath exports of the engine package.
 
 Consumer import:
 

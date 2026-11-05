@@ -42,7 +42,7 @@ merchant rules, owner authorization and distinct approval/veto windows in every
 mode. A general tool decision cannot authorize spending outside that contract.
 
 The shared judgment port owns transient availability handling. Primary-only
-routes wait for recovery or cancellation; explicit compatible failover chains
+routes use finite attempts; explicit cross-model failover chains
 return typed `unavailable` on exhaustion. Products consume that lifecycle
 without adding retry loops or inventing semantic answers.
 
@@ -77,10 +77,9 @@ The upstream targets and implementation sequence are recorded in
 [`docs/design/upstream-reconciliation.md`](docs/design/upstream-reconciliation.md).
 
 - **Judgment:** the shared port, autonomous receipt validation, decision log,
-  patterns and calibration tooling are implemented. Primary-only transient
-  outages wait for recovery or cancellation; explicit failover returns typed
-  `unavailable` on exhaustion. Permanent request, authentication, format and
-  decision-log failures remain terminal.
+  patterns and calibration tooling are implemented. Configured decision targets use finite attempts and
+  cross-model failover; exhaustion halts the operation. Host authority, cancellation
+  and decision-log failures remain terminal.
 - **Conversation and tools:** TUI composer input and `--prompt` reach the
   selected conversation model directly. Tool admission follows owner settings
   and deterministic authority checks. Explicit native work intake remains a
@@ -124,7 +123,7 @@ The workspace package `@goodvibes-jev/judgment` provides:
 - **The decision log.** SQLite, one entry per reading, queryable by battery, time range and outcome.
 - **Calibration.** Runs every battery's fixtures live and reports accuracy against confidence. It fails when a battery falls below its floor.
 
-The old heuristics are being removed, not kept as backups. Legacy uncertainty must never be promoted to `act` or relabeled as approval. The default port uses one configured System One endpoint. Explicit failover chains and persisted fallback settings are supported; live calibration remains unfinished. The [judgment package README](packages/judgment/README.md) documents primary-only retries, configured failover exhaustion, owned cancellation and terminal permanent failures. Products must consume that shared lifecycle and preserve cancellation and zero effects while waiting; transport recovery does not establish autonomous consumer migration or live-provider proof.
+The old heuristics are being removed, not kept as backups. Legacy uncertainty must never be promoted to `act` or relabeled as approval. The default port uses one configured System One endpoint. Explicit failover chains and persisted fallback settings are supported; live calibration remains unfinished. The [judgment package README](packages/judgment/README.md) documents finite attempts, cross-model failover exhaustion and owned cancellation. Products must consume that shared lifecycle and preserve cancellation and zero effects while waiting; transport recovery does not establish autonomous consumer migration or live-provider proof.
 
 ## The engine (`packages/engine`)
 

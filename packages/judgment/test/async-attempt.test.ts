@@ -155,7 +155,7 @@ describe('asynchronous judgment attempt admission', () => {
 
   test('denial after backoff prevents the next retry without altering prior attempt evidence', async () => {
     let calls = 0; let gates = 0; let allowed = true;
-    const port = createSystemOnePort(config(async () => { calls++; return unavailable(); }));
+    const port = createSystemOnePort({ ...config(async () => { calls++; return unavailable(); }), fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'fallback-key' }, model: DEFAULT_MODEL }] });
     await expect(port.ask({ ...request,
       beforeAsyncAttempt: async () => { gates++; await Promise.resolve(); if (!allowed) throw new Error('permission changed'); },
       onRetry: () => { allowed = false; },

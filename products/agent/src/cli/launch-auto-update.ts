@@ -121,7 +121,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     // in place, and the skip should never look like an update happened.
     options.print(installKind === 'source'
       ? 'auto-update skipped: running from source (dev checkout)'
-      : 'auto-update skipped: package-managed install, update with: bun add -g @pellux/goodvibes-agent');
+      : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent');
     return { action: 'continue', reason: 'not-swappable-install' };
   }
 

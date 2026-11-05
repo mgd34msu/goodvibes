@@ -11,7 +11,7 @@
  * Wired via `GatewayMethodCatalog.register(descriptor, handler)`, the SAME
  * mechanism the plugin API already uses (../../plugins/api.ts
  * `registerGatewayMethod`), rather than a new REST path in the external
- * `@pellux/goodvibes-daemon-sdk` package or a change to
+ * `@goodvibes-jev/engine/daemon-sdk` package or a change to
  * ../../daemon/http/router.ts (both out of this brief's file ownership).
  * The registered handler is reached over real HTTP today via the existing
  * generic invoke endpoint `POST /api/control-plane/methods/{methodId}/invoke`

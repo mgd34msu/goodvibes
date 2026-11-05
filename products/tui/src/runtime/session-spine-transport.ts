@@ -3,7 +3,7 @@
  *
  * The TUI session-spine cutover: the thin typed-client
  * adapter that lets the TUI's bootstrap drive the SDK's
- * `@pellux/goodvibes-sdk/platform/runtime/session-spine` `SessionSpineClient`
+ * `@goodvibes-jev/engine/sdk/platform/runtime/session-spine` `SessionSpineClient`
  * via its injected `SpineTransport` seam.
  *
  * The TUI is SDK-clean here: `SpineSessionsClient` is exactly the narrow wire

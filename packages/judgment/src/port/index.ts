@@ -14,6 +14,8 @@ export { JudgmentError, JudgmentContextLimitError, type JudgmentErrorKind } from
 export { LIMITS, estimateTokens, validateContextBudget, validateQuestions } from './limits.ts';
 export { createModelCatalog, type ModelCatalog } from './models.ts';
 export { createSystemOnePort } from './transport.ts';
+export { DECISION_MODEL_PROFILES, judgmentAdapter, type JudgmentAdapterKind, type DecisionModelProfile } from './backends.ts';
+export { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './backend-settings.ts';
 export * from './types.ts';
 
 export type { JudgmentRetryPolicy } from './retry.ts';

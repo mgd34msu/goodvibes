@@ -82,7 +82,7 @@ export function validateWebuiAnswers<Q extends Questions>(questions: Q, raw: unk
 }
 
 /** Keep numeric operational evidence; provider identifiers are not retained. */
-function safeLineage(raw: unknown, model: string): JudgmentLineage | undefined {
+function safeLineage(raw: unknown, models: ReadonlySet<string>): JudgmentLineage | undefined {
   if (raw === undefined) return undefined;
   const lineage = record(raw);
   const id = lineage['logicalRequestId'];
@@ -105,10 +105,10 @@ function safeLineage(raw: unknown, model: string): JudgmentLineage | undefined {
       const status = attempt['status'];
       if (!Number.isInteger(number) || number < 1 || !Number.isInteger(endpointIndex)
         || (endpointKind !== 'hosted' && endpointKind !== 'local')
-        || attempt['requestedModel'] !== model
+        || typeof attempt['requestedModel'] !== 'string' || !models.has(attempt['requestedModel'])
         || (outcome !== 'answered' && !ERROR_KINDS.includes(outcome as JudgmentErrorKind))
         || (status !== undefined && (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599))) return INVALID();
-      return { attempt: number, endpointIndex, endpointKind, requestedModel: model,
+      return { attempt: number, endpointIndex, endpointKind, requestedModel: attempt['requestedModel'],
         latencyMs: nonnegative(attempt['latencyMs']), outcome: outcome as 'answered' | JudgmentErrorKind,
         ...(status === undefined ? {} : { status: status as number }) };
     }),
@@ -123,6 +123,8 @@ export interface WebuiAnswerBoundaryOptions {
    * These declarations must never come from the browser request.
    */
   readonly returnedModels?: Readonly<Record<string, readonly string[]>>;
+  /** Server-owned fallback request models; browser input cannot expand this set. */
+  readonly fallbackModels?: readonly string[];
 }
 
 /**
@@ -133,21 +135,25 @@ export interface WebuiAnswerBoundaryOptions {
 export function withWebuiAnswerBoundary(inner: JudgmentPort, options: WebuiAnswerBoundaryOptions = {}): JudgmentPort {
   if (inner.recorder !== undefined) throw new Error('WebUI answer boundary must precede decision logging.');
   const returnedModels = new Map(Object.entries(options.returnedModels ?? {}).map(([requested, allowed]) => [requested, new Set(allowed)]));
+  const fallbackModels = [...options.fallbackModels ?? []];
   return {
     get model() { return inner.model; },
     async ask(request) {
       const model = request.model ?? inner.model;
+      const allowedModels = new Set([model, ...fallbackModels]);
       try {
         const raw = record(await inner.ask(request));
         const answers = validateWebuiAnswers(request.questions, raw['answers']);
         const actualModel = raw['model'];
+        const lineage = safeLineage(raw['lineage'], allowedModels);
+        const completed = lineage?.attempts.at(-1);
+        const answeringModel = completed?.outcome === 'answered' ? completed.requestedModel : model;
         if (raw['requestedModel'] !== model || typeof actualModel !== 'string'
-          || !(returnedModels.get(model)?.has(actualModel) ?? matchesJudgmentModel(model, actualModel))) return INVALID();
+          || !(returnedModels.get(answeringModel)?.has(actualModel) ?? matchesJudgmentModel(answeringModel, actualModel))) return INVALID();
         const usage = record(raw['usage']);
         const inputTokens = nonnegative(usage['inputTokens']);
         const outputTokens = nonnegative(usage['outputTokens']);
         if (!Number.isInteger(inputTokens) || !Number.isInteger(outputTokens)) return INVALID();
-        const lineage = safeLineage(raw['lineage'], model);
         return { answers, requestedModel: model, model: actualModel, usage: { inputTokens, outputTokens },
           latencyMs: nonnegative(raw['latencyMs']), requestId: undefined,
           ...(lineage === undefined ? {} : { lineage }) };
@@ -157,7 +163,7 @@ export function withWebuiAnswerBoundary(inner: JudgmentPort, options: WebuiAnswe
         const kind = ERROR_KINDS.includes(rawKind as JudgmentErrorKind) ? rawKind as JudgmentErrorKind : 'unavailable';
         // Do not keep cause, original message, response body or provider request ID.
         let lineage: JudgmentLineage | undefined;
-        try { lineage = safeLineage(descriptors['lineage']?.value, model); } catch { /* discard invalid metadata */ }
+        try { lineage = safeLineage(descriptors['lineage']?.value, allowedModels); } catch { /* discard invalid metadata */ }
         throw new JudgmentError(kind, 'WebUI judgment could not be completed.', lineage === undefined ? {} : { lineage });
       }
     },

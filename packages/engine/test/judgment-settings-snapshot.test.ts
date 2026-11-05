@@ -86,9 +86,10 @@ describe('judgment settings reload captures one configuration per call', () => {
     } finally { abort.abort(); key.resolve('synthetic-old-secret'); await first.catch(() => {}); old.stop(); next.stop(); }
   });
 
-  test('a hot reload affects new readings while the shared retry owner preserves the pending reading', async () => {
+  test('a hot reload affects new readings while configured failover preserves the pending reading', async () => {
     const old = endpoint(true); const next = endpoint();
     const { settings, env, source } = fixture('env'); settings['judgment.endpoint'] = old.url;
+    settings['judgment.fallbacks'] = [{ endpoint: old.url, model: 'jev-1.13.0', keySource: 'env', keyName: 'TYPESAFE_API_KEY' }];
     const port = createSettingsJudgmentPort(source); const waiting = Promise.withResolvers<void>(); const abort = new AbortController();
     const first = port.ask({ ...request, signal: abort.signal, onRetry: () => waiting.resolve() });
     try {

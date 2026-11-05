@@ -1,6 +1,6 @@
 /**
  * terminal-shell-conformance.test.ts, the package's own regression gate for
- * @pellux/goodvibes-terminal-shell.
+ * @goodvibes-jev/engine/terminal-shell.
  *
  * Reproduces the exact 501 defect class the package exists to prevent: a
  * gateway descriptor registered without an attached handler. The conformance

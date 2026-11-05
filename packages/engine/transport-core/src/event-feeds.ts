@@ -2,7 +2,7 @@ import type { EventEnvelope } from './event-envelope.js';
 
 /**
  * Minimal structural constraint for runtime events. Matches the `{ type: string }` shape
- * of `AnyRuntimeEvent` from `@pellux/goodvibes-contracts` without taking on that dependency.
+ * of `AnyRuntimeEvent` from `@goodvibes-jev/engine/contracts` without taking on that dependency.
  * Re-exported so downstream packages can share the same public type identity.
  */
 export type EventLike = { readonly type: string };

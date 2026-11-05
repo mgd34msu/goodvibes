@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/engine",
-  "version": "2.0.25",
+  "version": "3.0.0-dev.0",
   "description": "The platform library: the old goodvibes-sdk packages, with Jev judgment at every decision point.",
   "keywords": [
     "goodvibes",
@@ -1438,6 +1438,11 @@
       "bun": "./sdk/src/platform/ci-watch/index.ts",
       "types": "./sdk/dist/platform/ci-watch/index.d.ts",
       "import": "./sdk/dist/platform/ci-watch/index.js"
+    },
+    "./sdk/browser/decision-router": {
+      "bun": "./sdk/src/browser-decision-router.ts",
+      "types": "./sdk/dist/browser-decision-router.d.ts",
+      "import": "./sdk/dist/browser-decision-router.js"
     }
   },
   "publishConfig": {

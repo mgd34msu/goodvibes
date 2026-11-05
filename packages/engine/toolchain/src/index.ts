@@ -27,3 +27,5 @@ export * from './lib/sha256sums.js';
 export * from './lib/train-status.js';
 
 export { nativeAddonFailure } from './batteries/native-addon-failure.js';
+
+export { isPinnedWorkspaceVersion } from './lib/workspace-version.js';

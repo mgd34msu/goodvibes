@@ -20,7 +20,7 @@ import type { ServerSentEventHandlers } from './transport-http.js';
  * The input type of `TMethodId` minus the key this wrapper supplies from its own
  * positional argument (the id already in the URL path).
  *
- * `OmitNamed` rather than a plain `Omit`, see @pellux/goodvibes-contracts'
+ * `OmitNamed` rather than a plain `Omit`, see @goodvibes-jev/engine/contracts'
  * typed-io-keys.ts: an `additionalProperties: true` verb renders with a broad
  * index signature, and `Omit` collapses the whole named shape against it.
  */

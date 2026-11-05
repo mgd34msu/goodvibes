@@ -7,7 +7,7 @@ const root = process.cwd();
 
 // SDK release gates: overlay-marker hard-fail, exact-pin, pin/lock/installed
 // agreement, and npm-only import sweep. Keeps scripts/sdk-dev.ts's local-SDK
-// overlay from ever leaking into a published @pellux/goodvibes-agent.
+// overlay from ever leaking into a published @goodvibes-jev/agent.
 for (const issue of sdkReleaseGateIssues(root)) {
   throw new Error(issue);
 }

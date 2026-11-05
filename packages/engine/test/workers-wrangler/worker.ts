@@ -1,5 +1,5 @@
 /**
- * Cloudflare Workers test script for @pellux/goodvibes-sdk, wrangler-CLI harness.
+ * Cloudflare Workers test script for @goodvibes-jev/engine/sdk, wrangler-CLI harness.
  *
  * Mirrors test/workers/worker.ts exactly. This version is bundled by wrangler dev
  * (esbuild pipeline) rather than Miniflare's programmatic API.

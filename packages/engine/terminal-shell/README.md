@@ -1,11 +1,11 @@
-# @pellux/goodvibes-terminal-shell
+# @goodvibes-jev/engine/terminal-shell
 
 Shared terminal-shell plumbing for GoodVibes daemon front-ends. Two front-ends drive a full-screen terminal UI over the same daemon runtime, and they must keep a specific slice of that runtime wiring **identical**. When copies of it drift, real defects ship. This package is the single home for that slice, so each front-end consumes one implementation instead of maintaining a parallel copy.
 
 ## Install
 
 ```sh
-npm install @pellux/goodvibes-terminal-shell
+npm install @goodvibes-jev/engine
 ```
 
 ## What belongs here

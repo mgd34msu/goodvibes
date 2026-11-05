@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Assemble the @pellux/goodvibes-tui-<os>-<arch> platform packages from built
+ * Assemble the @goodvibes-jev/tui-<os>-<arch> platform packages from built
  * binaries in dist/. Run at release time after scripts/build.ts has produced
  * the target binaries.
  *

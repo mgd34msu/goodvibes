@@ -7,9 +7,9 @@ goodvibes-tui requires Bun.
 
 Install Bun first, then install GoodVibes from the npm registry with:
 
-  bun add -g @pellux/goodvibes-tui
+  bun add -g @goodvibes-jev/tui
 
-npm install -g @pellux/goodvibes-tui also works, but Bun must already be installed and available on PATH.
+npm install -g @goodvibes-jev/tui also works, but Bun must already be installed and available on PATH.
 EOF
   exit 1
 fi

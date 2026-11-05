@@ -199,6 +199,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       let resolve: (() => void) | null = null;
       let done = false;
       let streamError: string | undefined;
+      let routeMetadata: Pick<CompanionProviderChunk, 'decisionRoute' | 'usage'> = {};
       let streamedContent = '';
       const push = (chunk: CompanionProviderChunk): void => {
         queue.push(chunk);
@@ -207,6 +208,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       };
       const chatPromise = provider.chat({
         model: providerModelId,
+        ...(options.routingContext === undefined ? {} : { routingContext: options.routingContext }),
         messages: messages.map((m) => {
           if (m.role === 'tool') {
             return {
@@ -235,6 +237,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
           }
         },
       }).then((resp) => {
+        routeMetadata = { ...(resp.decisionRoute ? { decisionRoute: resp.decisionRoute, usage: resp.usage } : {}) };
         if (resp.content && streamedContent.length === 0) {
           push({ type: 'text_delta', delta: resp.content });
         }
@@ -263,7 +266,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       if (streamError) {
         yield { type: 'error' as const, error: streamError };
       } else {
-        yield { type: 'done' as const };
+        yield { type: 'done' as const, ...routeMetadata };
       }
     },
   };

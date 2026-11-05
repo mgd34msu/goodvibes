@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/agent",
-  "version": "2.1.0",
+  "version": "3.0.0-dev.0",
   "private": true,
   "description": "GoodVibes personal operator assistant TUI with a proactive Agent product brain, isolated Agent Knowledge, local profiles, routines, skills, personas, and explicit build delegation.",
   "type": "module",

@@ -2,7 +2,7 @@
  * Platform runtime UI surface barrel.
  *
  * Source file: `packages/sdk/src/platform/runtime/ui.ts`
- * Public path: `@pellux/goodvibes-sdk/platform/runtime/ui`
+ * Public path: `@goodvibes-jev/engine/sdk/platform/runtime/ui`
  *
  * NOTE: This is NOT a re-export of the `runtime/ui/` subdirectory.
  * The `ui/` subdirectory contains model-picker and provider-health data

@@ -1,4 +1,4 @@
-# @pellux/goodvibes-toolchain
+# @goodvibes-jev/engine/toolchain
 
 Shared GoodVibes CI/CD toolchain. One published home for the release, publish,
 and verification scripts that used to live as parallel copies across the
@@ -45,7 +45,7 @@ The default CLI sends no diagnostic output to a provider.
 
 See `docs/release-and-publishing.md` in the SDK repo for the full
 `toolchain.config.json` contract and per-repo examples. Import the
-`ToolchainConfig` type from `@pellux/goodvibes-toolchain` for editor help.
+`ToolchainConfig` type from `@goodvibes-jev/engine/toolchain` for editor help.
 
 ## Usage
 

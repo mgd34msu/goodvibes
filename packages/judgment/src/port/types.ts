@@ -101,7 +101,7 @@ export interface JudgmentRetryProgress {
 
 export interface JudgmentLineage {
   readonly logicalRequestId: string;
-  /** Most recent attempts; earlier detail is bounded during an arbitrarily long outage. */
+  /** Most recent attempts; earlier detail is bounded for unusually large configured chains. */
   readonly attempts: readonly JudgmentAttempt[];
   readonly omittedAttempts?: number;
 }
@@ -114,6 +114,7 @@ export interface JudgmentEndpointHealth {
   readonly attempts: number;
   readonly consecutiveFailures: number;
   readonly lastOutcome?: JudgmentAttempt['outcome'];
+  readonly cooldownRemainingMs?: number;
 }
 
 /** Typed answers for one call, with what answered and what it cost. */

@@ -38,7 +38,7 @@ The service must establish source access, source/purpose permission, route clear
 `webui-answers.ts` exports `validateWebuiAnswers(questions, raw)` for the service's pre-log validation seam, plus `withWebuiAnswerBoundary(nonRecordingPort, options?)`. Correct composition is:
 
 1. Non-recording, server-configured port with a source-bound route and current-authority checks at every shared retry/fallback dispatch
-2. `withWebuiAnswerBoundary(port, { returnedModels? })`
+2. `withWebuiAnswerBoundary(port, { returnedModels?, fallbackModels? })`
 3. `withDecisionLog(validatedPort, admittedLog)`
 4. Service scoped port enforcing registration/question identity and the aggregate budget
 5. Reader
@@ -64,3 +64,7 @@ The lease identifies an immutable observed read, not ongoing remote message exis
 Config mutations and credential changes synchronously retire account epochs, including ABA changes. Newer source reads, observed mailbox replacement, expiry and shutdown revoke old leases; shared retries recheck fresh authentication, source, purpose and route at every transmission and retention boundary. The WebUI opens an editable draft while waiting. Typing a subject, closing, selecting another message, starting a newer reply, changing client identity or navigating away cancels its pending interpretation. Unavailable or held readings leave the subject unset for explicit owner editing.
 
 The canonical in-memory IMAP fixtures, authenticated request/response tests and recorded-wire browser replay are synthetic implementation proof. They are not live mailbox/provider verification or hosted browser calibration.
+
+Server-owned `fallbackModels` admits configured cross-model attempt identities.
+Returned aliases are validated against the model of the final answered attempt;
+neither browser input nor an alias entry can authorize another fallback target.

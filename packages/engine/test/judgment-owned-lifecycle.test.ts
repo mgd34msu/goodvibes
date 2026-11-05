@@ -10,7 +10,7 @@ import { decisionLogPath } from '../sdk/src/platform/state/decision-log.ts';
 
 const request = { state: { fixture: 'native lifecycle' }, questions: { yes: noul('Is this a lifecycle fixture?') }, context: { site: 'test.native-lifecycle' } };
 const source = (endpoint: string, secrets: JudgmentSettingsSource['secrets'] = { get: async () => 'synthetic-key' }): JudgmentSettingsSource => ({
-  config: { get: (key) => ({ 'judgment.endpoint': endpoint, 'judgment.model': 'jev-1.13.0', 'judgment.timeoutMs': 1000, 'judgment.keySource': 'secret', 'judgment.fallbacks': [] })[key] },
+  config: { get: (key) => ({ 'judgment.endpoint': endpoint, 'judgment.model': 'jev-1.13.0', 'judgment.timeoutMs': 1000, 'judgment.keySource': 'secret', 'judgment.fallbacks': [], 'judgment.backend': {}, 'judgment.keyName': 'TYPESAFE_API_KEY' })[key] },
   env: {}, secrets,
 });
 function deferred() {
@@ -115,16 +115,23 @@ describe('native judgment ownership', () => {
     } finally { await scope.close(); installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); }
   });
 
-  test.each(['runtime shutdown', 'caller cancel'] as const)('%s stops central outage retries with one terminal decision record', async (stop) => {
+  test.each(['runtime shutdown', 'caller cancel'] as const)('%s cancels a pending backup with one terminal decision record', async (stop) => {
     const root = mkdtempSync(join(tmpdir(), 'judgment-retry-stop-'));
     const previous = installJudgmentPort(undefined);
     const scope = createAsyncDisposalScope('fixture'); const retried = deferred();
     let calls = 0;
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { calls++; return new Response('', { status: 503 }); } });
-    const { port, decisionLog } = composeJudgment({ ...source(`http://127.0.0.1:${server.port}`), stateRoot: root, disposal: scope.registry });
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(input) {
+      calls++;
+      if (new URL(input.url).pathname.startsWith('/backup/')) { retried.resolve(); return await new Promise<Response>(() => {}); }
+      return new Response('', { status: 503 });
+    } });
+    const settings = source(`http://127.0.0.1:${server.port}`);
+    const { port, decisionLog } = composeJudgment({ ...settings, config: { get: key => key === 'judgment.fallbacks'
+      ? [{ endpoint: `http://127.0.0.1:${server.port}/backup`, model: 'jev-1.13.0', keySource: 'none', keyName: '' }]
+      : settings.config.get(key) }, stateRoot: root, disposal: scope.registry });
     const abort = new AbortController();
     try {
-      const pending = port.ask({ ...request, signal: abort.signal, onRetry: retried.resolve }).catch((error: unknown) => error);
+      const pending = port.ask({ ...request, signal: abort.signal }).catch((error: unknown) => error);
       await retried.promise;
       const closing = stop === 'runtime shutdown' ? scope.close() : undefined;
       if (stop === 'caller cancel') abort.abort();
@@ -135,11 +142,11 @@ describe('native judgment ownership', () => {
         expect(decisionLog.query()).toMatchObject([{ status: 'failed', error: { kind: 'aborted' } }]);
         await scope.close();
       }
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       using persisted = new SqliteDecisionLog(decisionLogPath(root));
       const records = persisted.query();
       expect(records).toHaveLength(1); expect(records[0]).toMatchObject({ status: 'failed', error: { kind: 'aborted' } });
-      expect(records[0]?.lineage?.attempts).toHaveLength(1);
+      expect(records[0]?.lineage?.attempts).toHaveLength(2);
     } finally { await scope.close(); server.stop(true); installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); }
   });
 });

@@ -562,3 +562,19 @@ test('an identity lookup that keeps the same fallback does not retire the catalo
     expect(() => source.assertCurrent()).not.toThrow();
   } finally { installJudgmentPort(previous); }
 });
+
+test('standing judgment budget: provider startup and repeated model inventory operations make zero decision requests', async () => {
+  const decisions = fakePort(() => { throw new Error('Inventory operations must use published model facts'); });
+  const previous = installJudgmentPort(decisions.port);
+  const root = mkdtempSync(join(tmpdir(), 'registry-decision-budget-'));
+  try {
+    const registry = makeRegistry(root);
+    for (let read = 0; read < 20; read++) {
+      registry.listModels(); registry.getSelectableModels(); registry.getConfiguredProviderIds();
+    }
+    // Allow any accidentally scheduled background metadata reader to run too.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(decisions.requests).toHaveLength(0);
+    expect(registry.has('decision-router')).toBe(true);
+  } finally { installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); }
+});

@@ -115,8 +115,8 @@ describe('build-binaries run', () => {
  */
 const manifests: DependencyManifest[] = [
   {
-    name: '@pellux/goodvibes-sdk',
-    path: 'node_modules/@pellux/goodvibes-sdk/package.json',
+    name: '@goodvibes-jev/engine/sdk',
+    path: 'node_modules/@goodvibes-jev/engine/sdk/package.json',
     required: ['zustand'],
     optional: ['jsdom', '@mozilla/readability', 'openai'],
   },
@@ -178,7 +178,7 @@ describe('build-binaries optional-dependency screen', () => {
       provideAddon: () => true, exec, logger: captureLogger(),
       dependencyManifests: manifests,
       isPackageInstalled: installedExcept(['zustand']),
-    })).toThrow(/@pellux\/goodvibes-sdk/);
+    })).toThrow(/@goodvibes-jev\/engine\/sdk/);
   });
 
   test('a package declared optional by one manifest and required by another is required', () => {

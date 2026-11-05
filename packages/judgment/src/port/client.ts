@@ -1,4 +1,4 @@
-import { APIConnectionError, APIError, APIUserAbortError, TypeSafeClient, TypeSafeError, type Fetch, type SystemOneRequest, type SystemOneResult, type Questions } from '@typesafe-ai/sdk';
+import { APIConnectionError, APIError, APIUserAbortError, TypeSafeError, type Fetch, type SystemOneRequest, type SystemOneResult, type Questions } from '@typesafe-ai/sdk';
 import type { JudgmentConfig } from './config.ts';
 import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
 import { recordingRequestIds } from './request-id.ts';
@@ -31,21 +31,7 @@ export function toJudgmentError(error: unknown): JudgmentError {
   return new JudgmentError('invalid-response', 'System One did not return a usable response');
 }
 
-/** An SDK client for the configured endpoint, recording each response's request id. */
-export function clientFor(config: JudgmentConfig, singleAttempt = false): TypeSafeClient {
-  const { endpoint, model, timeoutMs, retry } = config;
-  const { apiKey, baseURL } = endpoint;
-  const base: Fetch = config.fetch ?? ((input, init) => fetch(input, init));
-  return new TypeSafeClient({ apiKey, baseURL, defaultModel: model, timeout: timeoutMs, retry: { ...retry, ...(singleAttempt ? { maxRetries: 0 } : {}) }, logLevel: 'off', fetch: recordingRequestIds((input, init) => {
-    const pending = base(input, { ...init, redirect: 'error' });
-    // Unwind SDK timers/listeners even when a custom fetch ignores cancellation.
-    return init?.signal ? interruptible(pending, init.signal) : pending;
-  }) });
-}
-
-
-/** The SDK requires a positive timer. Untimed requests use the same wire
- * protocol with the owning signal and the port's response validation. */
+/** One wire request, owned by the caller's cancellation/deadline signal. */
 export async function requestWithoutDeadline(
   config: JudgmentConfig, method: 'GET' | 'POST', path: string, signal: AbortSignal,
   body?: unknown, extraHeaders?: Readonly<Record<string, string>>,
@@ -57,7 +43,7 @@ export async function requestWithoutDeadline(
     signal.throwIfAborted();
     response = await interruptible(recordingRequestIds(base)(`${config.endpoint.baseURL.replace(/\/$/, '')}${path}`, {
       method, redirect: 'error', signal,
-      headers: { ...extraHeaders, Authorization: `Bearer ${config.endpoint.apiKey}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: { ...extraHeaders, ...(config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }), signal);
     text = await interruptible(response.text(), signal);

@@ -1,3 +1,4 @@
+import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 import { JudgmentInputError } from '../gate/judgment-input.js';
@@ -23,13 +24,14 @@ import { nativeWorkCheckpoint } from './response-completion-checkpoint.js';
 import { retainedDelegationSources } from './verification/delegated-history.js';
 
 export class ResponseCompletionError extends Error {
-  constructor(readonly problem: 'rejected' | 'unavailable' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
+  constructor(readonly problem: 'rejected' | 'unavailable' | 'stale-evidence' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
     super(problem === 'rejected'
       ? 'The response has not established completion of the authorized work.'
-      : problem === 'unavailable' ? 'The response completion service is unavailable. Completion remains held.'
+      : problem === 'unavailable' ? 'Completion verification is unavailable. Check decision model keys, endpoints and local services. The operation has stopped; completion remains held.'
+      : problem === 'stale-evidence' ? 'Completion evidence changed while being checked; a fresh reading is required.'
       : problem === 'invalid-evidence' ? 'The completion evidence could not be admitted. Repair is required; retrying unchanged evidence cannot establish completion.'
       : problem === 'rejected-request' ? 'The completion service rejected the request. Repair the request before retrying.'
-      : problem === 'capacity' ? 'Completion validation cannot fit the required evidence. The draft remains private while validation recovers.'
+      : problem === 'capacity' ? 'Completion validation cannot fit the required evidence. The operation has stopped; the draft remains private.'
       : problem === 'access-blocked' ? 'Jev access is blocked. Completion remains held; account access must be restored before retrying.'
       : 'The completion service returned an unusable result. Completion remains held and requires recovery.', options);
     this.name = 'ResponseCompletionError';
@@ -335,6 +337,7 @@ export class ResponseCompletionGuard {
       return { correction: null, assertCurrent: () => { restriction.assertCurrent(); current(); } };
     } catch (error) {
       options.signal?.throwIfAborted(); options.assertCurrent?.();
+      assertDecisionAvailable(error);
       const blocked = accessFailure(error);
       if (blocked) throw blocked;
       return held;
@@ -375,7 +378,7 @@ export class ResponseCompletionGuard {
       // an unchanged HTTP rejection still remains a permanent request error.
       if (error instanceof JudgmentError && error.kind === 'rejected' && error.status === undefined) {
         try { this.assertEvidenceCurrent?.(); }
-        catch (cause) { throw new ResponseCompletionError('unavailable', { cause }); }
+        catch (cause) { throw new ResponseCompletionError('stale-evidence', { cause }); }
       }
       const transient = error instanceof JudgmentPortMissingError || error instanceof JudgmentAuthorityRetiredError
         || (error instanceof JudgmentError && error.kind === 'unavailable');
@@ -386,9 +389,8 @@ export class ResponseCompletionGuard {
     }
   }
 
-  /** An unavailable checker cannot release the task or exhaust a hidden attempt budget. */
+  /** Rebuild changed evidence, but never restart an exhausted provider chain. */
   async checkUntilAvailable(input: () => ResponseCompletionInput, options: JudgmentReadingOptions = {}, onWaiting?: () => void): Promise<string | null> {
-    let delay = 1_000;
     for (;;) {
       try {
         let correction = await this.check(input(), options, onWaiting);
@@ -401,9 +403,10 @@ export class ResponseCompletionGuard {
       catch (error) {
         options.signal?.throwIfAborted(); options.assertCurrent?.();
         if (!(error instanceof ResponseCompletionError)) throw error;
-        // An account refusal will not recover through retries of this request.
-        // Surface the actionable hold without publishing or regenerating it.
-        if (error.problem === 'access-blocked' || error.problem === 'rejected-request') throw error;
+        if (error.problem === 'stale-evidence') {
+          await waitForTaskRecovery(0, options.signal);
+          continue;
+        }
         // Protocol, storage and context failures are checker failures, not
         // findings about the user's work. Keep this exact draft private and
         // recover natively; do not send the model on another artifact/check loop.
@@ -415,9 +418,7 @@ export class ResponseCompletionGuard {
             + 'remove user requirements, invent success, or describe incomplete work as finished. Protected material must use its secure input path; '
             + 'use redacted observations when exact private values are irrelevant. Completion still requires a fresh successful Jev check.';
         }
-        onWaiting?.();
-        await waitForTaskRecovery(delay, options.signal);
-        delay = Math.min(delay * 2, 10_000);
+        throw error;
       }
     }
   }
@@ -686,7 +687,8 @@ export class ResponseCompletionGuard {
     const localizeHeld = async (): Promise<readonly CompletionFinding[]> => {
       let findings: readonly CompletionFinding[];
       try { findings = await completionFindings(port, state, heldChecks, readingOptions); }
-      catch {
+      catch (error) {
+        assertDecisionAvailable(error);
         options.signal?.throwIfAborted(); options.assertCurrent?.();
         // Failure to localize a held check never becomes a permit, and cannot
         // prevent the already-needed repair from returning to the model.

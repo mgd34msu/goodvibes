@@ -1,3 +1,5 @@
+import { DecisionRouterProvider } from '../sdk/src/platform/providers/decision-router.js';
+import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createCanonicalLiveCodeSource } from './_helpers/code-injection-readings.js';
@@ -729,4 +731,20 @@ test.each(['success', 'retry', 'continuation', 'policy-retry', 'file-continuatio
   if (mode === 'success') await work; else await expect(work).rejects.toThrow();
   expect(dispatched).toBe(1);
   } finally { live.dispose(); }
+});
+
+test('Decision Router resolves the actual model before the main turn preflight and never answers after a failed preflight', async () => {
+  const decisions = fakePort((name, question) => name === 'pick' ? choiceAnswer(question, 'general', 0.97) : noulAnswer(0.97));
+  let answerCalls = 0;
+  const answer: LLMProvider = { name: 'answer', models: ['small'], async chat() { answerCalls++; throw new Error('must not dispatch'); } };
+  const actualModel = { ...FAKE_MODEL, id: 'small', registryKey: 'answer:small', provider: 'answer', contextWindow: 1024 };
+  const router = new DecisionRouterProvider({ settings: () => ({ categories: { general: { target: { provider: 'answer', model: 'small' } } } }),
+    resolveTarget: () => ({ provider: answer, model: actualModel }), capturePort: () => ({ port: decisions.port, assertCurrent() {} }) });
+  const { context } = makeContext({ text: 'Hello', provider: answer, enabled: false });
+  context.providerRegistry.getForModel = () => router;
+  let preflightModel: ModelDefinition | undefined;
+  const routedContext: OrchestratorTurnLoopContext = { ...context,
+    checkContextWindowPreflight: async (_turn, model) => { preflightModel = model; return 'error'; } };
+  await executeOrchestratorTurnLoop(routedContext);
+  expect(preflightModel).toBe(actualModel); expect(answerCalls).toBe(0); expect(decisions.requests).toHaveLength(1);
 });

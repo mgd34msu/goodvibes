@@ -1,5 +1,5 @@
 /**
- * @pellux/goodvibes-sdk/platform/runtime/client
+ * @goodvibes-jev/engine/sdk/platform/runtime/client
  *
  * The client SEAMS: what a surface product does at each place its own process
  * stops and the daemon's begins.

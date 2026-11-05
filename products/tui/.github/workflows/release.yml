@@ -79,11 +79,11 @@ jobs:
       workflow: ci.yml
       event: push
       toolchain-source: registry
-      # Pinned, not floating: release-time `bunx @pellux/goodvibes-toolchain`
+      # Pinned, not floating: release-time `bunx @goodvibes-jev/engine/toolchain`
       # would otherwise resolve whatever npm calls latest at that moment, so a
       # toolchain published mid-release could change the gate that validates it.
       # Same version as package.json devDependencies (see toolchain.config.json).
-      toolchain-spec: "@pellux/goodvibes-toolchain@2.1.0"
+      toolchain-spec: "@goodvibes-jev/engine/toolchain@2.1.0"
       bun-version: "1.3.14"
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
@@ -118,7 +118,7 @@ jobs:
       artifact-glob: |
         dist/goodvibes-*
         dist/lib
-      toolchain-spec: "@pellux/goodvibes-toolchain@2.1.0"
+      toolchain-spec: "@goodvibes-jev/engine/toolchain@2.1.0"
       bun-version: "1.3.14"
 
   # ── TUI-specific native-arm64 banner smoke on macos-14. ───────────────────
@@ -209,13 +209,13 @@ jobs:
           # variable and copies ITS artifacts from there, stage them beside
           # this app's, in the exact layout that postinstall expects, so the
           # clean-project install needs no network and asserts real bytes.
-          DAEMON_VERSION="$(node -e "console.log(require('${GITHUB_WORKSPACE}/package.json').dependencies['@pellux/goodvibes-daemon'])")"
+          DAEMON_VERSION="$(node -e "console.log(require('${GITHUB_WORKSPACE}/package.json').dependencies['@goodvibes-jev/daemon'])")"
           gh release download "v${DAEMON_VERSION}" -R mgd34msu/goodvibes-daemon -p goodvibes-daemon-linux-x64 -D "${GITHUB_WORKSPACE}/dist" --clobber
           mkdir -p "${GITHUB_WORKSPACE}/dist/lib/sqlite-vec-linux-x64"
           gh release download "v${DAEMON_VERSION}" -R mgd34msu/goodvibes-daemon -p sqlite-vec-linux-x64.so -O "${GITHUB_WORKSPACE}/dist/lib/sqlite-vec-linux-x64/vec0.so" --clobber
           GOODVIBES_ASSET_SOURCE_DIR="${GITHUB_WORKSPACE}/dist" HOME="$HOME" npm install "${GITHUB_WORKSPACE}/pellux-goodvibes-tui-${VERSION}.tgz"
           test -x node_modules/.bin/goodvibes
-          test -x node_modules/@pellux/goodvibes-tui/vendor/goodvibes-linux-x64
+          test -x node_modules/@goodvibes-jev/tui/vendor/goodvibes-linux-x64
           test "$(node_modules/.bin/goodvibes --version)" = "goodvibes ${VERSION}"
           # The daemon is a separate package on its own version line: it comes in
           # as a dependency, so `goodvibes-daemon` must be on PATH after this
@@ -316,7 +316,7 @@ jobs:
       # file exists at the tagged ref (docs/releases/<version>.md, no v prefix ,
       # the same resolution the old validate-release used).
       notes-file: docs/releases/${{ needs.stage-release-assets.outputs.version }}.md
-      toolchain-spec: "@pellux/goodvibes-toolchain@2.1.0"
+      toolchain-spec: "@goodvibes-jev/engine/toolchain@2.1.0"
       bun-version: "1.3.14"
 
   # ── Publish platform binary packages to npmjs (BEFORE the main package). ──
@@ -370,12 +370,12 @@ jobs:
       id-token: write
     uses: mgd34msu/goodvibes-sdk/.github/workflows/reusable-npm-publish.yml@deccd4836763493f826b0d96edf8d3c9ef58f3f6 # sdk 2.1.0 release
     with:
-      package-name: "@pellux/goodvibes-tui"
+      package-name: "@goodvibes-jev/tui"
       environment: production
       registry: "https://registry.npmjs.org"
       # reusable-npm-publish takes no toolchain-spec input; the pin rides in the
       # publish command itself so this step cannot float to a newer toolchain.
-      publish-command: "GOODVIBES_SKIP_NPM_AUTH_CHECK=1 bun run publish:check && bun run package:install-check && bunx @pellux/goodvibes-toolchain@2.1.0 goodvibes-publish-package --poll"
+      publish-command: "GOODVIBES_SKIP_NPM_AUTH_CHECK=1 bun run publish:check && bun run package:install-check && bunx @goodvibes-jev/engine/toolchain@2.1.0 goodvibes-publish-package --poll"
       bun-version: "1.3.14"
     secrets:
       npm-token: ${{ secrets.NPM_TOKEN }}

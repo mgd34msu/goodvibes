@@ -1,3 +1,6 @@
+import type { ChatRequest } from '../providers/interface.js';
+import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
+import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { setTimeout as waitForRetry } from 'node:timers/promises';
 import { prepareProjectFramework, readRepeatedCalls, captureOrchestratorObservationOwner, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
@@ -287,6 +290,7 @@ async function executeToolCalls(
       }
     } catch (err) {
       assertCallCurrent();
+      assertDecisionAvailable(err);
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();
       const toolErr = signal?.aborted ? 'cancelled by user' : summarizeError(err);
       recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, JSON.stringify(call.arguments));
@@ -480,17 +484,25 @@ export async function runAgentTask(
     const providerRegistry = context.providerRegistry;
     const currentModel = lazyCurrentModel(providerRegistry);
     const primaryRoute = context.resolveProviderForRecord(providerRegistry, record, currentModel);
-    let activeRoute = primaryRoute;
+    const routingSignal = context.getCancellationSignal?.(record.id);
+    const decisionRoute = await prepareDecisionRouterTurn(primaryRoute.provider, {
+      messages: [{ role: 'user', content: record.task }], context: { turnId: record.id, prompt: record.task },
+      ...(routingSignal === undefined ? {} : { signal: routingSignal }),
+      assertCurrent: () => terminal.assertCurrent(),
+      ...(context.beforeProviderRequest === undefined ? {} : { beforeAttempt: () => context.beforeProviderRequest?.() }),
+    });
+    terminal.assertCurrent();
+    let activeRoute = decisionRoute ? { ...primaryRoute, provider: decisionRoute.provider, modelId: decisionRoute.model.id } : primaryRoute;
     let fallbackRouteIndex = 0;
-    const fallbackRoutes = context.resolveFallbackModelRoutes(
+    const fallbackRoutes = decisionRoute ? [] : context.resolveFallbackModelRoutes(
       providerRegistry,
       record,
       currentModel,
       primaryRoute.requestedModelId,
     );
-    const modelId = primaryRoute.modelId;
-    record.model = record.model ?? primaryRoute.requestedModelId;
-    record.provider = record.provider ?? activeRoute.provider.name;
+    const modelId = activeRoute.modelId;
+    record.model = decisionRoute ? activeRoute.modelId : record.model ?? primaryRoute.requestedModelId;
+    record.provider = decisionRoute ? activeRoute.provider.name : record.provider ?? activeRoute.provider.name;
 
     session = new AgentSession(record.id, modelId, record.provider ?? currentModel.provider ?? 'unknown', {
       // Agent journals live under sessions/agents/, a sibling of the user
@@ -510,6 +522,7 @@ export async function runAgentTask(
 
     conversation = session.conversation;
     conversation.addUserMessage(record.task);
+    if (decisionRoute) conversation.addSystemMessage(describeDecisionRoute(decisionRoute.info));
     const wake = record.resumeSteer ? Object.freeze({ ...record.resumeSteer }) : undefined;
     record.resumeSteer = undefined;
     // Conversation-snapshot bridge: hand AgentManager a live accessor onto THIS
@@ -838,7 +851,7 @@ export async function runAgentTask(
           const capturedCodeGeneration = capturedCode?.generation?.();
           const codeAuthorityForAttempt = assertCodeInjectionCurrent;
           const assertNativeProviderSource = async () => {
-            terminal.assertCurrent();
+            terminal.assertCurrent(); decisionRoute?.assertCurrent();
             try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
             await capturedCode?.assertCurrent?.(capturedCodeGeneration);
             await context.beforeProviderRequest?.();
@@ -856,14 +869,16 @@ export async function runAgentTask(
             // only cooperatively at the next turn/tool boundary.
             const cancelSignal = context.getCancellationSignal?.(record.id);
             try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
-            response = await activeRoute.provider.chat({
+            const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
+            response = await chat({
               model: activeRoute.modelId,
               messages: conversation.getMessagesForLLM(),
               tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
               systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(composeTurnSystemPrompt(systemPrompt))
                 + (completionCorrection ? `\n\n${completionCorrection}` : '') + privateContextBlock,
               ...((codeAuthorityForAttempt || nativeSource || projectFramework || promptContext?.preparedKnowledgePrompt || context.beforeProviderRequest) ? { beforeAttempt: assertNativeProviderSource } : {}),
-              ...(record.reasoningEffort ? { reasoningEffort: record.reasoningEffort } : {}),
+              ...(decisionRoute ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
+                : record.reasoningEffort ? { reasoningEffort: record.reasoningEffort } : {}),
               ...(cancelSignal ? { signal: cancelSignal } : {}),
               onDelta,
             });

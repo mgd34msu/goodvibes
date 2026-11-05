@@ -165,10 +165,11 @@ describe('createSystemOnePort', () => {
     expect(error.requestId).toBe('req-9');
   });
 
-  test('a network failure retries without surfacing a terminal unavailability', async () => {
+  test('a network failure advances through the explicitly configured targets', async () => {
     let calls = 0;
     const port = createSystemOnePort({ signal: new AbortController().signal,
       endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:9', apiKey: 'k' },
+      fallbacks: Array.from({ length: 4 }, (_, index) => ({ endpoint: { kind: 'local', baseURL: `http://127.0.0.1:${index + 10}`, apiKey: 'k' }, model: 'jev-1.13.0' })),
       model: 'jev-1.13.0',
       timeoutMs: 1_000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1 },

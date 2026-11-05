@@ -44,7 +44,7 @@ function use(h: Harness): Harness {
 const unitFix = (): string => plannerOutput(fixPlan([{ serves: ['u1.c1'], files: ['src/csv.ts'] }]));
 
 describe('routing a stalled unit', () => {
-  test.each(['stall-route', 'planner-route'] as const)('a temporary %s outage retries its reading without repeating workers or spending a repair round', async site => {
+  test.each(['stall-route', 'planner-route'] as const)('an exhausted %s decision stops correction without starting another worker', async site => {
     let stallReadings = 0, plannerRoutes = 0;
     const planner = stepPlanner(oneUnitPlan(1), { fix: unitFix });
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2, maxFixRounds: 1 },
@@ -63,17 +63,16 @@ describe('routing a stalled unit', () => {
     const { contract } = startContract(h);
     await waitFor(() => terminal(h, contract.id), 'recovered correction to finish', 15_000);
     const done = contractOf(h, contract.id);
-    expect(done.status).toBe('passed');
-    expect(done.units[0]!.fixRounds).toBe(1);
+    expect(done.status).toBe('failed');
+    expect(done.failureKind).toBe('judgment-unavailable');
     expect(h.agentsOf('u1')).toHaveLength(1);
-    expect(h.agentsOf('u1.f1.u1')).toHaveLength(1);
-    expect(planner.of('fix')).toHaveLength(1);
-    expect(done.decisions.filter(decision => decision.action === 'resumed' && decision.reason.includes('correction budget unchanged'))).toHaveLength(1);
-    expect(stallReadings).toBe(site === 'stall-route' ? 2 : 1);
-    expect(plannerRoutes).toBe(site === 'planner-route' ? 3 : 2);
+    expect(h.agentsOf('u1.f1.u1')).toHaveLength(0);
+    expect(planner.of('fix')).toHaveLength(0);
+    expect(stallReadings).toBe(1);
+    expect(plannerRoutes).toBe(site === 'planner-route' ? 2 : 1);
   }, 20_000);
 
-  test('cancelling during a correction reading outage stops retries without starting a repair', async () => {
+  test('a correction reading outage stops after one failure without starting a repair', async () => {
     let readings = 0;
     const planner = stepPlanner(oneUnitPlan(1), { fix: unitFix });
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2 }, planner: planner.runner,
@@ -82,10 +81,9 @@ describe('routing a stalled unit', () => {
         return undefined;
       } }));
     const { contract } = startContract(h);
-    await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.includes('correction budget unchanged')), 'pending correction reading');
-    h.runner.cancel(contract.id, 'operator cancelled the task');
+    await waitFor(() => terminal(h, contract.id), 'correction outage to halt');
     await h.runner.join(contract.id);
-    expect(contractOf(h, contract.id).status).toBe('cancelled');
+    expect(contractOf(h, contract.id).status).toBe('failed');
     expect(readings).toBe(1);
     expect(planner.of('fix')).toHaveLength(0);
     expect(contractOf(h, contract.id).units[0]!.fixRounds).toBe(0);

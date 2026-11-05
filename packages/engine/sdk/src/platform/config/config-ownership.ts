@@ -213,6 +213,7 @@ export type DaemonOwnedConfigPath = ConfigKey | DaemonOwnedNonSchemaConfigPath;
  * unchanged: one voice on every surface.
  */
 export const USER_SHARED_WINS_CONFIG_KEYS: readonly string[] = [
+  'provider.decisionRouter', // one category table across all user surfaces, selected only by the virtual provider
   'tts.provider',
   'tts.voice',
   'tts.speed',

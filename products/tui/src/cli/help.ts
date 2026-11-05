@@ -11,7 +11,7 @@ function readJsonVersion(path: string): string | null {
     // this path to a different package.json (a bundled dependency's) that
     // reports a placeholder like "0.0.0". Fall through to the baked VERSION in
     // that case rather than rendering a stray version in `--version`/banners.
-    if (parsed.name !== '@pellux/goodvibes-tui') return null;
+    if (parsed.name !== '@goodvibes-jev/tui') return null;
     return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
   } catch {
     return null;

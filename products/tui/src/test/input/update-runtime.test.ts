@@ -162,7 +162,7 @@ describe('applyUpdate: non-binary install kinds never attempt a swap', () => {
     const calls: string[] = [];
     await applyUpdate(
       baseApplyOptions({
-        execPath: '/home/user/.bun/install/global/node_modules/@pellux/goodvibes-tui/vendor/goodvibes-linux-x64',
+        execPath: '/home/user/.bun/install/global/node_modules/@goodvibes-jev/tui/vendor/goodvibes-linux-x64',
         fetchImpl: buildStubFetch({ latestTag: 'v9.9.9', calls }),
         print: (line) => printed.push(line),
       }),
@@ -683,9 +683,9 @@ describe('rollbackUpdate: one command back to the version that ran before', () =
 
   test('non-binary installs are refused with the package-manager alternative', () => {
     const printed: string[] = [];
-    const fs = memoryIo({ '/home/u/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes': 'pkg' });
+    const fs = memoryIo({ '/home/u/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes': 'pkg' });
     rollbackUpdate({
-      execPath: '/home/u/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes',
+      execPath: '/home/u/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes',
       platform: 'linux',
       arch: 'x64',
       print: (line) => printed.push(line),

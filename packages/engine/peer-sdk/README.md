@@ -1,8 +1,8 @@
-# @pellux/goodvibes-peer-sdk
+# @goodvibes-jev/engine/peer-sdk
 
 Public GoodVibes peer package for distributed-runtime peer APIs and work exchange flows.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/peer`. Install this package directly when you only need the peer client subset.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/peer`. These modules are subpath exports of the engine package.
 
 ```ts
 import { createPeerSdk } from '@goodvibes-jev/engine/sdk/peer';
@@ -55,5 +55,5 @@ const heartbeat = await peer.peer.heartbeat({ capabilities: ['work'], version: '
 
 ## See also
 
-- Main SDK: [`@pellux/goodvibes-sdk`](../sdk/README.md)
+- Main SDK: [`@goodvibes-jev/engine/sdk`](../sdk/README.md)
 - [Getting Started](../../docs/getting-started.md)

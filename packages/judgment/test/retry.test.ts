@@ -9,6 +9,7 @@ const good = (id = 'ok') => Response.json({ model: DEFAULT_MODEL, answers: { yes
 const bad = () => Response.json({}, { status: 503 });
 const config = (fetch: NonNullable<JudgmentConfig['fetch']>): JudgmentConfig => ({
   endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' },
+  fallbacks: Array.from({ length: 24 }, (_, index) => ({ endpoint: { kind: 'local', baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: DEFAULT_MODEL })),
   signal: new AbortController().signal, model: DEFAULT_MODEL, timeoutMs: 15, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch,
 });
 
@@ -25,11 +26,11 @@ describe('shared retry timing and cancellation', () => {
     expect(() => retryPolicy({ apiConnectionError: false } as JudgmentConfig['retry'])).toThrow(JudgmentError);
   });
 
-  test('backoff saturates, jitter cannot hot loop, rate guidance is a minimum', () => {
+  test('backoff saturates, jitter cannot hot loop and provider cooldowns are bounded', () => {
     const policy = retryPolicy({ backoffInitialMs: 10, backoffMaxMs: 100, backoffJitter: 0 });
     expect([0, 1, 2, 50, 10_000].map((attempt) => retryDelay(undefined, attempt, policy))).toEqual([10, 20, 40, 100, 100]);
-    expect(retryDelay(apiError({ 'retry-after': '3600' }), 50, policy)).toBe(3_600_000);
-    expect(retryDelay(apiError({ 'retry-after-ms': 'garbage', 'retry-after': '3600' }), 50, policy)).toBe(3_600_000);
+    expect(retryDelay(apiError({ 'retry-after': '3600' }), 50, policy)).toBe(300_000);
+    expect(retryDelay(apiError({ 'retry-after-ms': 'garbage', 'retry-after': '3600' }), 50, policy)).toBe(300_000);
     expect(retryDelay(apiError({ 'retry-after-ms': '200', 'retry-after': '3600' }), 50, policy)).toBe(200);
     expect(retryDelay(apiError({ 'retry-after': '0' }), 50, policy)).toBe(100);
     expect(retryDelay(apiError({ 'retry-after': '-1' }), 50, policy)).toBe(100);
@@ -38,9 +39,9 @@ describe('shared retry timing and cancellation', () => {
     for (let i = 0; i < 100; i++) expect(retryDelay(undefined, i, fullJitter)).toBe(1);
   });
 
-  test('HTTP date guidance is honored beyond the old 60-second ceiling', () => {
+  test('HTTP date guidance also respects the five-minute cooldown ceiling', () => {
     const date = new Date(Date.now() + 3_600_000).toUTCString();
-    expect(retryDelay(apiError({ 'retry-after': date }), 0, retryPolicy({}))).toBeGreaterThan(3_598_000);
+    expect(retryDelay(apiError({ 'retry-after': date }), 0, retryPolicy({}))).toBe(300_000);
   });
 
   test('even a delay longer than the timer integer range is immediately abortable', async () => {
@@ -68,19 +69,19 @@ describe('shared attempt ownership', () => {
       let transmissions = 0;
       const port = createSystemOnePort({ ...config(async () => {
         transmissions++;
-        if (phase === 'fetch') { started(); return new Promise<Response>(() => {}); }
+        if (phase === 'fetch' || transmissions === 2) { started(); return new Promise<Response>(() => {}); }
         return Response.json({}, { status: 503, headers: { 'retry-after': '86400' } });
       }), timeoutMs: 0, signal: owner.signal });
-      const pending = port.ask({ ...request, signal: caller.signal, onRetry: () => { started(); } });
+      const pending = port.ask({ ...request, signal: caller.signal, onRetry: () => {} });
       await entered;
       (cancelOwner === 'port' ? owner : caller).abort();
       await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
-      expect(transmissions).toBe(1);
+      expect(transmissions).toBe(phase === 'fetch' ? 1 : 2);
       expect(getEventListeners(owner.signal, 'abort')).toHaveLength(0);
       expect(getEventListeners(caller.signal, 'abort')).toHaveLength(0);
       if (cancelOwner === 'port') {
         await expect(port.ask({ ...request, signal: new AbortController().signal })).rejects.toMatchObject({ kind: 'aborted' });
-        expect(transmissions).toBe(1);
+        expect(transmissions).toBe(phase === 'fetch' ? 1 : 2);
       }
     }, 1000);
   }
@@ -207,7 +208,7 @@ describe('shared attempt ownership', () => {
 
   test('malformed successful response terminates as invalid-response, never an endless outage', async () => {
     let calls = 0;
-    const port = createSystemOnePort(config(async () => { calls++; return new Response('not json', { headers: { 'content-type': 'application/json' } }); }));
+    const port = createSystemOnePort({ ...config(async () => { calls++; return new Response('not json', { headers: { 'content-type': 'application/json' } }); }), fallbacks: [] });
     await expect(port.ask(request)).rejects.toMatchObject({ kind: 'invalid-response' });
     expect(calls).toBe(1);
   });

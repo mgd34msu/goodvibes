@@ -115,7 +115,7 @@ loads from `<install-dir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>` next to the
 running binary. Every install channel ships it:
 
 - **npm / Bun installs** carry it inside the platform-specific
-  `@pellux/goodvibes-tui-<os>-<arch>` package and vendor it beside the binaries.
+  `@goodvibes-jev/tui-<os>-<arch>` package and vendor it beside the binaries.
 - **The pure-binary installer** (`curl -fsSL https://goodvibes.sh/install.sh | sh`)
   downloads the platform's addon as a checksum-verified release asset
   (`sqlite-vec-<os>-<arch>.<suffix>`, covered by `SHA256SUMS.txt`) and places it

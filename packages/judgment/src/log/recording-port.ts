@@ -10,7 +10,7 @@ import { hashState, isoTime, type DecisionLog, type NewDecisionEntry } from './t
 const FAILURE_MESSAGES: Readonly<Record<JudgmentErrorKind, string>> = {
   'invalid-request': 'the judgment request was invalid',
   rejected: 'the judgment request was rejected',
-  unavailable: 'the judgment provider could not answer',
+  unavailable: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.',
   aborted: 'the judgment call was cancelled',
   'invalid-response': 'the judgment provider returned an invalid response',
   unrecorded: 'the decision log could not record this judgment',

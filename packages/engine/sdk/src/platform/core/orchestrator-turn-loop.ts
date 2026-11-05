@@ -1,3 +1,5 @@
+import { selectedRoutingFiles } from '../providers/decision-router-context.js';
+import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { ProviderAttemptDeniedError, revalidateProviderAttempt } from '../providers/attempt-guard.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { nativeSelectedDiffEvidence } from '../workflow/work-ledger/native-diff-evidence.js';
@@ -260,8 +262,29 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   };
   assertActiveTurn();
   const helperModel = context.helperModel;
-  const model = context.providerRegistry.getCurrentModel();
-  const provider: LLMProvider = context.providerRegistry.getForModel(model.registryKey, model.provider);
+  const selectedModel = context.providerRegistry.getCurrentModel();
+  const selectedProvider = context.providerRegistry.getForModel(selectedModel.registryKey, selectedModel.provider);
+  const decisionRoute = await prepareDecisionRouterTurn(selectedProvider, {
+    messages: context.conversation.getMessagesForLLM(),
+    context: { sessionId: context.sessionId, turnId: context.turnId, prompt: context.text,
+      selectedFiles: selectedRoutingFiles(isNativeConversationTurn() ? readNativeConversationTurnSelectedDiffContext()?.unifiedDiff : undefined) },
+    ...(signal === undefined ? {} : { signal }), assertCurrent: assertActiveTurn,
+    beforeAttempt: async () => {
+      assertActiveTurn();
+      if (isNativeConversationTurn()) await revalidateNativeConversationTurnScope();
+      assertActiveTurn();
+    },
+  });
+  assertActiveTurn();
+  const model = decisionRoute?.model ?? selectedModel;
+  const provider: LLMProvider = decisionRoute?.provider ?? selectedProvider;
+  const turnReasoning = () => decisionRoute
+    ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
+    : resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'), context.sessionId);
+  if (decisionRoute) {
+    context.conversation.addSystemMessage(describeDecisionRoute(decisionRoute.info));
+    context.requestRender();
+  }
   const toolDefinitions = context.toolRegistry.getToolDefinitions();
   const streamEnabled = context.configManager.get('display.stream') as boolean;
 
@@ -277,7 +300,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     onCompletionRequired: () => { context.setCompletionActivity?.('checking'); context.requestRender(); },
     verificationStore: new VerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId),
     verificationWriter: createVerificationWriter({
-      route: () => ({ provider, model: model.id, reasoning: resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'), context.sessionId) }),
+      route: () => ({ provider, model: model.id, reasoning: turnReasoning() }),
       beforeAttempt: () => assertVerificationProvider(),
       onUsage: (response, durationMs) => {
         context.usage.input += response.usage.inputTokens; context.usage.output += response.usage.outputTokens;
@@ -596,7 +619,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     };
     try {
       if (codeAuthorityForAttempt) await revalidateProviderAttempt(codeAuthorityForAttempt);
-      response = await provider.chat({
+      decisionRoute?.assertCurrent();
+      const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => provider.chat(request);
+      response = await chat({
         model: model.id,
         messages: [
           ...context.conversation.getMessagesForLLM(),
@@ -605,14 +630,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
         systemPrompt: composeTurnSystemPrompt(composedBaseSystemPrompt) + privateDiffBlock,
         ...((tokenLimits.maxOutputTokens ?? 0) > 0 ? { maxTokens: tokenLimits.maxOutputTokens } : {}),
-        ...resolveTurnReasoning(
-          model,
-          context.configManager.get('provider.reasoningEffort'),
-          context.sessionId,
-        ),
+        ...turnReasoning(),
         signal,
         onDelta,
-        ...(codeAuthorityForAttempt || capturedProviderSource || nativeTurn ? { beforeAttempt: async () => {
+        ...(decisionRoute || codeAuthorityForAttempt || capturedProviderSource || nativeTurn ? { beforeAttempt: async () => {
+          decisionRoute?.assertCurrent();
           if (codeAuthorityForAttempt) await revalidateProviderAttempt(codeAuthorityForAttempt);
           assertActiveTurn();
           if (capturedProviderSource) assertNativeProviderSource();

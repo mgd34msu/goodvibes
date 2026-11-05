@@ -1,8 +1,8 @@
-# @pellux/goodvibes-daemon-sdk
+# @goodvibes-jev/engine/daemon-sdk
 
 Public GoodVibes daemon package for embeddable route contracts, dispatchers, handler builders, and daemon-side helpers.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/daemon`. Install this package directly when you only need the daemon embedding subset.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/daemon`. These modules are subpath exports of the engine package.
 
 Consumer import:
 

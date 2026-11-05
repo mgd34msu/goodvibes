@@ -1,3 +1,5 @@
+import type { ConfigSetting } from './schema-types.js';
+import { DEFAULT_DECISION_ROUTER_SETTINGS, validDecisionRouterSettings } from './decision-router-settings.js';
 import { type ConfigSettingDefinition, intRange, numRange, optionalWorkLimit, reasoningEffortSetting } from './schema-shared.js';
 
 export const coreConfigDefaults = {
@@ -14,6 +16,7 @@ export const coreConfigDefaults = {
     showToolPreview: false,
   },
   provider: {
+    decisionRouter: DEFAULT_DECISION_ROUTER_SETTINGS,
     reasoningEffort: 'medium',
     model: 'openrouter:openrouter/free',
     embeddingProvider: 'hashed-local',
@@ -154,7 +157,7 @@ export const coreConfigDefaults = {
   },
 };
 
-export const coreHeadConfigSettings: ConfigSettingDefinition[] = [
+export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
   {
     key: 'display.stream',
     type: 'boolean',
@@ -222,6 +225,13 @@ export const coreHeadConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: false,
     description: 'Show partial tool call preview while streaming',
+  },
+  {
+    key: 'provider.decisionRouter',
+    type: 'object',
+    default: DEFAULT_DECISION_ROUTER_SETTINGS,
+    description: 'Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials.',
+    validate: validDecisionRouterSettings,
   },
   {
     key: 'provider.reasoningEffort',

@@ -87,8 +87,8 @@ describe('runLaunchAutoUpdate', () => {
   test('package-manager and from-source installs never self-update at launch: each skip states itself honestly', async () => {
     const cases = [
       {
-        execPath: '/home/u/.bun/install/global/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent',
-        line: 'auto-update skipped: package-managed install, update with: bun add -g @pellux/goodvibes-agent',
+        execPath: '/home/u/.bun/install/global/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent',
+        line: 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent',
       },
       {
         execPath: '/usr/local/bin/bun',

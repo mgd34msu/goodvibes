@@ -85,3 +85,6 @@ registry.register(localBenchmarkPrompt);
 
 import { commandDiscovery } from './command-discovery.js';
 registry.register(commandDiscovery);
+
+import { decisionRouterCategory } from './batteries/decision-router.js';
+registry.register(decisionRouterCategory);

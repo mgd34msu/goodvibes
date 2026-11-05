@@ -92,9 +92,9 @@ function siteOf(stack: string): string {
     // Normalize this repo's own frames and the SDK package's compiled frames
     // down to the module path that names the owner.
     const file = match[1]
-      .replace(/^.*\/@pellux\/goodvibes-sdk\/dist\//, 'sdk/')
+      .replace(/^.*\/@goodvibes-jev\/engine\/sdk\/dist\//, 'sdk/')
       .replace(/^.*\/packages\/sdk\/dist\//, 'sdk/')
-      .replace(/^.*\/@pellux\/goodvibes-terminal-shell\/dist\//, 'terminal-shell/')
+      .replace(/^.*\/@goodvibes-jev\/engine\/terminal-shell\/dist\//, 'terminal-shell/')
       .replace(/^.*\/packages\/terminal-shell\/dist\//, 'terminal-shell/')
       .replace(/^.*\/src\//, 'src/');
     return fn ? `${fn} (${file})` : file;

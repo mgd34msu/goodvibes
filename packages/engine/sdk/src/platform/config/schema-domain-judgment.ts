@@ -7,14 +7,17 @@
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 import type { JudgmentSettings } from './schema-types-judgment.js';
 import type { ConfigSetting } from './schema-types.js';
-import { validJudgmentFallbackSettings } from './judgment-fallback-settings.js';
+import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
+import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
     endpoint: '',
     keySource: 'env',
+    keyName: 'TYPESAFE_API_KEY',
     model: '',
-    timeoutMs: 0,
+    backend: {},
+    timeoutMs: 30_000,
     fallbacks: [],
   },
 };
@@ -43,8 +46,16 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'judgment.keySource',
     type: 'enum',
     default: 'env',
-    description: 'Which place the judgment API key is read from, env (TYPESAFE_API_KEY in the process environment) or secret (TYPESAFE_API_KEY in the secret store); the setting names the place, not the key',
-    enumValues: ['env', 'secret'],
+    description: 'Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference',
+    enumValues: ['env', 'secret', 'none'],
+  },
+  {
+    key: 'judgment.keyName',
+    type: 'string',
+    default: 'TYPESAFE_API_KEY',
+    description: 'Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none',
+    validate: validJudgmentCredentialName,
+    validationHint: 'a credential reference name',
   },
   {
     key: 'judgment.model',
@@ -53,18 +64,26 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     description: 'Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest',
   },
   {
+    key: 'judgment.backend',
+    type: 'object',
+    default: {},
+    description: 'Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically',
+    validate: value => { try { captureJudgmentBackendSettings(value); return value !== undefined; } catch { return false; } },
+    validationHint: 'data object with optional adapter, positive maxInputBytes/maxQuestions and explicit responseModels',
+  },
+  {
     key: 'judgment.fallbacks',
     type: 'object',
     default: [],
-    description: 'Ordered array of compatible System One fallback objects. Each object has exactly endpoint, model, keySource and keyName. endpoint is an HTTP or HTTPS URL without embedded credentials, query or fragment. model is a Jev model name or alias such as jev-latest; it must match the requested primary model. keySource is env or secret; keyName names the environment variable or native secret-store entry from which the runtime privately resolves the API key. This setting accepts only that reference name, never a credential value or an inline apiKey field. An empty array disables fallbacks, including inherited fallbacks.',
+    description: 'Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted once with a finite deadline; exhaustion halts the operation',
     validate: validJudgmentFallbackSettings,
     validationHint: 'array of { endpoint, model, keySource: "env" | "secret", keyName }; no credentials in URLs or inline keys',
   },
   {
     key: 'judgment.timeoutMs',
     type: 'number',
-    default: 0,
-    description: 'Optional timeout per judgment attempt in milliseconds; 0 waits until completion or cancellation',
+    default: 30_000,
+    description: 'Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner',
     ...intRange(0, 2_147_483_647),
   },
 ];

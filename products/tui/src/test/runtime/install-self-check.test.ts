@@ -110,7 +110,7 @@ describe('evaluateInstallSelfCheck', () => {
 describe('runInstallSelfCheck', () => {
   test('detects the install kind from the exec path and evaluates', () => {
     const findings = runInstallSelfCheck({
-      execPath: '/home/user/.bun/install/global/node_modules/@pellux/goodvibes-tui/vendor/goodvibes-linux-x64',
+      execPath: '/home/user/.bun/install/global/node_modules/@goodvibes-jev/tui/vendor/goodvibes-linux-x64',
       packageRoot: '/opt/goodvibes',
       platform: 'linux',
       arch: 'x64',

@@ -13,6 +13,8 @@ if (rootPackage.name !== 'goodvibes-jev' || typeof version !== 'string'
 const targets = [
   { path: join(root, 'sdk', 'src', 'platform', 'version.ts'), declaration: 'version' },
   { path: join(repoRoot, 'products/daemon/src/version.ts'), declaration: '_version' },
+  { path: join(repoRoot, 'products/tui/src/version.ts'), declaration: '_version' },
+  { path: join(repoRoot, 'products/agent/src/version.ts'), declaration: '_version' },
 ];
 
 const files = targets.map(target => {
@@ -25,14 +27,17 @@ const files = targets.map(target => {
   );
   return { path: target.path, before: source, after: next };
 });
-const daemonManifestPath = join(repoRoot, 'products/daemon/package.json');
-const daemonManifestText = readFileSync(daemonManifestPath, 'utf8');
-const daemonManifest = JSON.parse(daemonManifestText) as { name?: unknown; version?: unknown };
-if (daemonManifest.name !== '@goodvibes-jev/daemon' || typeof daemonManifest.version !== 'string') {
-  throw new Error('Version synchronization requires the daemon workspace manifest');
+for (const workspace of ['packages/engine', 'packages/judgment', 'products/daemon', 'products/tui', 'products/agent', 'products/webui',
+  ...['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].map(platform => `products/tui/platform-packages/${platform}`)]) {
+  const path = join(repoRoot, workspace, 'package.json');
+  const before = readFileSync(path, 'utf8');
+  const manifest = JSON.parse(before) as { name?: unknown; version?: unknown };
+  if (typeof manifest.name !== 'string' || !manifest.name.startsWith('@goodvibes-jev/') || typeof manifest.version !== 'string') {
+    throw new Error(`Version synchronization requires a first-party workspace manifest: ${workspace}`);
+  }
+  const after = manifest.version === version ? before : `${JSON.stringify({ ...manifest, version }, null, 2)}\n`;
+  files.push({ path, before, after });
 }
-const daemonAfter = daemonManifest.version === version ? daemonManifestText : `${JSON.stringify({ ...daemonManifest, version }, null, 2)}\n`;
-files.push({ path: daemonManifestPath, before: daemonManifestText, after: daemonAfter });
 const attempted: typeof files = [];
 try {
   for (const file of files) {
@@ -47,4 +52,4 @@ try {
   throw new AggregateError(failures, 'Version synchronization failed; inspect any failed restoration');
 }
 
-console.log(`synced SDK and daemon version surfaces -> ${version}`);
+console.log(`synced all workspace manifests and compiled version fallbacks -> ${version}`);

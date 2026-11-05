@@ -1,8 +1,8 @@
-# @pellux/goodvibes-transport-http
+# @goodvibes-jev/engine/transport-http
 
 Public GoodVibes HTTP transport package for JSON requests, auth headers, retry/backoff, SSE streams, and contract route invocation.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/transport-http`. Install this package directly when you only need the HTTP transport subset.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/transport-http`. These modules are subpath exports of the engine package.
 
 Key exports:
 - Contract routes: `invokeContractRoute`, `openContractRouteStream`, `requireContractRoute`.

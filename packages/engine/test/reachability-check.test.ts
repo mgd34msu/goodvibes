@@ -21,7 +21,7 @@ import { scanCommandShadows } from '../sdk/src/platform/runtime/path-shadow.ts';
 const HOME = '/home/owner';
 const INSTALL_DIR = `${HOME}/.local/bin`;
 const BUN_BIN = `${HOME}/.bun/bin`;
-const BUN_PACKAGE = `${HOME}/.bun/install/global/node_modules/@pellux/goodvibes-agent/bin/goodvibes-agent`;
+const BUN_PACKAGE = `${HOME}/.bun/install/global/node_modules/@goodvibes-jev/agent/bin/goodvibes-agent`;
 
 interface FakeHost {
   readonly files: Record<string, { readonly link?: string; readonly version?: string }>;
@@ -54,7 +54,7 @@ describe('the startup check fires on an earlier-PATH copy', () => {
       homeDir: HOME,
       runningVersion: '1.25.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => '1.25.0',
       ...hostIo(host),
     });
@@ -65,7 +65,7 @@ describe('the startup check fires on an earlier-PATH copy', () => {
     expect(text).toContain('version 1.18.1');
     expect(text).toContain(`${INSTALL_DIR}/goodvibes`);
     expect(text).toContain('version 1.25.0');
-    expect(text).toContain('bun remove -g @pellux/goodvibes-agent');
+    expect(text).toContain('bun remove -g @goodvibes-jev/agent');
   });
 
   test('a shadow reports both problems at once when the build is also behind', async () => {
@@ -82,7 +82,7 @@ describe('the startup check fires on an earlier-PATH copy', () => {
       homeDir: HOME,
       runningVersion: '1.21.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => 'v1.25.0',
       ...hostIo(host),
     });
@@ -106,7 +106,7 @@ describe('the startup check stays silent when there is nothing to say', () => {
       homeDir: HOME,
       runningVersion: '1.25.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => {
         throw new Error('the release lookup must not run for a healthy binary install');
       },
@@ -132,7 +132,7 @@ describe('the startup check stays silent when there is nothing to say', () => {
       homeDir: HOME,
       runningVersion: '1.25.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => '1.25.0',
       ...hostIo(host),
     });
@@ -150,7 +150,7 @@ describe('the startup check stays silent when there is nothing to say', () => {
       homeDir: HOME,
       runningVersion: '1.25.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => {
         throw new Error('a source checkout must not reach the network');
       },
@@ -170,7 +170,7 @@ describe('the startup check stays silent when there is nothing to say', () => {
       homeDir: HOME,
       runningVersion: '1.18.1',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => '1.25.0',
       ...hostIo(host),
     });
@@ -193,7 +193,7 @@ describe('being behind is stated plainly, and only when it is known', () => {
       homeDir: HOME,
       runningVersion: '1.18.1',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => 'v1.25.0',
       ...hostIo(host),
     });
@@ -201,7 +201,7 @@ describe('being behind is stated plainly, and only when it is known', () => {
     const text = reachabilityNoticeLines(result.notices).join('\n');
     expect(text).toContain('This build is v1.18.1. The current release is v1.25.0');
     expect(text).toContain('genuinely absent from this build');
-    expect(text).toContain('bun add -g @pellux/goodvibes-terminal');
+    expect(text).toContain('bun add -g @goodvibes-jev/tui');
   });
 
   test('an unknown latest version says nothing rather than guessing', () => {
@@ -251,7 +251,7 @@ describe('an installed binary nobody can reach by name', () => {
       homeDir: HOME,
       runningVersion: '1.25.0',
       commandName: 'goodvibes',
-      packageName: '@pellux/goodvibes-terminal',
+      packageName: '@goodvibes-jev/tui',
       resolveLatest: async () => '1.25.0',
       ...hostIo(host),
     });

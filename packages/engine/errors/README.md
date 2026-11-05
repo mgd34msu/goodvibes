@@ -1,13 +1,13 @@
-# @pellux/goodvibes-errors
+# @goodvibes-jev/engine/errors
 
 Public GoodVibes error package for structured SDK, transport, and daemon failures.
 
-Most applications should install `@pellux/goodvibes-sdk` and import `@pellux/goodvibes-sdk/errors`. Install this package directly when you only need the shared error model.
+Most applications should install `@goodvibes-jev/engine` and import `@goodvibes-jev/engine/sdk/errors`. These modules are subpath exports of the engine package.
 
 ## Install
 
 ```sh
-npm install @pellux/goodvibes-errors
+npm install @goodvibes-jev/engine
 ```
 
 ## The error model
@@ -48,7 +48,7 @@ try {
 }
 ```
 
-The same symbols are re-exported from the SDK facade, so SDK consumers can import them from `@pellux/goodvibes-sdk/errors` instead:
+The same symbols are re-exported from the SDK facade, so SDK consumers can import them from `@goodvibes-jev/engine/sdk/errors` instead:
 
 ```ts
 import { HttpStatusError } from '@goodvibes-jev/engine/sdk/errors';

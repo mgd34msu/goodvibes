@@ -25,7 +25,7 @@
  *
  * Removal is deliberately conservative. A copy is only ever offered for
  * removal when it is recognisably one of OUR programs, a link into an
- * installed `@pellux/goodvibes-*` package, or a file that answers
+ * installed `@goodvibes-jev/{tui,agent,daemon}` package, or a file that answers
  * `--version` with `<command> <semver>`, and only when it lives inside the
  * user's own home directory. Everything else is reported and left alone.
  */
@@ -41,7 +41,7 @@
  *   - `install-target`: the copy living in the directory the installer and
  *     the auto-updater maintain. Never a removal candidate.
  *   - `package-link`: an entry that resolves into an installed
- *     `@pellux/goodvibes-*` package (a `bun add -g` / `npm i -g` link, or a
+ *     `@goodvibes-jev/{tui,agent,daemon}` package (a `bun add -g` / `npm i -g` link, or a
  *     project-local dependency link). Removed by uninstalling that package.
  *   - `our-binary`: a standalone file that answers `--version` with
  *     `<command> <semver>`, i.e. a previous standalone install of the same
@@ -55,7 +55,7 @@ export type ShadowOwnership = 'install-target' | 'package-link' | 'our-binary' |
 export interface ShadowRemoval {
   /** `package` = uninstall the owning package; `file` = delete the PATH entry itself. */
   readonly kind: 'package' | 'file';
-  /** The `@pellux/...` package name, when `kind` is `package`. */
+  /** The `@goodvibes-jev/...` package name, when `kind` is `package`. */
   readonly packageName?: string | undefined;
   /** The exact command a user (or the installer) runs to remove this copy. */
   readonly command: string;
@@ -187,12 +187,10 @@ export function isWithinDirectory(path: string, root: string): boolean {
 // ---------------------------------------------------------------------------
 
 /** The npm scope every package this platform publishes lives under. */
-const PACKAGE_SCOPE = '@pellux';
-/** Only `@pellux/goodvibes-*` packages are ours; a same-scope stranger is not assumed. */
-const PACKAGE_PREFIX = 'goodvibes-';
+const PACKAGE_SCOPE = '@goodvibes-jev';
 
 /**
- * Extracts the owning `@pellux/goodvibes-*` package name from a resolved
+ * Extracts the owning `@goodvibes-jev/{tui,agent,daemon}` package name from a resolved
  * path, by finding the LAST `node_modules` segment and reading the scoped
  * package directory that follows it. The last occurrence is the one that
  * owns the file: a nested `node_modules/a/node_modules/b/bin/x` belongs to
@@ -205,7 +203,7 @@ export function owningPackageName(resolvedPath: string): string | undefined {
     const scope = segments[i + 1];
     const name = segments[i + 2];
     if (scope !== PACKAGE_SCOPE || name === undefined) return undefined;
-    if (!name.startsWith(PACKAGE_PREFIX)) return undefined;
+    if (!['tui', 'agent', 'daemon'].includes(name)) return undefined;
     return `${scope}/${name}`;
   }
   return undefined;

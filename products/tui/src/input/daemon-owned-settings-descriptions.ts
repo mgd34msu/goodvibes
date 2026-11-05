@@ -1,7 +1,7 @@
 /**
  * daemon-owned-settings-descriptions.ts, appends an honest storage-location
  * note to any settings-modal entry whose config key is daemon-owned (see
- * `@pellux/goodvibes-sdk/platform/config`'s `isDaemonOwnedConfigKey`).
+ * `@goodvibes-jev/engine/sdk/platform/config`'s `isDaemonOwnedConfigKey`).
  *
  * Before the daemon-owned-config migration, every product wrote every key
  * into its own per-surface silo, and a value like `surfaces.telegram.token`

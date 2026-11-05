@@ -86,7 +86,7 @@ export const GOODVIBES_RUNTIME_CAPABILITIES: readonly GoodVibesRuntimeCapability
     requirements: ['fetch', 'websocket'],
     // Display-only patterns, not glob patterns for resolution; document the npm package family.
     dependencyFamilies: [
-      '@pellux/goodvibes-transport-*',
+      '@goodvibes-jev/engine/transport-*',
       '@goodvibes-jev/engine/operator-sdk',
       '@goodvibes-jev/engine/peer-sdk',
     ],

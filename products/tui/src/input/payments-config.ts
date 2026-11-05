@@ -7,7 +7,7 @@
  * shipping.preferredTier, the fourteen billing/shipping address sub-fields
  * (name, line1, line2, city, region, postalCode, country, each repeated for
  * billingAddress and shippingAddress), the two window keys, and
- * notifyChannels, see `@pellux/goodvibes-sdk/platform/config`). Every one of
+ * notifyChannels, see `@goodvibes-jev/engine/sdk/platform/config`). Every one of
  * those keys reads and writes through the ordinary CONFIG_SCHEMA-driven path
  * in settings-modal-data.ts's buildSettingGroups, exactly like `relay.*` or
  * any other real SDK domain, no synthetic entry or dedicated store is needed
@@ -56,7 +56,7 @@
  * cvvHandling, real now, not built here, selects whether the CVV is stored
  * (the default, per the 2026-07-27 payment-capability ruling) or requested at
  * purchase time; see `CVV_PROMPT_TRADEOFF_WARNING`, imported directly from
- * `@pellux/goodvibes-sdk/platform/payments` by every caller that needs it
+ * `@goodvibes-jev/engine/sdk/platform/payments` by every caller that needs it
  * (renderer/settings-modal.ts, settings-modal.ts), no local copy lives here
  * or anywhere else in this app.
  */

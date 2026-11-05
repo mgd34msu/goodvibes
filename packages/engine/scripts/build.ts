@@ -10,7 +10,7 @@
  *
  * That window is not private to this repository. A consumer checkout dev-linked
  * to this one (goodvibes-tui does exactly that) resolves every
- * `@pellux/goodvibes-*` import through this tree, so for the length of a
+ * `@goodvibes-jev/engine/*` import through this tree, so for the length of a
  * rebuild it could resolve NONE of them. Whole test files died at import with
  * "Cannot find module", and typechecks failed on imports that were perfectly
  * correct, always transiently, always passing on a lone re-run, which is the

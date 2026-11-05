@@ -95,7 +95,7 @@ describe('runLaunchAutoUpdate', () => {
   });
 
   test('package-manager and from-source installs never self-update at launch', async () => {
-    for (const execPath of ['/home/u/.bun/install/global/node_modules/@pellux/goodvibes-tui/bin/goodvibes', '/usr/local/bin/bun']) {
+    for (const execPath of ['/home/u/.bun/install/global/node_modules/@goodvibes-jev/tui/bin/goodvibes', '/usr/local/bin/bun']) {
       const { options, printed } = baseOptions({ execPath, fetchImpl: failingFetch });
       const outcome = await runLaunchAutoUpdate(options);
       expect(outcome).toEqual({ action: 'continue', reason: 'not-swappable-install' });

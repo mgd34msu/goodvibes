@@ -79,7 +79,7 @@ export type RuntimeEventPayload<T extends AnyRuntimeEvent['type']> = Extract<
 >;
 
 // RUNTIME_EVENT_DOMAINS, RuntimeEventDomain, and isRuntimeEventDomain re-exported
-// from @pellux/goodvibes-contracts (the canonical source-of-truth). This eliminates
+// from @goodvibes-jev/engine/contracts (the canonical source-of-truth). This eliminates
 // the RUNTIME_EVENT_DOMAINS_2 duplicate identity in the api-extractor report.
 export {
   RUNTIME_EVENT_DOMAINS,

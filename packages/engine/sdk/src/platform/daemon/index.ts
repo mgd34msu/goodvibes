@@ -14,7 +14,7 @@ export type { DaemonUpdateArtifact } from './facade-lifecycle.js';
 export { HttpListener } from './http-listener.js';
 // Hosted sessions: the composition a product wires, and the option shape it
 // states its trust posture through. The engine itself is
-// `@pellux/goodvibes-sdk/platform/hosted-sessions`.
+// `@goodvibes-jev/engine/sdk/platform/hosted-sessions`.
 export { composeHostedSessions } from './hosted-sessions-composition.js';
 export type {
   DaemonHostedSessionsOptions,

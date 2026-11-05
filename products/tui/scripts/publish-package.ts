@@ -69,8 +69,8 @@ try {
       // Packages requires every package to live under the repo owner's scope),
       // the per-platform optionalDependencies must be rescoped in lockstep so
       // the mirrored main package resolves the mirrored platform packages
-      // instead of the npm-only @pellux ones. The npm publish path never sets
-      // an override, so its @pellux optionalDependencies are left untouched.
+      // instead of the npm-only @goodvibes-jev ones. The npm publish path never sets
+      // an override, so its @goodvibes-jev optionalDependencies are left untouched.
       const overrideScope = packageNameOverride.includes('/')
         ? packageNameOverride.slice(0, packageNameOverride.indexOf('/'))
         : '';

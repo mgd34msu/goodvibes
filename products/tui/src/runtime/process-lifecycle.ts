@@ -208,7 +208,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   };
 
   // Terminal enter/restore sequencing is the byte-identical seam both daemon
-  // front-ends share, so it lives in @pellux/goodvibes-terminal-shell and this
+  // front-ends share, so it lives in @goodvibes-jev/engine/terminal-shell and this
   // wiring delegates to it. Only the restore path is used here (the TUI's
   // startup enter sequence stays in main.ts); the graceful shutdown below
   // (draining services, persisting sessions, exit codes) is TUI-specific and

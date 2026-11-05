@@ -3,7 +3,7 @@
  * package-install-check.ts, private workspace readiness and published-package verification.
  *
  * The shared tarball path/size policy + bin-shim (present/executable/shebang)
- * checks are owned by @pellux/goodvibes-toolchain and driven by this repo's
+ * checks are owned by @goodvibes-jev/engine/toolchain and driven by this repo's
  * toolchain.config.json (publish section). Private workspace builds use their
  * actual source-tarball paths while retaining the same forbidden paths/size cap.
  * Local binary readiness and legacy published fallbacks are distribution-specific

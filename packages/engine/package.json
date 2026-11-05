@@ -1483,6 +1483,76 @@
       "bun": "./terminal-shell/src/native/index.ts",
       "types": "./terminal-shell/dist/native/index.d.ts",
       "import": "./terminal-shell/dist/native/index.js"
+    },
+    "./terminal-shell/theme": {
+      "bun": "./terminal-shell/src/renderer/theme.ts",
+      "types": "./terminal-shell/dist/renderer/theme.d.ts",
+      "import": "./terminal-shell/dist/renderer/theme.js"
+    },
+    "./terminal-shell/buffer": {
+      "bun": "./terminal-shell/src/renderer/buffer.ts",
+      "types": "./terminal-shell/dist/renderer/buffer.d.ts",
+      "import": "./terminal-shell/dist/renderer/buffer.js"
+    },
+    "./terminal-shell/lane-graph": {
+      "bun": "./terminal-shell/src/renderer/lane-graph.ts",
+      "types": "./terminal-shell/dist/renderer/lane-graph.d.ts",
+      "import": "./terminal-shell/dist/renderer/lane-graph.js"
+    },
+    "./terminal-shell/selection-modal": {
+      "bun": "./terminal-shell/src/selection-modal.ts",
+      "types": "./terminal-shell/dist/selection-modal.d.ts",
+      "import": "./terminal-shell/dist/selection-modal.js"
+    },
+    "./terminal-shell/audio-player": {
+      "bun": "./terminal-shell/src/audio/player.ts",
+      "types": "./terminal-shell/dist/audio/player.d.ts",
+      "import": "./terminal-shell/dist/audio/player.js"
+    },
+    "./terminal-shell/syntax-theme": {
+      "bun": "./terminal-shell/src/renderer/syntax-theme.ts",
+      "types": "./terminal-shell/dist/renderer/syntax-theme.d.ts",
+      "import": "./terminal-shell/dist/renderer/syntax-theme.js"
+    },
+    "./terminal-shell/diff-tint": {
+      "bun": "./terminal-shell/src/renderer/diff-tint.ts",
+      "types": "./terminal-shell/dist/renderer/diff-tint.d.ts",
+      "import": "./terminal-shell/dist/renderer/diff-tint.js"
+    },
+    "./terminal-shell/string-to-line": {
+      "bun": "./terminal-shell/src/renderer/string-to-line.ts",
+      "types": "./terminal-shell/dist/renderer/string-to-line.d.ts",
+      "import": "./terminal-shell/dist/renderer/string-to-line.js"
+    },
+    "./terminal-shell/syntax-highlighter": {
+      "bun": "./terminal-shell/src/renderer/syntax-highlighter.ts",
+      "types": "./terminal-shell/dist/renderer/syntax-highlighter.d.ts",
+      "import": "./terminal-shell/dist/renderer/syntax-highlighter.js"
+    },
+    "./terminal-shell/code-block": {
+      "bun": "./terminal-shell/src/renderer/code-block.ts",
+      "types": "./terminal-shell/dist/renderer/code-block.d.ts",
+      "import": "./terminal-shell/dist/renderer/code-block.js"
+    },
+    "./terminal-shell/markdown-inline": {
+      "bun": "./terminal-shell/src/renderer/markdown-inline.ts",
+      "types": "./terminal-shell/dist/renderer/markdown-inline.d.ts",
+      "import": "./terminal-shell/dist/renderer/markdown-inline.js"
+    },
+    "./terminal-shell/markdown-table": {
+      "bun": "./terminal-shell/src/renderer/markdown-table.ts",
+      "types": "./terminal-shell/dist/renderer/markdown-table.d.ts",
+      "import": "./terminal-shell/dist/renderer/markdown-table.js"
+    },
+    "./terminal-shell/markdown": {
+      "bun": "./terminal-shell/src/renderer/markdown.ts",
+      "types": "./terminal-shell/dist/renderer/markdown.d.ts",
+      "import": "./terminal-shell/dist/renderer/markdown.js"
+    },
+    "./terminal-shell/file-picker": {
+      "bun": "./terminal-shell/src/file-picker.ts",
+      "types": "./terminal-shell/dist/file-picker.d.ts",
+      "import": "./terminal-shell/dist/file-picker.js"
     }
   },
   "publishConfig": {

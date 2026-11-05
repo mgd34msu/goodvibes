@@ -7,3 +7,4 @@ export * from './native-work-submission-preflight.js';
 export * from './native-conversation-execution.js';
 export * from './native-host-fetch.js';
 export * from './types.js';
+export * from './native-headless-options.js';

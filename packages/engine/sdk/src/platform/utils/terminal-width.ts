@@ -1,115 +1,142 @@
-/** SDK-owned platform module. This implementation is maintained in goodvibes-sdk. */
-
+import { requireDefined } from './required-value.js';
 /**
- * Platform/surface classification for exports in this module:
+ * Strip ANSI SGR/CSI escape sequences and OSC-8 hyperlink sequences
+ * from a string so that only visible characters remain for width measurement.
  *
- * PLATFORM (safe for all surfaces):
- *   - getDisplayWidth, Unicode display-width calculation. Used by any surface
- *     that needs to measure text for layout purposes.
- *
- * SURFACE (terminal/TUI-specific):
- *   - center, truncateDisplay, padDisplayEnd, fitDisplay, Terminal column
- *     layout helpers that operate in cell widths. Not useful outside a terminal.
- *   - wrapText, Word-wrapping to a fixed column width.
- *   - interpolateColor, RGB hex interpolation for ANSI colour gradients.
+ * Covers:
+ *   - CSI sequences: ESC [ ... <final byte 0x40-0x7E>  (includes SGR \x1b[...m)
+ *   - OSC sequences: ESC ] ... ST  where ST is ESC\\ or BEL (0x07)
+ *   - Simple ESC followed by a single non-bracket/non-] character (e.g. ESC c)
  */
+function stripAnsi(text: string): string {
+  let result = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '\x1b') {
+      const next = text[i + 1];
+      if (next === '[') {
+        // CSI: skip until final byte (0x40-0x7E)
+        i += 2;
+        while (i < text.length) {
+          const c = text.charCodeAt(i);
+          i++;
+          if (c >= 0x40 && c <= 0x7e) break;
+        }
+      } else if (next === ']') {
+        // OSC: skip until ST (ESC\\ or BEL)
+        i += 2;
+        while (i < text.length) {
+          if (text[i] === '\x07') { i++; break; }
+          if (text[i] === '\x1b' && text[i + 1] === '\\') { i += 2; break; }
+          i++;
+        }
+      } else {
+        // Simple two-byte escape (ESC + one char)
+        i += next !== undefined ? 2 : 1;
+      }
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
+  return result;
+}
 
 /**
  * Calculates the visual width of a string in the terminal.
  * Handles CJK characters, emoji (including ZWJ sequences), and
- * variation selectors correctly as double-width.
+ * variation selectors correctly as double-width. ANSI escape sequences
+ * (SGR/CSI/OSC-8) are stripped before measurement.
  */
 export function getDisplayWidth(text: string): number {
+  text = stripAnsi(text);
   let width = 0;
   let i = 0;
   while (i < text.length) {
     const code = text.codePointAt(i)!;
-    const charLen = code > 0xFFFF ? 2 : 1; // surrogate pair = 2 JS chars
+    const charLen = code > 0xFFFF ? 2 : 1;
 
     if (code < 32 || code === 127) {
       i += charLen;
       continue;
     }
 
-    // Zero-width joiners, variation selectors, combining marks, 0 width
     if (
-      code === 0x200D || // ZWJ
-      code === 0xFE0F || // emoji variation selector
-      code === 0xFE0E || // text variation selector
-      (code >= 0x0300 && code <= 0x036F) || // combining diacriticals
-      (code >= 0x1AB0 && code <= 0x1AFF) || // combining diacriticals ext
-      (code >= 0x20D0 && code <= 0x20FF) || // combining marks for symbols
-      (code >= 0xFE20 && code <= 0xFE2F) || // combining half marks
-      (code >= 0xE0100 && code <= 0xE01EF) // variation selectors supplement
+      code === 0x200d ||
+      code === 0xfe0f ||
+      code === 0xfe0e ||
+      (code >= 0x0300 && code <= 0x036f) ||
+      (code >= 0x1ab0 && code <= 0x1aff) ||
+      (code >= 0x20d0 && code <= 0x20ff) ||
+      (code >= 0xfe20 && code <= 0xfe2f) ||
+      (code >= 0xe0100 && code <= 0xe01ef)
     ) {
       i += charLen;
       continue;
     }
 
-    // Dingbat symbols (✓ ✗ ✔ ✘) that fall in the 0x2700-0x27BF range which is
-    // classified as double-width below, but terminals render them as single-width.
-    // Also includes defensive entries for box drawing and block elements.
     if (
-      code === 0x2713 || // ✓ check mark
-      code === 0x2717 || // ✗ ballot x
-      code === 0x2714 || // ✔ heavy check mark
-      code === 0x2718 || // ✘ heavy ballot x
-      // ✕ (0x2715) and ✖ (0x2716), the multiplication-X cross family. GLYPHS
-      // .status.failure is ✕, so this is the character every failed row's
-      // marker uses. Terminals draw them one cell wide, but they sit inside the
-      // 0x2600–0x27bf emoji block below and would otherwise be counted as width
-      // 2, desyncing the styled cell grid from the physical glyph and corrupting
-      // the following text (the "✕t" glitch on the steer error line).
+      code === 0x2713 ||
+      code === 0x2717 ||
+      code === 0x2714 ||
+      code === 0x2718 ||
+      // ✕ (0x2715) and ✖ (0x2716), the multiplication-X cross family used for
+      // the error-line prefix. Terminals draw them one cell wide, but they sit
+      // inside the 0x2600–0x27bf emoji block below and would otherwise be counted
+      // as width 2, desyncing the styled cell grid from the physical glyph and
+      // corrupting the following text (the "✕t" glitch on the steer error line).
       code === 0x2715 ||
       code === 0x2716 ||
-      code === 0x2022 || // • bullet
-      code === 0x258D || // ▍ left five eighths block
-      (code >= 0x2500 && code <= 0x257F) // box drawing block (all single-width)
+      // ✦ (0x2726, the splash star and the modal group marker), ⏎ (0x23ce)
+      // and ⌫ (0x232b, keycap glyphs) have no emoji presentation, so
+      // terminals draw them one cell wide too; the block rules below would
+      // otherwise count them as 2 and shift everything after them.
+      code === 0x2726 ||
+      code === 0x23ce ||
+      code === 0x232b ||
+      code === 0x2022 ||
+      code === 0x258d ||
+      (code >= 0x2500 && code <= 0x257f)
     ) {
       width += 1;
       i += charLen;
       continue;
     }
 
-    // Emoji and pictographic, double width in most terminals
-    // Note: 💭 (U+1F4AD) and 🧠 (U+1F9E0) are both in the 0x1F300–0x1F9FF range,
-    // so they are correctly handled as width 2 here.
     if (
-      (code >= 0x1F300 && code <= 0x1F9FF) || // misc symbols, emoticons, supplemental (includes 💭 U+1F4AD, 🧠 U+1F9E0)
-      (code >= 0x1FA00 && code <= 0x1FAFF) || // chess, symbols ext-A
-      (code >= 0x2600 && code <= 0x27BF) ||   // misc symbols, dingbats
-      (code >= 0x2300 && code <= 0x23FF) ||   // misc technical (hourglass, etc)
-      (code >= 0x2B50 && code <= 0x2B55) ||   // stars, circles
-      (code >= 0xFE00 && code <= 0xFE0F) ||   // variation selectors (handled above but safe)
-      (code >= 0x1F000 && code <= 0x1F02F) || // mahjong, dominos
-      (code >= 0x1F680 && code <= 0x1F6FF) || // transport symbols
-      code === 0x200D ||                       // ZWJ (handled above)
-      (code >= 0xE000 && code <= 0xF8FF) ||   // private use area (some terminals render wide)
-      code === 0x2764 || code === 0x2763 ||   // hearts
-      code === 0x270A || code === 0x270B || code === 0x270C || // hand gestures
-      code === 0x261D || code === 0x2639 || code === 0x263A    // misc
+      (code >= 0x1f300 && code <= 0x1f9ff) ||
+      (code >= 0x1fa00 && code <= 0x1faff) ||
+      (code >= 0x2600 && code <= 0x27bf) ||
+      (code >= 0x2300 && code <= 0x23ff) ||
+      (code >= 0x2b50 && code <= 0x2b55) ||
+      (code >= 0xfe00 && code <= 0xfe0f) ||
+      (code >= 0x1f000 && code <= 0x1f02f) ||
+      (code >= 0x1f680 && code <= 0x1f6ff) ||
+      code === 0x200d ||
+      (code >= 0xe000 && code <= 0xf8ff) ||
+      code === 0x2764 || code === 0x2763 ||
+      code === 0x270a || code === 0x270b || code === 0x270c ||
+      code === 0x261d || code === 0x2639 || code === 0x263a
     ) {
       width += 2;
       i += charLen;
       continue;
     }
 
-    // CJK and fullwidth, double width
     if (
-      (code >= 0x1100 && code <= 0x115F) ||   // Hangul Jamo
-      (code >= 0x2E80 && code <= 0xA4CF && code !== 0x303F) || // CJK
-      (code >= 0xAC00 && code <= 0xD7A3) ||   // Hangul syllables
-      (code >= 0xF900 && code <= 0xFAFF) ||   // CJK compat ideographs
-      (code >= 0xFF00 && code <= 0xFF60) ||    // fullwidth forms
-      (code >= 0x20000 && code <= 0x2FFFD) ||  // CJK unified ext B+
-      (code >= 0x30000 && code <= 0x3FFFD)     // CJK unified ext G+
+      (code >= 0x1100 && code <= 0x115f) ||
+      (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
+      (code >= 0xac00 && code <= 0xd7a3) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xff00 && code <= 0xff60) ||
+      (code >= 0x20000 && code <= 0x2fffd) ||
+      (code >= 0x30000 && code <= 0x3fffd)
     ) {
       width += 2;
       i += charLen;
       continue;
     }
 
-    // Everything else, single width
     width += 1;
     i += charLen;
   }
@@ -140,6 +167,51 @@ export function truncateDisplay(text: string, width: number, ellipsis = '…'): 
   return result + ellipsis;
 }
 
+/** A single footer/status-line segment plus its survival priority. */
+export interface PrioritizedSegment {
+  readonly text: string;
+  /** Lower number = higher priority = dropped LAST under width pressure. */
+  readonly priority: number;
+}
+
+/**
+ * Join segments left-to-right with `separator`, but when the joined line
+ * would exceed `width`, drop whole low-priority segments (highest `priority`
+ * number first) one at a time until it fits, rather than character-truncating
+ * the joined string, which can mangle a high-value segment mid-word (e.g. a
+ * `spine:online` daemon-liveness marker clipped to `spi…`).
+ *
+ * Only falls back to character truncation (via truncateDisplay) if the
+ * remaining highest-priority segments still don't fit at width, a rare,
+ * very-narrow-terminal case.
+ */
+export function joinPrioritizedSegments(
+  segments: readonly PrioritizedSegment[],
+  separator: string,
+  width: number,
+): string {
+  const join = (list: readonly PrioritizedSegment[]) => list.map(s => s.text).join(separator);
+  let kept = segments;
+  // Keep dropping whole segments while more than one remains; once a single
+  // segment is left, stop, an empty result would be a worse outcome than
+  // falling through to character truncation on that last segment below.
+  while (kept.length > 1 && getDisplayWidth(join(kept)) > width) {
+    // Drop the single lowest-priority (highest `priority` number) segment;
+    // ties broken toward the leftmost (earlier-declared) segment surviving,
+    // `>=` (not `>`) so that on equal priority the LATER index keeps winning
+    // as the drop candidate, leaving the earliest-declared segment of that
+    // priority tier intact (e.g. cwd survives over model when both are
+    // priority 0, since cwd is declared first).
+    let dropIdx = 0;
+    for (let i = 1; i < kept.length; i++) {
+      if (requireDefined(kept[i]).priority >= requireDefined(kept[dropIdx]).priority) dropIdx = i;
+    }
+    kept = kept.slice(0, dropIdx).concat(kept.slice(dropIdx + 1));
+  }
+  const joined = join(kept);
+  return getDisplayWidth(joined) > width ? truncateDisplay(joined, width) : joined;
+}
+
 export function padDisplayEnd(text: string, width: number): string {
   const currentWidth = getDisplayWidth(text);
   if (currentWidth >= width) return text;
@@ -150,9 +222,6 @@ export function fitDisplay(text: string, width: number, ellipsis = '…'): strin
   return padDisplayEnd(truncateDisplay(text, width, ellipsis), width);
 }
 
-/**
- * Smart Word Wrapping.
- */
 export function wrapText(text: string, width: number): string[] {
   if (width <= 0) return [text];
   const lines: string[] = [];
@@ -168,23 +237,27 @@ export function wrapText(text: string, width: number): string[] {
     let currentLine = '';
 
     for (const word of words) {
-      const wordW = getDisplayWidth(word);
-      const currentLineW = getDisplayWidth(currentLine);
-      
-      // Safety: If a single word is longer than the width, we must force-break it
-      if (wordW > width) {
+      const wordWidth = getDisplayWidth(word);
+      const currentLineWidth = getDisplayWidth(currentLine);
+
+      if (wordWidth > width) {
         if (currentLine) lines.push(currentLine);
         let remaining = word;
         while (getDisplayWidth(remaining) > width) {
-          // Find split point
+          const codePoints = [...remaining];
           let splitIdx = 0;
-          let currentW = 0;
-          for (let i = 0; i < remaining.length; i++) {
-            const charW = getDisplayWidth(remaining[i]!);
-            if (currentW + charW > width) break;
-            currentW += charW;
-            splitIdx = i + 1;
+          let currentWidth = 0;
+          for (const cp of codePoints) {
+            const charWidth = getDisplayWidth(cp);
+            if (currentWidth + charWidth > width) break;
+            currentWidth += charWidth;
+            splitIdx += cp.length;
           }
+          // Safety: guarantee at least one code point of progress even if a
+          // single grapheme is wider than the available width (e.g. CJK/emoji
+          // at width===1). Without this guard splitIdx stays 0, remaining
+          // never shrinks, and the while-loop hangs.
+          if (splitIdx === 0) splitIdx = codePoints[0]!.length;
           lines.push(remaining.slice(0, splitIdx));
           remaining = remaining.slice(splitIdx);
         }
@@ -192,33 +265,81 @@ export function wrapText(text: string, width: number): string[] {
         continue;
       }
 
-      if ((currentLineW + wordW + (currentLine ? 1 : 0)) <= width) {
-        currentLine += (currentLine ? ' ' : '') + word;
+      if ((currentLineWidth + wordWidth + (currentLine ? 1 : 0)) <= width) {
+        currentLine += `${currentLine ? ' ' : ''}${word}`;
       } else {
         lines.push(currentLine);
         currentLine = word;
       }
     }
+
     if (currentLine) lines.push(currentLine);
   }
 
   return lines;
 }
 
+/** Columns one tab takes in a drawn body; the same two spaces a diff body uses (changes-modal.ts wrapTokens). */
+export const BODY_TAB_WIDTH = 2;
+
+/** Replace every tab with BODY_TAB_WIDTH spaces, so width math and drawing agree. */
+export function expandTabs(text: string): string {
+  return text.includes('\t') ? text.replace(/\t/g, ' '.repeat(BODY_TAB_WIDTH)) : text;
+}
+
 /**
- * Interpolates between two RGB colors based on a factor (0-1).
+ * Wrap one body line (a file line, command output) to `width` cells without
+ * losing its layout: tabs expand to spaces, a line that fits is returned
+ * exactly as it is (leading indentation and inner runs of spaces kept), and a
+ * longer line wraps at spaces with every continuation row indented like the
+ * first. A word wider than the room left is cut hard. Every returned row is
+ * at most `width` cells.
  */
+export function wrapPreservingIndent(text: string, width: number): string[] {
+  const out: string[] = [];
+  for (const raw of expandTabs(text).split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    if (getDisplayWidth(line) <= width) { out.push(line); continue; }
+    const indentText = /^ */.exec(line)![0];
+    // Deep indentation leaves no room: continuation rows start at the left edge.
+    const indent = indentText.length <= Math.floor(width / 2) ? indentText : '';
+    let rest = Array.from(line.slice(indentText.length));
+    let prefix = indentText.length <= width - 1 ? indentText : '';
+    while (rest.length > 0) {
+      const avail = Math.max(1, width - prefix.length);
+      // Longest run of `rest` that fits, preferring to break after a space.
+      let cut = 0;
+      let used = 0;
+      let lastSpace = -1;
+      for (let i = 0; i < rest.length; i++) {
+        const w = getDisplayWidth(rest[i]!);
+        if (used + w > avail) break;
+        used += w;
+        cut = i + 1;
+        if (rest[i] === ' ') lastSpace = i + 1;
+      }
+      const at = cut === rest.length ? cut : lastSpace > 0 ? lastSpace : Math.max(1, cut);
+      out.push((prefix + rest.slice(0, at).join('')).replace(/\s+$/, ''));
+      rest = rest.slice(at);
+      while (rest[0] === ' ') rest.shift();
+      prefix = indent;
+    }
+  }
+  return out;
+}
+
 export function interpolateColor(startHex: string, endHex: string, factor: number): string {
-  const parse = (hex: string) => {
+  const parse = (hex: string): readonly [number, number, number] => {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return [r, g, b];
   };
+
   const [r1, g1, b1] = parse(startHex);
   const [r2, g2, b2] = parse(endHex);
-  const r = Math.round(r1! + factor * (r2! - r1!));
-  const g = Math.round(g1! + factor * (g2! - g1!));
-  const b = Math.round(b1! + factor * (b2! - b1!));
+  const r = Math.round(r1 + factor * (r2 - r1));
+  const g = Math.round(g1 + factor * (g2 - g1));
+  const b = Math.round(b1 + factor * (b2 - b1));
   return `${r};${g};${b}`;
 }

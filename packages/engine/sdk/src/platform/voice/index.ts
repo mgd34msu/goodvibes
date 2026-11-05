@@ -82,3 +82,6 @@ export * from './capture/index.js';
 // computed in code, so the same detector runs in a daemon child process and in
 // a browser tab. See ./wake.
 export * from './wake/index.js';
+
+export { attachSpokenTurnModelRouting, createSpokenTurnInputOptions, resolveSpokenTurnModelOverride } from './spoken-turn-model-routing.js';
+export type { SpokenTurnModelRoutingOptions } from './spoken-turn-model-routing.js';

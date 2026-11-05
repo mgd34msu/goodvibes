@@ -24,13 +24,13 @@
       "path": "audio/player.ts",
       "baselineTuiLines": 242,
       "baselineSimilarity": 0.9817,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "audio/spoken-turn-model-routing.ts",
       "baselineTuiLines": 121,
       "baselineSimilarity": 0.9877,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "audio/spoken-turn-wiring.ts",
@@ -120,7 +120,7 @@
       "path": "cli/native-headless-options.ts",
       "baselineTuiLines": 64,
       "baselineSimilarity": 0.9688,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "cli/native-headless-turn.ts",
@@ -630,7 +630,7 @@
       "path": "input/file-picker.ts",
       "baselineTuiLines": 238,
       "baselineSimilarity": 0.9832,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/handler-command-route.ts",
@@ -792,7 +792,7 @@
       "path": "input/selection-modal.ts",
       "baselineTuiLines": 186,
       "baselineSimilarity": 0.9695,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/session-picker-modal.ts",
@@ -918,13 +918,13 @@
       "path": "renderer/buffer.ts",
       "baselineTuiLines": 113,
       "baselineSimilarity": 0.9737,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/code-block.ts",
       "baselineTuiLines": 489,
       "baselineSimilarity": 0.8858,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/composer.ts",
@@ -966,7 +966,7 @@
       "path": "renderer/diff-tint.ts",
       "baselineTuiLines": 98,
       "baselineSimilarity": 0.9796,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/diff.ts",
@@ -1008,13 +1008,13 @@
       "path": "renderer/lane-graph/glyphs.ts",
       "baselineTuiLines": 134,
       "baselineSimilarity": 0.947,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/lane-graph/layout.ts",
       "baselineTuiLines": 248,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/lane-graph/paint.ts",
@@ -1038,19 +1038,19 @@
       "path": "renderer/markdown-inline.ts",
       "baselineTuiLines": 141,
       "baselineSimilarity": 0.9894,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/markdown-table.ts",
       "baselineTuiLines": 464,
       "baselineSimilarity": 0.9957,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/markdown.ts",
       "baselineTuiLines": 390,
       "baselineSimilarity": 0.9897,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/mcp-workspace.ts",
@@ -1194,7 +1194,7 @@
       "path": "renderer/syntax-theme.ts",
       "baselineTuiLines": 51,
       "baselineSimilarity": 0.9307,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/system-message.ts",
@@ -1248,7 +1248,7 @@
       "path": "renderer/theme.ts",
       "baselineTuiLines": 331,
       "baselineSimilarity": 0.9329,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/thinking.ts",
@@ -1644,7 +1644,7 @@
       "path": "utils/terminal-width.ts",
       "baselineTuiLines": 345,
       "baselineSimilarity": 0.9637,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "verification/live-verifier.ts",

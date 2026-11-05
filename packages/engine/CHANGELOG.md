@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Verify every CI job through smaller paginated API responses, including jobs
+  beyond the first page, when GitHub times out on large responses after reruns.
 - Encode newly generated answer-gap identifiers without digits so random UUID
   suffixes cannot trigger payment-card screening during queued refinement.
 - Keep compacted Agent catalog descriptions separate from shared SDK definitions

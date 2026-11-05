@@ -64,6 +64,7 @@ interface WorkflowRun {
 }
 
 interface JobEntry {
+  readonly id?: number;
   readonly name: string;
   readonly status?: string;
   readonly conclusion?: string | null;
@@ -136,16 +137,44 @@ async function resolveRun(
 /** Enumerate every job of a completed run and collect the ones that are not `success`. */
 async function evaluateRunJobs(deps: PerJobGreenDeps, config: PerJobGreenConfig, runId: number): Promise<string[]> {
   const base = deps.apiBase ?? 'https://api.github.com';
-  const url = `${base}/repos/${config.owner}/${config.repo}/actions/runs/${runId}/jobs?per_page=100`;
-  const res = await getWithRetry(deps, config, url, `actions run ${runId} jobs`);
-  if (res.status !== 200) {
-    // Honest failure naming the endpoint: the retry budget is exhausted (or the
-    // status is definitively non-200), so the per-job conclusions are unknowable.
-    return [`actions run ${runId} jobs endpoint returned ${res.status} after ${config.retryAttempts} attempt(s)`];
+  // Large job/step responses can repeatedly time out at GitHub after a partial
+  // rerun. Smaller pages retain the same complete, per-job requirement and also
+  // cover workflows that exceed the API's maximum single-page size.
+  const pageSize = 30;
+  const failures: string[] = [];
+  const ids = new Set<number>();
+  let count = 0;
+  let total: number | undefined;
+  for (let page = 1; page <= 1000; page++) {
+    const url = `${base}/repos/${config.owner}/${config.repo}/actions/runs/${runId}/jobs?per_page=${pageSize}&page=${page}`;
+    const res = await getWithRetry(deps, config, url, `actions run ${runId} jobs page ${page}`);
+    if (res.status !== 200) {
+      return [...failures, `actions run ${runId} jobs endpoint returned ${res.status} after ${config.retryAttempts} attempt(s) (page ${page})`];
+    }
+    const reportedTotal = res.body && typeof res.body === 'object' ? (res.body as Record<string, unknown>).total_count : undefined;
+    if (reportedTotal !== undefined) {
+      if (typeof reportedTotal !== 'number' || !Number.isSafeInteger(reportedTotal) || reportedTotal < 0
+        || (total !== undefined && total !== reportedTotal)) return [...failures, 'job-count-changed-or-malformed'];
+      total = reportedTotal;
+    }
+    const jobs = asArray<JobEntry>(res.body, 'jobs');
+    if (jobs.length === 0) {
+      return count === 0 ? ['no-jobs-reported']
+        : total !== undefined && count !== total ? [...failures, 'incomplete-job-list'] : failures;
+    }
+    for (const job of jobs) {
+      if (job.id === undefined) continue;
+      if (ids.has(job.id)) return [...failures, 'duplicate-job-across-pages'];
+      ids.add(job.id);
+    }
+    count += jobs.length;
+    failures.push(...jobs.filter(j => j.conclusion !== 'success').map(j => `${j.name} (${j.conclusion ?? j.status ?? 'unknown'})`));
+    if (total !== undefined) {
+      if (count > total) return [...failures, 'job-count-changed-or-malformed'];
+      if (count === total) return failures;
+    } else if (jobs.length < pageSize) return failures;
   }
-  const jobs = asArray<JobEntry>(res.body, 'jobs');
-  if (jobs.length === 0) return ['no-jobs-reported'];
-  return jobs.filter((j) => j.conclusion !== 'success').map((j) => `${j.name} (${j.conclusion ?? j.status ?? 'unknown'})`);
+  return [...failures, 'job-pagination-limit-exceeded'];
 }
 
 /**

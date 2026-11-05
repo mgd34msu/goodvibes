@@ -18,6 +18,66 @@ function deps(responses: (url: string, call: number) => HttpResponse) {
 const RUN = { id: 42, path: '.github/workflows/ci.yml', head_sha: 'abc', created_at: '2026-07-16T00:00:00Z' };
 
 describe('per-job-green', () => {
+  for (const lastConclusion of ['success', 'failure', 'skipped'] as const) {
+    test(`checks every page of a large run, including a final ${lastConclusion} job`, async () => {
+      const jobs = Array.from({ length: 121 }, (_, index) => ({ name: `job-${index}`, conclusion: index === 120 ? lastConclusion : 'success' }));
+      const pages: number[] = [];
+      const d = deps(url => {
+        if (url.includes('/actions/runs?')) return { status: 200, body: { workflow_runs: [{ ...RUN, status: 'completed', conclusion: 'success' }] } };
+        if (url.includes('/jobs')) {
+          const query = new URL(url).searchParams;
+          expect(query.get('per_page')).toBe('30');
+          const page = Number(query.get('page')); pages.push(page);
+          return { status: 200, body: { total_count: jobs.length, jobs: jobs.slice((page - 1) * 30, page * 30) } };
+        }
+        return { status: 404, body: null };
+      });
+      const result = await verifyPerJobGreen(d, config, 'abc');
+      expect(pages).toEqual([1, 2, 3, 4, 5]);
+      expect(result.ok).toBe(lastConclusion === 'success');
+      if (lastConclusion !== 'success') expect(result.failures).toContain(`job-120 (${lastConclusion})`);
+    });
+  }
+
+  test('a missing later page cannot borrow the first page green result', async () => {
+    const d = deps(url => {
+      if (url.includes('/actions/runs?')) return { status: 200, body: { workflow_runs: [{ ...RUN, status: 'completed', conclusion: 'success' }] } };
+      if (url.includes('/jobs')) return { status: 200, body: { total_count: 2,
+        jobs: new URL(url).searchParams.get('page') === '1' ? [{ name: 'build', conclusion: 'success' }] : [] } };
+      return { status: 404, body: null };
+    });
+    const result = await verifyPerJobGreen(d, config, 'abc');
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain('incomplete-job-list');
+  });
+
+  test('an unavailable later page retains bounded retries and blocks release', async () => {
+    let laterCalls = 0;
+    const d = deps(url => {
+      if (url.includes('/actions/runs?')) return { status: 200, body: { workflow_runs: [{ ...RUN, status: 'completed', conclusion: 'success' }] } };
+      if (url.includes('/jobs')) {
+        if (new URL(url).searchParams.get('page') === '1') return { status: 200, body: { total_count: 2, jobs: [{ name: 'build', conclusion: 'success' }] } };
+        laterCalls++; return { status: 502, body: null };
+      }
+      return { status: 404, body: null };
+    });
+    const result = await verifyPerJobGreen(d, config, 'abc');
+    expect(result.ok).toBe(false);
+    expect(laterCalls).toBe(config.retryAttempts);
+    expect(result.failures.some(failure => failure.includes('502') && failure.includes('page 2'))).toBe(true);
+  });
+
+  test('a duplicated page cannot stand in for unseen jobs', async () => {
+    const d = deps(url => {
+      if (url.includes('/actions/runs?')) return { status: 200, body: { workflow_runs: [{ ...RUN, status: 'completed', conclusion: 'success' }] } };
+      if (url.includes('/jobs')) return { status: 200, body: { total_count: 2, jobs: [{ id: 7, name: 'build', conclusion: 'success' }] } };
+      return { status: 404, body: null };
+    });
+    const result = await verifyPerJobGreen(d, config, 'abc');
+    expect(result.ok).toBe(false);
+    expect(result.failures).toContain('duplicate-job-across-pages');
+  });
+
   test('passes when the run is completed and every job is green', async () => {
     const d = deps((url) => {
       if (url.includes('/actions/runs?')) return { status: 200, body: { workflow_runs: [{ ...RUN, status: 'completed', conclusion: 'success' }] } };

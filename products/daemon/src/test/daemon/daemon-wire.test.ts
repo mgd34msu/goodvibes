@@ -32,6 +32,7 @@ function installWireReadings() {
     if (name === 'intent') return choiceAnswer(question, 'chat', 0.97);
     if (name === 'needs_plan') return noulAnswer(0.03);
     if (name === 'risk') return scoreAnswer(question, 0, 0.97);
+    if (name === 'completion_required') return noulAnswer(0.99);
     throw new Error(`Unexpected wire core fixture question: ${name}`);
   });
   const intake = fakePort((name, question) => {
@@ -43,7 +44,7 @@ function installWireReadings() {
     model: core.port.model,
     ask(request) {
       const battery = request.context?.battery;
-      if (battery === 'engine.core.turn-shape') return core.port.ask(request);
+      if (battery === 'engine.core.turn-shape' || battery === 'engine.core.completion-applicability') return core.port.ask(request);
       if (battery === 'contract.request-route') return intake.port.ask(request);
       if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation']
         .includes(String(battery))) return completion.port.ask(request);

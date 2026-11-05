@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real default contract -> planner/member -> AgentOrchestrator -> registry -> scripted provider. */
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -47,7 +48,7 @@ for (const scenario of ['allowed', 'revoke-cached'] as const) {
       providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
     });
     await resumeContracts(runtime.contractRunner, root);
-    const previous = installJudgmentPort(runnerPort((context) => context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined).port);
+    const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined).port, runtime.judgment.decisionLog));
     const deny = async (path: string, id: string): Promise<void> => {
       await runtime.userPermissionRuleStore.add({
         rule: { id, type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [path] },

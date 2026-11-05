@@ -9,6 +9,7 @@ import pending from '../fixtures/e2e-judgments/cancelled-turn-pending.json';
 import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
 import diagnostics from '../fixtures/e2e-judgments/ci-diagnostics.json';
 import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
+import applicability from '../fixtures/e2e-judgments/completion-applicability.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
 import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -23,6 +24,27 @@ const diagnosticQuestions: Readonly<Record<string, Questions>> = {
   },
   'diagnostic-severity': { severity: noticeSeverity.items.severity.question },
 };
+
+test('headless applicability retains the real question and rejects changed instructions or requirements', async () => {
+  const server = startE2EJudgments();
+  server.expectTextOnlyCompletion(headlessCompletion.state.request, headlessCompletion.state.response);
+  const ask = (body: unknown) => fetch(`${server.baseURL}/v1/systemone`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    const response = await ask(applicability);
+    expect(response.status).toBe(200);
+    expect((await response.json()).answers.completion_required.noul).toBe(0.99);
+    for (const change of ['request', 'instructions', 'requirements', 'question'] as const) {
+      const body = structuredClone(applicability);
+      if (change === 'request') body.state.request = 'Another task';
+      else if (change === 'instructions') body.state.instructions.push('An additional original obligation');
+      else if (change === 'requirements') body.state.requirements.originalTask = 'Another task';
+      else body.questions.completion_required.instructions.question = 'A different routing decision';
+      expect((await ask(body)).status).toBe(422);
+    }
+  } finally { server.stop(); }
+});
 
 for (const product of ['agent', 'tui'] as const) test(`${product} scripted completion accepts only its complete recorded request and authored reply`, async () => {
   const server = startE2EJudgments();

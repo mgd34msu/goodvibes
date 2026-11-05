@@ -323,7 +323,9 @@ test('both real runtime compositions install autonomous MCP input resolution wit
   expect(workspaceTrust.isDecided()).toBe(false);
 });
 
-test('real client composition refuses missing or restricted workspace owners before judgment or human input', async () => {
+test('real client composition refuses external MCP input in plan mode before judgment or human input', async () => {
+  const previousMode = configManager.get('permissions.mode');
+  configManager.set('permissions.mode', 'plan');
   const withoutOwner = createClientRuntimeServices({
     configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     surfaceRoot: 'tui', workingDir: root, homeDirectory: root, requestApproval: declineEverything,
@@ -346,13 +348,13 @@ test('real client composition refuses missing or restricted workspace owners bef
           requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }, {
           scope: { connectionId: 'blocked-composition-connection', destination: 'synthetic', signal: new AbortController().signal, assertCurrent() {} },
           operation: { sourceOf: () => ({ goal: 'Register using the supplied name Alice', criteria: [] }), inputFacts: [{ name: 'Alice' }], assertCurrent() {} },
-        })).toEqual({ action: 'cancel' });
+        })).toEqual({ action: 'decline' });
       } finally { services.judgment.port.ask = original; }
     }
     expect(gate.requests).toHaveLength(0);
     expect(semantic.requests).toHaveLength(0);
     expect(asks.length).toBe(startAsks);
-  } finally { await withoutOwner.close(); }
+  } finally { await withoutOwner.close(); configManager.set('permissions.mode', previousMode); }
 });
 
 test('real client composition revokes an accepted MCP response when workspace trust changes before commit', async () => {

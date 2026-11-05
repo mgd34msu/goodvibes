@@ -51,7 +51,8 @@ afterEach(async () => { for (const restore of restores.splice(0).reverse()) awai
 afterAll(cleanupResearchScreeningFixtures);
 
 function readings(fits: Readonly<Record<string, number>> = {}) {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'match') return noulAnswer(fits[String(record(record(state).candidate).name)] ?? 0.01);
     // These synthetic registry providers publish no serving-software identity.
     if (question.type === 'choice' && Object.hasOwn(question.criteria, 'llamacpp')) return choiceAnswer(question, 'unknown', 0.999);

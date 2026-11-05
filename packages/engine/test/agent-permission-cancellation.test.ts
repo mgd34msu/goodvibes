@@ -39,10 +39,10 @@ test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission li
   });
   let agentId: string | undefined;
   if (mode === 'handoff') {
-    const check = runtime.permissionManager.checkDetailed.bind(runtime.permissionManager);
-    runtime.permissionManager.checkDetailed = async (...input) => {
+    const check = runtime.permissionManager.admitAutonomous.bind(runtime.permissionManager);
+    runtime.permissionManager.admitAutonomous = async (...input) => {
       const decision = await check(...input);
-      if (decision.approved && agentId !== undefined) queueMicrotask(() => runtime.agentManager.cancel(agentId!));
+      if (decision.result.approved && agentId !== undefined) queueMicrotask(() => runtime.agentManager.cancel(agentId!));
       return decision;
     };
   }
@@ -66,12 +66,15 @@ test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission li
     replace: true,
   });
   await runtime.providerRegistry.ready();
-  const previous = installJudgmentPort(fakePort((name, question, state) => {
+  const previous = installJudgmentPort(fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
+    if (name === 'completion_required') return noulAnswer(0.99);
     if (question.type === 'noul' && ['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'repetitive',
       'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification',
       'weakened_criteria', 'missing_results', 'unresolved_conflict'].includes(name)) return noulAnswer(0.01);
     expect(state).toMatchObject({ tool: 'write', arguments: args });
     if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.99);
+    if (name === 'kind') return choiceAnswer(question, 'write', 0.99);
     if (name === 'mutates') return noulAnswer(0.99);
     if (['outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity', 'cardDetails'].includes(name)) return noulAnswer(0.01);
     throw new Error(`Unscripted synthetic reading: ${name}`);

@@ -60,7 +60,8 @@ function source(text: string, origin = 'https://untrusted.example.test') {
 
 function accountReadings() {
   const security = securityPort({ derives: () => false });
-  const admission = fakePort((name, question) => {
+  const admission = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const chosen = name === 'disposition' ? 'act' : name === 'kind' ? 'write' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (chosen) return choiceAnswer(question, chosen, 0.999);
@@ -76,7 +77,7 @@ function accountReadings() {
   const port: JudgmentPort = { model: security.port.model, ask(request) {
     const battery = request.context?.battery;
     if (battery === 'engine.security.content-derivation') return security.port.ask(request);
-    if (['engine.gate.side-effect', 'engine.gate.risk-family', 'engine.gate.boundary', 'engine.gate.autonomous-disposition', 'engine.gate.autonomous-refusal'].includes(battery ?? '')) return admission.port.ask(request);
+    if (battery?.split('+').every(name => ['engine.gate.side-effect', 'engine.gate.risk-family', 'engine.gate.boundary', 'engine.gate.autonomous-disposition', 'engine.gate.autonomous-refusal'].includes(name))) return admission.port.ask(request);
     if (['engine.redaction.field-kind', 'engine.redaction.credential', 'engine.export.credential', 'engine.redaction.residual-credential', 'engine.redaction.profile-distinctive'].includes(battery ?? '')) return privacy.port.ask(request);
     throw new Error(`Unscripted authored account battery ${battery}`);
   } };

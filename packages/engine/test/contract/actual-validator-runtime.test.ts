@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real contract -> default AgentOrchestrator -> registerAllTools -> contained validators. */
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -98,7 +99,7 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
   });
   await resumeContracts(runtime.contractRunner, root);
   await runtime.userPermissionRuleStore.add({ rule: { id: 'deny-direct-runtime-original', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [join(root, 'private.txt')] }, createdAt: Date.now(), tier: 'path', tool: 'read' });
-  const previous = installJudgmentPort(runnerPort((context) => context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined).port);
+  const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined).port, runtime.judgment.decisionLog));
   const results = new Map<string, ToolResult>(); let calls = 0; let memberRoot = ''; let checked = false;
   const assertOwner = (): void => {
     expect(readFileSync(join(root, 'src/csv.ts'), 'utf8')).toBe(original); expect(existsSync(join(root, 'lint-proof.txt'))).toBe(false);

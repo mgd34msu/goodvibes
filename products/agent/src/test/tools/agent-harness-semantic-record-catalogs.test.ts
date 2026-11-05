@@ -395,7 +395,8 @@ describe('canonical semantic record catalogs', () => {
         assertCurrent() { if (!assertCurrentToolInvocation(args, executionOptions)) throw new ToolInputProjectionError('held'); } });
       published++; return { success: true, output: JSON.stringify(records) };
     } });
-    const fake = fakePort((name, question) => {
+    const fake = fakePort((wireName, question) => {
+      const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (entered && !revoked) { revoked = true; mode = 'plan'; }
       if (question.type === 'noul') return noulAnswer(0.001);
       if (question.type !== 'choice') throw new Error('Unexpected native watcher admission question');

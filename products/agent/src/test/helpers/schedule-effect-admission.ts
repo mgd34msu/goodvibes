@@ -32,7 +32,8 @@ export function scheduleEffectAdmission(directory: string, mode: PermissionMode 
     const admission = await admit(...args); onAdmission?.(++admissions); return admission;
   };
   const registry = new ToolRegistry(manager);
-  const answers = fakePort((name, question, state) => {
+  const answers = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') {
       if (name === 'security_code' || name === 'expiry') {
         if (typeof state !== 'string' || /\p{Nd}/u.test(state)) throw new Error('Synthetic schedule card-talk state must have every digit masked');

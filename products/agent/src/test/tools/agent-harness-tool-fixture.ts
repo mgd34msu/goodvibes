@@ -1095,7 +1095,8 @@ export function createHarnessFixtureReadings(): JudgmentPort {
     if (question.type === 'noul' && candidates.some(candidate => name === `fits_${candidate.id}`)) return noulAnswer(name === `fits_${chosen}` ? 0.999 : 0.001);
     throw new Error(`Unscripted Personal Ops field question ${name}`);
   });
-  const admission = fakePort((name, question) => {
+  const admission = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const choice = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (!choice) throw new Error(`Unscripted harness admission choice ${name}`);
@@ -1449,7 +1450,7 @@ export function createHarnessFixtureReadings(): JudgmentPort {
         ? personalOpsDiscovery.port.ask(request)
       : ['engine.redaction.field-kind', 'engine.redaction.credential', 'engine.export.credential',
         'engine.redaction.residual-credential', 'engine.redaction.profile-distinctive'].includes(request.context?.battery ?? '') ? privacy.port.ask(request)
-      : request.context?.battery === 'engine.gate.boundary' || request.context?.battery === 'engine.gate.side-effect' || request.context?.battery === 'engine.gate.risk-family'
+      : request.context?.battery?.split('+').every(name => ['engine.gate.boundary', 'engine.gate.side-effect', 'engine.gate.risk-family'].includes(name))
         || request.context?.battery === 'engine.gate.autonomous-disposition' || request.context?.battery === 'engine.gate.autonomous-refusal' ? admission.port.ask(request)
       : request.context?.battery === 'engine.tools.registry-rank'
         && ['agent.harness.cli-commands', 'agent.harness.keybindings', 'agent.harness.shortcuts'].includes(request.context?.site ?? '') ? metadata.port.ask(request)

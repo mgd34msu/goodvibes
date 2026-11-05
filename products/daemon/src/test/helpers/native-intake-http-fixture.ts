@@ -43,6 +43,7 @@ export async function createNativeIntakeHttpFixture(options: {
       inboxFactory: (context, _routing, settings) => registerInboxSurface(context, { ...settings, adapters: new Map() }) });
   } catch (error) { restoreDiscovery(); throw error; }
   const fake = fakePort((name, question) => {
+    if (name === 'completion_required') return noulAnswer(0.99);
     if (name === 'route') return choiceAnswer(question, options.route ?? 'contract', 0.99);
     if (name === 'relation') return choiceAnswer(question, 'supports', 0.99);
     if (name.startsWith('part_')) return noulAnswer(0.01);

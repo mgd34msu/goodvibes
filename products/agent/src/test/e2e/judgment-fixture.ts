@@ -12,6 +12,7 @@ import cancelledTurnPending from '../fixtures/e2e-judgments/cancelled-turn-pendi
 import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
 import diagnosticFixtures from '../fixtures/e2e-judgments/ci-diagnostics.json';
 import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
+import completionApplicability from '../fixtures/e2e-judgments/completion-applicability.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 
 const prompts = ['first words in a brand new workspace', 'please answer the e2e marmot question'] as const;
@@ -139,6 +140,7 @@ function diagnosticAnswer(body: unknown, ownedRoot: string | undefined): { kind:
 export function startE2EJudgments(options: { readonly ownedRoot?: string } = {}) {
   const accepted: string[] = [];
   const expectedCompletions = new Set<string>();
+  const expectedApplicability = new Set<string>();
   const completionAnswers = Object.fromEntries(Object.keys(headlessCompletion.questions)
     .map(name => [name, { type: 'noul', noul: 0.01 }]));
   // Preserve every original model, turn and cancellation fixture decision.
@@ -164,7 +166,9 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
       acceptedDiagnostics.push({ kind: diagnostic.kind, body });
       return Response.json({ model: 'jev-1.13.0', answers: diagnostic.answers, usage: { input_tokens: 10, output_tokens: 3 } });
     }
-    const reading = expectedCompletions.has(completionShape(body))
+    const reading = expectedApplicability.has(stable(body))
+      ? { kind: 'headless-applicability', answers: { completion_required: { type: 'noul', noul: 0.99 } } }
+      : expectedCompletions.has(completionShape(body))
       ? { kind: 'headless-completion', answers: completionAnswers }
       : e2eJudgmentAnswers(body, options.ownedRoot);
     if (!reading) {
@@ -201,6 +205,12 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
         requirements: { ...headlessCompletion.state.requirements, originalTask: request },
         initial: { request, transcript },
       } };
+      expectedApplicability.add(stable({ ...completionApplicability, questions: {
+        completion_required: { ...completionApplicability.questions.completion_required, instructions: {
+          ...completionApplicability.questions.completion_required.instructions,
+          nativeTargets: { version: 1, currentUserRequest: target(request) },
+        } },
+      }, state: { request, instructions: [request, request, request], requirements: completion.state.requirements } }));
       expectedCompletions.add(completionShape(completion));
       const nativeTranscript = [...nativeDispatchNotices, ...transcript];
       expectedCompletions.add(completionShape({ ...completion, state: { ...completion.state,

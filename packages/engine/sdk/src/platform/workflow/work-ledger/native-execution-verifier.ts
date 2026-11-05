@@ -7,6 +7,7 @@ import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/d
 import { assertNativeContractSource, nativeContractSourceForAdmission } from '../../contract/native-source.js';
 import { UNIT_JUDGE_BANDS } from '../../contract/batteries/unit-judge.js';
 import { FINAL_ANSWER_REVIEWS } from '../../contract/batteries/final-answer-review.js';
+import { ORIGINAL_OBLIGATION_COVERAGE, originalObligationSource } from '../../contract/batteries/original-obligation-coverage.js';
 import { completeAnswerClaimCoverage, scopedClaimQuestion, type AnswerClaimReview } from '../../contract/final-answer-claims.js';
 import { GOAL_OBLIGATIONS } from '../../contract/batteries/goal-obligations.js';
 import { goalObligationSource, goalObligationQuestion } from '../../contract/goal-obligation-proof.js';
@@ -236,7 +237,33 @@ export async function verifyNativeWorkExecution(options: {
     && decision.decisionIds.every(id => deliverable.decisionIds.includes(id)));
   const directGoal = nativeJudgeBatches(deliverableJudgeIds, contract.criteria, deliverableSite, options.decisionLog)?.get('goal');
   const qualifiedGoalIds = directGoal && rawNo(directGoal.answer, UNIT_JUDGE_BANDS.high) === deliverable.goal.probabilityUnmet ? [] : goalDecision?.decisionIds ?? [];
-  const expectedIds = Array.isArray(fulfillmentIds) ? [...new Set([...fulfillmentIds, ...(Array.isArray(contentIds) ? contentIds : []), ...deliverableJudgeIds, ...qualifiedGoalIds])] : [];
+  const originalDecision = [...contract.decisions].reverse().find(decision => decision.action === 'checked'
+    && decision.targetId === `${contract.id}.original-obligations`);
+  let original: Record<string, unknown> | null = null;
+  try { original = originalDecision ? object(JSON.parse(originalDecision.reason)) : null; } catch { /* Invalid evidence fails below. */ }
+  const originalIds = original?.['decisionIds'];
+  const originalId = Array.isArray(originalIds) && originalIds.length === 1 && typeof originalIds[0] === 'string' ? originalIds[0] : undefined;
+  const originalEntry = originalId ? options.decisionLog.get(originalId) : undefined;
+  const originalBattery = originalEntry?.context.battery === ORIGINAL_OBLIGATION_COVERAGE.critical.name
+    ? ORIGINAL_OBLIGATION_COVERAGE.critical : ORIGINAL_OBLIGATION_COVERAGE.high;
+  const originalQuestion = originalId ? nativeQuestionBatches([originalId], ['original_obligations_unmet'],
+    'contract.check.original-obligation-coverage', options.decisionLog)?.get('original_obligations_unmet') : undefined;
+  const originalProbability = originalQuestion ? rawNo(originalQuestion.answer, originalBattery.items.original_obligations_unmet.band) : null;
+  const originalReading = object(original?.['reading']);
+  const originalPolicy = object(original?.['policy']);
+  if (!original || original['schemaVersion'] !== 1 || original['passed'] !== true || !originalId || !originalEntry
+    || originalEntry.status !== 'answered' || originalEntry.context.battery !== originalBattery.name
+    || originalEntry.context.batteryVersion !== originalBattery.version || originalEntry.stateHash !== original['stateHash']
+    || originalPolicy?.['name'] !== originalBattery.name || originalPolicy['version'] !== originalBattery.version
+    || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== hashState(contract.answer ?? '')
+    || typeof original['evidenceDigest'] !== 'string' || !originalQuestion || originalProbability === null
+    || originalReading?.['probability'] !== originalProbability || originalReading['verdict'] !== 'no' || originalReading['outcome'] !== 'act'
+    || nativeSettlementDigest(originalQuestion.question) !== nativeSettlementDigest(originalBattery.items.original_obligations_unmet.question)
+    || nativeSettlementDigest(originalDecision?.decisionIds) !== nativeSettlementDigest(originalIds)
+    || !deliverable.decisionIds.includes(originalId)) {
+    throw new Error('Native execution lacks genuine original-obligation coverage');
+  }
+  const expectedIds = Array.isArray(fulfillmentIds) ? [...new Set([...fulfillmentIds, ...(Array.isArray(contentIds) ? contentIds : []), ...deliverableJudgeIds, ...qualifiedGoalIds, originalId])] : [];
   if (content?.['schemaVersion'] !== 2 || content['passed'] !== true || content['outputDigest'] !== hashState(contract.answer ?? '')
     || !contentQuestions || !contentReadings || !contentEntries.length
     || (claims !== undefined && !genuineClaims())

@@ -175,6 +175,7 @@ test('worker acceptance details reach both the provider and its independent comp
   const evidence = ['Return the report path and the inspected parser revision.'];
   const writeScope = ['report.md'];
   const fake = fakePort((name, _question, raw) => {
+    if (name === 'completion_required') return noulAnswer(.99);
     const state = raw as unknown as { response?: string; requirements?: { successCriteria?: string[] } };
     return noulAnswer(name === 'unfinished' && state.response === 'Review complete.' && state.requirements?.successCriteria?.includes(criteria[0]!) ? .99 : .01);
   });

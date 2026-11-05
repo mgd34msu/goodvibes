@@ -183,6 +183,28 @@ test('native settlement refuses missing, failing or mismatched final-content pro
   expect(f.storage.current(f.key).settlement).toBeNull();
 });
 
+test('native settlement requires recorded original-obligation coverage bound to the accepted source and answer', async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority);
+  const contract = await completed(f.harness, started.admission.contractId);
+  const coverageId = contract.checks.at(-1)!.decisionIds.find(id => f.log.get(id)?.context.site === 'contract.check.original-obligation-coverage')!;
+  expect(coverageId).toBeDefined();
+  for (const mutation of ['absent', 'failed-answer', 'wrong-state', 'wrong-question', 'wrong-policy'] as const) {
+    await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+      port: f.hostOptions.port, decisionLog: { get(id) {
+        const entry = f.log.get(id);
+        if (id !== coverageId || entry?.status !== 'answered') return entry;
+        if (mutation === 'absent') return undefined;
+        if (mutation === 'failed-answer') return { ...entry, answers: { original_obligations_unmet: noulAnswer(0.99) } };
+        if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as typeof entry.stateHash };
+        if (mutation === 'wrong-policy') return { ...entry, context: { ...entry.context, batteryVersion: 0 } };
+        return { ...entry, questions: { original_obligations_unmet: { type: 'noul', instructions: 'A different check' } } };
+      } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+      signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine original-obligation coverage');
+  }
+  expect(f.storage.current(f.key).ledger.revision).toBe(2);
+  expect(f.storage.current(f.key).settlement).toBeNull();
+});
+
 test('native settlement proves every original question across actual deliverable batches and refuses incomplete or mixed proof', async () => {
   let refused = false, refusedContent = false;
   const f = await fixture({ harness: { port: context => {

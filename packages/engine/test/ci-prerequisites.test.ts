@@ -92,14 +92,13 @@ describe('CI prerequisite acquisition', () => {
             [[ "$1" == --signal=KILL ]]
             [[ "$2" == 10s || "$2" == 30s || "$2" == 60s || "$2" == 90s || "$2" == 180s ]]
             shift 2
-            # Keep production durations asserted above. Trigger GNU timeout's own
-            # alarm only after both fixture processes are demonstrably running.
-            /usr/bin/timeout --signal=KILL 5s "$@" &
+            # Keep production durations asserted above. Let GNU timeout reach
+            # its real deadline; externally injected ALRM races its setup on CI.
+            /usr/bin/timeout --signal=KILL 2s "$@" &
             owned=$!
             while kill -0 "$owned" 2>/dev/null; do
               if [[ -s "$PIDS" && ! -e "$PIDS.alarmed" ]]; then
                 : > "$PIDS.alarmed"
-                kill -ALRM "$owned"
                 break
               fi
               /bin/sleep 0.01

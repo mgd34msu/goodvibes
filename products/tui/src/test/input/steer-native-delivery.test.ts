@@ -126,6 +126,7 @@ import { reconcileSteerBadges, STEER_BADGE_LINGER_MS } from '../../views/fleet-s
 
 test('a steer already present in an in-flight native chat remains unknown until its late consumed acknowledgement', async () => {
   const completion = fakePort(name => {
+    if (name === 'completion_required') return noulAnswer(.99);
     if (['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification', 'weakened_criteria'].includes(name)) return noulAnswer(.01);
     throw new Error(`Unexpected judgment in steer fixture: ${name}`);
   });

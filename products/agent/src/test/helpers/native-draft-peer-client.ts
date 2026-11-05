@@ -32,7 +32,8 @@ async function main() {
   const seed = { ...input.seed, id: input.seed.id, message: input.seed.message };
   const privateId = seed.id, message = seed.message;
   resetSessionUntrustedContentLedgerForTests();
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     const label = name === 'disposition' ? 'act'
       : name === 'kind' ? Object.hasOwn(question.criteria, 'read') ? 'read' : 'other'

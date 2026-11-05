@@ -33,7 +33,8 @@ export async function executeAdmitted(tool: Tool, args: Record<string, unknown>,
     options.configManager ? createPermissionConfigReader(options.configManager) : reader, new PolicyRuntimeState());
   const registry = new ToolRegistry(manager);
   registry.register(tool, options.registration);
-  const answers = fakePort((name, question) => {
+  const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type === 'choice') {
       const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read'

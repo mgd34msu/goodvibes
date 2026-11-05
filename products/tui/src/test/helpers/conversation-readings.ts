@@ -7,6 +7,9 @@ export function conversationReadingsPort(completion: { readonly request: string;
     if (name === 'needs_plan') return noulAnswer(0.03);
     if (name === 'risk') return scoreAnswer(question, 0, 0.97);
     if (name === 'strategy') return choiceAnswer(question, 'single', 0.97);
+    // Keep these integration fixtures on the checked-completion path.
+    if (name === 'completion_required' && state !== null && typeof state === 'object'
+      && !Array.isArray(state) && state.request === completion.request) return noulAnswer(0.99);
     if (question.type === 'noul' && state !== null && typeof state === 'object' && !Array.isArray(state)
       && state.request === completion.request && state.response === completion.response
       && ['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission',
@@ -16,7 +19,7 @@ export function conversationReadingsPort(completion: { readonly request: string;
   });
   const ask = fixture.port.ask.bind(fixture.port);
   fixture.port.ask = request => {
-    if (!['engine.core.turn-shape', 'engine.core.execution-strategy', 'engine.core.response-completion', 'engine.core.execution-assurance'].includes(request.context?.battery ?? '')) {
+    if (!['engine.core.turn-shape', 'engine.core.execution-strategy', 'engine.core.completion-applicability', 'engine.core.response-completion', 'engine.core.execution-assurance'].includes(request.context?.battery ?? '')) {
       throw new Error(`Unexpected conversation fixture battery: ${request.context?.battery}`);
     }
     return ask(request);

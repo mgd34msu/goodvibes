@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Actual AgentManager wake -> new Orchestrator run -> default captured REPL registry. */
 import { expect, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
@@ -46,11 +47,11 @@ test.skipIf(!availability.available)('actual wakeWithSteer reuses captured autho
     providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
   });
   await resumeContracts(runtime.contractRunner, root);
-  const previous = installJudgmentPort(runnerPort((context) => {
+  const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => {
     if (context.name === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
     if (context.name === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
     return undefined;
-  }).port);
+  }).port, runtime.judgment.decisionLog));
   const requests: ProviderMessage[][] = [];
   const expression = 'require("node:fs").readFileSync("input.txt", "utf8").trim()';
   const steps = [

@@ -19,7 +19,8 @@ export function effectAdmissionFixture(mode: PermissionMode = 'prompt', configRe
   const manager = new PermissionManager(undefined, configReader ?? config, new PolicyRuntimeState());
   const registry = new ToolRegistry(manager);
   let sequence = 0;
-  const port = fakePort((name, question, state) => {
+  const port = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') {
       // Exact synthetic fixture answers; this is no semantic classification service.
       const judgment = state && typeof state === 'object' && !Array.isArray(state) ? state.judgment : undefined;

@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real contract -> AgentManager -> AgentOrchestrator -> registered read workflows. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
@@ -81,13 +82,13 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
         providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
       });
       await resumeContracts(services.contractRunner, root);
-      previous = installJudgmentPort(runnerPort(context => {
+      previous = installJudgmentPort(withDecisionLog(runnerPort(context => {
         if (context.name === 'family') return choiceAnswer(context.question, 'file-mutation', 0.99);
         if (context.name === 'route' && context.question.type === 'choice'
           && Object.keys(context.question.criteria).sort().join(',') === 'fresh,owner,split')
           return choiceAnswer(context.question, 'owner', 0.99);
         return undefined;
-      }).port); portInstalled = true;
+      }).port, services.judgment.decisionLog)); portInstalled = true;
       const deny = async (path: string, name: string) => services.userPermissionRuleStore.add({
         rule: { id: name, type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [path] },
         createdAt: Date.now(), tier: 'path', tool: 'read',

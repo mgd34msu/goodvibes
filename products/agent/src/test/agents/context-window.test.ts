@@ -104,9 +104,9 @@ async function withMockProvider<T>(
     if (['billing', 'rate_limited', 'transient_network', 'provider_unusable', 'before_response'].includes(name)) return noulAnswer(0.01);
     throw new Error(`Unexpected synthetic error reading: ${name}`);
   });
-  const completion = fakePort(() => noulAnswer(0.01));
+  const completion = fakePort(name => noulAnswer(name === 'completion_required' ? 0.99 : 0.01));
   const previousPort = installJudgmentPort({ model: diagnostics.port.model, ask(request) {
-    if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation']
+    if (['engine.core.completion-applicability', 'engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation']
       .includes(String(request.context?.battery))) return completion.port.ask(request);
     return diagnostics.port.ask(request);
   } });

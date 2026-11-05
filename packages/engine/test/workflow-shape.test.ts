@@ -394,8 +394,8 @@ describe('ci.yml: build once, restore everywhere', () => {
     const script = String(terminal?.run);
     // Run the actual workflow body with an isolated PATH: no real sudo/apt can
     // execute. Owned hanging fixtures reach the real GNU timeout; trigger its
-    // deadline alarm only after atomic parent/child readiness, avoiding a race
-    // between a short fixture deadline and a loaded runner starting the child.
+    // real deadline after atomic parent/child readiness. Injecting an external
+    // ALRM races GNU timeout setup on newer CI runners.
     for (const scenario of ['installed', 'missing', 'broken', 'update-fails', 'install-fails', 'verify-fails', 'update-hangs', 'install-hangs', 'probe-hangs', 'verify-hangs']) {
       const root = mkdtempSync(join(tmpdir(), 'agent-prerequisite-'));
       const bin = join(root, 'bin');
@@ -439,7 +439,7 @@ describe('ci.yml: build once, restore everywhere', () => {
           fi
           shift 2
           if [[ "$SCENARIO" == "$operation-hangs" ]]; then
-            /usr/bin/timeout "$signal_option" 5s "$@" &
+            /usr/bin/timeout "$signal_option" 2s "$@" &
             owned=$!
             deadline=$((SECONDS + 3))
             while [[ ! -s "$PIDS" ]]; do
@@ -451,7 +451,6 @@ describe('ci.yml: build once, restore everywhere', () => {
               fi
               /bin/sleep 0.01
             done
-            kill -ALRM "$owned"
             set +e
             wait "$owned"
             exit $?

@@ -30,7 +30,7 @@ test('real permission readers take a fresh narrow snapshot without cloning unrel
   const reader = createPermissionConfigReader(owner);
   const before = reader.getSnapshot();
   expect(Object.keys(before)).toEqual(['permissions']);
-  expect(before.permissions.mode).toBe('custom');
+  expect(before.permissions.mode).toBe('safe-owner');
   expect(before.permissions.tools.read).toBe('allow');
   await Promise.resolve();
   owner.set('permissions.tools.read', 'deny');

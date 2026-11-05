@@ -163,10 +163,12 @@ describe('execution-mode decisions', () => {
     expect(asks[0]?.args).not.toBe(args);
   });
 
-  test('YOLO bypasses surface and catastrophic safety vetoes without a judgment request', async () => {
-    const { manager, asks } = gate('yolo', { surface: 'web-page' });
+  test('YOLO bypasses catastrophic safety decisions while preserving host surface restrictions', async () => {
+    const { manager, asks } = gate('yolo');
     expect((await manager.checkDetailed('write', { path: '/synthetic/file', content: 'synthetic-danger' })).approved).toBe(true);
     expect((await manager.checkDetailed('exec', { command: 'synthetic-danger' })).approved).toBe(true);
+    const restricted = gate('yolo', { surface: 'web-page' });
+    expect((await restricted.manager.checkDetailed('write', { path: '/synthetic/file', content: 'synthetic-danger' })).approved).toBe(false);
     expect(asks).toHaveLength(0);
     expect(readings.requests).toHaveLength(0);
   });

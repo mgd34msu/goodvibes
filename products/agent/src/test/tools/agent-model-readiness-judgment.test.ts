@@ -64,7 +64,8 @@ function fixture(owner: ProtectedSourceOwner = ordinaryResearchOwner(), registry
 }
 
 function readings(options: { route?: number; confidence?: number; transfer?: number; fits?: Record<string, number>; memory?: number } = {}) {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     // The authored provider explicitly publishes cloud hosting despite its
     // misleading ollama-local identifier.
     if (question.type === 'choice' && Object.hasOwn(question.criteria, 'llamacpp')) return choiceAnswer(question, 'not-local', 0.999);

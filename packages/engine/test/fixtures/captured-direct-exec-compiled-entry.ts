@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '../../errors/src/index.js';
 import { ConfigManager } from '../../sdk/src/platform/config/index.js';
 import { createContractRunner } from '../../sdk/src/platform/contract/runner.js';
@@ -96,11 +97,11 @@ test('direct compiled-parent build uses captured config and authorized bytes', a
     requestApproval: async () => { approvalCalls++; return { approved: false }; },
   });
   await resumeContracts(runtime.contractRunner, root);
-  const previous = installJudgmentPort(runnerPort((context) => {
+  const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => {
     if (context.name === 'family') return choiceAnswer(context.question, 'file-mutation', 0.99);
     if (context.name === 'credential' && context.state.name === 'CAPTURE_DIRECT_EXEC_TOKEN') return noulAnswer(0.99);
     return undefined;
-  }).port);
+  }).port, runtime.judgment.decisionLog));
   await runtime.userPermissionRuleStore.add({
     rule: { id: 'deny-original-direct-exec-private', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [denied] },
     createdAt: Date.now(), tier: 'path', tool: 'read',

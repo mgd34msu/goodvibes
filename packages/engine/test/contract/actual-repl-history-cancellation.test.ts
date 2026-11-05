@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real captured eval, then history cancellation through AgentManager and its registered tool pipeline. */
 import { expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
@@ -50,11 +51,11 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
       providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
     });
     await resumeContracts(runtime.contractRunner, root);
-    const previous = installJudgmentPort(runnerPort(context => {
+    const previous = installJudgmentPort(withDecisionLog(runnerPort(context => {
       if (context.name === 'family') return choiceAnswer(context.question, 'shell-read', 0.99);
       if (context.name === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
       return undefined;
-    }).port);
+    }).port, runtime.judgment.decisionLog));
     const hold = deferred<void>();
     const entered = deferred<void>();
     const historyRequested = deferred<void>();

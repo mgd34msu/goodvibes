@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real temporary-Git contract -> AgentManager -> AgentOrchestrator -> default REPL registry. */
 import { expect, spyOn, test } from 'bun:test';
 import * as asyncFs from 'node:fs/promises';
@@ -63,11 +64,11 @@ for (const scenario of ['allowed', 'allowed-node-runtime', 'revoke-after-eval', 
       providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
     });
     await resumeContracts(runtime.contractRunner, root);
-    const previous = installJudgmentPort(runnerPort((context) => {
+    const previous = installJudgmentPort(withDecisionLog(runnerPort((context) => {
       if (context.name === 'family') return choiceAnswer(context.question, context.state.tool === 'repl' ? 'shell-read' : 'file-mutation', 0.99);
       if (context.name === 'kind') return choiceAnswer(context.question, 'shell', 0.99);
       return undefined;
-    }).port);
+    }).port, runtime.judgment.decisionLog));
     await runtime.userPermissionRuleStore.add({
       rule: { id: 'deny-original-repl-private', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: 'read', pathPatterns: [denied] },
       createdAt: Date.now(), tier: 'path', tool: 'read',

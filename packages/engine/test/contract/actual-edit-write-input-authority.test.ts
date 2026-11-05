@@ -1,3 +1,4 @@
+import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real contract -> default AgentOrchestrator -> registerAllTools -> contained validators. */
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -117,9 +118,9 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
         requestApproval: async () => ({ approved: true }),
       });
       await resumeContracts(runtime.contractRunner, root);
-      const previous = installJudgmentPort(runnerPort((context) =>
+      const previous = installJudgmentPort(withDecisionLog(runnerPort((context) =>
         context.name === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined,
-      ).port);
+      ).port, runtime.judgment.decisionLog));
       const steps: ToolCall[] = [
         notebookStep('NOTEBOOK_DRY_RUN\n', true),
         notebookStep('NOTEBOOK_APPLIED\n'),

@@ -415,7 +415,7 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
     operationalMessages: readConfigString(context, 'ui.operationalMessages', '(default)'),
     systemMessages: readConfigString(context, 'ui.systemMessages', '(default)'),
     releaseChannel: readConfigString(context, 'release.channel', '(default)'),
-    permissionMode: readExecutionMode(context.platform.configManager) ?? 'unavailable',
+    permissionMode: (context.platform?.configManager ? readExecutionMode(context.platform.configManager) : undefined) ?? 'unavailable',
     toolAutoHeal: readConfigBoolean(context, 'tools.autoHeal', false),
     toolsDefaultTokenBudget: readConfigNumber(context, 'tools.defaultTokenBudget', 0),
     artifactMaxBytes: readConfigNumber(context, 'storage.artifacts.maxBytes', 512 * 1024 * 1024),

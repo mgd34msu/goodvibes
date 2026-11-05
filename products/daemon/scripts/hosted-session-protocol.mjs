@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 export function syntheticSystemOneAnswers(questions) {
   assert(questions && typeof questions === 'object' && !Array.isArray(questions), 'Expected SystemOne questions');
   return Object.fromEntries(Object.entries(questions).map(([name, question]) => {
-    if (question.type === 'noul') return [name, { type: 'noul', noul: 0.01 }];
+    if (question.type === 'noul') return [name, { type: 'noul', noul: name === 'completion_required' ? 0.99 : 0.01 }];
     if (question.type === 'score') {
       assert(Array.isArray(question.criteria) && question.criteria.length > 0, 'Expected score criteria');
       return [name, {

@@ -34,7 +34,8 @@ export const POSTURE_CALLS = {
 } as const satisfies Record<string, Fixture>;
 
 export function approvalPostureReadings() {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     const call = state as { tool?: unknown; arguments?: unknown };
     const fixture: Fixture | undefined = Object.values(POSTURE_CALLS).find((candidate) =>
       candidate.tool === call.tool && isDeepStrictEqual(candidate.args, call.arguments));

@@ -26,7 +26,8 @@ export function nativeMemoryWorkPrivacy(delegate: JudgmentPort) {
 
 /** Exact synthetic local-write admission roles, recorded through the native gate. */
 export function nativeMemoryWorkAdmission(delegate?: JudgmentPort, kind: 'read' | 'write' = 'write') {
-  const readings = fakePort((name, question) => {
+  const readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const label = name === 'disposition' ? 'act' : name === 'kind' ? kind : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (label) return choiceAnswer(question, label, 0.999);
@@ -36,7 +37,7 @@ export function nativeMemoryWorkAdmission(delegate?: JudgmentPort, kind: 'read' 
   });
   const gates = new Set(['engine.gate.side-effect', 'engine.gate.risk-family', 'engine.gate.boundary', 'engine.gate.autonomous-disposition', 'engine.gate.autonomous-refusal']);
   const port: JudgmentPort = { model: readings.port.model, ask(request) {
-    if (gates.has(request.context?.battery ?? '')) return readings.port.ask(request);
+    if (request.context?.battery?.split('+').every(name => gates.has(name))) return readings.port.ask(request);
     if (delegate) return delegate.ask(request);
     throw new Error(`Unscripted native memory/work battery ${request.context?.battery}`);
   } };

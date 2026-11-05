@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Reject prototype paths, accessors and object coercion in workflow trigger
+  conditions while preserving own primitive and array data lookups.
+
 - Preserve ordered decision audit notes instead of overwriting prior readings,
   actions and truth. Migrate retained schema 2/3 notes to append-only schema 4
   while keeping latest-note helpers compatible.

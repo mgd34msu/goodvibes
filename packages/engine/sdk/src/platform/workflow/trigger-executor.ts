@@ -89,13 +89,22 @@ function resolvePath(root: Record<string, unknown>, path: string): ConditionValu
   const parts = path.split('.');
   let cur: unknown = root;
   for (const part of parts) {
+    // Reject the condition, rather than treating a forbidden path as missing:
+    // `payload.constructor === undefined` must not become an allowed action.
+    if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+      throw new Error('Prototype paths are not supported in trigger conditions');
+    }
     if (cur == null || typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[part];
+    const property = Object.getOwnPropertyDescriptor(cur, part);
+    if (property === undefined) return undefined;
+    if (!('value' in property)) throw new Error('Trigger conditions require data properties');
+    cur = property.value;
   }
   if (cur === null) return null;
   if (cur === undefined) return undefined;
   if (typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean') return cur;
-  return String(cur);
+  // Conditions operate on data, never user-defined coercion hooks.
+  throw new Error('Trigger conditions require primitive operands');
 }
 
 /** Tokenise a condition string into an array of tokens. */

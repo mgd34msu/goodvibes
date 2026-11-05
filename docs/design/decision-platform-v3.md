@@ -9,7 +9,7 @@ versions remain independent. Dependencies resolve from the root lockfile.
 Historical changelogs identify retired packages as `legacy-package:name`.
 
 - [x] Restrict trigger conditions to own data properties and primitive operands.
-- [ ] Align all manifests, compiled versions, package references and release tooling.
+- [x] Align all manifests, compiled versions, package references and release tooling.
 - [ ] Support Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B and Laya through
   model-neutral adapters with explicit endpoint, authentication and capabilities.
 - [ ] Try configured decision targets with finite attempt deadlines. Preserve

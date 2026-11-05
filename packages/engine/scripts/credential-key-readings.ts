@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CONFIG_SCHEMA } from '../sdk/src/platform/config/schema.ts';
 import { isDeclaredSecretBearingConfigKey } from '../sdk/src/platform/config/secret-bearing-config-keys.ts';
-import { isStructuredCredentialReferenceConfigKey } from '../sdk/src/platform/config/structured-credential-config.ts';
+import { isStructuredCredentialReferenceConfigKey, isScalarCredentialReferenceConfigKey } from '../sdk/src/platform/config/structured-credential-config.ts';
 
 export const READINGS_PATH = resolve(import.meta.dir, '..', 'etc', 'credential-key-readings.json');
 
@@ -41,7 +41,7 @@ export interface CredentialKeyReadings {
 /** Every schema key without an explicit credential storage contract, sorted by key. */
 export function undeclaredSchemaKeys(): { readonly key: string; readonly description: string }[] {
   return CONFIG_SCHEMA
-    .filter((setting) => !isDeclaredSecretBearingConfigKey(setting.key) && !isStructuredCredentialReferenceConfigKey(setting.key))
+    .filter((setting) => !isDeclaredSecretBearingConfigKey(setting.key) && !isStructuredCredentialReferenceConfigKey(setting.key) && !isScalarCredentialReferenceConfigKey(setting.key))
     .map((setting) => ({ key: setting.key, description: setting.description ?? '' }))
     .sort((a, b) => a.key.localeCompare(b.key));
 }

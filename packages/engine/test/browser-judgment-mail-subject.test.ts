@@ -137,11 +137,13 @@ test.each(['reread', 'gone', 'mailbox-generation', 'account', 'shutdown', 'calle
   } finally { finish.resolve(); await pending; await f.close(); }
 });
 
-test.each([4, 130])('shared retry survives %s attempts and source invalidation stops the next retry without a record', async successAt => {
+test.each([4, 130])('configured failover survives %s targets and source invalidation prevents the next transmission', async successAt => {
   for (const revoke of [false, true]) {
     let attempts = 0; let retire = () => {};
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic' }, model: 'jev-1.13.0', timeoutMs: 1000,
-      retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => {
+      retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      fallbacks: Array.from({ length: successAt - 1 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic' }, model: 'jev-1.13.0' })),
+      fetch: async () => {
         attempts++; if (revoke) retire();
         return attempts < successAt ? new Response('', { status: 503 }) : Response.json({ model: 'jev-1.13.0', answers: { already_reply: { type: 'noul', noul: 0.01 } }, usage: { input_tokens: 1, output_tokens: 1 } });
       } });
@@ -185,7 +187,7 @@ test('source retirement during asynchronous key acquisition cannot dispatch or r
   const entered = deferred<void>(); const key = deferred<string>();
   let dispatches = 0;
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(new Proxy(globalThis.fetch, { apply() { dispatches++; return Promise.reject(new Error('Unexpected synthetic dispatch')); } }));
-  const transport = createSettingsJudgmentPort({ config: { get: name => ({ 'judgment.endpoint': 'http://127.0.0.1:1', 'judgment.model': 'jev-1.13.0', 'judgment.keySource': 'secret', 'judgment.timeoutMs': 1000, 'judgment.fallbacks': [] })[name] },
+  const transport = createSettingsJudgmentPort({ config: { get: name => ({ 'judgment.endpoint': 'http://127.0.0.1:1', 'judgment.model': 'jev-1.13.0', 'judgment.keySource': 'secret', 'judgment.timeoutMs': 1000, 'judgment.fallbacks': [], 'judgment.backend': {}, 'judgment.keyName': 'TYPESAFE_API_KEY' })[name] },
     secrets: { get: async () => { entered.resolve(); return key.promise; } }, env: {} });
   const f = fixture({ transport }); let pending: Promise<unknown> | undefined;
   try {

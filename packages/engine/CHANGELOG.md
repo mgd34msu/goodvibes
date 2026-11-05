@@ -6,6 +6,14 @@
 
 ### Changed
 
+- Support independently configured decision model backends, including Cloudflare
+  Clef and Laya protocol adapters, complete-input limits and explicit aliases.
+- Exhaust decision targets with finite deadlines, independent rate-limit cooldowns
+  and a user-facing halt diagnostic. Preserve cancellation and semantic refusals.
+- Stop completion and contract consumers from restarting exhausted decision
+  chains; retain stale-evidence rebuilding and halt tool batches before further
+  effects when a decision service fails.
+
 - Use one development version for every product, foundation and engine package,
   including compiled fallbacks and platform package descriptors.
 - Replace retired package names with monorepo subpaths and remove the obsolete

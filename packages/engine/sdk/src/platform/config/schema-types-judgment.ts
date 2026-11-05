@@ -6,7 +6,9 @@
  */
 
 /** Where the judgment API key is read from. */
-export type JudgmentKeySource = 'env' | 'secret';
+export type JudgmentKeySource = 'env' | 'secret' | 'none';
+
+import type { JudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 
 /** A compatible endpoint and a credential name, never a credential value. */
 export interface JudgmentFallbackSettings {
@@ -14,6 +16,7 @@ export interface JudgmentFallbackSettings {
   readonly model: string;
   readonly keySource: JudgmentKeySource;
   readonly keyName: string;
+  readonly backend?: JudgmentBackendSettings;
 }
 
 export interface JudgmentSettings {
@@ -21,8 +24,12 @@ export interface JudgmentSettings {
   endpoint: string;
   /** `env` reads TYPESAFE_API_KEY from the process environment; `secret` reads it from the secret store. */
   keySource: JudgmentKeySource;
+  /** Credential reference for the primary target; omitted uses TYPESAFE_API_KEY. */
+  keyName?: string;
   /** Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest. */
   model: string;
+  /** Optional protocol, complete-input limits and explicit response aliases. */
+  backend?: JudgmentBackendSettings;
   /** Timeout per judgment attempt in milliseconds. */
   timeoutMs: number;
   /** Ordered compatible endpoints. An explicit empty list disables inherited fallbacks. */
@@ -32,7 +39,9 @@ export interface JudgmentSettings {
 export type JudgmentConfigKey =
   | 'judgment.endpoint'
   | 'judgment.keySource'
+  | 'judgment.keyName'
   | 'judgment.model'
+  | 'judgment.backend'
   | 'judgment.timeoutMs'
   | 'judgment.fallbacks';
 
@@ -40,7 +49,9 @@ export type JudgmentConfigKey =
 export interface JudgmentConfigValueMap {
   'judgment.endpoint': string;
   'judgment.keySource': JudgmentKeySource;
+  'judgment.keyName': string;
   'judgment.model': string;
+  'judgment.backend': JudgmentBackendSettings;
   'judgment.timeoutMs': number;
   'judgment.fallbacks': readonly JudgmentFallbackSettings[];
 }

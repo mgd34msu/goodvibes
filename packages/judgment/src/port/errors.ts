@@ -3,7 +3,7 @@ import type { JudgmentLineage } from './types.ts';
 /**
  * Why a judgment call failed. Every decision site treats a failure as a
  * failure: there is no heuristic path to fall back to. Configured failover
- * exhausts after one compatible chain; primary-only outages retry until cancelled.
+ * exhausts after one finite chain, including a single configured target.
  */
 export type JudgmentErrorKind =
   /** The request broke a documented limit and was never sent. */

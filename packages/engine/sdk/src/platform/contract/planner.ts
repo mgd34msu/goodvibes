@@ -22,7 +22,7 @@ import { assertContractInputView, contractInputPath } from './input-snapshot.js'
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 
-import { JudgmentPortMissingError, JudgmentAuthorityRetiredError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentPortMissingError, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import type { ContractEvent } from '../../events/contract.js';
 import type { DecompositionBounds, DecompositionRunner, DecompositionRunResult } from '../core/plan-decomposition.js';
@@ -504,19 +504,10 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   return { plan, text, problems: verdict.problems, verdict };
 }
 
-async function checkPlanUntilAvailable(context: PlanningContext, output: string, repair: number,
+async function checkPlanOwned(context: PlanningContext, output: string, repair: number,
   signal: AbortSignal | undefined, assertCurrent: () => Promise<void>): Promise<CheckedPlan> {
-  let delay = 1_000;
-  for (;;) {
-    await assertCurrent();
-    try { return await checkPlanText(context, output, repair, signal); }
-    catch (error) {
-      if (isAbort(error, signal) || (judgmentFailureReason(error) === undefined && !(error instanceof JudgmentAuthorityRetiredError))) throw error;
-      await assertCurrent();
-      await waitForTaskRecovery(delay, signal);
-      delay = Math.min(delay * 2, 10_000);
-    }
-  }
+  await assertCurrent();
+  return checkPlanText(context, output, repair, signal);
 }
 
 /**
@@ -640,7 +631,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       if (signal?.aborted) return { kind: 'cancelled' };
       await assertCurrent();
       await assertReadAccess();
-      const checked = run.status === 'completed' ? await checkPlanUntilAvailable(context, run.output, repair, signal, assertCurrent)
+      const checked = run.status === 'completed' ? await checkPlanOwned(context, run.output, repair, signal, assertCurrent)
         : { text: run.output, plan: undefined, verdict: undefined,
           problems: [{ code: 'unparseable' as const, message: runFailureReason(run) + '. Repair this failed planning attempt; the original request remains active.' }] };
       if (run.status !== 'completed') await waitForTaskRecovery(Math.min(250 * (repair + 1), 5_000), signal);
@@ -718,7 +709,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         if (run.status !== 'completed') await waitForTaskRecovery(Math.min(250 * attempt, 5_000), signal);
         state.plannerOutputs[budgetKey] = output; deps.native?.changed(contract);
       }
-      const checked = await checkPlanUntilAvailable(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
+      const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
       await admitted.assertCurrent();
       const valid = checked.problems.length === 0 && checked.plan !== undefined;
       const canRepair = context.config.planRepairLimit === 0 || nativeSpent(contract, budgetKey) < context.config.planRepairLimit + 1;

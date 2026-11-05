@@ -1,4 +1,5 @@
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
+import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
 import { hashState } from '@goodvibes-jev/judgment';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
@@ -396,6 +397,7 @@ async function executeToolCallsInMode(
           result = toCancelledResult(call.id, result);
         }
       } catch (err) {
+        assertDecisionAvailable(err);
         const message = callSignal?.aborted
           ? TOOL_CALL_CANCELLED_MESSAGE
           : err instanceof ToolError

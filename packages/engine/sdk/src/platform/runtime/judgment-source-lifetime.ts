@@ -1,6 +1,7 @@
 import { JudgmentAuthorityRetiredError, type JudgmentAuthorityFrame } from '@goodvibes-jev/engine/errors';
 import type { JudgmentSettingsSource } from './judgment-services.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
+import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 
 /**
  * The real composition owns this observation. Credential values are compared
@@ -33,7 +34,9 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
     const secretBefore = source.secrets.getCredentialMutationState?.();
     const fallbacks = captureJudgmentFallbackSettings(source.config.get('judgment.fallbacks'));
     const keySource = source.config.get('judgment.keySource');
-    const secretNames = [...(keySource === 'secret' ? ['TYPESAFE_API_KEY'] : []),
+    const configuredKeyName = source.config.get('judgment.keyName');
+    const keyName = typeof configuredKeyName === 'string' && configuredKeyName.trim() ? configuredKeyName.trim() : 'TYPESAFE_API_KEY';
+    const secretNames = [...(keySource === 'secret' ? [keyName] : []),
       ...fallbacks.filter(target => target.keySource === 'secret').map(target => target.keyName)];
     const credentialObservations = secretNames.flatMap(name => {
       const snapshot = source.secrets.resolveLocalCredentialSnapshot?.(name);
@@ -41,8 +44,9 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
         : snapshot?.state === 'absent' ? [snapshot.state, snapshot.revision] : [snapshot?.state];
     });
     const observation = [configBefore, secretBefore?.generation,
-      source.config.get('judgment.endpoint'), keySource,
+      source.config.get('judgment.endpoint'), keySource, keyName, source.env[keyName],
       source.config.get('judgment.model'), source.config.get('judgment.timeoutMs'),
+      JSON.stringify(captureJudgmentBackendSettings(source.config.get('judgment.backend'))),
       JSON.stringify(fallbacks), ...fallbacks.map(target => source.env[target.keyName]), ...credentialObservations,
       source.env['TYPESAFE_BASE_URL'], source.env['TYPESAFE_DEFAULT_MODEL'], source.env['TYPESAFE_API_KEY']];
     const configAfter = source.config.getConfigurationIncarnation?.();

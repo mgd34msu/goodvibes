@@ -2,6 +2,7 @@ import type { Fetch } from '@typesafe-ai/sdk';
 import { JudgmentError } from './errors.ts';
 import { retryPolicy, type JudgmentRetryPolicy } from './retry.ts';
 import { validEndpointURL } from './endpoint-validation.ts';
+import { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './backend-settings.ts';
 export { isPinnedJudgmentModel, validEndpointURL } from './endpoint-validation.ts';
 
 /** The hosted System One endpoint. */
@@ -15,16 +16,17 @@ export const DEFAULT_MODEL = 'jev-latest';
  * is a System One model the owner runs themselves. Both speak the same wire
  * protocol (POST /v1/systemone), so only the address and key differ.
  */
-export interface JudgmentEndpoint {
+export interface JudgmentEndpoint extends JudgmentBackendSettings {
   readonly kind: 'hosted' | 'local';
   readonly baseURL: string;
   readonly apiKey: string;
+  readonly authentication?: 'bearer' | 'none';
 }
 
-/** An explicitly configured compatible System One target, in failover order. */
+/** An explicitly configured decision model target, in failover order. */
 export interface JudgmentFallback {
   readonly endpoint: JudgmentEndpoint;
-  /** Requested model or alias. Only matching requests may use this target. */
+  /** The model or alias to request from this target, independently of the primary. */
   readonly model: string;
 }
 
@@ -34,9 +36,9 @@ export interface JudgmentConfig {
   readonly endpoint: JudgmentEndpoint;
   /** The model id or alias to ask; defaults to {@link DEFAULT_MODEL}. */
   readonly model: string;
-  /** Optional timeout per attempt in milliseconds; 0 waits until completion or cancellation. */
+  /** Finite per-target timeout in milliseconds; legacy 0 selects the 30-second default. */
   readonly timeoutMs: number;
-  /** Backoff between transient failures: a configured chain runs once; primary-only retries persist. */
+  /** Cooldown timing for unavailable targets; it never delays independent fallbacks. */
   readonly retry: Partial<JudgmentRetryPolicy>;
   /** Additional System One targets. No discovery or implicit alternate providers. */
   readonly fallbacks?: readonly JudgmentFallback[];
@@ -70,7 +72,7 @@ export function judgmentConfigFromEnv(
   return {
     endpoint: { kind: endpointKind(baseURL), baseURL, apiKey },
     model: overrides.model ?? (env['TYPESAFE_DEFAULT_MODEL']?.trim() || DEFAULT_MODEL),
-    timeoutMs: overrides.timeoutMs ?? 0,
+    timeoutMs: overrides.timeoutMs ?? 30_000,
     retry: overrides.retry ?? {},
     ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     ...(overrides.fallbacks === undefined ? {} : { fallbacks: overrides.fallbacks }),
@@ -87,9 +89,21 @@ export function validateJudgmentConfig(config: JudgmentConfig): void {
   const targets = [{ endpoint: config.endpoint, model: config.model }, ...(config.fallbacks ?? [])];
   for (const target of targets) {
     if (!target || !target.endpoint || !['hosted', 'local'].includes(target.endpoint.kind)
-      || !validEndpointURL(target.endpoint.baseURL) || typeof target.endpoint.apiKey !== 'string' || !target.endpoint.apiKey.trim()
+      || !validEndpointURL(target.endpoint.baseURL) || typeof target.endpoint.apiKey !== 'string'
       || typeof target.model !== 'string' || !target.model.trim()) {
       throw new JudgmentError('invalid-request', 'invalid judgment target; use an http(s) URL without credentials, query or fragment, a model and a resolved key');
+    }
+    const endpoint = target.endpoint;
+    try {
+      captureJudgmentBackendSettings({
+        ...(endpoint.adapter === undefined ? {} : { adapter: endpoint.adapter }),
+        ...(endpoint.maxInputBytes === undefined ? {} : { maxInputBytes: endpoint.maxInputBytes }),
+        ...(endpoint.maxQuestions === undefined ? {} : { maxQuestions: endpoint.maxQuestions }),
+        ...(endpoint.responseModels === undefined ? {} : { responseModels: endpoint.responseModels }),
+      });
+      if (endpoint.authentication !== undefined && !['bearer', 'none'].includes(endpoint.authentication)) throw new Error('Invalid authentication');
+    } catch {
+      throw new JudgmentError('invalid-request', 'invalid judgment backend capabilities or model aliases');
     }
   }
   if (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 0 || config.timeoutMs > 2_147_483_647

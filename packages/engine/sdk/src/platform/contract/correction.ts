@@ -114,30 +114,27 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
   /** Retry only the interrupted reading. Replaying a correction step would
    * spend another fix round or run its planner and workers a second time. */
-  async function recoverReading<T>(run: ContractRun, targetId: string, what: string, read: () => Promise<T>): Promise<T> {
-    for (let failures = 0; ; failures++) {
-      run.abort.signal.throwIfAborted();
-      try { return await read(); }
-      catch (error) {
-        if (run.terminal || isAbortError(error, run.abort.signal) || !(error instanceof JudgmentError)
-          || (error.kind !== 'unavailable' && error.kind !== 'unrecorded')) throw error;
-        const delay = Math.min(30_000, 1_000 * 2 ** Math.min(failures, 5));
-        run.decide('resumed', targetId, `${what} pending: ${failureFromError(error).reason}; retained work and correction budget unchanged, retry in ${delay / 1_000} seconds; no verdict`);
+  async function readOwned<T>(run: ContractRun, targetId: string, what: string, read: () => Promise<T>): Promise<T> {
+    run.abort.signal.throwIfAborted();
+    try { return await read(); }
+    catch (error) {
+      if (!run.terminal && error instanceof JudgmentError && (error.kind === 'unavailable' || error.kind === 'unrecorded')) {
+        run.decide('stalled', targetId, `${what} stopped: ${failureFromError(error).reason}; work is retained and no verdict was invented`);
         context.checkpoint?.(run);
-        await waitForTaskRecovery(delay, run.abort.signal);
       }
+      throw error;
     }
   }
 
   function readDecision(run: ContractRun, input: Parameters<typeof decideNativeContract>[2]) {
-    return recoverReading(run, input.targetId, 'native correction verification',
+    return readOwned(run, input.targetId, 'native correction verification',
       () => decideNativeContract(run.contract, context.native, input));
   }
 
   async function readRoute(run: ContractRun, state: Record<string, unknown>): Promise<{ readonly route: StallRoute; readonly act: boolean; readonly decisionId: string | undefined; recordAction(action: string): void }> {
     const usage = emptyJudgmentUsage();
     try {
-      const read = await recoverReading(run, run.id, 'correction routing', () => stallRoute.run(meteredPort(nativeContractPort(run.contract, context.native, judgmentPort(STALL_ROUTE_SITE), run.abort.signal), usage), state as Parameters<typeof stallRoute.run>[1], { site: STALL_ROUTE_SITE, signal: run.abort.signal }));
+      const read = await readOwned(run, run.id, 'correction routing', () => stallRoute.run(meteredPort(nativeContractPort(run.contract, context.native, judgmentPort(STALL_ROUTE_SITE), run.abort.signal), usage), state as Parameters<typeof stallRoute.run>[1], { site: STALL_ROUTE_SITE, signal: run.abort.signal }));
       const reading = read.readings.route;
       return { route: reading.choice, act: reading.outcome === 'act', decisionId: read.result.decisionId, recordAction: (action) => read.recordAction(action) };
     } finally {
@@ -222,26 +219,10 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       criteria: brief.criteria.map((criterion) => ({ id: criterion.id, text: criterion.text, quote: undefined })),
       groups: [checked.group],
     };
-    for (let failures = 0; ; failures++) {
-      try {
-        const jev = await runUnitShapeChecks(shaped, { signal: run.abort.signal, nativeSource: run.contract.nativeSource, native: { contract: run.contract, services: context.native } });
-        addJudgmentUsage(run.contract.judgmentUsage, jev.usage);
-        return { group: checked.group, plan: checked.plan, problems: jev.problems, decisionIds: jev.decisionIds };
-      } catch (error) {
-        if (isAbortError(error, run.abort.signal) || failureFromError(error).kind !== 'judgment-unavailable') throw error;
-        const delay = Math.min(30_000, 1_000 * 2 ** Math.min(failures, 5));
-        run.decide('resumed', brief.targetId, `fix-plan verification pending; exact proposal retained, retry in ${delay / 1_000} seconds, no verdict: ${failureFromError(error).reason}`);
-        context.checkpoint?.(run);
-        await new Promise<void>(resolve => {
-          const done = (): void => { clearTimeout(timer); run.abort.signal.removeEventListener('abort', done); resolve(); };
-          const timer = setTimeout(done, delay);
-          timer.unref?.();
-          run.abort.signal.addEventListener('abort', done, { once: true });
-          if (run.abort.signal.aborted) done();
-        });
-        run.abort.signal.throwIfAborted();
-      }
-    }
+    run.abort.signal.throwIfAborted();
+    const jev = await runUnitShapeChecks(shaped, { signal: run.abort.signal, nativeSource: run.contract.nativeSource, native: { contract: run.contract, services: context.native } });
+    addJudgmentUsage(run.contract.judgmentUsage, jev.usage);
+    return { group: checked.group, plan: checked.plan, problems: jev.problems, decisionIds: jev.decisionIds };
   }
 
   /**
@@ -254,7 +235,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     const { contract } = run;
     const input = await prepareFixPlannerInput(run);
     assertNativeContractSource(contract);
-    const route = await recoverReading(run, brief.targetId, 'fix planner routing',
+    const route = await readOwned(run, brief.targetId, 'fix planner routing',
       () => nativeContractRoute(context.routeSelector, contract, context.native, { purpose: 'planner', contract: run.view() }, run.abort.signal));
     if (contract.nativeSource !== undefined) { await planNativeFix(run, brief, round, route, input); return; }
     let repair: { problems: readonly PlanProblem[]; previousPlan: string } | undefined;
@@ -459,7 +440,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
   }
 
   async function freshUnit(run: ContractRun, unit: ContractUnit, reason: string, decisionIds: readonly string[]): Promise<void> {
-    const route = await recoverReading(run, unit.id, 'fresh worker routing',
+    const route = await readOwned(run, unit.id, 'fresh worker routing',
       () => nativeContractRoute(context.routeSelector, run.contract, context.native, { purpose: 'fresh-unit', contract: run.view(), unit: structuredClone(unit) }, run.abort.signal));
     if (run.contract.nativeSource !== undefined) {
       const cost = itemClosed(run, unit) ? 2 : 1;

@@ -54,13 +54,17 @@ function headlineProblem(question: Question, answer: RawAnswer): string | undefi
 }
 
 /**
- * Accept hundredth-precision fields without treating their displayed digits
+ * Accept hundredth-precision and four-decimal wire fields without treating their displayed digits
  * as the original probabilities. This is a compatibility tolerance, not a
  * guarantee about the provider's rounding algorithm. Higher-precision fields
  * keep their original precision. Validation never rewrites the answer.
  */
 function roundingRadius(value: number): number {
-  return Math.abs(value * 100 - Math.round(value * 100)) < 1e-12 ? 0.005 : Number.EPSILON * 4;
+  if (Math.abs(value * 100 - Math.round(value * 100)) < 1e-12) return 0.005;
+  // Laya's System One server serializes distributions to four decimal places.
+  // Preserve those supplied values; allow only their declared rounding interval.
+  if (Math.abs(value * 10_000 - Math.round(value * 10_000)) < 1e-10) return 0.00005;
+  return Number.EPSILON * 4;
 }
 
 /** Extreme means of a unit-mass distribution inside the supplied intervals. */

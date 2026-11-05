@@ -81,6 +81,7 @@ describe('browser judgment service (synthetic port only)', () => {
     let hostedAllowed = true; let attempts = 0;
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: 'jev-1.13.0', timeoutMs: 1000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      fallbacks: Array.from({ length: 8 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: 'jev-1.13.0' })),
       fetch: async () => { attempts++; hostedAllowed = false; return new Response('', { status: 503 }); },
     });
     const f = fixture({ transport, endpointKinds: ['hosted'], authorize: ({ route }) => route.kind === 'local' || hostedAllowed });
@@ -145,10 +146,11 @@ describe('browser judgment service (synthetic port only)', () => {
     } finally { finish?.(); await pending.catch(() => {}); await f.service.close(); f.log[Symbol.dispose](); timers.mockRestore(); }
   });
 
-  test('one browser call survives repeated provider outages through the shared transport', async () => {
+  test('one browser call tries the explicitly configured decision targets', async () => {
     let attempts = 0;
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: 'jev-1.13.0', timeoutMs: 1000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      fallbacks: Array.from({ length: 8 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: 'jev-1.13.0' })),
       fetch: async () => {
         if (++attempts < 9) return new Response('', { status: 503 });
         return Response.json({ model: 'jev-1.13.0', answers: Object.fromEntries(names.map((name) => [name, { type: 'noul', noul: 0.01 }])), usage: { input_tokens: 1, output_tokens: 1 } });
@@ -166,6 +168,7 @@ describe('browser judgment service (synthetic port only)', () => {
     let current = true; let attempts = 0;
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: 'jev-1.13.0', timeoutMs: 1000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      fallbacks: Array.from({ length: 8 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: 'jev-1.13.0' })),
       fetch: async () => { attempts++; current = false; return new Response('', { status: 503 }); },
     });
     const code = kind === 'source' ? 'JUDGMENT_REFERENCE_HELD' : kind === 'authentication' ? 'JUDGMENT_AUTH_REQUIRED' : 'JUDGMENT_PERMISSION_HELD';
@@ -186,6 +189,7 @@ describe('browser judgment service (synthetic port only)', () => {
     let attempts = 0; let guarded = 0;
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: 'jev-1.13.0', timeoutMs: 1000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      fallbacks: Array.from({ length: 8 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: 'jev-1.13.0' })),
       fetch: async () => { attempts++; return new Response('', { status: 503 }); },
     });
     const f = fixture({ transport, beforeAttempt() {
@@ -202,14 +206,16 @@ describe('browser judgment service (synthetic port only)', () => {
     } finally { await f.service.close(); f.log[Symbol.dispose](); }
   });
 
-  test.each(['expiry', 'revocation'] as const)('owned reference %s interrupts long Retry-After and releases admission', async (kind) => {
+  test.each(['expiry', 'revocation'] as const)('owned reference %s cancels a pending backup and releases admission', async (kind) => {
     let attempts = 0; let retries = 0; let recover = false;
     let ready!: () => void; const waiting = new Promise<void>((resolve) => { ready = resolve; });
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: 'jev-1.13.0', timeoutMs: 1000,
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
-      fetch: async () => {
+      fallbacks: Array.from({ length: 8 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${index + 2}`, apiKey: 'synthetic-key' }, model: 'jev-1.13.0' })),
+      fetch: async (url, init) => {
         attempts++;
-        if (!recover) return new Response('', { status: 503, headers: { 'Retry-After': '3600' } });
+        if (!recover && String(url).startsWith('http://127.0.0.1:1/')) return new Response('', { status: 503, headers: { 'Retry-After': '3600' } });
+        if (!recover) return await new Promise<Response>((_, reject) => { init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true }); });
         return Response.json({ model: 'jev-1.13.0', answers: Object.fromEntries(names.map((name) => [name, { type: 'noul', noul: 0.01 }])), usage: { input_tokens: 1, output_tokens: 1 } });
       },
     });
@@ -227,18 +233,19 @@ describe('browser judgment service (synthetic port only)', () => {
     try {
       const pending = Array.from({ length: 4 }, () => f.service.execute(body(reference), owner, new AbortController().signal, () => owner).catch((error: unknown) => error));
       await waiting;
-      expect(attempts).toBe(4);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(attempts).toBe(8);
       await expect(f.service.execute(body(reference), owner, new AbortController().signal, () => owner)).rejects.toMatchObject({ code: 'JUDGMENT_BUSY' });
       if (kind === 'expiry') expire(); else f.references.revoke(reference);
       for (const result of await Promise.all(pending)) expect(result).toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
       // Accepted calls drain without the provider's hour-long cooldown or a
-      // fifth transmission; the same principal can admit fresh work again.
+      // further transmission; the same principal can admit fresh work again.
       await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(attempts).toBe(4);
+      expect(attempts).toBe(8);
       recover = true;
       const fresh = f.references.issue({ ...source, expiresAt: Date.now() + 60_000 });
       expect(await f.service.execute(body(fresh), owner, new AbortController().signal, () => owner)).toMatchObject({ status: 'settled' });
-      expect(attempts).toBe(5);
+      expect(attempts).toBe(9);
       expect(f.log.query({ status: 'failed' })).toHaveLength(0);
     } finally { timer.mockRestore(); await f.service.close(); f.log[Symbol.dispose](); }
   });

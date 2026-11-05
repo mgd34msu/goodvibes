@@ -12,6 +12,7 @@ import { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { JevDecisionContext } from '@goodvibes-jev/judgment/decisions';
 import { JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { JudgmentPort as JudgmentPort_2 } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentRetryProgress } from '@goodvibes-jev/judgment';

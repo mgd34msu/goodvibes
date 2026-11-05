@@ -1,12 +1,12 @@
 import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
 import { checkAnswers, projectAnswers } from './answers.ts';
-import { clientFor, systemOneWithoutDeadline, toJudgmentError } from './client.ts';
+import { toJudgmentError } from './client.ts';
+import { acceptsBackendModel, askBackend, judgmentAdapter, validateBackendInput } from './backends.ts';
 import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
-import { matchesJudgmentModel } from './endpoint-validation.ts';
 import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
 import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
 import { withRequestId } from './request-id.ts';
-import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
+import { interruptible, retryDelay, retryPolicy } from './retry.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 function needsContextUpgrade(error: unknown): boolean {
@@ -17,18 +17,20 @@ function needsContextUpgrade(error: unknown): boolean {
   return !!detail && typeof detail === 'object' && 'error_type' in detail && detail.error_type === 'max_tokens_exceeded';
 }
 
-/** One attempt owner: configured failover exhausts once; a primary-only outage retries until cancelled. */
+/** Each configured target gets one finite attempt; a valid answer ends the chain. */
 export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   validateJudgmentConfig(config);
-  const targets = [{ endpoint: { ...config.endpoint }, model: config.model }, ...(config.fallbacks ?? []).map((t) => ({ ...t, endpoint: { ...t.endpoint } }))];
+  const targets = [{ endpoint: config.endpoint, model: config.model }, ...(config.fallbacks ?? [])].map(target => ({
+    model: target.model, endpoint: { ...target.endpoint, ...(target.endpoint.responseModels === undefined ? {} : { responseModels: [...target.endpoint.responseModels] }) },
+  }));
   const fetch = config.fetch;
-  const clients = targets.map(({ endpoint, model }) => config.timeoutMs > 0 ? clientFor({ ...config, endpoint, model }, true) : undefined);
   const policy = retryPolicy(config.retry);
-  const timeoutMs = config.timeoutMs;
+  const timeoutMs = config.timeoutMs || 30_000;
+  const cooldowns = targets.map(() => 0);
   const defaultModel = config.model;
   const ownerSignal = config.signal;
   const health: JudgmentEndpointHealth[] = targets.map(({ endpoint, model }, endpointIndex) => ({ endpointIndex, endpointKind: endpoint.kind, model, attempts: 0, consecutiveFailures: 0 }));
-  const keys = targets.map((target) => target.endpoint.apiKey);
+  const keys = targets.map((target) => target.endpoint.apiKey).filter(key => key.length > 0);
   const safeId = (value: string | undefined): string | undefined => {
     if (!value || value.length > 256 || !/^[A-Za-z0-9._:-]+$/.test(value) || keys.some((key) => value.includes(key))) return undefined;
     // Provider request IDs are optional diagnostics. A valid opaque ID can
@@ -41,7 +43,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
 
   return {
     model: defaultModel,
-    health: () => health.map((item) => ({ ...item })),
+    health: () => health.map((item, index) => {
+      const remaining = Math.max(0, (cooldowns[index] ?? 0) - Date.now());
+      return { ...item, ...(remaining > 0 ? { cooldownRemainingMs: remaining } : {}) };
+    }),
     async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
       const started = performance.now();
       // These locally generated opaque keys need no decimal spelling. Retain
@@ -71,6 +76,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
       };
       try {
         if (owners.length === 0) throw new JudgmentError('invalid-request', 'judgment calls require an owning AbortSignal on the request or port');
+        if (typeof requestedModel !== 'string' || !/^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(requestedModel)) {
+          throw new JudgmentError('invalid-request', 'judgment model overrides must be nonempty model identifiers');
+        }
         if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are not supported; cancel through the owning signal');
         checkCancellation();
         let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
@@ -79,14 +87,18 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         const { state, questions } = input;
         validateQuestions(questions);
         validateContextBudget(state, questions);
-        let headers = requiresLongContext(state, questions) ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : undefined;
-        // Exhaust a configured failover chain once; a primary-only outage retries until cancellation.
-        const eligible = targets.map((target, endpointIndex) => ({ target, endpointIndex }))
-          .filter(({ target, endpointIndex }) => endpointIndex === 0 || target.model === requestedModel);
-        let retry = 0;
-        for (;;) {
-          for (let eligibleIndex = 0; eligibleIndex < eligible.length; eligibleIndex++) {
-            const { target, endpointIndex } = eligible[eligibleIndex]!;
+        let lastFailure: JudgmentError | undefined;
+        const eligible = targets.map((target, endpointIndex) => ({ target, endpointIndex }));
+        for (let eligibleIndex = 0; eligibleIndex < eligible.length; eligibleIndex++) {
+          const entry = eligible[eligibleIndex];
+          if (entry === undefined) throw new JudgmentError('invalid-request', 'invalid judgment target order');
+          const { target, endpointIndex } = entry;
+          if (cooldowns[endpointIndex]! > Date.now()) continue;
+          const targetModel = endpointIndex === 0 ? requestedModel : target.model;
+          let headers = judgmentAdapter(target.endpoint) === 'system-one' && requiresLongContext(state, questions)
+            ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : undefined;
+          let contextUpgrade = false;
+          for (;;) {
             checkCancellation();
             try {
               if (beforeAsyncAttempt) {
@@ -124,10 +136,13 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             const attemptTimer = timeoutMs > 0 ? setTimeout(() => attemptController.abort(new APITimeoutError(timeoutMs)), timeoutMs) : undefined;
             let failure: unknown;
             try {
+              const body = { state, questions, model: targetModel };
+              validateBackendInput(target.endpoint, targetModel, body);
+              if (target.endpoint.authentication !== 'none' && !target.endpoint.apiKey.trim()) {
+                throw new JudgmentError('unavailable', 'this judgment target has no resolved credential');
+              }
               const response = await interruptible(withRequestId(
-                () => timeoutMs === 0
-                  ? systemOneWithoutDeadline({ ...target, timeoutMs: 0, retry: {}, ...(fetch ? { fetch } : {}) }, { state, questions, model: requestedModel }, attemptController.signal, headers)
-                  : clients[endpointIndex]!.systemOne({ state, questions, model: requestedModel }, { signal: attemptController.signal, ...(headers === undefined ? {} : { headers }) }),
+                () => askBackend({ ...target, timeoutMs, retry: {}, ...(fetch ? { fetch } : {}) }, body, attemptController.signal, headers),
                 (id) => { requestId = safeId(id); },
               ), attemptController.signal);
               checkCancellation();
@@ -138,9 +153,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               }
               try { checkAnswers(questions, result.answers, requestId); }
               catch { throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions'); }
-              if (!matchesJudgmentModel(requestedModel, result.model)) throw new JudgmentError('invalid-response', 'System One returned a model that does not match the requested model or Jev alias');
+              if (!acceptsBackendModel(target.endpoint, targetModel, result.model)) throw new JudgmentError('invalid-response', 'the decision model does not match this configured target or its declared alias');
               const attempt: JudgmentAttempt = {
-                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel,
+                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel,
                 latencyMs: performance.now() - attemptStarted, outcome: 'answered', ...(requestId ? { requestId } : {}),
               };
               remember(attempt);
@@ -153,9 +168,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             } catch (error) {
               failure = controller.signal.aborted ? controller.signal.reason : attemptController.signal.aborted ? attemptController.signal.reason : error;
               const last = toJudgmentError(failure);
+              lastFailure = last;
               requestId = safeId(last.requestId) ?? requestId;
               remember({
-                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel,
+                attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel,
                 latencyMs: performance.now() - attemptStarted, outcome: last.kind,
                 ...(last.status === undefined ? {} : { status: last.status }), ...(requestId ? { requestId } : {}),
               });
@@ -163,35 +179,44 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               // Exact server tokenization can exceed the character estimate.
               // Retry the complete input on the same endpoint in long-context
               // mode, retaining this refusal and rechecking owner authority.
-              if (headers === undefined && needsContextUpgrade(failure)) {
+              if (!contextUpgrade && headers === undefined && judgmentAdapter(target.endpoint) === 'system-one' && needsContextUpgrade(failure)) {
                 headers = { 'TypeSafe-Danger-Zone-Long-Context': 'true' };
-                eligibleIndex--;
+                contextUpgrade = true;
                 continue;
               }
-              if (last.kind !== 'unavailable' || !retryable(failure)) throw last;
+              // Host admission failures run outside this catch. A valid semantic
+              // refusal or abstention is final; HTTP/config/response failures
+              // belong to this target and may advance to another configured model.
+              if (last.kind === 'aborted' || failure instanceof JudgmentError && last.kind === 'rejected') throw last;
+              if (failure instanceof APIError && (failure.headers.has('retry-after') || failure.headers.has('retry-after-ms'))) {
+                cooldowns[endpointIndex] = Date.now() + retryDelay(failure, 0, policy);
+              }
             } finally {
               clearTimeout(attemptTimer);
               controller.signal.removeEventListener('abort', abortAttempt);
             }
             checkCancellation();
-            if (targets.length > 1 && endpointIndex === eligible.at(-1)?.endpointIndex) {
-              const last = toJudgmentError(failure);
-              throw new JudgmentError('unavailable', 'all compatible configured judgment endpoints are unavailable', {
-                ...(last.status === undefined ? {} : { status: last.status }), ...(requestId ? { requestId } : {}),
-              });
+            if (eligibleIndex + 1 < eligible.length) {
+              // A Retry-After applies to the failed target, never to an independent backup.
+              try {
+                const observed = onRetry?.(Object.freeze({ logicalRequestId,
+                  attempt: Object.freeze({ ...attempts[attempts.length - 1]! }),
+                  elapsedMs: performance.now() - started, nextDelayMs: 0 }));
+                void Promise.resolve(observed).catch(() => {});
+              } catch { /* Progress reporting never decides the reading. */ }
             }
-            const nextDelayMs = retryDelay(failure, retry, policy);
-            retry = Math.min(retry + 1, 30);
-            // Observers cannot change evidence or turn an outage into a terminal failure.
-            try {
-              const observed = onRetry?.(Object.freeze({ logicalRequestId,
-                attempt: Object.freeze({ ...attempts[attempts.length - 1]! }),
-                elapsedMs: performance.now() - started, nextDelayMs }));
-              void Promise.resolve(observed).catch(() => {});
-            } catch { /* Progress reporting never decides the reading. */ }
-            await delay(nextDelayMs, controller.signal);
+            break;
           }
         }
+        const last = attempts.at(-1);
+        // Preserve a precise terminal protocol/configuration diagnostic when
+        // there is only one target; context-limit callers can still partition
+        // complete evidence. Availability failures always use the halt notice.
+        if (targets.length === 1 && lastFailure && lastFailure.kind !== 'unavailable') throw lastFailure;
+        throw new JudgmentError('unavailable', 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.', {
+          ...(last?.status === undefined ? {} : { status: last.status }),
+          ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
+        });
       } catch (error) {
         const failure = toJudgmentError(error);
         // Do not retain upstream causes, bodies, headers, URLs or API keys in a public error/log.

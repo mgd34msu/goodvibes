@@ -43,7 +43,7 @@ import {
   SECRET_BEARING_CONFIG_PATHS,
 } from './secret-bearing-config-keys.js';
 import { configKeyDescription, holdsCredential } from './credential-key-reading.js';
-import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from './structured-credential-config.js';
+import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue, isScalarCredentialReferenceConfigKey, assertScalarCredentialReferenceConfigValue } from './structured-credential-config.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
 import { SWEPT_CREDENTIAL_READER_FLOOR } from './settings-reader-floor.js';
 import type { SecretScope, SecretStorageMedium } from './secrets.js';
@@ -193,6 +193,11 @@ export async function sweepPlaintextCredentials(
   // ordinary setting cannot be passed through this door and rewritten.
   const extra: string[] = [];
   for (const key of new Set(additionalKeys)) {
+    if (isScalarCredentialReferenceConfigKey(key)) {
+      const value = config.get(key);
+      if (value !== undefined) assertScalarCredentialReferenceConfigValue(key, value);
+      continue;
+    }
     if (isStructuredCredentialReferenceConfigKey(key)) {
       const value = config.get(key);
       if (value !== undefined) captureStructuredCredentialReferenceConfigValue(key, value);

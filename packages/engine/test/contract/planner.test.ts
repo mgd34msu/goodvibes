@@ -396,26 +396,20 @@ describe('planContract: failure, with no single-item fallback', () => {
     expect(requests).toHaveLength(0);
   });
 
-  test('a Jev outage during plan checks waits for recovery and validates the same proposal', async () => {
-    const entered = Promise.withResolvers<void>();
-    install(() => { entered.resolve(); throw new JudgmentError('unavailable', 'endpoint down'); });
+  test('exhausted decision models halt plan checking without regenerating the proposal', async () => {
+    let reads = 0;
+    install(() => { reads++; throw new JudgmentError('unavailable', 'endpoint down'); });
     const contract = shapedContract(), h = harness([plannerOutput(validPlan())]);
-    const pending = planContract(contract, h.deps);
-    await entered.promise;
-    expect(contract.status).not.toBe('failed');
-    install();
-    expect((await pending).kind).toBe('accepted');
-    expect(h.requests).toHaveLength(1);
-    expect(ofType(h.events, 'CONTRACT_FAILED')).toHaveLength(0);
+    expect(await planContract(contract, h.deps)).toMatchObject({ kind: 'failed', failureKind: 'judgment-unavailable' });
+    expect(reads).toBeGreaterThan(0); expect(h.requests).toHaveLength(1);
+    expect(ofType(h.events, 'CONTRACT_FAILED')).toHaveLength(1);
   });
 
-  test('no port during plan checks holds completion and honors caller cancellation', async () => {
+  test('a missing decision port halts plan checking without waiting for an owner cancellation', async () => {
     const contract = shapedContract(), controller = new AbortController();
-    const pending = planContract(contract, harness([plannerOutput(validPlan())]).deps, { signal: controller.signal });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    expect(contract.status).not.toBe('failed');
-    controller.abort();
-    expect((await pending).kind).toBe('cancelled');
+    expect(await planContract(contract, harness([plannerOutput(validPlan())]).deps, { signal: controller.signal }))
+      .toMatchObject({ kind: 'failed', failureKind: 'judgment-unavailable' });
+    expect(contract.status).toBe('failed');
   });
 
   test('an aborted signal ends planning as cancelled without failing the contract', async () => {

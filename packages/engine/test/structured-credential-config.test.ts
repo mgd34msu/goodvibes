@@ -162,3 +162,9 @@ test('plaintext sweep leaves valid reference arrays intact and refuses malformed
   await expect(sweepPlaintextCredentials({ ...config, get: (name: string) => name === key ? marker : undefined }, secrets, [key])).rejects.toThrow('Invalid judgment fallback settings');
   expect(calls).toBe(0);
 });
+
+test('primary credential names remain separately declared references through the plaintext sweep', async () => {
+  expect(undeclaredSchemaKeys().some(entry => entry.key === 'judgment.keyName')).toBe(false);
+  const schema = CONFIG_SCHEMA.filter(entry => entry.key !== 'judgment.keyName');
+  expect(structuredCredentialConfigSchemaFailures(schema)).toEqual([{ key: 'judgment.keyName', reason: expect.any(String) }]);
+});

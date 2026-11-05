@@ -1,3 +1,4 @@
+import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { setTimeout as waitForRetry } from 'node:timers/promises';
 import { prepareProjectFramework, readRepeatedCalls, captureOrchestratorObservationOwner, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
@@ -287,6 +288,7 @@ async function executeToolCalls(
       }
     } catch (err) {
       assertCallCurrent();
+      assertDecisionAvailable(err);
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();
       const toolErr = signal?.aborted ? 'cancelled by user' : summarizeError(err);
       recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, JSON.stringify(call.arguments));

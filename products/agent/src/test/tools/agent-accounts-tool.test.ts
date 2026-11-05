@@ -47,7 +47,8 @@ describe('the account register', () => {
     home = makeProjectTempDir('accounts-tool');
     resetSessionUntrustedContentLedgerForTests(); resetSessionExpectationBookForTests();
     log = new SqliteDecisionLog(':memory:');
-    const fake = fakePort((name, question) => {
+    const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (question.type === 'noul') return noulAnswer(0.001);
       if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' || name === 'effect__kind' ? 'read' : 'generic', 0.999);
       throw new Error(`Unexpected question ${name}`);

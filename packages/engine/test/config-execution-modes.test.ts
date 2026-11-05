@@ -24,6 +24,8 @@ test('settings expose execution mode and explicit owner restrictions while saved
   const { open, settings } = fixture();
   writeFileSync(settings, JSON.stringify({ permissions: { mode: 'prompt', tools: { read: 'deny' } }, behavior: { autoApprove: true } }));
   const manager = open();
+  const schema = manager.getSchema();
+  expect(manager.getSchema()).toBe(schema);
   const keys = new Set(manager.getSchema().map(setting => setting.key));
   expect(keys.has('permissions.mode')).toBe(true);
   expect(keys.has('behavior.autoApprove')).toBe(false);
@@ -34,6 +36,7 @@ test('settings expose execution mode and explicit owner restrictions while saved
   expect(manager.get('behavior.autoApprove')).toBe(true);
   expect(isEffectiveDangerMode(manager)).toBe(true);
   manager.set('permissions.mode', 'safe-owner');
+  expect(manager.getSchema()).toBe(schema);
   expect(isEffectiveDangerMode(manager)).toBe(false);
 });
 

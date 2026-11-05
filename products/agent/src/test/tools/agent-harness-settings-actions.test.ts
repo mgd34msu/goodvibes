@@ -1873,7 +1873,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         readonly total: number;
         readonly note?: string;
       };
-      const visibleSettingKeys = CONFIG_SCHEMA
+      const visibleSettingKeys = CONFIG_SCHEMA.filter(setting => !setting.deprecated)
         .filter((setting) => !isAgentHiddenSettingKey(setting.key))
         .map((setting) => setting.key)
         .sort();
@@ -1905,10 +1905,10 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         readonly returned: number;
         readonly total: number;
       };
-      expect(allPayload.returned).toBe(CONFIG_SCHEMA.length);
-      expect(allPayload.total).toBe(CONFIG_SCHEMA.length);
+      expect(allPayload.returned).toBe(CONFIG_SCHEMA.filter(setting => !setting.deprecated).length);
+      expect(allPayload.total).toBe(CONFIG_SCHEMA.filter(setting => !setting.deprecated).length);
       expect(allPayload.settings.filter((setting) => !setting.visibleInWorkspace).map(setting => setting.key).sort())
-        .toEqual(CONFIG_SCHEMA.filter(setting => isAgentHiddenSettingKey(setting.key)).map(setting => setting.key).sort());
+        .toEqual(CONFIG_SCHEMA.filter(setting => !setting.deprecated && isAgentHiddenSettingKey(setting.key)).map(setting => setting.key).sort());
 
       const filteredSettings = await fixture.tool.execute({
         mode: 'settings',

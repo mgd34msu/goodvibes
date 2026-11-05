@@ -23,7 +23,8 @@ let onPrivacyRead: (() => void) | undefined;
 
 beforeEach(() => {
   decisions = new SqliteDecisionLog(':memory:');
-  const answers = fakePort((name, question) => {
+  const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const value = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (value === undefined || !Object.hasOwn(question.criteria, value)) throw new Error(`Unexpected synthetic choice ${name}`);

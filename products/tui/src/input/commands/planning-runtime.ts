@@ -239,7 +239,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       const sub = (args[0] ?? 'toggle').toLowerCase();
       const next: PermissionModeValue =
         sub === 'on' || sub === 'enter' ? 'plan'
-        : sub === 'off' || sub === 'exit' ? 'prompt'
+        : sub === 'off' || sub === 'exit' ? 'safe-owner'
         : togglePlanMode(current);
       configManager.set('permissions.mode', next);
       ctx.print(next === 'plan'

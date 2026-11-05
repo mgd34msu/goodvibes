@@ -13,7 +13,8 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 let previous: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type !== 'choice') throw new Error('Unexpected synthetic schedule question');
     const label = name === 'disposition' ? Object.hasOwn(question.criteria, 'act') ? 'act' : 'reject'

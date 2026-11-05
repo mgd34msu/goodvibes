@@ -122,7 +122,7 @@ describe('Agent host notification setting through actual settings surfaces', () 
     }
     expect(await resetHarnessSetting(config, null, KEY)).toMatchObject({ key: KEY, current: true });
     // Ordinary SDK keys retain the harness's existing string coercion.
-    expect(await setHarnessSetting(config, null, 'behavior.autoApprove', 'false')).toMatchObject({ current: false });
+    expect(await setHarnessSetting(config, null, 'display.stream', 'false')).toMatchObject({ current: false });
   });
 
   test('real config drives a fake approval sink live and reset revokes supported details', async () => {

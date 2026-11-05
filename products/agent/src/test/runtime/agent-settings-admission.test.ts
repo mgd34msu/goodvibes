@@ -70,7 +70,8 @@ afterEach(async () => {
 });
 
 function recordedPort(): JudgmentPort {
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition' && question.type === 'choice') {
       const choice = selected === 'act' && !Object.hasOwn(question.criteria, 'act') ? 'reject' : selected;
       return choiceAnswer(question, choice, 0.999);

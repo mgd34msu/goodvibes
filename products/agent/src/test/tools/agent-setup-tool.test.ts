@@ -21,7 +21,8 @@ let afterAdmission: ((tool: string) => void) | undefined;
 const roots: string[] = [];
 beforeEach(() => {
   afterAdmission = undefined;
-  readings = fakePort((name, question, state) => {
+  readings = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     const owner = state && typeof state === 'object' && !Array.isArray(state) ? state.input : undefined;
     const tool = owner && typeof owner === 'object' && !Array.isArray(owner) && typeof owner.tool === 'string' ? owner.tool : '';

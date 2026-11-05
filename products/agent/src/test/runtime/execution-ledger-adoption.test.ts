@@ -32,7 +32,8 @@ beforeEach(resetTestRuntimeServices);
 function compose() {
   services = getTestRuntimeServices();
   forgetLedgerArgRoles();
-  const fixture = fakePort((name, question, state) => {
+  const fixture = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition') return choiceAnswer(question, 'act', 0.99);
     if (name === 'kind') return choiceAnswer(question, 'network', 0.99);
     const key = (state as { argument?: string }).argument;

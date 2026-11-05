@@ -40,7 +40,7 @@ describe('/plan mode toggle', () => {
     expect(out.at(-1)).toContain('Plan mode ON');
 
     await registry.execute('plan', [], makeCtx(config, out));
-    expect(config.store['permissions.mode']).toBe('prompt');
+    expect(config.store['permissions.mode']).toBe('safe-owner');
     expect(out.at(-1)).toContain('Plan mode OFF');
   });
 
@@ -56,7 +56,7 @@ describe('/plan mode toggle', () => {
     expect(config.store['permissions.mode']).toBe('plan');
 
     await registry.execute('plan', ['off'], makeCtx(config, out));
-    expect(config.store['permissions.mode']).toBe('prompt');
+    expect(config.store['permissions.mode']).toBe('safe-owner');
   });
 
   test('the project-planning command is still reachable under /project-plan and its alias', () => {

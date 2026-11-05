@@ -10,6 +10,7 @@ import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
 import diagnostics from '../fixtures/e2e-judgments/ci-diagnostics.json';
 import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
 import applicability from '../fixtures/e2e-judgments/completion-applicability.json';
+import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
 import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -24,6 +25,22 @@ const diagnosticQuestions: Readonly<Record<string, Questions>> = {
   },
   'diagnostic-severity': { severity: noticeSeverity.items.severity.question },
 };
+
+test('startup gate fixture requires the exact owned workspace, operation and questions', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'agent-startup-gate-'));
+  const server = startE2EJudgments({ ownedRoot: root });
+  const original = { ...ambientDraftGate, state: { ...ambientDraftGate.state, workingDirectory: join(root, 'workspace') } };
+  const ask = (body: unknown) => fetch(`${server.baseURL}/v1/systemone`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    expect((await ask(original)).status).toBe(200);
+    expect((await ask({ ...original, state: { ...original.state, workingDirectory: '/another/workspace' } })).status).toBe(422);
+    expect((await ask({ ...original, state: { ...original.state, arguments: { mode: 'send' } } })).status).toBe(422);
+    expect((await ask({ ...original, questions: { ...original.questions, extra: { type: 'noul' } } })).status).toBe(422);
+    expect((await ask(ambientDraftGate)).status).toBe(422);
+  } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test('headless applicability retains the real question and rejects changed instructions or requirements', async () => {
   const server = startE2EJudgments();

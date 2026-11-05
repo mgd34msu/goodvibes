@@ -37,7 +37,8 @@ const contentFields = new Set(['body', 'prompt']);
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  const scripted = fakePort((name, question, state) => {
+  const scripted = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type !== 'choice') throw new Error(`Unexpected synthetic schedule question ${name}`);
     const field = state && typeof state === 'object' && !Array.isArray(state) ? state.field : undefined;

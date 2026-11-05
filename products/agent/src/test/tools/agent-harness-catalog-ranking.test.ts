@@ -34,7 +34,8 @@ afterEach(() => {
 });
 
 function readings(fits: Readonly<Record<string, number>>) {
-  return requestDiagnostics.track(fakePort((name, question, state) => {
+  return requestDiagnostics.track(fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'match') return noulAnswer(fits[(state as unknown as { candidate: { name: string } }).candidate.name] ?? 0.01);
     if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'hazard' ? 'none' : 'generic', 0.999);
     return noulAnswer(0.001);

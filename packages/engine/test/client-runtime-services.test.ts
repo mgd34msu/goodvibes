@@ -348,7 +348,7 @@ test('real client composition refuses external MCP input in plan mode before jud
           requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }, {
           scope: { connectionId: 'blocked-composition-connection', destination: 'synthetic', signal: new AbortController().signal, assertCurrent() {} },
           operation: { sourceOf: () => ({ goal: 'Register using the supplied name Alice', criteria: [] }), inputFacts: [{ name: 'Alice' }], assertCurrent() {} },
-        })).toEqual({ action: 'decline' });
+        })).toEqual({ action: services === withoutOwner ? 'decline' : 'cancel' });
       } finally { services.judgment.port.ask = original; }
     }
     expect(gate.requests).toHaveLength(0);

@@ -72,7 +72,8 @@ function reader(source: ReturnType<typeof fixture>, beforeAnswer?: (name: string
   const negatives = new Set(['lineHasCredential', 'spanIsCredential', 'credentialRemains', 'identifying',
     'mutates', 'outward', 'secrets', 'obfuscated', 'catastrophic', 'cardDetails', 'irreversible', 'beyondProject', 'weakensSecurity',
     'flagsRisk', 'needsNetwork', 'needsPrivilege', 'platform_source', 'platform_requested']);
-  const fake = fakePort((name, question, state) => {
+  const fake = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     beforeAnswer?.(name, state);
     if (name === 'match' && question.type === 'noul') {
       const current = object(state), candidate = object(current.candidate);

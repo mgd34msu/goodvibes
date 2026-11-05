@@ -95,7 +95,7 @@ function routedHarness(input: {
         invoke: async <T,>(methodId: string, payload?: unknown): Promise<T> => {
           calls.push({ methodId, input: (payload ?? {}) as Record<string, unknown> });
           if (methodId === 'sessions.steer') daemon.steer((payload as { metadata: { correlationId: string } }).metadata.correlationId);
-          return { session: { id: HOSTED_ID } } as T;
+          return { session: { id: HOSTED_ID, permissionMode: 'safe-owner' } } as T;
         },
       },
       configManager: { get: (() => undefined) as never },

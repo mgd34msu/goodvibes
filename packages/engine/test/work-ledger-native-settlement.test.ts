@@ -104,7 +104,7 @@ test('native settlement accepts a genuine content review followed by original-re
   const contract = await completed(f.harness, started.admission.contractId);
   expect(contract.status).toBe('passed');
   expect(assessments).toBe(2);
-  expect(contract.checks.at(-1)!.decisionIds).toHaveLength(3);
+  expect(contract.checks.at(-1)!.decisionIds).toHaveLength(4);
   const receipt = await f.host.settle(f.key, f.authority);
   expect(receipt.attestation.outcome).toBe('verified');
   expect(f.harness.agentsOf('u1')).toHaveLength(1);
@@ -221,7 +221,7 @@ test('native settlement proves every original question across actual deliverable
   const rootCheck = contract.checks.at(-1)!;
   const rootIds = rootCheck.decisionIds.filter(id => f.log.get(id)?.context.site === 'contract.check.deliverable-judge');
   expect(rootIds).toHaveLength(2);
-  expect(rootCheck.decisionIds).toHaveLength(4);
+  expect(rootCheck.decisionIds).toHaveLength(5);
   expect(new Set(rootIds.map(id => f.log.get(id)!.stateHash)).size).toBe(1);
   for (const [index, criterion] of contract.criteria.entries()) {
     const id = criterion.readings.find(reading => reading.checkId === rootCheck.id)!.decisionId!;

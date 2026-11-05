@@ -28,7 +28,7 @@
 |  ┃  Ask anything, or type / for commands and @ for files                                           |
 |  ┃                                                                                                 |
 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
-|   balanced   /workspace/assistant     context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
+|   Safe — owner                        context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
 @STYLES
 0 1 fg=0;255;255
 0 1 bold=1
@@ -2490,26 +2490,10 @@
 29 8 fg=#94a3b8
 29 9 fg=#94a3b8
 29 10 fg=#94a3b8
-29 14 fg=#4e5c6f
-29 15 fg=#4e5c6f
-29 16 fg=#4e5c6f
-29 17 fg=#4e5c6f
-29 18 fg=#4e5c6f
-29 19 fg=#4e5c6f
-29 20 fg=#4e5c6f
-29 21 fg=#4e5c6f
-29 22 fg=#4e5c6f
-29 23 fg=#4e5c6f
-29 24 fg=#4e5c6f
-29 25 fg=#4e5c6f
-29 26 fg=#4e5c6f
-29 27 fg=#4e5c6f
-29 28 fg=#4e5c6f
-29 29 fg=#4e5c6f
-29 30 fg=#4e5c6f
-29 31 fg=#4e5c6f
-29 32 fg=#4e5c6f
-29 33 fg=#4e5c6f
+29 11 fg=#94a3b8
+29 12 fg=#94a3b8
+29 13 fg=#94a3b8
+29 14 fg=#94a3b8
 29 39 fg=#94a3b8
 29 40 fg=#94a3b8
 29 41 fg=#94a3b8

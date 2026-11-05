@@ -81,7 +81,8 @@ function record(port: JudgmentPort) {
   return log;
 }
 function approvalReadings() {
-  return fakePort((name, question) => {
+  return fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition') return choiceAnswer(question, 'act', 0.99);
     if (name === 'kind') return choiceAnswer(question, 'read', 0.99);
     if (name === 'family') return choiceAnswer(question, 'generic', 0.99);

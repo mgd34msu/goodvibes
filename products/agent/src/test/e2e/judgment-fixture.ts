@@ -13,6 +13,7 @@ import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
 import diagnosticFixtures from '../fixtures/e2e-judgments/ci-diagnostics.json';
 import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
 import completionApplicability from '../fixtures/e2e-judgments/completion-applicability.json';
+import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 
 const prompts = ['first words in a brand new workspace', 'please answer the e2e marmot question'] as const;
@@ -131,6 +132,16 @@ function diagnosticAnswer(body: unknown, ownedRoot: string | undefined): { kind:
   const marker = '<owned-fixture-root>';
   if (serialized.includes(marker)) return undefined;
   if (ownedRoot) serialized = serialized.split(JSON.stringify(ownedRoot).slice(1, -1)).join(marker);
+  if (ownedRoot && serialized === stable(ambientDraftGate)) return { kind: 'startup-draft-gate', answers: {
+    effect__mutates: { type: 'noul', noul: 0.99 }, effect__outward: { type: 'noul', noul: 0.01 },
+    effect__secrets: { type: 'noul', noul: 0.01 },
+    effect__kind: { type: 'choice', choice: 'write', confidence: 0.99,
+      probabilities: Object.fromEntries(Object.keys(ambientDraftGate.questions.effect__kind.criteria).map(key => [key, key === 'write' ? 1 : 0])) },
+    risk__family: { type: 'choice', choice: 'file-mutation', confidence: 0.99,
+      probabilities: Object.fromEntries(Object.keys(ambientDraftGate.questions.risk__family.criteria).map(key => [key, key === 'file-mutation' ? 1 : 0])) },
+    risk__irreversible: { type: 'noul', noul: 0.01 }, risk__beyondProject: { type: 'noul', noul: 0.01 },
+    risk__weakensSecurity: { type: 'noul', noul: 0.01 }, edge__cardDetails: { type: 'noul', noul: 0.01 },
+  } };
   for (const contract of diagnosticFixtures.contracts) for (const reading of contract.readings) {
     if (serialized === stable({ model: contract.model, questions: contract.questions, state: reading.state })) return { kind: contract.kind, answers: reading.answers };
   }

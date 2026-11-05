@@ -197,7 +197,8 @@ function makeParityFixture(options: { sourceOwner?: boolean } = {}) {
       }));
       return [battery.name, questions] satisfies readonly [string, Record<string, unknown>];
     }));
-    const answers = fakePort((name, question) => {
+    const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
       const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' ? 'generic' : undefined;
       if (question.type === 'choice' && label) return choiceAnswer(question, label, 0.999);
       if (question.type === 'noul' && ['mutates', 'outward', 'secrets', 'obfuscated', 'irreversible', 'beyondProject', 'weakensSecurity', 'catastrophic', 'cardDetails'].includes(name)) return noulAnswer(0.001);

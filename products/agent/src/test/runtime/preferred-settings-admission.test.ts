@@ -85,7 +85,8 @@ afterEach(async () => {
 });
 
 function recordedPort(): JudgmentPort {
-  const scripted = fakePort((name, question, state) => {
+  const scripted = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'match') return noulAnswer((state as unknown as { candidate: { name: string } }).candidate.name === 'display.theme' ? 0.999 : 0.001);
     if (name === 'disposition' && question.type === 'choice') {
       const choice = selected === 'act' && !Object.hasOwn(question.criteria, 'act') ? 'reject' : selected;

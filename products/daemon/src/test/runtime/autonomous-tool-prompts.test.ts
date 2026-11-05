@@ -57,7 +57,8 @@ test('daemon child registry preserves sandbox containment and cancels before dis
   let sandboxAdmissions = 0;
   const sandboxRequests: unknown[] = [];
   let cancelAtSandbox: AbortController | undefined;
-  const answers = fakePort((name, question, state) => {
+  const answers = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition') return choiceAnswer(question, 'act', 0.98);
     if (name === 'family' || name === 'capability') return choiceAnswer(question, 'generic', 0.98);
     if (name === 'kind') return choiceAnswer(question, 'other', 0.98);

@@ -112,18 +112,18 @@ describe('Shift+Tab cycles the session permission mode', () => {
     return { state, store, setCalls, prints };
   }
 
-  test('legacy backtab (\\x1b[Z) advances normal → accept-edits and narrates it', () => {
+  test('legacy backtab (\\x1b[Z) advances safe-owner → safe-jev and narrates it', () => {
     const { state, store, setCalls, prints } = stateWithConfig('prompt');
     expect(handleGlobalShortcutToken(state, key('\x1b[Z'), 24)).toBe(true);
-    expect(store['permissions.mode']).toBe('accept-edits');
-    expect(setCalls).toEqual([['permissions.mode', 'accept-edits']]);
-    expect(prints.at(-1)).toContain('accept-edits');
+    expect(store['permissions.mode']).toBe('safe-jev');
+    expect(setCalls).toEqual([['permissions.mode', 'safe-jev']]);
+    expect(prints.at(-1)).toContain('safe-jev');
   });
 
-  test('kitty shift+tab advances plan → auto (allow-all)', () => {
+  test('kitty shift+tab advances plan → safe-owner', () => {
     const { state, store } = stateWithConfig('plan');
     expect(handleGlobalShortcutToken(state, key('tab', { shift: true }), 24)).toBe(true);
-    expect(store['permissions.mode']).toBe('allow-all');
+    expect(store['permissions.mode']).toBe('safe-owner');
   });
 });
 

@@ -3,7 +3,7 @@ import * as childProcess from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
 import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
@@ -67,7 +67,15 @@ async function assertRejectedHistoricalSelection(
 }
 for (const mode of ['diff', 'breaking', 'semantic_diff'] as const) {
   test(`captured ${mode} reuses the ordinary analyzer and identifies immutable comparison inputs`, async () => {
-    const f = await fixture(); const previous = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
+    const f = await fixture(); const previous = installJudgmentPort(fakePort((wireName, question) => {
+      const name = wireName.replace(/^(effect|risk|edge)__/, '');
+      if (question.type === 'choice') {
+        if (name === 'kind') return choiceAnswer(question, 'read', 0.99);
+        if (name === 'family') return choiceAnswer(question, 'generic', 0.99);
+        throw new Error(`Unexpected captured-read fixture choice ${name}`);
+      }
+      return noulAnswer(name === 'completion_required' ? 0.99 : 0.01);
+    }).port);
     try {
       const ordinary = await createAnalyzeTool({ chat: f.chat }, undefined, f.root).execute({ mode });
       const captured = await f.tool.execute({ mode });
@@ -124,7 +132,15 @@ test('mutable captured member HEAD includes its validated descendant commits', a
   expect(readFileSync(join(f.root, 'api.ts'), 'utf8')).not.toContain('MEMBER_DESCENDANT_MARKER');
 });
 test('permission revocation during semantic prose withholds output and later history delivery', async () => {
-  const f = await fixture(); const previous = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
+  const f = await fixture(); const previous = installJudgmentPort(fakePort((wireName, question) => {
+      const name = wireName.replace(/^(effect|risk|edge)__/, '');
+      if (question.type === 'choice') {
+        if (name === 'kind') return choiceAnswer(question, 'read', 0.99);
+        if (name === 'family') return choiceAnswer(question, 'generic', 0.99);
+        throw new Error(`Unexpected captured-read fixture choice ${name}`);
+      }
+      return noulAnswer(name === 'completion_required' ? 0.99 : 0.01);
+    }).port);
   const tool = capturedInputTool(createAnalyzeTool({ chat: async () => {
     f.denied.add(join(f.root, 'api.ts')); return 'HISTORY_ONLY_MARKER';
   } }, undefined, f.view), f.authority, f.view, f.filter, f.stop.signal);
@@ -179,7 +195,15 @@ for (const captured of [false, true]) {
       homeDirectory: f.root, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
       modelDiscovery: 'skip', providerRegistryFactory: createLaunchTolerantProviderRegistry,
       requestApproval: async () => ({ approved: true }) });
-    const previous = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
+    const previous = installJudgmentPort(fakePort((wireName, question) => {
+      const name = wireName.replace(/^(effect|risk|edge)__/, '');
+      if (question.type === 'choice') {
+        if (name === 'kind') return choiceAnswer(question, 'read', 0.99);
+        if (name === 'family') return choiceAnswer(question, 'generic', 0.99);
+        throw new Error(`Unexpected captured-read fixture choice ${name}`);
+      }
+      return noulAnswer(name === 'completion_required' ? 0.99 : 0.01);
+    }).port);
     const prose = spyOn(runtime.toolLLM, 'chat').mockResolvedValue('DEFAULT_MEMBER_SEMANTIC_SUMMARY');
     const modes = ['diff', 'breaking', 'semantic_diff', 'upgrade'];
     const requests: string[] = [];

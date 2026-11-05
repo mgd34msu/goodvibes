@@ -50,7 +50,8 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
   const entered = barrier(), released = barrier();
   const rawReads = new Set<Promise<unknown>>();
   let suspended = false;
-  const scripted = fakePort((name, question) => {
+  const scripted = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'score') return scoreAnswer(question, name === 'link' ? 0 : 3, settings.gradeConfidence ?? 0.9999);
     if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
     const choice = name === 'target' ? settings.target ?? 'skill' : name === 'memory_class' ? 'decision'

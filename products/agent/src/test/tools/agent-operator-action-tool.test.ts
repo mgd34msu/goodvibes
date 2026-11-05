@@ -22,7 +22,8 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act'
       : name === 'kind' ? Object.hasOwn(question.criteria, 'other') ? 'other' : 'read' : 'generic', 0.999);
     if (question.type === 'noul') return noulAnswer(0.001);

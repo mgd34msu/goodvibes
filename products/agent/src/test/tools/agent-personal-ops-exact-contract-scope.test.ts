@@ -39,7 +39,8 @@ function reader(beforeAnswer?: (name: string, state: unknown) => void) {
   const negatives = new Set(['lineHasCredential', 'spanIsCredential', 'credentialRemains', 'identifying',
     'mutates', 'outward', 'secrets', 'obfuscated', 'catastrophic', 'cardDetails', 'irreversible', 'beyondProject', 'weakensSecurity',
     'flagsRisk', 'needsNetwork', 'needsPrivilege', 'platform_source', 'platform_requested']);
-  const fake = fakePort((name, question, state) => {
+  const fake = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     beforeAnswer?.(name, state);
     if (name === 'match' && question.type === 'noul') {
       if (!state || typeof state !== 'object' || !('candidate' in state)) throw new Error('Missing original candidate');

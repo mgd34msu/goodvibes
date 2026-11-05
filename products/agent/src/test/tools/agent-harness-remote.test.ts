@@ -48,7 +48,8 @@ const ADMISSION_BATTERIES = new Set(['engine.gate.boundary', 'engine.gate.side-e
 beforeEach(() => {
   // Authored local handoff readings intentionally classify the body as read.
   // The authentic engine proof and deterministic effect floors still apply.
-  readings = fakePort((name, question) => {
+  readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read'
       : name === 'family' || name === 'capability' ? 'generic' : undefined;
     if (question.type === 'choice' && label) return choiceAnswer(question, label, 0.999);
@@ -56,7 +57,7 @@ beforeEach(() => {
     throw new Error(`Unscripted remote admission question ${name}`);
   });
   const port: JudgmentPort = { model: readings.port.model, ask(request) {
-    if (!ADMISSION_BATTERIES.has(request.context?.battery ?? '')) throw new Error('Unscripted remote admission battery');
+    if (!request.context?.battery?.split('+').every(name => ADMISSION_BATTERIES.has(name))) throw new Error('Unscripted remote admission battery');
     return readings.port.ask(request);
   } };
   decisionLog = new SqliteDecisionLog(':memory:');

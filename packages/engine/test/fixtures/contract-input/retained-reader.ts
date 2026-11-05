@@ -8,7 +8,7 @@ import { createClientRuntimeServices } from '../../../sdk/src/platform/runtime/b
 import { createRuntimeStore, RuntimeEventBus } from '../../../sdk/src/platform/runtime/state.js';
 import { createLaunchTolerantProviderRegistry } from '../../../sdk/src/platform/providers/index.js';
 import { installJudgmentPort } from '../../../errors/src/index.js';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 
 // Run by the parent test in a new process: no receipt, lease or captured-root
 // registration is carried across this boundary.
@@ -34,7 +34,15 @@ const runtime = createClientRuntimeServices({
   providerRegistryFactory: createLaunchTolerantProviderRegistry,
   requestApproval: async () => ({ approved: true }),
 });
-const previous = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
+const previous = installJudgmentPort(fakePort((wireName, question) => {
+      const name = wireName.replace(/^(effect|risk|edge)__/, '');
+      if (question.type === 'choice') {
+        if (name === 'kind') return choiceAnswer(question, 'read', 0.99);
+        if (name === 'family') return choiceAnswer(question, 'generic', 0.99);
+        throw new Error(`Unexpected captured-read fixture choice ${name}`);
+      }
+      return noulAnswer(name === 'completion_required' ? 0.99 : 0.01);
+    }).port);
 
 await runtime.userPermissionRuleStore.add({
   rule: {

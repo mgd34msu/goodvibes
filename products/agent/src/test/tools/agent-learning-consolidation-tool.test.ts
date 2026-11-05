@@ -25,7 +25,8 @@ let previousPort: ReturnType<typeof installJudgmentPort>;
 let log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  previousPort = installJudgmentPort(withDecisionLog(fakePort((name, question) => {
+  previousPort = installJudgmentPort(withDecisionLog(fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'match') return noulAnswer(0.99);
     if (question.type === 'score' && ['usefulness', 'freshness', 'source_quality', 'risk', 'priority', 'confidence', 'link'].includes(name)) {
       return scoreAnswer(question, name === 'risk' ? 0 : name === 'link' ? 2 : 4, 0.999);

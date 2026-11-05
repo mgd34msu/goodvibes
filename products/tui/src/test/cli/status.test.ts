@@ -59,7 +59,7 @@ describe('CLI status and doctor output', () => {
       'storage.secretPolicy': 'require_secure',
     }));
 
-    expect(text).toContain('permissions: Allow all configured actions (allow-all)');
+    expect(text).toContain('permissions: YOLO (allow-all)');
     expect(text).toContain('secretPolicy: Require secure storage (require_secure)');
   });
 
@@ -75,9 +75,9 @@ describe('CLI status and doctor output', () => {
     });
 
     expect(text).toContain('[risk:security:allow-all-permissions]');
-    expect(text).toContain('cause: permissions.mode is allow-all.');
-    expect(text).toContain('impact: Permitted actions run automatically without an approval prompt. Configured denials and per-call authority checks still apply');
-    expect(text).toContain('action: Use Plan only for read-only work or Custom rules to restrict particular tools.');
+    expect(text).toContain('cause: The selected execution mode is YOLO.');
+    expect(text).toContain('impact: Runs authorized actions without general safety decisions; host containment, secret storage and payment rules still apply.');
+    expect(text).toContain('action: Select Safe owner or Safe Jev when dangerous actions need a safety decision.');
     expect(text).toContain('[warning:network:network-http-listener-enabled]');
   });
 

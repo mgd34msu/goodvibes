@@ -32,7 +32,8 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { buildOperatorContract } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { createHmac } from 'node:crypto';
 import { GOODVIBES_NTFY_AGENT_TOPIC } from '@goodvibes-jev/engine/sdk/platform/integrations';
-const parityReadings = fakePort((name, question, state) => {
+const parityReadings = fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
   if (name === 'security_code' || name === 'wanted' || name === 'serve' || name === 'keep' || name === 'attached') return noulAnswer(0.01);
   if (name === 'pick' && question.type === 'choice' && 'title-1' in question.criteria) return choiceAnswer(question, 'title-1', 0.99);
   if (name === 'memory_class') return choiceAnswer(question, 'fact', 0.99);
@@ -270,7 +271,8 @@ describe('daemon server source parity: restored source assertions', () => {
 async function proveAutonomousRead(): Promise<void> {
     const path = join(workingDir, 'autonomous-proof.txt');
     writeFileSync(path, 'owned autonomous server parity receipt\n');
-    const readings = fakePort((name, question) => {
+    const readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'disposition') return choiceAnswer(question, 'act', 0.99);
       if (name === 'family' || name === 'capability') return choiceAnswer(question, 'generic', 0.99);
       if (name === 'kind') return choiceAnswer(question, 'other', 0.99);

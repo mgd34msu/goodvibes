@@ -106,7 +106,8 @@ describe('fleet plane adoption', () => {
 
     // Install after runtime construction; ordinary configured writes stay automatic.
     forgetCatastrophicReadings();
-    const previousJudgmentPort = installJudgmentPort(fakePort((name, question) => {
+    const previousJudgmentPort = installJudgmentPort(fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.97);
       if (name === 'kind') return choiceAnswer(question, 'write', 0.97);
       if (name === 'capability') return choiceAnswer(question, 'generic', 0.97);

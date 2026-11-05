@@ -175,9 +175,9 @@ function buildHarness(options: { attemptProfile?: boolean; ownerChannels?: strin
   }).continuationRunner;
   const daemon = disposables.add(new DaemonServer({ runtimeServices: services }));
   const conversation = fakePort((_name, question) => choiceAnswer(question, 'conversation', 0.99));
-  const completion = fakePort(() => noulAnswer(.01));
+  const completion = fakePort(name => noulAnswer(name === 'completion_required' ? .99 : .01));
   const prior = installJudgmentPort({ model: conversation.port.model, ask(request) {
-    if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation'].includes(String(request.context?.battery)))
+    if (['engine.core.completion-applicability', 'engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation'].includes(String(request.context?.battery)))
       return completion.port.ask(request);
     if (request.context?.battery !== 'engine.daemon.inbound-intent') throw new Error('Unexpected fixture reading');
     return conversation.port.ask(request);

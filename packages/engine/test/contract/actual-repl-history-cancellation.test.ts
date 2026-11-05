@@ -79,9 +79,8 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
     const originalRead = runtime.permissionManager.readAccess.bind(runtime.permissionManager);
     const readTap = policy === 'readAccessFilter' ? spyOn(runtime.permissionManager, 'readAccess').mockImplementation(async path => {
       await maybeHold();
-      const result = await originalRead(path);
-      if (released) latePolicyFinished.resolve();
-      return result;
+      try { return await originalRead(path); }
+      finally { if (released) latePolicyFinished.resolve(); }
     }) : undefined;
     const expression = '"REAL_HISTORY_CANCELLATION_RESULT"';
     const steps = [

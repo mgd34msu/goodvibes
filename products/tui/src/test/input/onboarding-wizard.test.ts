@@ -723,7 +723,7 @@ describe('OnboardingWizardController', () => {
     // an active mode, so the single write both selects and enables it.
     expect(configValues.get('behavior.hitlMode')).toBe('operator');
     expect(configValues.get('behavior.guidanceMode')).toBe('guided');
-    expect(configValues.get('permissions.mode')).toBe('allow-all');
+    expect(configValues.get('permissions.mode')).toBe('safe-owner');
     expect(request.operations).toContainEqual({ kind: 'acknowledge', target: 'providers', acknowledged: true });
     expect(request.operations).toContainEqual({ kind: 'acknowledge', target: 'subscriptions', acknowledged: true });
     expect(request.operations).toContainEqual({ kind: 'acknowledge', target: 'auth', acknowledged: true });

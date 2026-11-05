@@ -118,7 +118,7 @@ describe('CLI status and doctor output', () => {
       'storage.secretPolicy': 'require_secure',
     }));
 
-    expect(text).toContain('permissions: Allow all configured actions (allow-all)');
+    expect(text).toContain('permissions: YOLO (allow-all)');
     expect(text).toContain('secretPolicy: Require secure storage (require_secure)');
   });
 
@@ -132,26 +132,26 @@ describe('CLI status and doctor output', () => {
     // permissions.mode alone and would have printed "Ask before powerful
     // actions" here, disagreeing with the gate (which checks autoApprove
     // before presets, after boundary checks). It must now say auto-approve is on.
-    expect(text).toContain('Auto-approve ON');
+    expect(text).toContain('permissions: YOLO (prompt)');
     expect(text).toContain('autoApprove: yes (behavior.autoApprove)');
-    expect(text).not.toContain('permissions: Ask before powerful actions');
+    expect(text).not.toContain('permissions: Safe — owner');
   });
 
   test('status JSON separates configured automatic approvals from a universal prompt bypass', () => {
     for (const [settings, automaticApprovals] of [
-      [{ 'permissions.mode': 'prompt' }, true],
+      [{ 'permissions.mode': 'prompt' }, false],
       [{ 'permissions.mode': 'plan' }, false],
       [{ 'permissions.mode': 'prompt', 'behavior.autoApprove': true }, true],
       [{ 'permissions.mode': 'allow-all' }, true],
     ] as const) {
       const snapshot = JSON.parse(renderCliStatus({ ...makeOptions(settings), outputFormat: 'json' }));
       expect(snapshot.auth.automaticApprovals).toBe(automaticApprovals);
-      expect(snapshot.auth.bypassesPrompts).toBe(false);
+      expect(snapshot.auth.bypassesPrompts).toBe(automaticApprovals);
       expect(snapshot.auth.permissionMode).toBe(settings['permissions.mode']);
-      expect(snapshot.auth.permissionDetail).toContain('Configured denials, read-only modes and surface authority still apply');
+      expect(snapshot.auth.permissionLabel).toBe(automaticApprovals ? 'YOLO' : settings['permissions.mode'] === 'plan' ? 'Plan' : 'Safe — owner');
     }
     const text = renderCliStatus(makeOptions({ 'permissions.mode': 'allow-all' }));
-    expect(text).toContain('Configured denials, read-only modes and surface authority still apply');
+    expect(text).toContain('host containment, secret storage and payment rules still apply');
     expect(text).not.toContain('critical calls still ask');
     expect(text).not.toContain('Allow everything');
   });
@@ -167,15 +167,15 @@ describe('CLI status and doctor output', () => {
 
     expect(text).toContain('[risk:security:auto-approve-enabled]');
     expect(text).toContain('cause: behavior.autoApprove is true.');
-    expect(text).not.toContain('[risk:security:allow-all-permissions]');
-    expect(text).toContain('auto-approve cannot override them.');
+    expect(text).toContain('[risk:security:allow-all-permissions]');
+    expect(text).toContain('host containment, secret storage and payment rules still apply');
     expect(text).not.toContain('tool calls never prompt');
   });
 
   test('default posture (autoApprove=false, mode=prompt) still reads "prompt" everywhere', () => {
     const text = renderCliStatus(makeOptions({ 'permissions.mode': 'prompt' }));
 
-    expect(text).toContain('permissions: Automatic configured actions (prompt)');
+    expect(text).toContain('permissions: Safe — owner (prompt)');
     expect(text).toContain('autoApprove: no (behavior.autoApprove)');
     expect(text).not.toContain('Auto-approve ON');
   });
@@ -194,9 +194,9 @@ describe('CLI status and doctor output', () => {
     expect(text).toContain('[risk:security:allow-all-permissions]');
     expect(text).not.toContain('critical calls still ask');
     expect(text).not.toContain('Allow everything');
-    expect(text).toContain('cause: permissions.mode is allow-all.');
+    expect(text).toContain('cause: The selected execution mode is YOLO.');
     expect(text).toContain('impact: Powerful write, edit, network, and execution tools can run without a Human-in-the-Loop (HITL) approval prompt.');
-    expect(text).toContain('action: Use Plan mode for read-only work or Custom rules to deny specific tools unless this is an intentionally trusted environment.');
+    expect(text).toContain('action: Select Safe owner or Safe Jev when dangerous actions need a safety decision.');
     expect(text).not.toContain('network-http-listener-enabled');
   });
 

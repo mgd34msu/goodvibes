@@ -9,13 +9,13 @@
 |   ✦ agent experience                                                           |
 |     Display         10      stream                                  true       |
 |     UI               4      lineNumbers                              off       |
-|     Behavior        11                                                         |
+|     Behavior        10                                                         |
 |     Your Profile    10      display.lineNumbers · default off · enum           |
 |     Dates and       11      with 3 possible value(s) · source default          |
 |     Plans                                                                      |
-|     Agent Runtime    9      12 more ↓ · pgdn                                   |
+|     Agent Runtime    9      9 more ↓ · pgdn                                    |
 |     Notifications   14                                                         |
-|     Permissions     22      collapseThreshold                         30       |
+|     Permissions     21      collapseThreshold                         30       |
 |              52 more ↓                                                         |
 |                                                                                |
 |      ↑↓  move    ⏎  change    ←→  category    pgup pgdn  docs                  |
@@ -1677,7 +1677,6 @@
 14 42 bg=#1e293b
 14 43 fg=#4e5c6f
 14 43 bg=#1e293b
-14 44 fg=#4e5c6f
 14 44 bg=#1e293b
 14 45 bg=#1e293b
 14 46 bg=#1e293b

@@ -27,7 +27,8 @@ beforeEach(() => {
   resetSessionUntrustedContentLedgerForTests();
   delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN; delete process.env.GOODVIBES_DAEMON_TOKEN;
   log = new SqliteDecisionLog(':memory:');
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act'
       : name === 'kind' ? Object.hasOwn(question.criteria, 'other') ? 'other' : 'read' : 'generic', 0.999);
     if (question.type === 'noul') return noulAnswer(0.001);

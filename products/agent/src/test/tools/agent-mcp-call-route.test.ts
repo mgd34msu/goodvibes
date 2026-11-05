@@ -14,7 +14,8 @@ let previous: ReturnType<typeof installJudgmentPort>;
 let log: SqliteDecisionLog;
 beforeEach(() => {
   resetAgentMcpCallRouteForTests(); log = new SqliteDecisionLog(':memory:');
-  const readings = fakePort((name, question) => {
+  const readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const label = name === 'disposition' ? Object.hasOwn(question.criteria, 'act') ? 'act' : 'reject'
         : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;

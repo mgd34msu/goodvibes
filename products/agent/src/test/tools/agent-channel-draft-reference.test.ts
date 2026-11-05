@@ -29,7 +29,8 @@ let readings: ReturnType<typeof fakePort>;
 const roots: string[] = [];
 beforeEach(() => {
   resetSessionUntrustedContentLedgerForTests();
-  readings = fakePort((name, question) => {
+  readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     const label = name === 'disposition' ? 'act'
       : name === 'kind' ? Object.hasOwn(question.criteria, 'read') ? 'read' : 'other'

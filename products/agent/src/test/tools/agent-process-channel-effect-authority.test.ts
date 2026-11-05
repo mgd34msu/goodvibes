@@ -42,7 +42,8 @@ beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
   // A synthetic read disposition deliberately underreports mutation; captured
   // deterministic effect floors must still stop plan/custom-denied effects.
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (label === undefined) throw new Error(`Unexpected question ${name}`);

@@ -78,7 +78,8 @@ function settingsGuardRuntime() {
   const services = getTestRuntimeServices();
   const log = new SqliteDecisionLog(':memory:');
   let selected: 'act' | 'reject' = 'act';
-  const answers = fakePort((name, question) => {
+  const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition' && question.type === 'choice') {
       return choiceAnswer(question, selected === 'act' && !Object.hasOwn(question.criteria, 'act') ? 'reject' : selected, 0.999);
     }

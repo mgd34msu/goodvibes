@@ -148,6 +148,9 @@ export async function executeToolCalls(
 ): Promise<ToolResult[]> {
   const results: ToolResult[] = [];
   for (const call of calls) {
+    await deps.permissionManager.prepareAutonomousOwner?.(deps.turnSignal);
+    deps.turnSignal?.throwIfAborted();
+    deps.assertCurrent?.();
     const inheritedMode = currentExecutionMode();
     const selection = deps.permissionManager.captureExecutionMode?.();
     const mode = selection?.mode ?? deps.permissionManager.getMode?.() ?? inheritedMode ?? 'safe-jev';

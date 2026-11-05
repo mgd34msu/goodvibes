@@ -116,7 +116,8 @@ describe('the composition states a trust posture, and it is the session\'s works
     const floor = await options.floorFactory({ workspaceRoot: workspaceA });
     const runtime = createHostedSessionRuntime({ floor, sessionId: 'hosted-trust-parity', workspaceRoot: workspaceA,
       systemPrompt: options.systemPrompt?.({ sessionId: 'hosted-trust-parity', workspaceRoot: workspaceA }) ?? '' });
-    const readings = fakePort((name, question) => {
+    const readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'disposition') return choiceAnswer(question, 'act', 0.99);
       if (name === 'family' || name === 'capability') return choiceAnswer(question, 'generic', 0.99);
       if (name === 'kind') return choiceAnswer(question, 'other', 0.99);

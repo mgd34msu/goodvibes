@@ -28,7 +28,7 @@ function host(value: unknown): unknown { return { behavior: { hostPrivacyExample
 
 test('a named setting lookup reads only that value and observes a later managed lock', () => {
   const { config, options } = fixture();
-  const key = 'behavior.autoApprove';
+  const key = 'display.stream';
   config.set(key, true);
   const values: { get(key: ConfigKey): unknown } = config;
   const originalGet = values.get.bind(config);
@@ -68,12 +68,12 @@ describe('public instance-owned boolean host settings', () => {
     expect(new Set<string>(CONFIG_SCHEMA.map(setting => setting.key)).has(KEY)).toBe(false);
     expect(Object.hasOwn(DEFAULT_CONFIG.behavior, 'hostPrivacyExample')).toBe(false);
     const bare = new ConfigManager({ ...options, hostSettings: undefined });
-    expect(bare.getSchema()).toBe(CONFIG_SCHEMA);
+    expect(bare.getSchema()).toEqual(CONFIG_SCHEMA.filter(setting => !setting.deprecated));
     expect(bare.getHostSettingsSchema()).toEqual([]);
     expect(Object.hasOwn(bare.getCategory('behavior'), 'hostPrivacyExample')).toBe(false);
   });
 
-  test.each(['behavior.autoApprove', 'behavior.__proto__', '__proto__.host', 'behavior.constructor', 'behavior.prototype', 'behavior.nested.host', 'unknown.host', 'surfaces.hostExample'])('rejects invalid or colliding descriptor %s', (key) => {
+  test.each(['display.stream', 'behavior.__proto__', '__proto__.host', 'behavior.constructor', 'behavior.prototype', 'behavior.nested.host', 'unknown.host', 'surfaces.hostExample'])('rejects invalid or colliding descriptor %s', (key) => {
     expect(() => fixture([{ ...definition, key }])).toThrow();
   });
   test('rejects duplicate and malformed descriptors before loading', () => {
@@ -222,7 +222,7 @@ describe('public instance-owned boolean host settings', () => {
   test('no-host watcher retains its existing absent-file observation behavior', async () => {
     const { options } = fixture([]);
     const config = new ConfigManager(options);
-    config.set('behavior.autoApprove', true);
+    config.set('display.stream', true);
     const loads = spyOn(config, 'load');
     const stop = config.watchConfigFiles({ intervalMs: 5 });
     const directory = join(options.workingDir, '.goodvibes', 'agent');
@@ -231,9 +231,9 @@ describe('public instance-owned boolean host settings', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 40));
       expect(loads).not.toHaveBeenCalled();
-      expect(config.get('behavior.autoApprove')).toBe(true);
+      expect(config.get('display.stream')).toBe(true);
       chmodSync(directory, 0o700);
-      await waitFor(() => config.get('behavior.autoApprove') === false);
+      await waitFor(() => config.get('display.stream') === false);
       expect(loads).toHaveBeenCalledTimes(1);
     } finally { chmodSync(directory, 0o700); stop(); loads.mockRestore(); }
   });
@@ -271,8 +271,8 @@ describe('public instance-owned boolean host settings', () => {
     const synthetic = 'payments.cardNumber' as ConfigKey;
     config.setDynamic(synthetic, 'goodvibes://secrets/test');
     expect(config.get(synthetic)).toBe('goodvibes://secrets/test');
-    config.set('behavior.autoApprove', true);
-    expect(config.get('behavior.autoApprove')).toBe(true);
+    config.set('display.stream', true);
+    expect(config.get('display.stream')).toBe(true);
     write(join(options.configDir, 'settings-sync.json'), { ...defaultStore(), managedLocks: [{ key: KEY, source: 'test-policy', reason: 'locked host preference', updatedAt: 1 }] });
     expect(() => config.getHostBooleanSetting(KEY).set(false)).toThrow('locked');
     config.getHostBooleanSetting(KEY).set(false, { bypassManagedLock: true });
@@ -291,7 +291,7 @@ describe('public instance-owned boolean host settings', () => {
     const bare = new ConfigManager({ ...options, hostSettings: undefined });
     const handle = config.getHostBooleanSetting(KEY);
     handle.set(false);
-    expect(config.getSchema()).toBe(CONFIG_SCHEMA);
+    expect(config.getSchema()).toEqual(CONFIG_SCHEMA.filter(setting => !setting.deprecated));
     expect(config.getHostSettingsSchema()).toEqual([definition]);
     expect(handle.getResolved()).toEqual({ key: KEY, value: false, defaultValue: true, source: 'local', managedLock: null });
     expect(JSON.stringify(getSettingsControlPlaneSnapshot(config))).toBe(JSON.stringify(getSettingsControlPlaneSnapshot(bare)));
@@ -300,13 +300,13 @@ describe('public instance-owned boolean host settings', () => {
     handle.setProjectValue(false);
     write(join(options.configDir, 'settings-sync.json'), { ...defaultStore(), managedLocks: [
       { key: KEY, source: 'host-lock', reason: 'host policy', updatedAt: 1 },
-      { key: 'behavior.autoApprove', source: 'builtin-lock', reason: 'builtin policy', updatedAt: 2 },
+      { key: 'display.stream', source: 'builtin-lock', reason: 'builtin policy', updatedAt: 2 },
     ] });
     expect(handle.getResolved()).toEqual({ key: KEY, value: false, defaultValue: true, source: 'local',
       managedLock: { source: 'host-lock', reason: 'host policy', updatedAt: 1 } });
     const snapshot = getSettingsControlPlaneSnapshot(config);
     expect(snapshot.managedLockCount).toBe(1);
-    expect(snapshot.managedLocks).toEqual([{ key: 'behavior.autoApprove', source: 'builtin-lock', reason: 'builtin policy', updatedAt: 2 }]);
+    expect(snapshot.managedLocks).toEqual([{ key: 'display.stream', source: 'builtin-lock', reason: 'builtin policy', updatedAt: 2 }]);
     expect(new Set<string>(snapshot.resolvedEntries.map(entry => entry.key)).has(KEY)).toBe(false);
   });
 

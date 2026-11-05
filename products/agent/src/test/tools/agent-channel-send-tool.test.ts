@@ -28,7 +28,8 @@ function fakeRouter(requests: ChannelDeliveryRequest[]) {
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;
       if (!label) throw new Error(`Unexpected fixture question ${name}`);

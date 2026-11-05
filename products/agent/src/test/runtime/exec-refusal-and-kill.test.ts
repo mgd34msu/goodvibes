@@ -51,7 +51,8 @@ const LAST_USER_MESSAGE = 'run the maintenance commands in the scratch folder';
 // Script these fixture facts, not the permission decisions: allow-all/plan,
 // Agent background refusal and the owner-terminal rule still decide normally.
 function execReadings() {
-  return fakePort((name, question, state) => {
+  return fakePort((wireName, question, state) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (name === 'disposition' && question.type === 'choice') return choiceAnswer(question, Object.hasOwn(question.criteria, 'act') ? 'act' : 'reject', 0.99);
     const foreignTerminal = JSON.stringify(state).includes('tmux -L gv-exec-refusal-');
     const readsFile = (state as { tool?: string }).tool === 'read';

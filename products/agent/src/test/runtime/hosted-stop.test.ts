@@ -110,6 +110,13 @@ function fixture(options: { readonly reconnect?: boolean; readonly routeTurns?: 
     idleTimeout: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
+      if (request.method === 'POST' && path === `/api/sessions/${SESSION}/permission-mode`) {
+        const packet = await request.json() as { mode: string; body?: { mode: string } };
+        return Response.json({ sessionId: SESSION, mode: (packet.body ?? packet).mode, previousMode: 'safe-owner' });
+      }
+      if (request.method === 'GET' && path === `/api/sessions/${SESSION}/permission-mode`) {
+        return Response.json({ sessionId: SESSION, mode: 'safe-owner' });
+      }
       if (request.method === 'GET' && path === `/api/sessions/${SESSION}/events`) {
         let active: EventStream | undefined;
         return new Response(new ReadableStream<Uint8Array>({

@@ -100,7 +100,7 @@ describe('/config fullscreen workspace command', () => {
         for (const entry of entries) workspaceKeys.add(entry.setting.key);
       }
 
-      expect(CONFIG_SCHEMA.map((entry) => entry.key).filter((key) => !isAgentHiddenSettingKey(key) && !workspaceKeys.has(key))).toEqual([]);
+      expect(CONFIG_SCHEMA.filter(entry => !entry.deprecated).map((entry) => entry.key).filter((key) => !isAgentHiddenSettingKey(key) && !workspaceKeys.has(key))).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

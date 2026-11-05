@@ -102,7 +102,7 @@ test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission li
     const persisted = new UserPermissionRuleStore(join(config.getControlPlaneConfigDir(), 'permission-rules.json'));
     await persisted.init(); expect(persisted.list()).toEqual([]);
     expect(record.status).toBe(cancel ? 'cancelled' : 'completed');
-    expect(await runtime.permissionManager.checkDetailed('write', args)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'config_policy' });
+    expect(await runtime.permissionManager.checkDetailed('write', args)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset', reasonCode: 'preset_allow' });
     if (!cancel) expect(executionError).toBeUndefined();
   } finally {
     providerRelease.resolve();

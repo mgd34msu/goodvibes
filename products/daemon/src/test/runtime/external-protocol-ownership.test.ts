@@ -150,7 +150,7 @@ test('configured plan mode remains a deterministic refusal through the product p
 });
 
 test('automatic protocol admission does not depend on an optional permission reader', async () => {
-  const f = await fixture(); f.onReading(() => { throw new Error('Synthetic judgment transport unavailable'); });
+  const f = await fixture(); f.onReading(request => { if ('disposition' in request.questions) throw new Error('Synthetic permission decision unavailable'); });
   expect(await f.call()).toMatchObject({ done: true }); const hosted = await f.spawn('Original caller: only the synthetic file');
   await until(() => f.acp.get(hosted.id)?.state === 'idle', 'Unavailable reader ACP refusal settles');
   expect(f.acp.get(hosted.id)?.progress).toContain('permission granted'); expect(f.calls).toHaveLength(1); expect(f.human).not.toHaveBeenCalled();

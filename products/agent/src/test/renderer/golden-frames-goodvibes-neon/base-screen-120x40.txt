@@ -38,7 +38,7 @@
 |  ┃  Ask anything, or type / for commands and @ for files                                                               |
 |  ┃                                                                                                                     |
 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
-|   ! auto-approve   /workspace/assistant                   context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
+|   ! YOLO   /workspace/assistant                           context █████░░░░░░░░│░░ 34% 340.0k / 1.0M    ctrl+p  menu   |
 @STYLES
 0 1 fg=0;255;255
 0 1 bold=1
@@ -2157,22 +2157,14 @@
 39 7 bold=1
 39 8 fg=#ef4444
 39 8 bold=1
-39 9 fg=#ef4444
-39 9 bold=1
-39 10 fg=#ef4444
-39 10 bold=1
-39 11 fg=#ef4444
-39 11 bold=1
-39 12 fg=#ef4444
-39 12 bold=1
-39 13 fg=#ef4444
-39 13 bold=1
-39 14 fg=#ef4444
-39 14 bold=1
-39 15 fg=#ef4444
-39 15 bold=1
-39 16 fg=#ef4444
-39 16 bold=1
+39 12 fg=#4e5c6f
+39 13 fg=#4e5c6f
+39 14 fg=#4e5c6f
+39 15 fg=#4e5c6f
+39 16 fg=#4e5c6f
+39 17 fg=#4e5c6f
+39 18 fg=#4e5c6f
+39 19 fg=#4e5c6f
 39 20 fg=#4e5c6f
 39 21 fg=#4e5c6f
 39 22 fg=#4e5c6f
@@ -2185,14 +2177,6 @@
 39 29 fg=#4e5c6f
 39 30 fg=#4e5c6f
 39 31 fg=#4e5c6f
-39 32 fg=#4e5c6f
-39 33 fg=#4e5c6f
-39 34 fg=#4e5c6f
-39 35 fg=#4e5c6f
-39 36 fg=#4e5c6f
-39 37 fg=#4e5c6f
-39 38 fg=#4e5c6f
-39 39 fg=#4e5c6f
 39 59 fg=#94a3b8
 39 60 fg=#94a3b8
 39 61 fg=#94a3b8

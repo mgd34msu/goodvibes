@@ -23,7 +23,8 @@ export async function admitLocalState(register: (registry: ToolRegistry) => void
   };
   const manager = new PermissionManager(undefined, reader, new PolicyRuntimeState());
   const registry = new ToolRegistry(manager); register(registry);
-  const answers = fakePort((name, question) => {
+  const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     if (question.type === 'choice') {
       const label = name === 'disposition' ? 'act' : (name === 'kind' || name === 'effect__kind') ? 'read'

@@ -22,6 +22,11 @@
 
 ### Fixed
 
+- Preserve settings schema identity during prepared edits and catalog reads, and
+  settle pending permission changes before capturing an invocation's execution
+  mode so valid first actions are not rejected as stale.
+- Verify recorded original-obligation coverage during native settlement alongside
+  the existing deliverable and final-answer checks.
 - Retain completed calibration evidence when later fixtures fail, including
   partial reports rather than discarding successful readings.
 - Check completion against the owner's original request and current execution

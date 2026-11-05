@@ -94,7 +94,8 @@ function fixture(screening: Parameters<typeof researchScreeningFixture>[0] = {})
       const unexpected: { name: string; choices: readonly string[] }[] = [];
       // Recorded synthetic dispositions exercise the native effect floors;
       // they do not qualify live semantic judgments about arbitrary imports.
-      const answers = fakePort((name, question) => {
+      const answers = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
         if (question.type === 'noul') return noulAnswer(0.001);
         if (question.type === 'choice') {
           if (name === 'disposition' && !Object.hasOwn(question.criteria, 'act')) {

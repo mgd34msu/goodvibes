@@ -55,6 +55,9 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
   PreparedConfigMutationFacts, PreparedConfigMutationDestination, PreparedConfigMutationTransitionFacts,
   PreparedConfigMutationReceipt } from './prepared-mutation.js';
 
+// Keep schema identity stable for prepared settings and catalog ownership checks.
+const visibleConfigSchema = CONFIG_SCHEMA.filter(setting => !setting.deprecated);
+
 // These are the existing module-acquisition primitives, not a callable authenticity test.
 const scalarGlobal = globalThis;
 const scalarObject = Object;
@@ -1349,7 +1352,7 @@ export class ConfigManager {
 
   /** Return the builtin schema; host descriptors are a separate typed surface. */
   getSchema(): ConfigSetting[] {
-    return CONFIG_SCHEMA.filter(setting => !setting.deprecated);
+    return visibleConfigSchema;
   }
 
   /** Immutable descriptors for the boolean settings registered by this host. */

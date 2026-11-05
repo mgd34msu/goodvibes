@@ -22,7 +22,7 @@
 |  ┃  Ask anything, or type / for commands and @ for files                                 |
 |  ┃                                                                                       |
 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
-|   ! auto-approve  sleep disabled   ◐ 1 agent running · 2…   █████│ 87%    ctrl+p  menu   |
+|   ! YOLO  sleep disabled   ◐ 1 agent running · 2 process…   █████│ 87%    ctrl+p  menu   |
 @STYLES
 0 1 fg=94;224;230
 0 1 bold=1
@@ -1156,22 +1156,22 @@
 23 7 bold=1
 23 8 fg=#f2767e
 23 8 bold=1
-23 9 fg=#f2767e
-23 9 bold=1
-23 10 fg=#f2767e
-23 10 bold=1
-23 11 fg=#f2767e
+23 11 fg=#f0b660
 23 11 bold=1
-23 12 fg=#f2767e
+23 12 fg=#f0b660
 23 12 bold=1
-23 13 fg=#f2767e
+23 13 fg=#f0b660
 23 13 bold=1
-23 14 fg=#f2767e
+23 14 fg=#f0b660
 23 14 bold=1
-23 15 fg=#f2767e
+23 15 fg=#f0b660
 23 15 bold=1
-23 16 fg=#f2767e
+23 16 fg=#f0b660
 23 16 bold=1
+23 17 fg=#f0b660
+23 17 bold=1
+23 18 fg=#f0b660
+23 18 bold=1
 23 19 fg=#f0b660
 23 19 bold=1
 23 20 fg=#f0b660
@@ -1184,22 +1184,22 @@
 23 23 bold=1
 23 24 fg=#f0b660
 23 24 bold=1
-23 25 fg=#f0b660
-23 25 bold=1
-23 26 fg=#f0b660
-23 26 bold=1
-23 27 fg=#f0b660
-23 27 bold=1
-23 28 fg=#f0b660
+23 28 fg=#5ee0e6
 23 28 bold=1
-23 29 fg=#f0b660
+23 29 fg=#5ee0e6
 23 29 bold=1
-23 30 fg=#f0b660
+23 30 fg=#5ee0e6
 23 30 bold=1
-23 31 fg=#f0b660
+23 31 fg=#5ee0e6
 23 31 bold=1
-23 32 fg=#f0b660
+23 32 fg=#5ee0e6
 23 32 bold=1
+23 33 fg=#5ee0e6
+23 33 bold=1
+23 34 fg=#5ee0e6
+23 34 bold=1
+23 35 fg=#5ee0e6
+23 35 bold=1
 23 36 fg=#5ee0e6
 23 36 bold=1
 23 37 fg=#5ee0e6

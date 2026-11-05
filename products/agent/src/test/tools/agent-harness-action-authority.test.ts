@@ -24,7 +24,8 @@ beforeEach(() => {
   log = new SqliteDecisionLog(':memory:');
   // These are recorded synthetic readings. They intentionally classify the
   // intercepted body as read-only, exercising the separate code-owned floor.
-  const readings = fakePort((name, question) => {
+  const readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'choice') {
       const label = name === 'disposition' ? Object.hasOwn(question.criteria, 'act') ? 'act' : 'reject'
         : name === 'kind' ? 'read' : name === 'family' || name === 'capability' ? 'generic' : undefined;

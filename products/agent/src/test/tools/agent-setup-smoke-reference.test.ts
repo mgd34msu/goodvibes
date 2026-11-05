@@ -24,7 +24,8 @@ const input = { mode: 'run_setup_smoke', setupItemId: 'install-smoke', fields: {
   notes: 'Observed https://fixture.invalid/status?token=private-smoke-query',
 } };
 beforeEach(() => {
-  readings = fakePort((name, question) => {
+  readings = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'noul') return noulAnswer(0.001);
     const label = name === 'disposition' ? 'act' : name === 'kind' ? 'read'
       : name === 'family' || name === 'capability' ? 'generic' : undefined;

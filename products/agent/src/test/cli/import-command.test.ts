@@ -123,7 +123,7 @@ describe('goodvibes-agent import openclaw', () => {
     const skills = AgentSkillRegistry.fromShellPaths({ resolveUserPath }).snapshot().skills;
     expect(skills.map((s) => s.name).sort()).toEqual(['Daily Brief', 'Ops Sweep']);
 
-    expect(configManager.get('permissions.mode')).toBe('custom');
+    expect(configManager.get('permissions.mode')).toBe('safe-owner');
     expect(String(configManager.get('permissions.tools.exec' as never))).toBe('allow');
     expect(String(configManager.get('permissions.tools.read' as never))).toBe('allow');
   });

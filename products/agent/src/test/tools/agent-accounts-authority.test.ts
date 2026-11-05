@@ -22,7 +22,8 @@ const roots: string[] = [];
 beforeEach(() => {
   resetSessionExpectationBookForTests(); resetSessionUntrustedContentLedgerForTests(); readings = 0; duringReading = undefined;
   log = new SqliteDecisionLog(':memory:');
-  const fake = fakePort((name, question) => {
+  const fake = fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
     readings++; duringReading?.(name);
     if (question.type === 'choice') return choiceAnswer(question, name === 'disposition' ? 'act' : name === 'kind' ? 'read' : 'generic', 0.999);
     if (question.type === 'noul') return noulAnswer(0.001);

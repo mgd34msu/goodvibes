@@ -69,7 +69,7 @@ export async function publishNotice(feed: NotificationFeed, text: string, option
     feed.recordNotice({ domain: parts.domain, level: event.level, title: event.title, body: event.detail, timestamp: (options.now ?? Date.now)(), restored, eventKey: runtimeEventKey(event.type, options.runtimeEvent) });
     return;
   }
-  const pending = feed.recordNotice({ ...parts, timestamp: (options.now ?? Date.now)(), restored, severityPending: true });
+  const pending = feed.recordNotice({ ...parts, level: undefined, timestamp: (options.now ?? Date.now)(), restored, severityPending: true });
   // History remains visible while the independent semantic decoration is pending.
   // An unsettled reading never invents an info/warning/error classification.
   try {

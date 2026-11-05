@@ -390,7 +390,7 @@
       "path": "input/commands/context-window.ts",
       "baselineTuiLines": 103,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/commands/conversation-runtime.ts",
@@ -600,7 +600,7 @@
       "path": "input/commands/transcript-reading.ts",
       "baselineTuiLines": 35,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/commands/tts-runtime.ts",
@@ -714,7 +714,7 @@
       "path": "input/handler-work-tree-route.ts",
       "baselineTuiLines": 123,
       "baselineSimilarity": 1.0,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/handler.ts",
@@ -762,7 +762,7 @@
       "path": "input/notifications-modal.ts",
       "baselineTuiLines": 123,
       "baselineSimilarity": 0.9633,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/overlay-filter.ts",
@@ -852,7 +852,7 @@
       "path": "input/surface-modal-host.ts",
       "baselineTuiLines": 113,
       "baselineSimilarity": 0.9956,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/theme-settings-actions.ts",
@@ -1074,7 +1074,7 @@
       "path": "renderer/notifications-modal.ts",
       "baselineTuiLines": 116,
       "baselineSimilarity": 0.9569,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/process-view.ts",
@@ -1266,7 +1266,7 @@
       "path": "renderer/toast-center.ts",
       "baselineTuiLines": 122,
       "baselineSimilarity": 0.9794,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/ui-factory.ts",

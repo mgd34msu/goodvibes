@@ -1658,6 +1658,46 @@
       "bun": "./terminal-shell/src/renderer/lane-graph-paint.ts",
       "types": "./terminal-shell/dist/renderer/lane-graph-paint.d.ts",
       "import": "./terminal-shell/dist/renderer/lane-graph-paint.js"
+    },
+    "./sdk/platform/runtime/notification-feed": {
+      "bun": "./sdk/src/platform/runtime/notifications/feed.ts",
+      "types": "./sdk/dist/platform/runtime/notifications/feed.d.ts",
+      "import": "./sdk/dist/platform/runtime/notifications/feed.js"
+    },
+    "./terminal-shell/surface-modal-host": {
+      "bun": "./terminal-shell/src/surface-modal-host.ts",
+      "types": "./terminal-shell/dist/surface-modal-host.d.ts",
+      "import": "./terminal-shell/dist/surface-modal-host.js"
+    },
+    "./terminal-shell/toast-center": {
+      "bun": "./terminal-shell/src/renderer/toast-center.ts",
+      "types": "./terminal-shell/dist/renderer/toast-center.d.ts",
+      "import": "./terminal-shell/dist/renderer/toast-center.js"
+    },
+    "./terminal-shell/notifications-modal": {
+      "bun": "./terminal-shell/src/renderer/notifications-modal.ts",
+      "types": "./terminal-shell/dist/renderer/notifications-modal.d.ts",
+      "import": "./terminal-shell/dist/renderer/notifications-modal.js"
+    },
+    "./terminal-shell/notification-history": {
+      "bun": "./terminal-shell/src/notifications-modal.ts",
+      "types": "./terminal-shell/dist/notifications-modal.d.ts",
+      "import": "./terminal-shell/dist/notifications-modal.js"
+    },
+    "./terminal-shell/context-window-command": {
+      "bun": "./terminal-shell/src/context-window-command.ts",
+      "types": "./terminal-shell/dist/context-window-command.d.ts",
+      "import": "./terminal-shell/dist/context-window-command.js"
+    },
+    "./terminal-shell/transcript-reading": {
+      "bun": "./terminal-shell/src/transcript-reading.ts",
+      "types": "./terminal-shell/dist/transcript-reading.d.ts",
+      "import": "./terminal-shell/dist/transcript-reading.js"
+    },
+    "./terminal-shell/work-tree-input": {
+      "bun": "./terminal-shell/src/work-tree-input.ts",
+      "types": "./terminal-shell/dist/work-tree-input.d.ts",
+      "import": "./terminal-shell/dist/work-tree-input.js"
     }
   },
   "publishConfig": {

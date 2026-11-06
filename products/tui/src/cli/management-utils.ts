@@ -1,3 +1,6 @@
+import {getLocalNetworkIp} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import {splitCommandOption,readOptionValue,readOptionValues,hasCommandFlag,commandValues,isPresentConfigValue,extractAuthorizationCode} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+export {splitCommandOption,readOptionValue,readOptionValues,hasCommandFlag,commandValues,isPresentConfigValue,extractAuthorizationCode} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 /**
  * management-utils.ts, shared CLI utility functions.
@@ -17,20 +20,20 @@ import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
-import { networkInterfaces } from 'node:os';
+import 'node:child_process';
+import 'node:os';
 import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createRuntimeServices } from '../runtime/services.ts';
 import { createRuntimeStore } from '../runtime/store/index.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { RuntimeEventBus, createShellPathService, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/sdk/platform/utils';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { applyRuntimeEndpointFlagOverrides } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime, GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
-import { openBrowser as _openBrowser } from '../utils/browser.ts';
+import '../utils/browser.ts';
 
 type Formatter = (value: unknown, text: string) => string;
 
@@ -53,57 +56,15 @@ export function exitCodeForText(output: string): number {
   return 0;
 }
 
-export function splitCommandOption(token: string): { readonly name: string; readonly value: string | undefined } {
-  const index = token.indexOf('=');
-  if (index < 0) return { name: token, value: undefined };
-  return { name: token.slice(0, index), value: token.slice(index + 1) };
-}
 
-export function readOptionValue(args: readonly string[], name: string): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]!;
-    const split = splitCommandOption(token);
-    if (split.name !== name) continue;
-    if (split.value !== undefined) return split.value;
-    const next = args[index + 1];
-    if (next === undefined || next.startsWith('--')) return undefined;
-    return next;
-  }
-  return undefined;
-}
 
-export function readOptionValues(args: readonly string[], name: string): string[] {
-  const values: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]!;
-    const split = splitCommandOption(token);
-    if (split.name !== name) continue;
-    if (split.value !== undefined) {
-      values.push(split.value);
-      continue;
-    }
-    const next = args[index + 1];
-    if (next !== undefined && !next.startsWith('--')) values.push(next);
-  }
-  return values;
-}
 
-export function hasCommandFlag(args: readonly string[], name: string): boolean {
-  return args.some((arg) => splitCommandOption(arg).name === name);
-}
 
-export function commandValues(args: readonly string[]): string[] {
-  const values: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]!;
-    if (!token.startsWith('--')) {
-      values.push(token);
-      continue;
-    }
-    if (!token.includes('=') && args[index + 1] && !args[index + 1]!.startsWith('--')) index += 1;
-  }
-  return values;
-}
+
+
+
+
+
 
 export function readPassword(args: readonly string[]): string | null {
   const explicit = readOptionValue(args, '--password');
@@ -112,19 +73,9 @@ export function readPassword(args: readonly string[]): string | null {
   return process.env.GOODVIBES_AUTH_PASSWORD ?? null;
 }
 
-export function extractAuthorizationCode(input: string): string {
-  try {
-    const url = new URL(input);
-    return url.searchParams.get('code') ?? input;
-  } catch {
-    return input;
-  }
-}
 
-export function isPresentConfigValue(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0;
-  return value !== undefined && value !== null && value !== false;
-}
+
+
 
 export function getNestedValue(source: unknown, key: string): unknown {
   let cursor = source;
@@ -135,19 +86,7 @@ export function getNestedValue(source: unknown, key: string): unknown {
   return cursor;
 }
 
-function getLocalNetworkIp(): string {
-  try {
-    const nets = networkInterfaces();
-    for (const name of Object.keys(nets)) {
-      for (const netInfo of nets[name] ?? []) {
-        if (netInfo.family === 'IPv4' && !netInfo.internal) return netInfo.address;
-      }
-    }
-  } catch {
-    return '127.0.0.1';
-  }
-  return '127.0.0.1';
-}
+
 
 function connectHostForBindHost(host: string): string {
   if (host === '0.0.0.0' || host === '::') return '127.0.0.1';

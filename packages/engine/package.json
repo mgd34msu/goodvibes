@@ -2573,6 +2573,46 @@
       "bun": "./terminal-shell/src/setup-review.ts",
       "types": "./terminal-shell/dist/setup-review.d.ts",
       "import": "./terminal-shell/dist/setup-review.js"
+    },
+    "./terminal-shell/host-pairing-controller": {
+      "bun": "./terminal-shell/src/host-pairing-controller.ts",
+      "types": "./terminal-shell/dist/host-pairing-controller.d.ts",
+      "import": "./terminal-shell/dist/host-pairing-controller.js"
+    },
+    "./terminal-shell/host-pairing-store": {
+      "bun": "./terminal-shell/src/host-pairing-store.ts",
+      "types": "./terminal-shell/dist/host-pairing-store.d.ts",
+      "import": "./terminal-shell/dist/host-pairing-store.js"
+    },
+    "./terminal-shell/cli-environment": {
+      "bun": "./terminal-shell/src/cli-environment.ts",
+      "types": "./terminal-shell/dist/cli-environment.d.ts",
+      "import": "./terminal-shell/dist/cli-environment.js"
+    },
+    "./terminal-shell/cli-arguments": {
+      "bun": "./terminal-shell/src/cli-arguments.ts",
+      "types": "./terminal-shell/dist/cli-arguments.d.ts",
+      "import": "./terminal-shell/dist/cli-arguments.js"
+    },
+    "./terminal-shell/provider-boot": {
+      "bun": "./terminal-shell/src/provider-boot.ts",
+      "types": "./terminal-shell/dist/provider-boot.d.ts",
+      "import": "./terminal-shell/dist/provider-boot.js"
+    },
+    "./terminal-shell/settings-mcp-entries": {
+      "bun": "./terminal-shell/src/settings-mcp-entries.ts",
+      "types": "./terminal-shell/dist/settings-mcp-entries.d.ts",
+      "import": "./terminal-shell/dist/settings-mcp-entries.js"
+    },
+    "./terminal-shell/skill-discovery": {
+      "bun": "./terminal-shell/src/skill-discovery.ts",
+      "types": "./terminal-shell/dist/skill-discovery.d.ts",
+      "import": "./terminal-shell/dist/skill-discovery.js"
+    },
+    "./terminal-shell/markdown-frontmatter": {
+      "bun": "./terminal-shell/src/markdown-frontmatter.ts",
+      "types": "./terminal-shell/dist/markdown-frontmatter.d.ts",
+      "import": "./terminal-shell/dist/markdown-frontmatter.js"
     }
   },
   "publishConfig": {

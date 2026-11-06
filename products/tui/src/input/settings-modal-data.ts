@@ -1,3 +1,4 @@
+export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
 /**
  * settings-modal-data, pure data-assembly helpers for SettingsModal.
@@ -11,7 +12,7 @@ import { type ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
 import { getResolvedSettingLookup } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
+
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
@@ -37,16 +38,7 @@ import {
   isExecEnvScrubAllowlistConfigKey,
   readExecEnvScrubAllowlist,
 } from './exec-env-scrub-config.ts';
-import {
-  SETTINGS_CATEGORIES,
-  type BuiltinSettingEntry,
-  type FlagEntry,
-  type HostSettingEntry,
-  type McpEntry,
-  type SettingEntry,
-  type SettingsCategory,
-  type SubscriptionEntry,
-} from './settings-modal-types.ts';
+import { SETTINGS_CATEGORIES, type BuiltinSettingEntry, type FlagEntry, type HostSettingEntry, type SettingEntry, type SettingsCategory, type SubscriptionEntry } from './settings-modal-types.ts';
 import { enrichRelaySettingDescriptions } from './relay-settings-descriptions.ts';
 import { enrichDaemonOwnedSettingDescriptions } from './daemon-owned-settings-descriptions.ts';
 import { applyFeatureUnitLayout } from './feature-unit-layout.ts';
@@ -601,17 +593,7 @@ export function buildFlagEntries(featureFlagManager: FeatureFlagManager | null):
 // buildMcpEntries, snapshot of current MCP server security entries
 // ---------------------------------------------------------------------------
 
-export function buildMcpEntries(mcpRegistry: McpRegistry | null): McpEntry[] {
-  if (!mcpRegistry) return [];
-  return mcpRegistry.listServerSecurity().map((entry) => ({
-    name: entry.name,
-    connected: entry.connected,
-    role: entry.role,
-    trustMode: entry.trustMode,
-    allowedPaths: [...entry.allowedPaths],
-    allowedHosts: [...entry.allowedHosts],
-  }));
-}
+
 
 // ---------------------------------------------------------------------------
 // buildSubscriptionEntries, re-export for use by SettingsModal

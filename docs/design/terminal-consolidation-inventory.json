@@ -2014,5 +2014,73 @@
       "baselineSimilarity": 0.6222,
       "status": "platform-implementation-with-product-policy-adapter"
     }
+  ],
+  "offPathConsolidation": [
+    {
+      "paths": [
+        "products/tui/src/shell/host-pairing-controller.ts",
+        "products/agent/src/shell/setup-pairing-controller.ts"
+      ],
+      "platformModule": "terminal-shell/host-pairing-controller",
+      "status": "platform-implementation-with-product-policy-adapter",
+      "reason": "One input owner, single-use confirmation and cancellation/recovery state machine; distinct preview/store/presentation ports."
+    },
+    {
+      "paths": [
+        "products/tui/src/runtime/tui-host-credential-store.ts",
+        "products/agent/src/runtime/connected-host-pairing-store.ts"
+      ],
+      "platformModule": "terminal-shell/host-pairing-store",
+      "status": "platform-implementation-with-product-policy-adapter",
+      "reason": "Shared strict reader, file ownership/symlink protections, durable lock/CAS publication; original product files and origin policy retained."
+    },
+    {
+      "paths": [
+        "products/tui/src/views/skills-discovery.ts",
+        "products/agent/src/agent/skill-discovery.ts"
+      ],
+      "platformModule": "terminal-shell/skill-discovery",
+      "status": "platform-implementation-with-product-policy-adapter",
+      "reason": "Shared frontmatter/file scan/deduplication; original product directories, body retention and marketplace tagging retained."
+    },
+    {
+      "platformModule": "terminal-shell/cli-arguments",
+      "paths": [
+        "products/tui/src/cli/management-utils.ts",
+        "products/agent/src/cli/management.ts",
+        "products/agent/src/cli/agent-knowledge-args.ts"
+      ],
+      "reason": "Shared argument readers and scalar/auth helpers; Agent empty-following-value behavior retained.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "platformModule": "terminal-shell/cli-environment",
+      "paths": [
+        "products/tui/src/utils/browser.ts",
+        "products/tui/src/cli/management-utils.ts",
+        "products/agent/src/cli/management.ts",
+        "products/agent/src/input/commands/qrcode-runtime.ts"
+      ],
+      "reason": "Shared browser request and local IPv4 selection; product dial policies remain separate.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "platformModule": "terminal-shell/provider-boot",
+      "paths": [
+        "products/tui/src/runtime/provider-fallback.ts",
+        "products/agent/src/runtime/provider-boot.ts"
+      ],
+      "reason": "One boot-time custom provider readiness and configured-model recovery implementation.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "platformModule": "terminal-shell/settings-mcp-entries",
+      "paths": [
+        "products/tui/src/input/settings-modal-data.ts",
+        "products/agent/src/input/settings-modal-mcp-entries.ts"
+      ],
+      "reason": "One detached security-entry projection for MCP settings.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    }
   ]
 }

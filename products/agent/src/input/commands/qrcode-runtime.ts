@@ -1,5 +1,6 @@
+import {getLocalNetworkIp} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import type { CommandRegistry } from '../command-registry.ts';
-import { networkInterfaces } from 'node:os';
+import 'node:os';
 import {
   buildCompanionConnectionInfo,
   type CompanionConnectionInfo,
@@ -12,19 +13,7 @@ import { resolveRuntimeEndpointBinding } from '../../cli/endpoints.ts';
 import { connectedHostOperatorTokenFingerprint, connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
 import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 
-function getLocalNetworkIp(): string {
-  try {
-    const nets = networkInterfaces();
-    for (const name of Object.keys(nets)) {
-      for (const netInfo of nets[name] ?? []) {
-        if (netInfo.family === 'IPv4' && !netInfo.internal) return netInfo.address;
-      }
-    }
-  } catch {
-    return '127.0.0.1';
-  }
-  return '127.0.0.1';
-}
+
 
 function urlHostForBindHost(host: string): string {
   if (host === '0.0.0.0' || host === '::') return getLocalNetworkIp();

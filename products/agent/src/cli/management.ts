@@ -1,29 +1,33 @@
+import {getLocalNetworkIp,openBrowser} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+export {openBrowser} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+export {hasCommandFlag,isPresentConfigValue,extractAuthorizationCode} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { runSetupPairingCommand } from './setup-pair-command.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { networkInterfaces } from 'node:os';
-import type { ConfigManager, ConfigKey, GoodVibesConfig } from '../config/index.ts';
-import { CONFIG_SCHEMA } from '../config/index.ts';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import 'node:child_process';
+import 'node:os';
+import type { ConfigManager } from '../config/index.ts';
+import '../config/index.ts';
 import { formatProviderModel, getModelIdFromProviderModel } from '../config/provider-model.ts';
 import { createRuntimeServices } from '../runtime/services.ts';
 import { createRuntimeStore } from '../runtime/store/index.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
-import { SecretsManager } from '../config/secrets.ts';
+import '../config/secrets.ts';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { BUILTIN_SECRET_PROVIDER_SOURCES, describeSecretRef, isSecretRefInput, resolveSecretRef } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getSubscriptionProviderConfig, listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
-import { beginOpenAICodexLogin, exchangeOpenAICodexCode } from '@goodvibes-jev/engine/sdk/platform/config';
-import { inspectProviderAuth } from '@/runtime/index.ts';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@/runtime/index.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { formatProviderAuthRoute, summarizeProviderAuthRoutes } from './provider-auth-routes.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
@@ -80,29 +84,13 @@ function exitCodeForText(output: string): number {
   return 0;
 }
 
-function splitCommandOption(token: string): { readonly name: string; readonly value: string | undefined } {
-  const index = token.indexOf('=');
-  if (index < 0) return { name: token, value: undefined };
-  return { name: token.slice(0, index), value: token.slice(index + 1) };
-}
 
-export function hasCommandFlag(args: readonly string[], name: string): boolean {
-  return args.some((arg) => splitCommandOption(arg).name === name);
-}
 
-export function extractAuthorizationCode(input: string): string {
-  try {
-    const url = new URL(input);
-    return url.searchParams.get('code') ?? input;
-  } catch {
-    return input;
-  }
-}
 
-export function isPresentConfigValue(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0;
-  return value !== undefined && value !== null && value !== false;
-}
+
+
+
+
 
 function inferProviderFromRegistryKey(modelKey: string): string {
   if (modelKey.includes(':')) return modelKey.split(':')[0] || 'openai';
@@ -119,19 +107,7 @@ export function getNestedValue(source: unknown, key: string): unknown {
   return cursor;
 }
 
-function getLocalNetworkIp(): string {
-  try {
-    const nets = networkInterfaces();
-    for (const name of Object.keys(nets)) {
-      for (const netInfo of nets[name] ?? []) {
-        if (netInfo.family === 'IPv4' && !netInfo.internal) return netInfo.address;
-      }
-    }
-  } catch {
-    return '127.0.0.1';
-  }
-  return '127.0.0.1';
-}
+
 
 /**
  * Where THIS process dials. Shares the wildcard→loopback mapping with every
@@ -150,19 +126,7 @@ export function urlHostForBindHost(host: string): string {
   return host || '127.0.0.1';
 }
 
-export function openBrowser(url: string): string {
-  const platform = process.platform;
-  const command = platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-    child.once('error', () => {});
-    child.unref();
-    return 'browser open requested';
-  } catch (error) {
-    return `browser open failed: ${summarizeError(error)}`;
-  }
-}
+
 
 export function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
 

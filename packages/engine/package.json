@@ -2843,6 +2843,11 @@
       "bun": "./terminal-shell/src/renderer/session-picker.ts",
       "types": "./terminal-shell/dist/renderer/session-picker.d.ts",
       "import": "./terminal-shell/dist/renderer/session-picker.js"
+    },
+    "./terminal-shell/renderer/settings-context": {
+      "bun": "./terminal-shell/src/renderer/settings-context.ts",
+      "types": "./terminal-shell/dist/renderer/settings-context.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-context.js"
     }
   },
   "publishConfig": {

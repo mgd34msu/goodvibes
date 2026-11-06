@@ -102,7 +102,7 @@ export function createSessionPickerRenderer<Modal extends SessionPickerRenderSta
           ]
         : [
             ['↑↓', 'move'],
-            ['⏎', 'open'],
+            ['⏎', policy.openLabel],
             ['⌫', 'edit search'],
           ];
     const f = beginModal(screenWidth, screenHeight, { title: 'Sessions', hints });

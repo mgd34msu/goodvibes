@@ -85,3 +85,29 @@ export const SHARED_CATEGORY_INFO = {
   tools:
     'Tool LLM and helper model routing. Empty provider/model values inherit the active chat route unless a specific helper/tool route is set.',
 } as const;
+
+export const SHARED_SETTING_ENUM_DESCRIPTIONS = {
+  'behavior.hitlMode': {
+    quiet: 'Minimize operational interruptions and surface fewer Human-in-the-Loop prompts.',
+    balanced: 'Show important Human-in-the-Loop prompts without turning routine work into noise.',
+  },
+  'behavior.guidanceMode': {
+    off: 'Do not add extra guidance beyond direct command output.',
+    minimal: 'Show concise guidance only when it helps avoid mistakes.',
+    guided: 'Provide more explanation and next-step context during configuration and operations.',
+  },
+  'storage.secretPolicy': {
+    preferred_secure: 'Use secure secret storage when available, with supported fallback behavior.',
+    require_secure: 'Require secure secret storage and reject plaintext fallback.',
+    plaintext_allowed: 'Allow plaintext fallback when secure storage is unavailable.',
+  },
+  'ui.systemMessages': {
+    conversation: 'Show system messages inline in the transcript.',
+  },
+  'ui.operationalMessages': {
+    conversation: 'Show operational messages inline in the transcript.',
+  },
+  'surfaces.whatsapp.provider': {
+    'meta-cloud': 'Use Meta Cloud API credentials and identifiers.',
+  },
+} as const;

@@ -1392,10 +1392,11 @@
       "path": "renderer/settings-modal-context.ts",
       "baselineTuiLines": 372,
       "baselineSimilarity": 0.4867,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "buildMcpContext"
-      ]
+      ],
+      "notes": "Platform owns secret-safe in-progress values, default/type/source headers, boolean/enum/secret/editing explanations, subscription facts and shared enum descriptions. Adapters retain product feature-unit versus flags context, local-sync versus host-owned conflicts, unavailable metadata, theme picker, connections and subscription confirmation copy."
     },
     {
       "path": "renderer/settings-modal-helpers.ts",

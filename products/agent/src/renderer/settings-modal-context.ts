@@ -1,3 +1,4 @@
+import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { SHARED_CATEGORY_INFO } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
 /**
@@ -8,11 +9,11 @@ import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/m
  */
 
 import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import type { SettingsModal, SettingEntry, FlagEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
-import { describeUiRouting, formatValue, getSettingLabel, inferSubscriptionRouteReason } from './settings-modal-helpers.ts';
+import { describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import { maskConcealedText } from '../input/concealed-input.ts';
+import '../input/concealed-input.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
 
@@ -114,14 +115,14 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
 
 export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'behavior.hitlMode': {
-    quiet: 'Minimize operational interruptions and surface fewer Human-in-the-Loop prompts.',
-    balanced: 'Show important Human-in-the-Loop prompts without turning routine work into noise.',
+    quiet: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['quiet'],
+    balanced: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['balanced'],
     operator: 'Surface more operational detail for users actively supervising agents, tools, connected-host posture, and automation.',
   },
   'behavior.guidanceMode': {
-    off: 'Do not add extra guidance beyond direct command output.',
-    minimal: 'Show concise guidance only when it helps avoid mistakes.',
-    guided: 'Provide more explanation and next-step context during configuration and operations.',
+    off: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['off'],
+    minimal: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['minimal'],
+    guided: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['guided'],
   },
   'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map((preset) => [preset.mode, preset.summary])),
   'permissions.backgroundAgents': {
@@ -134,18 +135,18 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     off: 'Never append post-edit diagnostics to write/edit tool results.',
   },
   'storage.secretPolicy': {
-    preferred_secure: 'Use secure secret storage when available, with supported fallback behavior.',
-    require_secure: 'Require secure secret storage and reject plaintext fallback.',
-    plaintext_allowed: 'Allow plaintext fallback when secure storage is unavailable.',
+    preferred_secure: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['preferred_secure'],
+    require_secure: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['require_secure'],
+    plaintext_allowed: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['plaintext_allowed'],
   },
   'ui.systemMessages': {
     panel: 'Show system messages in the activity feed only.',
-    conversation: 'Show system messages inline in the transcript.',
+    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.systemMessages']['conversation'],
     both: 'Show system messages in both the activity feed and the transcript.',
   },
   'ui.operationalMessages': {
     panel: 'Show operational messages in the activity feed only.',
-    conversation: 'Show operational messages inline in the transcript.',
+    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.operationalMessages']['conversation'],
     both: 'Show operational messages in both the activity feed and the transcript.',
   },
   'surfaces.telegram.mode': {
@@ -153,110 +154,13 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     polling: 'Poll Telegram for updates from the configured account.',
   },
   'surfaces.whatsapp.provider': {
-    'meta-cloud': 'Use Meta Cloud API credentials and identifiers.',
+    'meta-cloud': SHARED_SETTING_ENUM_DESCRIPTIONS['surfaces.whatsapp.provider']['meta-cloud'],
     bridge: 'Use a bridge endpoint URL/token flow instead of direct Meta Cloud API delivery.',
   },
 };
 
-function formatDefaultValue(value: unknown): string {
-  if (value === '') return '(empty)';
-  if (value === null || value === undefined) return '(unset)';
-  return String(value);
-}
-
 export function formatDefaultForEntry(entry: SettingEntry): string {
   return formatDefaultValue(entry.setting.default);
-}
-
-export function currentSettingValue(modal: SettingsModal, entry: SettingEntry, selected: boolean): string {
-  if (selected && modal.editingMode) {
-    // Secret-backed keys (payments.cardNumber/.cardCvv/..., surfaces.*.botToken,
-    // .signingSecret, see config/secret-config.ts) must never echo the
-    // in-progress plaintext buffer: not in the table row, not in the
-    // "Current: ..." context line, not in search results. Masking only at rest
-    // leaves the value fully readable for the entire time it is being typed,
-    // which is the window that matters for someone reading over a shoulder or
-    // a terminal recording.
-    //
-    // Reuses the composer's own concealed-input mask rather than a second
-    // implementation, so both entry paths (this modal and /payments card) mask
-    // identically, same bullet-per-character shape, so keystrokes still
-    // visibly register without revealing content.
-    const buffer = isSecretConfigKey(entry.setting.key) ? maskConcealedText(modal.editBuffer) : modal.editBuffer;
-    return `${buffer}▏`;
-  }
-  return formatValue(entry);
-}
-
-function buildSettingContext(modal: SettingsModal, entry: SettingEntry): string[] {
-  const lines: string[] = [
-    getSettingLabel(entry),
-    `Key: ${entry.setting.key}`,
-    `Current: ${currentSettingValue(modal, entry, true)}`,
-    `Default: ${formatDefaultForEntry(entry)}`,
-    `Type: ${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`,
-    `Source: ${entry.effectiveSource ?? 'default'}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
-  ];
-
-  // The SDK's own wording, not authored here, and never shown against 'stored'.
-  if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
-    lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
-  }
-
-  if (entry.metadataUnavailable) lines.push(`Editing unavailable: ${entry.metadataUnavailable}`);
-  else if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
-  if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
-
-  if (entry.setting.key === 'permissions.mode') {
-    lines.push('', 'Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');
-  }
-
-  if (entry.setting.key === 'ui.systemMessages' || entry.setting.key === 'ui.operationalMessages') {
-    lines.push(`Routing meaning: ${describeUiRouting(String(entry.currentValue))}.`);
-  }
-
-  if (entry.setting.type === 'boolean') {
-    lines.push('');
-    lines.push('Possible values:');
-    if (entry.setting.key === NOTIFICATIONS_METADATA_ONLY_KEY) {
-      lines.push('true: Keep notifications metadata-only (restrictive default).');
-      lines.push('false: Explicitly permit notification details on supported paths.');
-    } else {
-      lines.push('true: enabled or allowed for this setting.');
-      lines.push('false: disabled or not allowed for this setting.');
-    }
-  }
-
-  if (entry.setting.type === 'enum' && entry.setting.enumValues) {
-    lines.push('');
-    lines.push('Possible values:');
-    const descriptions = ENUM_VALUE_DESCRIPTIONS[entry.setting.key] ?? {};
-    for (const value of entry.setting.enumValues) {
-      lines.push(`${value}: ${descriptions[value] ?? `Use ${value} for this setting.`}`);
-    }
-  }
-
-  if (isSecretConfigKey(entry.setting.key)) {
-    lines.push('');
-    lines.push(
-      'Secret handling: raw values entered here are stored through the secret manager and the config receives a goodvibes:// secret reference. Empty input clears the config value.',
-    );
-  }
-
-  if (entry.setting.type === 'number') {
-    lines.push('');
-    lines.push('Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.');
-  }
-
-  if (entry.setting.key === 'display.theme') {
-    lines.push('');
-    lines.push('Editing: Enter opens the theme picker with live preview. Enter saves the selected theme; Esc restores the previous theme.');
-  } else if (entry.setting.type === 'string' && !isSecretConfigKey(entry.setting.key)) {
-    lines.push('');
-    lines.push('Editing: Enter opens inline edit. Delete the current text to save an empty value when that is valid for the setting.');
-  }
-
-  return lines;
 }
 
 function formatSubscriptionRoute(route: SubscriptionEntry['activeRoute'] | SubscriptionEntry['preferredRoute']): string {
@@ -292,31 +196,6 @@ function buildFlagContext(entry: FlagEntry | null): string[] {
   ];
 }
 
-function buildSubscriptionContext(modal: SettingsModal, entry: SubscriptionEntry | null): string[] {
-  if (!entry) return ['Subscriptions', 'No subscription provider is selected.'];
-  const expires = entry.expiresAt ? new Date(entry.expiresAt).toISOString() : 'not reported';
-  const routeReason = inferSubscriptionRouteReason(entry);
-  const logout =
-    entry.state === 'active' || entry.state === 'pending'
-      ? modal.subscriptionLogoutConfirmationTarget === entry.provider
-        ? `Press Enter again to sign out ${entry.provider}. Move selection or close config to cancel.`
-        : 'Press Enter to review sign-out for this provider session.'
-      : `Open Agent Workspace -> Start and choose Sign in to a provider for ${entry.provider}.`;
-  return [
-    entry.provider,
-    `State: ${entry.state}`,
-    ...(routeReason ? [routeReason] : []),
-    logout,
-    `Active route: ${formatSubscriptionRoute(entry.activeRoute)}`,
-    `Preferred route: ${formatSubscriptionRoute(entry.preferredRoute)}`,
-    `OAuth configured: ${entry.oauthConfigured ? 'yes' : 'no'}`,
-    `Freshness: ${entry.authFreshness ?? 'n/a'}`,
-    `Expires: ${expires}`,
-    ...((entry.issues ?? []).length > 0 ? ['', 'Issues:', ...(entry.issues ?? [])] : []),
-    ...((entry.nextActions ?? []).length > 0 ? ['', 'Next actions:', ...(entry.nextActions ?? [])] : []),
-  ];
-}
-
 /** Items in a category (the count beside it in the category list). */
 export function categoryItemCount(modal: SettingsModal, category: SettingsCategory): number {
   if (category === 'flags') return modal.flagEntries.length;
@@ -349,3 +228,45 @@ export function settingContextLines(modal: SettingsModal): string[] {
   lines.push('', `Category purpose: ${CATEGORY_INFO[category]}`);
   return lines;
 }
+
+import {
+  createSettingContext,
+  createSubscriptionContext,
+  formatDefaultValue,
+} from '@goodvibes-jev/engine/terminal-shell/renderer/settings-context';
+export const { currentSettingValue, buildSettingContext } = createSettingContext<SettingsModal, SettingEntry>({
+  isSecretKey: isSecretConfigKey,
+  cursor: '▏',
+  formatValue,
+  label: getSettingLabel,
+  source: (entry) => entry.effectiveSource ?? 'default',
+  detail(entry) {
+    const lines: string[] = []; // The SDK's own wording, not authored here, and never shown against 'stored'.
+    if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
+      lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
+    }
+
+    if (entry.metadataUnavailable) lines.push(`Editing unavailable: ${entry.metadataUnavailable}`);
+    else if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
+    if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
+
+    if (entry.setting.key === 'permissions.mode') {
+      lines.push('', 'Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');
+    }
+
+    return lines;
+  },
+  enumDescriptions: ENUM_VALUE_DESCRIPTIONS,
+  routingKeys: ['ui.systemMessages', 'ui.operationalMessages'],
+  describeUiRouting,
+  customEditing: (entry) =>
+    entry.setting.key === 'display.theme'
+      ? 'Editing: Enter opens the theme picker with live preview. Enter saves the selected theme; Esc restores the previous theme.'
+      : undefined,
+});
+const buildSubscriptionContext = createSubscriptionContext<SettingsModal>({
+  confirmLogout: (provider) => `Press Enter again to sign out ${provider}. Move selection or close config to cancel.`,
+  beginLogout: 'Press Enter to review sign-out for this provider session.',
+  login: (provider) => `Open Agent Workspace -> Start and choose Sign in to a provider for ${provider}.`,
+  route: formatSubscriptionRoute,
+});

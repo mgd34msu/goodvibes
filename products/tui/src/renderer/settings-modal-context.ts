@@ -1,3 +1,4 @@
+import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
 /**
  * settings-modal-context.ts, the documentation the settings modal shows for
@@ -9,14 +10,14 @@ import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/m
  * and styles it.
  */
 
-import type { SettingsModal, SettingEntry, McpEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
+import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { FEATURE_SETTINGS_BY_ID, isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
-import { CATEGORY_INFO, describeUiRouting, formatValue, getSettingLabel, inferSubscriptionRouteReason } from './settings-modal-helpers.ts';
+import { CATEGORY_INFO, describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { buildConnectionContext } from './settings-modal-connections.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import { maskConcealedText } from '../input/concealed-input.ts';
+import '../input/concealed-input.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
 import { GATE_PRESETS } from '@goodvibes-jev/engine/sdk/platform/gate';
 
@@ -27,16 +28,16 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     light: 'Force the light theme regardless of terminal background. Applies immediately.',
   },
   'behavior.hitlMode': {
-    quiet: 'Minimize operational interruptions and surface fewer Human-in-the-Loop prompts.',
-    balanced: 'Show important Human-in-the-Loop prompts without turning routine work into noise.',
+    quiet: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['quiet'],
+    balanced: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['balanced'],
     operator: 'Surface more operational detail for users actively supervising agents, tools, services, and automation.',
   },
   'behavior.guidanceMode': {
-    off: 'Do not add extra guidance beyond direct command output.',
-    minimal: 'Show concise guidance only when it helps avoid mistakes.',
-    guided: 'Provide more explanation and next-step context during configuration and operations.',
+    off: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['off'],
+    minimal: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['minimal'],
+    guided: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['guided'],
   },
-  'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map(preset => [preset.mode, preset.summary])),
+  'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map((preset) => [preset.mode, preset.summary])),
   'permissions.backgroundAgents': {
     inherit: 'Background and subagent tool calls run through the SAME session permission mode as foreground work.',
     'allow-all': 'Background and subagent tool calls are exempt from prompting (auto-approved) even when foreground work is gated.',
@@ -46,9 +47,9 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     off: 'Do not run diagnostics automatically after edits.',
   },
   'storage.secretPolicy': {
-    preferred_secure: 'Use secure secret storage when available, with supported fallback behavior.',
-    require_secure: 'Require secure secret storage and reject plaintext fallback.',
-    plaintext_allowed: 'Allow plaintext fallback when secure storage is unavailable.',
+    preferred_secure: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['preferred_secure'],
+    require_secure: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['require_secure'],
+    plaintext_allowed: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['plaintext_allowed'],
   },
   'batch.mode': {
     off: 'Keep daemon work on the immediate local path.',
@@ -72,12 +73,12 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   },
   'ui.systemMessages': {
     panel: 'Kept for older settings files: shows system messages inline in the transcript, same as conversation.',
-    conversation: 'Show system messages inline in the transcript.',
+    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.systemMessages']['conversation'],
     both: 'Shows system messages inline in the transcript, same as conversation.',
   },
   'ui.operationalMessages': {
     panel: 'Kept for older settings files: shows operational messages inline in the transcript, same as conversation.',
-    conversation: 'Show operational messages inline in the transcript.',
+    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.operationalMessages']['conversation'],
     both: 'Shows operational messages inline in the transcript, same as conversation.',
   },
   'ui.contractMessages': {
@@ -90,7 +91,7 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     polling: 'Poll Telegram for updates from the service.',
   },
   'surfaces.whatsapp.provider': {
-    'meta-cloud': 'Use Meta Cloud API credentials and identifiers.',
+    'meta-cloud': SHARED_SETTING_ENUM_DESCRIPTIONS['surfaces.whatsapp.provider']['meta-cloud'],
     bridge: 'Use a bridge service URL/token flow instead of direct Meta Cloud API delivery.',
   },
   'payments.cvvHandling': {
@@ -98,96 +99,6 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     prompt: CVV_PROMPT_TRADEOFF_WARNING,
   },
 };
-
-function formatDefaultValue(value: unknown): string {
-  if (value === '') return '(empty)';
-  if (value === null || value === undefined) return '(unset)';
-  return String(value);
-}
-
-export function currentSettingValue(modal: SettingsModal, entry: SettingEntry, selected: boolean): string {
-  if (selected && modal.editingMode) {
-    // Secret-backed keys (surfaces.*.botToken, .signingSecret, etc., see
-    // secret-config.ts) must never echo the in-progress plaintext buffer:
-    // not in the row, not in the "Current: ..." context line, not in search
-    // results. Reuse the composer's concealed-input mask (concealed-input.ts)
-    // rather than a second masking implementation, same bullet-per-character
-    // shape, so keystrokes still visibly register without revealing content.
-    const buffer = isSecretConfigKey(entry.setting.key) ? maskConcealedText(modal.editBuffer) : modal.editBuffer;
-    return `${buffer}${GLYPHS.surface.cursor}`;
-  }
-  return formatValue(entry);
-}
-
-function buildSettingContext(modal: SettingsModal, entry: SettingEntry): string[] {
-  const lines: string[] = [
-    getSettingLabel(entry),
-    `Key: ${entry.setting.key}`,
-    `Current: ${currentSettingValue(modal, entry, true)}`,
-    `Default: ${formatDefaultValue(entry.setting.default)}`,
-    `Type: ${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`,
-    `Source: ${entry.metadataUnavailable || entry.valueUnavailable ? 'unavailable' : entry.effectiveSource ?? 'default'}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
-  ];
-
-  if (entry.metadataUnavailable) lines.push(`Unavailable: ${entry.metadataUnavailable}`);
-  if (entry.valueUnavailable) lines.push(`Value unavailable: ${entry.valueUnavailable} You can set an explicit value here.`);
-  if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
-  if (entry.conflict) lines.push(`Conflict: resolve with /settings-sync resolve ${entry.setting.key} local|synced.`);
-
-  // A settings sub-row owned by a feature unit names its feature so "what does this do" is answerable without scrolling back to the header row.
-  if (entry.ownerFlagId) {
-    const owner = FEATURE_SETTINGS_BY_ID.get(entry.ownerFlagId);
-    if (owner) lines.push(`Part of feature: ${owner.name} (the header row above).`);
-  }
-
-  lines.push('', entry.setting.description);
-
-  if (
-    entry.setting.key === 'ui.systemMessages'
-    || entry.setting.key === 'ui.operationalMessages'
-    || entry.setting.key === 'ui.contractMessages'
-  ) {
-    lines.push(`Routing meaning: ${describeUiRouting(String(entry.currentValue))}.`);
-  }
-
-  if (entry.setting.type === 'boolean') {
-    lines.push('');
-    lines.push('Possible values:');
-    if (String(entry.setting.key) === NOTIFICATIONS_METADATA_ONLY_KEY) {
-      lines.push('true: Keep notifications metadata-only (restrictive default).');
-      lines.push('false: Explicitly permit notification details on supported paths.');
-    } else {
-      lines.push('true: enabled or allowed for this setting.');
-      lines.push('false: disabled or not allowed for this setting.');
-    }
-  }
-
-  if (entry.setting.type === 'enum' && entry.setting.enumValues) {
-    lines.push('');
-    lines.push('Possible values:');
-    const descriptions = ENUM_VALUE_DESCRIPTIONS[entry.setting.key] ?? {};
-    for (const value of entry.setting.enumValues) {
-      lines.push(`${value}: ${descriptions[value] ?? `Use ${value} for this setting.`}`);
-    }
-  }
-
-  if (isSecretConfigKey(entry.setting.key)) {
-    lines.push('');
-    lines.push('Secret handling: raw values entered here are stored through the secret manager and the config receives a goodvibes:// secret reference. Empty input clears the config value.');
-  }
-
-  if (entry.setting.type === 'number') {
-    lines.push('');
-    lines.push('Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.');
-  }
-
-  if (entry.setting.type === 'string' && !isSecretConfigKey(entry.setting.key)) {
-    lines.push('');
-    lines.push('Editing: Enter opens inline edit. Delete the current text to save an empty value when that is valid for the setting.');
-  }
-
-  return lines;
-}
 
 /**
  * The option shape of a feature header, rendered from the same schema the
@@ -245,14 +156,10 @@ function buildFlagContext(entry: SettingEntry | null): string[] {
     // value of true beside a state of disabled and explains nothing, the
     // written reason exists in the registry, so render it where the user meets
     // the contradiction rather than leaving it to be discovered.
-    ...(feature.operable === false && feature.inoperableDetail
-      ? [`Not available in this build: ${feature.inoperableDetail}`]
-      : []),
+    ...(feature.operable === false && feature.inoperableDetail ? [`Not available in this build: ${feature.inoperableDetail}`] : []),
     `Default: ${feature.defaultEnabled ? 'enabled' : 'disabled'}`,
     `Applies: ${feature.restartRequired ? 'on next launch (startup-gated)' : 'immediately'}`,
-    ...(pendingRestart
-      ? [`Pending restart: saved as ${persistedState}; effective state stays ${state} until the next launch.`]
-      : []),
+    ...(pendingRestart ? [`Pending restart: saved as ${persistedState}; effective state stays ${state} until the next launch.`] : []),
     '',
     feature.description,
   ];
@@ -279,32 +186,6 @@ function buildFlagContext(entry: SettingEntry | null): string[] {
     lines.push('', `Kill reason: ${flag.killReason}`);
   }
   return lines;
-}
-
-
-
-function buildSubscriptionContext(modal: SettingsModal, entry: SubscriptionEntry | null): string[] {
-  if (!entry) return ['Subscriptions', 'No subscription provider is selected.'];
-  const expires = entry.expiresAt ? new Date(entry.expiresAt).toISOString() : 'not reported';
-  const routeReason = inferSubscriptionRouteReason(entry);
-  const logout = entry.state === 'active' || entry.state === 'pending'
-    ? modal.subscriptionLogoutConfirmationTarget === entry.provider
-      ? `Sign out ${entry.provider}? Enter/y to confirm, n/Esc to cancel.`
-      : 'Press Enter to begin sign-out for this provider session.'
-    : `Use /subscription login ${entry.provider} start to begin OAuth sign-in for this provider.`;
-  return [
-    entry.provider,
-    `State: ${entry.state}`,
-    ...(routeReason ? [routeReason] : []),
-    logout,
-    `Active route: ${entry.activeRoute ?? 'n/a'}`,
-    `Preferred route: ${entry.preferredRoute ?? 'n/a'}`,
-    `OAuth configured: ${entry.oauthConfigured ? 'yes' : 'no'}`,
-    `Freshness: ${entry.authFreshness ?? 'n/a'}`,
-    `Expires: ${expires}`,
-    ...((entry.issues ?? []).length > 0 ? ['', 'Issues:', ...(entry.issues ?? [])] : []),
-    ...((entry.nextActions ?? []).length > 0 ? ['', 'Next actions:', ...(entry.nextActions ?? [])] : []),
-  ];
 }
 
 /**
@@ -346,3 +227,38 @@ export function categoryItemCount(modal: SettingsModal, category: SettingsCatego
   if (category === 'connections') return modal.connectionEntries.length;
   return modal.groups.get(category)?.length ?? 0;
 }
+
+import { createSettingContext, createSubscriptionContext } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-context';
+export const { currentSettingValue, buildSettingContext } = createSettingContext<SettingsModal, SettingEntry>({
+  isSecretKey: isSecretConfigKey,
+  cursor: GLYPHS.surface.cursor,
+  formatValue,
+  label: getSettingLabel,
+  source: (entry) => (entry.metadataUnavailable || entry.valueUnavailable ? 'unavailable' : (entry.effectiveSource ?? 'default')),
+  detail(entry) {
+    const lines: string[] = [];
+    if (entry.metadataUnavailable) lines.push(`Unavailable: ${entry.metadataUnavailable}`);
+    if (entry.valueUnavailable) lines.push(`Value unavailable: ${entry.valueUnavailable} You can set an explicit value here.`);
+    if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
+    if (entry.conflict) lines.push(`Conflict: resolve with /settings-sync resolve ${entry.setting.key} local|synced.`);
+
+    // A settings sub-row owned by a feature unit names its feature so "what does this do" is answerable without scrolling back to the header row.
+    if (entry.ownerFlagId) {
+      const owner = FEATURE_SETTINGS_BY_ID.get(entry.ownerFlagId);
+      if (owner) lines.push(`Part of feature: ${owner.name} (the header row above).`);
+    }
+
+    lines.push('', entry.setting.description);
+
+    return lines;
+  },
+  enumDescriptions: ENUM_VALUE_DESCRIPTIONS,
+  routingKeys: ['ui.systemMessages', 'ui.operationalMessages', 'ui.contractMessages'],
+  describeUiRouting,
+});
+const buildSubscriptionContext = createSubscriptionContext<SettingsModal>({
+  confirmLogout: (provider) => `Sign out ${provider}? Enter/y to confirm, n/Esc to cancel.`,
+  beginLogout: 'Press Enter to begin sign-out for this provider session.',
+  login: (provider) => `Use /subscription login ${provider} start to begin OAuth sign-in for this provider.`,
+  route: (value) => value ?? 'n/a',
+});

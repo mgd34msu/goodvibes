@@ -1,5 +1,5 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
-import { createBasicShellCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
+import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
@@ -158,39 +158,22 @@ const coreActions = createShellCoreActions<CommandContext>(
 
 export function registerShellCoreCommands(registry: CommandRegistry): void {
   const basicCommands = createBasicShellCommands<CommandContext>();
+  const navigation = createShellNavigationCommands<CommandContext>({
+    shortcutsHidden: true,
+    shortcutsFallback: 'Use ? key or /help for shortcuts',
+    quitAliases: [':q'],
+    beforeCommands: (ctx) => {
+      if (!ctx.openSelection) return false;
+      openRegisteredCommandSelection(registry, ctx, { includeHidden: true });
+      return true;
+    },
+  });
 
   registry.register(coreActions.model);
 
-  registry.register({
-    name: 'commands',
-    aliases: ['cmds'],
-    description: 'Browse all commands in a scrollable list',
-    handler(_args, ctx) {
-      if (ctx.openSelection) {
-        openRegisteredCommandSelection(registry, ctx, { includeHidden: true });
-        return;
-      }
-      if (ctx.openHelpOverlay) {
-        ctx.openHelpOverlay();
-        return;
-      }
-      ctx.print('Use /help for interactive command list');
-    },
-  });
+  registry.register(navigation.commands);
 
-  registry.register({
-    name: 'shortcuts',
-    aliases: ['keys', 'keybinds'],
-    description: 'Show keyboard shortcuts reference',
-    hidden: true,
-    handler(_args, ctx) {
-      if (ctx.openShortcutsOverlay) {
-        ctx.openShortcutsOverlay();
-        return;
-      }
-      ctx.print('Use ? key or /help for shortcuts');
-    },
-  });
+  registry.register(navigation.shortcuts);
 
   registry.register(coreActions.keybindings);
 
@@ -226,14 +209,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'quit',
-    aliases: [':q'],
-    description: 'Exit the application',
-    handler(_args, ctx) {
-      ctx.exit();
-    },
-  });
+  registry.register(navigation.quit);
 
   registry.register(coreActions.effort);
 }

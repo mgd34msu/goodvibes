@@ -1,5 +1,5 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
-import { createBasicShellCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
+import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
@@ -42,34 +42,17 @@ const coreActions = createShellCoreActions<CommandContext>(
 
 export function registerShellCoreCommands(registry: CommandRegistry): void {
   const basicCommands = createBasicShellCommands<CommandContext>();
+  const navigation = createShellNavigationCommands<CommandContext>({
+    shortcutsHidden: false,
+    shortcutsFallback: 'Use /commands for shortcuts',
+    quitAliases: [':q', 'exit'],
+  });
 
   registry.register(coreActions.model);
 
-  registry.register({
-    name: 'commands',
-    aliases: ['cmds'],
-    description: 'Browse all commands in a scrollable list',
-    handler(_args, ctx) {
-      if (ctx.openHelpOverlay) {
-        ctx.openHelpOverlay();
-        return;
-      }
-      ctx.print('Use /help for interactive command list');
-    },
-  });
+  registry.register(navigation.commands);
 
-  registry.register({
-    name: 'shortcuts',
-    aliases: ['keys', 'keybinds'],
-    description: 'Show keyboard shortcuts reference',
-    handler(_args, ctx) {
-      if (ctx.openShortcutsOverlay) {
-        ctx.openShortcutsOverlay();
-        return;
-      }
-      ctx.print('Use /commands for shortcuts');
-    },
-  });
+  registry.register(navigation.shortcuts);
 
   registry.register({
     name: 'find',
@@ -241,14 +224,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'quit',
-    aliases: [':q', 'exit'],
-    description: 'Exit the application',
-    handler(_args, ctx) {
-      ctx.exit();
-    },
-  });
+  registry.register(navigation.quit);
 
   registry.register({
     name: 'wq',

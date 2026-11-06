@@ -40,3 +40,54 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
     },
   };
 }
+
+export function createShellNavigationCommands<
+  Context extends {
+    print(text: string): void;
+    exit(): void;
+    readonly openHelpOverlay?: (() => void) | undefined;
+    readonly openShortcutsOverlay?: (() => void) | undefined;
+  },
+>(policy: {
+  readonly beforeCommands?: ((context: Context) => boolean) | undefined;
+  readonly shortcutsHidden: boolean;
+  readonly shortcutsFallback: string;
+  readonly quitAliases: string[];
+}): { commands: TerminalSlashCommand<Context>; shortcuts: TerminalSlashCommand<Context>; quit: TerminalSlashCommand<Context> } {
+  return {
+    commands: {
+      name: 'commands',
+      aliases: ['cmds'],
+      description: 'Browse all commands in a scrollable list',
+      handler(_args, context) {
+        if (policy.beforeCommands?.(context)) return;
+        if (context.openHelpOverlay) {
+          context.openHelpOverlay();
+          return;
+        }
+        context.print('Use /help for interactive command list');
+      },
+    },
+    shortcuts: {
+      name: 'shortcuts',
+      aliases: ['keys', 'keybinds'],
+      description: 'Show keyboard shortcuts reference',
+      hidden: policy.shortcutsHidden,
+      handler(_args, context) {
+        if (context.openShortcutsOverlay) {
+          context.openShortcutsOverlay();
+          return;
+        }
+        context.print(policy.shortcutsFallback);
+      },
+    },
+    quit: {
+      name: 'quit',
+      aliases: policy.quitAliases,
+      description: 'Exit the application',
+      handler(_args, context) {
+        context.exit();
+      },
+    },
+  };
+}

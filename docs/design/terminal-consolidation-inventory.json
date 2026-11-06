@@ -730,24 +730,25 @@
       "path": "input/commands/session.ts",
       "baselineTuiLines": 505,
       "baselineSimilarity": 0.4716,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "statusBadge",
         "handleGraph",
         "fmtRef",
         "flagValue"
-      ]
+      ],
+      "notes": "Graph inspection and session workflows already delegate to platform implementations. TUI explicitly owns orchestration mutations and resume picker; Agent refuses local cross-session mutations and routes supported continuity commands. Registrations and usage text describe these different capabilities."
     },
     {
       "path": "input/commands/shell-core.ts",
       "baselineTuiLines": 468,
       "baselineSimilarity": 0.4973,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "shell-core-actions: model/effort/clear/keybindings",
         "basic-shell-commands: reset/paste"
       ],
-      "notes": "Common model/effort selection, fresh-conversation admission and keybinding presentation now share platform actions. Product ports retain credential intake, effort publication scope/advice, toast versus receipt, shortcut overlay versus list and command catalogs. Remaining compaction/help/pin product commands still need final audit."
+      "notes": "Shared shell model/effort/keybinding/clear/paste/reset and navigation command implementations. Product adapters retain help-list presentation, compaction previews, pin/history/debug commands and available quit aliases."
     },
     {
       "path": "input/commands/status-runtime.ts",

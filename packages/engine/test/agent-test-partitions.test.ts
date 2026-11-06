@@ -147,7 +147,7 @@ test('complete remaining CI partitions preserve every file and isolate the nativ
   ]);
   const sizes = groups.slice(1).map(group => group.files.length);
   expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
-  expect(Math.max(...sizes)).toBeLessThanOrEqual(240);
+  expect(Math.max(...sizes)).toBeLessThanOrEqual(120);
 });
 
 test('future nested tests are discovered once; stale, malformed, duplicate and mixed selectors fail closed', () => {

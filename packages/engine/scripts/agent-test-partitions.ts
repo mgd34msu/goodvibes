@@ -35,7 +35,9 @@ const REMAINING_NATIVE_CATALOGS = [
   'src/test/tools/agent-harness-tool.test.ts',
   'src/test/tools/agent-harness-semantic-record-catalogs.test.ts',
 ] as const;
-const REMAINING_FILES_PER_GROUP = 240;
+// Startup-heavy runtime fixtures exhausted the twelve-minute suite ceiling at
+// 238 files while still making progress. Keep that deadline and split the work.
+const REMAINING_FILES_PER_GROUP = 120;
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist']);
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 

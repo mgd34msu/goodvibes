@@ -31,7 +31,7 @@ export async function routeNativeConversationInput(deps: {
     return failed;
   }
   for (const line of nativeConversationIntakeLines(state)) deps.notify(line);
-  if (state?.turnReady && state.turnPermit && state.result?.kind === 'turn') {
+  if (isNativeConversationTurnReady(state)) {
     try {
       await deps.dispatch(state);
     } catch {
@@ -49,7 +49,23 @@ export async function dispatchNativeConversationTurn(
   orchestrator: Pick<Orchestrator, 'bindNativeConversationProject' | 'handleUserInput'>,
   options?: OrchestratorUserInputOptions,
 ): Promise<void> {
-  if (!state.turnReady || !state.turnPermit || state.result?.kind !== 'turn') return;
+  if (!isNativeConversationTurnReady(state)) return;
   orchestrator.bindNativeConversationProject(state.result.projectId);
-  await orchestrator.handleUserInput(state.result.text, undefined, { ...options, nativeConversationTurnPermit: state.turnPermit });
+  await orchestrator.handleUserInput(state.result.text, undefined, nativeConversationTurnInputOptions(state, options));
+}
+
+export type ReadyNativeConversationTurn = NativeConversationIntakeState & {
+  readonly turnReady: true;
+  readonly turnPermit: NonNullable<NativeConversationIntakeState['turnPermit']>;
+  readonly result: Extract<NonNullable<NativeConversationIntakeState['result']>, { readonly kind: 'turn' }>;
+};
+/** A renderer or input route cannot turn an unclaimed or non-turn receipt into dispatchable input. */
+export function isNativeConversationTurnReady(state: NativeConversationIntakeState | undefined): state is ReadyNativeConversationTurn {
+  return state?.turnReady === true && Boolean(state.turnPermit) && state.result?.kind === 'turn';
+}
+export function nativeConversationTurnInputOptions(
+  state: ReadyNativeConversationTurn,
+  options?: OrchestratorUserInputOptions,
+): OrchestratorUserInputOptions {
+  return { ...options, nativeConversationTurnPermit: state.turnPermit };
 }

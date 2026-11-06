@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
@@ -494,8 +495,8 @@ async function main() {
       await remoteConversation.observeNative(state, commandContext.nativeConversationIntake);
       return;
     }
-    if (!state.turnReady || !state.turnPermit || state.result?.kind !== 'turn') return;
-    const inputOptions = { ...(spokenOutput ? createSpokenTurnInputOptions() : {}), nativeConversationTurnPermit: state.turnPermit };
+    if (!isNativeConversationTurnReady(state)) return;
+    const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
     if (spokenOutput) spokenTurns.submitNextTurn(state.result.text);
     try {
       await dispatchNativeConversationTurn(state, orchestrator, inputOptions);

@@ -1,16 +1,22 @@
+import { captureOnboardingReadFacts } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 import { collectTerminalOnboardingSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-collector';
 import {
   createOnboardingSnapshotReadHelpers,
   captureOnboardingConfigSnapshot,
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
-import { buildProviderRoutingSnapshot, buildRuntimeDefaultsSnapshot, buildAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
+import '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 
 import { getProviderIdFromModel } from '../../config/provider-model.ts';
 import { summarizeAgentBehaviorDiscovery } from '../../agent/behavior-discovery-summary.ts';
 import { readOnboardingRuntimeState } from './state.ts';
 import { captureNativeReadRestrictions } from '../read-restrictions.ts';
-import type { OnboardingConfigSnapshot, OnboardingSnapshotCollectionIssueArea, OnboardingSnapshotDependencies, OnboardingSnapshotState } from './types.ts';
+import type {
+  OnboardingConfigSnapshot,
+  OnboardingSnapshotCollectionIssueArea,
+  OnboardingSnapshotDependencies,
+  OnboardingSnapshotState,
+} from './types.ts';
 
 export interface OnboardingSnapshotReadOptions {
   readonly signal?: AbortSignal | undefined;
@@ -40,14 +46,15 @@ export async function collectOnboardingSnapshot(
 ): Promise<OnboardingSnapshotState> {
   const assertCurrent = snapshotReadGuard(options);
   assertCurrent();
-  const capturedAt = deps.clock?.() ?? Date.now();
-  const config = buildConfigSnapshot(deps.config);
-  const providerRouting = buildProviderRoutingSnapshot(config, getProviderIdFromModel);
-  const runtimeDefaults = buildRuntimeDefaultsSnapshot(config);
-  const acknowledgementResult = buildAcknowledgementSnapshot(deps, readOnboardingRuntimeState);
+  const facts = captureOnboardingReadFacts(
+    deps,
+    () => buildConfigSnapshot(deps.config),
+    getProviderIdFromModel,
+    readOnboardingRuntimeState,
+  );
   const { state } = await collectTerminalOnboardingSnapshot(
     deps,
-    { capturedAt, config, providerRouting, runtimeDefaults, acknowledgements: acknowledgementResult },
+    facts,
     { loadOptionalSnapshot, buildServicesSnapshot },
     { assertCurrent, drainOnFailure: true, readExtra: async () => undefined },
   );

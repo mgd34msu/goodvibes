@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
@@ -461,8 +462,8 @@ async function main() {
     spokenOutput = false,
     current: () => boolean = () => true,
   ): Promise<void> => {
-    if (!state.turnReady || !state.turnPermit || state.result?.kind !== 'turn') return;
-    const inputOptions = { ...(spokenOutput ? createSpokenTurnInputOptions() : {}), nativeConversationTurnPermit: state.turnPermit };
+    if (!isNativeConversationTurnReady(state)) return;
+    const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
     if (spokenOutput) spokenTurns.submitNextTurn(state.result.text);
     // Provider failover retains the exact same source identity and opaque permit.
     retryCtx = { count: conversation.getMessageCount(), text: state.result.text, opts: inputOptions };

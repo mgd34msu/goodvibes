@@ -1,9 +1,10 @@
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { routingRegistry, routeReadiness, localRecipeFit, routeReadinessFrom, localRecipeFitFrom } from '@goodvibes-jev/engine/sdk/platform/routing';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { readProviderHealthSignal } from './agent-harness-model-provider-health.ts';
 import { listProviderRegistryProviders } from './agent-harness-model-catalog.ts';
@@ -46,6 +47,20 @@ export function deferredRecipeFit(): LocalModelRecipeFit {
     provenance: null, reasons: ['Recipe-fit enrichment has not run.'] };
 }
 
+function classicReadiness(options: ModelReadingOptions): ModelReadinessScore {
+  const current = captureCatalogMethods(options, ['signal', 'assertCurrent', 'sourceOwner', 'retainCurrent']);
+  const nativeCurrent = () => { current(); options.signal?.throwIfAborted(); current(); };
+  nativeCurrent(); assertProjectionCurrent(options.assertCurrent);
+  options.retainCurrent?.(nativeCurrent); nativeCurrent();
+  return { ...deferredModelReadiness('Classic does not perform semantic model-readiness assessment.'),
+    provenance: { policy: 'classic', assessment: 'not-evaluated' } };
+}
+function classicFit(options: ModelReadingOptions): LocalModelRecipeFit {
+  classicReadiness(options);
+  return { ...deferredRecipeFit(), provenance: { policy: 'classic', assessment: 'not-evaluated' },
+    reasons: ['Classic does not assess semantic hardware/recipe suitability.'] };
+}
+
 const batteryDefinitions = new WeakMap<object, () => void>();
 const getBatteryDefinition = batteryDefinitions.get.bind(batteryDefinitions);
 const setBatteryDefinition = batteryDefinitions.set.bind(batteryDefinitions);
@@ -79,28 +94,33 @@ function readinessAuthority(battery: typeof routeReadiness | typeof localRecipeF
   });
 }
 function retainReadinessAuthority(authority: ReturnType<typeof captureJudgmentPort>, scoped: ModelReadingOptions) {
+  assertProjectionCurrent(scoped.assertCurrent);
+  if (isClassicOperation()) return;
   const restriction = authority.consumeObservation();
-  scoped.retainCurrent?.(restriction.assertCurrent);
-  restriction.assertCurrent();
+  const semanticCurrent = () => { if (!isClassicOperation()) restriction.assertCurrent(); };
+  scoped.retainCurrent?.(semanticCurrent);
+  semanticCurrent();
 }
 
 /** Acquire neither a battery nor a port until full-source screening settles. */
 async function readRoute(source: unknown, options: ModelReadingOptions) {
   return withModelReadingSource(source, options, async (state, scoped) => {
     scoped.assertCurrent?.();
-    const decision = routingRegistry.get('agent.models.route-readiness');
-    if (!decision || typeof modelReadingServicePath(decision, ['run']) !== 'function') return routeReadinessFrom(null);
-    const battery = decision as typeof routeReadiness;
-    const authority = readinessAuthority(battery, scoped);
-    try {
-      const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
-        site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
-        only: ['latency', 'contextWindow', 'toolSupport', 'vision', 'cost', 'privacy', 'cloudTransfer'],
-      });
-      authority.assertCurrent();
-      const result = routeReadinessFrom(run);
-      authority.assertCurrent(); return result;
-    } finally { retainReadinessAuthority(authority, scoped); }
+    return decisionOrClassic(async () => {
+      const decision = routingRegistry.get('agent.models.route-readiness');
+      if (!decision || typeof modelReadingServicePath(decision, ['run']) !== 'function') return routeReadinessFrom(null);
+      const battery = decision as typeof routeReadiness;
+      const authority = readinessAuthority(battery, scoped);
+      try {
+        const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
+          site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
+          only: ['latency', 'contextWindow', 'toolSupport', 'vision', 'cost', 'privacy', 'cloudTransfer'],
+        });
+        authority.assertCurrent();
+        const result = routeReadinessFrom(run);
+        authority.assertCurrent(); return result;
+      } finally { retainReadinessAuthority(authority, scoped); }
+    }, () => { assertProjectionCurrent(scoped.assertCurrent); return routeReadinessFrom(null); });
   });
 }
 
@@ -146,12 +166,21 @@ export async function modelReadinessScore(context: CommandContext, model: ModelC
   });
   const hasHostingFacts = hasEndpointFacts || [providerFacts.hosting, providerFacts.documentation, providerFacts.setupDescription, providerFacts.anonymousDetail].some(value => typeof value === 'string' && value.trim().length > 0);
   if (!hasHostingFacts) missing.set('privacy', 'Provider and endpoint facts are missing; a route name is not hosting evidence.');
+  const explicitlyUnavailable = model.available === false || model.configured === false || providerHealth.isConfigured === false
+    || providerFacts.available === false || providerFacts.isAvailable === false || providerFacts.configured === false || providerFacts.isConfigured === false;
+  const classic = (): ModelRouteReadinessScore => {
+    const deferred = classicReadiness(options);
+    return { ...deferred, ...(explicitlyUnavailable ? { outcome: 'unavailable' as const,
+      missingSignals: [...deferred.missingSignals, 'This provider or model is unavailable or unconfigured.'] } : {}), providerHealth };
+  };
+  if (isClassicOperation()) return classic();
   if (!options.sourceOwner) return { ...deferredModelReadiness('Readiness source screening is unavailable.'), outcome: 'unavailable', providerHealth };
   const reading = await readRoute({ subject: model, rubric: RUBRIC, capabilities: model.capabilities, contextWindow: model.contextWindow,
     cost: { tier: model.tier ?? null }, provider, measuredLatency: latency, benchmarkQuality: model.benchmarkCompositeScore ?? null,
     providerHealth, missingSignals: [...missing.values()] }, options);
+  if (isClassicOperation()) return classic();
   const result = described(reading, missing);
-  if (model.available === false || model.configured === false || providerHealth.isConfigured === false || providerFacts.available === false || providerFacts.isAvailable === false || providerFacts.configured === false || providerFacts.isConfigured === false) {
+  if (explicitlyUnavailable) {
     return { ...result, score: null, normalized: null, level: null, confidence: null, outcome: 'unavailable',
       missingSignals: [...result.missingSignals, 'This provider or model is unavailable or unconfigured.'], providerHealth };
   }
@@ -160,6 +189,7 @@ export async function modelReadinessScore(context: CommandContext, model: ModelC
 
 export async function localRecipeReadinessScore(recipe: LocalModelRecipe, fit: LocalModelRecipeFit, detected: boolean,
   evidence: LocalModelBenchmarkEvidence, options: ModelReadingOptions = {}): Promise<ModelReadinessScore> {
+  if (isClassicOperation()) return classicReadiness(options);
   if (!options.sourceOwner) return deferredModelReadiness();
   // These are names only: no capability evidence exists to send to a reader.
   // Keep the missing evidence explicit in the compound readiness input.
@@ -170,6 +200,7 @@ export async function localRecipeReadinessScore(recipe: LocalModelRecipe, fit: L
   const reading = await readRoute({ subject: recipe, rubric: RUBRIC, detected, benchmarkEvidence: evidence,
     localFit: fit.outcome === 'ready' ? fit : null, exampleVision, provider: null,
     capabilities: null, contextWindow: null, measuredLatency: null, cost: null }, options);
+  if (isClassicOperation()) return { ...classicReadiness(options), exampleVision };
   const missing = new Map<ModelReadinessDimension['id'], string>([
     ['latency', 'Recipe examples have no measured latency for an exact configured route.'],
     ['context-window', 'Verify the context window of the exact model served.'],
@@ -183,18 +214,21 @@ export async function localRecipeReadinessScore(recipe: LocalModelRecipe, fit: L
 
 export async function scoreLocalModelRecipe(recipe: LocalModelRecipe, hardware: LocalModelHardwareProfile, detection: LocalModelDetection,
   options: ModelReadingOptions = {}): Promise<LocalModelRecipeFit> {
+  if (isClassicOperation()) return classicFit(options);
   if (!options.sourceOwner) return deferredRecipeFit();
   return withModelReadingSource({ recipe, hardware, detection, rubric: RUBRIC }, options, async (state, scoped) => {
-    const decision = routingRegistry.get('agent.models.local-recipe-fit');
-    if (!decision || typeof modelReadingServicePath(decision, ['run']) !== 'function') return { ...deferredRecipeFit(), outcome: 'unavailable' };
-    const battery = decision as typeof localRecipeFit;
-    const authority = readinessAuthority(battery, scoped);
-    try {
-      const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
-        site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
-      });
-      authority.assertCurrent(); const reading = localRecipeFitFrom(run);
-      return { ...reading, reasons: reading.outcome === 'ready' ? ['Settled hardware and recipe-requirements reading.'] : ['Hardware fit is unsettled.'] };
-    } finally { retainReadinessAuthority(authority, scoped); }
+    return decisionOrClassic(async () => {
+      const decision = routingRegistry.get('agent.models.local-recipe-fit');
+      if (!decision || typeof modelReadingServicePath(decision, ['run']) !== 'function') return { ...deferredRecipeFit(), outcome: 'unavailable' };
+      const battery = decision as typeof localRecipeFit;
+      const authority = readinessAuthority(battery, scoped);
+      try {
+        const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
+          site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
+        });
+        authority.assertCurrent(); const reading = localRecipeFitFrom(run);
+        return { ...reading, reasons: reading.outcome === 'ready' ? ['Settled hardware and recipe-requirements reading.'] : ['Hardware fit is unsettled.'] };
+      } finally { retainReadinessAuthority(authority, scoped); }
+    }, () => { assertProjectionCurrent(scoped.assertCurrent); return classicFit(scoped); });
   });
 }

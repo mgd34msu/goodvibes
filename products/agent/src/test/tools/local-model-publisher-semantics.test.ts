@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { EntryType, JudgmentPort, Question } from '@goodvibes-jev/judgment';
@@ -546,4 +548,45 @@ describe('Local model publisher wording and native discovery', () => {
       if (original) Object.defineProperty(owner, key, original); else Reflect.deleteProperty(owner, key);
     }
   });
+});
+
+
+test('Classic local diagnostics keep declared protocol facts and leave prose and certification unassessed', async () => {
+  const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); }); installJudgmentPort(unavailable.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    expect(await readLocalServingBoolean(true, 'tools', {}, {})).toBe(true);
+    expect(await readLocalServingBoolean('false', 'tools', {}, {})).toBe(false);
+    expect(await readLocalServingBoolean('supported', 'tools', {}, {})).toBeNull();
+    expect(await readLocalServingStatus('ready', {}, {})).toBe('ready');
+    expect(await readLocalServingStatus('Looks healthy according to the log.', {}, {})).toBe('unknown');
+    expect(await readLocalResourcePressure('high', {}, {})).toBe('high');
+    expect(await readLocalResourcePressure('critical', {}, {})).toBe('unknown');
+    expect(await readLocalServingSchemaStatus('certified', {}, {})).toBeNull();
+    expect(await localStackFor('ollama', {})).toBe('ollama');
+    expect(await localStackFor('A local Ollama-compatible server', {})).toBeNull();
+  });
+  expect(unavailable.requests).toHaveLength(0);
+});
+
+test('Classic published diagnostic inventory retains host records without capturing a decision port', async () => {
+  const f = fixture(); f.diagnostic.status = 'ready'; f.diagnostic.resourcePressure = 'high'; f.diagnostic.toolSupport = 'true';
+  const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); }); installJudgmentPort(unavailable.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const endpoints = await localModelServerEndpoints(f.context, true, { sourceOwner: ordinaryResearchOwner() });
+    expect(endpoints.length).toBeGreaterThan(0);
+    const diagnostic = endpoints.map(endpoint => endpoint.servingDiagnostics).find(value => value?.schemaStatus === 'not-evaluated');
+    expect(diagnostic).toMatchObject({ status: 'ready', schemaStatus: 'not-evaluated', resourcePressure: 'high', toolSupport: true });
+    expect(diagnostic?.policy).toContain('Classic');
+  });
+  expect(unavailable.requests).toHaveLength(0);
+});
+
+test('Classic diagnostic ownership rejects cancellation before reading publisher facts', async () => {
+  const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); }); installJudgmentPort(unavailable.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(readLocalServingStatus('ready', {}, { signal: controller.signal })).rejects.toThrow();
+    await expect(readLocalServingBoolean(true, 'tools', {}, { async assertCurrent() {} })).rejects.toThrow();
+  });
+  expect(unavailable.requests).toHaveLength(0);
 });

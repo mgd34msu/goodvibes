@@ -130,3 +130,5 @@ export { atRestCredential, memoryRouteRole, memoryCredentialState, memoryLiveSta
 export { localBenchmarkPrompt, localBenchmarkPromptPolicy } from './batteries/local-benchmark-prompt.js';
 
 export { readCommandDiscovery, type CommandDiscoveryEntry, type CommandDiscoveryRequest, type CommandDiscoveryReading } from './command-discovery.js';
+export { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure,
+  type ClassicModelStack, type ClassicServingStatus, type ClassicResourcePressure } from './classic-model-facts.js';

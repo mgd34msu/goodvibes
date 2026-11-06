@@ -1,3 +1,4 @@
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { types as nodeTypes } from 'node:util';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
@@ -150,7 +151,10 @@ async function localServingStatus(record: Record<string, unknown>, options: Mode
 
 async function localResourcePressure(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['resourcePressure']> {
   const value = firstString(record, ['resourcePressure', 'pressure', 'memoryPressure', 'vramPressure']);
-  if (value) return readLocalResourcePressure(value, record, options);
+  if (value) {
+    const pressure = await readLocalResourcePressure(value, record, options);
+    if (!isClassicOperation() || pressure !== 'unknown') return pressure;
+  }
   const usage = firstNumber(record, ['memoryUsagePercent', 'memoryPercent', 'vramUsagePercent', 'gpuMemoryPercent']);
   if (usage !== null) return usage >= 90 ? 'high' : usage >= 70 ? 'moderate' : 'low';
   return 'unknown';
@@ -177,9 +181,13 @@ function firstStringFromRecords(records: readonly Record<string, unknown>[], key
 }
 
 async function localServingSchemaStatus(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['schemaStatus']> {
+  if (isClassicOperation()) return 'not-evaluated';
   const records = [record, readRecord(record.schema), readRecord(record.contract), readRecord(record.receipt)];
   const explicit = firstStringFromRecords(records, ['schemaStatus', 'receiptSchemaStatus', 'certificationStatus']);
-  if (explicit) return await readLocalServingSchemaStatus(explicit, record, options) ? 'certified' : 'legacy';
+  if (explicit) {
+    const certified = await readLocalServingSchemaStatus(explicit, record, options);
+    return certified === null ? 'not-evaluated' : certified ? 'certified' : 'legacy';
+  }
   const schemaVersion = firstStringFromRecords(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
   const provenance = firstStringFromRecords(records, ['methodId', 'sourceTool', 'actionId']);
   const publicationGuarantee = firstStringFromRecords(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'servingPublicationGuarantee']);
@@ -369,7 +377,7 @@ async function normalizeServingDiagnosticRecord(value: unknown, source: string, 
   const startReceiptId = firstString(record, ['startReceiptId', 'startupReceiptId']);
   const repairReceiptId = firstString(record, ['repairReceiptId', 'restartReceiptId']);
   const receiptStatus = firstString(record, ['receiptStatus', 'receiptOutcome']);
-  const schemaStatus = await localServingSchemaStatus(record, options);
+  let schemaStatus = await localServingSchemaStatus(record, options);
   const schemaVersion = firstStringFromRecords(
     [record, readRecord(record.schema), readRecord(record.contract), readRecord(record.receipt)],
     ['schemaVersion', 'receiptSchemaVersion', 'contractVersion'],
@@ -380,8 +388,10 @@ async function normalizeServingDiagnosticRecord(value: unknown, source: string, 
   const repairRoute = await diagnosticRouteFromRecord(record, ['repairRoute', 'restartRoute', 'restartServerRoute', 'repairModelServerRoute', 'repairActionRoute', 'repairCommandRoute'], options);
   const provenance = await localServingProvenance(record, startRoute, repairRoute, options);
   const resourceSummary = await localResourceSummary(record, resourcePressure, options);
+  if (isClassicOperation()) schemaStatus = 'not-evaluated';
   const missingSignals = [
-    ...(schemaStatus === 'certified' ? [] : ['Certified local serving diagnostics schema is not published.']),
+    ...(schemaStatus === 'certified' ? [] : [schemaStatus === 'not-evaluated'
+      ? 'Schema certification is not assessed during Classic operation.' : 'Certified local serving diagnostics schema is not published.']),
     ...(serverVersion ? [] : ['Server version is not published.']),
     ...(loadedModelCount > 0 ? [] : ['Loaded model detail is not published.']),
     ...(contextWindowTokens !== null ? [] : ['Context-window support is not published.']),
@@ -414,7 +424,7 @@ async function normalizeServingDiagnosticRecord(value: unknown, source: string, 
     ...(repairRoute ? { repairRoute } : {}),
     inspectRoute: firstString(record, ['inspectRoute', 'modelRoute', 'route']) || 'models action:"local" includeParameters:true',
     missingSignals,
-    policy: 'Read-only daemon-published local serving diagnostics. Agent consumes certified version/model/capability/resource/receipt metadata when present, and surfaces start/repair routes only when the host publishes exact confirmed routes; provider edits, refresh, smoke, benchmark, and route changes remain separate visible confirmed actions.',
+    policy: isClassicOperation() ? 'Classic read-only publisher facts. Exact declared values are retained; semantic readiness and schema certification are not evaluated. Execution routes still require their own owner admission.' : 'Read-only daemon-published local serving diagnostics. Agent consumes certified version/model/capability/resource/receipt metadata when present, and surfaces start/repair routes only when the host publishes exact confirmed routes; provider edits, refresh, smoke, benchmark, and route changes remain separate visible confirmed actions.',
     baseUrl,
     modelsUrl,
     providerId: firstString(record, ['providerId', 'provider', 'providerName']) || null,
@@ -447,8 +457,8 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
   const assertCurrent = () => {
     // The active port already invokes the complete local restriction. Once it
     // is consumed, its pure observation guard is joined with that restriction.
-    if (!activeReading) assertLocalCurrent();
-    portCurrent?.();
+    if (!activeReading || isClassicOperation()) assertLocalCurrent();
+    if (!isClassicOperation()) portCurrent?.();
   };
   assertCurrent();
   const records: LocalModelServingDiagnosticRecord[] = [];
@@ -469,9 +479,11 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
   assertCurrent();
   for (const { entry, observation } of observations) {
     try {
-      owner ??= captureJudgmentPort('agent.local-serving-diagnostics', { ...options, assertCurrent: assertLocalCurrent });
-      portCurrent = owner.assertCurrent; activeReading = true;
-      const reading = { ...options, signal: owner.signal, assertCurrent };
+      await decisionOrClassic(async () => {
+        owner ??= captureJudgmentPort('agent.local-serving-diagnostics', { ...options, assertCurrent: assertLocalCurrent });
+        portCurrent = owner.assertCurrent; activeReading = true;
+      }, () => { portCurrent = undefined; activeReading = false; assertLocalCurrent(); });
+      const reading = { ...options, signal: isClassicOperation() ? signal : owner?.signal ?? signal, assertCurrent };
       const protectedSnapshot = await protectPersonalOpsData(observation.data, reading);
       // Schema, status and identity readings require the complete original
       // diagnostic. A redacted display cannot stand in for its native facts.
@@ -487,7 +499,8 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
       assertCurrent();
       if (sourceRecords.length > 0) sourcePaths.add(entry.path);
       records.push(...sourceRecords);
-    } catch {
+    } catch (error) {
+      activateClassicFallback(error);
       sawError = true;
     }
   }
@@ -502,10 +515,12 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
   const missingSignals = records.length > 0
     ? []
     : ['No daemon-published local serving diagnostics read model is available to Agent yet.'];
-  if (owner) {
-    const restriction = owner.consumeObservation(); portCurrent = restriction.assertCurrent; activeReading = false;
-    options.retainCurrent?.(restriction.assertCurrent, 'agent.local-serving-diagnostics.port');
-  }
+  if (owner && !isClassicOperation()) {
+    const restriction = owner.consumeObservation();
+    const semanticCurrent = () => { if (!isClassicOperation()) restriction.assertCurrent(); };
+    portCurrent = semanticCurrent; activeReading = false;
+    options.retainCurrent?.(semanticCurrent, 'agent.local-serving-diagnostics.port');
+  } else { portCurrent = undefined; activeReading = false; }
   assertCurrent();
   return {
     records,

@@ -1,3 +1,4 @@
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { OpenAICompatProvider, OllamaProvider } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -1213,3 +1214,34 @@ test.each(['method', 'accessor', 'owner', 'signal'] as const)(
     expect(calls).toBe(1); expect(touched).toBe(0); expect(f.effects).toEqual([]);
   },
 );
+
+
+test('Classic real model route and status views retain model facts without invented readiness scores', async () => {
+  const f = fixture(); const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); });
+  installJudgmentPort(unavailable.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const route = body(await f.tool.execute(routeArgs));
+    const readiness = record(route.readiness);
+    expect(readiness.score).toBeNull(); expect(readiness.confidence).toBeNull(); expect(readiness.decisionId).toBeNull();
+    expect(readiness.provenance).toMatchObject({ policy: 'classic', assessment: 'not-evaluated' });
+    const status = body(await f.tool.execute({ action: 'status', includeParameters: true }));
+    expect(rows(status.models).some(model => model.contextWindow === 4096)).toBe(true);
+    expect(rows(status.models).every(model => model.readinessScore === null)).toBe(true);
+    expect(f.effects).toEqual([]);
+  });
+  expect(unavailable.requests).toHaveLength(0);
+});
+
+test('Preferred model inspection falls back without changing the selected route or inventing readiness', async () => {
+  const f = fixture(); const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); });
+  installJudgmentPort(unavailable.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const route = body(await f.tool.execute(routeArgs));
+    expect(record(route.readiness)).toMatchObject({ score: null, confidence: null, decisionId: null,
+      provenance: { policy: 'classic', assessment: 'not-evaluated' } });
+    const attempted = unavailable.requests.length; expect(attempted).toBeGreaterThan(0);
+    await f.tool.execute({ action: 'status', includeParameters: true });
+    expect(unavailable.requests).toHaveLength(attempted);
+    expect(f.effects).toEqual([]);
+  });
+});

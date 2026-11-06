@@ -243,7 +243,7 @@ export interface LocalModelServerServingDiagnostics {
   readonly status: 'ready' | 'attention' | 'blocked' | 'unknown';
   readonly source: string;
   readonly summary: string;
-  readonly schemaStatus?: 'certified' | 'legacy';
+  readonly schemaStatus?: 'certified' | 'legacy' | 'not-evaluated';
   readonly schemaVersion?: string;
   readonly provenance?: readonly string[];
   readonly publicationGuarantee?: string;

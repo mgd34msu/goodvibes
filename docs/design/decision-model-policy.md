@@ -271,3 +271,14 @@ are not started during Classic. Verified Home Graph answers, semantic reindex,
 triage, refinement and generated sharing/device pages name their decision-model
 requirement before starting those operations. Existing stored content remains
 readable; import/revalidation and other remaining callers are still under review.
+
+Classic model diagnostics use shared platform parsing of exact declared stack,
+boolean, status and resource-pressure values. Free-form publisher descriptions
+remain unknown; actual numeric measurements and explicit unconfigured/unavailable
+flags remain visible. Model readiness and hardware/recipe fit remain unassessed,
+with null scores, confidence and decision IDs. Local serving schema certification
+is labelled `not-evaluated`, including when a publisher merely says "certified".
+Native catalog, publisher, privacy and cancellation restrictions remain live;
+semantic backend observations alone stop blocking local presentation after an
+eligible Preferred fallback. No server probe or route change follows from viewing
+these diagnostics.

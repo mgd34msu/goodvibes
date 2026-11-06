@@ -667,7 +667,7 @@ export function createHttpStatusError(
 
 export { installJudgmentPort, judgmentPort, restoreJudgmentPort, JudgmentPortMissingError } from './judgment-port.js';
 export { assertDecisionModelsEnabled, decisionModelPolicyState, installDecisionModelPolicyObserver, DecisionModelsDisabledError,
-  type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';
+  tryClassicDecisionFallback, DECISION_MODEL_POLICIES, parseDecisionModelPolicy, type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';
 export { bindJudgmentPortAuthority, captureJudgmentPort, JudgmentAuthorityRetiredError,
   type JudgmentAuthorityFrame, type JudgmentEffectRestriction, type JudgmentPortCapture, type JudgmentReadingOptions } from './judgment-authority.js';
 export {

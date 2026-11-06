@@ -22,7 +22,7 @@ export type FailureClass = 'retryable' | 'terminal';
  * carries, a structured fact (a Retry-After, an HTTP status, an errno code, a
  * timeout error class), Jev's reading of the wording, or no wording at all.
  */
-export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'no-wording';
+export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'classic' | 'no-wording';
 
 /** Whether a failure is worth another attempt, and why. */
 export interface FailureTransience {
@@ -141,13 +141,14 @@ function failureWording(error: unknown, describe: (error: unknown) => string): F
  * failure stays observable, where a give-up would drop it silently.
  */
 export function transienceFromReading(failure: FailureConclusions): FailureTransience {
-  const basis = 'reading';
+  const basis = failure.source === 'classic' ? 'classic' : 'reading';
+  const categoryDetail = failure.source === 'classic' ? `structured Classic category ${failure.category}` : `read as ${failure.category}`;
   if (failure.billing) return { failureClass: 'terminal', basis, detail: 'the account cannot pay for the request' };
   if (failure.transientNetwork) return { failureClass: 'retryable', basis, detail: 'a transient network fault' };
-  if (PERMANENT_CATEGORIES.has(failure.category)) return { failureClass: 'terminal', basis, detail: `read as ${failure.category}` };
-  if (TRANSIENT_CATEGORIES.has(failure.category)) return { failureClass: 'retryable', basis, detail: `read as ${failure.category}` };
+  if (PERMANENT_CATEGORIES.has(failure.category)) return { failureClass: 'terminal', basis, detail: categoryDetail };
+  if (TRANSIENT_CATEGORIES.has(failure.category)) return { failureClass: 'retryable', basis, detail: categoryDetail };
   if (failure.rateLimited) return { failureClass: 'retryable', basis, detail: 'a rate limit' };
-  return { failureClass: 'retryable', basis, detail: 'the wording does not settle it' };
+  return { failureClass: 'retryable', basis, detail: failure.source === 'classic' ? 'no structured failure category; use the existing bounded retry policy' : 'the wording does not settle it' };
 }
 
 /**

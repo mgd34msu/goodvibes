@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { parseDecisionModelPolicy, type DecisionModelPolicy } from '../packages/engine/errors/src/decision-policy.js';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs';
@@ -6,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, digest, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
-export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string }
+export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
 export function parseOptions(args: string[], home = realpathSync(process.env.HOME ?? ''), runtime = {
   bunPath: process.execPath, findNode: (): string | null => Bun.which('node'),
@@ -17,7 +18,7 @@ export function parseOptions(args: string[], home = realpathSync(process.env.HOM
     const flag = args[i]!;
     if (flag === '--no-service') service = false;
     else if (flag === '--service') service = true;
-    else if (['--prefix', '--bin-dir', '--data-dir', '--port', '--runtime-dir', '--workspace'].includes(flag) && args[i + 1] && !args[i + 1]!.startsWith('--')) values[flag] = args[++i]!;
+    else if (['--prefix', '--bin-dir', '--data-dir', '--port', '--runtime-dir', '--workspace', '--decision-policy'].includes(flag) && args[i + 1] && !args[i + 1]!.startsWith('--')) values[flag] = args[++i]!;
     else throw new Error(`Unknown or incomplete option: ${flag}`);
   }
   const prefix = resolve(values['--prefix'] ?? join(home, '.local/share/goodvibes-jev'));
@@ -29,7 +30,7 @@ export function parseOptions(args: string[], home = realpathSync(process.env.HOM
     dataDir: resolve(values['--data-dir'] ?? old?.dataDir ?? join(home, '.local/share/goodvibes-jev-data')),
     port: Number(values['--port'] ?? old?.port ?? 3421), service: service ?? old?.service ?? true,
     workspace: realpathSync(resolve(values['--workspace'] ?? old?.workspace ?? ROOT)),
-    runtimeDir, nodePath };
+    runtimeDir, nodePath, ...(values['--decision-policy'] === undefined ? {} : { decisionPolicy: parseDecisionModelPolicy(values['--decision-policy']) }) };
   validateLayout(options);
   if (!statSync(options.workspace).isDirectory()) throw new Error('--workspace must name a project directory.');
   if (options.workspace === home || options.workspace === '/' || contained(options.dataDir, options.workspace) || contained(options.prefix, options.workspace)) throw new Error('--workspace must name a project directory outside installation data.');
@@ -214,6 +215,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         if (!present(link)) symlinkSync(join(options.prefix, 'commands', name), link);
       }
       const daemon = join(options.prefix, 'commands/goodvibes-daemon');
+      if (options.decisionPolicy !== undefined) execute(daemon, ['config', 'set', 'judgment.policy', options.decisionPolicy], { cwd: options.dataDir, capture: true });
       execute(daemon, ['config', 'set', 'judgment.model', 'jev-latest'], { cwd: options.dataDir, capture: true });
       execute(daemon, ['config', 'set', 'controlPlane.port', String(options.port)], { cwd: options.dataDir, capture: true });
       execute(daemon, ['webui', 'enable', '--loopback', '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });

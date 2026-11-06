@@ -1,6 +1,6 @@
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
 import { hashState, JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -753,13 +753,23 @@ export class PermissionManager {
 
   /** One safety decision across prepared tools, external actions and raw checks. */
   private assessExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
-    return decisionOrClassic(() => this.assessDecisionExecutionSafety(input), () => this.assessClassicExecutionSafety(input));
+    return decisionOrClassic(async () => {
+      const result = await this.assessDecisionExecutionSafety(input);
+      if (result.result.autonomousDecision?.outcome === 'reject') rememberDecisionRefusal(this.classicActionKey(input));
+      return result;
+    }, () => this.assessClassicExecutionSafety(input));
+  }
+
+  private classicActionKey(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): string {
+    return hashState(captureJsonEntry({ tool: input.toolName, args: input.args, directory: input.workingDirectory ?? null }));
   }
 
   private async assessClassicExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
     input.assertCurrent();
     if (!input.policyResult.approved || input.mode === 'plan' || input.mode === 'yolo') return { result: input.policyResult };
     const analysis = input.policyResult.analysis;
+    if (wasDecisionRefused(this.classicActionKey(input))) return { result: this.result(false, false, 'safety_check', 'jev_reject', analysis,
+      { detail: 'A decision model refused this exact action. Availability fallback cannot override that refusal.' }) };
     const remembered = await this.rememberedDecision(this.getApprovalKey(input.toolName, input.args), input.toolName, input.args,
       { signal: input.signal, assertCurrent: input.assertCurrent });
     remembered?.assertCurrent(); input.assertCurrent();

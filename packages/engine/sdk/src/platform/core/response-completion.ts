@@ -160,6 +160,7 @@ export function collectResponseDelegates(conversation: ConversationManager,
 
 /** One guard per run. Rejected final drafts return to the model, never to a successful terminal event. */
 export class ResponseCompletionGuard {
+  private hasSemanticRefusal = false;
   private readonly initial: unknown;
   private accepted: ((response: { readonly content: string }) => (() => void)) | undefined;
   private hasToolEvidence = false;
@@ -239,6 +240,7 @@ export class ResponseCompletionGuard {
   }
 
   private rememberReview(findings: readonly CompletionFinding[], input: ResponseCompletionInput): void {
+    if (findings.some(finding => finding.assessment === 'confirmed')) this.hasSemanticRefusal = true;
     this.previousReview = captureStrictJudgmentJson({ findings });
     if (this.reviewStore && this.reviewKey) {
       const messages = input.conversation.getMessageSnapshot();
@@ -375,7 +377,7 @@ export class ResponseCompletionGuard {
       };
       this.restoredCorrection = undefined;
       return null;
-    }); }
+    }, () => !this.hasSemanticRefusal); }
     catch (error) {
       if (!options.signal?.aborted) try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the original failure. */ }
       options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -508,6 +510,7 @@ export class ResponseCompletionGuard {
     const readingOptions = { signal: owner.signal, beforeAttempt: owner.assertCurrent, onRetry: () => onWaiting?.() };
     const acceptCheckedResponse = () => {
       owner.assertCurrent(); current();
+      this.hasSemanticRefusal = false;
       this.heldCycle = undefined;
       this.accepted = response => {
         owner.assertCurrent(); current();
@@ -604,6 +607,8 @@ export class ResponseCompletionGuard {
     const run = (checks[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof responseCompletion.run>>>).value;
     const consolidation = (checks[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof delegationConsolidation.run>> | null>).value;
     const execution = (checks[2] as PromiseFulfilledResult<Awaited<ReturnType<typeof executionAssurance.run>> | null>).value;
+    if ([...Object.values(run.readings), ...Object.values(consolidation?.readings ?? {})]
+      .some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) this.hasSemanticRefusal = true;
     owner.assertCurrent(); current();
     const publicationSource = state === fullState ? null : verificationHash(fullState);
     // A checkpoint always needs fresh final checks, never accumulated approval
@@ -651,6 +656,8 @@ export class ResponseCompletionGuard {
       ['irrelevant_verification', execution.readings.verification_claimed, execution.readings.irrelevant_verification],
       ['weakened_criteria', execution.readings.criteria_altered, execution.readings.weakened_criteria],
     ] as const : [];
+    if (executionChecks.some(([, applies, failure]) => applies.verdict === 'yes' && applies.outcome === 'act'
+      && failure.verdict === 'yes' && failure.outcome === 'act')) this.hasSemanticRefusal = true;
     // Each conditional is settled when either it does not apply or its failure is confidently absent.
     for (const [aspect, applies, failure] of executionChecks) {
       if ((applies.verdict === 'no' && applies.outcome === 'act') || (failure.verdict === 'no' && failure.outcome === 'act')) qualifications.execution.add(aspect);

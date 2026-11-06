@@ -10,6 +10,7 @@ import {
 import type { DaemonErrorCategory } from './daemon-error-contract.js';
 import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from './judgment-authority.js';
+import { decisionModelPolicyState, tryClassicDecisionFallback } from './decision-policy.js';
 
 /**
  * What an error's wording says about the failure, read by Jev in place of the
@@ -221,6 +222,8 @@ export interface FailureReadOptions extends Pick<CallOptions, 'signal' | 'before
 }
 
 export interface FailureConclusions {
+  /** Classic uses only structured protocol facts, with no invented semantic readings. */
+  readonly source?: 'classic';
   /** The category the wording supports; 'unknown' unless the reading is strong enough to act on. */
   readonly category: FailureCategory;
   readonly billing: boolean;
@@ -231,7 +234,7 @@ export interface FailureConclusions {
   readonly beforeResponse: boolean;
   /** The connection failure the wording describes; 'none' unless the reading is strong enough to act on. */
   readonly connection: ConnectionFailure;
-  readonly readings: {
+  readonly readings?: {
     readonly category: ChoiceReading<FailureCategory>;
     readonly connection_failure: ChoiceReading<ConnectionFailure>;
   } & { readonly [K in Exclude<FailureQuestion, 'category' | 'connection_failure'>]: YesNoReading };
@@ -262,7 +265,7 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
   if (memo.size >= MEMO_LIMIT) memo.delete(memo.keys().next().value!);
   memo.set(state, reading);
   const discard = () => { if (memo.get(state) === reading) memo.delete(state); };
-  void reading.then(result => { if (Object.values(result.readings).some(value => value.outcome !== 'act')) discard(); }, discard);
+  void reading.then(result => { if (Object.values(result.readings ?? {}).some(value => value.outcome !== 'act')) discard(); }, discard);
   return reading;
 }
 
@@ -272,6 +275,30 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
  * options keep their port/lifetime and bypass the cross-caller wording memo.
  */
 export async function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
+  options?.signal?.throwIfAborted();
+  if (decisionModelPolicyState().operation === 'classic') return classicFailureConclusions(evidence);
+  try { return await readDecisionFailure(evidence, site, options); }
+  catch (error) {
+    options?.signal?.throwIfAborted();
+    if (!tryClassicDecisionFallback(error)) throw error;
+    return classicFailureConclusions(evidence);
+  }
+}
+
+function classicFailureConclusions(evidence: FailureEvidence): FailureConclusions {
+  const code = evidence.code?.trim().toUpperCase();
+  const fixed = categoryForStatus(evidence.status) ?? categoryForCode(code);
+  const category = fixed && Object.hasOwn(CATEGORY_OPTIONS, fixed) ? fixed as FailureCategory : 'unknown';
+  const connection: ConnectionFailure = evidence.status !== undefined ? 'none' : code === 'ECONNREFUSED' ? 'refused'
+    : code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns_failed' : code === 'ETIMEDOUT' ? 'timed_out' : 'none';
+  return { source: 'classic', category, billing: evidence.status === 402, rateLimited: evidence.status === 429,
+    contextExceeded: code === 'CONTEXT_LENGTH_EXCEEDED' || code === 'MAX_TOKENS_EXCEEDED',
+    transientNetwork: evidence.status === undefined && code !== undefined && CODE_CATEGORIES.has(code),
+    providerUnusable: evidence.status === 401 || evidence.status === 403 || evidence.status === 404,
+    beforeResponse: evidence.status === undefined && (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EHOSTUNREACH'), connection };
+}
+
+async function readDecisionFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
   const source = options === undefined ? captureJudgmentPort(site) : undefined;
   const port = options?.port ?? source!.port, model = port.model;
   const current = () => {

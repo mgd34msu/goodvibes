@@ -1,5 +1,5 @@
 import { composeJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
-import { configureDecisionModelPolicy } from './decision-policy.js';
+import { configureDecisionModelPolicy, isClassicOperation } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
@@ -261,7 +261,7 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   bindJudgmentPortAuthority(port, sourceLifetime.capture);
   const previous = installJudgmentPort(port);
   // Config loaded before this port existed; what its load kept for a reading is read now.
-  void input.config.announceUnknownSettingForms?.();
+  if (!isClassicOperation()) void input.config.announceUnknownSettingForms?.();
   input.disposal.add('judgment port and decision log', () => {
     retired.add(port);
     closing = true;

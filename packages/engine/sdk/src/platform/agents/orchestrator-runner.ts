@@ -1,4 +1,5 @@
 import type { ChatRequest } from '../providers/interface.js';
+import { withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
@@ -455,6 +456,13 @@ export async function runAgentTask(
   context: AgentOrchestratorRunContext,
   record: AgentRecord,
 ): Promise<void> {
+  return withDecisionModelPolicy(() => context.configManager?.get('judgment.policy'), () => runAgentTaskWithPolicy(context, record), state => {
+    context.emitAgentProgress(record.id, `[Decision policy] ${state.reason === 'unavailable'
+      ? 'Decision models unavailable; continuing with Classic operation.' : 'Classic - Off; no independent semantic verification.'}`, 'operator');
+  });
+}
+
+async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, record: AgentRecord): Promise<void> {
   record.status = 'running';
   const terminal = captureAgentRunTerminal(context, record);
   const acceptanceDetails = workerAcceptanceDetails(record);

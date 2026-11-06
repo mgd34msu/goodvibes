@@ -22,6 +22,10 @@ the operation. Preferred fallback preserves transcript and execution records;
 only a side-effect-free decision phase may re-enter through its Classic path.
 Already executed tools are never replayed. A real semantic refusal, cancellation,
 privacy rejection, malformed answer or revoked authority cannot trigger fallback.
+An outage also cannot reopen an action already refused in the current operation
+or publish a final answer with a still-confirmed semantic failure. A fresh
+successful decision may resolve that hold; explicit Classic selection starts a
+new operation without representing it as decision-model approval.
 
 Classic uses owner approval where `safe-jev` would have decided. Explicit YOLO
 remains an independent permission choice. Authentication, workspace scope,

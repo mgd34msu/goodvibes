@@ -3,16 +3,11 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import {
   DecisionModelsDisabledError, JudgmentPortMissingError, decisionModelPolicyState,
   installDecisionModelPolicyObserver, type DecisionModelPolicy, type DecisionModelPolicyState,
+  parseDecisionModelPolicy,
 } from '@goodvibes-jev/engine/errors';
 
 export type { DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-export const DECISION_MODEL_POLICIES = ['Default - On', 'Preferred', 'Classic - Off'] as const;
-
-export function parseDecisionModelPolicy(value: unknown): DecisionModelPolicy {
-  if (value === undefined) return 'Default - On';
-  if (value === 'Default - On' || value === 'Preferred' || value === 'Classic - Off') return value;
-  throw new Error('Invalid decision-model policy');
-}
+export { DECISION_MODEL_POLICIES, parseDecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 
 export class DecisionModelPolicyChangedError extends Error {
   constructor() { super('Decision-model policy changed. Start a fresh operation with the current policy.'); this.name = 'DecisionModelPolicyChangedError'; }
@@ -24,6 +19,7 @@ interface PolicyScope {
   readonly onChange: ((state: DecisionModelPolicyState) => void) | undefined;
   reason: DecisionModelPolicyState['reason'];
   revision: number;
+  readonly refusals: Set<string>;
 }
 const scopes = new AsyncLocalStorage<PolicyScope>();
 const configurations: { readonly read: () => unknown; active: boolean }[] = [];
@@ -46,7 +42,7 @@ function observe(): DecisionModelPolicyState {
   const reason = scope?.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
   return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.revision ?? 0 });
 }
-installDecisionModelPolicyObserver(observe);
+installDecisionModelPolicyObserver(observe, activateClassicFallback);
 
 export function isClassicOperation(): boolean { return decisionModelPolicyState().operation === 'classic'; }
 
@@ -54,9 +50,10 @@ export function isClassicOperation(): boolean { return decisionModelPolicyState(
 export function withDecisionModelPolicy<T>(read: () => unknown, operation: () => T,
   onChange?: (state: DecisionModelPolicyState) => void): T {
   if (scopes.getStore()) return operation();
-  const policy = parseDecisionModelPolicy(read());
-  const current = () => { if (parseDecisionModelPolicy(read()) !== policy) throw new DecisionModelPolicyChangedError(); };
-  return scopes.run({ policy, current, onChange, reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0 }, () => {
+  const readPolicy = () => parseDecisionModelPolicy(read() ?? configured());
+  const policy = readPolicy();
+  const current = () => { if (readPolicy() !== policy) throw new DecisionModelPolicyChangedError(); };
+  return scopes.run({ policy, current, onChange, reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0, refusals: new Set() }, () => {
     current();
     if (policy === 'Classic - Off') onChange?.(observe());
     return operation();
@@ -77,16 +74,23 @@ export function activateClassicFallback(error: unknown): boolean {
 }
 
 /** Re-enter only a caller's side-effect-free decision phase, never replay its executed operation. */
-export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>): Promise<T> {
+export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed: () => boolean = () => true): Promise<T> {
   return withDecisionModelPolicy(configured, async () => {
-    if (isClassicOperation()) return classic();
+    if (isClassicOperation()) {
+      if (!fallbackAllowed()) throw new DecisionModelsDisabledError('fresh resolution of an existing semantic refusal');
+      return classic();
+    }
     try { return await decision(); }
     catch (error) {
-      if (!activateClassicFallback(error)) throw error;
+      if (!fallbackAllowed() || !activateClassicFallback(error)) throw error;
       return classic();
     }
   });
 }
+
+/** A later outage cannot reopen the same refused action within its owning operation. Keys stay host-private. */
+export function rememberDecisionRefusal(action: string): void { scopes.getStore()?.refusals.add(action); }
+export function wasDecisionRefused(action: string): boolean { return scopes.getStore()?.refusals.has(action) ?? false; }
 
 /** Explicit capability report for genuinely decision-only features. */
 export function requireDecisionFeature(feature: string): void {

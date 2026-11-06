@@ -1,11 +1,6 @@
+import { readKnowledgeTaskArguments, readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
-import {
-  readFlag,
-  readStringListFlag,
-  readPositiveIntFlag,
-  readJsonObjectFlag,
-  positionalArgs,
-} from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
 const { nodeLabel } = createKnowledgeLabels(' confidence=');
 import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
@@ -84,26 +79,15 @@ export const knowledgeCommand: SlashCommand = {
       case 'ask': {
         const ask = requireKnowledgeAsk(context);
         if (!ask) return;
-        const valuedFlags = ['--space', '--knowledge-space', '--limit', '--mode'];
-        const query = positionalArgs(rest, valuedFlags).join(' ').trim();
+        const input = readKnowledgeAskArguments(rest, true);
+        const query = input.query;
         if (!query) {
           print(
             '[knowledge] Usage: /knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
           );
           return;
         }
-        const requestedMode = readFlag(rest, '--mode') as KnowledgeAskMode | undefined;
-        const mode: KnowledgeAskMode =
-          requestedMode && ['concise', 'standard', 'detailed'].includes(requestedMode) ? requestedMode : 'standard';
-        const result = await ask({
-          query,
-          knowledgeSpaceId: readFlag(rest, '--space') ?? readFlag(rest, '--knowledge-space'),
-          limit: readPositiveIntFlag(rest, '--limit', 10),
-          mode,
-          includeSources: true,
-          includeConfidence: true,
-          includeLinkedObjects: true,
-        });
+        const result = await ask(input);
         print(renderKnowledgeAskResult(result));
         break;
       }
@@ -401,14 +385,7 @@ export const knowledgeCommand: SlashCommand = {
       }
 
       case 'packet': {
-        const scopeValues: string[] = [];
-        for (let index = 0; index < rest.length; index += 1) {
-          if (rest[index] === '--scope' && rest[index + 1]) {
-            scopeValues.push(rest[index + 1]!);
-            index += 1;
-          }
-        }
-        const query = positionalArgs(rest, ['--scope']).join(' ').trim();
+        const { scopeValues, query } = readKnowledgeTaskArguments(rest);
         if (!query) {
           print('[knowledge] Usage: /knowledge packet <task...> [--scope <path> ...]');
           return;
@@ -419,14 +396,7 @@ export const knowledgeCommand: SlashCommand = {
       }
 
       case 'explain': {
-        const scopeValues: string[] = [];
-        for (let index = 0; index < rest.length; index += 1) {
-          if (rest[index] === '--scope' && rest[index + 1]) {
-            scopeValues.push(rest[index + 1]!);
-            index += 1;
-          }
-        }
-        const query = positionalArgs(rest, ['--scope']).join(' ').trim();
+        const { scopeValues, query } = readKnowledgeTaskArguments(rest);
         if (!query) {
           print('[knowledge] Usage: /knowledge explain <task...> [--scope <path> ...]');
           return;

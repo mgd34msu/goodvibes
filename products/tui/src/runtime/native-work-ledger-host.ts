@@ -1,9 +1,9 @@
+import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import { createNativeWorkLedgerReadBinding } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-binding';
 import { createNativeHostFetch } from './client/native-host-fetch.ts';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.ts';
 import {
   NativeConversationIntakeControls,
-  nativeConversationIntakeLines,
   type NativeConversationIntakeActions,
   type NativeConversationIntakeState,
 } from './native-conversation-intake.ts';
@@ -14,7 +14,6 @@ import { realpathSync } from 'node:fs';
 import { NativeWorkSubmissionJournal } from './native-work-submission-journal.ts';
 import {
   NativeWorkSubmissionControls,
-  nativeWorkSubmissionLines,
   type NativeWorkSubmissionActions,
   type NativeWorkSubmissionState,
 } from './native-work-submission.ts';
@@ -324,49 +323,8 @@ export function registerNativeWorkLedgerCommand(
       'Inspect native work and recover ordinary input with intake-status/intake-retry/intake-resume/intake-cancel; /work <daemon-project-id> selects a project.',
     handler: async (args, ctx) => {
       const action = args[0];
-      if (action === 'intake-status' || action === 'intake-retry' || action === 'intake-resume' || action === 'intake-cancel') {
-        if (args.length !== 1) {
-          ctx.print('Usage: /work intake-status | intake-retry | intake-resume | intake-cancel');
-          return;
-        }
-        const intake = ctx.nativeConversationIntake;
-        if (!intake) {
-          ctx.print('Native conversation intake is unavailable in this shell.');
-          return;
-        }
-        const result = await (action === 'intake-status'
-          ? intake.status()
-          : action === 'intake-retry'
-            ? intake.retry()
-            : action === 'intake-resume'
-              ? intake.resume()
-              : intake.cancel());
-        ctx.print(nativeConversationIntakeLines(result).join('\n'));
-        if (result?.turnReady) await ctx.dispatchNativeIntakeTurn?.(result);
-        return;
-      }
-      if (action === 'submit-file' || action === 'submission-status' || action === 'submission-retry') {
-        if (args.length !== (action === 'submit-file' ? 2 : 1)) {
-          ctx.print('Usage: /work submit-file <JSON-path> | submission-status | submission-retry');
-          return;
-        }
-        if (!submission) {
-          ctx.print('Native source submission is unavailable in this shell.');
-          return;
-        }
-        const result =
-          action === 'submit-file'
-            ? await submission.submitFile(args[1]!)
-            : action === 'submission-status'
-              ? await submission.status()
-              : await submission.retry();
-        ctx.print(
-          nativeWorkSubmissionLines(result)
-            .map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' '))
-            .join('\n'),
-        );
-        return;
-      }
+      if (await handleNativeIntakeCommand(args, ctx, false)) return;
+      if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;
       if (args.length > 1) {
         ctx.print('Usage: /work [exact-daemon-project-id]');
         return;

@@ -41,3 +41,34 @@ export function positionalArgs(args: string[], valuedFlags: readonly string[] = 
     return true;
   });
 }
+
+export function readRepeatedFlagValues(args: readonly string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const value = args[index + 1];
+    if (args[index] === name && value) {
+      values.push(value);
+      index++;
+    }
+  }
+  return values;
+}
+export function readKnowledgeTaskArguments(args: string[]) {
+  return { scopeValues: readRepeatedFlagValues(args, '--scope'), query: positionalArgs(args, ['--scope']).join(' ').trim() };
+}
+export function readKnowledgeAskArguments(args: string[], allowKnowledgeSpace: boolean) {
+  const query = positionalArgs(args, allowKnowledgeSpace ? ['--space', '--knowledge-space', '--limit', '--mode'] : ['--limit', '--mode'])
+    .join(' ')
+    .trim();
+  const requested = readFlag(args, '--mode');
+  const mode = requested === 'concise' || requested === 'standard' || requested === 'detailed' ? requested : 'standard';
+  return {
+    query,
+    limit: readPositiveIntFlag(args, '--limit', 10),
+    mode,
+    includeSources: true,
+    includeConfidence: true,
+    includeLinkedObjects: true,
+    ...(allowKnowledgeSpace ? { knowledgeSpaceId: readFlag(args, '--space') ?? readFlag(args, '--knowledge-space') } : {}),
+  } as const;
+}

@@ -1,3 +1,4 @@
+import { readKnowledgeTaskArguments, readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import {
   readFlag,
   readStringListFlag,
@@ -217,23 +218,13 @@ export const knowledgeCommand: SlashCommand = {
             return;
           }
           const ask = command.retain(service, 'ask', () => context.extensions.agentKnowledgeService);
-          const valuedFlags = ['--limit', '--mode'];
-          const query = positionalArgs(rest, valuedFlags).join(' ').trim();
+          const input = readKnowledgeAskArguments(rest, false);
+          const query = input.query;
           if (!query) {
             print('[knowledge] Usage: /knowledge ask <query> [--limit <n>] [--mode <concise|standard|detailed>]');
             return;
           }
-          const requestedMode = readFlag(rest, '--mode');
-          const mode: KnowledgeAskMode =
-            requestedMode === 'concise' || requestedMode === 'standard' || requestedMode === 'detailed' ? requestedMode : 'standard';
-          const result = await ask.method.call(ask.owner, {
-            query,
-            limit: readPositiveIntFlag(rest, '--limit', 10),
-            mode,
-            includeSources: true,
-            includeConfidence: true,
-            includeLinkedObjects: true,
-          });
+          const result = await ask.method.call(ask.owner, input);
           ask.assertCurrent();
           print(renderKnowledgeAskResult(result));
           break;
@@ -782,14 +773,7 @@ export const knowledgeCommand: SlashCommand = {
         }
 
         case 'packet': {
-          const scopeValues: string[] = [];
-          for (let index = 0; index < rest.length; index += 1) {
-            if (rest[index] === '--scope' && rest[index + 1]) {
-              scopeValues.push(rest[index + 1]!);
-              index += 1;
-            }
-          }
-          const query = positionalArgs(rest, ['--scope']).join(' ').trim();
+          const { scopeValues, query } = readKnowledgeTaskArguments(rest);
           if (!query) {
             print('[knowledge] Usage: /knowledge packet <task...> [--scope <path> ...]');
             return;
@@ -802,14 +786,7 @@ export const knowledgeCommand: SlashCommand = {
         }
 
         case 'explain': {
-          const scopeValues: string[] = [];
-          for (let index = 0; index < rest.length; index += 1) {
-            if (rest[index] === '--scope' && rest[index + 1]) {
-              scopeValues.push(rest[index + 1]!);
-              index += 1;
-            }
-          }
-          const query = positionalArgs(rest, ['--scope']).join(' ').trim();
+          const { scopeValues, query } = readKnowledgeTaskArguments(rest);
           if (!query) {
             print('[knowledge] Usage: /knowledge explain <task...> [--scope <path> ...]');
             return;

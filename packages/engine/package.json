@@ -3093,6 +3093,11 @@
       "bun": "./terminal-shell/src/security-command.ts",
       "types": "./terminal-shell/dist/security-command.d.ts",
       "import": "./terminal-shell/dist/security-command.js"
+    },
+    "./terminal-shell/native/work-command": {
+      "bun": "./terminal-shell/src/native/work-command.ts",
+      "types": "./terminal-shell/dist/native/work-command.d.ts",
+      "import": "./terminal-shell/dist/native/work-command.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,4 @@
+import {buildPluginStartupContext} from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
@@ -22,7 +23,7 @@ import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
-import { shutdownRuntime, fireSessionStart } from '@/runtime/index.ts';
+import { fireSessionStart } from '@/runtime/index.ts';
 import { createTaskManager } from '@/runtime/index.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { emitSessionReady, emitSessionStarted } from '@/runtime/index.ts';
@@ -55,38 +56,38 @@ import {
 } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
-import { registerAgentAuditTool } from '../tools/agent-audit-tool.ts';
+import '../tools/agent-audit-tool.ts';
 import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
-import { installAgentMcpCallRoute } from '../tools/agent-mcp-call-route.ts';
+import '../tools/agent-mcp-call-route.ts';
 import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
-import { wireCapabilityIndex } from './bootstrap-capability-wiring.ts';
-import { registerAgentCapabilityTool } from '../tools/agent-capability-tool.ts';
-import { registerAgentAutonomyTool } from '../tools/agent-autonomy-tool.ts';
-import { registerAgentChannelsTool } from '../tools/agent-channels-tool.ts';
-import { registerAgentComputerTool } from '../tools/agent-computer-tool.ts';
-import { registerAgentContextTool } from '../tools/agent-context-tool.ts';
-import { registerAgentDelegationTool } from '../tools/agent-delegation-tool.ts';
-import { registerAgentDeviceTool } from '../tools/agent-device-tool.ts';
-import { registerAgentExecutionTool } from '../tools/agent-execution-tool.ts';
-import { registerAgentHarnessTool } from '../tools/agent-harness-tool.ts';
-import { registerAgentHostTool } from '../tools/agent-host-tool.ts';
-import { registerAgentMemoryTool } from '../tools/agent-memory-tool.ts';
-import { registerAgentModelsTool } from '../tools/agent-models-tool.ts';
-import { registerAgentPersonalOpsTool } from '../tools/agent-personal-ops-tool.ts';
-import { registerAgentProfileTool } from '../tools/agent-profile-tool.ts';
-import { createProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
-import { registerAgentResearchTool } from '../tools/agent-research-tool.ts';
-import { registerAgentRouteTool } from '../tools/agent-route-tool.ts';
-import { registerAgentSecurityTool } from '../tools/agent-security-tool.ts';
-import { registerAgentSessionsTool } from '../tools/agent-sessions-tool.ts';
-import { registerAgentSetupTool } from '../tools/agent-setup-tool.ts';
-import { registerAgentSettingsImportTool } from '../tools/agent-settings-import-tool.ts';
-import { registerAgentSettingsTool } from '../tools/agent-settings-tool.ts';
-import { registerAgentSupportTool } from '../tools/agent-support-tool.ts';
-import { registerAgentTerminalProcessTools } from '../tools/agent-terminal-process-tools.ts';
-import { registerAgentVibeTool } from '../tools/agent-vibe-tool.ts';
-import { registerAgentWorkspaceTool } from '../tools/agent-workspace-tool.ts';
-import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
+import './bootstrap-capability-wiring.ts';
+import '../tools/agent-capability-tool.ts';
+import '../tools/agent-autonomy-tool.ts';
+import '../tools/agent-channels-tool.ts';
+import '../tools/agent-computer-tool.ts';
+import '../tools/agent-context-tool.ts';
+import '../tools/agent-delegation-tool.ts';
+import '../tools/agent-device-tool.ts';
+import '../tools/agent-execution-tool.ts';
+import '../tools/agent-harness-tool.ts';
+import '../tools/agent-host-tool.ts';
+import '../tools/agent-memory-tool.ts';
+import '../tools/agent-models-tool.ts';
+import '../tools/agent-personal-ops-tool.ts';
+import '../tools/agent-profile-tool.ts';
+import '../agent/owner-profile-gateway.ts';
+import '../tools/agent-research-tool.ts';
+import '../tools/agent-route-tool.ts';
+import '../tools/agent-security-tool.ts';
+import '../tools/agent-sessions-tool.ts';
+import '../tools/agent-setup-tool.ts';
+import '../tools/agent-settings-import-tool.ts';
+import '../tools/agent-settings-tool.ts';
+import '../tools/agent-support-tool.ts';
+import '../tools/agent-terminal-process-tools.ts';
+import '../tools/agent-vibe-tool.ts';
+import '../tools/agent-workspace-tool.ts';
+import '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './agent-operator-policy.ts';
 
 
@@ -529,17 +530,7 @@ export async function bootstrapRuntime(
     requestRender,
   });
 
-  deferredStartup.schedule(createPluginStartupTask(pluginManager, () => ({ runtimeBus,
-commandRegistry: pluginCommandRegistry,
-providerRegistry,
-toolRegistry,
-gatewayMethods: services.gatewayMethods,
-channelRegistry: services.channelPlugins,
-channelDeliveryRouter: services.deliveryManager.getDeliveryRouter(),
-memoryEmbeddingRegistry: services.memoryEmbeddingRegistry,
-voiceProviderRegistry: services.voiceProviders,
-mediaProviderRegistry: services.mediaProviders,
-webSearchProviderRegistry: services.webSearchProviders }), requestRender, message => systemMessageRouter.high(message)));
+  deferredStartup.schedule(createPluginStartupTask(pluginManager, ()=>buildPluginStartupContext({runtimeBus,commandRegistry:pluginCommandRegistry,providerRegistry,toolRegistry},services), requestRender, message => systemMessageRouter.high(message)));
   // Probe the daemon spine OFF the interactive path. On a reachable daemon,
   // fold the agent's own per-cwd legacy session store into it (once; marked
   // migrated). Waits for connected-host discovery (which may have just started

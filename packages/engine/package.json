@@ -2528,6 +2528,36 @@
       "bun": "./terminal-shell/src/subscription-runtime-commands.ts",
       "types": "./terminal-shell/dist/subscription-runtime-commands.d.ts",
       "import": "./terminal-shell/dist/subscription-runtime-commands.js"
+    },
+    "./terminal-shell/onboarding-snapshot-reads": {
+      "bun": "./terminal-shell/src/onboarding-snapshot-reads.ts",
+      "types": "./terminal-shell/dist/onboarding-snapshot-reads.d.ts",
+      "import": "./terminal-shell/dist/onboarding-snapshot-reads.js"
+    },
+    "./terminal-shell/session-graph-command": {
+      "bun": "./terminal-shell/src/session-graph-command.ts",
+      "types": "./terminal-shell/dist/session-graph-command.d.ts",
+      "import": "./terminal-shell/dist/session-graph-command.js"
+    },
+    "./terminal-shell/block-content-actions": {
+      "bun": "./terminal-shell/src/block-content-actions.ts",
+      "types": "./terminal-shell/dist/block-content-actions.d.ts",
+      "import": "./terminal-shell/dist/block-content-actions.js"
+    },
+    "./terminal-shell/basic-shell-commands": {
+      "bun": "./terminal-shell/src/basic-shell-commands.ts",
+      "types": "./terminal-shell/dist/basic-shell-commands.d.ts",
+      "import": "./terminal-shell/dist/basic-shell-commands.js"
+    },
+    "./terminal-shell/verification-primitives": {
+      "bun": "./terminal-shell/src/verification-primitives.ts",
+      "types": "./terminal-shell/dist/verification-primitives.d.ts",
+      "import": "./terminal-shell/dist/verification-primitives.js"
+    },
+    "./terminal-shell/command-service-access": {
+      "bun": "./terminal-shell/src/command-service-access.ts",
+      "types": "./terminal-shell/dist/command-service-access.d.ts",
+      "import": "./terminal-shell/dist/command-service-access.js"
     }
   },
   "publishConfig": {

@@ -17,3 +17,19 @@ export function filterGroups(groups: readonly HelpGroup[], query: string): HelpG
     }))
     .filter((g) => g.entries.length > 0);
 }
+
+/** Treat plugin metadata as untrusted: one throwing getter cannot break help navigation. */
+export function hasHelpCommand(
+  commands: readonly { readonly name: string; readonly aliases?: readonly string[] | undefined }[] | undefined,
+  name: string,
+): boolean {
+  if (!commands) return false;
+  for (const command of commands) {
+    try {
+      if (command.name === name || (command.aliases ?? []).includes(name)) return true;
+    } catch {
+      /* Skip malformed plugin metadata. */
+    }
+  }
+  return false;
+}

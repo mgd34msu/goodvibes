@@ -1,3 +1,4 @@
+import {buildPluginStartupContext} from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 /**
  * Bootstrap composition root for goodvibes-tui.
@@ -27,14 +28,9 @@ import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import {
-  fireSessionStart, createTaskManager, OpsControlPlane, AcpTaskAdapter,
-  emitSessionReady, emitSessionStarted, loadLastConversation, leaveHostedSessionOnExit,
-  scheduleBackgroundMcpDiscovery, restoreSavedModel, startExternalServices,
-  type ExternalServicesHandle, type HostServiceStatus, createHttpTransport, createDeferredStartupCoordinator,
-} from '@/runtime/index.ts';
+import { fireSessionStart, createTaskManager, OpsControlPlane, AcpTaskAdapter, emitSessionReady, emitSessionStarted, loadLastConversation, leaveHostedSessionOnExit, scheduleBackgroundMcpDiscovery, restoreSavedModel, startExternalServices, type ExternalServicesHandle, createDeferredStartupCoordinator } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
-import { foldLegacySpineStore, deriveSpineFooterStatus } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
+import { deriveSpineFooterStatus } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
 import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/sdk/platform/pairing';
 import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
@@ -47,7 +43,7 @@ import type { ShellViews } from '../views/builtin-views.ts';
 import { announceResumeState } from './resume-notice.ts';
 import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
-import { consumeDaemonAttachNotices } from './daemon-attach-notices.ts';
+import './daemon-attach-notices.ts';
 import { wireContextAccountingSource } from './context-accounting-source.ts';
 import { autostartInstalledDaemon, createDaemonServiceControl, describeDaemonAutostart } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
@@ -521,17 +517,7 @@ export async function bootstrapRuntime(
     requestRender();
     daemonHandshake.onLivenessTransition(online);
   });
-  deferredStartup.schedule(createPluginStartupTask(pluginManager, () => ({ runtimeBus,
-commandRegistry: pluginCommandRegistry,
-providerRegistry,
-toolRegistry,
-gatewayMethods: services.gatewayMethods,
-channelRegistry: services.channelPlugins,
-channelDeliveryRouter: services.deliveryManager.getDeliveryRouter(),
-memoryEmbeddingRegistry: services.memoryEmbeddingRegistry,
-voiceProviderRegistry: services.voiceProviders,
-mediaProviderRegistry: services.mediaProviders,
-webSearchProviderRegistry: services.webSearchProviders }), requestRender, message => systemMessageRouter.high(message)));
+  deferredStartup.schedule(createPluginStartupTask(pluginManager, ()=>buildPluginStartupContext({runtimeBus,commandRegistry:pluginCommandRegistry,providerRegistry,toolRegistry},services), requestRender, message => systemMessageRouter.high(message)));
   deferredStartup.schedule({
     label: 'external-services',
     run: async () => {

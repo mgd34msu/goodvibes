@@ -609,7 +609,57 @@
       "path": "input/commands/runtime-services.ts",
       "baselineTuiLines": 396,
       "baselineSimilarity": 0.7344,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "requireSession",
+        "requireProvider",
+        "requireWorkspace",
+        "requirePlatform",
+        "requireOps",
+        "requireExtensions",
+        "requireReadModels",
+        "requireKeybindingsManager",
+        "requireProfileManager",
+        "requireBookmarkManager",
+        "requireSessionManager",
+        "requireSecretsManager",
+        "requireSubscriptionManager",
+        "requireServiceRegistry",
+        "requireLocalUserAuthManager",
+        "requireTokenAuditor",
+        "requireReplayEngine",
+        "requireWebhookNotifier",
+        "requireSessionMemoryStore",
+        "requireSessionLineageTracker",
+        "requireSessionChangeTracker",
+        "requirePlanManager",
+        "requireAdaptivePlanner",
+        "requireSessionOrchestration",
+        "requireForensicsRegistry",
+        "requirePluginManager",
+        "requirePolicyRuntimeState",
+        "requireMcpRegistry",
+        "requireToolRegistry",
+        "requireHookWorkbench",
+        "requireIntegrationHelpers",
+        "requireProviderOptimizer",
+        "requireFavoritesStore",
+        "requireBenchmarkStore",
+        "requireRemoteRuntime",
+        "requireOperatorClient",
+        "requirePeerClient",
+        "requireProviderApi",
+        "requireHookApi",
+        "requireMcpApi",
+        "requireDirectTransport",
+        "requireAgentManager",
+        "requireModeManager",
+        "requireAutomationManager",
+        "requireContextValue",
+        "requireShellPaths",
+        "requirePluginPathOptions",
+        "requireEcosystemCatalogPaths"
+      ]
     },
     {
       "path": "input/commands/schedule-runtime.ts",
@@ -638,7 +688,10 @@
       "baselineSimilarity": 0.4716,
       "status": "pending-convergence",
       "platformFunctions": [
-        "statusBadge"
+        "statusBadge",
+        "handleGraph",
+        "fmtRef",
+        "flagValue"
       ]
     },
     {
@@ -719,7 +772,7 @@
       "path": "input/handler-content-actions.ts",
       "baselineTuiLines": 554,
       "baselineSimilarity": 0.6648,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "MARKER_REGEX",
         "IMAGE_PREFIXES",
@@ -1715,7 +1768,8 @@
         "hasExternalIntegrations",
         "getAcknowledgementAccepted",
         "buildNotNeededAcknowledgement",
-        "buildRequiredAcknowledgement"
+        "buildRequiredAcknowledgement",
+        "deriveReopenEditAcknowledgementState"
       ]
     },
     {
@@ -1743,7 +1797,11 @@
         "sortSurfaceRecords",
         "buildFallbackAuthSnapshot",
         "buildAcknowledgementSnapshot",
-        "buildFallbackSecretReview"
+        "buildFallbackSecretReview",
+        "buildServicesSnapshot",
+        "loadOptionalSnapshot",
+        "drainSnapshotReads",
+        "buildConfigSnapshot"
       ]
     },
     {
@@ -1780,7 +1838,8 @@
         "OnboardingSurfacesSnapshot",
         "OnboardingRuntimeDefaultsSnapshot",
         "OnboardingAcknowledgementState",
-        "OnboardingReopenEditAcknowledgementState"
+        "OnboardingReopenEditAcknowledgementState",
+        "OnboardingConfigSnapshot"
       ]
     },
     {
@@ -1935,7 +1994,17 @@
       "path": "verification/live-verifier.ts",
       "baselineTuiLines": 421,
       "baselineSimilarity": 0.5479,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "runCommand",
+        "commandCheck",
+        "fetchCheck",
+        "countStatuses",
+        "renderLiveVerificationReportMarkdown table",
+        "validateDaemonHealth",
+        "LiveVerificationCheck",
+        "LiveVerificationStatus"
+      ]
     },
     {
       "path": "version.ts",

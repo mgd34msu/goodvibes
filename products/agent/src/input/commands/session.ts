@@ -1,4 +1,4 @@
-import { statusBadge } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
+import { createSessionGraphHandler } from '@goodvibes-jev/engine/terminal-shell/session-graph-command';
 /**
  * /session command handler, Multi-session Orchestration.
  *
@@ -8,7 +8,7 @@ import { statusBadge } from '@goodvibes-jev/engine/terminal-shell/task-presentat
  */
 
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
-import type { CrossSessionTaskRef } from '@goodvibes-jev/engine/sdk/platform/sessions';
+
 import { handleSessionWorkflowCommand } from './session-workflow.ts';
 import { requireSessionOrchestration } from './runtime-services.ts';
 
@@ -18,118 +18,24 @@ import { requireSessionOrchestration } from './runtime-services.ts';
  * Extract a named flag value from args (e.g. `--to <value>`).
  * Returns undefined if the flag is not present.
  */
-function flagValue(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx === -1 || idx + 1 >= args.length) return undefined;
-  return args[idx + 1];
-}
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 /** Status badge for display. */
 
-
 /** Format a ref as a compact one-line string. */
-function fmtRef(ref: CrossSessionTaskRef): string {
-  const key = `${ref.sessionId.slice(0, 8)}...:${ref.taskId.slice(0, 8)}...`;
-  const label = ref.label ? ` [${ref.label}]` : '';
-  return `${statusBadge(ref.status)} ${key}${label}  "${ref.title}"`;
-}
 
 function printSessionGraphMutationBlocked(context: CommandContext): void {
-  context.print([
-    '[session] Local cross-session task graph mutation is blocked in GoodVibes Agent.',
-    '[session] Use /session graph for read-only inspection.',
-    '[session] Use /delegate <task> for explicit build/fix/review handoff to GoodVibes TUI.',
-  ].join('\n'));
+  context.print(
+    [
+      '[session] Local cross-session task graph mutation is blocked in GoodVibes Agent.',
+      '[session] Use /session graph for read-only inspection.',
+      '[session] Use /delegate <task> for explicit build/fix/review handoff to GoodVibes TUI.',
+    ].join('\n'),
+  );
 }
 
 // ── /session graph ────────────────────────────────────────────────────────────
-
-function handleGraph(args: string[], context: CommandContext): void {
-  const filterSession = flagValue(args, '--session');
-  const format = flagValue(args, '--format') ?? 'text';
-
-  const orchestration = requireSessionOrchestration(context);
-  const snap = orchestration.snapshot();
-
-  const refs = Object.values(snap.refs);
-  const filteredRefs = filterSession
-    ? refs.filter((r) => r.sessionId === filterSession)
-    : refs;
-
-  if (format === 'json') {
-    context.print(JSON.stringify(snap, null, 2));
-    return;
-  }
-
-  // ── Text display ─────────────────────────────────────────────────────────────
-
-  if (filteredRefs.length === 0) {
-    if (filterSession) {
-      context.print(`[session] No tasks registered for session ${filterSession.slice(0, 8)}...`);
-    } else {
-      context.print('[session] Task graph is empty. Local task graph mutation is blocked in Agent; use /delegate for explicit build/fix/review handoff.');
-    }
-    return;
-  }
-
-  const lines: string[] = [
-    `[session] Cross-session task graph (${filteredRefs.length} task${filteredRefs.length !== 1 ? 's' : ''}):`,
-  ];
-
-  // Group by session for readability
-  const bySession = new Map<string, CrossSessionTaskRef[]>();
-  for (const ref of filteredRefs) {
-    const group = bySession.get(ref.sessionId) ?? [];
-    group.push(ref);
-    bySession.set(ref.sessionId, group);
-  }
-
-  for (const [sid, sessionRefs] of bySession) {
-    lines.push(`  Session ${sid.slice(0, 16)}...`);
-    for (const ref of sessionRefs) {
-      lines.push(`    ${fmtRef(ref)}`);
-
-      // Show dependencies
-      const deps = orchestration.getDependencies(ref.sessionId, ref.taskId);
-      for (const dep of deps) {
-        lines.push(
-          `      depends-on: ${statusBadge(dep.status)} ${dep.sessionId.slice(0, 8)}...:${dep.taskId.slice(0, 8)}...  "${dep.title}"`,
-        );
-      }
-
-      // Show dependents
-      const dependents = orchestration.getDependents(ref.sessionId, ref.taskId);
-      for (const d of dependents) {
-        lines.push(
-          `      depended-by: ${statusBadge(d.status)} ${d.sessionId.slice(0, 8)}...:${d.taskId.slice(0, 8)}...  "${d.title}"`,
-        );
-      }
-    }
-  }
-
-  // Handoffs summary
-  const handoffs = orchestration.getHandoffs();
-  const filteredHandoffs = filterSession
-    ? handoffs.filter((h) => h.fromSessionId === filterSession || h.toSessionId === filterSession)
-    : handoffs;
-
-  if (filteredHandoffs.length > 0) {
-    lines.push(`  Handoffs (${filteredHandoffs.length}):`);
-    for (const h of filteredHandoffs) {
-      const ack = h.acknowledged ? 'ack' : 'pending';
-      lines.push(
-        `    ${h.handoffId.slice(0, 8)}...  ` +
-        `${h.fromSessionId.slice(0, 8)}... → ${h.toSessionId.slice(0, 8)}...  ` +
-        `task:${h.taskRef.taskId.slice(0, 8)}...  [${ack}]` +
-        (h.reason ? `  reason: ${h.reason}` : ''),
-      );
-    }
-  }
-
-  context.print(lines.join('\n'));
-}
 
 // ── Top-level command definition ───────────────────────────────────────────────
 
@@ -188,3 +94,8 @@ export const sessionCommand: SlashCommand = {
     }
   },
 };
+
+const handleGraph = createSessionGraphHandler<CommandContext>(
+  requireSessionOrchestration,
+  '[session] Task graph is empty. Local task graph mutation is blocked in Agent; use /delegate for explicit build/fix/review handoff.',
+);

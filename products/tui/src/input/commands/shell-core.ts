@@ -1,3 +1,4 @@
+import {createBasicShellCommands} from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import {
@@ -21,6 +22,8 @@ import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 
 export function registerShellCoreCommands(registry: CommandRegistry): void {
+const basicCommands=createBasicShellCommands<CommandContext>();
+
   registry.register({
     name: 'model',
     aliases: ['m'],
@@ -143,21 +146,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'paste',
-    aliases: ['clip'],
-    description: 'Insert clipboard text or image into the prompt',
-    handler(_args, ctx) {
-      if (!ctx.pasteFromClipboard) {
-        ctx.print('Paste is not available in this context.');
-        return;
-      }
-      const result = ctx.pasteFromClipboard();
-      if (!result.pasted) {
-        ctx.print('Clipboard does not contain supported text or image data.');
-      }
-    },
-  });
+  registry.register(basicCommands.paste);
 
   registry.register({
     name: 'pastes',
@@ -263,19 +252,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     },
   });
 
-  registry.register({
-    name: 'reset',
-    aliases: [],
-    description: 'Full reset: clear display and conversation context',
-    handler(_args, ctx) {
-      ctx.session.conversationManager.resetAll();
-      if (ctx.reloadSystemPrompt) {
-        ctx.session.runtime.systemPrompt = ctx.reloadSystemPrompt();
-      }
-      ctx.session.conversationManager.rebuildHistory();
-      ctx.renderRequest();
-    },
-  });
+  registry.register(basicCommands.reset);
 
   registry.register({
     name: 'compact',

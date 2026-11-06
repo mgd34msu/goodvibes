@@ -211,3 +211,83 @@ export function buildRequiredAcknowledgement(
     detail,
   };
 }
+
+export function deriveReopenEditAcknowledgementState(
+  snapshot: OnboardingSignalSnapshot & { readonly auth: import('./onboarding-data-types.js').OnboardingAuthSnapshot },
+  presentation: {
+    readonly bootstrap: string;
+    readonly sessions: (count: number) => string;
+    readonly users: (count: number) => string;
+    readonly empty: string;
+  },
+) {
+  const providerAccounts = snapshot.providerAccounts?.providers ?? [];
+  const providerPendingCount = providerAccounts.filter((provider) => provider.pendingLogin).length;
+  const providerConfiguredCount = providerAccounts.filter(
+    (provider) => provider.activeRoute !== 'unconfigured' || provider.oauthReady,
+  ).length;
+  const providerRoutingCustomized = hasCustomizedProviderRouting(snapshot);
+  const providerSignalCount = getConfiguredProviderSignalIds(snapshot).length;
+
+  const subscriptionsPendingCount = snapshot.subscriptions.pending.length;
+  const subscriptionsActiveCount = snapshot.subscriptions.active.length;
+
+  const authUserCount = snapshot.auth.snapshot.userCount;
+  const authSessionCount = snapshot.auth.snapshot.sessionCount;
+  const bootstrapCredentialPresent = snapshot.auth.snapshot.bootstrapCredentialPresent;
+
+  const providers =
+    providerPendingCount > 0
+      ? buildRequiredAcknowledgement(
+          snapshot,
+          'providers',
+          'pending-login',
+          `${providerPendingCount} provider login(s) are still pending completion.`,
+        )
+      : providerConfiguredCount > 0 || providerSignalCount > 0
+        ? buildRequiredAcknowledgement(
+            snapshot,
+            'providers',
+            'configured-routing',
+            `${Math.max(providerConfiguredCount, providerSignalCount, 1)} provider auth path(s) are already configured.`,
+          )
+        : providerRoutingCustomized
+          ? buildRequiredAcknowledgement(
+              snapshot,
+              'providers',
+              'customized-config',
+              'Provider routing already differs from the default shell configuration.',
+            )
+          : buildNotNeededAcknowledgement(snapshot, 'providers', 'No existing provider routing needs confirmation.');
+
+  const subscriptions =
+    subscriptionsPendingCount > 0
+      ? buildRequiredAcknowledgement(
+          snapshot,
+          'subscriptions',
+          'pending-login',
+          `${subscriptionsPendingCount} subscription login(s) are pending completion.`,
+        )
+      : subscriptionsActiveCount > 0
+        ? buildRequiredAcknowledgement(
+            snapshot,
+            'subscriptions',
+            'subscription-state',
+            `${subscriptionsActiveCount} stored subscription session(s) already exist.`,
+          )
+        : buildNotNeededAcknowledgement(snapshot, 'subscriptions', 'No stored subscription sessions need confirmation.');
+
+  const auth = bootstrapCredentialPresent
+    ? buildRequiredAcknowledgement(snapshot, 'auth', 'bootstrap-credential', presentation.bootstrap)
+    : authSessionCount > 0
+      ? buildRequiredAcknowledgement(snapshot, 'auth', 'active-sessions', presentation.sessions(authSessionCount))
+      : authUserCount > 0
+        ? buildRequiredAcknowledgement(snapshot, 'auth', 'auth-state', presentation.users(authUserCount))
+        : buildNotNeededAcknowledgement(snapshot, 'auth', presentation.empty);
+
+  return {
+    providers,
+    subscriptions,
+    auth,
+  };
+}

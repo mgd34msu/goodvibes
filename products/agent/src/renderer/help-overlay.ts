@@ -1,3 +1,4 @@
+import {hasHelpCommand} from '@goodvibes-jev/engine/terminal-shell/renderer/help-groups';
 import { filterGroups, type HelpGroup } from '@goodvibes-jev/engine/terminal-shell/renderer/help-groups';
 /**
  * renderHelpOverlay, the help modal (`?` or /help): keyboard shortcuts plus
@@ -107,16 +108,7 @@ const PREFERRED_COMMANDS = [
 /** Every help group for the live keybindings and registry. */
 function helpGroups(keybindingsManager: KeybindingsManager, commands?: SlashCommand[]): HelpGroup[] {
   const kb = (action: Parameters<typeof keybindingsManager.getComboLabel>[0]) => keybindingsManager.getComboLabel(action);
-  const hasCommand = (name: string): boolean => {
-    if (!commands) return false;
-    for (const command of commands) {
-      // A broken plugin may expose a throwing `aliases` getter; skip it rather than crash the modal.
-      try {
-        if (command.name === name || (command.aliases ?? []).includes(name)) return true;
-      } catch { /* skip this command */ }
-    }
-    return false;
-  };
+  const hasCommand = (name:string)=>hasHelpCommand(commands,name);
 
   const groups: HelpGroup[] = [
     {

@@ -1,54 +1,68 @@
-import type { OnboardingNetworkMode, OnboardingAcknowledgementReason, OnboardingProviderRoutingSnapshot, OnboardingServiceState, OnboardingServicesSnapshot, OnboardingSubscriptionsSnapshot, OnboardingSecretsSnapshot, OnboardingAuthSnapshot, OnboardingSurfaceRecord, OnboardingSurfacesSnapshot, OnboardingRuntimeDefaultsSnapshot, OnboardingAcknowledgementState, OnboardingReopenEditAcknowledgementState } from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
-export type { OnboardingNetworkMode, OnboardingAcknowledgementReason, OnboardingProviderRoutingSnapshot, OnboardingServiceState, OnboardingServicesSnapshot, OnboardingSubscriptionsSnapshot, OnboardingSecretsSnapshot, OnboardingAuthSnapshot, OnboardingSurfaceRecord, OnboardingSurfacesSnapshot, OnboardingRuntimeDefaultsSnapshot, OnboardingAcknowledgementState, OnboardingReopenEditAcknowledgementState } from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
-export type { OnboardingVerificationStatus, OnboardingVerificationItem, OnboardingVerificationResult } from '@goodvibes-jev/engine/terminal-shell/onboarding-verification';
+import type { TerminalOnboardingConfigSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
+import type {
+  OnboardingNetworkMode,
+  OnboardingAcknowledgementReason,
+  OnboardingProviderRoutingSnapshot,
+  OnboardingServiceState,
+  OnboardingServicesSnapshot,
+  OnboardingSubscriptionsSnapshot,
+  OnboardingSecretsSnapshot,
+  OnboardingAuthSnapshot,
+  OnboardingSurfaceRecord,
+  OnboardingSurfacesSnapshot,
+  OnboardingRuntimeDefaultsSnapshot,
+  OnboardingAcknowledgementState,
+  OnboardingReopenEditAcknowledgementState,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
+export type {
+  OnboardingNetworkMode,
+  OnboardingAcknowledgementReason,
+  OnboardingProviderRoutingSnapshot,
+  OnboardingServiceState,
+  OnboardingServicesSnapshot,
+  OnboardingSubscriptionsSnapshot,
+  OnboardingSecretsSnapshot,
+  OnboardingAuthSnapshot,
+  OnboardingSurfaceRecord,
+  OnboardingSurfacesSnapshot,
+  OnboardingRuntimeDefaultsSnapshot,
+  OnboardingAcknowledgementState,
+  OnboardingReopenEditAcknowledgementState,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
+export type {
+  OnboardingVerificationStatus,
+  OnboardingVerificationItem,
+  OnboardingVerificationResult,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-verification';
 import type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 export type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-import type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-export type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope, OnboardingCheckMarkerSource, OnboardingAcknowledgementRuntimeState, OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingCheckMarkersState, WriteOnboardingCheckMarkerOptions } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
-import type { ConfigManager, ConfigKey, GoodVibesConfig } from '../../config/index.ts';
-import type { SecretsManager, SecretRecord, SecretStorageReview } from '../../config/secrets.ts';
-import type { LegacyFeatureConfigKey } from '../feature-enablement.ts';
-import type { LocalAuthSnapshot, UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
-import type { ShellPathService } from '@/runtime/index.ts';
 import type {
-  LocalAuthInspectionQuery,
-  ServiceInspectionQuery,
-  SubscriptionAccessQuery,
-} from '@/runtime/index.ts';
+  OnboardingMode,
+  OnboardingAcknowledgementTarget,
+  OnboardingStateScope,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+export type {
+  OnboardingMode,
+  OnboardingAcknowledgementTarget,
+  OnboardingStateScope,
+  OnboardingCheckMarkerSource,
+  OnboardingAcknowledgementRuntimeState,
+  OnboardingCheckMarkerPayload,
+  OnboardingCheckMarkerState,
+  OnboardingCheckMarkersState,
+  WriteOnboardingCheckMarkerOptions,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+import type { ConfigManager, ConfigKey } from '../../config/index.ts';
+import type { SecretsManager } from '../../config/secrets.ts';
+import type { LegacyFeatureConfigKey } from '../feature-enablement.ts';
+import type { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import type { ShellPathService } from '@/runtime/index.ts';
+import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 import type { AgentBehaviorDiscoverySnapshot } from '../../agent/behavior-discovery-summary.ts';
 
-
-
-
-
-
-
-export interface OnboardingConfigSnapshot {
-  readonly display: GoodVibesConfig['display'];
-  readonly provider: GoodVibesConfig['provider'];
-  readonly behavior: GoodVibesConfig['behavior'];
-  readonly storage: GoodVibesConfig['storage'];
-  readonly permissions: GoodVibesConfig['permissions'];
-  readonly helper: GoodVibesConfig['helper'];
-  readonly tools: Pick<GoodVibesConfig['tools'], 'llmEnabled' | 'llmProvider' | 'llmModel'>;
-  readonly surfaces: GoodVibesConfig['surfaces'];
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+export type OnboardingConfigSnapshot = TerminalOnboardingConfigSnapshot<
+  'display' | 'provider' | 'behavior' | 'storage' | 'permissions' | 'helper' | 'tools' | 'surfaces'
+>;
 
 export interface OnboardingProviderAccountRecord {
   readonly providerId: string;
@@ -67,10 +81,6 @@ export interface OnboardingProviderAccountsSnapshot {
   readonly issueCount: number;
   readonly providers: readonly OnboardingProviderAccountRecord[];
 }
-
-
-
-
 
 export type OnboardingSnapshotCollectionIssueArea =
   | 'host'
@@ -130,10 +140,6 @@ export interface OnboardingStep1CapabilityFlags {
   readonly automationReview: boolean;
   readonly tuiDelegation: boolean;
 }
-
-
-
-
 
 export interface OnboardingStepDerivationState {
   readonly step1Capabilities: readonly OnboardingStep1CapabilityItem[];
@@ -233,10 +239,6 @@ export interface OnboardingApplyResult {
   readonly errors: readonly OnboardingApplyError[];
 }
 
-
-
-
-
 export interface OnboardingSurfaceReadHelper {
   list(): readonly OnboardingSurfaceRecord[] | Promise<readonly OnboardingSurfaceRecord[]>;
 }
@@ -245,10 +247,7 @@ export interface OnboardingProviderAccountReadHelper {
   loadSnapshot(): Promise<OnboardingProviderAccountsSnapshot>;
 }
 
-export type OnboardingShellPaths = Pick<
-  ShellPathService,
-  'homeDirectory' | 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'
->;
+export type OnboardingShellPaths = Pick<ShellPathService, 'homeDirectory' | 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 
 export interface OnboardingSnapshotDependencies {
   readonly clock?: () => number;

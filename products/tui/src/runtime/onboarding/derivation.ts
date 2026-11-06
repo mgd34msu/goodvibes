@@ -1,52 +1,17 @@
-import { countPermissionToolOverrides, hasCustomizedProviderRouting, getProviderAccountSignalIds, getServiceCredentialProviderIds, getSecretBackedProviderIds, getConfiguredProviderSignalIds, hasConfiguredProviderState, getConfiguredSurfaceKinds, countConfiguredSurfaceKinds, hasInboundEventSurface, hasCustomizedWorkspaceDefaults, getProviderIdentityIds, getExternalIntegrationServiceIds, hasExternalIntegrations, getAcknowledgementAccepted, buildNotNeededAcknowledgement, buildRequiredAcknowledgement } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
-import { isDeepEqual } from '@goodvibes-jev/engine/terminal-shell/onboarding-values';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type {
-  OnboardingAcknowledgementState,
-  OnboardingAcknowledgementTarget,
-  OnboardingNetworkMode,
-  OnboardingReopenEditAcknowledgementState,
-  OnboardingSnapshotState,
-  OnboardingStep1CapabilityItem,
-  OnboardingStepDerivationState,
-} from './types.ts';
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+import { hasCustomizedProviderRouting, hasConfiguredProviderState, getConfiguredSurfaceKinds, countConfiguredSurfaceKinds, hasInboundEventSurface, getExternalIntegrationServiceIds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/providers';
+import type { OnboardingNetworkMode, OnboardingReopenEditAcknowledgementState, OnboardingSnapshotState, OnboardingStep1CapabilityItem, OnboardingStepDerivationState } from './types.ts';
 
 function hasAnyServerEnabled(snapshot: OnboardingSnapshotState): boolean {
-  return snapshot.bindSettings.daemonEnabled
-    || snapshot.bindSettings.controlPlane.enabled
-    || snapshot.bindSettings.httpListenerEnabled
-    || snapshot.bindSettings.web.enabled;
+  return (
+    snapshot.bindSettings.daemonEnabled ||
+    snapshot.bindSettings.controlPlane.enabled ||
+    snapshot.bindSettings.httpListenerEnabled ||
+    snapshot.bindSettings.web.enabled
+  );
 }
 
 function hasBrowserAccess(snapshot: OnboardingSnapshotState): boolean {
@@ -56,11 +21,13 @@ function hasBrowserAccess(snapshot: OnboardingSnapshotState): boolean {
 function isLoopbackHost(host: string | null | undefined): boolean {
   const normalized = (host ?? '').trim().toLowerCase();
   if (normalized.length === 0) return false;
-  return normalized === 'localhost'
-    || normalized === '::1'
-    || normalized === '[::1]'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || /^127(?:\.\d{1,3}){3}$/.test(normalized);
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized === '[::1]' ||
+    normalized === '0:0:0:0:0:0:0:1' ||
+    /^127(?:\.\d{1,3}){3}$/.test(normalized)
+  );
 }
 
 function isRemoteBind(hostMode: string, host: string | null | undefined, allowRemote = false): boolean {
@@ -72,38 +39,35 @@ function isRemoteBind(hostMode: string, host: string | null | undefined, allowRe
 
 function hasRemoteDeviceAccess(snapshot: OnboardingSnapshotState): boolean {
   return (
-    ((snapshot.bindSettings.daemonEnabled || snapshot.bindSettings.controlPlane.enabled)
-      && isRemoteBind(
+    ((snapshot.bindSettings.daemonEnabled || snapshot.bindSettings.controlPlane.enabled) &&
+      isRemoteBind(
         snapshot.bindSettings.controlPlane.hostMode,
         snapshot.bindSettings.controlPlane.host,
         snapshot.bindSettings.controlPlane.allowRemote,
-      ))
-    || (snapshot.bindSettings.web.enabled && isRemoteBind(
-      snapshot.bindSettings.web.hostMode,
-      snapshot.bindSettings.web.host,
-    ))
+      )) ||
+    (snapshot.bindSettings.web.enabled && isRemoteBind(snapshot.bindSettings.web.hostMode, snapshot.bindSettings.web.host))
   );
 }
 
 function hasWebhookOrEventIngress(snapshot: OnboardingSnapshotState): boolean {
-  return snapshot.bindSettings.httpListenerEnabled
-    || hasInboundEventSurface(snapshot)
-    || snapshot.services.services.some((service) => service.hasWebhookUrl || service.hasSigningSecret || service.hasPublicKey || service.hasAppToken);
+  return (
+    snapshot.bindSettings.httpListenerEnabled ||
+    hasInboundEventSurface(snapshot) ||
+    snapshot.services.services.some(
+      (service) => service.hasWebhookUrl || service.hasSigningSecret || service.hasPublicKey || service.hasAppToken,
+    )
+  );
 }
 
-
-
-
-
-
-
 function hasCloudflareBatch(snapshot: OnboardingSnapshotState): boolean {
-  return snapshot.config.cloudflare.enabled
-    || snapshot.config.batch.queueBackend === 'cloudflare'
-    || snapshot.config.batch.mode !== 'off'
-    || snapshot.config.cloudflare.accountId.trim().length > 0
-    || snapshot.config.cloudflare.apiTokenRef.trim().length > 0
-    || snapshot.config.cloudflare.workerBaseUrl.trim().length > 0;
+  return (
+    snapshot.config.cloudflare.enabled ||
+    snapshot.config.batch.queueBackend === 'cloudflare' ||
+    snapshot.config.batch.mode !== 'off' ||
+    snapshot.config.cloudflare.accountId.trim().length > 0 ||
+    snapshot.config.cloudflare.apiTokenRef.trim().length > 0 ||
+    snapshot.config.cloudflare.workerBaseUrl.trim().length > 0
+  );
 }
 
 function describeLocalTuiOnly(snapshot: OnboardingSnapshotState): string {
@@ -138,10 +102,7 @@ function describeWebhookIngress(snapshot: OnboardingSnapshotState): string {
 }
 
 function describeExternalIntegrations(snapshot: OnboardingSnapshotState): string {
-  const integrationCount = new Set<string>([
-    ...getExternalIntegrationServiceIds(snapshot),
-    ...getConfiguredSurfaceKinds(snapshot),
-  ]).size;
+  const integrationCount = new Set<string>([...getExternalIntegrationServiceIds(snapshot), ...getConfiguredSurfaceKinds(snapshot)]).size;
 
   if (integrationCount === 0) {
     return 'Enable setup screens for Slack, Discord, Telegram, Home Assistant, Teams, Matrix, and other app surfaces you choose.';
@@ -158,15 +119,7 @@ function describeCloudflareBatch(snapshot: OnboardingSnapshotState): string {
   return 'Optionally configure Cloudflare Workers and Queues for explicit or eligible background batch jobs. Immediate local daemon behavior stays the default unless enabled.';
 }
 
-
-
-
-
-
-
-export function deriveStep1Capabilities(
-  snapshot: OnboardingSnapshotState,
-): readonly OnboardingStep1CapabilityItem[] {
+export function deriveStep1Capabilities(snapshot: OnboardingSnapshotState): readonly OnboardingStep1CapabilityItem[] {
   return [
     {
       id: 'local-tui-only',
@@ -207,9 +160,7 @@ export function deriveStep1Capabilities(
   ];
 }
 
-export function deriveStep1CapabilityFlags(
-  snapshot: OnboardingSnapshotState,
-): {
+export function deriveStep1CapabilityFlags(snapshot: OnboardingSnapshotState): {
   readonly providers: boolean;
   readonly services: boolean;
   readonly subscriptions: boolean;
@@ -224,9 +175,8 @@ export function deriveStep1CapabilityFlags(
     providers: hasConfiguredProviderState(snapshot) || hasCustomizedProviderRouting(snapshot),
     services: snapshot.services.total > 0,
     subscriptions: snapshot.subscriptions.active.length > 0 || snapshot.subscriptions.pending.length > 0,
-    auth: snapshot.auth.snapshot.userCount > 0
-      || snapshot.auth.snapshot.sessionCount > 0
-      || snapshot.auth.snapshot.bootstrapCredentialPresent,
+    auth:
+      snapshot.auth.snapshot.userCount > 0 || snapshot.auth.snapshot.sessionCount > 0 || snapshot.auth.snapshot.bootstrapCredentialPresent,
     controlPlane: snapshot.bindSettings.daemonEnabled || snapshot.bindSettings.controlPlane.enabled,
     httpListener: snapshot.bindSettings.httpListenerEnabled,
     web: snapshot.bindSettings.web.enabled,
@@ -242,8 +192,8 @@ export function deriveStep1_5NetworkMode(
   const hasNetworkFacingSurface = bindSettings.httpListenerEnabled || bindSettings.web.enabled;
 
   if (
-    (bindSettings.daemonEnabled || bindSettings.controlPlane.enabled)
-    && (!hasNetworkFacingSurface || bindSettings.controlPlane.hostMode !== 'local')
+    (bindSettings.daemonEnabled || bindSettings.controlPlane.enabled) &&
+    (!hasNetworkFacingSurface || bindSettings.controlPlane.hostMode !== 'local')
   ) {
     activeModes.push(bindSettings.controlPlane.hostMode);
   }
@@ -259,94 +209,16 @@ export function deriveStep1_5NetworkMode(
   return activeModes.some((mode) => mode !== 'network') ? 'custom' : 'local-network-default';
 }
 
-export function deriveReopenEditAcknowledgementState(
-  snapshot: OnboardingSnapshotState,
-): OnboardingReopenEditAcknowledgementState {
-  const providerAccounts = snapshot.providerAccounts?.providers ?? [];
-  const providerPendingCount = providerAccounts.filter((provider) => provider.pendingLogin).length;
-  const providerConfiguredCount = providerAccounts.filter((provider) => provider.activeRoute !== 'unconfigured' || provider.oauthReady).length;
-  const providerRoutingCustomized = hasCustomizedProviderRouting(snapshot);
-  const providerSignalCount = getConfiguredProviderSignalIds(snapshot).length;
-
-  const subscriptionsPendingCount = snapshot.subscriptions.pending.length;
-  const subscriptionsActiveCount = snapshot.subscriptions.active.length;
-
-  const authUserCount = snapshot.auth.snapshot.userCount;
-  const authSessionCount = snapshot.auth.snapshot.sessionCount;
-  const bootstrapCredentialPresent = snapshot.auth.snapshot.bootstrapCredentialPresent;
-
-  const providers = providerPendingCount > 0
-    ? buildRequiredAcknowledgement(
-        snapshot,
-        'providers',
-        'pending-login',
-        `${providerPendingCount} provider login(s) are still pending completion.`,
-      )
-    : providerConfiguredCount > 0 || providerSignalCount > 0
-      ? buildRequiredAcknowledgement(
-          snapshot,
-          'providers',
-          'configured-routing',
-          `${Math.max(providerConfiguredCount, providerSignalCount, 1)} provider auth path(s) are already configured.`,
-        )
-      : providerRoutingCustomized
-        ? buildRequiredAcknowledgement(
-            snapshot,
-            'providers',
-            'customized-config',
-            'Provider routing already differs from the default shell configuration.',
-          )
-        : buildNotNeededAcknowledgement(snapshot, 'providers', 'No existing provider routing needs confirmation.');
-
-  const subscriptions = subscriptionsPendingCount > 0
-    ? buildRequiredAcknowledgement(
-        snapshot,
-        'subscriptions',
-        'pending-login',
-        `${subscriptionsPendingCount} subscription login(s) are pending completion.`,
-      )
-    : subscriptionsActiveCount > 0
-      ? buildRequiredAcknowledgement(
-          snapshot,
-          'subscriptions',
-          'subscription-state',
-          `${subscriptionsActiveCount} stored subscription session(s) already exist.`,
-        )
-      : buildNotNeededAcknowledgement(snapshot, 'subscriptions', 'No stored subscription sessions need confirmation.');
-
-  const auth = bootstrapCredentialPresent
-    ? buildRequiredAcknowledgement(
-        snapshot,
-        'auth',
-        'bootstrap-credential',
-        'The local auth bootstrap credential file is still present.',
-      )
-    : authSessionCount > 0
-      ? buildRequiredAcknowledgement(
-          snapshot,
-          'auth',
-          'active-sessions',
-          `${authSessionCount} local auth session(s) are currently active.`,
-        )
-      : authUserCount > 0
-        ? buildRequiredAcknowledgement(
-            snapshot,
-            'auth',
-            'auth-state',
-            `${authUserCount} local auth user(s) are already configured.`,
-          )
-        : buildNotNeededAcknowledgement(snapshot, 'auth', 'No local auth state needs confirmation.');
-
-  return {
-    providers,
-    subscriptions,
-    auth,
-  };
+export function deriveReopenEditAcknowledgementState(snapshot: OnboardingSnapshotState): OnboardingReopenEditAcknowledgementState {
+  return deriveAcknowledgements(snapshot, {
+    bootstrap: 'The local auth bootstrap credential file is still present.',
+    sessions: (count) => `${count} local auth session(s) are currently active.`,
+    users: (count) => `${count} local auth user(s) are already configured.`,
+    empty: 'No local auth state needs confirmation.',
+  });
 }
 
-export function deriveOnboardingStepState(
-  snapshot: OnboardingSnapshotState,
-): OnboardingStepDerivationState {
+export function deriveOnboardingStepState(snapshot: OnboardingSnapshotState): OnboardingStepDerivationState {
   return {
     step1Capabilities: deriveStep1Capabilities(snapshot),
     step1_5NetworkMode: deriveStep1_5NetworkMode(snapshot.bindSettings),

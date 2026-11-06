@@ -1,174 +1,49 @@
+import {
+  createOnboardingSnapshotReadHelpers,
+  captureOnboardingConfigSnapshot,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
 import { buildFallbackSecretReview } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
-import { sortUnique, buildProviderRoutingSnapshot, buildRuntimeDefaultsSnapshot, buildConfiguredSurfaceKinds, sortSurfaceRecords, buildFallbackAuthSnapshot, buildAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
-import type { SecretStorageReview } from '../../config/secrets.ts';
+import {
+  sortUnique,
+  buildProviderRoutingSnapshot,
+  buildRuntimeDefaultsSnapshot,
+  buildConfiguredSurfaceKinds,
+  sortSurfaceRecords,
+  buildFallbackAuthSnapshot,
+  buildAcknowledgementSnapshot,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
+
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { readOnboardingRuntimeState } from './state.ts';
-import type {
-  OnboardingConfigSnapshot,
-  OnboardingLegacyDaemonSnapshot,
-  OnboardingServiceState,
-  OnboardingSnapshotCollectionIssue,
-  OnboardingSnapshotCollectionIssueArea,
-  OnboardingSnapshotDependencies,
-  OnboardingSnapshotState,
-  OnboardingSurfaceRecord,
-} from './types.ts';
+import type { OnboardingConfigSnapshot, OnboardingLegacyDaemonSnapshot, OnboardingSnapshotCollectionIssue, OnboardingSnapshotCollectionIssueArea, OnboardingSnapshotDependencies, OnboardingSnapshotState, OnboardingSurfaceRecord } from './types.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 
-function buildConfigSnapshot(
-  config: OnboardingSnapshotDependencies['config'],
-): OnboardingConfigSnapshot {
-  return {
-    display: config.getCategory('display'),
-    provider: config.getCategory('provider'),
-    behavior: config.getCategory('behavior'),
-    storage: config.getCategory('storage'),
-    permissions: config.getCategory('permissions'),
-    helper: config.getCategory('helper'),
-    tools: {
-      llmEnabled: config.get('tools.llmEnabled'),
-      llmProvider: config.get('tools.llmProvider'),
-      llmModel: config.get('tools.llmModel'),
-    },
-    danger: config.getCategory('danger'),
-    controlPlane: config.getCategory('controlPlane'),
-    httpListener: config.getCategory('httpListener'),
-    web: config.getCategory('web'),
-    network: config.getCategory('network'),
-    surfaces: config.getCategory('surfaces'),
-    service: config.getCategory('service'),
-    batch: config.getCategory('batch'),
-    cloudflare: config.getCategory('cloudflare'),
-  };
+function buildConfigSnapshot(config: OnboardingSnapshotDependencies['config']): OnboardingConfigSnapshot {
+  return captureOnboardingConfigSnapshot(config, [
+    'display',
+    'provider',
+    'behavior',
+    'storage',
+    'permissions',
+    'helper',
+    'tools',
+    'danger',
+    'controlPlane',
+    'httpListener',
+    'web',
+    'network',
+    'surfaces',
+    'service',
+    'batch',
+    'cloudflare',
+  ]);
 }
-
-async function buildServicesSnapshot(
-  services: OnboardingSnapshotDependencies['services'],
-): Promise<{
-  snapshot: {
-    total: number;
-    oauthProviderIds: readonly string[];
-    services: readonly OnboardingServiceState[];
-  };
-  issues: readonly OnboardingSnapshotCollectionIssue[];
-}> {
-  let configs: ReturnType<OnboardingSnapshotDependencies['services']['getAll']>;
-  try {
-    configs = services.getAll();
-  } catch (error) {
-    return {
-      snapshot: {
-        total: 0,
-        oauthProviderIds: [],
-        services: [],
-      },
-      issues: [
-        {
-          area: 'services',
-          message: summarizeError(error),
-        },
-      ],
-    };
-  }
-
-  const names = Object.keys(configs).sort((left, right) => left.localeCompare(right));
-  const entryResults = await Promise.all(names.map(async (name) => {
-    const config = configs[name]!;
-    try {
-      const inspection = await services.inspect(name);
-
-      return {
-        entry: {
-          name,
-          providerId: config.providerId ?? config.name,
-          baseUrl: config.baseUrl ?? null,
-          authType: config.authType,
-          tokenKey: config.tokenKey,
-          oauthConfigured: Boolean(config.oauth),
-          hasPrimaryCredential: inspection?.hasPrimaryCredential ?? false,
-          hasPasswordCredential: inspection?.hasPasswordCredential ?? false,
-          hasWebhookUrl: inspection?.hasWebhookUrl ?? false,
-          hasSigningSecret: inspection?.hasSigningSecret ?? false,
-          hasPublicKey: inspection?.hasPublicKey ?? false,
-          hasAppToken: inspection?.hasAppToken ?? false,
-        } satisfies OnboardingServiceState,
-        issue: null,
-      };
-    } catch (error) {
-      return {
-        entry: {
-          name,
-          providerId: config.providerId ?? config.name,
-          baseUrl: config.baseUrl ?? null,
-          authType: config.authType,
-          tokenKey: config.tokenKey,
-          oauthConfigured: Boolean(config.oauth),
-          hasPrimaryCredential: false,
-          hasPasswordCredential: false,
-          hasWebhookUrl: false,
-          hasSigningSecret: false,
-          hasPublicKey: false,
-          hasAppToken: false,
-        } satisfies OnboardingServiceState,
-        issue: {
-          area: 'services',
-          message: `${name}: ${summarizeError(error)}`,
-        } satisfies OnboardingSnapshotCollectionIssue,
-      };
-    }
-  }));
-
-  const entries = entryResults.map((result) => result.entry);
-  const issues: OnboardingSnapshotCollectionIssue[] = [];
-  for (const result of entryResults) {
-    if (result.issue) issues.push(result.issue);
-  }
-
-  return {
-    snapshot: {
-      total: entries.length,
-      oauthProviderIds: sortUnique(entries.filter((entry) => entry.oauthConfigured).map((entry) => entry.providerId)),
-      services: entries,
-    },
-    issues,
-  };
-}
-
-
 
 function buildFallbackLegacyDaemonSnapshot(): OnboardingLegacyDaemonSnapshot {
   return { present: false, active: false, path: '' };
 }
 
-async function loadOptionalSnapshot<T>(
-  area: OnboardingSnapshotCollectionIssueArea,
-  loader: (() => Promise<T>) | undefined,
-  fallback: T,
-): Promise<{
-  value: T;
-  issue: OnboardingSnapshotCollectionIssue | null;
-}> {
-  if (!loader) return { value: fallback, issue: null };
-
-  try {
-    return {
-      value: await loader(),
-      issue: null,
-    };
-  } catch (error) {
-    return {
-      value: fallback,
-      issue: {
-        area,
-        message: summarizeError(error),
-      },
-    };
-  }
-}
-
-export async function collectOnboardingSnapshot(
-  deps: OnboardingSnapshotDependencies,
-): Promise<OnboardingSnapshotState> {
+export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependencies): Promise<OnboardingSnapshotState> {
   const capturedAt = deps.clock?.() ?? Date.now();
   const config = buildConfigSnapshot(deps.config);
   const providerRouting = buildProviderRoutingSnapshot(config, getProviderIdFromModel);
@@ -196,32 +71,16 @@ export async function collectOnboardingSnapshot(
       () => Promise.resolve(deps.subscriptions.listPending()),
       [] as ReturnType<OnboardingSnapshotDependencies['subscriptions']['listPending']>,
     ),
-    loadOptionalSnapshot(
-      'auth',
-      () => Promise.resolve(deps.auth.inspect()),
-      buildFallbackAuthSnapshot(),
-    ),
+    loadOptionalSnapshot('auth', () => Promise.resolve(deps.auth.inspect()), buildFallbackAuthSnapshot()),
     buildServicesSnapshot(deps.services),
-    loadOptionalSnapshot(
-      'secrets-review',
-      () => deps.secrets.inspect(),
-      buildFallbackSecretReview(config),
-    ),
-    loadOptionalSnapshot(
-      'secrets-records',
-      () => deps.secrets.listDetailed(),
-      [] as const,
-    ),
+    loadOptionalSnapshot('secrets-review', () => deps.secrets.inspect(), buildFallbackSecretReview(config)),
+    loadOptionalSnapshot('secrets-records', () => deps.secrets.listDetailed(), [] as const),
     loadOptionalSnapshot(
       'surfaces',
       deps.surfaces ? () => Promise.resolve(deps.surfaces!.list()) : undefined,
       [] as readonly OnboardingSurfaceRecord[],
     ),
-    loadOptionalSnapshot(
-      'provider-accounts',
-      deps.providerAccounts ? () => deps.providerAccounts!.loadSnapshot() : undefined,
-      null,
-    ),
+    loadOptionalSnapshot('provider-accounts', deps.providerAccounts ? () => deps.providerAccounts!.loadSnapshot() : undefined, null),
     loadOptionalSnapshot(
       'legacy-daemon',
       deps.legacyDaemon ? () => Promise.resolve(deps.legacyDaemon!.detect()) : undefined,
@@ -290,3 +149,9 @@ export async function collectOnboardingSnapshot(
     collectionIssues,
   };
 }
+
+const { buildServicesSnapshot, loadOptionalSnapshot } = createOnboardingSnapshotReadHelpers<OnboardingSnapshotCollectionIssueArea>({
+  serviceArea: 'services',
+  drainOnFailure: false,
+  error: summarizeError,
+});

@@ -1,6 +1,13 @@
+import { createVerificationPrimitives, renderVerificationTables, type LiveVerificationStatus, type LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
+  compact,
+  error: (error) => (error instanceof Error ? error.message : String(error)),
+  missingBearer: 'No connected-host bearer token was available.',
+  validateJsonOnNonZero: true,
+});
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
 import { findAgentKnowledgeScopeContamination } from '../cli/agent-knowledge-runtime.ts';
 import { normalizeAgentKnowledgeJsonText } from '../agent/knowledge-scope-alias.ts';
 
@@ -12,7 +19,8 @@ const AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_MARKERS = [
 const AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_PATTERNS = [
   {
     label: 'default knowledge scope id',
-    pattern: /["']?(?:knowledge[-_\s]*space[-_\s]*id|knowledgespaceid|space[-_\s]*id|spaceid|spaceId|knowledgeSpaceId|namespace)["']?\s*[:=]\s*["']?default["']?/i,
+    pattern:
+      /["']?(?:knowledge[-_\s]*space[-_\s]*id|knowledgespaceid|space[-_\s]*id|spaceid|spaceId|knowledgeSpaceId|namespace)["']?\s*[:=]\s*["']?default["']?/i,
   },
 ] as const;
 const AGENT_KNOWLEDGE_READ_ROUTE_CHECKS = [
@@ -67,8 +75,10 @@ export const LIVE_VERIFICATION_SCENARIO_IDS: readonly string[] = [
 ];
 
 const STATUS_RELEASE_DETAIL = 'Status JSON command completed; provider/model identifiers omitted from release artifact.';
-const PROVIDERS_RELEASE_DETAIL = 'Provider inventory command completed; provider names and credential posture omitted from release artifact.';
-const DOCTOR_RELEASE_DETAIL = 'Doctor command completed without findings; provider/model identifiers and credential posture omitted from release artifact.';
+const PROVIDERS_RELEASE_DETAIL =
+  'Provider inventory command completed; provider names and credential posture omitted from release artifact.';
+const DOCTOR_RELEASE_DETAIL =
+  'Doctor command completed without findings; provider/model identifiers and credential posture omitted from release artifact.';
 
 /**
  * The doctor exits non-zero for ANY finding, including `[risk:*]` advisories
@@ -89,16 +99,6 @@ export function doctorRiskAdvisoryOnlyCount(result: { exitCode: number | null; s
   return findings.every((kind) => kind === 'risk') ? findings.length : null;
 }
 
-export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
-
-export interface LiveVerificationCheck {
-  id: string;
-  title: string;
-  status: LiveVerificationStatus;
-  summary: string;
-  detail?: string;
-}
-
 export interface LiveVerificationOptions {
   homeDir: string;
   binaryPath: string;
@@ -117,13 +117,6 @@ export interface LiveVerificationReport {
   checks: LiveVerificationCheck[];
   counts: Record<LiveVerificationStatus, number>;
   ok: boolean;
-}
-
-interface CommandResult {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
 }
 
 export interface LiveVerificationRedactionContext {
@@ -238,154 +231,6 @@ function buildCommandEnv(homeDir: string, connectedHostBaseUrl: string, token: s
   };
 }
 
-function runCommand(
-  command: string,
-  args: string[],
-  cwd: string,
-  options: { readonly env?: NodeJS.ProcessEnv; readonly timeoutMs?: number } = {},
-): Promise<CommandResult> {
-  return new Promise((resolveCommand) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: options.env ?? { ...process.env, NO_COLOR: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 1000).unref();
-    }, options.timeoutMs ?? 15_000);
-    child.stdout?.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
-    child.stderr?.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      resolveCommand({
-        exitCode: -1,
-        stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
-        timedOut,
-      });
-    });
-    child.on('exit', (exitCode) => {
-      clearTimeout(timeout);
-      resolveCommand({
-        exitCode,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-        timedOut,
-      });
-    });
-  });
-}
-
-function commandCheck(
-  id: string,
-  title: string,
-  result: CommandResult,
-  passSummary: string,
-  options?: { warnOnNonZero?: boolean; parseJson?: boolean; passDetail?: string },
-): LiveVerificationCheck {
-  const parseJsonOutput = (): string | null => {
-    try {
-      JSON.parse(result.stdout);
-      return null;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  };
-  if (result.timedOut) {
-    return {
-      id,
-      title,
-      status: options?.warnOnNonZero ? 'warn' : 'fail',
-      summary: 'Command timed out.',
-      detail: compact(`${result.stdout}\n${result.stderr}`),
-    };
-  }
-  if (result.exitCode !== 0) {
-    if (options?.parseJson) {
-      const parseError = parseJsonOutput();
-      if (parseError !== null) {
-        return {
-          id,
-          title,
-          status: 'fail',
-          summary: `Command exited ${result.exitCode} and did not return valid JSON.`,
-          detail: compact(`${result.stdout}\n${result.stderr}\n${parseError}`),
-        };
-      }
-    }
-    return {
-      id,
-      title,
-      status: options?.warnOnNonZero ? 'warn' : 'fail',
-      summary: `Command exited ${result.exitCode}.`,
-      detail: compact(`${result.stdout}\n${result.stderr}`),
-    };
-  }
-  if (options?.parseJson) {
-    const parseError = parseJsonOutput();
-    if (parseError !== null) {
-      return {
-        id,
-        title,
-        status: 'fail',
-        summary: 'Command succeeded but did not return valid JSON.',
-        detail: parseError,
-      };
-    }
-  }
-  return {
-    id,
-    title,
-    status: 'pass',
-    summary: passSummary,
-    detail: options?.passDetail ?? compact(result.stdout || result.stderr),
-  };
-}
-
-async function fetchCheck(
-  id: string,
-  title: string,
-  url: string,
-  token: string | undefined,
-  validate: (status: number, body: string) => { status: LiveVerificationStatus; summary: string; detail?: string },
-): Promise<LiveVerificationCheck> {
-  if (!token) {
-    return {
-      id,
-      title,
-      status: 'skip',
-      summary: 'No connected-host bearer token was available.',
-    };
-  }
-  try {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    const body = await response.text();
-    const validated = validate(response.status, body);
-    return {
-      id,
-      title,
-      ...validated,
-      detail: validated.detail ?? compact(body),
-    };
-  } catch (error) {
-    return {
-      id,
-      title,
-      status: 'fail',
-      summary: 'Request failed.',
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 async function fetchJsonCheck(
   id: string,
   title: string,
@@ -432,16 +277,6 @@ async function fetchJsonCheck(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
-}
-
-function countStatuses(checks: readonly LiveVerificationCheck[]): Record<LiveVerificationStatus, number> {
-  return checks.reduce<Record<LiveVerificationStatus, number>>(
-    (counts, check) => {
-      counts[check.status] += 1;
-      return counts;
-    },
-    { pass: 0, warn: 0, fail: 0, skip: 0 },
-  );
 }
 
 export function findAgentKnowledgeResponseContamination(body: string): string | null {
@@ -508,195 +343,207 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   });
 
   if (existsSync(binaryPath)) {
-    checks.push(commandCheck(
-      'cli-version',
-      'Agent CLI version command',
-      await runCommand(binaryPath, ['--version'], projectRoot),
-      'Agent CLI version returned successfully.',
-    ));
-    checks.push(commandCheck(
-      'cli-status-json',
-      'Agent CLI status JSON command',
-      await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'status', '--json'], projectRoot, { env: commandEnv }),
-      'Agent CLI status returned parseable JSON.',
-      { parseJson: true, passDetail: STATUS_RELEASE_DETAIL },
-    ));
-    checks.push(commandCheck(
-      'cli-compat-json',
-      'Agent CLI compatibility JSON command',
-      await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'compat', '--json'], projectRoot, { env: commandEnv }),
-      'Agent CLI compatibility returned parseable JSON.',
-      { parseJson: true, warnOnNonZero: true },
-    ));
-    checks.push(commandCheck(
-      'cli-agent-knowledge-status',
-      'Agent Knowledge CLI status command',
-      await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'knowledge', 'status', '--json'], projectRoot, { env: commandEnv }),
-      'Agent Knowledge status returned parseable JSON.',
-      { parseJson: true, warnOnNonZero: true },
-    ));
-    checks.push(commandCheck(
-      'cli-providers',
-      'Agent CLI providers command',
-      await runCommand(binaryPath, ['providers'], projectRoot),
-      'Provider inventory rendered successfully.',
-      { passDetail: PROVIDERS_RELEASE_DETAIL },
-    ));
-    const doctorResult = await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'doctor', '--output', 'text'], projectRoot, { env: commandEnv });
+    checks.push(
+      commandCheck(
+        'cli-version',
+        'Agent CLI version command',
+        await runCommand(binaryPath, ['--version'], projectRoot),
+        'Agent CLI version returned successfully.',
+      ),
+    );
+    checks.push(
+      commandCheck(
+        'cli-status-json',
+        'Agent CLI status JSON command',
+        await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'status', '--json'], projectRoot, { env: commandEnv }),
+        'Agent CLI status returned parseable JSON.',
+        { parseJson: true, passDetail: STATUS_RELEASE_DETAIL },
+      ),
+    );
+    checks.push(
+      commandCheck(
+        'cli-compat-json',
+        'Agent CLI compatibility JSON command',
+        await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'compat', '--json'], projectRoot, { env: commandEnv }),
+        'Agent CLI compatibility returned parseable JSON.',
+        { parseJson: true, warnOnNonZero: true },
+      ),
+    );
+    checks.push(
+      commandCheck(
+        'cli-agent-knowledge-status',
+        'Agent Knowledge CLI status command',
+        await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'knowledge', 'status', '--json'], projectRoot, {
+          env: commandEnv,
+        }),
+        'Agent Knowledge status returned parseable JSON.',
+        { parseJson: true, warnOnNonZero: true },
+      ),
+    );
+    checks.push(
+      commandCheck(
+        'cli-providers',
+        'Agent CLI providers command',
+        await runCommand(binaryPath, ['providers'], projectRoot),
+        'Provider inventory rendered successfully.',
+        { passDetail: PROVIDERS_RELEASE_DETAIL },
+      ),
+    );
+    const doctorResult = await runCommand(binaryPath, ['--runtime-url', connectedHostBaseUrl, 'doctor', '--output', 'text'], projectRoot, {
+      env: commandEnv,
+    });
     const doctorAdvisories = doctorRiskAdvisoryOnlyCount(doctorResult);
-    checks.push(commandCheck(
-      'cli-doctor',
-      'CLI doctor command',
-      doctorAdvisories !== null ? { ...doctorResult, exitCode: 0 } : doctorResult,
-      doctorAdvisories !== null && doctorAdvisories > 0
-        ? `Doctor completed; ${doctorAdvisories} operator-configuration risk advisory(ies) noted (intentional trust posture, not a release defect).`
-        : 'Doctor completed without findings.',
-      { warnOnNonZero: true, passDetail: DOCTOR_RELEASE_DETAIL },
-    ));
+    checks.push(
+      commandCheck(
+        'cli-doctor',
+        'CLI doctor command',
+        doctorAdvisories !== null ? { ...doctorResult, exitCode: 0 } : doctorResult,
+        doctorAdvisories !== null && doctorAdvisories > 0
+          ? `Doctor completed; ${doctorAdvisories} operator-configuration risk advisory(ies) noted (intentional trust posture, not a release defect).`
+          : 'Doctor completed without findings.',
+        { warnOnNonZero: true, passDetail: DOCTOR_RELEASE_DETAIL },
+      ),
+    );
   }
 
-  checks.push(await fetchCheck(
-    'connected-host-status',
-    'Authenticated connected-host /status',
-    `${connectedHostBaseUrl}/status`,
-    token,
-    (status, body) => {
-      if (status !== 200) return { status: 'fail', summary: `/status returned ${status}.` };
-      try {
-        JSON.parse(body) as unknown;
-        return { status: 'pass', summary: '/status returned 200 with parseable JSON.' };
-      } catch {
-        return { status: 'warn', summary: '/status returned 200 but was not parseable JSON.' };
-      }
-    },
-  ));
-
-  checks.push(await fetchCheck(
-    'connected-host-health',
-    'Authenticated connected-host /api/health',
-    `${connectedHostBaseUrl}/api/health`,
-    token,
-    (status, body) => {
-      if (status !== 200) return { status: 'fail', summary: `/api/health returned ${status}.` };
-      try {
-        const parsed = JSON.parse(body) as { overall?: unknown };
-        return {
-          status: parsed.overall === 'healthy' ? 'pass' : 'warn',
-          summary: `Health overall=${String(parsed.overall ?? 'unknown')}.`,
-        };
-      } catch {
-        return { status: 'warn', summary: '/api/health returned 200 but was not parseable JSON.' };
-      }
-    },
-  ));
-
-  checks.push(await fetchCheck(
-    'openai-compatible-models',
-    'OpenAI-compatible /v1/models route',
-    `${connectedHostBaseUrl}/v1/models`,
-    token,
-    (status, body) => {
-      if (status !== 200) return { status: 'fail', summary: `/v1/models returned ${status}.` };
-      try {
-        const parsed = JSON.parse(body) as { data?: unknown };
-        const models = Array.isArray(parsed.data) ? parsed.data.length : 0;
-        return {
-          status: models > 0 ? 'pass' : 'warn',
-          summary: `/v1/models returned ${models} model(s).`,
-          detail: `/v1/models returned ${models} model(s); model identifiers omitted from release artifact.`,
-        };
-      } catch {
-        return { status: 'warn', summary: '/v1/models returned 200 but was not parseable JSON.' };
-      }
-    },
-  ));
-
-  checks.push(await fetchJsonCheck(
-    'agent-knowledge-status',
-    'Agent Knowledge isolated /status',
-    `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/status`,
-    token,
-    {
-      validate: (status, body) => {
-        if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/status returned ${status}.` };
-        return validateAgentKnowledgeJsonBody(
-          'Agent Knowledge status',
-          body,
-          'Agent Knowledge status route returned parseable isolated JSON.',
-        );
+  checks.push(
+    await fetchCheck(
+      'connected-host-status',
+      'Authenticated connected-host /status',
+      `${connectedHostBaseUrl}/status`,
+      token,
+      (status, body) => {
+        if (status !== 200) return { status: 'fail', summary: `/status returned ${status}.` };
+        try {
+          JSON.parse(body) as unknown;
+          return { status: 'pass', summary: '/status returned 200 with parseable JSON.' };
+        } catch {
+          return { status: 'warn', summary: '/status returned 200 but was not parseable JSON.' };
+        }
       },
-    },
-  ));
+    ),
+  );
 
-  checks.push(await fetchJsonCheck(
-    'agent-knowledge-ask-isolated',
-    'Agent Knowledge isolated ask',
-    `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/ask`,
-    token,
-    {
-      method: 'POST',
-      body: {
-        query: 'What is GoodVibes Agent?',
-        limit: 5,
-        mode: 'concise',
-        includeSources: true,
-        includeConfidence: true,
-        includeLinkedObjects: true,
-      },
-      validate: (status, body) => {
-        if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/ask returned ${status}.` };
-        return validateAgentKnowledgeJsonBody(
-          'Agent Knowledge ask',
-          body,
-          'Agent Knowledge ask stayed on the isolated Agent route.',
-        );
-      },
-    },
-  ));
+  checks.push(
+    await fetchCheck(
+      'connected-host-health',
+      'Authenticated connected-host /api/health',
+      `${connectedHostBaseUrl}/api/health`,
+      token,
+      validateDaemonHealth,
+    ),
+  );
 
-  checks.push(await fetchJsonCheck(
-    'agent-knowledge-search-isolated',
-    'Agent Knowledge isolated search',
-    `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/search`,
-    token,
-    {
-      method: 'POST',
-      body: { query: 'What is GoodVibes Agent?', limit: 5 },
-      validate: (status, body) => {
-        if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/search returned ${status}.` };
-        return validateAgentKnowledgeJsonBody(
-          'Agent Knowledge search',
-          body,
-          'Agent Knowledge search stayed on the isolated Agent route.',
-        );
+  checks.push(
+    await fetchCheck(
+      'openai-compatible-models',
+      'OpenAI-compatible /v1/models route',
+      `${connectedHostBaseUrl}/v1/models`,
+      token,
+      (status, body) => {
+        if (status !== 200) return { status: 'fail', summary: `/v1/models returned ${status}.` };
+        try {
+          const parsed = JSON.parse(body) as { data?: unknown };
+          const models = Array.isArray(parsed.data) ? parsed.data.length : 0;
+          return {
+            status: models > 0 ? 'pass' : 'warn',
+            summary: `/v1/models returned ${models} model(s).`,
+            detail: `/v1/models returned ${models} model(s); model identifiers omitted from release artifact.`,
+          };
+        } catch {
+          return { status: 'warn', summary: '/v1/models returned 200 but was not parseable JSON.' };
+        }
       },
-    },
-  ));
+    ),
+  );
 
-  for (const check of AGENT_KNOWLEDGE_READ_ROUTE_CHECKS) {
-    checks.push(await fetchJsonCheck(
-      check.id,
-      check.title,
-      `${connectedHostBaseUrl}${check.route}`,
+  checks.push(
+    await fetchJsonCheck(
+      'agent-knowledge-status',
+      'Agent Knowledge isolated /status',
+      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/status`,
       token,
       {
-        validate: validateAgentKnowledgeJsonRoute(check.route, check.title),
+        validate: (status, body) => {
+          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/status returned ${status}.` };
+          return validateAgentKnowledgeJsonBody(
+            'Agent Knowledge status',
+            body,
+            'Agent Knowledge status route returned parseable isolated JSON.',
+          );
+        },
       },
-    ));
+    ),
+  );
+
+  checks.push(
+    await fetchJsonCheck(
+      'agent-knowledge-ask-isolated',
+      'Agent Knowledge isolated ask',
+      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/ask`,
+      token,
+      {
+        method: 'POST',
+        body: {
+          query: 'What is GoodVibes Agent?',
+          limit: 5,
+          mode: 'concise',
+          includeSources: true,
+          includeConfidence: true,
+          includeLinkedObjects: true,
+        },
+        validate: (status, body) => {
+          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/ask returned ${status}.` };
+          return validateAgentKnowledgeJsonBody('Agent Knowledge ask', body, 'Agent Knowledge ask stayed on the isolated Agent route.');
+        },
+      },
+    ),
+  );
+
+  checks.push(
+    await fetchJsonCheck(
+      'agent-knowledge-search-isolated',
+      'Agent Knowledge isolated search',
+      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/search`,
+      token,
+      {
+        method: 'POST',
+        body: { query: 'What is GoodVibes Agent?', limit: 5 },
+        validate: (status, body) => {
+          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/search returned ${status}.` };
+          return validateAgentKnowledgeJsonBody(
+            'Agent Knowledge search',
+            body,
+            'Agent Knowledge search stayed on the isolated Agent route.',
+          );
+        },
+      },
+    ),
+  );
+
+  for (const check of AGENT_KNOWLEDGE_READ_ROUTE_CHECKS) {
+    checks.push(
+      await fetchJsonCheck(check.id, check.title, `${connectedHostBaseUrl}${check.route}`, token, {
+        validate: validateAgentKnowledgeJsonRoute(check.route, check.title),
+      }),
+    );
   }
 
   const counts = countStatuses(checks);
   const ok = counts.fail === 0 && (!options.strict || counts.warn === 0);
-  return sanitizeLiveVerificationReport({
-    generatedAt: new Date().toISOString(),
-    homeDir,
-    binaryPath,
-    connectedHostBaseUrl,
-    strict: options.strict ?? false,
-    checks,
-    counts,
-    ok,
-  }, { homeDir, userHomeDir: dirname(homeDir), projectRoot, binaryPath, tokens: token ? [token] : undefined });
+  return sanitizeLiveVerificationReport(
+    {
+      generatedAt: new Date().toISOString(),
+      homeDir,
+      binaryPath,
+      connectedHostBaseUrl,
+      strict: options.strict ?? false,
+      checks,
+      counts,
+      ok,
+    },
+    { homeDir, userHomeDir: dirname(homeDir), projectRoot, binaryPath, tokens: token ? [token] : undefined },
+  );
 }
 
 export function sanitizeLiveVerificationReport(
@@ -730,36 +577,18 @@ export function renderLiveVerificationReportMarkdown(report: LiveVerificationRep
   const homeDir = normalizeRenderedPath(report.homeDir, '[goodvibes-home]');
   const binaryPath = normalizeRenderedPath(report.binaryPath, '[agent-binary]');
   const connectedHostBaseUrl = redactPrivateNetworkAddresses(redact(report.connectedHostBaseUrl));
-  const lines: string[] = [
-    '# GoodVibes Agent Live Verification',
-    '',
-    `Generated: ${report.generatedAt}`,
-    `Home: \`${homeDir}\``,
-    `Binary: \`${binaryPath}\``,
-    `Connected host: \`${connectedHostBaseUrl}\``,
-    '',
-    '| Status | Count |',
-    '|---|---:|',
-    `| pass | ${report.counts.pass} |`,
-    `| warn | ${report.counts.warn} |`,
-    `| fail | ${report.counts.fail} |`,
-    `| skip | ${report.counts.skip} |`,
-    '',
-    '| Check | Status | Summary |',
-    '|---|---|---|',
-  ];
-  for (const check of report.checks) {
-    lines.push(`| ${check.title} | ${check.status} | ${check.summary.replace(/\|/g, '\\|')} |`);
-  }
-  const detailed = report.checks.filter((check) => check.detail?.trim());
-  if (detailed.length > 0) {
-    lines.push('', '## Details', '');
-    for (const check of detailed) {
-      lines.push(`### ${check.title}`, '', '```text', check.detail?.trim() ?? '', '```', '');
-    }
-  }
-  lines.push(report.ok ? 'Result: PASS' : 'Result: FAIL', '');
-  return lines.join('\n');
+  return renderVerificationTables(
+    [
+      '# GoodVibes Agent Live Verification',
+      '',
+      `Generated: ${report.generatedAt}`,
+      `Home: \`${homeDir}\``,
+      `Binary: \`${binaryPath}\``,
+      `Connected host: \`${connectedHostBaseUrl}\``,
+      '',
+    ],
+    report,
+  );
 }
 
 export function writeLiveVerificationReportFiles(report: LiveVerificationReport, outputDir: string): void {

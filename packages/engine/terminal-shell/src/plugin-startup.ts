@@ -24,3 +24,29 @@ export function createPluginStartupTask(
     },
   };
 }
+type PluginStartupContext = Omit<Parameters<PluginManager['init']>[0], 'getPluginConfig' | 'isEnabled'>;
+export function buildPluginStartupContext(
+  base: Pick<PluginStartupContext, 'runtimeBus' | 'commandRegistry' | 'providerRegistry' | 'toolRegistry'>,
+  services: {
+    readonly gatewayMethods: PluginStartupContext['gatewayMethods'];
+    readonly channelPlugins: PluginStartupContext['channelRegistry'];
+    readonly deliveryManager: {
+      getDeliveryRouter(): PluginStartupContext['channelDeliveryRouter'];
+    };
+    readonly memoryEmbeddingRegistry: PluginStartupContext['memoryEmbeddingRegistry'];
+    readonly voiceProviders: PluginStartupContext['voiceProviderRegistry'];
+    readonly mediaProviders: PluginStartupContext['mediaProviderRegistry'];
+    readonly webSearchProviders: PluginStartupContext['webSearchProviderRegistry'];
+  },
+): PluginStartupContext {
+  return {
+    ...base,
+    gatewayMethods: services.gatewayMethods,
+    channelRegistry: services.channelPlugins,
+    channelDeliveryRouter: services.deliveryManager.getDeliveryRouter(),
+    memoryEmbeddingRegistry: services.memoryEmbeddingRegistry,
+    voiceProviderRegistry: services.voiceProviders,
+    mediaProviderRegistry: services.mediaProviders,
+    webSearchProviderRegistry: services.webSearchProviders,
+  };
+}

@@ -2,7 +2,8 @@ import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { requireActingReading, JudgmentHeldError } from '../types/judgment-held.js';
+import { requireActingReading } from '../types/judgment-held.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 export const browserLaunchCause = defineBattery({
   name: 'engine.browser.launch-cause', version: 1, accuracyFloor: 0.95,
   description: 'Reads complete browser launch diagnostics before suggesting a cause-specific remedy.',
@@ -20,6 +21,11 @@ export const browserLaunchCause = defineBattery({
   ],
 });
 export async function readBrowserLaunchCause(message: string, options: JudgmentReadingOptions = {}) {
+  return decisionOrClassic(() => readDecisionBrowserLaunchCause(message, options), () => {
+    options.signal?.throwIfAborted(); options.assertCurrent?.(); return 'unknown' as const;
+  });
+}
+async function readDecisionBrowserLaunchCause(message: string, options: JudgmentReadingOptions) {
   assertJudgmentInput({ message });
   if (message.length > 160_000) throw new JudgmentInputError('unsupported-input');
   const owner = captureJudgmentPort(browserLaunchCause.name, { ...options, prepareResultCapture: prepareJudgmentResult });

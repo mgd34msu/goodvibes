@@ -1,6 +1,6 @@
 import { isProxy } from 'node:util/types';
 import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, type EntryType } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, decisionModelPolicyState, tryClassicDecisionFallback, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureJudgmentFailure } from '../../gate/failure-input.js';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
@@ -131,15 +131,15 @@ export function ownLocalEngineFailureLifetime(config: { readonly engine: string;
   try {
     captureJudgmentFailure(config);
     assertCurrent();
-    owner = captureJudgmentPort('voice.local-engine.failure', { signal, assertCurrent });
-  } catch { /* Healthy/structured engine operations need no semantic service. */ }
+    if (decisionModelPolicyState().operation !== 'classic') owner = captureJudgmentPort('voice.local-engine.failure', { signal, assertCurrent });
+  } catch (error) { tryClassicDecisionFallback(error); /* Healthy/structured engine operations need no semantic service. */ }
   return Object.freeze({ signal, assertCurrent, owner, containsRequestContent });
 }
 
 export function assertLocalEngineFailureCurrent(lifetime: LocalEngineFailureLifetime): void {
   assertPermissionActive(lifetime.signal);
   lifetime.assertCurrent();
-  lifetime.owner?.assertCurrent();
+  if (decisionModelPolicyState().operation !== 'classic') lifetime.owner?.assertCurrent();
 }
 
 /** Unavailable, refused, oversized, malformed and weak readings cannot disable
@@ -147,6 +147,7 @@ export function assertLocalEngineFailureCurrent(lifetime: LocalEngineFailureLife
 export async function readLocalEngineFailure(error: unknown, engine: string, operation: 'TTS' | 'STT',
   lifetime: LocalEngineFailureLifetime): Promise<LocalEngineFailureKind | undefined> {
   lifetime.assertCurrent();
+  if (decisionModelPolicyState().operation === 'classic') { assertPermissionActive(lifetime.signal); return undefined; }
   let readingStarted = false;
   try {
     // Admit the FULL immutable failure before projection, size caps or use of
@@ -173,7 +174,8 @@ export async function readLocalEngineFailure(error: unknown, engine: string, ope
     run.recordAction(`local ${operation} failure classified ${reading.choice}`);
     assertLocalEngineFailureCurrent(lifetime);
     return reading.choice;
-  } catch {
+  } catch (error) {
+    tryClassicDecisionFallback(error);
     lifetime.assertCurrent();
     if (readingStarted) assertLocalEngineFailureCurrent(lifetime);
     return undefined;

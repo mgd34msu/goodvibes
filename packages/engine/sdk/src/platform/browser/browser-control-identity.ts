@@ -5,6 +5,7 @@ import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 import { currentExecutionMode } from '../gate/execution-context.js';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 export const browserControlIdentity = defineBattery({
   name: 'browser.control.same-identity', version: 1, accuracyFloor: 0.95,
@@ -45,8 +46,8 @@ export class BrowserControlIdentityWork {
   constructor(options: JudgmentReadingOptions = {}) {
     this.signal = options.signal; this.callerCurrent = options.assertCurrent;
     this.assertCurrent();
-    try { this.owner = captureJudgmentPort('browser.control.identity', { signal: this.signal, assertCurrent: this.callerCurrent }); }
-    catch (error) { if (!(error instanceof JudgmentPortMissingError)) throw error; }
+    if (!isClassicOperation()) try { this.owner = captureJudgmentPort('browser.control.identity', { signal: this.signal, assertCurrent: this.callerCurrent }); }
+    catch (error) { if (!activateClassicFallback(error) && !(error instanceof JudgmentPortMissingError)) throw error; }
     this.assertCurrent();
   }
   readonly assertCurrent = (): void => {
@@ -54,7 +55,7 @@ export class BrowserControlIdentityWork {
     this.signal?.throwIfAborted();
     const result: unknown = this.callerCurrent?.();
     if (result !== undefined) { drainOwned(result); throw new Error('Browser action owner must be synchronous.'); }
-    this.owner?.assertCurrent();
+    if (!isClassicOperation()) this.owner?.assertCurrent();
   };
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
@@ -81,6 +82,12 @@ export class BrowserControlIdentityWork {
 
   /** Uses this action's original reader; a later installation cannot be adopted. */
   async credentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
+    return decisionOrClassic(() => this.readCredentialPage(state, currentPage), async () => {
+      this.assertCurrent(); await currentPage(); this.assertCurrent();
+      return 'unresolved';
+    });
+  }
+  private async readCredentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
     this.assertCurrent();
     const input = snapshotJudgmentInput(state);
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Browser page evidence is unavailable.');
@@ -117,6 +124,13 @@ export class BrowserControlIdentityWork {
   }
 
   async sameControl(state: { readonly recorded: object; readonly current: object }): Promise<boolean> {
+    return decisionOrClassic(() => this.readSameControl(state), () => {
+      // The caller has already checked exact structural/name identity. Classic
+      // cannot approve a changed label by interpreting a paraphrase.
+      this.assertCurrent(); return false;
+    });
+  }
+  private async readSameControl(state: { readonly recorded: object; readonly current: object }): Promise<boolean> {
     this.assertCurrent();
     // Only admitted identity descriptors enter the reading, never entered field
     // values. The caller refuses semantic reading while payment material is live.

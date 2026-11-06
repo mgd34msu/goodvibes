@@ -163,6 +163,16 @@ merge, decay or archive writes. Automatic semantic knowledge-consolidation
 features report their decision-model requirement before starting a Classic pass;
 existing memory retrieval and explicit owner review remain available.
 
+Classic browser actions retain the existing exact snapshot URL, structure,
+control-name, uniqueness and action-owner checks. A paraphrased control requires
+a fresh snapshot instead of semantic identity approval. Unassessed page purpose
+never grants credential entry. Browser launch/provisioning failures keep generic
+diagnostics and exact host errno facts; prose cannot authorize library installs
+or cause-specific repairs. Voice failures retain actual process signal facts
+without inferring a microphone/model cause or disabling an engine from prose.
+Calendar failures name a missing permission only from the supported exact
+authentication challenge; otherwise the original provider refusal remains.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

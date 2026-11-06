@@ -1,5 +1,6 @@
 import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, DecisionModelsDisabledError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { assertPermissionActive, awaitPermission } from '../permissions/cancellation.js';
 import { captureJudgmentFailure } from '../gate/failure-input.js';
 import type { CommandOutcome } from './browser-types.js';
@@ -22,7 +23,7 @@ export function ownProvisionLifetime<T extends BrowserProvisionLifetime>(options
   const check = (): void => {
     assertPermissionActive(original.signal);
     original.assertCurrent?.();
-    authority?.assertCurrent();
+    if (!isClassicOperation()) authority?.assertCurrent();
   };
   const scope: ProvisionScope = { reading() {
     check();
@@ -86,6 +87,11 @@ function evidence(command: string, phase: string, outcome: CommandOutcome) {
   } & CommandOutcome;
 }
 async function category(command: string, phase: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<Category> {
+  return decisionOrClassic(() => readDecisionCategory(command, phase, outcome, lifetime), () => {
+    assertProvisionCurrent(lifetime); return 'other';
+  });
+}
+async function readDecisionCategory(command: string, phase: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime): Promise<Category> {
   assertProvisionCurrent(lifetime);
   try {
     const state = evidence(command, phase, outcome);
@@ -101,8 +107,9 @@ async function category(command: string, phase: string, outcome: CommandOutcome,
       || !['missing-library', 'program-not-installed', 'network-blocked', 'other'].every(key => Object.hasOwn(reading.probabilities, key))) throw new BrowserProvisionReadingError();
     run.recordAction(`browser provisioning classified ${reading.choice}`);
     return reading.choice;
-  } catch {
+  } catch (error) {
     assertProvisionCurrent(lifetime);
+    if (activateClassicFallback(error)) throw new DecisionModelsDisabledError('interpret browser provisioning failure prose');
     throw new BrowserProvisionReadingError();
   }
 }

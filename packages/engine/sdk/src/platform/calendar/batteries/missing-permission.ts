@@ -8,6 +8,7 @@ import {
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import type { CalendarProviderId } from '../oauth-types.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 const SITE = 'calendar.api.missing-permission';
 const UNRESOLVED = 'unresolved';
@@ -239,6 +240,12 @@ function prepareEvidence(provider: CalendarProviderId, bodyText: string, authent
 export async function readMissingPermission(
   provider: CalendarProviderId, bodyText: string, authenticationChallenge: string, options: CallOptions = {},
 ): Promise<string | undefined> {
+  return decisionOrClassic(() => readDecisionMissingPermission(provider, bodyText, authenticationChallenge, options), () => {
+    options.signal?.throwIfAborted(); options.beforeAttempt?.();
+    return structuredPermission(authenticationChallenge);
+  });
+}
+async function readDecisionMissingPermission(provider: CalendarProviderId, bodyText: string, authenticationChallenge: string, options: CallOptions): Promise<string | undefined> {
   const evidence = prepareEvidence(provider, bodyText, authenticationChallenge);
   options.signal?.throwIfAborted();
   const structured = structuredPermission(authenticationChallenge);

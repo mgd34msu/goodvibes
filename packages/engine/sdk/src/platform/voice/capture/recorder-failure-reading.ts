@@ -1,5 +1,5 @@
 import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, type EntryType } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, decisionModelPolicyState, tryClassicDecisionFallback, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureJudgmentFailureInput } from '../../gate/failure-input-snapshot.js';
 
 export const recorderFailureReading = defineBattery({
@@ -29,12 +29,14 @@ export interface RecorderFailureOwner {
 /** Capture the original installation at stream creation, never at a delayed close.
  * Browser safe: this boundary must not import Node's failure-input adapter. */
 export function ownRecorderFailure(config: unknown, signal: AbortSignal): RecorderFailureOwner {
+  if (decisionModelPolicyState().operation === 'classic') return Object.freeze({});
   try {
     captureJudgmentFailureInput(config);
     return Object.freeze({ capture: captureJudgmentPort('voice.recorder-failure', { signal }) });
-  } catch { return Object.freeze({}); }
+  } catch (error) { tryClassicDecisionFallback(error); return Object.freeze({}); }
 }
 export async function readRecorderFailure(evidence: unknown, owner: RecorderFailureOwner): Promise<RecorderFailureCause | 'unavailable'> {
+  if (decisionModelPolicyState().operation === 'classic') return 'unavailable';
   try {
     // Complete immutable input is admitted before sizing or consulting the port.
     const state = captureJudgmentFailureInput(evidence) as Readonly<Record<string, unknown>>;
@@ -54,5 +56,5 @@ export async function readRecorderFailure(evidence: unknown, owner: RecorderFail
     run.recordAction(`recorder failure classified ${reading.choice}`);
     capture.assertCurrent();
     return reading.choice as RecorderFailureCause;
-  } catch { return 'unavailable'; }
+  } catch (error) { tryClassicDecisionFallback(error); return 'unavailable'; }
 }

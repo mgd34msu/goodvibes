@@ -1,3 +1,4 @@
+import { createPaymentCardCommands } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 import { createCardFieldPrompter, CARD_SECRET_FIELDS, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
  * /payments card, capture a payment card through the composer's concealed
@@ -58,16 +59,11 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS, type CardField } from '@go
  * and SDK-driven, not an implicit "this is the TUI so it's fine" assumption.
  */
 
-import type { CommandRegistry, CommandContext } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
-import { describeCardEntryRefusal, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/sdk/platform/payments';
-import {
-  PAYMENTS_CARD_NUMBER_CONFIG_KEY,
-  PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
-  PAYMENTS_CARD_CVV_CONFIG_KEY,
-  PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY,
-} from '../payments-config.ts';
+
+import '@goodvibes-jev/engine/sdk/platform/payments';
+import '../payments-config.ts';
 
 /**
  * This command is wired only into the TUI's own composer command registry,
@@ -78,10 +74,7 @@ import {
  */
 export const CARD_ENTRY_SURFACE = 'tui';
 
-
-
 /** Order matters only for the guided prompt sequence, not for storage. */
-
 
 function fieldConfigured(ctx: CommandContext, field: CardField): boolean {
   const raw: unknown = ctx.platform.configManager.get(field.key);
@@ -95,12 +88,13 @@ function renderCardStatus(ctx: CommandContext): string[] {
   }
   lines.push('');
   lines.push('Run /payments card to enter or replace the card (masked input, chained prompts).');
-  lines.push('Billing/shipping address, budgets, windows and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.');
+  lines.push(
+    'Billing/shipping address, budgets, windows and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.',
+  );
   return lines;
 }
 
 /** Chain a masked prompt for each card secret field, storing each through the daemon-scoped secret tier. */
-
 
 /**
  * Start the card-entry flow, gated on the SDK's own entry-surface allowlist
@@ -109,49 +103,28 @@ function renderCardStatus(ctx: CommandContext): string[] {
  * parameter only so tests can drive the refusal path without needing this
  * app to actually be reachable from a remote channel.
  */
-export function startCardEntryFlow(ctx: CommandContext, surface: string = CARD_ENTRY_SURFACE): void {
-  if (!mayOfferCardEntryFlow(surface)) {
-    ctx.print(describeCardEntryRefusal(surface));
-    return;
-  }
-  if (!ctx.beginConcealedInput) {
-    ctx.print('[payments] Concealed input is unavailable on this surface.');
-    return;
-  }
-  ctx.print(`Entering ${CARD_SECRET_FIELDS.length} card field(s): masked; Esc to stop at any point.`);
-  promptCardFields(ctx, CARD_SECRET_FIELDS, 0);
-}
 
 /** Entry point for `/payments [card|status]`, exported directly so tests can drive it without the registry. */
-export function runPaymentsCommand(args: readonly string[], ctx: CommandContext): void {
-  const sub = (args[0] ?? '').toLowerCase();
-  if (sub === '' || sub === 'status') {
-    ctx.print(renderCardStatus(ctx).join('\n'));
-    return;
-  }
-  if (sub === 'card') {
-    startCardEntryFlow(ctx);
-    return;
-  }
-  ctx.print('Usage: /payments [card|status]');
-}
 
 /** Card secret fields in prompt order, exported for tests that need to drive the chain field-by-field. */
 export { CARD_SECRET_FIELDS };
 
-export function registerPaymentCardCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'payments',
-    description: 'Payment card on file for daemon-initiated purchases (card entry is masked input)',
-    usage: '/payments [card]',
-    argsHint: '[card]',
-    handler(args, ctx) {
-      runPaymentsCommand(args, ctx);
-    },
-  });
-}
+const promptCardFields = createCardFieldPrompter<CommandContext>(
+  (ctx, field, value) =>
+    persistSecretBackedConfigValue(ctx.platform.configManager, ctx.platform.secretsManager, field.key, value, { scope: 'daemon' }),
+  {
+    completed:
+      '\nCard stored. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.',
+    prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to store, Esc to stop.`,
+  },
+);
 
-const promptCardFields = createCardFieldPrompter<CommandContext>((ctx, field, value) => persistSecretBackedConfigValue(ctx.platform.configManager, ctx.platform.secretsManager, field.key, value, { scope: 'daemon' }), {
- completed: "\nCard stored. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.",
- prompt: field => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to store, Esc to stop.`,
+export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands } = createPaymentCardCommands<CommandContext>({
+  surface: CARD_ENTRY_SURFACE,
+  announcement: `Entering ${CARD_SECRET_FIELDS.length} card field(s): masked; Esc to stop at any point.`,
+  promptFields: promptCardFields,
+  status: renderCardStatus,
+  description: 'Payment card on file for daemon-initiated purchases (card entry is masked input)',
+  usage: '/payments [card]',
+  argsHint: '[card]',
 });

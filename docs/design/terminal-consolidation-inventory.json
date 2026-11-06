@@ -563,12 +563,13 @@
       "path": "input/commands/payment-card-intake.ts",
       "baselineTuiLines": 213,
       "baselineSimilarity": 0.4682,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "CardField",
         "CARD_SECRET_FIELDS",
         "createCardFieldPrompter"
-      ]
+      ],
+      "notes": "Platform owns payment command dispatch, deterministic entry-surface gate before prompting, concealed field sequence and re-entrancy/cancellation-safe secret capture. Product adapters bind fixed entry identities and daemon-scoped writers, status copy and Agent-only guided ordinary address intake."
     },
     {
       "path": "input/commands/platform-access-runtime.ts",

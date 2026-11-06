@@ -1,3 +1,4 @@
+import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/sdk/platform/payments';
 import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
 import {
   PAYMENTS_CARD_NUMBER_CONFIG_KEY,
@@ -79,4 +80,60 @@ export function createCardFieldPrompter<Context extends CardPromptContext>(
     });
   }
   return promptCardFields;
+}
+
+/** Never ask for card material until the deterministic entry-surface check passes. */
+export function createPaymentCardCommands<Context extends CardPromptContext>(policy: {
+  readonly surface: string;
+  readonly announcement: string;
+  readonly promptFields: (context: Context, fields: readonly CardField[], index: number) => void;
+  readonly status: (context: Context) => string[];
+  readonly address?: ((context: Context, kind: 'billing' | 'shipping') => void) | undefined;
+  readonly description: string;
+  readonly usage: string;
+  readonly argsHint: string;
+}) {
+  function startCardEntryFlow(context: Context, surface: string = policy.surface): void {
+    if (!mayOfferCardEntryFlow(surface)) {
+      context.print(describeCardEntryRefusal(surface));
+      return;
+    }
+    if (!context.beginConcealedInput) {
+      context.print('[payments] Concealed input is unavailable on this surface.');
+      return;
+    }
+    context.print(policy.announcement);
+    policy.promptFields(context, CARD_SECRET_FIELDS, 0);
+  }
+  function runPaymentsCommand(args: readonly string[], context: Context): void {
+    const sub = (args[0] ?? '').toLowerCase();
+    if (!sub || sub === 'status') {
+      context.print(policy.status(context).join('\n'));
+      return;
+    }
+    if (sub === 'card') {
+      startCardEntryFlow(context);
+      return;
+    }
+    if (sub === 'address' && policy.address) {
+      const kind = (args[1] ?? '').toLowerCase();
+      if (kind !== 'billing' && kind !== 'shipping') {
+        context.print('Usage: /payments address <billing|shipping>');
+        return;
+      }
+      policy.address(context, kind);
+      return;
+    }
+    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + ']');
+  }
+  function registerPaymentCardCommands(registry: Pick<import('./command-registry.js').TerminalCommandRegistry<Context>, 'register'>): void {
+    registry.register({
+      name: 'payments',
+      description: policy.description,
+      usage: policy.usage,
+      argsHint: policy.argsHint,
+      handler: (args, context) => runPaymentsCommand(args, context),
+    });
+  }
+  return { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands };
 }

@@ -1,5 +1,5 @@
 {
-  "status": "implementation-complete-awaiting-integration",
+  "status": "implementation-complete",
   "baseline": "review census at 415ceea; thin platform forwarders are shared ownership, not duplicate implementations",
   "files": [
     {
@@ -2255,5 +2255,6 @@
     },
     "limits": "Static clone inspection is not a behavioral certificate and thresholds do not prove absence of every repeated expression. Public re-exports, type aliases, product configuration and repeated calls to the same platform implementation intentionally remain.",
     "qualification": "Types, builds, generated artifacts, behavior checks, packaging, installed products, CI and release remain pending for the final consolidated revision."
-  }
+  },
+  "releaseQualification": "Publication requires exact-source green CI and native cohort admission; this source inventory alone is not behavioral proof."
 }

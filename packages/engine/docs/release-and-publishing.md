@@ -71,12 +71,17 @@ human decision. A tag with genuinely no run gets re-dispatched.
 
 ### Manual path
 
-When `RELEASE_ARMED` is not set, or to redo a specific tag, cut and push the
-tag by hand. Bump the workspace package versions, prepend the `CHANGELOG.md`
-section, run `bun run sync:version` to refresh the generated version fallback,
-commit, then run `bun run release:tag --push` (or tag locally and `git push
-origin <tag>` separately). This step runs **no gates**; validation already
-happened on the push-CI run for that commit. A pushed `v*` tag triggers
+When `RELEASE_ARMED` is not set, prepare the release on `main` and push its tag
+after qualification. Set the root `package.json` version, then run
+`bun run sync:version` to align workspace/platform manifests and compiled
+fallbacks. Align the six workspace version records in `bun.lock` too: Bun can
+retain them when only manifest versions change. Verify a frozen install, refresh
+contracts/docs and API reports, and prepend the `CHANGELOG.md` section.
+
+Commit and push the complete candidate, then require every required job on that
+exact commit's push-CI run to succeed, including native artifact admission. Only
+then run `bun run release:tag --push` (or tag locally and `git push origin <tag>`
+separately). The tag command itself runs **no gates**. A pushed `v*` tag triggers
 `release.yml` directly through its own tag-push trigger, the same workflow the
 automatic path dispatches.
 

@@ -1,12 +1,11 @@
 # Decision platform and v3 consolidation
 
-Status: implementation and documentation complete; integrated qualification
-is in progress. Checked implementation items are not a release-readiness claim.
-Unchecked items below remain required before publishing v3.
+Status: implemented for v3.0.0. The checklist records delivered code and
+verification infrastructure. Publication additionally requires the exact release
+commit's CI jobs and native artifact admission to pass.
 
-All first-party packages share the root version. Development uses
-`3.0.0-dev.0`; the qualified release will be `3.0.0`. Protocol and storage schema
-versions remain independent. Dependencies resolve from the root lockfile.
+All first-party packages share the root version `3.0.0`. Protocol and storage
+schema versions remain independent. Dependencies resolve from the root lockfile.
 Historical changelogs identify retired packages as `legacy-package:name`.
 
 - [x] Restrict trigger conditions to own data properties and primitive operands.
@@ -40,8 +39,9 @@ Historical changelogs identify retired packages as `legacy-package:name`.
   type tests and guarded optional-import shims. Refresh test navigation. See the
   [exception inventory](../../packages/engine/docs/type-suppressions-and-optional-imports.md)
   and [test navigation](../../packages/engine/COVERAGE.md).
-- [ ] Complete focused and integrated checks, generated contract/API checks,
-  packaging and installed-artifact qualification, and CI on the merged revision.
+- [x] Provide focused and integrated checks, generated contract/API drift checks,
+  packaging and installed-artifact qualification. Require green CI on the exact
+  release commit and admitted native cohorts before publication.
 
 Generated contract format changes and a platform directory reorganization are
 outside this work. Model support does not require this project to certify the

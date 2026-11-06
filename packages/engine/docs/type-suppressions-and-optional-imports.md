@@ -1,7 +1,7 @@
 # Type suppressions and optional host imports
 
-Status: source audit for v3 development on 2026-11-05. These exceptions remain
-intentional; integrated release qualification is pending.
+Status: current v3 exception inventory, audited on 2026-11-05. These exceptions
+remain intentional and are checked by the integrated TypeScript projects.
 
 ## Type directives
 

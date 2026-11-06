@@ -6,7 +6,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
   "product": {
     "id": "goodvibes",
     "surface": "operator",
-    "version": "3.0.0-dev.0"
+    "version": "3.0.0"
   },
   "auth": {
     "modes": [

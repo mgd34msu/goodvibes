@@ -907,7 +907,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.0.0-dev.0\"; readonly operatorMethodCount: 542; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.0.0\"; readonly operatorMethodCount: 542; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "FailureCategory",
@@ -4225,7 +4225,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.0.0-dev.0\"; readonly operatorMethodCount: 542; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.0.0\"; readonly operatorMethodCount: 542; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "GatewayEventTransport",

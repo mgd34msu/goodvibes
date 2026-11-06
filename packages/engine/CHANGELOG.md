@@ -1,14 +1,48 @@
 # Changelog
 
-## 3.0.0 (unreleased)
+## [3.0.0] - 2026-11-06
 
-Development version: `3.0.0-dev.0`, shared by every monorepo workspace.
-Six decision-backend profiles, finite hosted/local failover, the opt-in Decision
-Router, bounded routing previews, dispatch-aware call budgets and platform-owned
-terminal consolidation are implemented; integrated qualification is in progress. See the [draft release notes](../../docs/releases/3.0.0.md)
-and [work scope](../../docs/design/decision-platform-v3.md) for implementation and
-qualification status. No release readiness is asserted by this entry.
+### Changed
 
+- Unify Judgment, Engine, Daemon, TUI, Agent and WebUI at version 3.0.0 under
+  the `@goodvibes-jev` namespace and one root lockfile. Protocol and persisted
+  schema versions remain independent.
+- Support Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B and Laya through
+  model-neutral protocol adapters with explicit endpoint, authentication,
+  complete-input and capability contracts.
+- Try configured hosted/local decision targets with finite deadlines and
+  dispatch-aware lineage. A valid refusal is final. Exhaustion halts the
+  operation and explains how to check keys, endpoints and local model services.
+- Add the opt-in Decision Router provider with ten built-in categories, custom
+  categories, per-category provider/model/effort and General fallback. Bound the
+  routing preview separately from answering context and the saved transcript;
+  pin each answer route through streaming and tool execution.
+- Consolidate terminal input, rendering, commands, onboarding, notifications,
+  native ledgers and lifecycle behavior into the engine platform and existing
+  terminal-shell. Keep product authority, isolated data roots and presentation
+  in explicit adapters.
+- Add deterministic operation budgets for logical judgments, target attempts
+  and actual wire dispatches. Live calibration remains optional.
+
+### Fixed
+
+- Reject prototype traversal, accessor reads and object coercion in trigger
+  conditions. Share owned late-rejection draining while preserving cancellation,
+  meaningful failures and cleanup.
+- Preserve append-only decision audit notes, migrate retained schema 2/3 notes
+  to schema 4, and require a cancellation owner for real decision calls.
+- Raise new password hashes to scrypt N=131072 with an explicit memory budget;
+  verify legacy hashes and upgrade weaker hashes after successful login.
+- Preserve hosted intake journal policy, exact source/continuation identities,
+  unknown-outcome recovery and one-shot dispatch through compiled products.
+- Resolve published terminal declarations and runtime imports through shipped
+  platform exports. Withhold service-log text when redaction is unavailable and
+  honor declared workspace package managers without product-local lockfiles.
+
+See the [release guide](https://github.com/mgd34msu/goodvibes-jev/blob/v3.0.0/docs/releases/3.0.0.md)
+for configuration and qualification boundaries. Native release assets are admitted
+from the exact green CI build and published with checksums. npm publication is a
+separate repository opt-in.
 
 ## [Unreleased]
 

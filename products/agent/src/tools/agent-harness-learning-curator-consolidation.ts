@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
 import { localRegistryRoute, routeList, routeValue } from './agent-harness-learning-curator-common.ts';
@@ -208,6 +209,7 @@ export async function consolidationCandidatesForDomain(
   options: CatalogRankingOptions,
   context?: unknown,
 ): Promise<readonly LearningCandidateDraft[]> {
+  requireDecisionFeature('automatic duplicate consolidation; inspect the records and use explicit owner edits instead');
   if (!CONSOLIDATION_DOMAINS.includes(domain) || records.length < 2) return [];
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const edges = records.map(() => new Set<number>());

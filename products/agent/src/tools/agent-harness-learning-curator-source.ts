@@ -290,7 +290,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
 export type LearningCuratorSource = ReturnType<typeof acquireLearningCuratorSource>;
 export interface LearningCandidateCollection {
   readonly candidates: readonly LearningCandidate[];
-  readonly promptRecords: readonly { readonly domain: LocalLearningCandidateDomain; readonly item: AgentWorkspaceLocalLibraryItem; readonly priority: number; readonly scores: LearningCandidate['scores'] }[];
+  readonly promptRecords: readonly { readonly domain: LocalLearningCandidateDomain; readonly item: AgentWorkspaceLocalLibraryItem; readonly priority: LearningCandidate['priority']; readonly scores: LearningCandidate['scores'] }[];
   readonly assertCurrent: () => void;
   readonly options: CatalogRankingOptions;
   readonly assertCandidateCurrent: (candidate: LearningCandidate) => void;

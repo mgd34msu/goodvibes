@@ -1,3 +1,8 @@
+import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import type { CommandContext } from '../../input/command-registry.js';
+import { describeLearningCandidate, learningCuratorSummary, resolveLearningConsolidationCandidate } from '../../tools/agent-harness-learning-curator.js';
 import { learningProposalQuality } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
@@ -590,4 +595,80 @@ describe('native learning capture clock representation', () => {
     original.detail = 'Unrelated replacement of the original durable evidence.';
     expect(source.assertCurrent).toThrow(ToolInputProjectionError);
   });
+});
+
+test('Classic curator preserves stored review facts and prompt eligibility with null grades and zero decision traffic', async () => {
+  const records = [nativeMemory('one', 'Same stored statement'), nativeMemory('two', 'Same stored statement')];
+  const native = { clients: { agentKnowledgeApi: { memory: { getAll: () => records } } } };
+  const context = native as unknown as CommandContext;
+  const privacy = researchScreeningFixture(); const reading = { sourceOwner: privacy.owner }; let asks = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('must not ask'); } });
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const collection = await buildLearningCandidates(native, reading);
+    assertLearningCandidateCollection(collection, native, reading);
+    expect(collection.candidates.length).toBeGreaterThan(0);
+    for (const candidate of collection.candidates) {
+      expect(candidate).toMatchObject({ scores: null, priority: null, operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+      expect(candidate.consolidation).toBeUndefined(); expect(candidate.proposalTarget).toBeUndefined();
+      expect(candidate.judgmentDecisionIds).toBeUndefined();
+    }
+    expect(collection.promptRecords).toHaveLength(2);
+    expect(collection.promptRecords.every(record => record.priority === null && record.scores === null)).toBe(true);
+    const report = await learningCuratorSummary(context, { includeParameters: true }, reading);
+    expect(report).toMatchObject({ operationProvenance: 'classic', summary: { needsConsolidation: null, proposedBehavior: null },
+      promptPlan: { proposalCount: null, consolidationCount: null } });
+    const id = collection.candidates[0]?.id;
+    if (!id) throw new Error('Missing native inspection card');
+    expect(await describeLearningCandidate(context, { candidateId: id }, reading)).toMatchObject({ status: 'found', candidate: { scores: null, priority: null } });
+    await expect(resolveLearningConsolidationCandidate(context, id, reading)).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(asks).toBe(0); expect(privacy.calls).toEqual([]);
+    expect(records.map(record => record.reviewState)).toEqual(['fresh', 'fresh']);
+    Object.assign(records[0]!, { summary: 'Changed after inspection' });
+    expect(collection.assertCurrent).toThrow();
+  });
+});
+
+test('Classic direct automatic scoring, proposal, class and duplicate operations report their limitation before asking', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(readLearningGrade({}, options())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(readLearningProposalTarget({}, options())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(readLearningMemoryClass({}, options())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(readLearningDuplicatePair({ left: {}, right: {} }, options())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(readLearningSurvivor({ domain: 'memory', records: [] }, options())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+  });
+});
+
+test('Preferred curator exhaustion produces native inspection without replaying writes or fabricating grades', async () => {
+  const records = [nativeMemory('one', 'Original stored memory')]; let asks = 0;
+  const context = { clients: { agentKnowledgeApi: { memory: { getAll: () => records } } } };
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const collection = await buildLearningCandidates(context, options());
+    expect(collection.candidates.every(candidate => candidate.scores === null && candidate.priority === null)).toBe(true);
+    expect(records[0]?.summary).toBe('Original stored memory'); expect(records[0]?.reviewState).toBe('fresh');
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' }); expect(asks).toBe(1);
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`curator ${kind} is not Preferred exhaustion`, async () => {
+  const context = { clients: { agentKnowledgeApi: { memory: { getAll: () => [nativeMemory('one', 'Stored record')] } } } };
+  installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await expect(buildLearningCandidates(context, options())).rejects.toThrow();
+    expect(decisionModelPolicyState().operation).toBe('decision');
+  });
+});
+
+test('Classic candidate generation still enforces native cancellation before source reads', async () => {
+  const abort = new AbortController(); abort.abort(); let reads = 0;
+  const context = { clients: { agentKnowledgeApi: { memory: { getAll() { reads++; return []; } } } } };
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(buildLearningCandidates(context, { ...options(), signal: abort.signal })).rejects.toThrow();
+    expect(reads).toBe(0);
+  });
+});
+
+test('an unassessed Classic collection cannot acquire semantic transition authority after its request scope ends', async () => {
+  const collection = await withDecisionModelPolicy(() => 'Classic - Off', () => buildLearningCandidates({}, options()));
+  expect(() => collection.prepareTransition({ kind: 'stale', domain: 'persona', id: 'fixture', reason: 'fixture' })).toThrow(DecisionModelsDisabledError);
 });

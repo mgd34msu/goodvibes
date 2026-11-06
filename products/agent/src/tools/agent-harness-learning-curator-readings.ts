@@ -1,7 +1,8 @@
+import { isClassicOperation, requireDecisionFeature } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { learningProposalQuality } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
-import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { STAKES_BANDS, type NamedDecision } from '@goodvibes-jev/judgment';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -47,6 +48,8 @@ export interface LearningGrade { readonly scores: LearningScores; readonly prior
 
 async function reading<T>(source: unknown, options: CatalogRankingOptions, decision: NamedDecision, method: 'run' | 'align' | 'select' | 'count' | 'score',
   consume: (authority: ReturnType<typeof captureJudgmentPort>, captured: unknown) => Promise<T>): Promise<T> {
+  options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
+  requireDecisionFeature('automatic learning scoring, proposal inference or consolidation; inspect and edit the native records explicitly');
   return withModelReadingSource(source, options, async (captured, current) => {
     const assertCanonical = definitionGuards.get(decision);
     if (!assertCanonical) throw new ToolInputProjectionError('held');
@@ -58,7 +61,10 @@ async function reading<T>(source: unknown, options: CatalogRankingOptions, decis
     try {
       const result = await consume(authority, captured); authority.assertCurrent(); return result;
     } finally {
-      const restriction = authority.consumeObservation(); current.retainCurrent?.(restriction.assertCurrent, site); restriction.assertCurrent();
+      const restriction = authority.consumeObservation();
+      const retained = () => { assertCanonical(); current.signal?.throwIfAborted(); authority.signal.throwIfAborted();
+        if (!isClassicOperation()) restriction.assertCurrent(); };
+      current.retainCurrent?.(retained, site); retained();
     }
   });
 }

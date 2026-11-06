@@ -1,3 +1,4 @@
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -19,6 +20,7 @@ function readLimit(value: unknown, fallback: number): number {
 
 function describeCandidate(candidate: LearningCandidate, includeParameters: boolean, lookup?: Record<string, unknown>): Record<string, unknown> {
   return {
+    ...(candidate.operationProvenance ? { operationProvenance: candidate.operationProvenance, semanticAssessment: candidate.semanticAssessment } : {}),
     candidateId: candidate.id,
     label: candidate.label,
     domain: candidate.domain,
@@ -163,6 +165,7 @@ function nextActions(candidates: readonly LearningCandidate[]): readonly string[
 
 function promptPlanCandidate(candidate: LearningCandidate, includeParameters: boolean): Record<string, unknown> {
   return {
+    ...(candidate.operationProvenance ? { operationProvenance: candidate.operationProvenance, semanticAssessment: candidate.semanticAssessment } : {}),
     candidateId: candidate.id,
     label: candidate.label,
     domain: candidate.domain,
@@ -181,13 +184,16 @@ function promptPlanCandidate(candidate: LearningCandidate, includeParameters: bo
 function promptRecordEntry(record: LearningCandidateCollection['promptRecords'][number], includeParameters: boolean): Record<string, unknown> {
   const { domain, item, priority, scores } = record;
   return {
+    ...(priority === null ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
     id: `${domain}:${item.id}`,
     label: item.name,
     domain,
     recordId: item.id,
     priority,
     scores,
-    reason: domain === 'memory'
+    reason: priority === null
+      ? 'Native stored review, confidence and enabled/active fields determine existing prompt eligibility; no new semantic grade was produced.'
+      : domain === 'memory'
       ? 'High-confidence memory (confidence ≥ 70) is eligible for prompt recall.'
       : domain === 'persona'
         ? 'Active persona is eligible for prompt personality context.'
@@ -236,8 +242,8 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     status,
     promptActiveCount: promptActiveRecords.length,
     suppressedCount,
-    proposalCount: proposalCandidates.length,
-    consolidationCount: consolidationCandidates.length,
+    proposalCount: isClassicOperation() ? null : proposalCandidates.length,
+    consolidationCount: isClassicOperation() ? null : consolidationCandidates.length,
     promptActiveRecords: promptActiveRecords.slice(0, includeParameters ? 12 : 5),
     reviewFirst: reviewFirstCandidates.slice(0, includeParameters ? 10 : 5).map((candidate) => promptPlanCandidate(candidate, includeParameters)),
     proposalQueue: proposalCandidates.slice(0, includeParameters ? 10 : 5).map((candidate) => promptPlanCandidate(candidate, includeParameters)),
@@ -245,7 +251,8 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     suppressed,
     orderingRules: [
       'Prompt context is limited to high-confidence memory (confidence ≥ 70), active personas, and enabled setup-ready behavior.',
-      'Current admitted curator readings grade usefulness, freshness, source quality, risk, confidence and priority. Sorting uses the settled priority grade.',
+      isClassicOperation() ? 'Classic lists native eligibility and review facts with unassessed scores/priority; stable label ordering is not a quality ranking.'
+        : 'Current admitted curator readings grade usefulness, freshness, source quality, risk, confidence and priority. Sorting uses the settled priority grade.',
       'Low-confidence, stale, setup-blocked, blocked VIBE.md, and duplicate records stay suppressed until their confidence or enabled/active state is repaired.',
       'Proposals from notes, completed work, completed research, and saved sessions require explicit create or promotion routes before they can guide the assistant.',
     ],
@@ -260,16 +267,22 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
 }
 
 export async function learningCuratorCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+  return withConfiguredDecisionModelPolicy(() => ownedLearningCuratorCatalogStatus(context, options));
+}
+
+async function ownedLearningCuratorCatalogStatus(context: CommandContext, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const collection = await buildLearningCandidates(context, options); collection.assertCurrent();
   const { candidates } = collection;
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+      interpretationNotice: 'Classic shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
     modes: ['learning_curator', 'learning_candidate'],
     candidates: candidates.length,
     needsReview: candidates.filter((candidate) => candidate.status === 'needs-review').length,
     needsSetup: candidates.filter((candidate) => candidate.status === 'needs-setup').length,
-    needsConsolidation: candidates.filter((candidate) => candidate.status === 'needs-consolidation').length,
+    needsConsolidation: isClassicOperation() ? null : candidates.filter((candidate) => candidate.status === 'needs-consolidation').length,
     lowConfidence: candidates.filter((candidate) => candidate.status === 'low-confidence').length,
-    proposedBehavior: candidates.filter((candidate) => candidate.status === 'proposal-ready').length,
+    proposedBehavior: isClassicOperation() ? null : candidates.filter((candidate) => candidate.status === 'proposal-ready').length,
     personalityIssues: candidates.filter((candidate) => candidate.domain === 'vibe').length,
     readyToPromote: candidates.filter((candidate) => candidate.status === 'ready-to-promote').length,
     readOnly: true,
@@ -285,6 +298,10 @@ async function matchingLearningCandidates(collection: LearningCandidateCollectio
 }
 
 export async function learningCuratorSummary(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+  return withConfiguredDecisionModelPolicy(() => ownedLearningCuratorSummary(context, args, options));
+}
+
+async function ownedLearningCuratorSummary(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
   const query = readString(args.query);
   const limit = readLimit(args.limit, 100);
@@ -296,13 +313,15 @@ export async function learningCuratorSummary(context: CommandContext, args: Agen
   options.signal?.throwIfAborted();
   const consolidationBatch = learningConsolidationBatchPlan(all, includeParameters);
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+      interpretationNotice: 'Classic shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
     summary: {
       candidates: all.length,
       needsReview: all.filter((candidate) => candidate.status === 'needs-review').length,
       needsSetup: all.filter((candidate) => candidate.status === 'needs-setup').length,
-      needsConsolidation: all.filter((candidate) => candidate.status === 'needs-consolidation').length,
+      needsConsolidation: isClassicOperation() ? null : all.filter((candidate) => candidate.status === 'needs-consolidation').length,
       lowConfidence: all.filter((candidate) => candidate.status === 'low-confidence').length,
-      proposedBehavior: all.filter((candidate) => candidate.status === 'proposal-ready').length,
+      proposedBehavior: isClassicOperation() ? null : all.filter((candidate) => candidate.status === 'proposal-ready').length,
       personalityIssues: all.filter((candidate) => candidate.domain === 'vibe').length,
       readyToPromote: all.filter((candidate) => candidate.status === 'ready-to-promote').length,
       ready: all.filter((candidate) => candidate.status === 'ready').length,
@@ -324,6 +343,10 @@ export type LearningConsolidationCandidateResolution =
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
 export async function resolveLearningConsolidationCandidate(context: CommandContext, input: string, options: CatalogRankingOptions = {}): Promise<LearningConsolidationCandidateResolution> {
+  return withConfiguredDecisionModelPolicy(() => ownedResolveLearningConsolidationCandidate(context, input, options));
+}
+
+async function ownedResolveLearningConsolidationCandidate(context: CommandContext, input: string, options: CatalogRankingOptions): Promise<LearningConsolidationCandidateResolution> {
   options.signal?.throwIfAborted();
   const lookup = input.trim();
   if (!lookup) {
@@ -332,7 +355,9 @@ export async function resolveLearningConsolidationCandidate(context: CommandCont
       usage: 'candidateId or query is required. Use memory action:"curator" query:"consolidation" to inspect candidate ids.',
     };
   }
+  requireDecisionFeature('automatic learning duplicate selection and consolidation; inspect and edit individual records explicitly');
   const collection = await buildLearningCandidates(context, options); collection.assertCurrent();
+  requireDecisionFeature('automatic learning duplicate selection and consolidation; inspect and edit individual records explicitly');
   const candidates = collection.candidates.filter((candidate) => candidate.consolidation !== undefined);
   const normalized = lookup.toLowerCase();
   const exact = candidates.find((candidate) => candidate.id === lookup)
@@ -366,6 +391,10 @@ export async function resolveLearningConsolidationCandidate(context: CommandCont
 }
 
 export async function describeLearningCandidate(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<LearningCandidateResolution> {
+  return withConfiguredDecisionModelPolicy(() => ownedDescribeLearningCandidate(context, args, options));
+}
+
+async function ownedDescribeLearningCandidate(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<LearningCandidateResolution> {
   options.signal?.throwIfAborted();
   const candidateId = readString(args.candidateId);
   const target = readString(args.target);

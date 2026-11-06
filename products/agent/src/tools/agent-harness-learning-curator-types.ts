@@ -1,4 +1,5 @@
 export type LearningCandidateStatus =
+  | 'unassessed'
   | 'needs-review'
   | 'needs-setup'
   | 'needs-consolidation'
@@ -69,16 +70,18 @@ export interface LearningConsolidationPlan {
 }
 
 export interface LearningCandidate {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly judgmentDecisionIds?: readonly string[];
   readonly id: string;
   readonly label: string;
   readonly domain: LearningCandidateDomain;
   readonly recordId: string | null;
   readonly status: LearningCandidateStatus;
-  readonly priority: number;
+  readonly priority: number | null;
   readonly reason: string;
   readonly next: string;
-  readonly scores: LearningScores;
+  readonly scores: LearningScores | null;
   readonly reviewState?: string;
   readonly enabled?: boolean;
   readonly active?: boolean;
@@ -134,8 +137,8 @@ export interface LearningPromptPlan {
   readonly status: 'ready' | 'attention' | 'empty';
   readonly promptActiveCount: number;
   readonly suppressedCount: number;
-  readonly proposalCount: number;
-  readonly consolidationCount: number;
+  readonly proposalCount: number | null;
+  readonly consolidationCount: number | null;
   readonly promptActiveRecords: readonly Record<string, unknown>[];
   readonly reviewFirst: readonly Record<string, unknown>[];
   readonly proposalQueue: readonly Record<string, unknown>[];

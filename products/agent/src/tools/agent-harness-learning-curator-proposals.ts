@@ -1,3 +1,6 @@
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import { type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import type { WorkPlanItem } from '@goodvibes-jev/engine/sdk/platform/workflow';
@@ -15,8 +18,8 @@ function captureCandidate(): LearningCandidateDraft {
     label: 'Capture reviewed lesson',
     domain: 'capture',
     recordId: null,
-    status: 'ready',
-    reason: 'No urgent local-learning review candidates are present.',
+    status: isClassicOperation() ? 'unassessed' : 'ready',
+    reason: isClassicOperation() ? 'No mechanical review flags were found; semantic curation remains unassessed.' : 'No urgent local-learning review candidates are present.',
     next: 'After a repeated workflow, useful preference, or durable lesson appears, capture it as a local memory, skill, routine, or persona for review.',
     inspectRoute: 'agent_harness mode:"workspace_action" actionId:"learned-behavior"',
     modelRoute: 'agent_harness mode:"workspace_actions" query:"learned behavior"',
@@ -98,6 +101,7 @@ function proposalSubject(target: LearningProposalTarget): string {
 }
 
 async function noteBehaviorProposalCandidate(record: LearningRecord, source: LearningCuratorSource): Promise<LearningCandidateDraft | null> {
+  if (isClassicOperation()) return null;
   const { item } = record;
   if (!isReviewed(item)) return null;
   const target = await readLearningProposalTarget({ origin: 'note', ...record }, source.options);
@@ -151,6 +155,7 @@ function completedWorkDetail(item: Omit<WorkPlanItem, 'createdAt' | 'updatedAt' 
 }
 
 async function workPlanCompletionCandidate(item: Omit<WorkPlanItem, 'createdAt' | 'updatedAt' | 'completedAt'>, source: LearningCuratorSource): Promise<LearningCandidateDraft | null> {
+  if (isClassicOperation()) return null;
   if (item.status !== 'done') return null;
   const target = await readLearningProposalTarget({ origin: 'work_plan', record: item }, source.options);
   source.assertCurrent();
@@ -212,6 +217,7 @@ function researchRunDetail(run: AgentResearchRunRecord): string {
 }
 
 async function researchRunCompletionCandidate(run: AgentResearchRunRecord, source: LearningCuratorSource): Promise<LearningCandidateDraft | null> {
+  if (isClassicOperation()) return null;
   if (run.status !== 'completed') return null;
   const target = await readLearningProposalTarget({ origin: 'research_run', record: run }, source.options);
   source.assertCurrent();
@@ -285,6 +291,7 @@ function sessionDetail(session: Omit<SessionInfoLike, 'timestamp'>, loadedText: 
 }
 
 async function sessionCompletionCandidate(record: LearningCuratorSource['source']['sessions'][number], source: LearningCuratorSource): Promise<LearningCandidateDraft | null> {
+  if (isClassicOperation()) return null;
   const { session, loaded } = record;
   if (!session.name) return null;
   const loadedText = [loaded?.meta.title ?? '', ...(loaded?.messages ?? []).map(extractMessageText)].filter(Boolean).join('\n');
@@ -428,7 +435,22 @@ export function assertLearningCandidateCollection(collection: LearningCandidateC
 }
 
 export async function buildLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions = {}): Promise<LearningCandidateCollection> {
-  const source = acquireLearningCuratorSource(context, options);
+  return withConfiguredDecisionModelPolicy(async () => {
+    const source = acquireLearningCuratorSource(context, options);
+    return decisionOrClassic(() => buildOwnedLearningCandidates(context, options, source),
+      () => withModelReadingSource(source.source, source.options, async (_captured, current) => {
+        current.assertCurrent?.();
+        const collection = await buildOwnedLearningCandidates(context, options, source);
+        current.assertCurrent?.(); return collection;
+      }), () => { source.assertCurrent(); return true; });
+  });
+}
+
+function comparePriority(left: { readonly priority: number | null }, right: { readonly priority: number | null }): number {
+  return left.priority === null ? right.priority === null ? 0 : 1 : right.priority === null ? -1 : right.priority - left.priority;
+}
+
+async function buildOwnedLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions, source: LearningCuratorSource): Promise<LearningCandidateCollection> {
   const drafts: { readonly candidate: LearningCandidateDraft; readonly record: unknown }[] = [];
   const promptRecords: LearningCandidateCollection['promptRecords'][number][] = [];
   for (const [domain, records] of Object.entries(source.libraries)) {
@@ -437,15 +459,17 @@ export async function buildLearningCandidates(context: LearningCuratorNativeCont
     for (const record of records) {
       const local = await candidatesForItem(domain, record, source); source.assertCurrent();
       for (const candidate of local) drafts.push({ candidate, record });
+      if (isClassicOperation() && local.length === 0) drafts.push({ candidate: candidateBase(domain, record.item, 'unassessed',
+        'Stored record; semantic curation was not evaluated.', 'Inspect the source record and use explicit review, update or stale actions.'), record });
       const eligible = domain === 'memory' ? (record.item.confidence ?? 100) >= 70
         : domain === 'persona' ? record.item.active === true
         : domain !== 'note' && record.item.enabled === true && missingRequirementCount(record.item) === 0;
       if (eligible) {
-        const grade = await readLearningGrade({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }, source.options);
-        source.assertCurrent(); promptRecords.push({ domain, item: record.item, priority: grade.priority, scores: grade.scores });
+        const grade = isClassicOperation() ? null : await readLearningGrade({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }, source.options);
+        source.assertCurrent(); promptRecords.push({ domain, item: record.item, priority: grade?.priority ?? null, scores: grade?.scores ?? null });
       }
     }
-    const consolidation = await consolidationCandidatesForDomain(domain, records, source.options, source.source); source.assertCurrent();
+    const consolidation = isClassicOperation() ? [] : await consolidationCandidatesForDomain(domain, records, source.options, source.source); source.assertCurrent();
     for (const candidate of consolidation) drafts.push({ candidate, record: records });
   }
   for (const item of source.source.workItems) {
@@ -466,9 +490,10 @@ export async function buildLearningCandidates(context: LearningCuratorNativeCont
   const candidates: LearningCandidate[] = [];
   for (const { candidate, record } of drafts) {
     if (candidate.proposalTarget && promotedReferences.has(learningPromotionReference(candidate.id))) continue;
-    const grade = await readLearningGrade({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }, source.options); source.assertCurrent();
-    candidates.push({ ...candidate, scores: grade.scores, priority: grade.priority,
-      ...(candidate.proposalTarget === 'memory' && candidate.proposalFields ? { proposalFields: { ...candidate.proposalFields, confidence: String(grade.confidence) } } : {}),
+    const grade = isClassicOperation() ? null : await readLearningGrade({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }, source.options); source.assertCurrent();
+    candidates.push({ ...candidate, scores: grade?.scores ?? null, priority: grade?.priority ?? null,
+      ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
+      ...(grade && candidate.proposalTarget === 'memory' && candidate.proposalFields ? { proposalFields: { ...candidate.proposalFields, confidence: String(grade.confidence) } } : {}),
     });
   }
   source.assertCurrent();
@@ -483,9 +508,14 @@ export async function buildLearningCandidates(context: LearningCuratorNativeCont
     }
     assertLearningCandidateCollection(collection, context, options);
   };
-  const collection: LearningCandidateCollection = Object.freeze({ candidates: captureCatalogData(candidates.sort((left, right) => right.priority - left.priority || left.label.localeCompare(right.label))),
-    promptRecords: captureCatalogData(promptRecords.sort((left, right) => right.priority - left.priority || left.item.name.localeCompare(right.item.name))),
-    assertCurrent: source.assertCurrent, assertCandidateCurrent, prepareTransition: source.prepareTransition, options: source.options });
+  const classicCollection = isClassicOperation();
+  const collection: LearningCandidateCollection = Object.freeze({ candidates: captureCatalogData(candidates.sort((left, right) => comparePriority(left, right) || left.label.localeCompare(right.label))),
+    promptRecords: captureCatalogData(promptRecords.sort((left, right) => comparePriority(left, right) || left.item.name.localeCompare(right.item.name))),
+    assertCurrent: source.assertCurrent, assertCandidateCurrent, prepareTransition: (intent: Parameters<LearningCuratorSource['prepareTransition']>[0]) => {
+      if (classicCollection) throw new DecisionModelsDisabledError('automatic transitions from an unassessed learning inspection');
+      requireDecisionFeature('automatic learning proposal or consolidation transitions; use explicit native registry actions');
+      return source.prepareTransition(intent);
+    }, options: source.options });
   collections.set(collection, { context, options,
     assertFields: captureCatalogMethods(collection, ['candidates', 'promptRecords', 'assertCurrent', 'assertCandidateCurrent', 'prepareTransition', 'options']),
     assertCandidates: captureCatalogSnapshotGuard(collection.candidates), assertPromptRecords: captureCatalogSnapshotGuard(collection.promptRecords) });

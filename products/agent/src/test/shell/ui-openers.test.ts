@@ -1,7 +1,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { beginModelPickerCatalogLoad, isModelPickerCatalogCurrent, fillModelPickerCatalog, type ModelPickerCatalogFill, type ConfiguredVia } from '@goodvibes-jev/engine/terminal-shell/model-picker-catalog';
+import { beginModelPickerCatalogLoad, isModelPickerCatalogCurrent, fillModelPickerCatalog, type ModelPickerCatalogFill, type ModelPickerCatalogState, type ConfiguredVia } from '@goodvibes-jev/engine/terminal-shell/model-picker-catalog';
 import { wireShellUiOpeners } from '../../shell/ui-openers.ts';
 import { buildTestModelDefinition, createTestManagers } from '../helpers/test-managers.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -10,6 +10,8 @@ import { dirname } from 'node:path';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { activeTokens, getActiveThemeMode, getActiveThemeName, listThemeChoices, normalizeThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { resetTerminalPaletteForTests } from '../../renderer/terminal-palette.ts';
+
+type CatalogPickerStub = ModelPickerCatalogState<unknown> & { clearFilteredCaches(): void };
 
 describe('wireShellUiOpeners', () => {
   let commandContext: Record<string, unknown>;
@@ -154,9 +156,9 @@ describe('wireShellUiOpeners', () => {
           catalogTicket: 0,
           configuredViaMap: new Map() as ConfiguredVia,
           providers: [],
-          beginCatalogLoad() { return beginModelPickerCatalogLoad(this); },
-          isCatalogLoadCurrent(ticket: number) { return isModelPickerCatalogCurrent(this, ticket); },
-          fillCatalog(ticket: number, fill: ModelPickerCatalogFill<unknown>, done = true) { return fillModelPickerCatalog(this, ticket, fill, () => this.clearFilteredCaches(), done); },
+          beginCatalogLoad(this: CatalogPickerStub) { return beginModelPickerCatalogLoad(this); },
+          isCatalogLoadCurrent(this: CatalogPickerStub, ticket: number) { return isModelPickerCatalogCurrent(this, ticket); },
+          fillCatalog(this: CatalogPickerStub, ticket: number, fill: ModelPickerCatalogFill<unknown>, done = true) { return fillModelPickerCatalog(this, ticket, fill, () => this.clearFilteredCaches(), done); },
           models: [],
           getFilteredModels: () => [],
           getFilteredProviders: () => [],

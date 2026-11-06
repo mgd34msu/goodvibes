@@ -126,7 +126,7 @@ test('a genuine settled native receipt still permits the single original canonic
   installJudgmentPort(fake.port);
   const result = await read(native.owner);
   expect(result.matches).toHaveLength(1); expect(result.matches[0]?.entry).toEqual(candidate);
-  expect(result.matches[0]?.judgment.reading).toMatchObject({ verdict: 'yes', outcome: 'act' });
+  expect(result.matches[0]?.judgment?.reading).toMatchObject({ verdict: 'yes', outcome: 'act' });
   expect(fake.requests).toHaveLength(1);
   expect(native.calls.map(call => call.path)).toEqual(['/v1/chat/completions', '/v1/systemone']);
   expect(native.owner.screen).toBe(originalScreen);

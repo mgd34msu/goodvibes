@@ -34,7 +34,7 @@ test('Classic history, exact detail and local search retain actual outcomes with
     const summary = await executionHistorySummary(f.context, {}, f.options);
     expect(summary).toMatchObject({ status: 'available', provenance: 'classic', returned: 2,
       records: [expect.objectContaining({ status: 'succeeded' }), expect.objectContaining({ status: 'failed' })],
-      activityCards: [expect.objectContaining({ status: 'failed', verification: { status: 'not-evaluated', evidence: [], unassessedExecutionRecordIds: ['one', 'two'] } })],
+      activityCards: [expect.objectContaining({ status: 'failed', verification: expect.objectContaining({ status: 'not-evaluated', evidence: [], unassessedExecutionRecordIds: ['one', 'two'] }) })],
       judgments: [],
     });
     const exact = await describeExecutionHistoryItem(f.context, { executionRecordId: 'one' }, f.options);

@@ -28,6 +28,14 @@ function fixture() {
   return { privacy, outcome, workspace, context, options, projection };
 }
 
+function schemaReadings(probability: number) {
+  return fakePort(name => {
+    if (name === 'certified_schema') return noulAnswer(probability);
+    if (name === 'lineHasCredential' || name === 'spanIsCredential') return noulAnswer(0.001);
+    throw new Error(`Unexpected synthetic remote question: ${name}`);
+  });
+}
+
 test('Classic remote settlement preserves actual outcomes/workspaces with unassessed meanings and no decision traffic', async () => {
   const f = fixture(); let asks = 0;
   installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('must not ask'); } });
@@ -49,8 +57,13 @@ test('Classic remote settlement preserves actual outcomes/workspaces with unasse
 });
 
 test('Preferred preserves a real negative schema reading when later operation interpretation exhausts', async () => {
-  const f = fixture(); let asks = 0; const base = fakePort(() => noulAnswer(0.001));
-  installJudgmentPort({ ...base.port, async ask(request) { asks++; if (asks === 2) throw new JudgmentError('unavailable', 'fixture exhausted'); return base.port.ask(request); } });
+  const f = fixture(); let asks = 0; const base = schemaReadings(0.001);
+  installJudgmentPort({ ...base.port, async ask(request) {
+    if ('certified_schema' in request.questions || 'outcome_kind' in request.questions) {
+      asks++; if (asks === 2) throw new JudgmentError('unavailable', 'fixture exhausted');
+    }
+    return base.port.ask(request);
+  } });
   await withDecisionModelPolicy(() => 'Preferred', async () => {
     const owned = captureNativeRemoteReadModelSnapshot(f.context);
     const result = await settleNativeRemotePublisherSemantics(owned.token, f.options, f.projection);
@@ -76,8 +89,13 @@ for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'
 });
 
 test('unsettled schema evidence cannot be replaced with Classic just because another reading could fail', async () => {
-  const f = fixture(); let asks = 0; const base = fakePort(() => noulAnswer(0.5));
-  installJudgmentPort({ ...base.port, async ask(request) { asks++; if (asks > 1) throw new JudgmentError('unavailable', 'fixture exhausted'); return base.port.ask(request); } });
+  const f = fixture(); let asks = 0; const base = schemaReadings(0.5);
+  installJudgmentPort({ ...base.port, async ask(request) {
+    if ('certified_schema' in request.questions || 'outcome_kind' in request.questions) {
+      asks++; if (asks > 1) throw new JudgmentError('unavailable', 'fixture exhausted');
+    }
+    return base.port.ask(request);
+  } });
   await withDecisionModelPolicy(() => 'Preferred', async () => {
     const owned = captureNativeRemoteReadModelSnapshot(f.context);
     await expect(settleNativeRemotePublisherSemantics(owned.token, f.options, f.projection)).rejects.toThrow();

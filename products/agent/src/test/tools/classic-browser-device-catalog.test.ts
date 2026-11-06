@@ -29,10 +29,13 @@ test('Classic catalogs retain local search matches, explicit booleans, and unkno
         { ...publication, id: 'native', categoryId: 'work', mobileReady: true, pwaReady: false },
       ], firstRunReceipts: [{ ...publication, id: 'first', summary: 'Works offline.' }],
     } }), options);
+    expect(snapshot.categoryRoutes.map(record => record.id)).toEqual(['unknown', 'native']);
+    expect(snapshot.firstRunReceipts.map(record => record.id)).toEqual(['first']);
     expect(snapshot).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated', categoryRoutes: [
-      expect.objectContaining({ id: 'unknown', mobileReady: null, pwaReady: null }),
-      expect.objectContaining({ id: 'native', mobileReady: true, pwaReady: false }),
+      { id: 'unknown', mobileReady: null, pwaReady: null },
+      { id: 'native', mobileReady: true, pwaReady: false },
     ] });
+    expect(snapshot.categoryRoutes[0]?.certification, JSON.stringify(snapshot.categoryRoutes[0])).toBeDefined();
     expect(isCertifiedBrowserPwaCategoryRoute(snapshot.categoryRoutes[0]!)).toBe(false);
     expect(snapshot.categoryRoutes[0]?.certification.missingSignals.join(' ')).toContain('not evaluated');
     expect(isCertifiedBrowserPwaFirstRunReceipt(snapshot.firstRunReceipts[0]!)).toBe(false);

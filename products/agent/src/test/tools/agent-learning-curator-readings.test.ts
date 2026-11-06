@@ -312,7 +312,7 @@ describe('native protected learning curator readings', () => {
     expect(collection.candidates[0]?.id).toBe('memory:opaque:needs-review');
     expect(collection.candidates[0]?.priority).toBe(25);
     expect(collection.promptRecords[0]?.priority).toBe(25);
-    expect(collection.candidates[0]?.scores.usefulness).toBe(25);
+    expect(collection.candidates[0]?.scores?.usefulness).toBe(25);
     collection.assertCurrent();
   });
 

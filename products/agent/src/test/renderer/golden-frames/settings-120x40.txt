@@ -24,7 +24,7 @@
 |                                       reasoning summaries, token speed, and tool previews.                             |
 |          ✦ models and providers                                                                                        |
 |            Provider            8      collapseThreshold                                               30               |
-|            Judgment            7      theme                                                    goodvibes               |
+|            Judgment            8      theme                                                    goodvibes               |
 |            Subscriptions       1      themeMode                                                     auto               |
 |            Helper              3      treeGlyphs                                                 rounded               |
 |            Tools               9      showThinking                                                 false               |

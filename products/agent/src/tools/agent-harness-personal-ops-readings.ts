@@ -7,18 +7,24 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 
+const nativeThrowIfAborted = AbortSignal.prototype.throwIfAborted;
+const nativeApply = Reflect.apply;
+function assertNativeCancellation(signal: AbortSignal | undefined): void {
+  if (signal) nativeApply(nativeThrowIfAborted, signal, []);
+}
+
 /** Only the pure interpretation phase is replaceable. The complete original protected source remains owned. */
 async function withPersonalOpsReading<S, T>(source: S, options: CatalogRankingOptions, site: string,
   read: (captured: S, authority: JudgmentPortCapture) => Promise<T>, classic: (captured: S) => T, skip?: (captured: S) => boolean): Promise<T> {
   return withConfiguredDecisionModelPolicy(() => withModelReadingSource(source, options, async (captured, current) => {
-    const assertCurrent = () => { current.signal?.throwIfAborted(); current.assertCurrent?.(); };
+    const assertCurrent = () => { assertNativeCancellation(current.signal); current.assertCurrent?.(); };
     if (skip?.(captured)) { assertCurrent(); return classic(captured); }
     return decisionOrClassic(async () => {
       const authority = captureJudgmentPort(site, { signal: current.signal, assertCurrent, prepareResultCapture: prepareJudgmentResult });
       try { const result = await read(captured, authority); authority.assertCurrent(); return result; }
       finally {
         const observation = authority.consumeObservation();
-        const retained = () => { current.signal?.throwIfAborted(); authority.signal.throwIfAborted();
+        const retained = () => { assertNativeCancellation(current.signal); assertNativeCancellation(authority.signal);
           if (!isClassicOperation()) observation.assertCurrent(); };
         current.retainCurrent?.(retained, site); retained();
       }

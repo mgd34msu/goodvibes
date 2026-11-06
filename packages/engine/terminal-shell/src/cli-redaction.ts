@@ -112,7 +112,11 @@ function valuePaths(value: unknown, path: string, out: Map<string, unknown>): vo
     if (!structuredReferenceValue(path, value)) out.set(path, value);
     return;
   }
-  if (path && holdsValue(value)) out.set(path, value);
+  // Namespace objects are structural paths, not credentials containing every
+  // public setting below them. Declared object-valued settings still own their
+  // complete value; unknown containers have every descendant leaf screened.
+  const container = value !== null && typeof value === 'object';
+  if (path && holdsValue(value) && (!container || SCHEMA_KEYS.has(path))) out.set(path, value);
   if (Array.isArray(value)) {
     value.forEach((item, index) => valuePaths(item, `${path}.${index}`, out));
   } else if (value && typeof value === 'object') {

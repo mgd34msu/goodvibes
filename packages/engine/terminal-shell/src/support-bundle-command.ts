@@ -218,6 +218,9 @@ export function createSupportBundleCommand<
             // The final redaction phase can be the one that exhausts the chain.
             // Stamp only fixed native metadata onto its already-redacted JSON.
             serialized = JSON.stringify({ ...JSON.parse(serialized) as Record<string, unknown>,
+              // Public native envelope constants are not derived from config
+              // or diagnostic values that the redactor has withheld.
+              version: bundle.version, type: bundle.type,
               operationProvenance: 'classic', semanticAssessment: 'not-evaluated' }, null, 2);
           }
           redactedConfig.assertCurrent();

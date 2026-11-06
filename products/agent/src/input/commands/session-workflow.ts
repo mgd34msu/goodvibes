@@ -1,3 +1,4 @@
+import { formatSessionExport, resolveSessionExportRequest } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
@@ -122,50 +123,18 @@ async function printSessionExport(
   } catch (error) {
     if (!(error instanceof JudgmentPortMissingError)) throw error;
   }
-  const lines: string[] = [];
-  if (format === 'markdown') {
-    lines.push(`# Session: ${title || sessionId}`);
-    lines.push('');
-    for (const msg of messages) {
-      const content = conversationMessageContentText(msg);
-      if (!content.trim()) continue;
-      if (msg.role === 'user') {
-        lines.push('## User');
-        lines.push('');
-        lines.push(content);
-        lines.push('');
-      } else if (msg.role === 'assistant') {
-        lines.push('## Assistant');
-        lines.push('');
-        lines.push(content);
-        lines.push('');
-      } else if (msg.role === 'tool') {
-        const toolName = msg.toolName ?? 'tool';
-        lines.push(`## Tool Result: ${toolName}`);
-        lines.push('');
-        lines.push('```');
-        lines.push(content.slice(0, 2000) + (content.length > 2000 ? '\n...(truncated)' : ''));
-        lines.push('```');
-        lines.push('');
-      }
-    }
-  } else {
-    for (const msg of messages) {
-      const role = msg.role.toUpperCase();
-      const content = conversationMessageContentText(msg);
-      if (!content.trim()) continue;
-      lines.push(`[${role}]`);
-      lines.push(content);
-      lines.push('');
-    }
-  }
+  const formatted = formatSessionExport(sessionId, title, messages, format, {
+    role: (message) => message.role,
+    content: conversationMessageContentText,
+    tool: (message) => message.toolName ?? 'tool',
+  });
   // A transcript is the one place a value the model was handed becomes a
   // durable document. The canonical redactor carries the platform's credential
   // patterns AND, in a process that has loaded the owner profile, that
   // profile's closed-tier values, his address, his contact details, the People
   // section, so an exported session cannot become the copy of the dossier that
   // the file itself is careful not to be (docs/owner-profile.md §10, §11.3).
-  const redacted = await redactSensitiveDataAsync(lines.join('\n'), { signal, assertCurrent, purpose: 'export' });
+  const redacted = await redactSensitiveDataAsync(formatted, { signal, assertCurrent, purpose: 'export' });
   assertCurrent();
   print.call(ctx, redacted);
 }
@@ -341,15 +310,14 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     }
 
     if (sub === 'export') {
-      const target = args[1];
-      if (!target) {
-        ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
-        return true;
-      }
-      const format = (args[2] || 'markdown').toLowerCase();
-      const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
-      const sessions = sm.list();
-      const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
+      const request = resolveSessionExportRequest(
+        args,
+        ctx.session.runtime.sessionId,
+        () => sm.list(),
+        (text) => ctx.print(text),
+      );
+      if (!request) return true;
+      const { target, format, sessionId, found } = request;
       if (!found && target !== '.') {
         try {
           const { meta, messages } = sm.load(sessionId);

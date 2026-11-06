@@ -3103,6 +3103,11 @@
       "bun": "./terminal-shell/src/shell-frame-facts.ts",
       "types": "./terminal-shell/dist/shell-frame-facts.d.ts",
       "import": "./terminal-shell/dist/shell-frame-facts.js"
+    },
+    "./terminal-shell/session-export-format": {
+      "bun": "./terminal-shell/src/session-export-format.ts",
+      "types": "./terminal-shell/dist/session-export-format.d.ts",
+      "import": "./terminal-shell/dist/session-export-format.js"
     }
   },
   "publishConfig": {

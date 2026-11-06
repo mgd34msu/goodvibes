@@ -1,3 +1,4 @@
+import { formatSessionExport, resolveSessionExportRequest } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
@@ -46,45 +47,12 @@ function printSessionExport(
   messages: Array<Record<string, unknown>>,
   format: string,
 ): void {
-  const lines: string[] = [];
-  if (format === 'markdown') {
-    lines.push(`# Session: ${title || sessionId}`);
-    lines.push('');
-    for (const msg of messages) {
-      const role = String(msg.role ?? 'unknown');
-      const content = String(msg.content ?? '');
-      if (!content.trim()) continue;
-      if (role === 'user') {
-        lines.push('## User');
-        lines.push('');
-        lines.push(content);
-        lines.push('');
-      } else if (role === 'assistant') {
-        lines.push('## Assistant');
-        lines.push('');
-        lines.push(content);
-        lines.push('');
-      } else if (role === 'tool') {
-        const toolName = String(msg.toolName ?? 'tool');
-        lines.push(`## Tool Result: ${toolName}`);
-        lines.push('');
-        lines.push('```');
-        lines.push(content.slice(0, 2000) + (content.length > 2000 ? '\n...(truncated)' : ''));
-        lines.push('```');
-        lines.push('');
-      }
-    }
-  } else {
-    for (const msg of messages) {
-      const role = String(msg.role ?? 'unknown').toUpperCase();
-      const content = String(msg.content ?? '');
-      if (!content.trim()) continue;
-      lines.push(`[${role}]`);
-      lines.push(content);
-      lines.push('');
-    }
-  }
-  ctx.print(lines.join('\n'));
+  const formatted = formatSessionExport(sessionId, title, messages, format, {
+    role: (message) => String(message.role ?? 'unknown'),
+    content: (message) => String(message.content ?? ''),
+    tool: (message) => String(message.toolName ?? 'tool'),
+  });
+  ctx.print(formatted);
 }
 
 // session-mgmt / smgmt was removed in TASK-032.
@@ -256,15 +224,14 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     }
 
     if (sub === 'export') {
-      const target = args[1];
-      if (!target) {
-        ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
-        return true;
-      }
-      const format = (args[2] || 'markdown').toLowerCase();
-      const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
-      const sessions = sm.list();
-      const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
+      const request = resolveSessionExportRequest(
+        args,
+        ctx.session.runtime.sessionId,
+        () => sm.list(),
+        (text) => ctx.print(text),
+      );
+      if (!request) return true;
+      const { target, format, sessionId, found } = request;
       if (!found && target !== '.') {
         try {
           const { meta, messages } = sm.load(sessionId);

@@ -270,29 +270,30 @@ test('hosted cancellation joins delayed private body retirement and publishes no
   expect(f.calls).toHaveLength(1);
 });
 
-test('hosted canonical Jev retry retains fixed key, source and live grant without proposal fallback', async () => {
+test('hosted canonical Jev outage halts; explicit retry retains fixed credentials and complete source', async () => {
   let judgmentCalls = 0;
   const f = fixture({ respond: call => {
     if (call.url === routes.proposal) return proposal(sourceFrom(call.body).revision);
     return ++judgmentCalls === 1 ? new Response('synthetic-private-upstream-body', { status: 503 }) : judgment(call.body);
   } });
+  expect(await f.owner.screen(f.owner.capture(['Ordinary source.']))).toEqual({ status: 'held', reason: 'route-unavailable' });
+  expect(f.calls.map(call => call.url)).toEqual([routes.proposal, routes.judgment]);
   expect(await project(f.owner, ['Ordinary source.'])).toEqual(['Ordinary source.']);
-  expect(f.calls.map(call => call.url)).toEqual([routes.proposal, routes.judgment, routes.judgment]);
-  expect(f.calls.slice(1).every(call => call.headers.some(([name, value]) => name === 'authorization' && value === `Bearer ${typesafeApiKey}`))).toBe(true);
+  expect(f.calls.map(call => call.url)).toEqual([routes.proposal, routes.judgment, routes.proposal, routes.judgment]);
+  expect(f.calls.filter(call => call.url === routes.judgment).every(call => call.headers.some(([name, value]) => name === 'authorization' && value === `Bearer ${typesafeApiKey}`))).toBe(true);
 }, 10_000);
 
-test('native hosted grant revocation during Jev backoff fences the next actual attempt', async () => {
-  let current = true;
+test('native hosted grant revocation during a failed Jev attempt fences further transmission', async () => {
+  let current = true; let retries = 0;
   const f = fixture({ assertCurrent() { if (!current) throw new Error('synthetic-borrowed-secret'); },
-    onRetry(progress) {
-      expect(progress.attempt.endpointKind).toBe('hosted');
-      expect(JSON.stringify(progress)).not.toContain('Ordinary source.');
-      expect(JSON.stringify(progress)).not.toContain(typesafeApiKey);
+    onRetry() { retries++; },
+    respond: call => {
+      if (call.url === routes.proposal) return proposal(sourceFrom(call.body).revision);
       current = false;
+      return new Response('synthetic-private-upstream-body', { status: 503 });
     },
-    respond: call => call.url === routes.proposal ? proposal(sourceFrom(call.body).revision)
-      : new Response('synthetic-private-upstream-body', { status: 503 }),
   });
   expect(await f.owner.screen(f.owner.capture(['Ordinary source.']))).toEqual({ status: 'held', reason: 'stale' });
   expect(f.calls.map(call => call.url)).toEqual([routes.proposal, routes.judgment]);
+  expect(retries).toBe(0);
 }, 10_000);

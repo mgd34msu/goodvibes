@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { VERSION } from '../../version.ts';
 import { metadataCliResult } from '../../cli/metadata.ts';
 import { renderGoodVibesCommandHelp, renderGoodVibesHelp } from '../../cli/help.ts';
 
@@ -9,7 +10,7 @@ test('metadata commands retain parser precedence and normal commands continue to
   expect(metadataCliResult(['--help'])?.stdout).toBe(renderGoodVibesHelp());
   expect(metadataCliResult(['profiles', '--help'])?.stdout).toBe(renderGoodVibesCommandHelp('profiles'));
   expect(metadataCliResult(['help', 'profiles'])?.stdout).toBe(renderGoodVibesCommandHelp('profiles'));
-  expect(metadataCliResult(['--version'])?.stdout).toBe('goodvibes-agent 2.1.0');
+  expect(metadataCliResult(['--version'])?.stdout).toBe(`goodvibes-agent ${VERSION}`);
   expect(metadataCliResult(['--not-an-option'])?.exitCode).toBe(2);
   expect(metadataCliResult(['status'])).toBeNull();
   expect(metadataCliResult(['--prompt', 'ordinary prompt'])).toBeNull();
@@ -20,7 +21,7 @@ test('source and package launchers run metadata commands without creating Agent 
   try {
     for (const [entry, args, expected, exitCode] of [
       ['../../main.ts', ['--help'], 'Usage: goodvibes-agent', 0],
-      ['../../../bin/goodvibes-agent.ts', ['--version'], 'goodvibes-agent 2.1.0', 0],
+      ['../../../bin/goodvibes-agent.ts', ['--version'], `goodvibes-agent ${VERSION}`, 0],
       ['../../main.ts', ['completion', 'bash'], 'complete ', 0],
       ['../../main.ts', ['--not-an-option'], 'Usage: goodvibes-agent', 2],
     ] as const) {

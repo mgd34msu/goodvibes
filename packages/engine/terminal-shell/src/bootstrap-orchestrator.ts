@@ -42,7 +42,15 @@ export function projectOrchestratorCoreServices(input: {
     OrchestratorCoreServices,
     'planManager' | 'adaptivePlanner' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'idempotencyStore'
   >;
-}) {
+}): {
+  configManager: ConfigManager;
+  providerRegistry: ProviderRegistry;
+  planManager: OrchestratorCoreServices['planManager'];
+  adaptivePlanner: OrchestratorCoreServices['adaptivePlanner'];
+  sessionMemoryStore: OrchestratorCoreServices['sessionMemoryStore'];
+  sessionLineageTracker: OrchestratorCoreServices['sessionLineageTracker'];
+  idempotencyStore: OrchestratorCoreServices['idempotencyStore'];
+} {
   const { configManager, providerRegistry, services } = input;
   return {
     configManager,

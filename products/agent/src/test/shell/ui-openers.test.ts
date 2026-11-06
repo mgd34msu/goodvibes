@@ -1,6 +1,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beginModelPickerCatalogLoad, isModelPickerCatalogCurrent, fillModelPickerCatalog, type ModelPickerCatalogFill, type ConfiguredVia } from '@goodvibes-jev/engine/terminal-shell/model-picker-catalog';
 import { wireShellUiOpeners } from '../../shell/ui-openers.ts';
 import { buildTestModelDefinition, createTestManagers } from '../helpers/test-managers.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -151,6 +152,11 @@ describe('wireShellUiOpeners', () => {
           selectedIndex: 0,
           catalogLoading: false,
           catalogTicket: 0,
+          configuredViaMap: new Map() as ConfiguredVia,
+          providers: [],
+          beginCatalogLoad() { return beginModelPickerCatalogLoad(this); },
+          isCatalogLoadCurrent(ticket: number) { return isModelPickerCatalogCurrent(this, ticket); },
+          fillCatalog(ticket: number, fill: ModelPickerCatalogFill<unknown>, done = true) { return fillModelPickerCatalog(this, ticket, fill, () => this.clearFilteredCaches(), done); },
           models: [],
           getFilteredModels: () => [],
           getFilteredProviders: () => [],

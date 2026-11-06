@@ -66,8 +66,10 @@ function buildProjectContext(workingDirectory: string, observation?: ProjectFram
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
         if (pkg.name) lines.push(`- Name: ${pkg.name}`);
 
-        // Package manager
-        if (existsSync(join(cwd, 'bun.lockb')) || existsSync(join(cwd, 'bun.lock'))) lines.push('- Package manager: bun');
+        // A workspace can pin its manager while the lockfile lives at the monorepo root.
+        const declaredManager = typeof pkg.packageManager === 'string' ? pkg.packageManager.split('@')[0] : undefined;
+        if (declaredManager && ['bun', 'yarn', 'pnpm', 'npm'].includes(declaredManager)) lines.push(`- Package manager: ${declaredManager}`);
+        else if (existsSync(join(cwd, 'bun.lockb')) || existsSync(join(cwd, 'bun.lock'))) lines.push('- Package manager: bun');
         else if (existsSync(join(cwd, 'yarn.lock'))) lines.push('- Package manager: yarn');
         else if (existsSync(join(cwd, 'pnpm-lock.yaml'))) lines.push('- Package manager: pnpm');
         else lines.push('- Package manager: npm');

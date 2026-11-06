@@ -1,3 +1,4 @@
+import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/sdk/platform/security';
 import type { SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type {
   LocalAuthInspectionQuery,
@@ -145,6 +146,7 @@ export async function collectTerminalOnboardingSnapshot<Config extends CommonCon
   for (const result of [active, pendingSubscriptions, auth, secretReview, secretRecords, surfaces, accounts]) {
     if (result.issue) collectionIssues.push(result.issue);
   }
+  const authSnapshot: LocalAuthSnapshot = auth.value;
   return {
     state: {
       capturedAt: captured.capturedAt,
@@ -160,7 +162,7 @@ export async function collectTerminalOnboardingSnapshot<Config extends CommonCon
         pendingProviderIds: sortUnique(pendingSubscriptions.value.map((entry) => entry.provider)),
       },
       secrets: { review: secretReview.value, records: secretRecords.value },
-      auth: { snapshot: auth.value },
+      auth: { snapshot: authSnapshot },
       surfaces: {
         configuredEnabledKinds: buildConfiguredSurfaceKinds(captured.config.surfaces),
         records: sortSurfaceRecords(surfaces.value),

@@ -676,7 +676,7 @@
   },
   {
     "state": {
-      "content": "Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input. No legacy turn or work execution was started."
+      "content": "Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect."
     },
     "questions": {
       "activity": {

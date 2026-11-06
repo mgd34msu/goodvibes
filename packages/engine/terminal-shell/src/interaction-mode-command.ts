@@ -1,5 +1,5 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ShellModeManagerService } from '../../sdk/src/platform/runtime/shell-command-ops.js';
+import type { ShellModeManagerService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import type { TerminalSlashCommand } from './command-registry.js';

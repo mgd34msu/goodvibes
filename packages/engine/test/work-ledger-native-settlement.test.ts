@@ -468,17 +468,19 @@ test('a persisted passed checkpoint cannot settle while another execution lease 
   expect((await f.host.settle(f.key, f.authority)).attestation.outcome).toBe('verified'); expect(f.harness.agentsOf('u1')).toHaveLength(1);
 });
 
-test('terminal settlement uses shared retry ownership and cancellation interrupts retry-after without late publication', async () => {
-  let retried!: () => void; const waiting = new Promise<void>(resolve => { retried = resolve; }); let calls = 0;
-  const retry = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-fixture' }, model: DEFAULT_MODEL, timeoutMs: 100,
-    retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => { calls++; return Response.json({}, { status: 503, headers: { 'retry-after': '3600' } }); } });
+test('terminal settlement cancellation interrupts a pending configured backup without late publication', async () => {
+  let entered!: () => void; const waiting = new Promise<void>(resolve => { entered = resolve; }); let calls = 0;
+  const retry = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-fixture' }, model: DEFAULT_MODEL, timeoutMs: 1000,
+    fallbacks: [{ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:2', apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL }],
+    retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+    fetch: async () => { if (++calls === 1) return Response.json({}, { status: 503 }); entered(); return new Promise<Response>(() => {}); } });
   let f!: Awaited<ReturnType<typeof fixture>>;
   f = await fixture({ decoratePort: port => ({ ...port, ask: request => request.context?.site === 'contract.check.unit-judge'
-    ? withDecisionLog(retry, f.log).ask({ ...request, onRetry(progress) { retried(); request.onRetry?.(progress); } }) : port.ask(request) }) });
+    ? withDecisionLog(retry, f.log).ask(request) : port.ask(request) }) });
   const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
   const pending = f.host.settle(f.key, f.authority).catch(error => error); await waiting;
-  await f.host.cancel(f.key, f.authority, 'Synthetic settlement backoff cancellation'); expect(await pending).toBeInstanceOf(Error);
-  expect(calls).toBe(1); expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
+  await f.host.cancel(f.key, f.authority, 'Synthetic settlement cancellation'); expect(await pending).toBeInstanceOf(Error);
+  expect(calls).toBe(2); expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
 }, 5000);
 
 test('current paired authority is rechecked before a shared transport retry', async () => {

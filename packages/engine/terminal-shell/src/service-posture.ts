@@ -1,7 +1,7 @@
 import { closeSync, existsSync, openSync, readSync, statSync, type Stats } from 'node:fs';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import type { ConfigManager } from '../../sdk/src/platform/config/index.js';
-import type { JudgmentReadingOptions } from '../../errors/src/index.js';
+import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding, type RuntimeEndpointId } from './cli-endpoints.js';
 import { classifyBindPosture, isNetworkFacing } from './cli-network-posture.js';
 import { redactText } from './cli-redaction.js';
@@ -77,8 +77,16 @@ export async function readServiceLogPosture(
     )
       throw new Error('Service log changed during redaction.');
   };
-  captureOwner?.();
-  const tail = await redactText(captured.text, { ...options, assertCurrent });
+  let tail: string;
+  try {
+    captureOwner?.();
+    tail = await redactText(captured.text, { ...options, assertCurrent });
+  } catch {
+    // Withhold the captured bytes when redaction is unavailable. Revocation,
+    // cancellation and a changed file still prevent the entire publication.
+    assertCurrent();
+    return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, readError: 'Service log could not be read safely.' };
+  }
   assertCurrent();
   return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, tail };
 }

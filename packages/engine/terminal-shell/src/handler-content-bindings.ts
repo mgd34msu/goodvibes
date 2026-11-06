@@ -76,7 +76,7 @@ export function createHandlerContentBindings<Host extends HandlerContentHost>(po
   function registerPasteForHandler(host: Host, content: string): string {
     return registerPasteForHost(host, content, host.uiServices.environment.shellPaths.workingDirectory);
   }
-  function expandPromptForHandler(host: Host, text: string) {
+  function expandPromptForHandler(host: Host, text: string): ReturnType<typeof expandPrompt> {
     return policy.expandPrompt(host.pasteRegistry, host.imageRegistry, text, host.uiServices.environment.shellPaths.workingDirectory);
   }
   function getImageAttachmentsForHandler(host: Host) {

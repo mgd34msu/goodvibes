@@ -157,7 +157,7 @@ describe('retained standalone release boundary', () => {
       const result = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
       expect(result).toContain('@goodvibes-jev/engine/toolchain@2.1.1');
       expect(result).toContain(`@${'b'.repeat(40)} # sdk 2.1.0 release`);
-      expect(result).not.toContain('@goodvibes-jev/engine/toolchain@');
+      expect(result).not.toContain('@goodvibes-jev/engine/toolchain@2.0.0');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

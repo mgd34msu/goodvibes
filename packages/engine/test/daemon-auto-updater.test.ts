@@ -646,12 +646,13 @@ describe('update failure reading lifecycle', () => {
       expect(log.query({})).toHaveLength(0); expect(h.alerts).toEqual([]); expect(h.timers).toHaveLength(0);
     } finally { finish.resolve(); log[Symbol.dispose](); rmSync(h.scratch, { recursive: true, force: true }); }
   });
-  test('availability retries remain within one updater check and alert only after recovery', async () => {
+  test('configured failover remains within one updater check and alerts only after recovery', async () => {
     let calls = 0; let reads = 0;
     const fake = failureReadingsPort([['repository access revoked', { category: 'authorization' }]]).port;
     const h = makeHarness({ idle: () => true, fetchOverride: async () => { reads++; return persistentFetch('ignored'); } });
     await installUpdaterPort(createSystemOnePort({
       endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: DEFAULT_MODEL,
+      fallbacks: [2, 3].map(port => ({ endpoint: { kind: 'local' as const, baseURL: `http://127.0.0.1:${port}`, apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL })),
       timeoutMs: 100, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
       fetch: async (_url, init) => {
         calls++; expect(h.alerts).toEqual([]); expect(h.updater.failedCheckCount).toBe(1);

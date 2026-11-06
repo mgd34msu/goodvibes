@@ -6,6 +6,7 @@ import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';
 import modelTier from '../fixtures/e2e-judgments/model-tier.json';
 import turnQuestions from '../fixtures/e2e-judgments/turn-questions.json';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json';
 import cancelledTurnTimings from '../fixtures/e2e-judgments/cancelled-turn-timings.json';
 import cancelledTurnPending from '../fixtures/e2e-judgments/cancelled-turn-pending.json';
@@ -67,7 +68,7 @@ function matchesCancelledTurnTiming(body: unknown): boolean {
 export function e2eJudgmentAnswers(body: unknown, ownedRoot?: string): { kind: 'presentation' | 'tier' | 'identity' | 'route' | 'turn' | 'native-route' | 'native-turn' | 'cancelled-turn-timing' | 'cancelled-turn-pending'; answers: unknown } | undefined {
   if (stable(body).includes('<owned-fixture-root>')) return undefined;
   const presentationShape = (value: unknown, root?: string) => {
-    const discovery = stable(value).replace(/\/tmp\/[^\s"]+\/home\/\.goodvibes\/agent\/discovered-providers\.json/g, '<fixture-home>/discovered-providers.json');
+    const discovery = root ? stable(value).split(JSON.stringify(join(root, 'home/.goodvibes/agent/discovered-providers.json')).slice(1, -1)).join('<fixture-home>/discovered-providers.json') : stable(value);
     const wire = root ? discovery.split(JSON.stringify(root).slice(1, -1)).join('<owned-fixture-root>') : discovery;
     // Only the two recorded native status formats parameterize their generated
     // UUIDs. Keep exact prose, complete questions and within-message equality.

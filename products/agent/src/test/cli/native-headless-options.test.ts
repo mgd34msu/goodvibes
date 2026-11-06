@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { AGENT_CLI_CATALOG } from '../../cli/catalog.ts';
 import { extractNativeHeadlessOptions } from '../../cli/native-headless-options.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 
@@ -25,9 +25,7 @@ function expectUnchanged(argv: readonly string[]) {
 
 describe('native headless option authority', () => {
   test('the guarded required-value spellings cover the current Agent parser', () => {
-    const source = readFileSync(new URL('../../cli/parser.ts', import.meta.url), 'utf8');
-    const branches = [...source.matchAll(/if \(([^{}]+)\) \{\s*const consumed = getValue\(/g)];
-    const required = branches.flatMap(branch => [...branch[1]!.matchAll(/name === '([^']+)'/g)].map(match => match[1]!));
+    const required = AGENT_CLI_CATALOG.globalFlags.filter(flag => ['string', 'string-list', 'port', 'enum'].includes(flag.kind)).flatMap(flag => [...flag.tokens]);
     expect([...new Set(required)].sort()).toEqual([...valueOptions].sort());
   });
 

@@ -156,9 +156,10 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
     id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-npx-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
     try {
       // The real dependency capture and two compiler runs took 135 seconds on
-      // the development host and exceeded 180 on hosted CI. Keep a bounded
+      // the development host. Hosted CI reached 236 seconds before the final
+      // member turn, so allow that turn and settlement within a bounded
       // settlement deadline with cleanup room inside the enclosing test timer.
-      await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), `actual Node/npm ${mode} settlement`, mode === 'direct' ? 120_000 : 240_000);
+      await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), `actual Node/npm ${mode} settlement`, mode === 'direct' ? 120_000 : 360_000);
     } catch (error) {
       throw new Error(`Actual runtime did not settle: ${JSON.stringify({ mode, contract: runner.get(id), results: [...results], calls,
         members: runtime.agentManager.list().map(member => ({ id: member.id, status: member.status })) })}`, { cause: error });
@@ -179,4 +180,4 @@ for (const mode of ['direct', 'validators'] as const)
   test.skipIf(!supported)(mode === 'direct'
     ? 'actual default member direct Node/npm commands admit their runtime without prior validators'
     : 'actual default member typecheck/lint validators use admitted Node/npm and real project dependencies',
-  () => assertActualRuntimeFlow(mode), mode === 'direct' ? 150_000 : 300_000);
+  () => assertActualRuntimeFlow(mode), mode === 'direct' ? 150_000 : 420_000);

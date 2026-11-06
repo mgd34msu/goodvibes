@@ -671,7 +671,7 @@ export class ModelPickerModal {
     }
   }
 
-  getSyntheticModelInfo(modelId: string) {
+  getSyntheticModelInfo(modelId: string): ReturnType<ProviderRegistry['getSyntheticModelInfoFromCatalog']> {
     return this.providerRegistry.getSyntheticModelInfoFromCatalog(modelId);
   }
 

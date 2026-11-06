@@ -25,9 +25,16 @@ export function buildProviderRoutingSnapshot(
     toolModelId: config.tools.llmModel,
   };
 }
+export interface RuntimeDefaultsSnapshot {
+  providerReasoningEffort: GoodVibesConfig['provider']['reasoningEffort'];
+  permissionsMode: GoodVibesConfig['permissions']['mode'];
+  behavior: GoodVibesConfig['behavior'];
+  display: GoodVibesConfig['display'];
+  secretStoragePolicy: GoodVibesConfig['storage']['secretPolicy'];
+}
 export function buildRuntimeDefaultsSnapshot(
   config: Pick<GoodVibesConfig, 'provider' | 'permissions' | 'behavior' | 'display' | 'storage'>,
-) {
+): RuntimeDefaultsSnapshot {
   return {
     providerReasoningEffort: config.provider.reasoningEffort,
     permissionsMode: config.permissions.mode,
@@ -148,7 +155,7 @@ export function captureOnboardingReadFacts<
   captureConfig: () => Config,
   providerFromModel: (model: string) => string,
   readState: Parameters<typeof buildAcknowledgementSnapshot>[1],
-) {
+): { capturedAt: number; config: Config; providerRouting: ReturnType<typeof buildProviderRoutingSnapshot>; runtimeDefaults: RuntimeDefaultsSnapshot; acknowledgements: ReturnType<typeof buildAcknowledgementSnapshot> } {
   const capturedAt = deps.clock?.() ?? Date.now();
   const config = captureConfig();
   return {

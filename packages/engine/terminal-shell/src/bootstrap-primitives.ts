@@ -4,7 +4,7 @@ import {
   createFeatureFlagManager,
   deriveFeatureStates,
   bindFeatureSettingsBridge,
-} from '../../sdk/src/platform/runtime/feature-flags/index.js';
+} from '@goodvibes-jev/engine/sdk/platform/runtime/feature-flags';
 import {
   RuntimeEventBus,
   configureRuntimeEventBusDefaults,

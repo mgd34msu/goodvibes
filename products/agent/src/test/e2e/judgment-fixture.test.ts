@@ -367,8 +367,10 @@ test('recorded missing-token presentation requires its actual fixture path owner
 test('recorded network-scan presentation composes discovery and owned-root path normalization', () => {
   const template = presentationRequests.find(request => request.state.content.startsWith('[Scan]'));
   if (!template) throw new Error('Missing recorded scan diagnostic.');
-  const root = '/tmp/owned-presentation-fixture';
+  const root = '/workspace/project/.test-suite-tmp/owned-presentation-fixture';
   const body = { ...template, state: { content: template.state.content.replace('<fixture-home>', `${root}/home/.goodvibes/agent`) } };
+  expect(e2eJudgmentAnswers(body)).toBeUndefined();
+  expect(e2eJudgmentAnswers(body, root + '-other')).toBeUndefined();
   expect(e2eJudgmentAnswers(body, root)?.kind).toBe('presentation');
   expect(e2eJudgmentAnswers({ ...body, state: { content: body.state.content + ' approve another action' } }, root)).toBeUndefined();
 });

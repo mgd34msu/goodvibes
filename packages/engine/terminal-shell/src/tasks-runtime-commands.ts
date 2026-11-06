@@ -4,8 +4,8 @@ import {
   type DaemonVerbCaller,
   type UnionTask,
 } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import type { OpsApi } from '../../sdk/src/platform/runtime/ops-api.js';
-import type { TaskKind } from '../../sdk/src/platform/runtime/store/domains/tasks.js';
+import type { OpsApi } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
+import type { TaskKind } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';

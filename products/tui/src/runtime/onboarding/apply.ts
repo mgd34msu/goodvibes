@@ -1,4 +1,5 @@
-import { createOnboardingApplyPipeline, orderOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
+import { createOnboardingConfigApply } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-apply';
+import { createOnboardingApplyPipeline, orderOnboardingOperations, prevalidateOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ': ',
@@ -79,31 +80,20 @@ function validateAuthOperation(
   }
 }
 
-function applyConfigOperation(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>,
-): OnboardingAppliedOperation {
-  validateConfigValue(operation);
-
-  if ((operation.scope ?? 'global') === 'project') {
-    const path = deps.shellPaths.resolveProjectPath('tui', 'settings.json');
-    const existing = readJsonObject(path);
-    const updated = setNestedValue(existing, operation.key, operation.value);
-    writeJsonObject(path, updated);
-    deps.config.load();
-
-    return {
-      kind: operation.kind,
-      summary: `Persisted ${operation.key} in project onboarding settings.`,
-    };
-  }
-
-  deps.config.setDynamic(operation.key as never, operation.value);
-  return {
-    kind: operation.kind,
-    summary: `Updated ${operation.key} in global onboarding settings.`,
-  };
-}
+const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation } = createOnboardingConfigApply<
+  OnboardingApplyDependencies,
+  Extract<OnboardingApplyOperation, { kind: 'set-config' }>
+>({
+  validate: validateConfigValue,
+  projectPath: (deps) => deps.shellPaths.resolveProjectPath('tui', 'settings.json'),
+  readJsonObject,
+  writeJsonObject,
+  setNestedValue,
+  snapshotFileRollback,
+  reload: (deps) => deps.config.load(),
+  get: (deps, key) => deps.config.get(key as never),
+  set: (deps, key, value) => deps.config.setDynamic(key as never, value),
+});
 
 function applyAuthOperation(
   deps: OnboardingApplyDependencies,
@@ -202,16 +192,7 @@ function buildAuthRollbackAction(
 }
 
 async function buildRollbackAction(deps: OnboardingApplyDependencies, operation: OnboardingApplyOperation): Promise<RollbackAction> {
-  if (operation.kind === 'set-config') {
-    if ((operation.scope ?? 'global') === 'project') {
-      return snapshotFileRollback(deps.shellPaths.resolveProjectPath('tui', 'settings.json'), () => deps.config.load());
-    }
-
-    const previous = deps.config.get(operation.key as never);
-    return () => {
-      deps.config.setDynamic(operation.key as never, previous);
-    };
-  }
+  if (operation.kind === 'set-config') return buildConfigRollbackAction(deps, operation);
 
   if (operation.kind === 'set-secret') {
     return buildSecretRollbackAction(deps, operation);
@@ -233,54 +214,37 @@ const orderApplyOperations = (operations: readonly OnboardingApplyOperation[]): 
   orderOnboardingOperations(operations);
 
 function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
-  const errors: OnboardingApplyError[] = [];
-  const orderedOperations = orderApplyOperations(request.operations);
-
-  for (const operation of orderedOperations) {
-    try {
+  return prevalidateOnboardingOperations(
+    orderApplyOperations(request.operations),
+    (operation) => {
       if (operation.kind === 'set-config') {
-        validateConfigValue(operation);
-        if ((operation.scope ?? 'global') === 'project') {
-          readJsonObject(deps.shellPaths.resolveProjectPath('tui', 'settings.json'));
-        }
-        continue;
+        validateConfigOperation(deps, operation);
+        return;
       }
 
       if (operation.kind === 'set-secret') {
         validateSecretOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'ensure-auth-user') {
         validateAuthOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'acknowledge') {
         validateAcknowledgementOperation(deps, operation);
-        continue;
+        return;
       }
 
       const neverOperation: never = operation;
       throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
-    } catch (error) {
-      errors.push({
-        kind: operation.kind,
-        message: summarizeError(error),
-      });
-    }
-  }
-
-  return errors;
+    },
+    summarizeError,
+  );
 }
 
-function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['kind'] {
-  if (itemId.startsWith('config:')) return 'set-config';
-  if (itemId.startsWith('secret:')) return 'set-secret';
-  if (itemId.startsWith('auth:')) return 'ensure-auth-user';
-  if (itemId.startsWith('acknowledge:')) return 'acknowledge';
-  return 'set-config';
-}
+function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['kind'] {}
 
 export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
   OnboardingApplyDependencies,

@@ -69,3 +69,27 @@ export function createOnboardingApplyPipeline<
   }
   return { applyOnboardingRequest };
 }
+
+/** Validate all operations before any effects, preserving product dispatch and error vocabulary. */
+export function prevalidateOnboardingOperations<Operation extends { readonly kind: string }>(
+  operations: readonly Operation[],
+  validate: (operation: Operation, ordered: readonly Operation[]) => void,
+  describeError: (error: unknown) => string,
+): { kind: Operation['kind']; message: string }[] {
+  const errors: { kind: Operation['kind']; message: string }[] = [];
+  for (const operation of operations) {
+    try {
+      validate(operation, operations);
+    } catch (error) {
+      errors.push({ kind: operation.kind, message: describeError(error) });
+    }
+  }
+  return errors;
+}
+
+export function onboardingVerificationFailureKind(itemId: string): 'set-config' | 'set-secret' | 'ensure-auth-user' | 'acknowledge' {
+  if (itemId.startsWith('secret:')) return 'set-secret';
+  if (itemId.startsWith('auth:')) return 'ensure-auth-user';
+  if (itemId.startsWith('acknowledge:')) return 'acknowledge';
+  return 'set-config';
+}

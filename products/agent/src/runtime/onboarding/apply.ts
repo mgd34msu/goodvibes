@@ -1,4 +1,10 @@
-import { createOnboardingApplyPipeline, orderOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
+import { createOnboardingConfigApply } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-apply';
+import {
+  createOnboardingApplyPipeline,
+  orderOnboardingOperations,
+  prevalidateOnboardingOperations,
+  onboardingVerificationFailureKind,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ' ',
@@ -147,82 +153,25 @@ function validateCreateLocalNoteOperation(
   if (duplicate) throw new Error(`Note already exists: ${duplicate.id}`);
 }
 
-function applyConfigOperation(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>,
-): OnboardingAppliedOperation {
-  validateConfigValue(operation);
-
-  if ((operation.scope ?? 'global') === 'project') {
-    const path = deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json');
-    const existing = readJsonObject(path);
-    if (isLegacyFeatureConfigKey(operation.key)) {
-      // Legacy featureFlags keys dissolved onto domain settings keys: persist
-      // the translated domain-key writes, never a featureFlags record.
-      const writes = expandLegacyFeatureConfigValue(operation.key, operation.value);
-      let updated = existing;
-      for (const write of writes) {
-        updated = setNestedValue(updated, write.key, write.value);
-      }
-      writeJsonObject(path, updated);
-      deps.config.load();
-      return {
-        kind: operation.kind,
-        summary: `Persisted ${writes.map((write) => write.key).join(', ')} (legacy ${operation.key}) in project onboarding settings.`,
-      };
-    }
-    const updated = setNestedValue(existing, operation.key, operation.value);
-    writeJsonObject(path, updated);
-    deps.config.load();
-
-    return {
-      kind: operation.kind,
-      summary: `Persisted ${operation.key} in project onboarding settings.`,
-    };
-  }
-
-  if (isLegacyFeatureConfigKey(operation.key)) {
-    const writes = expandLegacyFeatureConfigValue(operation.key, operation.value);
-    for (const write of writes) {
-      deps.config.setDynamic(write.key, write.value);
-    }
-    return {
-      kind: operation.kind,
-      summary: `Updated ${writes.map((write) => write.key).join(', ')} (legacy ${operation.key}) in global onboarding settings.`,
-    };
-  }
-  deps.config.setDynamic(operation.key, operation.value);
-  return {
-    kind: operation.kind,
-    summary: `Updated ${operation.key} in global onboarding settings.`,
-  };
-}
+const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation } = createOnboardingConfigApply<
+  OnboardingApplyDependencies,
+  Extract<OnboardingApplyOperation, { kind: 'set-config' }>
+>({
+  validate: validateConfigValue,
+  projectPath: (deps) => deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json'),
+  readJsonObject,
+  writeJsonObject,
+  setNestedValue,
+  snapshotFileRollback,
+  reload: (deps) => deps.config.load(),
+  get: (deps, key) => deps.config.get(key as never),
+  set: (deps, key, value) => deps.config.setDynamic(key as never, value),
+  translate: (operation) =>
+    isLegacyFeatureConfigKey(operation.key) ? expandLegacyFeatureConfigValue(operation.key, operation.value) : undefined,
+});
 
 async function buildRollbackAction(deps: OnboardingApplyDependencies, operation: OnboardingApplyOperation): Promise<RollbackAction> {
-  if (operation.kind === 'set-config') {
-    if ((operation.scope ?? 'global') === 'project') {
-      return snapshotFileRollback(deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json'), () =>
-        deps.config.load(),
-      );
-    }
-
-    const operationKey = operation.key;
-    if (isLegacyFeatureConfigKey(operationKey)) {
-      // Snapshot the domain settings keys the translated writes will touch and
-      // restore those exact values, no featureFlags category exists to merge.
-      const writes = expandLegacyFeatureConfigValue(operationKey, operation.value);
-      const previousValues = writes.map((write) => ({ key: write.key, previous: deps.config.get(write.key) }));
-      return () => {
-        for (const entry of previousValues) {
-          deps.config.setDynamic(entry.key, entry.previous);
-        }
-      };
-    }
-    const previous = deps.config.get(operationKey);
-    return () => {
-      deps.config.setDynamic(operationKey, previous);
-    };
-  }
+  if (operation.kind === 'set-config') return buildConfigRollbackAction(deps, operation);
 
   if (operation.kind === 'set-secret') {
     return buildSecretRollbackAction(deps, operation);
@@ -383,37 +332,32 @@ const orderApplyOperations = (operations: readonly OnboardingApplyOperation[]): 
   ]);
 
 function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
-  const errors: OnboardingApplyError[] = [];
-  const orderedOperations = orderApplyOperations(request.operations);
-
-  for (const operation of orderedOperations) {
-    try {
+  return prevalidateOnboardingOperations(
+    orderApplyOperations(request.operations),
+    (operation, orderedOperations) => {
       if (operation.kind === 'set-config') {
-        validateConfigValue(operation);
-        if ((operation.scope ?? 'global') === 'project') {
-          readJsonObject(deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json'));
-        }
-        continue;
+        validateConfigOperation(deps, operation);
+        return;
       }
 
       if (operation.kind === 'set-secret') {
         validateSecretOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'ensure-auth-user') {
         validateAuthOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'acknowledge') {
         validateAcknowledgementOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'create-agent-profile') {
         validateCreateAgentProfileOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'select-agent-profile') {
@@ -424,54 +368,44 @@ function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: Onb
               resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, operation.name).id,
         );
         if (!createdEarlier) validateSelectAgentProfileOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'create-local-persona') {
         validateCreateLocalPersonaOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'create-local-note') {
         validateCreateLocalNoteOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'create-local-skill') {
         validateCreateLocalSkillOperation(deps, operation);
-        continue;
+        return;
       }
 
       if (operation.kind === 'create-local-routine') {
         validateCreateLocalRoutineOperation(deps, operation);
-        continue;
+        return;
       }
 
       const neverOperation: never = operation;
       throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
-    } catch (error) {
-      errors.push({
-        kind: operation.kind,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return errors;
+    },
+    (error) => (error instanceof Error ? error.message : String(error)),
+  );
 }
 
 function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['kind'] {
-  if (itemId.startsWith('config:')) return 'set-config';
-  if (itemId.startsWith('secret:')) return 'set-secret';
-  if (itemId.startsWith('auth:')) return 'ensure-auth-user';
-  if (itemId.startsWith('acknowledge:')) return 'acknowledge';
   if (itemId.startsWith('agent-profile:')) return 'create-agent-profile';
   if (itemId.startsWith('selected-agent-profile:')) return 'select-agent-profile';
   if (itemId.startsWith('local-note:')) return 'create-local-note';
   if (itemId.startsWith('local-persona:')) return 'create-local-persona';
   if (itemId.startsWith('local-skill:')) return 'create-local-skill';
   if (itemId.startsWith('local-routine:')) return 'create-local-routine';
-  return 'set-config';
+  return onboardingVerificationFailureKind(itemId);
 }
 
 export const { applyOnboardingRequest } = createOnboardingApplyPipeline<

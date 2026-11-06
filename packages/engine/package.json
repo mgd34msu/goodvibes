@@ -2983,6 +2983,11 @@
       "bun": "./terminal-shell/src/kill-ring.ts",
       "types": "./terminal-shell/dist/kill-ring.d.ts",
       "import": "./terminal-shell/dist/kill-ring.js"
+    },
+    "./terminal-shell/onboarding-config-apply": {
+      "bun": "./terminal-shell/src/onboarding-config-apply.ts",
+      "types": "./terminal-shell/dist/onboarding-config-apply.d.ts",
+      "import": "./terminal-shell/dist/onboarding-config-apply.js"
     }
   },
   "publishConfig": {

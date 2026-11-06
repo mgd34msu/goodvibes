@@ -1803,7 +1803,7 @@
       "path": "runtime/onboarding/apply.ts",
       "baselineTuiLines": 614,
       "baselineSimilarity": 0.5491,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "isPlainObject",
         "readJsonObject",
@@ -1822,7 +1822,7 @@
         "onboarding-config-validation",
         "onboarding-apply-pipeline: ordered apply, verification, rollback and error accounting"
       ],
-      "notes": "Shared config validation, file/secret/acknowledgement primitives and ordered transaction/verification/rollback pipeline. Product operation validators and effects retain local auth creation versus Agent refusal, profile/persona/note/routine extensions and distinct settings roots."
+      "notes": "Shared operation ordering, prevalidation/error collection, config persistence/rollback and apply/verify/rollback pipeline. TUI owns local auth administration; Agent refuses it and owns Agent-local behavior/profile mutations and legacy feature-key translation."
     },
     {
       "path": "runtime/onboarding/derivation.ts",

@@ -147,6 +147,15 @@ decision-model requirement; they cannot return an apparently clean scan or write
 an inferred API artifact. Summary formatting preserves these limitations and
 Classic provenance.
 
+Child failure envelopes retain their actual error, termination metadata and
+partial output in Classic. Free-text failures keep the generic error code;
+stamped host reason codes remain authoritative. Editor notices use a neutral
+presentation without a semantic blocking claim, and declared secret echoes stay
+protected. Service-log display and transcript export keep local redaction and
+original source/currentness checks without acquiring an unused decision owner.
+Cluster joins accept an unambiguous exact declared group name or ID in Classic;
+description-based selection does not authorize a join.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

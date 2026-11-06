@@ -1,6 +1,7 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { defineBattery, STAKES_BANDS, yesNo, type BatteryRun } from '@goodvibes-jev/judgment/decisions';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** Read-only presentation meaning, never permission to submit or save a form. */
 export const editorMessageBlocking = defineBattery({
@@ -22,6 +23,7 @@ export const editorMessageBlocking = defineBattery({
 });
 
 export type EditorMessageReading = BatteryRun<typeof editorMessageBlocking.items>;
+export type EditorMessagePresentation = EditorMessageReading | { readonly provenance: 'classic' };
 export interface EditorMessageInput {
   readonly message: string;
   readonly kind: string;
@@ -29,7 +31,13 @@ export interface EditorMessageInput {
 }
 
 /** Privacy inspection precedes port acquisition, including failure/outage paths. */
-export async function readEditorMessage(input: EditorMessageInput, signal: AbortSignal): Promise<EditorMessageReading> {
+export async function readEditorMessage(input: EditorMessageInput, signal: AbortSignal): Promise<EditorMessagePresentation> {
+  return decisionOrClassic(() => readDecisionEditorMessage(input, signal), () => {
+    signal.throwIfAborted();
+    return Object.freeze({ provenance: 'classic' as const });
+  });
+}
+async function readDecisionEditorMessage(input: EditorMessageInput, signal: AbortSignal): Promise<EditorMessageReading> {
   const state = snapshotJudgmentInput(input) as EditorMessageInput;
   signal.throwIfAborted();
   return editorMessageBlocking.run(judgmentPort(editorMessageBlocking.name), {

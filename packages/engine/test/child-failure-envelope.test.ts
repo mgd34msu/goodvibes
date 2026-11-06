@@ -7,6 +7,7 @@ import {
 } from '../sdk/src/platform/tools/agent/child-failure-envelope.js';
 import type { AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 
 // Free-text errors are read by engine.tools.child-failure-reason; these fakes
 // stand in for Jev. Wording no entry names reads as `error`.
@@ -33,6 +34,19 @@ function makeRecord(over: Partial<AgentRecord>): AgentRecord {
     ...over,
   } as AgentRecord;
 }
+
+test('Classic child failure publication preserves actual outputs and stamped reasons without decision readings', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const record = makeRecord({ error: 'An unclassified provider failure', fullOutput: 'Completed the first edit.' });
+    const envelope = await buildChildFailureEnvelope(record);
+    expect(envelope).toMatchObject({ provenance: 'classic', reason: { code: 'error', message: record.error }, partialOutputs: { lastOutput: 'Completed the first edit.' } });
+    expect(await classifyChildFailureReason(makeRecord({ error: 'Unclassified prose', failureReason: 'max_turns' }))).toBe('max_turns');
+    expect(await classifyChildFailureReason(makeRecord({ status: 'cancelled', terminationKind: 'interrupt' }))).toBe('interrupted');
+    const controller = new AbortController(); controller.abort();
+    await expect(buildChildFailureEnvelope(record, { signal: controller.signal })).rejects.toThrow();
+    expect(failureReadings.requests).toHaveLength(0);
+  });
+});
 
 describe('child-failure reason classification', () => {
   test('a reason code stamped at the source decides in code, without a reading', async () => {

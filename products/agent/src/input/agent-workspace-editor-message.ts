@@ -5,6 +5,7 @@ import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 export type EditorMessageState =
   | { readonly status: 'empty'; readonly revision: number }
   | { readonly status: 'pending' | 'unavailable' | 'protected'; readonly revision: number }
+  | { readonly status: 'classic'; readonly revision: number; readonly provenance: 'classic' }
   | { readonly status: 'read' | 'uncertain'; readonly revision: number; readonly reading: EditorMessageReading };
 
 interface ProtectedSpan { readonly length: number; readonly digest: string; }
@@ -90,6 +91,11 @@ export class WorkspaceEditorMessage {
     const controller = this.controller = new AbortController();
     this.state = { status: 'pending', revision };
     void readEditorMessage({ message: editor.message, kind: editor.kind, mode: editor.mode }, controller.signal).then((reading) => {
+      if ('provenance' in reading) {
+        if (controller.signal.aborted || revision !== this.revision) return;
+        this.state = { status: 'classic', revision, provenance: 'classic' };
+        requestRender(); return;
+      }
       if (controller.signal.aborted || revision !== this.revision) {
         reading.recordAction('Discarded stale editor message presentation reading.');
         return;

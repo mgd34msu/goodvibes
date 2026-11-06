@@ -9,6 +9,7 @@ import type { AgentWorkspaceLocalEditor } from '../../input/agent-workspace-type
 import type { CommandContext } from '../../input/command-registry.ts';
 import { renderAgentWorkspace } from '../../renderer/agent-workspace.ts';
 import { WORKSPACE_PALETTE } from '../../renderer/fullscreen-workspace.ts';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 const previous = installJudgmentPort(undefined);
 afterEach(() => {
@@ -17,6 +18,23 @@ afterEach(() => {
 const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
+
+test('Classic editor notices remain visible and neutral while declared secret echoes stay protected', async () => {
+  const fake = fakePort(() => noulAnswer(0.99));
+  installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const { ws } = workspace();
+    ws.localEditor = editor('Ready for explicit owner input.');
+    await flush();
+    expect(ws.editorMessageState.status).toBe('classic');
+    expect(messageColor(ws, 'Ready for explicit owner input.')).toBe(WORKSPACE_PALETTE.info);
+    ws.localEditor = { ...editor('Echo synthetic-private-value'), fields: [{ id: 'secret', label: 'Secret', value: 'synthetic-private-value', required: true, multiline: false, hint: '', redact: true }] };
+    await flush();
+    expect(ws.editorMessageState.status).toBe('protected');
+    expect(fake.requests).toHaveLength(0);
+    ws.close();
+  });
+});
 const editor = (message: string): AgentWorkspaceLocalEditor => ({
   kind: 'note',
   mode: 'create',

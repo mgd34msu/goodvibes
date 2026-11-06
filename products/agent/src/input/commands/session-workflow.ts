@@ -19,6 +19,7 @@ import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/
 import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/sdk/platform/core';
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
@@ -114,14 +115,14 @@ async function printSessionExport(
       drainOwned(result);
       throw new TranscriptSourceChangedError();
     }
-    readingOwner?.assertCurrent();
+    if (!isClassicOperation()) readingOwner?.assertCurrent();
     assertSource();
   };
   assertCurrent();
-  try {
+  if (!isClassicOperation()) try {
     readingOwner = captureJudgmentPort('agent.session-export', { signal, assertCurrent: assertSource });
   } catch (error) {
-    if (!(error instanceof JudgmentPortMissingError)) throw error;
+    if (!activateClassicFallback(error) && !(error instanceof JudgmentPortMissingError)) throw error;
   }
   const formatted = formatSessionExport(sessionId, title, messages, format, {
     role: (message) => message.role,

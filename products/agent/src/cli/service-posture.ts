@@ -25,6 +25,7 @@ import '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { dialHostForConfiguredHost } from '../config/connected-host-dial.ts';
+import { isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 export interface CliExternalHostLifecyclePosture {
   readonly platform: 'manual';
@@ -167,7 +168,7 @@ export async function buildCliServicePosture(
     ...reading,
     assertCurrent: () => {
       assertCurrent();
-      logOwner?.assertCurrent();
+      if (!isClassicOperation()) logOwner?.assertCurrent();
     },
   };
   const log = await readServiceLogPosture(configuredLogPath, options.logTailBytes ?? 4096, logReading, () => {
@@ -178,7 +179,7 @@ export async function buildCliServicePosture(
   }
 
   assertCurrent();
-  logOwner?.assertCurrent();
+  if (!isClassicOperation()) logOwner?.assertCurrent();
   return {
     config,
     managed: createExternalHostLifecycle(configuredLogPath),

@@ -13,6 +13,7 @@ import { assertProjectionCurrent } from '../input-projection.js';
 import { childFailureReason, childFailureView } from '../batteries/child-failure-reason.js';
 import type { AgentRecord } from './manager.js';
 import type { ConversationMessageSnapshot } from '../../core/conversation.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 
 /** Structured reason code for why a child terminated abnormally. */
 export type ChildFailureReasonCode =
@@ -27,6 +28,7 @@ export type ChildFailureReasonCode =
   | 'error';
 
 export interface ChildFailureEnvelope {
+  readonly provenance?: 'classic';
   readonly agentId: string;
   /** The lifecycle phase the child was in when it terminated (best-effort, honest). */
   readonly phase: string;
@@ -102,22 +104,24 @@ export async function classifyChildFailureReason(
   }
   const error = record.error?.trim() ?? '';
   if (error.length === 0) { assertChildFailureCurrent(options); return 'error'; }
-  const authority = options?.signal === undefined && options?.assertCurrent === undefined
-    ? undefined : captureJudgmentPort(CHILD_FAILURE_SITE, options);
-  const port = authority?.port ?? judgmentPort(CHILD_FAILURE_SITE);
-  const state = childFailureView(error);
-  assertChildFailureCurrent(options);
-  const run = await childFailureReason.run(port, state, {
-    site: CHILD_FAILURE_SITE,
-    ...(authority ? { signal: authority.signal } : {}),
-  });
-  authority?.assertCurrent();
-  const reading = run.readings.reason;
-  const code: ChildFailureReasonCode = reading.outcome === 'act' ? reading.choice : 'error';
-  authority?.assertCurrent();
-  run.recordAction(`reported ${code}`);
-  authority?.assertCurrent();
-  return code;
+  return decisionOrClassic(async () => {
+    const authority = options?.signal === undefined && options?.assertCurrent === undefined
+      ? undefined : captureJudgmentPort(CHILD_FAILURE_SITE, options);
+    const port = authority?.port ?? judgmentPort(CHILD_FAILURE_SITE);
+    const state = childFailureView(error);
+    assertChildFailureCurrent(options);
+    const run = await childFailureReason.run(port, state, {
+      site: CHILD_FAILURE_SITE,
+      ...(authority ? { signal: authority.signal } : {}),
+    });
+    authority?.assertCurrent();
+    const reading = run.readings.reason;
+    const code: ChildFailureReasonCode = reading.outcome === 'act' ? reading.choice : 'error';
+    authority?.assertCurrent();
+    run.recordAction(`reported ${code}`);
+    authority?.assertCurrent();
+    return code;
+  }, () => { assertChildFailureCurrent(options); return 'error'; });
 }
 
 /** Best-effort, honest lifecycle phase label from what the record records. */
@@ -156,6 +160,10 @@ export async function buildChildFailureEnvelope(
   record: AgentRecord,
   opts?: ChildFailureReadingOptions & { readonly transcriptTail?: readonly ConversationMessageSnapshot[] | undefined },
 ): Promise<ChildFailureEnvelope> {
+  return withConfiguredDecisionModelPolicy(() => buildOwnedChildFailureEnvelope(record, opts));
+}
+async function buildOwnedChildFailureEnvelope(record: AgentRecord,
+  opts?: ChildFailureReadingOptions & { readonly transcriptTail?: readonly ConversationMessageSnapshot[] | undefined }): Promise<ChildFailureEnvelope> {
   const reasonCode = await classifyChildFailureReason(record, opts);
   // A failed record whose fullOutput is the failure message itself would merely
   // echo reason.message; treat that as "no genuine output" so partialOutputs
@@ -169,6 +177,7 @@ export async function buildChildFailureEnvelope(
   const turnsCompleted = record.usage?.turnCount;
   const producedNothing = !lastOutput && (!transcriptTail || transcriptTail.length === 0);
   const envelope: ChildFailureEnvelope = {
+    ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
     agentId: record.id,
     phase: describeChildPhase(record),
     reason: {

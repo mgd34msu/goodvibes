@@ -34,6 +34,7 @@ import {
 } from './cluster-remote-daemon-target.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import {
   describeAge,
   renderCreated,
@@ -400,6 +401,12 @@ function uniqueIdPrefix(groups: readonly DiscoveredGroup[], answer: string): Dis
  * `terminal-shell.cluster-join-group` reading, taken only when it acts.
  */
 async function readJoinGroup(answer: string, groups: readonly DiscoveredGroup[], now: number): Promise<DiscoveredGroup | undefined> {
+  return decisionOrClassic(() => readDecisionJoinGroup(answer, groups, now), () => {
+    const matches = groups.filter(group => group.groupId === answer || group.displayName === answer);
+    return matches.length === 1 ? matches[0] : undefined;
+  });
+}
+async function readDecisionJoinGroup(answer: string, groups: readonly DiscoveredGroup[], now: number): Promise<DiscoveredGroup | undefined> {
   const candidates = groups.map((group) => ({
     id: group.groupId,
     content: {

@@ -467,7 +467,7 @@ function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWo
   const selected = editor.fields[editor.selectedFieldIndex];
   const lines: ContextLine[] = [
     { text: editor.title, fg: PALETTE.title, bold: true },
-    { text: compactText(editor.message), fg: messageState.status === 'read' ? (messageState.reading.readings.blocking.verdict === 'yes' ? PALETTE.warn : PALETTE.info) : PALETTE.muted },
+    { text: compactText(editor.message), fg: messageState.status === 'read' ? (messageState.reading.readings.blocking.verdict === 'yes' ? PALETTE.warn : PALETTE.info) : messageState.status === 'classic' ? PALETTE.info : PALETTE.muted },
     { text: 'Enter next/save; Ctrl-J newline; Esc cancel.', fg: PALETTE.muted },
   ];
   if (selected) {

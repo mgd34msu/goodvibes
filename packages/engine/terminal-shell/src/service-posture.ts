@@ -5,6 +5,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding, type RuntimeEndpointId } from './cli-endpoints.js';
 import { classifyBindPosture, isNetworkFacing } from './cli-network-posture.js';
 import { redactText } from './cli-redaction.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 export interface CliServiceRuntime {
   readonly configManager: ConfigManager;
   readonly workingDirectory: string;
@@ -22,6 +23,7 @@ export interface CliServiceEndpointPosture {
 }
 
 export interface CliServiceLogPosture {
+  readonly provenance?: 'classic';
   readonly path: string | null;
   readonly exists: boolean;
   readonly size: number;
@@ -35,6 +37,9 @@ export async function readServiceLogPosture(
   options: JudgmentReadingOptions,
   captureOwner?: () => void,
 ): Promise<CliServiceLogPosture> {
+  return withConfiguredDecisionModelPolicy(() => readOwnedServiceLogPosture(path, tailBytes, options, captureOwner));
+}
+async function readOwnedServiceLogPosture(path: string | undefined, tailBytes: number, options: JudgmentReadingOptions, captureOwner?: () => void): Promise<CliServiceLogPosture> {
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
   if (!path) return { path: null, exists: false, size: 0, modifiedAt: null };
@@ -79,8 +84,10 @@ export async function readServiceLogPosture(
   };
   let tail: string;
   try {
-    captureOwner?.();
-    tail = await redactText(captured.text, { ...options, assertCurrent });
+    tail = await decisionOrClassic(() => {
+      captureOwner?.();
+      return redactText(captured.text, { ...options, assertCurrent });
+    }, () => redactText(captured.text, { ...options, assertCurrent }));
   } catch {
     // Withhold the captured bytes when redaction is unavailable. Revocation,
     // cancellation and a changed file still prevent the entire publication.
@@ -88,7 +95,8 @@ export async function readServiceLogPosture(
     return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, readError: 'Service log could not be read safely.' };
   }
   assertCurrent();
-  return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, tail };
+  return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, tail,
+    ...(isClassicOperation() ? { provenance: 'classic' as const } : {}) };
 }
 
 /** Revalidate retained configuration and synchronous ownership before publishing diagnostics. */

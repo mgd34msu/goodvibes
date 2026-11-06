@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -18,6 +19,8 @@ export interface BrowserPwaRecordCertification {
 }
 
 export interface BrowserPwaCategoryRouteRecord {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly categoryId: string;
   readonly categoryIds: readonly string[];
@@ -27,8 +30,8 @@ export interface BrowserPwaCategoryRouteRecord {
   readonly summary: string | null;
   readonly route: string;
   readonly url: string | null;
-  readonly mobileReady: boolean;
-  readonly pwaReady: boolean;
+  readonly mobileReady: boolean | null;
+  readonly pwaReady: boolean | null;
   readonly capabilities: readonly string[];
   readonly controlRoutes: Readonly<Record<string, string>>;
   readonly modelRoute: string;
@@ -38,6 +41,8 @@ export interface BrowserPwaCategoryRouteRecord {
 }
 
 export interface BrowserPwaFirstRunReceiptRecord {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly status: string;
   readonly summary: string | null;
@@ -55,6 +60,8 @@ export interface BrowserPwaFirstRunReceiptRecord {
 }
 
 export interface BrowserPwaReadModelSnapshot {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly categoryRoutes: readonly BrowserPwaCategoryRouteRecord[];
   readonly firstRunReceipts: readonly BrowserPwaFirstRunReceiptRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
@@ -269,8 +276,8 @@ function certification(input: {
   readonly modelRoute: string;
   readonly hasRoute: boolean;
   readonly hasCategories?: boolean;
-  readonly hasMobileEvidence?: boolean;
-  readonly hasPwaEvidence?: boolean;
+  readonly hasMobileEvidence?: boolean | null;
+  readonly hasPwaEvidence?: boolean | null;
 }): BrowserPwaRecordCertification {
   const base = certificationBase(input.record, input.sourcePath);
   const missingSignals = [
@@ -284,6 +291,8 @@ function certification(input: {
     ...(base.cursor ? [] : [`${input.kind} freshness cursor is not published.`]),
     ...(input.modelRoute && input.hasRoute ? [] : [`Exact ${input.kind} inspect/open route is not published.`]),
     ...(input.hasCategories === false ? ['Browser-native Agent workspace category ids are not published.'] : []),
+    ...(input.hasMobileEvidence === null ? ['Mobile/touch readiness was not evaluated during Classic operation; publish an explicit readiness field.'] : []),
+    ...(input.hasPwaEvidence === null ? ['PWA readiness was not evaluated during Classic operation; publish explicit runtime status fields.'] : []),
     ...(input.hasMobileEvidence === false ? ['Mobile/touch control evidence is not published for this browser-native route.'] : []),
     ...(input.hasPwaEvidence === false ? ['PWA runtime evidence such as manifest, service-worker, install, or offline status is not published.'] : []),
   ];
@@ -397,7 +406,8 @@ function categoryIds(record: Record<string, unknown>, index: number): readonly s
 }
 
 async function evidenceBoolean(record: Record<string, unknown>, keys: readonly string[],
-  kind: 'mobile-touch' | 'pwa-runtime', options: CatalogRankingOptions): Promise<boolean> {
+  kind: 'mobile-touch' | 'pwa-runtime', options: CatalogRankingOptions): Promise<boolean | null> {
+  if (isClassicOperation()) return readBrowserDeviceEvidence({ kind, record }, options);
   for (const key of keys) {
     const value = readBoolean(record[key])
       ?? readBoolean(readMetadata(record)[key])
@@ -410,6 +420,7 @@ async function evidenceBoolean(record: Record<string, unknown>, keys: readonly s
 }
 
 async function normalizeCategoryRoute(entry: CollectedRecord, index: number, options: CatalogRankingOptions): Promise<BrowserPwaCategoryRouteRecord | null> {
+  const beganClassic = isClassicOperation();
   const ids = categoryIds(entry.record, index);
   const categoryId = ids[0] ?? `browser-category-${index}`;
   const id = nestedString(entry.record, 'id')
@@ -426,6 +437,7 @@ async function normalizeCategoryRoute(entry: CollectedRecord, index: number, opt
   const pwaReady = await evidenceBoolean(entry.record, ['pwaReady', 'installReady', 'offlineReady', 'pwaStatus'], 'pwa-runtime', options);
   options.assertCurrent?.();
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     id,
     categoryId,
     categoryIds: ids,
@@ -451,12 +463,13 @@ async function normalizeCategoryRoute(entry: CollectedRecord, index: number, opt
       modelRoute: routeForModel,
       hasRoute: Boolean(route || Object.keys(routes).length > 0),
       hasCategories: ids.length > 0,
-      hasMobileEvidence: mobileReady || Object.keys(routes).length > 0,
+      hasMobileEvidence: mobileReady,
     }),
   };
 }
 
 async function normalizeFirstRunReceipt(entry: CollectedRecord, index: number, options: CatalogRankingOptions): Promise<BrowserPwaFirstRunReceiptRecord | null> {
+  const beganClassic = isClassicOperation();
   const id = nestedString(entry.record, 'id')
     || nestedString(entry.record, 'receiptId')
     || nestedString(entry.record, 'firstRunReceiptId')
@@ -480,6 +493,7 @@ async function normalizeFirstRunReceipt(entry: CollectedRecord, index: number, o
     || await evidenceBoolean(entry.record, ['pwaReady', 'manifestReady', 'serviceWorkerReady', 'offlineReady', 'installReady'], 'pwa-runtime', options);
   options.assertCurrent?.();
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     id,
     status,
     summary: safeNullablePreview(nestedString(entry.record, 'summary') || nestedString(entry.record, 'detail'), 220),
@@ -586,6 +600,11 @@ export function certifiedBrowserPwaFirstRunReceipts(
 
 export async function browserPwaReadModelSnapshot(context: CommandContext,
   options: CatalogRankingOptions = {}): Promise<BrowserPwaReadModelSnapshot> {
+  return withConfiguredDecisionModelPolicy(() => ownedBrowserPwaReadModelSnapshot(context, options));
+}
+
+async function ownedBrowserPwaReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<BrowserPwaReadModelSnapshot> {
+  const beganClassic = isClassicOperation();
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const native = captureCatalogProducerSources(context, ["context.platform.readModels.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.workspaceRoutes", "context.platform.readModels.browserPwa.agentWorkspaceRoutes", "context.platform.readModels.webDashboard.categoryRoutes", "context.platform.readModels.webDashboard.workspaceRoutes", "context.platform.readModels.browserCockpit.categoryRoutes", "context.platform.readModels.pwa.workspaceRoutes", "context.platform.readModels.browser.categoryRoutes", "context.platform.readModels.browserPwaRoutes", "context.ops.browserPwa.categoryRoutes", "context.clients.operator.browserPwa.categoryRoutes", "context.clients.operatorSdk.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.readModels.browserPwa.receipts", "context.platform.readModels.browserPwa.runtimeReceipts", "context.platform.readModels.webDashboard.firstRunReceipts", "context.platform.readModels.browserCockpit.firstRunReceipts", "context.platform.readModels.pwa.firstRunReceipts", "context.platform.readModels.firstRun.browserPwaReceipts", "context.ops.browserPwa.firstRunReceipts", "context.clients.operator.browserPwa.firstRunReceipts", "context.clients.operatorSdk.browserPwa.firstRunReceipts"], ["getSnapshot", "snapshot", "toJSON", "listCategoryRoutes", "listWorkspaceRoutes", "listAgentWorkspaceRoutes", "listRoutes", "listFirstRunReceipts", "listReceipts", "listRuntimeReceipts", "listEvents", "list"]);
   const categoryEntries = categorySources(native).flatMap((candidate) =>
@@ -611,6 +630,7 @@ export async function browserPwaReadModelSnapshot(context: CommandContext,
       if (record) firstRunReceipts.push(record);
     }
     const result = {
+      ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
       categoryRoutes: dedupeById(categoryRoutes), firstRunReceipts: dedupeById(firstRunReceipts),
       sourceCounts: { ...sourceCounts(captured.categoryEntries), ...sourceCounts(captured.receiptEntries) },
     };

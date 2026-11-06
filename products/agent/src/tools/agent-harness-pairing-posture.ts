@@ -1,3 +1,4 @@
+import { isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import * as nativeOs from 'node:os';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
@@ -576,11 +577,13 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       id: 'camera-location-sensors',
       label: 'Camera, screen, and location sensors',
       domain: 'device',
-      status: sensorReady ? 'ready' : 'not-published',
+      status: sensorReady ? 'ready' : isClassicOperation() && liveDevice.capabilities.length > 0 ? 'attention' : 'not-published',
       userOutcome: 'Use phone camera, screen, location, or local device commands only after the daemon/companion publishes permission-scoped records.',
       summary: sensorReady
         ? 'The SDK/daemon published certified permission-scoped camera, screen, location, or device-command capability records.'
-        : 'Camera, screen, location, and device-command adapters are not published by the current Agent-visible SDK/daemon contract.',
+        : isClassicOperation() && liveDevice.capabilities.length > 0
+          ? 'Device records are published, but Classic operation did not interpret their descriptions. No exact ready sensor capability declaration matched; inspect the actual records.'
+          : 'Camera, screen, location, and device-command adapters are not published by the current Agent-visible SDK/daemon contract.',
       nextStep: sensorReady
         ? 'Inspect the certified device record and use only its returned confirmed permission/control routes.'
         : 'Inspect operator methods for newly published camera/location/screen contracts before claiming device access.',
@@ -598,7 +601,8 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         'host action:"capabilities" includeParameters:true',
       ],
       evidence: {
-        publishedByCurrentAgentContract: sensorReady,
+        publishedByCurrentAgentContract: sensorReady ? true : isClassicOperation() && liveDevice.capabilities.length > 0 ? null : false,
+        ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
         liveDeviceRecords: liveDevice.capabilities.length,
         ...liveDeviceEvidence(sensorRecords),
       },

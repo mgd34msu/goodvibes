@@ -13,3 +13,5 @@ export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionMod
   type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';
 
 export { prepareSystemMessagePresentation, peekSystemMessagePresentation, type SystemMessagePresentation } from './system-message-presentation.js';
+
+export { declaredClassicCapabilityEvidence } from './classic-capability-facts.js';

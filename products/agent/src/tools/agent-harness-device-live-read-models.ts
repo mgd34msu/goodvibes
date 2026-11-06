@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -19,6 +20,8 @@ export interface DeviceLiveRecordCertification {
 }
 
 export interface DeviceLiveCapabilityRecord {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly id: string;
   readonly capabilityId: string;
   readonly label: string | null;
@@ -36,6 +39,8 @@ export interface DeviceLiveCapabilityRecord {
 }
 
 export interface DeviceLiveReadModelSnapshot {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly capabilities: readonly DeviceLiveCapabilityRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
 }
@@ -281,6 +286,7 @@ function normalizeCapability(entry: CollectedRecord, index: number): DeviceLiveC
   const permissionScope = nestedString(entry.record, 'permissionScope') || nestedString(entry.record, 'scope') || nestedString(entry.record, 'permission');
   const status = nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown';
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     id,
     capabilityId: capId,
     label: safeNullablePreview(nestedString(entry.record, 'label') || nestedString(entry.record, 'title'), 120),
@@ -342,6 +348,10 @@ export async function certifiedDeviceLiveRecords(
   terms: readonly string[] = [],
   options: CatalogRankingOptions = {},
 ): Promise<readonly DeviceLiveCapabilityRecord[]> {
+  return withConfiguredDecisionModelPolicy(() => ownedCertifiedDeviceLiveRecords(snapshot, capabilityId, terms, options));
+}
+
+async function ownedCertifiedDeviceLiveRecords(snapshot: DeviceLiveReadModelSnapshot, capabilityId: string, terms: readonly string[], options: CatalogRankingOptions): Promise<readonly DeviceLiveCapabilityRecord[]> {
   const original = snapshotSources.get(snapshot);
   if (!original) throw new ToolInputProjectionError('invalid');
   original.assertSourceCurrent();
@@ -369,6 +379,10 @@ export async function certifiedDeviceLiveRecords(
 
 export async function deviceLiveReadModelSnapshot(context: CommandContext,
   options: CatalogRankingOptions = {}): Promise<DeviceLiveReadModelSnapshot> {
+  return withConfiguredDecisionModelPolicy(() => ownedDeviceLiveReadModelSnapshot(context, options));
+}
+
+async function ownedDeviceLiveReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<DeviceLiveReadModelSnapshot> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const native = captureCatalogProducerSources(context, ["context.platform.readModels.device.capabilities", "context.platform.readModels.device.sensors", "context.platform.readModels.companion.capabilities", "context.platform.readModels.voice.workflows", "context.platform.readModels.deviceCapabilities", "context.platform.readModels.companionCapabilities", "context.ops.device.capabilities", "context.clients.operator.device.capabilities", "context.clients.operatorSdk.device.capabilities"], ["getSnapshot", "snapshot", "toJSON", "listCapabilities", "listDeviceCapabilities", "listSensors", "listVoiceWorkflows", "list"]);
   const entries = sources(native).flatMap((candidate) => collectFromSource(candidate.source, candidate.path, candidate.kind));
@@ -386,7 +400,9 @@ export async function deviceLiveReadModelSnapshot(context: CommandContext,
       seen.add(key); capabilities.push(record);
       originalRecords.push({ id: record.id, capabilityId: record.capabilityId, record: entry.record });
     }
-    const result = captureCatalogSnapshot({ capabilities, sourceCounts: sourceCounts(captured.entries) }).captured;
+    const result = captureCatalogSnapshot({ capabilities, sourceCounts: sourceCounts(captured.entries),
+      ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
+    }).captured;
     snapshotSources.set(result, { records: originalRecords, assertSourceCurrent: caller.assertSourceCurrent });
     current.assertCurrent?.();
     return result;

@@ -1,4 +1,5 @@
-import { categoryForCode, categoryForStatus, failureState, GoodVibesSdkError, isKnownErrorCode, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { categoryForCode, categoryForStatus, failureState, GoodVibesSdkError, isKnownErrorCode, judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
@@ -10,6 +11,8 @@ const SITE = 'knowledge.self-improvement.failure-cause';
 const CAUSES = ['request_timeout', 'run_budget', 'other', 'unknown'] as const;
 type Cause = 'request_timeout' | 'run_budget' | 'other' | 'unknown';
 export interface RepairFailureConclusion {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly cause: Cause;
   readonly basis: string;
   readonly outcome?: string;
@@ -48,29 +51,48 @@ function structuralCause(error: unknown): { cause: Cause; basis: string } | unde
 
 /** Capture the composition before repair yields. Never borrow a later owner's port or memo. */
 export function captureRepairFailureReader(options: { readonly signal?: AbortSignal | undefined; readonly deadlineAt: number; readonly shouldStop: () => boolean; readonly ownerStopped?: () => boolean }) {
-  const ownerStopped = () => options.signal?.aborted === true || (options.ownerStopped ?? options.shouldStop)();
+  const signal = options.signal, shouldStop = options.shouldStop, stopped = options.ownerStopped, deadlineAt = options.deadlineAt;
+  let classic = isClassicOperation();
+  const classicNow = () => { classic = isClassicOperation() || classic; return classic; };
+  const ownerStopped = () => signal?.aborted === true || (stopped ?? shouldStop)();
+  const nativeOwnerCurrent = () => options.signal === signal && options.shouldStop === shouldStop
+    && options.ownerStopped === stopped && options.deadlineAt === deadlineAt && !ownerStopped();
   let port: JudgmentPort | undefined;
   let model: string | undefined;
-  try { port = judgmentPort(SITE); model = port.model; } catch { /* Explicit unconfigured result if text needs reading. */ }
+  let missing: JudgmentPortMissingError | undefined;
+  if (!classic) {
+    try { port = judgmentPort(SITE); } catch (error) { if (error instanceof JudgmentPortMissingError) missing = error; }
+    try { model = port?.model; } catch { /* A local metadata fault is never provider availability exhaustion. */ }
+  }
   const ownerCurrent = () => {
-    if (ownerStopped()) return false;
+    try {
+      if (!nativeOwnerCurrent()) return false;
+      if (classicNow()) return true;
+    } catch { return false; }
     try {
       const current = judgmentPort(SITE);
       return current === port && current.model === model;
-    } catch { return port === undefined; }
+    } catch (error) { return error instanceof JudgmentPortMissingError && port === undefined; }
   };
-  return async (error: unknown): Promise<RepairFailureConclusion> => {
+  return async (error: unknown): Promise<RepairFailureConclusion> => withConfiguredDecisionModelPolicy(async () => {
+    classicNow();
+    const provenance = () => classic ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {};
     let structural: ReturnType<typeof structuralCause>;
     try { structural = structuralCause(error); }
-    catch { return { cause: 'unknown', basis: 'unreadable-structure', isCurrent: () => ownerCurrent() && !options.shouldStop(), isOwnerCurrent: ownerCurrent }; }
-    if (structural) return { ...structural, isCurrent: () => ownerCurrent() && !options.shouldStop(), isOwnerCurrent: ownerCurrent };
+    catch { return { ...provenance(), cause: 'unknown', basis: 'unreadable-structure', isCurrent: () => ownerCurrent() && !shouldStop(), isOwnerCurrent: ownerCurrent }; }
+    if (structural) return { ...structural, ...provenance(), isCurrent: () => ownerCurrent() && !shouldStop(), isOwnerCurrent: ownerCurrent };
     let retries = 0;
-    const current = () => !options.shouldStop() && ownerCurrent();
-    const unresolved = (basis: string): RepairFailureConclusion => ({ cause: 'unknown', basis, retries, isCurrent: current, isOwnerCurrent: ownerCurrent });
+    const current = () => !shouldStop() && ownerCurrent();
+    const unresolved = (basis: string): RepairFailureConclusion => ({ ...provenance(), cause: 'unknown', basis, retries, isCurrent: current, isOwnerCurrent: ownerCurrent });
     if (ownerStopped()) return unresolved('cancelled');
-    if (!port) return unresolved('unconfigured');
+    if (!nativeOwnerCurrent()) return unresolved('stale');
+    if (classicNow()) return unresolved('classic-not-evaluated');
+    if (!port) {
+      if (missing && current() && activateClassicFallback(missing)) { classic = true; return unresolved('classic-not-evaluated'); }
+      return unresolved('unconfigured');
+    }
     if (!current()) return unresolved('stale');
-    const remaining = options.deadlineAt - Date.now();
+    const remaining = deadlineAt - Date.now();
     if (remaining <= 0) return unresolved('reading-budget-unavailable');
     const controller = new AbortController();
     let rejectStopped: (error: Error) => void = () => {};
@@ -78,10 +100,13 @@ export function captureRepairFailureReader(options: { readonly signal?: AbortSig
     let stopReason: string | undefined;
     const stop = (reason: string) => { stopReason = reason; controller.abort(); rejectStopped(new Error(reason)); };
     const abort = () => stop('cancelled');
-    options.signal?.addEventListener('abort', abort, { once: true });
+    signal?.addEventListener('abort', abort, { once: true });
     const timer = Number.isFinite(remaining) ? setTimeout(() => stop('reading-budget-unavailable'), remaining) : undefined;
     timer?.unref?.();
-    const beforeAttempt = () => { if (!current() || controller.signal.aborted || Date.now() >= options.deadlineAt) throw new Error('Failure reading is no longer current'); };
+    const beforeAttempt = () => {
+      if (!current() || controller.signal.aborted || Date.now() >= deadlineAt) throw new Error('Failure reading is no longer current');
+      if (classicNow()) throw new DecisionModelsDisabledError('semantic repair failure cause');
+    };
     try {
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failure carries no textual cause.';
       const evidence = { message };
@@ -89,7 +114,9 @@ export function captureRepairFailureReader(options: { readonly signal?: AbortSig
       beforeAttempt();
       const owned = port;
       const checked: JudgmentPort = { ...owned, model: owned.model, async ask(request) {
+        beforeAttempt();
         const result = await owned.ask(request);
+        if (!current() || controller.signal.aborted || Date.now() >= deadlineAt) throw new Error('Failure reading is no longer current');
         const answer = result.answers.cause;
         if (!answer || answer.type !== 'choice' || !CAUSES.includes(answer.choice as Cause)
           || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1
@@ -104,17 +131,20 @@ export function captureRepairFailureReader(options: { readonly signal?: AbortSig
         site: SITE, signal: controller.signal, beforeAttempt, onRetry: () => { retries++; },
       })]);
       if (!current()) { run.recordAction('discarded: failure reading owner or gap changed'); return unresolved('stale'); }
-      if (controller.signal.aborted || Date.now() >= options.deadlineAt) return unresolved('reading-budget-unavailable');
+      if (controller.signal.aborted || Date.now() >= deadlineAt) return unresolved('reading-budget-unavailable');
       const reading = run.readings.cause;
       const cause = reading.outcome === 'act' ? reading.choice : 'unknown';
       run.recordAction(cause === 'request_timeout' || cause === 'run_budget' ? `cause established: ${cause}; existing owner decides deferral` : 'no budget deferral established');
       return { cause, basis: 'reading', outcome: reading.outcome, ...(run.result.decisionId ? { decisionId: run.result.decisionId } : {}), retries, isCurrent: current, isOwnerCurrent: ownerCurrent };
-    } catch {
-      return unresolved(stopReason ?? 'unavailable');
+    } catch (error) {
+      if (stopReason) return unresolved(stopReason);
+      if (!current()) return unresolved('stale');
+      if (classicNow() || activateClassicFallback(error)) { classic = true; return unresolved('classic-not-evaluated'); }
+      return unresolved('unavailable');
     } finally {
       clearTimeout(timer);
-      options.signal?.removeEventListener('abort', abort);
+      signal?.removeEventListener('abort', abort);
       controller.abort();
     }
-  };
+  });
 }

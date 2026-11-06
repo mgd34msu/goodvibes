@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { selfImprovementFixtureReading, gapAssessmentFixture } from './_helpers/knowledge-self-improvement-readings.js';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { GoodVibesSdkError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -424,4 +426,64 @@ describe('failure disposition commit boundaries', () => {
       }
     }
   }
+});
+
+
+describe('Classic native repair failure cleanup', () => {
+  test('native timer, HTTP and errno causes remain usable; prose stays unassessed with no model access', async () => {
+    let asks = 0, metadata = 0, stopped = false;
+    install({ get model(): never { metadata++; throw new Error('Classic borrowed model'); },
+      get recorder(): never { metadata++; throw new Error('Classic borrowed recorder'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const read = reader({ shouldStop: () => stopped });
+      for (const [error, cause, basis] of [
+        [new KnowledgeRepairBudgetError(), 'run_budget', 'owned-timer'],
+        [Object.assign(new Error('not a timeout'), { status: 504 }), 'request_timeout', 'http-status'],
+        [Object.assign(new Error('not a timeout'), { code: 'ETIMEDOUT' }), 'request_timeout', 'error-code'],
+      ] as const) {
+        const result = await read(error);
+        expect(result).toMatchObject({ cause, basis, operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+        expect(result.isCurrent()).toBe(true); expect(result.decisionId).toBeUndefined(); expect(result.outcome).toBeUndefined();
+      }
+      const unknown = await read(new Error('budget deadline timeout exceeded'));
+      expect(unknown).toMatchObject({ cause: 'unknown', basis: 'classic-not-evaluated', operationProvenance: 'classic' });
+      expect(unknown.decisionId).toBeUndefined(); stopped = true; expect(unknown.isOwnerCurrent()).toBe(false);
+      expect(asks).toBe(0); expect(metadata).toBe(0);
+    });
+  });
+
+  test('a reader captured in Classic cannot acquire model authority after its capture scope ends', async () => {
+    let asks = 0;
+    const read = await withDecisionModelPolicy(() => 'Classic - Off', async () => reader());
+    install({ model: 'fixture', async ask() { asks++; throw new Error('Old Classic reader must not ask'); } });
+    expect(await read(new Error('opaque failure'))).toMatchObject({ cause: 'unknown', operationProvenance: 'classic', basis: 'classic-not-evaluated' });
+    expect(asks).toBe(0);
+  });
+
+  test('Preferred actual exhaustion retains the failure and makes subsequent cleanup native', async () => {
+    let asks = 0;
+    install({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const read = reader(), first = await read(new Error('opaque failure'));
+      expect(first).toMatchObject({ cause: 'unknown', basis: 'classic-not-evaluated', operationProvenance: 'classic' }); expect(first.isCurrent()).toBe(true);
+      expect(await read(new Error('another opaque failure'))).toMatchObject({ cause: 'unknown', basis: 'classic-not-evaluated' });
+      expect(asks).toBe(1); expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+    });
+  });
+
+  for (const kind of ['rejected', 'invalid-request', 'invalid-response', 'aborted', 'unrecorded'] as const) test(`repair failure ${kind} cannot activate Preferred fallback or invent a budget cause`, async () => {
+    install({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      expect((await reader()(new Error('opaque failure'))).cause).toBe('unknown'); expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  });
+
+  test('retired native ownership wins over a late availability failure', async () => {
+    let stopped = false;
+    install({ model: 'fixture', async ask() { stopped = true; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const result = await reader({ shouldStop: () => stopped })(new Error('opaque failure'));
+      expect(result.basis).toBe('stale'); expect(result.isCurrent()).toBe(false); expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  });
 });

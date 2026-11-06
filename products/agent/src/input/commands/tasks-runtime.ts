@@ -1,3 +1,4 @@
+import { sortUnionTasks, summarizeTaskResult } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
 /**
  * `/tasks`, the Agent's read-only view of runtime tasks.
  *
@@ -56,29 +57,9 @@ function tasksClientFor(ctx: CommandContext): TasksClient {
   });
 }
 
-function sortUnionTasks(tasks: readonly UnionTask[]): UnionTask[] {
-  const statusOrder: TaskLifecycleState[] = ['running', 'queued', 'blocked', 'failed', 'completed', 'cancelled'];
-  const ranking = new Map(statusOrder.map((status, index) => [status, index] as const));
-  return [...tasks].sort((a, b) => {
-    const rankDelta = (ranking.get(a.task.status) ?? 99) - (ranking.get(b.task.status) ?? 99);
-    if (rankDelta !== 0) return rankDelta;
-    const aWhen = a.task.startedAt ?? a.task.queuedAt;
-    const bWhen = b.task.startedAt ?? b.task.queuedAt;
-    return bWhen - aWhen;
-  });
-}
 
-function summarizeTaskResult(task: RuntimeTask): string {
-  const payload = (
-    typeof task.result === 'string'
-      ? task.result
-      : task.error
-        ?? (task.result !== undefined ? JSON.stringify(task.result) : task.description)
-        ?? task.title
-  );
-  const normalized = String(payload).replace(/\s+/g, ' ').trim();
-  return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}...`;
-}
+
+
 
 export function registerTasksRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

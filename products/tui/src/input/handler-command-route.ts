@@ -1,3 +1,4 @@
+import { createCommandModeTokenHandler } from '@goodvibes-jev/engine/terminal-shell/command-mode-route';
 import { scheduleCommandArguments } from './commands/schedule-arguments.ts';
 import { activeTokens } from '../renderer/theme.ts';
 import { loadSkillByTrigger } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -29,128 +30,26 @@ export type CommandModeRouteState = {
   clipboard?: ClipboardPasteSource;
 };
 
-export function handleCommandModeToken(state: CommandModeRouteState, token: InputToken): boolean {
-  if (!state.commandMode) return false;
-
-  const closeCommandMode = (): void => {
-    state.commandMode = false;
-    for (let i = state.modalStack.length - 1; i >= 0; i--) {
-      if (state.modalStack[i] === 'command') state.modalStack.splice(i, 1);
-    }
-    state.autocomplete?.reset();
-    state.prompt = '';
-    state.cursorPos = 0;
-  };
-
-  if (token.type !== 'key') return false;
-
-  if (token.logicalName === 'escape') {
-    state.handleEscape();
-    return true;
-  }
-  if (token.logicalName === 'up') {
-    state.autocomplete?.moveUp();
-    return true;
-  }
-  if (token.logicalName === 'down') {
-    state.autocomplete?.moveDown();
-    return true;
-  }
-  if (token.logicalName === 'tab') {
-    const selected = state.autocomplete?.getSelected();
-    if (selected) {
-      state.prompt = `/${selected.name} `;
-      state.cursorPos = state.prompt.length;
-      state.autocomplete?.reset();
-    }
-    return true;
-  }
-  if (token.logicalName === 'backspace') {
-    if (state.cursorPos > 0) {
-      state.prompt = state.prompt.slice(0, state.cursorPos - 1) + state.prompt.slice(state.cursorPos);
-      state.cursorPos--;
-    }
-    if (state.prompt === '') {
-      closeCommandMode();
-      state.autocomplete?.reset();
-    } else {
-      const query = state.prompt.startsWith('/') ? state.prompt.slice(1) : '';
-      const spaceIdx = query.indexOf(' ');
-      if (spaceIdx === -1) state.autocomplete?.update(query);
-    }
-    return true;
-  }
-  if (token.logicalName === 'enter') {
-    const selectedCmd = state.autocomplete?.isActive ? state.autocomplete.getSelected() : undefined;
-    const originalCommand = selectedCmd ? `/${selectedCmd.name}` : state.prompt;
-    const raw = originalCommand.trim();
-    if (raw.startsWith('/') && state.commandRegistry && state.commandContext) {
-      closeCommandMode();
-      // Submitting a command is a submission: the splash yields to command
-      // input exactly as it does to text input (owner rule), whether or not
-      // the command puts anything in the transcript.
-      state.conversationManager?.dismissSplash();
-      const parts = raw.slice(1).trim().split(/\s+/);
-      const name = parts[0];
-      const args = name === 'schedule' || name === 'sched' ? scheduleCommandArguments(raw.slice(1)) : parts.slice(1);
-      if (!args) { state.commandContext.scheduleReading?.cancel(); state.commandContext.print('Invalid schedule command quoting.'); state.requestRender(); return true; }
-      const ctx = withComposerBindings(state.commandContext, state);
-      const commandPromise = state.commandRegistry.get(name)
-        ? state.commandRegistry.executeFromOwner(name, args, ctx, originalCommand)
-        : (ctx.executeCommand?.(name, args) ?? Promise.resolve(false));
-      commandPromise
-        .then((handled) => {
-          if (handled) {
-            state.requestRender();
-          } else {
-            const shellPaths = state.commandContext?.workspace.shellPaths;
-            const skillContent = shellPaths
-              ? loadSkillByTrigger('/' + name, {
-                  workingDirectory: shellPaths.workingDirectory,
-                  homeDirectory: shellPaths.homeDirectory,
-                })
-              : null;
-            if (skillContent) {
-              state.commandContext?.submitInput?.(skillContent);
-            } else {
-              state.conversationManager?.log(`Unknown command: /${name}. Type /help for available commands.`, { fg: activeTokens().error });
-              state.requestRender();
-            }
-          }
-        })
-        .catch((err: unknown) => {
-          // Defense in depth for EVERY command, not just the ones that
-          // already guard their own internals: a handler that throws or
-          // awaits a rejected promise must never become a silent unhandled
-          // rejection, it renders the same way an unknown command does.
-          state.conversationManager?.log(`Command /${name} failed: ${summarizeError(err)}`, { fg: activeTokens().error });
-          state.requestRender();
-        });
-    } else {
-      closeCommandMode();
-    }
-    return true;
-  }
-
-  return token.logicalName !== 'left' && token.logicalName !== 'right' && token.logicalName !== 'home' && token.logicalName !== 'end';
-}
-
 /** The command context with the composer-bound actions (clipboard paste, nested commands) bound to this route's state. */
 function withComposerBindings(context: CommandContext, state: CommandModeRouteState): CommandContext {
   return {
     ...context,
     pasteFromClipboard: () => {
-      const result = handleClipboardPaste({
-        prompt: state.prompt,
-        cursorPos: state.cursorPos,
-        pasteRegistry: state.pasteRegistry,
-        nextPasteId: state.nextPasteId,
-        imageRegistry: state.imageRegistry,
-        nextImageId: state.nextImageId,
-        saveUndoState: state.saveUndoState,
-        ensureInputCursorVisible: state.ensureInputCursorVisible,
-        requestRender: state.requestRender,
-      }, context.workspace.shellPaths?.workingDirectory ?? state.projectRoot, state.clipboard);
+      const result = handleClipboardPaste(
+        {
+          prompt: state.prompt,
+          cursorPos: state.cursorPos,
+          pasteRegistry: state.pasteRegistry,
+          nextPasteId: state.nextPasteId,
+          imageRegistry: state.imageRegistry,
+          nextImageId: state.nextImageId,
+          saveUndoState: state.saveUndoState,
+          ensureInputCursorVisible: state.ensureInputCursorVisible,
+          requestRender: state.requestRender,
+        },
+        context.workspace.shellPaths?.workingDirectory ?? state.projectRoot,
+        state.clipboard,
+      );
       state.prompt = result.prompt;
       state.cursorPos = result.cursorPos;
       state.nextImageId = result.nextImageId;
@@ -159,11 +58,29 @@ function withComposerBindings(context: CommandContext, state: CommandModeRouteSt
     },
     executeCommand: async (name, args) => {
       const wrapped = withComposerBindings(context, state);
-      const handled = state.commandRegistry?.get(name)
-        ? await state.commandRegistry.execute(name, args, wrapped)
-        : false;
+      const handled = state.commandRegistry?.get(name) ? await state.commandRegistry.execute(name, args, wrapped) : false;
       if (handled) return true;
       return (await context.executeCommand?.(name, args)) ?? false;
     },
   };
 }
+
+export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
+  dismissSplash: true,
+  passOriginalInput: true,
+  passthroughKeys: ['left', 'right', 'home', 'end'],
+  unknownCommand: (name) => `Unknown command: /${name}. Type /help for available commands.`,
+  commandError: (error, name) => `Command /${name} failed: ${summarizeError(error)}`,
+  prepare(context, state, raw) {
+    const parts = raw.slice(1).trim().split(/\s+/),
+      name = parts[0] ?? '';
+    const args = name === 'schedule' || name === 'sched' ? scheduleCommandArguments(raw.slice(1)) : parts.slice(1);
+    if (!args) {
+      context.scheduleReading?.cancel();
+      context.print('Invalid schedule command quoting.');
+      state.requestRender();
+      return undefined;
+    }
+    return { name, args, context: withComposerBindings(context, state) };
+  },
+});

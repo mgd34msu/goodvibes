@@ -1,3 +1,4 @@
+import { statusBadge } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
 /**
  * /session command handler, Multi-session Orchestration.
  *
@@ -26,17 +27,7 @@ function flagValue(args: string[], flag: string): string | undefined {
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 /** Status badge for display. */
-function statusBadge(status: string): string {
-  switch (status) {
-    case 'queued':    return '[ ]';
-    case 'running':   return '[>]';
-    case 'blocked':   return '[~]';
-    case 'completed': return '[+]';
-    case 'failed':    return '[!]';
-    case 'cancelled': return '[x]';
-    default:          return '[?]';
-  }
-}
+
 
 /** Format a ref as a compact one-line string. */
 function fmtRef(ref: CrossSessionTaskRef): string {

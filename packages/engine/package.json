@@ -2418,6 +2418,56 @@
       "bun": "./terminal-shell/src/model-picker-auth-facts.ts",
       "types": "./terminal-shell/dist/model-picker-auth-facts.d.ts",
       "import": "./terminal-shell/dist/model-picker-auth-facts.js"
+    },
+    "./terminal-shell/system-message-router": {
+      "bun": "./terminal-shell/src/system-message-router.ts",
+      "types": "./terminal-shell/dist/system-message-router.d.ts",
+      "import": "./terminal-shell/dist/system-message-router.js"
+    },
+    "./terminal-shell/command-mode-route": {
+      "bun": "./terminal-shell/src/command-mode-route.ts",
+      "types": "./terminal-shell/dist/command-mode-route.d.ts",
+      "import": "./terminal-shell/dist/command-mode-route.js"
+    },
+    "./terminal-shell/session-picker-state": {
+      "bun": "./terminal-shell/src/session-picker-state.ts",
+      "types": "./terminal-shell/dist/session-picker-state.d.ts",
+      "import": "./terminal-shell/dist/session-picker-state.js"
+    },
+    "./terminal-shell/task-presentation": {
+      "bun": "./terminal-shell/src/task-presentation.ts",
+      "types": "./terminal-shell/dist/task-presentation.d.ts",
+      "import": "./terminal-shell/dist/task-presentation.js"
+    },
+    "./terminal-shell/voice-settings-review": {
+      "bun": "./terminal-shell/src/voice-settings-review.ts",
+      "types": "./terminal-shell/dist/voice-settings-review.d.ts",
+      "import": "./terminal-shell/dist/voice-settings-review.js"
+    },
+    "./terminal-shell/renderer/help-groups": {
+      "bun": "./terminal-shell/src/renderer/help-groups.ts",
+      "types": "./terminal-shell/dist/renderer/help-groups.d.ts",
+      "import": "./terminal-shell/dist/renderer/help-groups.js"
+    },
+    "./terminal-shell/permission-category-label": {
+      "bun": "./terminal-shell/src/permission-category-label.ts",
+      "types": "./terminal-shell/dist/permission-category-label.d.ts",
+      "import": "./terminal-shell/dist/permission-category-label.js"
+    },
+    "./terminal-shell/composer-controller": {
+      "bun": "./terminal-shell/src/composer-controller.ts",
+      "types": "./terminal-shell/dist/composer-controller.d.ts",
+      "import": "./terminal-shell/dist/composer-controller.js"
+    },
+    "./terminal-shell/runtime-setting-reset": {
+      "bun": "./terminal-shell/src/runtime-setting-reset.ts",
+      "types": "./terminal-shell/dist/runtime-setting-reset.d.ts",
+      "import": "./terminal-shell/dist/runtime-setting-reset.js"
+    },
+    "./terminal-shell/audio/retained-wake-clip": {
+      "bun": "./terminal-shell/src/audio/retained-wake-clip.ts",
+      "types": "./terminal-shell/dist/audio/retained-wake-clip.d.ts",
+      "import": "./terminal-shell/dist/audio/retained-wake-clip.js"
     }
   },
   "publishConfig": {

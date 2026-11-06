@@ -1,3 +1,4 @@
+import { syncRuntimeAfterSettingReset } from '@goodvibes-jev/engine/terminal-shell/runtime-setting-reset';
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import { servingEffortForLevel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
@@ -73,21 +74,7 @@ type SettingsRouteState = {
   handleEscape: () => void;
 };
 
-function syncRuntimeAfterSettingReset(ctx: CommandContext | undefined, key: string, value: unknown): void {
-  if (!ctx) return;
-  if (key === 'provider.model') ctx.session.runtime.model = String(value);
-  if (key === 'provider.reasoningEffort') {
-    // config holds the REQUESTED level; the session holds the EFFECTIVE one for
-    // whichever model is serving, so the reset value is resolved rather than
-    // copied straight across. A context with no reachable provider registry
-    // (a surface that routes only through the provider API) stores the reset
-    // value unresolved rather than failing the whole reset.
-    const serving = ctx.provider?.providerRegistry?.getCurrentModel?.();
-    ctx.session.runtime.reasoningEffort = serving
-      ? servingEffortForLevel(String(value), toEffortModel(serving)).effective ?? ''
-      : String(value);
-  }
-}
+
 
 function consumeSettingsPickerRequest(state: SettingsRouteState): void {
   const settingsAction = state.settingsModal.pendingSettingsPickerAction ?? null;

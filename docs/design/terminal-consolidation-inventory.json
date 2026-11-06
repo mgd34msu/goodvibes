@@ -54,7 +54,10 @@
       "path": "audio/wake-runtime.ts",
       "baselineTuiLines": 364,
       "baselineSimilarity": 0.5932,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "retainWakeClip"
+      ]
     },
     {
       "path": "cli-flags.ts",
@@ -313,7 +316,8 @@
       "path": "core/system-message-router.ts",
       "baselineTuiLines": 267,
       "baselineSimilarity": 0.541,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "note": "One noise gate, replay fold, kind/priority classification and delivery loop; TUI typed-conversation policy and Agent activity-feed policy remain explicit construction data."
     },
     {
       "path": "core/voice-capture-status.ts",
@@ -442,7 +446,11 @@
       "path": "input/commands/experience-runtime.ts",
       "baselineTuiLines": 330,
       "baselineSimilarity": 0.3573,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "VoiceBundle",
+        "inspectVoiceBundle"
+      ]
     },
     {
       "path": "input/commands/fresh-conversation.ts",
@@ -627,7 +635,10 @@
       "path": "input/commands/session.ts",
       "baselineTuiLines": 505,
       "baselineSimilarity": 0.4716,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "statusBadge"
+      ]
     },
     {
       "path": "input/commands/shell-core.ts",
@@ -645,13 +656,20 @@
       "path": "input/commands/subscription-runtime.ts",
       "baselineTuiLines": 434,
       "baselineSimilarity": 0.5799,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "extractAuthorizationCode"
+      ]
     },
     {
       "path": "input/commands/tasks-runtime.ts",
       "baselineTuiLines": 314,
       "baselineSimilarity": 0.4168,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "sortUnionTasks",
+        "summarizeTaskResult"
+      ]
     },
     {
       "path": "input/commands/transcript-reading.ts",
@@ -693,7 +711,8 @@
       "path": "input/handler-command-route.ts",
       "baselineTuiLines": 169,
       "baselineSimilarity": 0.6395,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "One command token navigation/dispatch/skill-fallback lifecycle. Product ports retain schedule parsing, composer binding, raw owner bytes, splash behavior, navigation keys and error presentation."
     },
     {
       "path": "input/handler-content-actions.ts",
@@ -737,7 +756,10 @@
       "path": "input/handler-interactions.ts",
       "baselineTuiLines": 306,
       "baselineSimilarity": 0.7386,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "registerPasteForHost"
+      ]
     },
     {
       "path": "input/handler-modal-routes.ts",
@@ -746,7 +768,8 @@
       "status": "pending-convergence",
       "platformFunctions": [
         "handleSelectionModalToken",
-        "handleBookmarkModalToken"
+        "handleBookmarkModalToken",
+        "syncRuntimeAfterSettingReset"
       ]
     },
     {
@@ -759,7 +782,10 @@
       "path": "input/handler-modal-token-routes.ts",
       "baselineTuiLines": 311,
       "baselineSimilarity": 0.8379,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "withModalState"
+      ]
     },
     {
       "path": "input/handler-picker-routes.ts",
@@ -768,7 +794,8 @@
       "status": "pending-convergence",
       "platformFunctions": [
         "handleFilePickerToken",
-        "handleBlockActionsToken"
+        "handleBlockActionsToken",
+        "handleEscapeOnlyModalToken"
       ]
     },
     {
@@ -805,7 +832,21 @@
       "path": "input/handler.ts",
       "baselineTuiLines": 776,
       "baselineSimilarity": 0.6944,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "setContentWidth",
+        "moveCursorVertical",
+        "ensureInputCursorVisible",
+        "getVisiblePromptLineCount",
+        "getWrappedPromptInfo",
+        "handleUndo",
+        "handleRedo",
+        "findPathToken",
+        "handlePathCompletion",
+        "wordWrapLine",
+        "TerminalComposerController",
+        "syncFeedContextFromHost"
+      ]
     },
     {
       "path": "input/input-history.ts",
@@ -920,7 +961,8 @@
       "path": "input/session-picker-modal.ts",
       "baselineTuiLines": 247,
       "baselineSimilarity": 0.5363,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Shared saved-session filtering, navigation, scroll, open/close and selection state. TUI retains live/hosted read sources and native-resume/confirmed-delete controls; Agent retains explicit-command deletion and its restore adapter."
     },
     {
       "path": "input/settings-modal-behavior.ts",
@@ -1000,7 +1042,10 @@
       "path": "permissions/prompt.ts",
       "baselineTuiLines": 121,
       "baselineSimilarity": 0.2827,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "getPermissionCategoryLabel"
+      ]
     },
     {
       "path": "providers/reasoning-effort-surface.ts",
@@ -1114,7 +1159,11 @@
       "path": "renderer/help-overlay.ts",
       "baselineTuiLines": 275,
       "baselineSimilarity": 0.4336,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "HelpGroup",
+        "filterGroups"
+      ]
     },
     {
       "path": "renderer/history-search-overlay.ts",
@@ -1272,7 +1321,8 @@
         "fitValue",
         "docLines",
         "windowDoc",
-        "settingsDocumentation"
+        "settingsDocumentation",
+        "mcpTrustRows"
       ]
     },
     {
@@ -1686,7 +1736,8 @@
         "buildConfiguredSurfaceKinds",
         "sortSurfaceRecords",
         "buildFallbackAuthSnapshot",
-        "buildAcknowledgementSnapshot"
+        "buildAcknowledgementSnapshot",
+        "buildFallbackSecretReview"
       ]
     },
     {

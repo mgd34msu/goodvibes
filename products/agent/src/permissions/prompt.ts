@@ -1,3 +1,4 @@
+import { getPermissionCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/permission-category-label';
 import { activeTokens } from '../renderer/theme.ts';
 import { beginModal, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
@@ -62,15 +63,7 @@ export class PermissionPromptUI {
   }
 
   /** Returns the category label and the active-theme color for display. */
-  static getCategoryLabel(category: PermissionCategory): { label: string; color: string } {
-    const p = activeTokens();
-    switch (category) {
-      case 'write':    return { label: 'WRITE',    color: p.warning };
-      case 'execute':  return { label: 'EXECUTE',  color: p.error };
-      case 'delegate': return { label: 'DELEGATE', color: p.blocked };
-      default:         return { label: 'PERMISSION', color: p.textMuted };
-    }
-  }
+  static getCategoryLabel(category: PermissionCategory): { label: string; color: string } { return getPermissionCategoryLabel(category); }
 
   static getPromptTitle(request: PermissionPromptRequest): string {
     return buildPermissionApprovalBrief(request).title;

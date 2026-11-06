@@ -1,3 +1,4 @@
+import { filterGroups, type HelpGroup } from '@goodvibes-jev/engine/terminal-shell/renderer/help-groups';
 /**
  * renderHelpOverlay, the /commands reference: keyboard shortcuts plus the
  * full slash-command list, drawn with the modal surface kit as one grouped,
@@ -28,10 +29,7 @@ import { drawTextBlock } from './surface-kit-extra.ts';
 
 export { renderShortcutsOverlay } from './shortcuts-overlay.ts';
 
-interface HelpGroup {
-  readonly title: string;
-  readonly entries: Array<{ readonly label: string; readonly right: string }>;
-}
+
 
 /**
  * The row strings ("  Title", "  ────", "  key\tdescription", "") become
@@ -215,18 +213,7 @@ function helpGroups(keybindingsManager: KeybindingsManager, commands?: SlashComm
   return groupsFromRows([...shortcutRows, ...commandRows]);
 }
 
-function filterGroups(groups: readonly HelpGroup[], query: string): HelpGroup[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [...groups];
-  return groups
-    .map((g) => ({
-      title: g.title,
-      entries: g.title.toLowerCase().includes(q)
-        ? g.entries
-        : g.entries.filter((e) => e.label.toLowerCase().includes(q) || e.right.toLowerCase().includes(q)),
-    }))
-    .filter((g) => g.entries.length > 0);
-}
+
 
 const HINTS: readonly KitHint[] = [['↑↓', 'scroll'], ['?', 'close']];
 

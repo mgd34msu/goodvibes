@@ -1,3 +1,5 @@
+import { syncFeedContextFromHost } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
+import { TerminalComposerController } from '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
@@ -218,6 +220,7 @@ export class InputHandler {
       | 'shell'
     >,
   ) {
+    super(InputHandler.MAX_INPUT_ROWS);
     this.filePicker = new FilePickerModal(uiServices.environment.shellPaths);
     this.modelPicker = new ModelPickerModal(
       uiServices.providers.favoritesStore,
@@ -336,15 +339,7 @@ export class InputHandler {
   }
 
   /** Sync mutable handler fields back into feedContext after in-feed mutations. */
-  public syncFeedContextMutableFields(): void {
-    const h = this;
-    syncFeedContextMutableFields({ prompt: h.prompt, cursorPos: h.cursorPos, inputScrollTop: h.inputScrollTop, commandMode: h.commandMode,
-      indicatorFocused: h.indicatorFocused, helpOverlayActive: h.helpOverlayActive,
-      helpScrollOffset: h.helpScrollOffset, shortcutsOverlayActive: h.shortcutsOverlayActive,
-      shortcutsScrollOffset: h.shortcutsScrollOffset, selectionCallback: h.selectionCallback,
-      nextPasteId: h.nextPasteId, nextImageId: h.nextImageId, mouseDownRow: h.mouseDownRow,
-      mouseDownCol: h.mouseDownCol, contentWidth: h.contentWidth }, this.feedContext);
-  }
+  public syncFeedContextMutableFields(): void { syncFeedContextFromHost(this, this.feedContext); }
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
   public setHistory(history: InputHistory): void { this.inputHistory = history; }
@@ -641,71 +636,32 @@ export class InputHandler {
   public contentWidth = 76;
 
   /** Set the content width used for wrapping calculations. Call from main.ts. */
-  public setContentWidth(w: number): void {
-    this.contentWidth = w;
-  }
+
 
   /**
    * Move cursor up or down by one WRAPPED line.
    * Uses the segment table to navigate visual lines, not raw \n lines.
    * Returns true if the cursor moved, false if at boundary.
    */
-  public moveCursorVertical(direction: -1 | 1): boolean {
-    const result = moveCursorVertical(
-      this.prompt,
-      this.cursorPos,
-      this.inputScrollTop,
-      this.contentWidth,
-      InputHandler.MAX_INPUT_ROWS,
-      direction,
-    );
-    this.cursorPos = result.cursorPos;
-    this.inputScrollTop = result.inputScrollTop;
-    return result.moved;
-  }
+
 
   /**
    * Ensure the cursor's wrapped line is visible within the input scroll window.
    */
-  public ensureInputCursorVisible(contentWidth?: number): void {
-    this.inputScrollTop = ensureInputCursorVisible(
-      this.prompt,
-      this.cursorPos,
-      this.inputScrollTop,
-      contentWidth ?? this.contentWidth,
-      InputHandler.MAX_INPUT_ROWS,
-    );
-  }
+
 
   /**
    * Get the number of visible prompt lines (capped at MAX_INPUT_ROWS),
    * accounting for word-wrapping within the content width.
    */
-  public getVisiblePromptLineCount(contentWidth?: number): number {
-    const info = this.getWrappedPromptInfo(contentWidth ?? 76);
-    return Math.min(info.wrappedLines.length, InputHandler.MAX_INPUT_ROWS);
-  }
+
 
   /**
    * Word-wrap the prompt and compute cursor display coordinates.
    * Returns wrapped lines, the cursor's position in wrapped coordinates,
    * and the visible slice respecting inputScrollTop.
    */
-  public getWrappedPromptInfo(contentWidth: number): WrappedPromptInfo {
-    // In concealed mode, wrap the MASKED buffer. maskConcealedText preserves
-    // length and newlines, so wrapping and cursor coordinates are identical to
-    // the plaintext while no plaintext character reaches the screen buffer.
-    // This is the ONLY place the composer's text becomes screen lines, so
-    // masking here covers every renderer that draws the composer.
-    const displayPrompt = this.concealedInput ? maskConcealedText(this.prompt) : this.prompt;
-    return getWrappedPromptInfo(
-      displayPrompt,
-      this.cursorPos,
-      this.inputScrollTop,
-      contentWidth,
-      InputHandler.MAX_INPUT_ROWS,
-    );
-  }
+
 
   // ── Undo / Redo methods ─────────────────────────────────────────────────
 
@@ -720,24 +676,12 @@ export class InputHandler {
   /**
    * handleUndo - Ctrl+Z: pop from undo stack, push current to redo stack.
    */
-  public handleUndo(): void {
-    const state = undoPromptState(this.undoStack, this.redoStack, this.prompt, this.cursorPos);
-    if (!state) return;
-    this.prompt = state.prompt;
-    this.cursorPos = state.cursorPos;
-    this.ensureInputCursorVisible();
-  }
+
 
   /**
    * handleRedo - Ctrl+Shift+Z: pop from redo stack, push current to undo stack.
    */
-  public handleRedo(): void {
-    const state = redoPromptState(this.undoStack, this.redoStack, this.prompt, this.cursorPos);
-    if (!state) return;
-    this.prompt = state.prompt;
-    this.cursorPos = state.cursorPos;
-    this.ensureInputCursorVisible();
-  }
+
 
   // ── Path completion methods ─────────────────────────────────────────────
 
@@ -754,34 +698,9 @@ export class InputHandler {
    * Repeated Tab cycles through matches.
    * Returns true if path completion was performed.
    */
-  public findPathToken(): { start: number; prefix: string } | null {
-    return findPathToken(this.prompt, this.cursorPos);
-  }
 
-  public handlePathCompletion(): boolean {
-    const result = handlePathCompletion({
-      prompt: this.prompt,
-      cursorPos: this.cursorPos,
-      inputScrollTop: this.inputScrollTop,
-      contentWidth: this.contentWidth,
-      maxRows: InputHandler.MAX_INPUT_ROWS,
-      pathCompletions: this.pathCompletions,
-      pathCompletionIndex: this.pathCompletionIndex,
-      pathCompletionPrefix: this.pathCompletionPrefix,
-      pathCompletionStart: this.pathCompletionStart,
-      allFiles: this.filePicker.allFiles,
-      saveUndoState: () => this.saveUndoState(),
-    });
-    if (!result.handled) return false;
-    this.prompt = result.prompt;
-    this.cursorPos = result.cursorPos;
-    this.inputScrollTop = result.inputScrollTop;
-    this.pathCompletions = result.pathCompletions;
-    this.pathCompletionIndex = result.pathCompletionIndex;
-    this.pathCompletionPrefix = result.pathCompletionPrefix;
-    this.pathCompletionStart = result.pathCompletionStart;
-    return true;
-  }
+
+
 
   public cycleAgentWorkspaceCategory(direction: 'next' | 'prev'): void {
     const context = this.commandContext;
@@ -805,7 +724,5 @@ export class InputHandler {
    * Word-wrap a single line to fit within maxW columns.
    * Breaks at spaces; words wider than maxW are force-broken.
    */
-  public wordWrapLine(line: string, maxW: number): string[] {
-    return wordWrapLine(line, maxW);
-  }
+
 }

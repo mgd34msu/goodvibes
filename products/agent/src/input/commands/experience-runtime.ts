@@ -1,3 +1,4 @@
+import { inspectVoiceBundle, type VoiceBundle } from '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
@@ -35,21 +36,9 @@ function formatVoiceInstallProgressLine(component: VoiceInstallProgressComponent
   return `  ${component.component}: ${formatVoiceComponentState(component.phase)}${bytes}${component.message ? `, ${component.message}` : ''}`;
 }
 
-interface VoiceBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  readonly enabled: boolean;
-  readonly notes: readonly string[];
-}
 
-function inspectVoiceBundle(bundle: VoiceBundle): string {
-  return [
-    'Voice Review',
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  enabled: ${bundle.enabled ? 'yes' : 'no'}`,
-    `  notes: ${bundle.notes.length}`,
-  ].join('\n');
-}
+
+
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

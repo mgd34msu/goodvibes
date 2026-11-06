@@ -1,3 +1,4 @@
+import { extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -44,17 +45,7 @@ function inspectBundle(path: string): string {
   ].join('\n');
 }
 
-function extractAuthorizationCode(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
 
-  try {
-    const url = new URL(trimmed);
-    return url.searchParams.get('code');
-  } catch {
-    return null;
-  }
-}
 
 function resolveManualLoginConfig(config: OAuthProviderConfig): OAuthProviderConfig {
   return config.manualRedirectUri

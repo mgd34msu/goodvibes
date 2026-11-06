@@ -20,3 +20,39 @@ export function formRows(workspace: {
     };
   });
 }
+
+export interface McpTrustRowEntry {
+  readonly name: string;
+  readonly allowedPaths: readonly string[];
+  readonly allowedHosts: readonly string[];
+  readonly trustMode: string;
+  readonly connected: boolean;
+  readonly role: string;
+}
+export function mcpTrustRows(
+  items: readonly McpTrustRowEntry[],
+  selected: number,
+  focused: boolean,
+  editing: boolean,
+  buffer: string,
+): KitRow[] {
+  const t = activeTokens();
+  return items.map((entry, i) => {
+    const scope =
+      entry.allowedPaths.length > 0
+        ? entry.allowedPaths.join(', ')
+        : entry.allowedHosts.length > 0
+          ? entry.allowedHosts.join(', ')
+          : 'no scope';
+    const trust = i === selected && editing ? `${buffer}▏` : entry.trustMode;
+    return {
+      label: entry.name,
+      desc: `${entry.role} · ${scope}`,
+      right: trust,
+      mark: entry.connected ? '●' : '○',
+      markFg: entry.connected ? t.success : t.textFaint,
+      selected: i === selected && focused,
+      current: i === selected && !focused,
+    };
+  });
+}

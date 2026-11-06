@@ -394,3 +394,15 @@ export function handleCtrlC(prompt: string, saveUndoState: () => void, setPrompt
     }, 1000);
     setLastCtrlCTimeoutId(timeoutId);
 }
+
+export function registerPasteForHost(handler: PasteRegistryState, content: string, projectRoot: string): string {
+    const result = registerPaste({
+      pasteRegistry: handler.pasteRegistry,
+      nextPasteId: handler.nextPasteId,
+      imageRegistry: handler.imageRegistry,
+      nextImageId: handler.nextImageId,
+    }, content, projectRoot);
+    handler.nextPasteId = result.nextPasteId;
+    handler.nextImageId = result.nextImageId;
+    return result.marker;
+  }

@@ -1,3 +1,4 @@
+import { buildFallbackSecretReview } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 import { sortUnique, buildProviderRoutingSnapshot, buildRuntimeDefaultsSnapshot, buildConfiguredSurfaceKinds, sortSurfaceRecords, buildFallbackAuthSnapshot, buildAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 import type { SecretStorageReview } from '../../config/secrets.ts';
 import { getProviderIdFromModel } from '../../config/provider-model.ts';
@@ -148,20 +149,7 @@ async function buildServicesSnapshot(
   };
 }
 
-function buildFallbackSecretReview(
-  config: OnboardingConfigSnapshot,
-): SecretStorageReview {
-  return {
-    policy: config.storage.secretPolicy,
-    secureAvailable: false,
-    storedKeys: 0,
-    envBackedKeys: 0,
-    secureKeys: 0,
-    plaintextKeys: 0,
-    warnings: [],
-    locations: [],
-  };
-}
+
 
 async function loadOptionalSnapshot<T>(
   area: OnboardingSnapshotCollectionIssueArea,

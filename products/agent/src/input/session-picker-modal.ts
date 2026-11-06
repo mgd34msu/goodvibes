@@ -1,3 +1,4 @@
+import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/session-picker-state';
 /**
  * SessionPickerModal, state management for the /sessions picker modal.
  *
@@ -31,83 +32,21 @@ export function renderSessionPickerStatePackageText(): string {
 // SessionPickerModal
 // ---------------------------------------------------------------------------
 
-export class SessionPickerModal {
-  public active = false;
-  public sessions: SessionInfo[] = [];
-  public selectedIndex = 0;
-  public scrollOffset = 0;
-  public visibleRows = 8;
-  public deleteConfirmationTarget: string | null = null;
-
+export class SessionPickerModal extends SavedSessionPickerState {
   /** Last status message to show in the modal (e.g. error or success). */
-  public statusMessage = '';
 
   /**
    * The always-live search query. Filters the sessions by name and title;
    * selectedIndex and scrollOffset index the filtered list.
    */
-  public query = '';
-
-  public constructor(private readonly sessionManager: SessionManager) {}
 
   /**
    * Open the modal, loading sessions from SessionManager.
    */
-  open(): void {
-    this.sessions = this.sessionManager.list();
-    this.selectedIndex = 0;
-    this.scrollOffset = 0;
-    this.statusMessage = '';
-    this.deleteConfirmationTarget = null;
-    this.query = '';
-    this.active = true;
-  }
 
   /** The sessions matching the query (all of them when it is empty). */
-  visibleSessions(): SessionInfo[] {
-    const q = this.query.trim().toLowerCase();
-    if (q.length === 0) return this.sessions;
-    return this.sessions.filter((s) => s.name.toLowerCase().includes(q) || (s.title ?? '').toLowerCase().includes(q));
-  }
 
   /** Replace the query; the selection returns to the first match. */
-  setQuery(query: string): void {
-    this.query = query;
-    this.selectedIndex = 0;
-    this.scrollOffset = 0;
-    this.deleteConfirmationTarget = null;
-  }
-
-  close(): void {
-    this.active = false;
-    this.statusMessage = '';
-    this.deleteConfirmationTarget = null;
-  }
-
-  moveUp(): void {
-    const count = this.visibleSessions().length;
-    if (count === 0) return;
-    this.selectedIndex = (this.selectedIndex - 1 + count) % count;
-    this._clampScroll();
-    this.deleteConfirmationTarget = null;
-  }
-
-  moveDown(): void {
-    const count = this.visibleSessions().length;
-    if (count === 0) return;
-    this.selectedIndex = (this.selectedIndex + 1) % count;
-    this._clampScroll();
-    this.deleteConfirmationTarget = null;
-  }
-
-  setVisibleRows(rows: number): void {
-    this.visibleRows = Math.max(3, rows);
-    this._clampScroll();
-  }
-
-  getSelected(): SessionInfo | null {
-    return this.visibleSessions()[this.selectedIndex] ?? null;
-  }
 
   /**
    * Load the currently selected session into the given ConversationManager.
@@ -137,16 +76,5 @@ export class SessionPickerModal {
     this.deleteConfirmationTarget = null;
     this.statusMessage = sessionDeletionCommandRequiredMessage(session.name);
     return false;
-  }
-
-  private _clampScroll(): void {
-    const visRows = Math.max(3, this.visibleRows);
-    if (this.selectedIndex < this.scrollOffset) {
-      this.scrollOffset = this.selectedIndex;
-    } else if (this.selectedIndex >= this.scrollOffset + visRows) {
-      this.scrollOffset = this.selectedIndex - visRows + 1;
-    }
-    const maxOffset = Math.max(0, this.visibleSessions().length - visRows);
-    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset));
   }
 }

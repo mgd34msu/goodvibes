@@ -1,3 +1,4 @@
+import { registerPasteForHost } from '@goodvibes-jev/engine/terminal-shell/input-content';
 import { activeTokens } from '../renderer/theme.ts';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
@@ -98,17 +99,7 @@ export function handlePasteForHandler(handler: InputHandler): ReturnType<typeof 
   return result;
 }
 
-export function registerPasteForHandler(handler: InputHandler, content: string): string {
-    const result = registerPaste({
-      pasteRegistry: handler.pasteRegistry,
-      nextPasteId: handler.nextPasteId,
-      imageRegistry: handler.imageRegistry,
-      nextImageId: handler.nextImageId,
-    }, content, handler.uiServices.environment.shellPaths.workingDirectory);
-    handler.nextPasteId = result.nextPasteId;
-    handler.nextImageId = result.nextImageId;
-    return result.marker;
-  }
+export function registerPasteForHandler(handler: InputHandler, content: string): string { return registerPasteForHost(handler, content, handler.uiServices.environment.shellPaths.workingDirectory); }
 
   /**
    * expandPrompt - Replaces paste markers with actual content.

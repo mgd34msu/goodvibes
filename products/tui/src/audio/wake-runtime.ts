@@ -1,3 +1,4 @@
+import { retainWakeClip } from '@goodvibes-jev/engine/terminal-shell/audio/retained-wake-clip';
 /**
  * wake-runtime.ts, wake-word detection on the terminal.
  *
@@ -166,20 +167,7 @@ export function wireWakeRuntime(deps: WakeRuntimeDeps): WakeRuntime {
     return { kind, deviceLabel, indicator, ...(detail !== undefined ? { detail } : {}) };
   };
 
-  const retainClip = (utterance: CapturedUtterance): void => {
-    const retainedDir = resolveManagedWakePaths(deps.managedRoot).retainedDir;
-    try {
-      mkdirSync(retainedDir, { recursive: true });
-      // The SDK owns the filename, and it is load-bearing rather than cosmetic: the
-      // recovery sweeper reads the owning session id from the first `--`-delimited
-      // segment, so a name invented here would get a live session's clips reaped as
-      // orphans (or leave them unreaped forever).
-      const target = join(retainedDir, retainedClipFileName(deps.sessionId, (deps.now ?? Date.now)()));
-      writeFileSync(target, encodeWavPcm16(utterance.samples, utterance.sampleRate));
-    } catch (error) {
-      deps.warn('retaining the wake clip failed', { error: error instanceof Error ? error.message : String(error) });
-    }
-  };
+  const retainClip = (utterance: CapturedUtterance): void => { retainWakeClip(deps, utterance); };
 
   const transcribeUtterance = async (utterance: CapturedUtterance, settings: WakeRuntimeSettings, signal: AbortSignal): Promise<void> => {
     if (signal.aborted) return;

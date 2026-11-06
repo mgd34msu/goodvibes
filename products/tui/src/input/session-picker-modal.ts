@@ -1,3 +1,4 @@
+import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/session-picker-state';
 /**
  * SessionPickerModal, state management for the /sessions picker modal.
  *
@@ -64,37 +65,31 @@ const DORMANT_CROSS_SURFACE_VIEW: CrossSurfaceView = {
   offlineNote: null,
 };
 
-export class SessionPickerModal {
-  public active = false;
-  public sessions: SessionInfo[] = [];
+export class SessionPickerModal extends SavedSessionPickerState {
   /** Cross-surface session union (view-only), see class doc. Empty until open(). */
   public crossSurfaceSessions: readonly SharedSessionRecord[] = [];
   /** Honest posture for crossSurfaceSessions: mode/online/stale/offlineNote. */
   public crossSurfaceView: CrossSurfaceView = DORMANT_CROSS_SURFACE_VIEW;
-  public selectedIndex = 0;
-  public scrollOffset = 0;
-  public visibleRows = 8;
-  public deleteConfirmationTarget: string | null = null;
 
   /** Daemon-hosted sessions (view-only), see class doc. Never a fabricated empty list. */
   public hostedRoster: HostedRosterSnapshot = UNREAD_HOSTED_ROSTER;
 
   /** Last status message to show in the modal (e.g. error or success). */
-  public statusMessage = '';
 
   private resumeTask: Promise<void> | null = null;
 
   /** The selected session's native resume, including its liveness decision. */
-  get pendingResume(): Promise<void> | null { return this.resumeTask; }
+  get pendingResume(): Promise<void> | null {
+    return this.resumeTask;
+  }
 
   /**
    * The always-live search query. Filters the local sessions by name and
    * title; selectedIndex and scrollOffset index the filtered list.
    */
-  public query = '';
 
   public constructor(
-    private readonly sessionManager: SessionManager,
+    sessionManager: SessionManager,
     private readonly sessionBroker?: SessionReadFacade,
     private readonly hostedRosterSource?: SessionPickerHostedRoster,
     /**
@@ -103,14 +98,15 @@ export class SessionPickerModal {
      * next keystroke, which is what a modal with no render hook can honestly do.
      */
     private readonly onRosterRefreshed?: () => void,
-  ) {}
+  ) {
+    super(sessionManager);
+  }
 
   /**
    * Open the modal, loading local saved sessions from SessionManager and (when
    * a sessionBroker was wired) the cross-surface session union, honestly.
    */
-  open(): void {
-    this.sessions = this.sessionManager.list();
+  protected override refreshAdditionalSources(): void {
     if (this.sessionBroker) {
       this.crossSurfaceSessions = this.sessionBroker.listSessions();
       this.crossSurfaceView = this.sessionBroker.crossSurfaceView;
@@ -129,59 +125,11 @@ export class SessionPickerModal {
         this.onRosterRefreshed?.();
       });
     }
-    this.selectedIndex = 0;
-    this.scrollOffset = 0;
-    this.statusMessage = '';
-    this.deleteConfirmationTarget = null;
-    this.query = '';
-    this.active = true;
   }
 
   /** The local sessions matching the query (all of them when it is empty). */
-  visibleSessions(): SessionInfo[] {
-    const q = this.query.trim().toLowerCase();
-    if (q.length === 0) return this.sessions;
-    return this.sessions.filter((s) => s.name.toLowerCase().includes(q) || (s.title ?? '').toLowerCase().includes(q));
-  }
 
   /** Replace the query; the selection returns to the first match. */
-  setQuery(query: string): void {
-    this.query = query;
-    this.selectedIndex = 0;
-    this.scrollOffset = 0;
-    this.deleteConfirmationTarget = null;
-  }
-
-  close(): void {
-    this.active = false;
-    this.statusMessage = '';
-    this.deleteConfirmationTarget = null;
-  }
-
-  moveUp(): void {
-    const count = this.visibleSessions().length;
-    if (count === 0) return;
-    this.selectedIndex = (this.selectedIndex - 1 + count) % count;
-    this._clampScroll();
-    this.deleteConfirmationTarget = null;
-  }
-
-  moveDown(): void {
-    const count = this.visibleSessions().length;
-    if (count === 0) return;
-    this.selectedIndex = (this.selectedIndex + 1) % count;
-    this._clampScroll();
-    this.deleteConfirmationTarget = null;
-  }
-
-  setVisibleRows(rows: number): void {
-    this.visibleRows = Math.max(3, rows);
-    this._clampScroll();
-  }
-
-  getSelected(): SessionInfo | null {
-    return this.visibleSessions()[this.selectedIndex] ?? null;
-  }
 
   /** Resume the captured local session through the existing native owner. */
   resumeSelected(resumeSession: NonNullable<CommandContext['resumeSession']>, dismiss: () => void): Promise<void> {
@@ -232,16 +180,5 @@ export class SessionPickerModal {
       this.statusMessage = `Error: ${summarizeError(e)}`;
       return false;
     }
-  }
-
-  private _clampScroll(): void {
-    const visRows = Math.max(3, this.visibleRows);
-    if (this.selectedIndex < this.scrollOffset) {
-      this.scrollOffset = this.selectedIndex;
-    } else if (this.selectedIndex >= this.scrollOffset + visRows) {
-      this.scrollOffset = this.selectedIndex - visRows + 1;
-    }
-    const maxOffset = Math.max(0, this.visibleSessions().length - visRows);
-    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset));
   }
 }

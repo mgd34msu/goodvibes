@@ -402,3 +402,62 @@ export function handleBlockActionsToken<Action extends string>(state: BlockActio
     state.requestRender();
     return true;
 }
+export type EscapeOnlyModalRouteState = {
+    active: boolean;
+    requestRender: () => void;
+    handleEscape: () => void;
+    /** Optional scrolling for read-only modals: ↑ passes +1 (back), ↓ passes -1. */
+    scroll?: ((delta: number) => void) | undefined;
+};
+export function handleEscapeOnlyModalToken(state: EscapeOnlyModalRouteState, token: InputToken): boolean {
+    if (!state.active)
+        return false;
+    if (token.type === 'key' && token.logicalName === 'escape') {
+        state.handleEscape();
+        return true;
+    }
+    if (token.type === 'key' && state.scroll) {
+        if (token.logicalName === 'up')
+            state.scroll(1);
+        else if (token.logicalName === 'down')
+            state.scroll(-1);
+        else if (token.logicalName === 'pageup')
+            state.scroll(10);
+        else if (token.logicalName === 'pagedown')
+            state.scroll(-10);
+    }
+    state.requestRender();
+    return true;
+}
+export type ModalTokenSnapshot = {
+    selectionCallback: ((result: SelectionResult | null) => void) | null;
+    helpOverlayActive: boolean;
+    helpScrollOffset: number;
+    shortcutsOverlayActive: boolean;
+    shortcutsScrollOffset: number;
+    prompt: string;
+    cursorPos: number;
+    nextImageId: number;
+};
+export function withModalState(state: ModalTokenSnapshot, handled: boolean, overrides: Partial<{
+    selectionCallback: ((result: SelectionResult | null) => void) | null;
+    helpOverlayActive: boolean;
+    helpScrollOffset: number;
+    shortcutsOverlayActive: boolean;
+    shortcutsScrollOffset: number;
+    prompt: string;
+    cursorPos: number;
+    nextImageId: number;
+}> = {}) {
+    return {
+        handled,
+        selectionCallback: overrides.selectionCallback ?? state.selectionCallback,
+        helpOverlayActive: overrides.helpOverlayActive ?? state.helpOverlayActive,
+        helpScrollOffset: overrides.helpScrollOffset ?? state.helpScrollOffset,
+        shortcutsOverlayActive: overrides.shortcutsOverlayActive ?? state.shortcutsOverlayActive,
+        shortcutsScrollOffset: overrides.shortcutsScrollOffset ?? state.shortcutsScrollOffset,
+        prompt: overrides.prompt ?? state.prompt,
+        cursorPos: overrides.cursorPos ?? state.cursorPos,
+        nextImageId: overrides.nextImageId ?? state.nextImageId,
+    };
+}

@@ -1,4 +1,4 @@
-import type { GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
+import type { GoodVibesConfig, SecretStorageReview } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/sdk/platform/security';
 import type { createOnboardingStateStorage } from './onboarding-state.js';
 import type { OnboardingAcknowledgementSnapshot, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
@@ -120,4 +120,19 @@ export function buildAcknowledgementSnapshot(deps: {
         },
         issue: null,
     };
+}
+
+export function buildFallbackSecretReview(
+  config: Pick<GoodVibesConfig, 'storage'>,
+): SecretStorageReview {
+  return {
+    policy: config.storage.secretPolicy,
+    secureAvailable: false,
+    storedKeys: 0,
+    envBackedKeys: 0,
+    secureKeys: 0,
+    plaintextKeys: 0,
+    warnings: [],
+    locations: [],
+  };
 }

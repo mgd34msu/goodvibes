@@ -1,3 +1,4 @@
+import { inspectVoiceBundle, type VoiceBundle } from '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
@@ -8,21 +9,9 @@ import { terminalWakeCapabilities } from '../../core/wake-provision-status.ts';
 import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
 import { wakeProvisionStatus } from '@goodvibes-jev/engine/sdk/platform/voice';
 
-interface VoiceBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  readonly enabled: boolean;
-  readonly notes: readonly string[];
-}
 
-function inspectVoiceBundle(bundle: VoiceBundle): string {
-  return [
-    'Voice Review',
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  enabled: ${bundle.enabled ? 'yes' : 'no'}`,
-    `  notes: ${bundle.notes.length}`,
-  ].join('\n');
-}
+
+
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

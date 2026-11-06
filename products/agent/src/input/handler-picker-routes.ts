@@ -1,3 +1,4 @@
+export { handleEscapeOnlyModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 export { handleFilePickerToken, handleBlockActionsToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { CommandContext } from './command-registry.ts';
@@ -288,30 +289,6 @@ export function handleLiveTailToken(state: LiveTailRouteState, token: InputToken
     stopAndReturn();
   }
 
-  state.requestRender();
-  return true;
-}
-
-type EscapeOnlyModalRouteState = {
-  active: boolean;
-  requestRender: () => void;
-  handleEscape: () => void;
-  /** Optional scrolling for read-only modals: ↑ passes +1 (back), ↓ passes -1. */
-  scroll?: (delta: number) => void;
-};
-
-export function handleEscapeOnlyModalToken(state: EscapeOnlyModalRouteState, token: InputToken): boolean {
-  if (!state.active) return false;
-  if (token.type === 'key' && token.logicalName === 'escape') {
-    state.handleEscape();
-    return true;
-  }
-  if (token.type === 'key' && state.scroll) {
-    if (token.logicalName === 'up') state.scroll(1);
-    else if (token.logicalName === 'down') state.scroll(-1);
-    else if (token.logicalName === 'pageup') state.scroll(10);
-    else if (token.logicalName === 'pagedown') state.scroll(-10);
-  }
   state.requestRender();
   return true;
 }

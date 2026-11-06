@@ -1,3 +1,4 @@
+import { mcpTrustRows } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
 import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
 /**
  * renderSettingsModal, the settings modal drawn with the surface kit.
@@ -117,19 +118,7 @@ function listRows(modal: SettingsModal, width: number): { rows: KitRow[]; select
       if (items.length === 0) return { rows: [{ label: 'No MCP servers registered.', muted: true }], selected: -1 };
       const sel = clampIndex(items.length);
       return {
-        rows: items.map((entry, i) => {
-          const scope = entry.allowedPaths.length > 0 ? entry.allowedPaths.join(', ') : entry.allowedHosts.length > 0 ? entry.allowedHosts.join(', ') : 'no scope';
-          const trust = i === sel && modal.editingMode ? `${modal.editBuffer}▏` : entry.trustMode;
-          return {
-            label: entry.name,
-            desc: `${entry.role} · ${scope}`,
-            right: trust,
-            mark: entry.connected ? '●' : '○',
-            markFg: entry.connected ? t.success : t.textFaint,
-            selected: i === sel && focused,
-            current: i === sel && !focused,
-          };
-        }),
+        rows: mcpTrustRows(items, sel, focused, modal.editingMode, modal.editBuffer),
         selected: sel,
       };
     }

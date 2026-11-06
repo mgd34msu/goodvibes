@@ -1,3 +1,4 @@
+import { withModalState as withState } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { ConversationManager } from '../core/conversation.ts';
@@ -282,31 +283,4 @@ export function handleModalTokenRoutes(state: ModalTokenRouteState, token: Input
   }
 
   return withState(state, false);
-}
-
-function withState(
-  state: ModalTokenRouteState,
-  handled: boolean,
-  overrides: Partial<{
-    selectionCallback: ((result: SelectionResult | null) => void) | null;
-    helpOverlayActive: boolean;
-    helpScrollOffset: number;
-    shortcutsOverlayActive: boolean;
-    shortcutsScrollOffset: number;
-    prompt: string;
-    cursorPos: number;
-    nextImageId: number;
-  }> = {},
-) {
-  return {
-    handled,
-    selectionCallback: overrides.selectionCallback ?? state.selectionCallback,
-    helpOverlayActive: overrides.helpOverlayActive ?? state.helpOverlayActive,
-    helpScrollOffset: overrides.helpScrollOffset ?? state.helpScrollOffset,
-    shortcutsOverlayActive: overrides.shortcutsOverlayActive ?? state.shortcutsOverlayActive,
-    shortcutsScrollOffset: overrides.shortcutsScrollOffset ?? state.shortcutsScrollOffset,
-    prompt: overrides.prompt ?? state.prompt,
-    cursorPos: overrides.cursorPos ?? state.cursorPos,
-    nextImageId: overrides.nextImageId ?? state.nextImageId,
-  };
 }

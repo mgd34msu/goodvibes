@@ -1,5 +1,6 @@
+import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
-import { mcpTrustRows } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
+import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
 import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
 /**
  * renderSettingsModal, the settings modal drawn with the surface kit.
@@ -27,7 +28,7 @@ import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/ter
 import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
 import { isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
-import { CATEGORY_LABELS, getSettingLabel, inferSubscriptionRouteReason, valueColor } from './settings-modal-helpers.ts';
+import { CATEGORY_LABELS, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
 import { connectionRows } from './settings-modal-connections.ts';
 import { categoryItemCount, currentSettingValue, settingContextLines } from './settings-modal-context.ts';
 import { activeTokens } from './theme.ts';
@@ -46,111 +47,12 @@ import './surface-kit-parts.ts';
  * draft longer than that keeps its end (where the cursor is) in view.
  */
 
-function settingRow(
-  modal: SettingsModal,
-  entry: SettingEntry,
-  selected: boolean,
-  focused: boolean,
-  width: number,
-  category?: string,
-): KitRow {
-  const t = activeTokens();
-  const editing = selected && modal.editingMode;
-  const danger = modal.currentCategory === 'danger' && !modal.searchFocused;
-  if (entry.flag) {
-    const { feature, state, pendingRestart } = entry.flag;
-    const configOn = isFeatureValueEnabled(feature, entry.currentValue);
-    const raw = currentSettingValue(modal, entry, selected);
-    // A startup-gated feature changed this session shows its saved value with
-    // a restart-pending marker (⟳); the documentation spells it out.
-    const value = pendingRestart ? `${raw} ⟳` : raw;
-    return {
-      label: feature.name,
-      desc: [category, entry.metadataUnavailable ? 'unavailable' : ''].filter(Boolean).join(' · ') || undefined,
-      right: fitValue(value, width, editing, feature.name),
-      rightFg: valueColor(entry),
-      mark: state === 'killed' ? '✕' : configOn ? '●' : '○',
-      markFg: state === 'killed' ? t.error : configOn ? t.success : t.textFaint,
-      selected: selected && focused,
-      current: selected && !focused,
-      labelFg: danger ? t.error : undefined,
-    };
-  }
-  const flags = [entry.metadataUnavailable ? 'unavailable' : '', entry.locked ? 'locked' : '', entry.conflict ? 'conflict' : '']
-    .filter(Boolean)
-    .join(' · ');
-  const desc = [category, flags].filter(Boolean).join(' · ');
-  return {
-    // Sub-options of a feature unit read as part of the unit above them.
-    label: entry.ownerFlagId ? `· ${getSettingLabel(entry)}` : getSettingLabel(entry),
-    desc: desc || undefined,
-    right: fitValue(currentSettingValue(modal, entry, selected), width, editing, getSettingLabel(entry)),
-    rightFg: valueColor(entry),
-    mark: entry.isDefault ? undefined : '◇',
-    markFg: t.warning,
-    selected: selected && focused,
-    current: selected && !focused,
-    labelFg: danger ? t.error : undefined,
-  };
-}
-
 function categoryOf(entry: SettingEntry): string {
   const prefix = entry.setting.key.split('.')[0] ?? '';
   return CATEGORY_LABELS[prefix as SettingsCategory] ?? prefix;
 }
 
 /** The rows of the right-hand list for the current view, and which one is selected. */
-function listRows(modal: SettingsModal, width: number): { rows: KitRow[]; selected: number } {
-  const focused = modal.searchFocused || (modal.focusRegion ?? 'settings') === 'settings';
-  const clampIndex = (n: number): number => Math.max(0, Math.min(modal.selectedIndex, n - 1));
-  if (modal.searchFocused) {
-    const results = modal.searchResults;
-    if (results.length === 0) return { rows: [], selected: -1 };
-    const sel = clampIndex(results.length);
-    return { rows: results.map((entry, i) => settingRow(modal, entry, i === sel, true, width, categoryOf(entry))), selected: sel };
-  }
-  const t = activeTokens();
-  switch (modal.currentCategory) {
-    case 'mcp': {
-      const items = modal.mcpEntries;
-      if (items.length === 0) return { rows: [{ label: 'No MCP servers registered.', muted: true }], selected: -1 };
-      const sel = clampIndex(items.length);
-      return {
-        rows: mcpTrustRows(items, sel, focused, modal.editingMode, modal.editBuffer),
-        selected: sel,
-      };
-    }
-    case 'subscriptions': {
-      const items = modal.subscriptionEntries;
-      if (items.length === 0) return { rows: [{ label: 'No provider subscriptions available or configured.', muted: true }], selected: -1 };
-      const sel = clampIndex(items.length);
-      return {
-        rows: items.map((entry, i) => ({
-          label: entry.provider,
-          desc:
-            [entry.activeRoute ?? '', entry.authFreshness ?? '', inferSubscriptionRouteReason(entry) ?? ''].filter(Boolean).join(' · ') ||
-            undefined,
-          right: entry.state,
-          rightFg: entry.state === 'active' ? t.success : undefined,
-          selected: i === sel && focused,
-          current: i === sel && !focused,
-        })),
-        selected: sel,
-      };
-    }
-    case 'connections':
-      return {
-        rows: connectionRows(modal, focused),
-        selected: modal.connectionEntries.length > 0 ? clampIndex(modal.connectionEntries.length) : -1,
-      };
-    default: {
-      const items = modal.currentItems;
-      if (items.length === 0) return { rows: [{ label: 'No settings in this category.', muted: true }], selected: -1 };
-      const sel = clampIndex(items.length);
-      return { rows: items.map((entry, i) => settingRow(modal, entry, i === sel, focused, width)), selected: sel };
-    }
-  }
-}
 
 function categoryRows(modal: SettingsModal): KitRow[] {
   return settingsCategoryRows({
@@ -191,52 +93,6 @@ function categoryRows(modal: SettingsModal): KitRow[] {
 // Hints
 // ---------------------------------------------------------------------------
 
-function settingsHints(modal: SettingsModal): KitHint[] {
-  if (modal.resetCategoryConfirm !== null || modal.resetAllConfirm !== null)
-    return [
-      ['⏎', 'confirm reset'],
-      ['esc', 'cancel'],
-    ];
-  if (modal.subscriptionLogoutConfirmationTarget)
-    return [
-      ['⏎', 'sign out'],
-      ['esc', 'cancel'],
-    ];
-  if (modal.editingMode)
-    return [
-      ['⏎', 'save'],
-      ['esc', 'cancel edit'],
-    ];
-  if (modal.searchFocused)
-    return [
-      ['↑↓', 'move'],
-      ['⏎', 'change'],
-      ['⌫', 'edit search'],
-      ['ctrl+r', 'reset'],
-    ];
-  if (modal.focusRegion === 'categories')
-    return [
-      ['↑↓', 'category'],
-      ['→', 'settings'],
-      ['tab', 'pane'],
-    ];
-  const enter: KitHint =
-    modal.currentCategory === 'mcp'
-      ? ['⏎', 'edit trust']
-      : modal.currentCategory === 'subscriptions'
-        ? ['⏎', 'review or sign out']
-        : ['⏎', 'change'];
-  return [
-    ['↑↓', 'move'],
-    enter,
-    ['←→', 'category'],
-    ['pgup pgdn', 'docs'],
-    ['ctrl+r', 'reset'],
-    ['shift+r', 'reset category'],
-    ['ctrl+shift+r', 'reset all'],
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Renderer
 // ---------------------------------------------------------------------------
@@ -248,6 +104,57 @@ const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentati
   countIndicatorRow: false,
 });
 export { settingsDocumentation };
+
+const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
+  label: getSettingLabel,
+  rowLabel: (entry) => (entry.ownerFlagId ? '· ' + getSettingLabel(entry) : getSettingLabel(entry)),
+  color: valueColor,
+  currentValue: currentSettingValue,
+  unavailable: (entry) => !!entry.metadataUnavailable,
+  category: categoryOf,
+  focused: (modal) => modal.searchFocused || (modal.focusRegion ?? 'settings') === 'settings',
+  routeLabel: (route) => route,
+  specialRow(modal, entry, selected, focused, width, category) {
+    const t = activeTokens();
+    const editing = selected && modal.editingMode;
+    const danger = modal.currentCategory === 'danger' && !modal.searchFocused;
+    if (entry.flag) {
+      const { feature, state, pendingRestart } = entry.flag;
+      const configOn = isFeatureValueEnabled(feature, entry.currentValue);
+      const raw = currentSettingValue(modal, entry, selected);
+      // A startup-gated feature changed this session shows its saved value with
+      // a restart-pending marker (⟳); the documentation spells it out.
+      const value = pendingRestart ? `${raw} ⟳` : raw;
+      return {
+        label: feature.name,
+        desc: [category, entry.metadataUnavailable ? 'unavailable' : ''].filter(Boolean).join(' · ') || undefined,
+        right: fitValue(value, width, editing, feature.name),
+        rightFg: valueColor(entry),
+        mark: state === 'killed' ? '✕' : configOn ? '●' : '○',
+        markFg: state === 'killed' ? t.error : configOn ? t.success : t.textFaint,
+        selected: selected && focused,
+        current: selected && !focused,
+        labelFg: danger ? t.error : undefined,
+      };
+    }
+    return undefined;
+  },
+  specialList: (modal, _width, focused, clampIndex) =>
+    modal.currentCategory === 'connections'
+      ? {
+          rows: connectionRows(modal, focused),
+          selected: modal.connectionEntries.length > 0 ? clampIndex(modal.connectionEntries.length) : -1,
+        }
+      : undefined,
+});
+function settingsHints(modal: SettingsModal): KitHint[] {
+  return settingsNavigationHints(modal, {
+    resetPending: modal.resetCategoryConfirm !== null || modal.resetAllConfirm !== null,
+    categoryFocused: modal.focusRegion === 'categories',
+    flagToggle: false,
+    extendedReset: true,
+  });
+}
 
 export const { renderSettingsModal } = createSettingsLayout<SettingsModal>({
   listRows,

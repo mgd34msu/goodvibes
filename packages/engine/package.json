@@ -2808,6 +2808,16 @@
       "bun": "./terminal-shell/src/shell-core-actions.ts",
       "types": "./terminal-shell/dist/shell-core-actions.d.ts",
       "import": "./terminal-shell/dist/shell-core-actions.js"
+    },
+    "./terminal-shell/renderer/settings-rows": {
+      "bun": "./terminal-shell/src/renderer/settings-rows.ts",
+      "types": "./terminal-shell/dist/renderer/settings-rows.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-rows.js"
+    },
+    "./terminal-shell/onboarding-apply-pipeline": {
+      "bun": "./terminal-shell/src/onboarding-apply-pipeline.ts",
+      "types": "./terminal-shell/dist/onboarding-apply-pipeline.d.ts",
+      "import": "./terminal-shell/dist/onboarding-apply-pipeline.js"
     }
   },
   "publishConfig": {

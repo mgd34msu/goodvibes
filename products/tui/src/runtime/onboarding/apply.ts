@@ -1,11 +1,9 @@
+import { createOnboardingApplyPipeline, orderOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ': ',
 });
-import {
-  createOnboardingApplyPrimitives,
-  verifyOnboardingWithRollback,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
+import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev/engine/terminal-shell/onboarding-file-helpers';
 const { isPlainObject, readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
   createOnboardingFileHelpers();
@@ -21,7 +19,6 @@ import type {
   OnboardingApplyError,
   OnboardingApplyOperation,
   OnboardingApplyRequest,
-  OnboardingApplyResult,
 } from './types.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 
@@ -232,17 +229,8 @@ async function buildRollbackAction(deps: OnboardingApplyDependencies, operation:
   throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
 }
 
-function orderApplyOperations(operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] {
-  const secretPolicyOperations = operations.filter(
-    (operation) => operation.kind === 'set-config' && operation.key === 'storage.secretPolicy',
-  );
-  const authOperations = operations.filter((operation) => operation.kind === 'ensure-auth-user');
-  const secretOperations = operations.filter((operation) => operation.kind === 'set-secret');
-  const configOperations = operations.filter((operation) => operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy');
-  const finalOperations = operations.filter((operation) => operation.kind === 'acknowledge');
-
-  return [...secretPolicyOperations, ...authOperations, ...secretOperations, ...configOperations, ...finalOperations];
-}
+const orderApplyOperations = (operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] =>
+  orderOnboardingOperations(operations);
 
 function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
   const errors: OnboardingApplyError[] = [];
@@ -294,93 +282,28 @@ function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['k
   return 'set-config';
 }
 
-export async function applyOnboardingRequest(
-  deps: OnboardingApplyDependencies,
-  request: OnboardingApplyRequest,
-): Promise<OnboardingApplyResult> {
-  const applied: OnboardingAppliedOperation[] = [];
-  const skipped: never[] = [];
-  const errors: OnboardingApplyError[] = prevalidateApplyRequest(deps, request);
-  if (errors.length > 0) {
-    return {
-      ok: false,
-      applied,
-      skipped,
-      errors,
-    };
-  }
-
-  const orderedOperations = orderApplyOperations(request.operations);
-  const rollbacks: RollbackAction[] = [];
-
-  const applyOperations = async (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => {
-    for (const operation of operations) {
-      let rollback: RollbackAction = () => {};
-      try {
-        rollback = await buildRollbackAction(deps, operation);
-        if (operation.kind === 'set-config') {
-          applied.push(applyConfigOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'set-secret') {
-          applied.push(await applySecretOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'ensure-auth-user') {
-          applied.push(applyAuthOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'acknowledge') {
-          applied.push(applyAcknowledgementOperation(deps, request, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        const neverOperation: never = operation;
-        throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
-      } catch (error) {
-        const rollbackErrors = await runRollbacks([...rollbacks, rollback]);
-        applied.length = 0;
-        errors.push({
-          kind: operation.kind,
-          message: [summarizeError(error), ...rollbackErrors.map((rollbackError) => `rollback: ${rollbackError}`)].join('; '),
-        });
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> =>
-    verifyOnboardingWithRollback(
-      () => verifyOnboardingRequest(deps, { ...request, operations }),
-      () => runRollbacks(rollbacks),
-      applied,
-      errors,
-      getVerificationFailureKind,
-    );
-
-  if (!(await applyOperations(orderedOperations))) {
-    return { ok: false, applied, skipped, errors };
-  }
-
-  if (!(await verifyOrRollback(orderedOperations))) {
-    return { ok: false, applied, skipped, errors };
-  }
-
-  return {
-    ok: errors.length === 0,
-    applied,
-    skipped,
-    errors,
-  };
-}
+export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
+  OnboardingApplyDependencies,
+  OnboardingApplyOperation,
+  OnboardingApplyRequest,
+  OnboardingAppliedOperation
+>({
+  prevalidate: prevalidateApplyRequest,
+  order: orderApplyOperations,
+  rollbackFor: buildRollbackAction,
+  rollback: runRollbacks,
+  verify: verifyOnboardingRequest,
+  verificationFailureKind: getVerificationFailureKind,
+  describeError: summarizeError,
+  apply(deps, request, operation) {
+    if (operation.kind === 'set-config') return applyConfigOperation(deps, operation);
+    if (operation.kind === 'set-secret') return applySecretOperation(deps, operation);
+    if (operation.kind === 'ensure-auth-user') return applyAuthOperation(deps, operation);
+    if (operation.kind === 'acknowledge') return applyAcknowledgementOperation(deps, request, operation);
+    const neverOperation: never = operation;
+    throw new Error('Unsupported onboarding operation: ' + JSON.stringify(neverOperation));
+  },
+});
 
 const {
   validateSecretOperation,

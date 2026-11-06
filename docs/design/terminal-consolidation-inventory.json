@@ -1407,14 +1407,15 @@
       "path": "renderer/settings-modal.ts",
       "baselineTuiLines": 384,
       "baselineSimilarity": 0.7419,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "fitValue",
         "docLines",
         "windowDoc",
         "settingsDocumentation",
         "mcpTrustRows"
-      ]
+      ],
+      "notes": "Platform owns settings rows, search/list selection, MCP/subscription display, categories, navigation hints, frame/documentation allocation and scroll state. Product adapters retain feature-header/flag presentation, connection rows, narrowed schemas and pointer/receipt policies."
     },
     {
       "path": "renderer/shell-surface.ts",
@@ -1784,8 +1785,10 @@
         "applyAcknowledgementOperation",
         "getNow",
         "verifyOnboardingWithRollback",
-        "onboarding-config-validation"
-      ]
+        "onboarding-config-validation",
+        "onboarding-apply-pipeline: ordered apply, verification, rollback and error accounting"
+      ],
+      "notes": "Shared config validation, file/secret/acknowledgement primitives and ordered transaction/verification/rollback pipeline. Product operation validators and effects retain local auth creation versus Agent refusal, profile/persona/note/routine extensions and distinct settings roots."
     },
     {
       "path": "runtime/onboarding/derivation.ts",

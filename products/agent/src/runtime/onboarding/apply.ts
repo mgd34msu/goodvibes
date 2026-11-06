@@ -1,12 +1,10 @@
+import { createOnboardingApplyPipeline, orderOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ' ',
   validateExtension: validateLegacyFeatureConfigValue,
 });
-import {
-  createOnboardingApplyPrimitives,
-  verifyOnboardingWithRollback,
-} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
+import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { existsSync, rmSync } from 'node:fs';
 import '@goodvibes-jev/engine/sdk/platform/config';
 import '../../config/index.ts';
@@ -31,7 +29,6 @@ import type {
   OnboardingApplyError,
   OnboardingApplyOperation,
   OnboardingApplyRequest,
-  OnboardingApplyResult,
 } from './types.ts';
 import {
   readJsonObject,
@@ -378,35 +375,12 @@ function applyCreateLocalNoteOperation(
   };
 }
 
-function orderApplyOperations(operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] {
-  const secretPolicyOperations = operations.filter(
-    (operation) => operation.kind === 'set-config' && operation.key === 'storage.secretPolicy',
-  );
-  const authOperations = operations.filter((operation) => operation.kind === 'ensure-auth-user');
-  const secretOperations = operations.filter((operation) => operation.kind === 'set-secret');
-  const configOperations = operations.filter((operation) => operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy');
-  const agentProfileOperations = operations.filter((operation) => operation.kind === 'create-agent-profile');
-  const agentProfileSelectionOperations = operations.filter((operation) => operation.kind === 'select-agent-profile');
-  const localBehaviorOperations = operations.filter(
-    (operation) =>
-      operation.kind === 'create-local-note' ||
-      operation.kind === 'create-local-persona' ||
-      operation.kind === 'create-local-skill' ||
-      operation.kind === 'create-local-routine',
-  );
-  const finalOperations = operations.filter((operation) => operation.kind === 'acknowledge');
-
-  return [
-    ...secretPolicyOperations,
-    ...authOperations,
-    ...secretOperations,
-    ...configOperations,
-    ...agentProfileOperations,
-    ...agentProfileSelectionOperations,
-    ...localBehaviorOperations,
-    ...finalOperations,
-  ];
-}
+const orderApplyOperations = (operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] =>
+  orderOnboardingOperations(operations, [
+    ['create-agent-profile'],
+    ['select-agent-profile'],
+    ['create-local-note', 'create-local-persona', 'create-local-skill', 'create-local-routine'],
+  ]);
 
 function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
   const errors: OnboardingApplyError[] = [];
@@ -500,131 +474,37 @@ function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['k
   return 'set-config';
 }
 
-export async function applyOnboardingRequest(
-  deps: OnboardingApplyDependencies,
-  request: OnboardingApplyRequest,
-): Promise<OnboardingApplyResult> {
-  const applied: OnboardingAppliedOperation[] = [];
-  const skipped: never[] = [];
-  const errors: OnboardingApplyError[] = prevalidateApplyRequest(deps, request);
-  if (errors.length > 0) {
-    return {
-      ok: false,
-      applied,
-      skipped,
-      errors,
-    };
-  }
-
-  const orderedOperations = orderApplyOperations(request.operations);
-  const rollbacks: RollbackAction[] = [];
-
-  const applyOperations = async (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => {
-    for (const operation of operations) {
-      let rollback: RollbackAction = () => {};
-      try {
-        rollback = await buildRollbackAction(deps, operation);
-        if (operation.kind === 'set-config') {
-          applied.push(applyConfigOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'set-secret') {
-          applied.push(await applySecretOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'ensure-auth-user') {
-          validateAuthOperation(deps, operation);
-          continue;
-        }
-
-        if (operation.kind === 'acknowledge') {
-          applied.push(applyAcknowledgementOperation(deps, request, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'create-agent-profile') {
-          applied.push(applyCreateAgentProfileOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'select-agent-profile') {
-          applied.push(applySelectAgentProfileOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'create-local-persona') {
-          applied.push(applyCreateLocalPersonaOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'create-local-note') {
-          applied.push(applyCreateLocalNoteOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'create-local-skill') {
-          applied.push(applyCreateLocalSkillOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        if (operation.kind === 'create-local-routine') {
-          applied.push(applyCreateLocalRoutineOperation(deps, operation));
-          rollbacks.push(rollback);
-          continue;
-        }
-
-        const neverOperation: never = operation;
-        throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
-      } catch (error) {
-        const rollbackErrors = await runRollbacks([...rollbacks, rollback]);
-        applied.length = 0;
-        errors.push({
-          kind: operation.kind,
-          message: [
-            error instanceof Error ? error.message : String(error),
-            ...rollbackErrors.map((rollbackError) => `rollback: ${rollbackError}`),
-          ].join('; '),
-        });
-        return false;
-      }
+export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
+  OnboardingApplyDependencies,
+  OnboardingApplyOperation,
+  OnboardingApplyRequest,
+  OnboardingAppliedOperation
+>({
+  prevalidate: prevalidateApplyRequest,
+  order: orderApplyOperations,
+  rollbackFor: buildRollbackAction,
+  rollback: runRollbacks,
+  verify: verifyOnboardingRequest,
+  verificationFailureKind: getVerificationFailureKind,
+  describeError: (error) => (error instanceof Error ? error.message : String(error)),
+  apply(deps, request, operation) {
+    if (operation.kind === 'set-config') return applyConfigOperation(deps, operation);
+    if (operation.kind === 'set-secret') return applySecretOperation(deps, operation);
+    if (operation.kind === 'ensure-auth-user') {
+      validateAuthOperation(deps, operation);
+      return null;
     }
-    return true;
-  };
-
-  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> =>
-    verifyOnboardingWithRollback(
-      () => verifyOnboardingRequest(deps, { ...request, operations }),
-      () => runRollbacks(rollbacks),
-      applied,
-      errors,
-      getVerificationFailureKind,
-    );
-
-  if (!(await applyOperations(orderedOperations))) {
-    return { ok: false, applied, skipped, errors };
-  }
-
-  if (!(await verifyOrRollback(orderedOperations))) {
-    return { ok: false, applied, skipped, errors };
-  }
-
-  return {
-    ok: errors.length === 0,
-    applied,
-    skipped,
-    errors,
-  };
-}
+    if (operation.kind === 'acknowledge') return applyAcknowledgementOperation(deps, request, operation);
+    if (operation.kind === 'create-agent-profile') return applyCreateAgentProfileOperation(deps, operation);
+    if (operation.kind === 'select-agent-profile') return applySelectAgentProfileOperation(deps, operation);
+    if (operation.kind === 'create-local-persona') return applyCreateLocalPersonaOperation(deps, operation);
+    if (operation.kind === 'create-local-note') return applyCreateLocalNoteOperation(deps, operation);
+    if (operation.kind === 'create-local-skill') return applyCreateLocalSkillOperation(deps, operation);
+    if (operation.kind === 'create-local-routine') return applyCreateLocalRoutineOperation(deps, operation);
+    const neverOperation: never = operation;
+    throw new Error('Unsupported onboarding operation: ' + JSON.stringify(neverOperation));
+  },
+});
 
 const {
   validateSecretOperation,

@@ -2658,6 +2658,21 @@
       "bun": "./terminal-shell/src/model-selection-action.ts",
       "types": "./terminal-shell/dist/model-selection-action.d.ts",
       "import": "./terminal-shell/dist/model-selection-action.js"
+    },
+    "./terminal-shell/local-provider-commands": {
+      "bun": "./terminal-shell/src/local-provider-commands.ts",
+      "types": "./terminal-shell/dist/local-provider-commands.d.ts",
+      "import": "./terminal-shell/dist/local-provider-commands.js"
+    },
+    "./terminal-shell/local-command-actions": {
+      "bun": "./terminal-shell/src/local-command-actions.ts",
+      "types": "./terminal-shell/dist/local-command-actions.d.ts",
+      "import": "./terminal-shell/dist/local-command-actions.js"
+    },
+    "./terminal-shell/secrets-command": {
+      "bun": "./terminal-shell/src/secrets-command.ts",
+      "types": "./terminal-shell/dist/secrets-command.d.ts",
+      "import": "./terminal-shell/dist/secrets-command.js"
     }
   },
   "publishConfig": {

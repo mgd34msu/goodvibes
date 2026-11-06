@@ -487,16 +487,18 @@
       "path": "input/commands/local-provider-runtime.ts",
       "baselineTuiLines": 219,
       "baselineSimilarity": 0.5446,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "reason": "One discovery/configuration/switch pipeline; product confirmation/model/default capability policies retained. New provider files always reference secure daemon-scoped credentials."
     },
     {
       "path": "input/commands/local-runtime.ts",
       "baselineTuiLines": 468,
       "baselineSimilarity": 0.6507,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "handleBookmarks"
-      ]
+      ],
+      "notes": "Platform owns image attachment, catalog refresh, favorites, block expansion and secret command parsing/read/write/reference mechanics. Products retain Agent media generation and TUI tool review, explicit mutation confirmation, credential ownership, visibility and presentation."
     },
     {
       "path": "input/commands/local-setup-review.ts",

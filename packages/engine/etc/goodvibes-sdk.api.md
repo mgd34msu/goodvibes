@@ -261,6 +261,9 @@ export type AnyRuntimeEvent = SessionEvent | TurnEvent | ProviderEvent | ToolEve
 // @public
 export function applyPerMethodPolicy(base: ResolvedHttpRetryPolicy, methodId: string): ResolvedHttpRetryPolicy;
 
+// @public (undocumented)
+export function assertDecisionModelsEnabled(feature: string): void;
+
 // @public
 export type AuthStateKind = 'anonymous' | 'session' | 'token';
 
@@ -1570,6 +1573,39 @@ export const DaemonErrorCategory: {
 export type DaemonErrorSource = 'provider' | 'tool' | 'transport' | 'config' | 'permission' | 'runtime' | 'render' | 'acp' | 'unknown';
 
 // @public (undocumented)
+export const DECISION_MODEL_POLICIES: readonly ["Default - On", "Preferred", "Classic - Off"];
+
+// @public
+export const DECISION_MODEL_POLICY_HEADER = "x-goodvibes-decision-policy";
+
+// @public
+export type DecisionModelPolicy = 'Default - On' | 'Preferred' | 'Classic - Off';
+
+// @public (undocumented)
+export interface DecisionModelPolicyState {
+    // (undocumented)
+    readonly operation: 'decision' | 'classic';
+    // (undocumented)
+    readonly policy: DecisionModelPolicy;
+    // (undocumented)
+    readonly reason: 'selected' | 'unavailable' | null;
+    // (undocumented)
+    readonly revision: number;
+}
+
+// @public (undocumented)
+export function decisionModelPolicyState(): DecisionModelPolicyState;
+
+// @public
+export class DecisionModelsDisabledError extends Error {
+    constructor(feature: string);
+    // (undocumented)
+    readonly code = "decision-models-disabled";
+    // (undocumented)
+    readonly feature: string;
+}
+
+// @public (undocumented)
 export const DEFAULT_HTTP_RETRY_POLICY: ResolvedHttpRetryPolicy;
 
 // @public (undocumented)
@@ -1807,12 +1843,13 @@ export interface FailureConclusions {
     // (undocumented)
     readonly rateLimited: boolean;
     // (undocumented)
-    readonly readings: {
+    readonly readings?: {
         readonly category: ChoiceReading<FailureCategory>;
         readonly connection_failure: ChoiceReading<ConnectionFailure>;
     } & {
         readonly [K in Exclude<FailureQuestion, 'category' | 'connection_failure'>]: YesNoReading;
     };
+    readonly source?: 'classic';
     // (undocumented)
     readonly transientNetwork: boolean;
 }
@@ -1933,7 +1970,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.0.0";
+    readonly productVersion: "3.1.0";
     readonly operatorMethodCount: 542;
     readonly operatorEventCount: 34;
     readonly peerEndpointCount: 6;
@@ -2522,6 +2559,9 @@ export function injectTraceparent(headers: Record<string, string>): void;
 
 // @public
 export function injectTraceparentAsync(headers: Record<string, string>): Promise<void>;
+
+// @public
+export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean): void;
 
 // @public
 export function installJudgmentPort(port: JudgmentPort | undefined): JudgmentPort | undefined;
@@ -12275,7 +12315,7 @@ export interface OperatorMethodOutputMap {
             id: string;
             ranAt: number;
             trigger: "manual" | "scheduled";
-            outcome: "cancelled" | "delivered" | "error" | "quiet" | "skipped-disabled" | "skipped-quiet-hours" | "skipped-stale";
+            outcome: "cancelled" | "delivered" | "error" | "quiet" | "skipped-decision-models-disabled" | "skipped-disabled" | "skipped-quiet-hours" | "skipped-stale";
             briefingSummary: string;
             decisionReason?: string;
             judgment?: {
@@ -24256,6 +24296,8 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "occasions.list": {
+        provenance?: "classic";
+        subjectAssessment?: "not-evaluated";
         today: string;
         timezone: string;
         occasions: readonly ({
@@ -24300,6 +24342,17 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "occasions.pending": {
+        provenance?: "classic";
+        semanticAssessment?: "not-evaluated";
+        open?: readonly ({
+            occasionId: string;
+            title: string;
+            person: string;
+            kind: "gift-giving" | "neither" | "remember-only";
+            proximity: "approaching" | "imminent" | "soon";
+            subject: "other" | "owner" | "unattributed";
+            acknowledged: boolean;
+        })[];
         today: string;
         nudge: null | {
             id: string;
@@ -24434,6 +24487,8 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "occasions.sweep": {
+        provenance?: "classic";
+        semanticAssessment?: "not-evaluated";
         ranAt: number;
         today: string;
         hold: null | string;
@@ -25142,6 +25197,12 @@ export interface OperatorMethodOutputMap {
     });
     // (undocumented)
     "projectPlanning.evaluate": ({
+        operationProvenance?: "classic";
+        semanticAssessment?: "not-evaluated";
+        readinessAssessment?: {
+            basis: "native-structure-and-owner-approval" | "semantic-and-native";
+            semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
+        };
         ok: boolean;
         projectId: string;
         knowledgeSpaceId: string;
@@ -25281,6 +25342,10 @@ export interface OperatorMethodOutputMap {
             verificationGates: readonly JsonValue[];
             agentAssignments: readonly JsonValue[];
             readiness: string;
+            readinessAssessment?: {
+                basis: "native-structure-and-owner-approval" | "semantic-and-native";
+                semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
+            };
             executionApproved: boolean;
             createdAt: number;
             updatedAt: number;
@@ -25487,6 +25552,10 @@ export interface OperatorMethodOutputMap {
             verificationGates: readonly JsonValue[];
             agentAssignments: readonly JsonValue[];
             readiness: string;
+            readinessAssessment?: {
+                basis: "native-structure-and-owner-approval" | "semantic-and-native";
+                semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
+            };
             executionApproved: boolean;
             createdAt: number;
             updatedAt: number;
@@ -25624,6 +25693,10 @@ export interface OperatorMethodOutputMap {
             verificationGates: readonly JsonValue[];
             agentAssignments: readonly JsonValue[];
             readiness: string;
+            readinessAssessment?: {
+                basis: "native-structure-and-owner-approval" | "semantic-and-native";
+                semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
+            };
             executionApproved: boolean;
             createdAt: number;
             updatedAt: number;
@@ -30534,6 +30607,22 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "voice.local.install": {
+        operationProvenance?: "classic";
+        semanticAssessment?: "not-evaluated";
+        proof?: {
+            proved: boolean;
+            stage: "compare" | "synthesize" | "transcribe";
+            phrase: string;
+            transcript?: string;
+            wordOverlap?: number;
+            comparison?: "classic-exact-match" | "classic-mismatch" | "no" | "unavailable" | "uncertain" | "yes";
+            operationProvenance?: "classic";
+            semanticAssessment?: "not-evaluated";
+            proofBasis?: "native-word-sequence";
+            error?: string;
+            summary: string;
+        };
+        notes?: readonly string[];
         provisioned: boolean;
         platform: null | string;
         tts: {
@@ -32091,6 +32180,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32118,6 +32212,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32147,6 +32246,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32209,6 +32313,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32238,6 +32347,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32266,6 +32380,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32293,6 +32412,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32385,6 +32509,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32412,6 +32541,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32441,6 +32575,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32503,6 +32642,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32532,6 +32676,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32560,6 +32709,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32587,6 +32741,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32679,6 +32838,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32706,6 +32870,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32735,6 +32904,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32797,6 +32971,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32826,6 +33005,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32854,6 +33038,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32881,6 +33070,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -32973,6 +33167,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33000,6 +33199,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33029,6 +33233,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33091,6 +33300,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33120,6 +33334,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33148,6 +33367,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33175,6 +33399,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33269,6 +33498,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33296,6 +33530,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33325,6 +33564,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33387,6 +33631,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33416,6 +33665,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33444,6 +33698,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -33471,6 +33730,11 @@ export interface OperatorMethodOutputMap {
             sourceId: string;
             sourceRevision: string;
             sessionId: string;
+            classic?: {
+                provenance: "owner";
+                policy: "Classic - Off" | "Preferred";
+                reason: "selected" | "unavailable";
+            };
             continuation?: {
                 sessionId: string;
                 revision: string;
@@ -34251,6 +34515,9 @@ export const OWNER_REPLY_READINGS: readonly ["approve", "reject", "amend", "uncl
 
 // @public (undocumented)
 export type OwnerReplyReading = (typeof OWNER_REPLY_READINGS)[number];
+
+// @public (undocumented)
+export function parseDecisionModelPolicy(value: unknown): DecisionModelPolicy;
 
 // @public
 export interface PartialToolCall {
@@ -35059,7 +35326,7 @@ export interface PlannerDecision {
     readonly decisionId?: string | undefined;
     // (undocumented)
     readonly inputs: {
-        readonly riskScore: number;
+        readonly riskScore: number | null;
         readonly latencyBudgetMs: number;
         readonly isMultiStep: boolean;
         readonly remoteAvailable: boolean;
@@ -35069,6 +35336,8 @@ export interface PlannerDecision {
     readonly outcome?: 'act' | 'confirm' | 'escalate' | undefined;
     // (undocumented)
     readonly overrideActive: boolean;
+    // (undocumented)
+    readonly provenance?: 'classic';
     // (undocumented)
     readonly reasonCode: string;
     // (undocumented)
@@ -35367,6 +35636,9 @@ export interface ReactNativeGoodVibesSdkOptions extends GoodVibesSdkOptions {
     // (undocumented)
     readonly WebSocketImpl?: typeof WebSocket | undefined;
 }
+
+// @public (undocumented)
+export function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): DecisionModelPolicyState | undefined;
 
 // @public
 export function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions>;
@@ -36491,7 +36763,7 @@ export interface ToolResultSummary {
 }
 
 // @public
-export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'no-wording';
+export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'classic' | 'no-wording';
 
 // @public
 export function transienceFromReading(failure: FailureConclusions): FailureTransience;
@@ -36753,6 +37025,9 @@ export interface TransportPaths {
     // (undocumented)
     readonly telemetryUrl: string;
 }
+
+// @public
+export function tryClassicDecisionFallback(error: unknown): boolean;
 
 // @public
 export const TURN_LIMIT_SOURCES: readonly ["default", "spawn-override", "policy-bound"];

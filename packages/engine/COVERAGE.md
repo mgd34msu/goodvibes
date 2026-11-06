@@ -39,7 +39,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/judgment/test/retry.test.ts](../judgment/test/retry.test.ts) |
 | [packages/judgment/test/truth.test.ts](../judgment/test/truth.test.ts) |
 
-## Engine platform (1947 files)
+## Engine platform (1949 files)
 
 | File |
 | --- |
@@ -278,6 +278,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/classic-imap.test.ts](test/classic-imap.test.ts) |
 | [packages/engine/test/classic-inspection.test.ts](test/classic-inspection.test.ts) |
 | [packages/engine/test/classic-knowledge-ingest.test.ts](test/classic-knowledge-ingest.test.ts) |
+| [packages/engine/test/classic-knowledge-job-scheduling.test.ts](test/classic-knowledge-job-scheduling.test.ts) |
 | [packages/engine/test/classic-knowledge.test.ts](test/classic-knowledge.test.ts) |
 | [packages/engine/test/classic-memory.test.ts](test/classic-memory.test.ts) |
 | [packages/engine/test/classic-multimodal.test.ts](test/classic-multimodal.test.ts) |
@@ -1192,6 +1193,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/native-ci-cancellation-index.test.ts](test/native-ci-cancellation-index.test.ts) |
 | [packages/engine/test/native-continuation-context.test.ts](test/native-continuation-context.test.ts) |
 | [packages/engine/test/native-draft-reference-connected.test.ts](test/native-draft-reference-connected.test.ts) |
+| [packages/engine/test/native-error-summary.test.ts](test/native-error-summary.test.ts) |
 | [packages/engine/test/native-execution-browser-contract.test.ts](test/native-execution-browser-contract.test.ts) |
 | [packages/engine/test/native-intake-browser-contract.test.ts](test/native-intake-browser-contract.test.ts) |
 | [packages/engine/test/native-intake-coverage-calibration.test.ts](test/native-intake-coverage-calibration.test.ts) |
@@ -1991,7 +1993,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/ws-call-context-retention.test.ts](test/ws-call-context-retention.test.ts) |
 | [packages/engine/test/zod-validation.test.ts](test/zod-validation.test.ts) |
 
-## Daemon (158 files)
+## Daemon (159 files)
 
 | File |
 | --- |
@@ -2087,6 +2089,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/daemon/src/test/runtime/credential-mail-composition.test.ts](../../products/daemon/src/test/runtime/credential-mail-composition.test.ts) |
 | [products/daemon/src/test/runtime/daemon-fixture-boot.test.ts](../../products/daemon/src/test/runtime/daemon-fixture-boot.test.ts) |
 | [products/daemon/src/test/runtime/daemon-host.test.ts](../../products/daemon/src/test/runtime/daemon-host.test.ts) |
+| [products/daemon/src/test/runtime/decision-policy-settings-http.test.ts](../../products/daemon/src/test/runtime/decision-policy-settings-http.test.ts) |
 | [products/daemon/src/test/runtime/device-hosted-ownership.test.ts](../../products/daemon/src/test/runtime/device-hosted-ownership.test.ts) |
 | [products/daemon/src/test/runtime/device-posture-key-governance.test.ts](../../products/daemon/src/test/runtime/device-posture-key-governance.test.ts) |
 | [products/daemon/src/test/runtime/discord-inbox-runtime.test.ts](../../products/daemon/src/test/runtime/discord-inbox-runtime.test.ts) |
@@ -3530,7 +3533,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/agent/src/test/work-plans/work-plan-store.test.ts](../../products/agent/src/test/work-plans/work-plan-store.test.ts) |
 | [products/agent/src/test/workflow/schedule-manager.test.ts](../../products/agent/src/test/workflow/schedule-manager.test.ts) |
 
-## Web UI (260 files)
+## Web UI (261 files)
 
 | File |
 | --- |
@@ -3567,6 +3570,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/webui/src/components/CredentialStatusPanel.semantic.test.tsx](../../products/webui/src/components/CredentialStatusPanel.semantic.test.tsx) |
 | [products/webui/src/components/CredentialStatusPanel.test.tsx](../../products/webui/src/components/CredentialStatusPanel.test.tsx) |
 | [products/webui/src/components/DataBlock.test.tsx](../../products/webui/src/components/DataBlock.test.tsx) |
+| [products/webui/src/components/DecisionPolicyNotice.test.tsx](../../products/webui/src/components/DecisionPolicyNotice.test.tsx) |
 | [products/webui/src/components/MarkdownMessage.semantic.test.tsx](../../products/webui/src/components/MarkdownMessage.semantic.test.tsx) |
 | [products/webui/src/components/MarkdownMessage.test.tsx](../../products/webui/src/components/MarkdownMessage.test.tsx) |
 | [products/webui/src/components/RecordList.test.tsx](../../products/webui/src/components/RecordList.test.tsx) |

@@ -37,11 +37,15 @@ const defaultState: DecisionModelPolicyState = Object.freeze({
 });
 let observe: () => DecisionModelPolicyState = () => defaultState;
 let fallback: (error: unknown) => boolean = () => false;
+type OperationOwner = <T>(operation: () => T) => T;
+let ownOperation: OperationOwner = operation => operation();
 
 /** Install host policy observation without importing a server runtime into browser consumers. */
-export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean): void {
+export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState,
+  onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void {
   observe = observer;
   fallback = onUnavailable ?? (() => false);
+  ownOperation = operationOwner ?? (operation => operation());
 }
 
 export function decisionModelPolicyState(): DecisionModelPolicyState { return observe(); }
@@ -59,4 +63,24 @@ export class DecisionModelsDisabledError extends Error {
 
 export function assertDecisionModelsEnabled(feature: string): void {
   if (decisionModelPolicyState().operation === 'classic') throw new DecisionModelsDisabledError(feature);
+}
+
+/** Runtime-neutral pure-phase dispatch. The installed host owns operation
+ * lifetime and exact availability classification; no host runtime is imported
+ * by shared batteries or browser consumers. Neither callback may replay an effect.
+ */
+export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>,
+  fallbackAllowed: () => boolean = () => true): Promise<T> {
+  return ownOperation(async () => {
+    if (decisionModelPolicyState().operation === 'classic') {
+      if (!fallbackAllowed()) throw new DecisionModelsDisabledError('fresh resolution of an existing semantic refusal');
+      return classic();
+    }
+    try { return await decision(); }
+    catch (error) {
+      const switchedBySibling = error instanceof DecisionModelsDisabledError && decisionModelPolicyState().operation === 'classic';
+      if (!fallbackAllowed() || !switchedBySibling && !tryClassicDecisionFallback(error)) throw error;
+      return classic();
+    }
+  });
 }

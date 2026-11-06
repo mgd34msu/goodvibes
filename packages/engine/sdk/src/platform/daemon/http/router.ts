@@ -6,7 +6,7 @@ import { createBrowserJudgmentHttpHandler, type BrowserJudgmentCapability } from
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { isValidConfigKey } from '../../config/schema.js';
 import { DECISION_MODEL_POLICY_HEADER, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { DecisionModelPolicyChangedError, withDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -305,7 +305,13 @@ export class DaemonHttpRouter {
         });
         if (response.status === 101) return response;
         const observed = new Response(response.body, response);
-        observed.headers.set(DECISION_MODEL_POLICY_HEADER, JSON.stringify(decisionModelPolicyState()));
+        try { observed.headers.set(DECISION_MODEL_POLICY_HEADER, JSON.stringify(decisionModelPolicyState())); }
+        catch (error) {
+          // An explicit policy setting write can retire its own request scope
+          // after committing. Preserve the real acknowledgement; omit obsolete
+          // operation metadata rather than claiming the new policy governed it.
+          if (!(error instanceof DecisionModelPolicyChangedError)) throw error;
+        }
         return serving.cors.enabled ? applyCorsHeaders(req, observed, serving) : observed;
       },
     ));

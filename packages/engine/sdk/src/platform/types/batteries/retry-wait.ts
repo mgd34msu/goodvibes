@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 /**
  * `engine.provider.retry-wait`: which number in a provider's error message,

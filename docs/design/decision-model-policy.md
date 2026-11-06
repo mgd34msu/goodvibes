@@ -1,6 +1,10 @@
 # Decision-model policy
 
-Status: implementation in progress. End-to-end qualification and release remain pending.
+Status: source implementation written; final qualification pending. Earlier focused
+platform, Agent/TUI process, daemon hosted HTTP and WebUI checks passed before the
+latest browser-boundary, settings-acknowledgement and scheduled-job repairs. Those
+repairs have authored regression coverage but have not been run. Final generated
+API refresh, full delivery qualification, final-commit CI and release remain pending.
 
 The [source inventory](decision-model-policy-inventory.json) records concrete
 port access sites and their Classic dispositions. It indexes source review;
@@ -52,6 +56,9 @@ work contract. An authenticated retained turn permit carries Preferred fallback
 into the actual conversation; caller-supplied policy fields cannot grant it.
 
 The daemon reports current operation policy through `x-goodvibes-decision-policy`.
+An authenticated settings write that changes policy preserves its actual commit
+acknowledgement and omits that now-stale request's policy header. The next request
+observes the new persisted policy; the write does not reauthorize pending work.
 Browser observations reset with the selected account/host lifetime. Classic browser
 features use lexical command matching, declared code languages or plaintext,
 punctuation-based speech chunks, and explicit reply prefixes. Unknown credential

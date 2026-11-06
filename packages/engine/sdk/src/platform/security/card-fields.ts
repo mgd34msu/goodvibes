@@ -30,7 +30,7 @@
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { cardField } from './batteries/card-field.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 
 /**
  * Everything about one control the classification may look at.

@@ -3816,6 +3816,17 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "integer in [1000, 3600000]"
   },
   {
+    "key": "judgment.policy",
+    "type": "enum",
+    "default": "Default - On",
+    "description": "Default - On requires available decision models. Preferred tries the configured chain and falls back to Classic only on availability exhaustion. Classic - Off makes no decision-model calls, uses owner-approved tool execution and ordinary completion, and exposes decision-only feature limitations.",
+    "enumValues": [
+      "Default - On",
+      "Preferred",
+      "Classic - Off"
+    ]
+  },
+  {
     "key": "judgment.endpoint",
     "type": "string",
     "default": "",

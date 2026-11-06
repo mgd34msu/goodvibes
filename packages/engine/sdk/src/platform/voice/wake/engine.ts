@@ -26,7 +26,7 @@
  * alongside the inference session it already supplies. A host that passes none
  * gets no warnings, which is why every shipped host passes one.
  */
-import { summarizeError } from '../../utils/error-display.js';
+import { summarizeError } from '../../utils/native-error-summary.js';
 import { WakeDetector, WAKE_DETECTOR_DEFAULTS, type WakeFrameOutcome } from './detector.js';
 import {
   WakeFeaturePipeline,

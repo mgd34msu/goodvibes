@@ -16,6 +16,8 @@ interface BrowserSurface {
   readonly retry: typeof import('../sdk/src/platform/types/batteries/retry-wait.js');
   readonly provider: typeof import('../sdk/src/platform/routing/batteries/provider.js');
   readonly judgment: typeof import('@goodvibes-jev/judgment/decisions');
+  readonly nativeSummary: typeof import('../sdk/src/platform/utils/native-error-summary.js');
+  readonly nativeErrors: typeof import('../sdk/src/platform/types/error-values.js');
 }
 
 interface BuildMetafile {
@@ -39,7 +41,9 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
       import * as display from ${battery('utils/batteries/display-payload')};
       import * as retry from ${battery('types/batteries/retry-wait')};
       import * as provider from ${battery('routing/batteries/provider')};
-      globalThis.browserSurface = { wake, judgment, display, retry, provider };
+      import * as nativeSummary from ${battery('utils/native-error-summary')};
+      import * as nativeErrors from ${battery('types/error-values')};
+      globalThis.browserSurface = { wake, judgment, display, retry, provider, nativeSummary, nativeErrors };
     `);
     const output = join(dir, 'consumer.js');
     const metafile = join(dir, 'metafile.json');
@@ -63,6 +67,8 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
         `sdk/${tree}/platform/utils/batteries/display-payload.${extension}`,
         `sdk/${tree}/platform/types/batteries/retry-wait.${extension}`,
         `sdk/${tree}/platform/routing/batteries/provider.${extension}`,
+        `sdk/${tree}/platform/utils/native-error-summary.${extension}`,
+        `sdk/${tree}/platform/types/error-values.${extension}`,
         `judgment/${tree}/decisions.${extension}`,
       ]) expect(paths.some((path) => path.endsWith(suffix)), `missing ${suffix}`).toBe(true);
       // Inspect actual bundle inputs and their edges. Provider runtime modules,
@@ -91,7 +97,7 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
 for (const source of [true, false]) {
   describe(`wake browser runtime through the ${source ? 'Bun source' : 'published import'} condition`, () => {
     test('executes neutral decisions and the wake error path without a host runtime', async () => {
-      const { wake, display, retry, provider, judgment } = await bundleConsumer(source);
+      const { wake, display, retry, provider, judgment, nativeSummary, nativeErrors } = await bundleConsumer(source);
       expect(judgment.estimateTokens('abcdefg')).toBe(3);
       expect(judgment.LIMITS.maxChoiceOptions).toBe(255);
       expect(judgment.NONE).toBe('none');
@@ -101,6 +107,9 @@ for (const source of [true, false]) {
       expect(retry.numberSpans('retry after 1.5 seconds').map((span) => span.value)).toEqual([1.5]);
       expect(provider.localServerIdentity.routes).toContain('vllm');
       expect(provider.reasoningFamily.routes).toContain('deepseek-reasoner');
+      const nativeFailure = new nativeErrors.AppError('{"message":"Classifier failed"}', 'WAKE_FIXTURE', false,
+        { phase: 'inference', requestId: 'synthetic-wake-request', providerCode: 'MODEL_LOAD' });
+      expect(nativeSummary.summarizeError(nativeFailure)).toBe('Classifier failed (phase=inference, code=MODEL_LOAD, request_id=synthetic-wake-request)');
 
       // Sessions are supplied by the host by design. Exercise the real front
       // end and error formatting when one injected classifier rejects, while

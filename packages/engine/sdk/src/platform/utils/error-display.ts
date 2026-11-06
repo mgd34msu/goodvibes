@@ -1,3 +1,5 @@
+import { buildSummary, cleanMessage, extractErrorMessage, extractStringField, extractStructuredMessage } from './native-error-summary.js';
+export { summarizeError } from './native-error-summary.js';
 import {
   categoryDependsOnWording,
   categoryForCode,
@@ -20,8 +22,6 @@ import { captureRedactionSource, redactSensitiveData, redactSensitiveDataAsync }
 import { assertRedactionCurrent } from './redaction-reading.js';
 import { displayPayload, MAX_DISPLAY_MESSAGE_CHARS, payloadSpans } from './batteries/display-payload.js';
 import { MAX_RETRY_WAIT_MESSAGE_CHARS, numberSpans, retryWait } from '../types/batteries/retry-wait.js';
-
-const MAX_ERROR_LENGTH = 240;
 
 // NOTE: Category rules (status and errno tables, the billing override, the Jev
 // failure reading and its connection-failure summaries) live once in the errors
@@ -71,52 +71,6 @@ export interface ProviderErrorNormalizationOptions extends ProviderErrorOptions 
   readonly fallbackMessage?: string | undefined;
 }
 
-function truncateMessage(msg: string): string {
-  if (msg.length <= MAX_ERROR_LENGTH) return msg;
-  return msg.slice(0, MAX_ERROR_LENGTH) + '\u2026';
-}
-
-function extractStringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key]!;
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function extractStructuredMessage(msg: string): string | undefined {
-  const trimmed = msg.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (!parsed || typeof parsed !== 'object') return undefined;
-    const record = parsed as Record<string, unknown>;
-    const nestedError = record.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : undefined;
-    const parts = [
-      extractStringField(record, 'message'),
-      nestedError ? extractStringField(nestedError, 'message') : undefined,
-      nestedError ? extractStringField(nestedError, 'code') : undefined,
-      nestedError ? extractStringField(nestedError, 'type') : undefined,
-      extractStringField(record, 'code'),
-      extractStringField(record, 'type'),
-    ].filter((value): value is string => Boolean(value));
-    return parts.length > 0 ? parts.join(', ') : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The message to show. `display` is the message with its machine payload
- * removed, which only {@link readNormalizedError} reads; without it the
- * message is shown as the error carries it. A message that is all payload
- * falls back to the message itself rather than to nothing.
- */
-function cleanMessage(msg: string, fallbackMessage?: string, display?: string): string {
-  const structured = extractStructuredMessage(msg);
-  if (structured) return truncateMessage(structured);
-  if (display !== undefined && display.length > 0) return truncateMessage(display);
-  if (msg.trim().length > 0) return truncateMessage(msg.trim());
-  return fallbackMessage ?? 'Unexpected error';
-}
-
 function inferHint(category: PlatformErrorCategory, statusCode?: number): string | undefined {
   switch (category) {
     case 'rate_limit':
@@ -158,31 +112,6 @@ function inferSource(error: unknown, override: PlatformErrorSource | undefined, 
   // A TypeError that failed before any response came back is the fetch transport failing.
   if (error instanceof Error && error.name === 'TypeError' && failure?.beforeResponse === true) return 'transport';
   return 'unknown';
-}
-
-function buildSummary(
-  message: string,
-  metadata: {
-    readonly requestId?: string | undefined;
-    readonly providerCode?: string | undefined;
-    readonly phase?: string | undefined;
-  },
-): string {
-  const tags: string[] = [];
-  if (metadata.phase && !message.toLowerCase().includes(metadata.phase.toLowerCase())) tags.push(`phase=${metadata.phase}`);
-  if (metadata.providerCode && !message.includes(metadata.providerCode)) tags.push(`code=${metadata.providerCode}`);
-  if (metadata.requestId && !message.includes(metadata.requestId)) tags.push(`request_id=${metadata.requestId}`);
-  return tags.length > 0 ? `${message} (${tags.join(', ')})` : message;
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object') {
-    const message = extractStringField(error as Record<string, unknown>, 'message');
-    if (message) return message;
-  }
-  return String(error);
 }
 
 /**
@@ -490,10 +419,6 @@ async function readDisplayMessage(rawMessage: string, site: string, owner: Judgm
   shown += message.slice(at);
   run.recordAction(`removed ${removed.length} of ${spans.length} bracketed parts from the displayed message`);
   return shown.replace(/ {2,}/g, ' ').trim();
-}
-
-export function summarizeError(error: unknown, options: ErrorNormalizationOptions = {}): string {
-  return normalizeError(error, options).summary;
 }
 
 export function formatError(error: unknown, options: ErrorNormalizationOptions = {}): string {

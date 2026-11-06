@@ -52,9 +52,8 @@
  * simplest form there is: **refuse if the finding list is non-empty**. See
  * `hasRefusableCardShapes`.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 import { cardTalk, maskDigits } from './batteries/card-talk.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** The decision site the card-talk reading is logged under. */
 export const CARD_TALK_SITE = 'security.card-shapes';

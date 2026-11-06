@@ -3,7 +3,7 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import {
   DecisionModelsDisabledError, JudgmentPortMissingError, decisionModelPolicyState,
   installDecisionModelPolicyObserver, type DecisionModelPolicy, type DecisionModelPolicyState,
-  parseDecisionModelPolicy,
+  parseDecisionModelPolicy, runDecisionOrClassic,
 } from '@goodvibes-jev/engine/errors';
 
 export type { DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -44,7 +44,7 @@ function observe(): DecisionModelPolicyState {
   const reason = scope?.state.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
   return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0 });
 }
-installDecisionModelPolicyObserver(observe, activateClassicFallback);
+installDecisionModelPolicyObserver(observe, activateClassicFallback, withConfiguredDecisionModelPolicy);
 
 export function isClassicOperation(): boolean { return decisionModelPolicyState().operation === 'classic'; }
 
@@ -112,18 +112,7 @@ export function inheritClassicDecisionFallback(): boolean {
 
 /** Re-enter only a caller's side-effect-free decision phase, never replay its executed operation. */
 export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed: () => boolean = () => true): Promise<T> {
-  return withDecisionModelPolicy(configured, async () => {
-    if (isClassicOperation()) {
-      if (!fallbackAllowed()) throw new DecisionModelsDisabledError('fresh resolution of an existing semantic refusal');
-      return classic();
-    }
-    try { return await decision(); }
-    catch (error) {
-      const switchedBySibling = error instanceof DecisionModelsDisabledError && isClassicOperation();
-      if (!fallbackAllowed() || !switchedBySibling && !activateClassicFallback(error)) throw error;
-      return classic();
-    }
-  });
+  return runDecisionOrClassic(decision, classic, fallbackAllowed);
 }
 
 /** A later outage cannot reopen the same refused action within its owning operation. Keys stay host-private. */

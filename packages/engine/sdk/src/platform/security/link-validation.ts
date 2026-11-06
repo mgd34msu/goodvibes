@@ -42,7 +42,7 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { linkHost, linkHostView, renderedHost } from './batteries/link-host.js';
 import { registrableDomain } from './public-suffix.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 
 /** The decision site the link-host reading is logged under. */
 export const LINK_HOST_SITE = 'security.link-validation';

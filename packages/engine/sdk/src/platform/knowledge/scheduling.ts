@@ -271,14 +271,15 @@ export class KnowledgeScheduleService {
     const job = this.getJob(schedule.jobId);
     // Preserve the saved cadence while semantic jobs are paused by Classic.
     // No run receipt or queued work claims that an omitted job executed.
-    if (!isClassicOperation() || (job && classicJob(job.kind))) await this.runJob(schedule.jobId, { mode: 'background' });
+    const dispatched = !isClassicOperation() || Boolean(job && classicJob(job.kind));
+    if (dispatched) await this.runJob(schedule.jobId, { mode: 'background' });
     await this.context.store.upsertSchedule({
       id: schedule.id,
       jobId: schedule.jobId,
       label: schedule.label,
       enabled: schedule.enabled,
       schedule: schedule.schedule,
-      lastRunAt: now,
+      lastRunAt: dispatched ? now : schedule.lastRunAt,
       nextRunAt: getNextAutomationOccurrence(schedule.schedule, now, schedule.id),
       metadata: schedule.metadata,
     });

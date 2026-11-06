@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "status": "Source dispositions recorded; end-to-end qualification and release pending.",
-  "sourceRevision": "63b79bde9454b913b3c567741116963d49944287",
+  "status": "Source dispositions and implementation recorded; final qualification, CI and release pending.",
+  "sourceRevision": "17a6ca4ea4d7d6284b379f9f2cada4824243ef68",
   "scope": "Tracked TypeScript source only. Excludes vendor, generated, dist, test/tests/e2e and runtime .goodvibes copies. Includes explicit developer tooling and foundation transport.",
   "method": "Index literal judgmentPort/captureJudgmentPort/createSystemOnePort access sites and declarations, then trace actual enclosing consumers and native/semantic branches. These counts are source navigation, not request counts or exhaustive transitive-call proof.",
-  "verification": "Implementation and regression tests are written. Tests, builds, typechecks and CI qualification have not been run for this delivery; do not treat source review as passing workflow evidence.",
+  "verification": "Earlier focused platform, Agent/TUI process, daemon hosted HTTP and WebUI checks passed within their documented scopes. The latest browser-boundary, settings acknowledgement and scheduled-job repairs have authored regression tests but have not been run. Final API refresh, full current-source verification, required CI and release remain pending.",
   "files": [
     {
       "file": "packages/engine/errors/src/failure-reading.ts",
@@ -15,7 +15,7 @@
         }
       ],
       "classicDisposition": "Classic structural HTTP/errno conclusions; no semantic readings; current owner guards retained",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -27,7 +27,7 @@
         }
       ],
       "classicDisposition": "Preserve typed Classic feature limitation instead of misreporting a retired authority",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -43,7 +43,7 @@
         }
       ],
       "classicDisposition": "Central Classic port lookup guard before model access",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -55,7 +55,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -67,7 +67,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -79,7 +79,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -95,7 +95,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -107,7 +107,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -119,7 +119,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -131,7 +131,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -143,7 +143,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -155,7 +155,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -167,7 +167,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -179,7 +179,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -191,7 +191,7 @@
         }
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
-      "sourceReview": "Current port construction, main entry and production import references inspected. Qualification deferred until implementation complete; no live calibration release gate added.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -203,7 +203,7 @@
         }
       ],
       "classicDisposition": "Classic list with unclassified families; prose-selected teamwork orchestration reports limitation before task creation",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -215,7 +215,7 @@
         }
       ],
       "classicDisposition": "Classic omits optional semantic brief comparison; actual agent/tool admission retained",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -231,7 +231,7 @@
         }
       ],
       "classicDisposition": "Public semantic-only connector classifier reports explicit feature limitation in Classic; empty declaration list remains native. No in-repo application caller beyond API export. Preferred owned scope switches on exact unavailable then reports limitation; never labels unknown effectful tools read-only or fabricates inbox/calendar flags.",
-      "sourceReview": "Source and actual caller inspected; implementation and zero-I/O/Preferred exhaustion/terminal failure/cancellation/no consumer replay regressions authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -255,7 +255,7 @@
         }
       ],
       "classicDisposition": "Raw semantic intent/proposal readers disclose feature limitation in Classic before privacy projection or port lookup. Actual classifyInboundIntent/parseWorkProposalReply callers use shared side-effect-free decisionOrClassic: Classic conversation default (explicit reason), no inferred owner reply; cancellation retained. Classic proposal render no longer promises natural-language yes/no approval.",
-      "sourceReview": "Source and actual caller inspected; implementation and zero-I/O/Preferred exhaustion/terminal failure/cancellation/no consumer replay regressions authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -271,7 +271,7 @@
         }
       ],
       "classicDisposition": "Classic retains declared test runners, omits inferred framework/repetition hints with live run ownership; Preferred optional outage transition survives catch",
-      "sourceReview": "Source inspected; implementation and regressions written; tests not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -283,7 +283,7 @@
         }
       ],
       "classicDisposition": "Classic unassessed observation; explicit authenticated planning command retains owner goal without semantic admission",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -295,7 +295,7 @@
         }
       ],
       "classicDisposition": "Inspected only product helper call chain; old platform source restriction no longer invokes semantic ownerAsked helper in active validatePlatformBoundary path",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -307,7 +307,7 @@
         }
       ],
       "classicDisposition": "Classic whole-field zoned timestamp/five-field cron/every or in compact duration grammar; unsupported prose explicitly needs decision model; no confidence",
-      "sourceReview": "Source inspected and code written; regressions written but not run; implementation-first remains active",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -319,7 +319,7 @@
         }
       ],
       "classicDisposition": "Classic retains native action/source ownership without model acquisition; exact snapshot/name matching remains, semantic paraphrases refused, credential page unassessed",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -335,7 +335,7 @@
         }
       ],
       "classicDisposition": "Classic structured errno facts only; no prose-authorized library/install/network diagnosis; live source fences retained",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -347,7 +347,7 @@
         }
       ],
       "classicDisposition": "Classic generic unknown launch cause; no model call or inferred repair",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -359,7 +359,7 @@
         }
       ],
       "classicDisposition": "Classic only exact supported authentication challenge can name a missing scope; original provider refusal otherwise",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -379,7 +379,7 @@
         }
       ],
       "classicDisposition": "Classic keeps original progress notices without substance verdict/cache suppression; Preferred exact availability fallback; no requests in Classic",
-      "sourceReview": "Source inspected; implementation and regressions written; tests not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -391,7 +391,7 @@
         }
       ],
       "classicDisposition": "Public judge early feature limitation in Classic before any port/provider. Service owns policy, skips before briefing/judge/message/delivery, explicit skipped-decision-models-disabled receipt/schema/UI. Preferred exact exhaustion skips without invented quiet/no; prior real contact receipt retained if fidelity unavailable.",
-      "sourceReview": "Source inspected; implementation and focused workflow/zero-I/O/owner/cancel/non-replay/terminal-failure regressions written, not run. Full qualification pending implementation completion.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -403,7 +403,7 @@
         }
       ],
       "classicDisposition": "Classic holdsCredential uses declared schema classification, masks undeclared keys; explicit semantic reading API remains model-only",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -415,7 +415,7 @@
         }
       ],
       "classicDisposition": "Classic unknown-key notices without inferred renames",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -427,7 +427,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -439,7 +439,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -475,7 +475,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -515,7 +515,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -527,7 +527,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -547,7 +547,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -563,7 +563,7 @@
         }
       ],
       "classicDisposition": "Whole owned policy; Classic ordinary turn bypasses semantic auto-contract/reply route, leaving pending owner escalations untouched. Only side-effect-free classification may fall back; start/reply outside fallback boundary, cancellation/native admission retained.",
-      "sourceReview": "Source inspected; implementation and focused workflow/zero-I/O/owner/cancel/non-replay/terminal-failure regressions written, not run. Full qualification pending implementation completion.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -575,7 +575,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -587,7 +587,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -599,7 +599,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -611,7 +611,7 @@
         }
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
-      "sourceReview": "8e3c7c10 source traced through runner/resume and actual public/private call paths; module feature guards added. Restart planning/committing/owner-wait, root no-owner/no-record creation, and supplied-port no-read/no-mutation regressions authored UNRUN. Full workflow/CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -623,7 +623,7 @@
         }
       ],
       "classicDisposition": "Classic single worker default, explicit owner strategy choices retained, no ranked candidates or Jev receipt",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -635,7 +635,7 @@
         }
       ],
       "classicDisposition": "Classic exact canonical labels/checkboxes; noncanonical labels get explicit parse notice; owned parse scope retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -647,7 +647,7 @@
         }
       ],
       "classicDisposition": "Ordinary conversation/adaptive telemetry callers skip semantic classification in Classic; explicit classifier remains semantic-only",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -663,7 +663,7 @@
         }
       ],
       "classicDisposition": "Classic finalization tied to exact current transcript; no independent semantic certification",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -675,7 +675,7 @@
         }
       ],
       "classicDisposition": "Declared occurrences retained; unknown system notices use generic category",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -687,7 +687,7 @@
         }
       ],
       "classicDisposition": "Classic exact /approve ID and /deny ID only; existing authorized candidate set and real broker owner proof retained; no semantic receipts",
-      "sourceReview": "source inspected; real broker regression written not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -699,7 +699,7 @@
         }
       ],
       "classicDisposition": "Shared semantic-only port, with all production caller roots traced. surface-conversation-gate native Classic conversation keeps original channel capability/profile/source guards and outsideContract; Preferred pure intent exhaustion falls back once. work-proposal reply native Classic passes message through; Preferred exhaustion preserves pending proposal and forwards chat, never accepts work. surface-actions explicit slash-command native Classic branch retains exact target custody. auto-updater lazy failure port is never accessed by error foundation Classic native HTTP/errno conclusions.",
-      "sourceReview": "Actual daemonReadingPort call sites inspected (work-proposal-reply, surface-conversation-gate, surface-actions, auto-updater), plus foundation readFailureConclusions early Classic branch before options.port. 8a230324/d989a988 implementation; added zero requests, exhausted proposal-to-chat continuation with unchanged pending proposal, source/cancel/privacy/refusal/uncertainty cases; all authored UNRUN. No full qualification yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -711,7 +711,7 @@
         }
       ],
       "classicDisposition": "Classic unassessed refusal/cursor, explicit Drafts target, live publication/account lease without semantic port; protocol facts retained",
-      "sourceReview": "Source inspected and code written; regressions written but not run; implementation-first remains active",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -727,7 +727,7 @@
         }
       ],
       "classicDisposition": "Standalone semantic corpus-style API explicitly requires decision models at entry (after caller cancellation). Actual product draft path is style-reply.ts and has a Classic template alternative.",
-      "sourceReview": "Source and actual in-repo callers searched; public guard implemented, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -739,7 +739,7 @@
         }
       ],
       "classicDisposition": "Protected read/draft-only source wrapper pins policy; Classic default profile/native draft preserve source-owner capture/screen/project equality, original source/caller/signal and cleanup restrictions with zero port/network. No name/tone/sentence inference, explicit not-evaluated Classic provenance. Only known pure read/draft callbacks enable availability fallback; semantic-only counters/tone/name helpers report feature limitation. Parent Agent scope spans profile and draft; no sending route added.",
-      "sourceReview": "Full source/protected owner and actual Agent Personal Ops caller inspected. Engine/Agent zero-I/O, Preferred exhaustion, terminal failures, ownership/cancellation/protected literals/retained source regressions authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -755,7 +755,7 @@
         }
       ],
       "classicDisposition": "Semantic verification labeling is optional history enrichment; sole production caller is execution-ledger. Classic omits the call and leaves verification absent; Preferred typed exhaustion records partial Classic provenance without claiming verification.",
-      "sourceReview": "Repository source search readExecutionPurpose callers; execution-ledger pure decisionOrClassic and native branch inspected at c088b73e. Regression authored UNRUN.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -767,7 +767,7 @@
         }
       ],
       "classicDisposition": "Immediate native lifecycle history remains available. Classic skips role/route/purpose model work and caches, withholds unassessed argument values, emits explicit Classic provenance and absent verification. Preferred uses pure enrichment fallback only on actual typed exhaustion; no executor replay.",
-      "sourceReview": "c088b73e source implementation and actual ledger caller trace; zero request/lifecycle/permission/single-use/Preferred regression tests authored UNRUN.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -787,7 +787,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -799,7 +799,7 @@
         }
       ],
       "classicDisposition": "Automatic Google page interpretation explicitly unavailable in Classic before captured port or browser actions. Native manual browser ownership is separate, retains method/caller/signal guards, and authorizes no inferred page facts or decision receipts. Setup roots and actual runner paths inspected; exact Preferred exhaustion stops without replay.",
-      "sourceReview": "e6d08fc6 + 8ca714c9; classic-google-automation.test.ts authored unrun, including click-before-outage, native consent/storage/rerun, pre-browser handoff, terminal errors and cancellation.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -811,7 +811,7 @@
         }
       ],
       "classicDisposition": "Publishing/project status interpretation explicitly semantic-only; full owned Google policy scope. Classic reports manual Google settings alternative without fabricated status. Exact Preferred exhaustion transitions then stops current flow, never replaying effects.",
-      "sourceReview": "e6d08fc6; public console-flow, setup-actions-cloud-project and native manual alternatives inspected; tests authored unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -827,7 +827,7 @@
         }
       ],
       "classicDisposition": "Classic keeps API/grant failures, returns unknown for prose cause without decision requests, and preserves exact native account/HTTP/ErrorInfo facts in actual parent callers. Provenance and unassessed diagnostic metadata are carried on parent failures. Preferred pure diagnostic fallback only on exact exhaustion; no HTTP replay, auth reset or consent changes. Source/privacy/caller/cancel guards retained before fallback.",
-      "sourceReview": "8ca714c9; classic-google-diagnostics.test.ts authored unrun. api-client and grant-diagnosis actual roots inspected; native token invalid-grant latching unchanged.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -839,7 +839,7 @@
         }
       ],
       "classicDisposition": "Automatic artifact selection explicitly unavailable in Classic before token projection/source screening; Agent mail.verification preflights before opening Google connection/read. Manual mail.read and native consent remain available. Exact Preferred availability propagates through read wrappers and stops without extracting an unassessed token or consuming expectation.",
-      "sourceReview": "e6d08fc6; actual Agent expectation-book consumption path inspected; source lease/opaque token refs/host admission retained on decision path; authored tests unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -851,7 +851,7 @@
         }
       ],
       "classicDisposition": "Classic literal declared-contract suggestions with original catalog guards; no hook execution",
-      "sourceReview": "Source inspected and code written; regressions written but not run; implementation-first remains active",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -863,7 +863,7 @@
         }
       ],
       "classicDisposition": "Classic delivery failure reporting skips model acquisition and does not replay whole turns after possible completed tools",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -879,7 +879,7 @@
         }
       ],
       "classicDisposition": "Classic synthesized nodes remain untrusted pending drafts with explicit native not-evaluated provenance, no battery/model/probability/decision ID and no port metadata access. Native observations, explicit owner review, unchanged active replay/restoration retain native routes. Changed active content and requireAccepted hold clearly. Preferred pure per-candidate typed availability exhaustion only; completed genuine no is retained. Caller/source/stage/cancel/model/ask/recorder and persisted publication guards remain; public node/import operations own policy throughout native staging and commit.",
-      "sourceReview": "e7c789fa current source implementation across activation reader/types, prepare/commit pass and KnowledgeStore node/import public APIs. Added draft persistence/reload, hostile port metadata, native observation/manual review, active replacement/no-write, requireAccepted, stale evidence, Preferred exhaustion and prior no, refusal/invalid/unrecorded, cancellation/native guard/budget, atomic import/forged metadata/publication tests; all authored UNRUN. Only whitespace check and mandatory credential-scope hook run; whole workflow and exact-SHA CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -891,7 +891,7 @@
         }
       ],
       "classicDisposition": "Classic semantic proposal refresh/automatic pass explicitly unavailable before pass startup; manual review separate",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -903,7 +903,7 @@
         }
       ],
       "classicDisposition": "Classic exact declared identities retained, inferred aliases omitted; whole-batch private/source/native guards retained; Preferred exact availability before held conversion",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -915,7 +915,7 @@
         }
       ],
       "classicDisposition": "Classic owners retain artifact/source/caller checks while omitting semantic backend dependencies; full extraction still hash-bound and one-use",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -927,7 +927,7 @@
         }
       ],
       "classicDisposition": "Semantic verified-answer page recovery only. Sole production caller refreshDevicePagesForHomeGraphAsk constructs the reader before its first persisted subject-link writes; called through verified Home Graph ask root, whose explicit feature guard prevents Classic entry. The private helper itself acquires central captureJudgmentPort before operation, which yields typed Classic limitation without requests. Raw store/browse/manual activation remain native paths. No source/receipt rebaseline or replay fallback added.",
-      "sourceReview": "Current full constructor/source inspection, actual caller search and HomeGraph ask.ts23 requireDecisionFeature; source-quality now propagates Classic limitation from lower enrichment bookkeeping. No code change needed in this helper; qualification still pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -939,7 +939,7 @@
         }
       ],
       "classicDisposition": "Classic producer omits automatic links before publication; Preferred exact availability preserved for no-inference fallback; semantic negatives/uncertainty never become links",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -951,7 +951,7 @@
         }
       ],
       "classicDisposition": "Classic stable catalog order without semantic probability; original complete catalog and caller/cancel guards retained",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -963,7 +963,7 @@
         }
       ],
       "classicDisposition": "Semantic passport refresh queue only. Sole production caller refreshHomeGraphDevicePassport in generated-pages.ts requires verified device-passport feature before constructing this queue; Classic is held before any queued operation or write. Native Home Graph raw storage/browse is a separate supported path. Queue preserves per-page serialization, original source/policy/native state/signal and installation currentness.",
-      "sourceReview": "Current repository-wide actual caller search and generated-pages.ts232 feature guard before237 withDevicePageRefresh invocation; queue source inspected. Existing native Home Graph regression coverage authored earlier; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -975,7 +975,7 @@
         }
       ],
       "classicDisposition": "Semantic quality preflight in shared public report and reader; Classic snapshot returns honest held assessment instead of regenerating issues; typed availability updates Preferred only",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -987,7 +987,7 @@
         }
       ],
       "classicDisposition": "Explicit decision-only limitation before store initialization or issue/fact effects; ordinary manual review/list/cancellation retained",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -999,7 +999,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1015,7 +1015,7 @@
         }
       ],
       "classicDisposition": "Classic planning readiness checks actual native goal presence/scope/questions/tasks/verification/owner approval, without claiming semantic goal clarity. State/evaluation persist an explicit readinessAssessment basis and not-evaluated semantic status. Full input/stored-row/clocks/workspace/source generation/current/cancel/publication/event guards retained. Public save/evaluate/action/answer operations own policy throughout commit. Optional answer suggestions use topics:null, empty IDs, no fake No/confidence for Classic; genuine completed topic readings survive later recommendation exhaustion. Native custom/ask-narrower choices remain available.",
-      "sourceReview": "7985d478 implementation and actual service/UI-composer call tracing. Added Classic edit/question/owner-approval/task-identity/restart, structural gap and privacy/cancel/source guards, Preferred exhaustion/terminal errors and partial genuine topic reading cases. All authored UNRUN; API/schema/contracts generation and full workflow qualification remain pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1027,7 +1027,7 @@
         }
       ],
       "classicDisposition": "Classic planning readiness checks actual native goal presence/scope/questions/tasks/verification/owner approval, without claiming semantic goal clarity. State/evaluation persist an explicit readinessAssessment basis and not-evaluated semantic status. Full input/stored-row/clocks/workspace/source generation/current/cancel/publication/event guards retained. Public save/evaluate/action/answer operations own policy throughout commit. Optional answer suggestions use topics:null, empty IDs, no fake No/confidence for Classic; genuine completed topic readings survive later recommendation exhaustion. Native custom/ask-narrower choices remain available.",
-      "sourceReview": "7985d478 implementation and actual service/UI-composer call tracing. Added Classic edit/question/owner-approval/task-identity/restart, structural gap and privacy/cancel/source guards, Preferred exhaustion/terminal errors and partial genuine topic reading cases. All authored UNRUN; API/schema/contracts generation and full workflow qualification remain pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1043,7 +1043,7 @@
         }
       ],
       "classicDisposition": "Classic native namespace selection, retained record/extraction/topology/caller guards; prior semantic negatives remain excluded",
-      "sourceReview": "Source inspected and code written; regressions written but not run; implementation-first remains active",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1059,7 +1059,7 @@
         }
       ],
       "classicDisposition": "Native localKnowledgeSourceSpans quotes complete exact fields/offsets. Semantic preparation remains inside guarded answer path, with source/port identity checks and Disabled/availability propagation to native public-retrieval fallback.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1075,7 +1075,7 @@
         }
       ],
       "classicDisposition": "Semantic-only excerpt selection retains source/config/timer/sibling cleanup; actual availability and Disabled propagate to owning public-retrieval phase. Native source quoting is separate and carries no semantic claim.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1099,7 +1099,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1115,7 +1115,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1139,7 +1139,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1151,7 +1151,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1167,7 +1167,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1179,7 +1179,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1195,7 +1195,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1211,7 +1211,7 @@
         }
       ],
       "classicDisposition": "Semantic-only evidence batches retain record/config/deadline guards and forward genuine unavailable/Disabled to owning public-retrieval fallback; local Classic ranking lives at that public boundary.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1227,7 +1227,7 @@
         }
       ],
       "classicDisposition": "Pure semantic ranking validates complete candidates, provider/model and ownership; actual availability/Disabled propagate to native retrieval. No Classic probabilities are fabricated.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1239,7 +1239,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1259,7 +1259,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1271,7 +1271,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1291,7 +1291,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1311,7 +1311,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1323,7 +1323,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1343,7 +1343,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1363,7 +1363,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1383,7 +1383,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1399,7 +1399,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1415,7 +1415,7 @@
         }
       ],
       "classicDisposition": "Native structured failure bookkeeping in Classic; unstructured causes explicitly unknown/not-evaluated; actual Preferred availability exhaustion only; native lifetime and cancellation guards retained.",
-      "sourceReview": "Committed and pushed 478b5951; source inspected; tests written, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1427,7 +1427,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1439,7 +1439,7 @@
         }
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
-      "sourceReview": "Source implementation reviewed; regression tests authored, not run; full workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1455,7 +1455,7 @@
         }
       ],
       "classicDisposition": "Semantic usefulness/authority is an explicit Classic feature limitation before any model access or semantic cache reuse. Native excluded-source status checks remain pure and available. DecisionModelsDisabledError is a propagated knowledge quality hold, so cleanup/enrichment catch paths cannot silently swallow it or turn it into a completed semantic result.",
-      "sourceReview": "9d8d6e02 source and actual quality helper propagation inspected. Added zero request/metadata, native input preservation, excluded source and cached-reading Classic limit regressions, authored UNRUN.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1467,7 +1467,7 @@
         }
       ],
       "classicDisposition": "Classic synthesized nodes remain untrusted pending drafts with explicit native not-evaluated provenance, no battery/model/probability/decision ID and no port metadata access. Native observations, explicit owner review, unchanged active replay/restoration retain native routes. Changed active content and requireAccepted hold clearly. Preferred pure per-candidate typed availability exhaustion only; completed genuine no is retained. Caller/source/stage/cancel/model/ask/recorder and persisted publication guards remain; public node/import operations own policy throughout native staging and commit.",
-      "sourceReview": "e7c789fa current source implementation across activation reader/types, prepare/commit pass and KnowledgeStore node/import public APIs. Added draft persistence/reload, hostile port metadata, native observation/manual review, active replacement/no-write, requireAccepted, stale evidence, Preferred exhaustion and prior no, refusal/invalid/unrecorded, cancellation/native guard/budget, atomic import/forged metadata/publication tests; all authored UNRUN. Only whitespace check and mandatory credential-scope hook run; whole workflow and exact-SHA CI qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1479,7 +1479,7 @@
         }
       ],
       "classicDisposition": "Classic mechanically normalizes native URL syntax and retains unresolved ref occurrences; typed Preferred exhaustion omits no unknown query identity, native/cancel guards live",
-      "sourceReview": "Source inspected; platform changes and regression workflows written; not executed or qualified",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1491,7 +1491,7 @@
         }
       ],
       "classicDisposition": "Classic media analysis pins policy, preserves actual image/audio/document/video provider/extractor output and native artifact/privacy/cancel/policy fences; skips optional semantic entities with explicit metadata and packet notice. Preferred exact chain exhaustion falls back only entity phase, never reruns media provider. Analysis registry/serialized-result identity and explicit authenticated writeback unchanged; host provenance cannot be minted in provider metadata.",
-      "sourceReview": "Actual service, entity reader, PDF native path, daemon handlers and artifact/knowledge writeback ownership inspected. All-kind SDK+daemon zero-request/one-provider-call/writeback/cancel/privacy/forgery/terminal-failure regressions authored unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1503,7 +1503,7 @@
         }
       ],
       "classicDisposition": "Classic native occasion lifetime avoids eager port capture while Default retains entry authority; native source/config/owner/policy/cancel retained through state publication. Explicit declared dates/plans/list/no/later/ack/history/resume remain usable. Semantic subject fallback unattributed unless native self marker, unassessed provenance; pending returns raw open items, no inferred reminder. Sweeps retain housekeeping and pause nudges/new mirrors/gift inference before effects. Mid-task wording outage returns held Classic with actual prior mirrored count, no effect replay. New gift interviews clearly require models; existing native interview records remain read/answer/complete capable.",
-      "sourceReview": "Read actual service methods/readers/subject/pending/native profile capture/state admission/sweep/mirror/ticker/schema and Agent/WebUI rendering. Implemented shared policy scopes, aggregate provenance/wire source schema/UI notices. SDK actual-file/state/restart/manual capture/zero-I/O/cancel/terminal-error/mid-task mirror and real gateway regressions authored unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1515,7 +1515,7 @@
         }
       ],
       "classicDisposition": "Classic held/unassessed failure with original admitted message, native source/owner/cancel fences and provenance; exact Preferred availability resets semantic observer to native guard. No git retry/repair or fabricated corruption diagnosis.",
-      "sourceReview": "Source inspected; implementation and focused workflow/zero-I/O/owner/cancel/non-replay/terminal-failure regressions written, not run. Full qualification pending implementation completion.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1527,7 +1527,7 @@
         }
       ],
       "classicDisposition": "Classic whole draft decomposition scope uses null/unassessed risk, existing owner-pinned/single planner; gate/proposal/draft persist Classic provenance. Author/edit/approve/inspect/reload remain native; autonomous contract launch preflight before runner start/draft removal. Draft edits replace stale gate metadata.",
-      "sourceReview": "Source and actual authoring/restart/launch caller inspected. Implementation and zero-I/O/Preferred exhaustion/missing-port/terminal-error/durable-draft regressions authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1543,7 +1543,7 @@
         }
       ],
       "classicDisposition": "Named private-person prose attribution is semantic-only: Classic explicit feature limitation after native source/privacy/cancellation checks and structural empty-input guards. Never substring-match or broaden to other private lines. Preferred real unavailable yields capability limitation rather than fake no matching person; no row is returned on incomplete interpretation. Raw structured/profile native surfaces retained.",
-      "sourceReview": "Source, actual store/config preparation callers and proposer/verification phase boundary inspected. Implemented source/config guard retention, clear feature limitation and stored-only Classic alternative; zero producer/decision requests, native config revocation, Preferred exhaustion, genuine verifier refusal and unrelated proposal-provider failure regressions authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1555,7 +1555,7 @@
         }
       ],
       "classicDisposition": "Classic explicit limitation before ordinary address proposer or JEV verifier; missing/disabled source field remains native absence. ConfigManager owned policy prepares stored address fields only in Classic with not-evaluated profile provenance. Preferred falls back to these native fields only on captured decision-port missing/full verification chain exhaustion; ordinary proposal-provider failures are never eligible. Native config epoch/source/privacy/cancel/currentness preserved, no address guesses or generator replay.",
-      "sourceReview": "Source, actual store/config preparation callers and proposer/verification phase boundary inspected. Implemented source/config guard retention, clear feature limitation and stored-only Classic alternative; zero producer/decision requests, native config revocation, Preferred exhaustion, genuine verifier refusal and unrelated proposal-provider failure regressions authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1571,7 +1571,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1583,7 +1583,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1595,7 +1595,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1607,7 +1607,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1627,7 +1627,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1639,7 +1639,7 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1651,7 +1651,7 @@
         }
       ],
       "classicDisposition": "Classic requests secret-aware owner approval, never semantic absence-of-secrets cached result; not a claim about file contents",
-      "sourceReview": "Source inspected; implementation and regressions written; tests not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1662,12 +1662,12 @@
           "source": "const base = judgmentPort('engine.gate.autonomous-preparation');"
         },
         {
-          "line": 851,
+          "line": 852,
           "source": "const base = judgmentPort('engine.gate.execution-safety');"
         }
       ],
       "classicDisposition": "Classic deterministic/owner authorization; remembered refusals remain denied",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1679,7 +1679,7 @@
         }
       ],
       "classicDisposition": "Classic neutral local presentation object; no fabricated blocking verdict",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1691,7 +1691,7 @@
         }
       ],
       "classicDisposition": "Classic General target without categorization; answering context preserved",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1703,7 +1703,7 @@
         }
       ],
       "classicDisposition": "Classic alternate API only for exact endpoint/method HTTP statuses; no prose-driven replay",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1715,7 +1715,7 @@
         }
       ],
       "classicDisposition": "Classic setup presentation from declared runtime auth/local facts, unknown otherwise, provenance retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1727,7 +1727,7 @@
         }
       ],
       "classicDisposition": "Classic refresh uses unknown interpreted provider access; no request or semantic cache write, actual published catalog facts retained",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1739,7 +1739,7 @@
         }
       ],
       "classicDisposition": "Classic local declared title/alias/keyword overlap suggestions; source/cancellation checks, provenance and no execution",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1751,7 +1751,7 @@
         }
       ],
       "classicDisposition": "Classic leaves interpreted cap family unknown; adapter uses its existing conservative documented cap",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1763,7 +1763,7 @@
         }
       ],
       "classicDisposition": "Automatic tier reads avoided at ordinary prompt caller by Classic tier-prompts facade; semantic contract router remains model-only. known/lastReading already return unknown under Classic guard",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1779,7 +1779,7 @@
         }
       ],
       "classicDisposition": "Classic uses declared adapter facts first and deterministic Claude ID prefix compatibility fallback; failed optional cache creation remains unclassified and answer can proceed uncached",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1799,7 +1799,7 @@
         }
       ],
       "classicDisposition": "Classic unknown discovery/stop metadata, no prose-based alternate API or reasoning blame; undocumented content semantics explicitly unavailable; family lookup consumed through Classic-aware caller",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1811,7 +1811,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1827,7 +1827,7 @@
         }
       ],
       "classicDisposition": "Inspected callers: semantic model-route planner reached through contract routing; Classic contract start preflight already reports decision-model requirement before work creation",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1843,7 +1843,7 @@
         }
       ],
       "classicDisposition": "Inspected semantic route planner dependency; contract-only automatic family expansion, Classic contract execution start already preflight-blocked",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1855,7 +1855,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1867,7 +1867,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1879,7 +1879,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1895,7 +1895,7 @@
         }
       ],
       "classicDisposition": "Classic skips credential exemptions; native issuer/profile/candidate masking remains. Cached exemptions require current semantic authority and cannot clear values in Classic.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1907,7 +1907,7 @@
         }
       ],
       "classicDisposition": "Session-return-context caller uses real host count; Classic unknown count nullable, no transcript prose reading",
-      "sourceReview": "source and actual caller inspected; regression written not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1919,7 +1919,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1931,7 +1931,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1943,7 +1943,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1955,7 +1955,7 @@
         }
       ],
       "classicDisposition": "Mechanical exact quotations with clipping; no semantic selection",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1967,7 +1967,7 @@
         }
       ],
       "classicDisposition": "Classic undeclared event values withheld without decision requests",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1983,7 +1983,7 @@
         }
       ],
       "classicDisposition": "Classic catalog search uses shared literal ranking over raw entries; listing, source/compatibility inspection and explicit install remain native. Semantic trust-note risk review reports an early Classic feature limit.",
-      "sourceReview": "Source and product marketplace consumers traced; regression tests authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -1995,7 +1995,7 @@
         }
       ],
       "classicDisposition": "Automatic semantic recommendation ranking is an explicit feature limit. Classic marketplace read model skips ranking, retires pending result keys and explains that recommendations were not evaluated; raw browsing remains available.",
-      "sourceReview": "Source, UI read-model and direct consumers reviewed; source implementation/tests authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2007,7 +2007,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2019,7 +2019,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2031,7 +2031,7 @@
         }
       ],
       "classicDisposition": "Lazy recorded transport enforces Classic before settings/credential/transport acquisition; composition skips semantic setting announcements in Classic. Finite failover, source ownership, cancellation and disposal preserved.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2043,7 +2043,7 @@
         }
       ],
       "classicDisposition": "Classic literal playbook suggestions with native catalog/cancellation guards; no diagnostics/remediation execution",
-      "sourceReview": "Source inspected and code written; regressions written but not run; implementation-first remains active",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2055,7 +2055,7 @@
         }
       ],
       "classicDisposition": "Operation owns native signal/caller lifetime independently of lazy semantic port acquisition. Classic retains native guards and skips obsolete semantic capture assertions. Semantic options.port lookup remains guarded.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2067,7 +2067,7 @@
         }
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
-      "sourceReview": "Source reviewed and implementation authored; regression workflows written but not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2083,7 +2083,7 @@
         }
       ],
       "classicDisposition": "Classic returns unassessed provenance consumed as mandatory owner ask by shared sandbox policy",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2095,7 +2095,7 @@
         }
       ],
       "classicDisposition": "Advisory caller now omits model-only advisory in Classic and uses real owner broker; explicit runSandboxJudgment remains semantic-only",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2107,7 +2107,7 @@
         }
       ],
       "classicDisposition": "Classic changed managed settings report unassessed risk; no-change bundle is deterministically low",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2119,7 +2119,7 @@
         }
       ],
       "classicDisposition": "Classic leaves prose classification absent; neutral presentation",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2131,7 +2131,7 @@
         }
       ],
       "classicDisposition": "Classic full diagnostics retain native structure, omit semantic description cache/port, descriptionQuality not-evaluated and Classic provenance propagated to diagnostic panel; Preferred only typed availability fallback.",
-      "sourceReview": "Source inspected; implementation and focused workflow/zero-I/O/owner/cancel/non-replay/terminal-failure regressions written, not run. Full qualification pending implementation completion.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2143,19 +2143,19 @@
         }
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
-      "sourceReview": "Source reviewed; code and regression tests authored, not run.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
       "file": "packages/engine/sdk/src/platform/security/card-shapes.ts",
       "portAccessSites": [
         {
-          "line": 308,
+          "line": 307,
           "source": "const run = await cardTalk.run(judgmentPort(CARD_TALK_SITE), maskDigits(text), { site: CARD_TALK_SITE, only: asked });"
         }
       ],
       "classicDisposition": "Classic PAN/labelled-security-code/expiry patterns stay local, no meaning call, position-only findings",
-      "sourceReview": "source inspected and Classic path written; tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2167,7 +2167,7 @@
         }
       ],
       "classicDisposition": "Shared assessOutwardContent now reports unassessed Classic derivation and requires existing exact owner approval instead of invoking this semantic reader",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2179,7 +2179,7 @@
         }
       ],
       "classicDisposition": "Classic deterministic HTTPS/port/userinfo/domain/redirect boundary; no semantic host certification",
-      "sourceReview": "source inspected; written; regression pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2191,7 +2191,7 @@
         }
       ],
       "classicDisposition": "Classic local receipts; Preferred only on verified private-route availability exhaustion; original authority/privacy/refusal fences retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2203,7 +2203,7 @@
         }
       ],
       "classicDisposition": "Literal overlap score with Classic provenance; full source path/currentness fences",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2215,7 +2215,7 @@
         }
       ],
       "classicDisposition": "Passive semantic injection omitted; manual code search remains available",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2227,7 +2227,7 @@
         }
       ],
       "classicDisposition": "Passive semantic enrichment omitted; stored memory retrieval remains available",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2239,7 +2239,7 @@
         }
       ],
       "classicDisposition": "Classic explicit skipped receipt with no merges/decays/archives or semantic requests",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2255,19 +2255,19 @@
         }
       ],
       "classicDisposition": "Manual literal/vector retrieval remains; scores explicitly identify source; no invented probabilities",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
       "file": "packages/engine/sdk/src/platform/state/memory-usage-detection.ts",
       "portAccessSites": [
         {
-          "line": 85,
+          "line": 86,
           "source": "const owner = captureJudgmentPort(SITE, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });"
         }
       ],
       "classicDisposition": "Classic actual injected presence only; no inferred reference credit, input/cancellation fences retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2279,7 +2279,7 @@
         }
       ],
       "classicDisposition": "Classic extension failure classification recognizes exact local platform refusal diagnostics; other packaging errors preserved",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2295,7 +2295,7 @@
         }
       ],
       "classicDisposition": "Classic imports complete owner-authored VIBE body as one fresh literal constraint with Classic/unassessed tags and file provenance, retaining precedence caveat. Shared pure transform only availability fallback; source/options/owner/signal/policy checked before/after readings. Empty reading sets do not lookup a port. Actual Agent boot/manual migrations own entire policy scope and retain file/backend through MemoryAccess publication and marker write.",
-      "sourceReview": "Full platform source and actual Agent boot/memory-spine importer read. Code plus literal persistence/projection/one-time restart/file replacement/secret/cancel/terminal-failure regressions authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2311,7 +2311,7 @@
         }
       ],
       "classicDisposition": "Classic actual stamped/cancel reason or generic error; actual child partial output and provenance retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2327,7 +2327,7 @@
         }
       ],
       "classicDisposition": "Classic raw git diff with unassessed semantic risk/compatibility; normal raw diff unchanged",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2347,7 +2347,7 @@
         }
       ],
       "classicDisposition": "Classic local credential candidates, env presence and actual filesystem mode bits; semantic dangerous-call assessment explicitly unavailable",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2359,7 +2359,7 @@
         }
       ],
       "classicDisposition": "Used only by semantic findings path; Classic bypasses existence/per-line readings at scan-findings facade",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2375,7 +2375,7 @@
         }
       ],
       "classicDisposition": "Classic declared env-template filename conventions and explicit importing test filename conventions, provenance retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2387,7 +2387,7 @@
         }
       ],
       "classicDisposition": "Classic native grammar repairs only; no supplied or installed decision-port access. Unresolved semantic parameters remain for schema validation; Preferred exact typed exhaustion retains completed pure repairs and never executes/replays a tool. Cancellation checked before fallback.",
-      "sourceReview": "b9fd2629; direct and prepared-call tests authored in classic-tool-repair.test.ts, unrun. Registry source/preparation/reentrancy ownership preserved; broader registry credential/projection audit still pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2399,7 +2399,7 @@
         }
       ],
       "classicDisposition": "Classic exact public-header allowlist; unknowns retain credential handling; typed availability-only fallback",
-      "sourceReview": "source inspected; written; regression pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2415,7 +2415,7 @@
         }
       ],
       "classicDisposition": "Exact, bounded regex and whitespace matching; no guessed fuzzy target",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2431,7 +2431,7 @@
         }
       ],
       "classicDisposition": "Native pipe default; explicit interactive supported; literal terminal questions shown to owner",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2443,7 +2443,7 @@
         }
       ],
       "classicDisposition": "Classic does not automatically replay executed failed commands",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2459,7 +2459,7 @@
         }
       ],
       "classicDisposition": "Classic literal HTML extraction and labelled excerpt/outline, not semantic summary",
-      "sourceReview": "source inspected; written; regression pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2471,7 +2471,7 @@
         }
       ],
       "classicDisposition": "Stable local matched-path ordering; read access preserved",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2483,7 +2483,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2495,7 +2495,7 @@
         }
       ],
       "classicDisposition": "Semantic frontend issue assessment explicitly unavailable in Classic; no apparently clean scan",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2511,7 +2511,7 @@
         }
       ],
       "classicDisposition": "Classic API registration inference explicitly unavailable before generated API artifact writes",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2527,7 +2527,7 @@
         }
       ],
       "classicDisposition": "Classic manifest/lockfile/test-runner facts; inferred entry points unassessed",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2539,7 +2539,7 @@
         }
       ],
       "classicDisposition": "Classic literal catalog retrieval with source/currentness fences and explicit provenance",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2555,7 +2555,7 @@
         }
       ],
       "classicDisposition": "Classic repair preparation does not borrow supplied port model/recorder metadata; supplied semantic asks guarded before invocation and each attempt. Native project/schema/one-use prepared proof, options/source/executor lifetime, admission and release retained. Native repairs used even with supplied ports.",
-      "sourceReview": "Current source inspected through projectCall/prepareCall/repairPort/executePrepared/executeNested/executeOrdinary. c088b73e adds native numeric repair and one-use execution regression with hostile supplied metadata; authored UNRUN. Whole-workflow native admission qualification remains pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2567,7 +2567,7 @@
         }
       ],
       "classicDisposition": "Explicit semantic repair limitation before optional repair; validation errors preserved",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2583,7 +2583,7 @@
         }
       ],
       "classicDisposition": "Classic omits semantic acceptance; captured publication and write revision stay enforced",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2595,7 +2595,7 @@
         }
       ],
       "classicDisposition": "Head/tail display, full output already retained by handler",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2611,7 +2611,7 @@
         }
       ],
       "classicDisposition": "Explicit Classic pending classification/native storage bucket, complete privacy admission before indexed mirror, no decision requests. Only actual typed Preferred availability activates Classic; cancellation/owner guards checked before fallback and filesystem effects. Native signal/owner preserved through actual store publication; state result/tags carry Classic and pending provenance. Replacing a value atomically resets old review metadata to native fresh defaults; no old semantic review is inherited.",
-      "sourceReview": "Platform classifier, actual state tool dispatch, MemoryRegistry/MemoryStore SQL/publication and persisted native review defaults inspected. Implementation and SDK tool set/get/update/reopen/zero-I/O/privacy/cancel/revoked owner regressions authored unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2631,7 +2631,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2643,19 +2643,19 @@
         }
       ],
       "classicDisposition": "Optional exported semantic reader; actual DirectoryWalk is already local with explicit WALK_SKIP_DIRS and access fences; no production callers found",
-      "sourceReview": "read directory-reading.ts and walk-dir.ts; rg actual callers",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
       "file": "packages/engine/sdk/src/platform/utils/error-display.ts",
       "portAccessSites": [
         {
-          "line": 402,
+          "line": 331,
           "source": "try { owner = captureJudgmentPort(options.site, { ...options, assertCurrent: assertSource }); }"
         }
       ],
       "classicDisposition": "Pure decisionOrClassic normalization has a native structured error/redaction branch with original caller signal/current checks; Classic does not assign inferred prose causes.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2679,7 +2679,7 @@
         }
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
-      "sourceReview": "Actual source read, implementation and regression workflows written; tests and CI deferred.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2695,7 +2695,7 @@
         }
       ],
       "classicDisposition": "Classic sync/async text and structure use native issuer/protected-value/candidate masking with source/current/signal checks, and no semantic safe-value exemptions.",
-      "sourceReview": "Current source and enclosing callers inspected. Full workflow qualification remains unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2707,7 +2707,7 @@
         }
       ],
       "classicDisposition": "Classic no semantic owner or microphone diagnosis; typed unavailable, actual recorder control remains independent",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2719,7 +2719,7 @@
         }
       ],
       "classicDisposition": "Classic no prose-based engine diagnosis or automatic disabling; structured process signals remain separate and authoritative",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2731,7 +2731,7 @@
         }
       ],
       "classicDisposition": "Native Classic managed-voice test compares the complete ordered Unicode word sequence from actual TTS/STT once; labels classic-exact-match/mismatch and native-word-sequence, no semantic receipt. Semantic helper explicitly disabled in Classic. Preferred actual exhaustion reuses captured transcript; terminal/malformed/no/uncertain do not become native positives. Native lifetime/cancellation/configuration checks retained.",
-      "sourceReview": "Actual proof, setup/gateway, diagnostics and source lifetime traced. Implementation and full native/Preferred/terminal regression tests authored; unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2743,7 +2743,7 @@
         }
       ],
       "classicDisposition": "One captured live policy scope spans spoken-turn events and timers; Classic skips model acquisition; actual Preferred outage continues native chunking without replay; native configuration/functions/cancellation guards remain live.",
-      "sourceReview": "Actual controller and chunker traced; code and end-to-end spoken event tests authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2755,7 +2755,7 @@
         }
       ],
       "classicDisposition": "Local punctuation/cap/latency boundaries; Classic no port capture",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2767,7 +2767,7 @@
         }
       ],
       "classicDisposition": "Declared fields structural; unknown fields masked Classic; no credential-name requests",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2779,7 +2779,7 @@
         }
       ],
       "classicDisposition": "Classic join uses exact unambiguous declared group name/identity, existing key/auth still required",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2791,7 +2791,7 @@
         }
       ],
       "classicDisposition": "Classic neutral decoration without model lookup; publication owner retained",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2803,7 +2803,7 @@
         }
       ],
       "classicDisposition": "Neutral display default; original notice kept; no reading receipt",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2819,7 +2819,7 @@
         }
       ],
       "classicDisposition": "Classic raw output with unknown error/port classifications; publication/cancellation restrictions retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2831,7 +2831,7 @@
         }
       ],
       "classicDisposition": "Standalone export pins its persisted policy before service startup; Classic uses native redaction and diagnostics without a judgment owner; native source/publication guards preserved, including fallback after final redaction.",
-      "sourceReview": "Shared exporter and actual Agent CLI path traced; cold export regression test authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2843,7 +2843,7 @@
         }
       ],
       "classicDisposition": "Classic clean version protocol and artifact checks remain native, explicitly labelled; extra diagnostic output reports an early semantic-assessment limitation before protected-source screening or port acquisition. Preferred actual exhaustion holds qualification without replaying the binary; no semantic evidence fabricated.",
-      "sourceReview": "Actual artifact/execution, output observation and source release lifecycle read. Implementation and native/no-request/no-replay regression tests authored; unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2855,7 +2855,7 @@
         }
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
-      "sourceReview": "Source entry, configured port and process owner inspected; qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2867,7 +2867,7 @@
         }
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
-      "sourceReview": "Source entry, configured port and process owner inspected; qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2879,7 +2879,7 @@
         }
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
-      "sourceReview": "Source entry, configured port and process owner inspected; qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2891,7 +2891,7 @@
         }
       ],
       "classicDisposition": "Foundation wire transport: finite configured target chain, exact answer/model/schema validation and caller-owned cancellation. Application Classic policy is enforced by the platform installation before entering this transport; explicitly constructing a standalone SDK port is opt-in.",
-      "sourceReview": "Transport boundaries and platform integration inspected; workflow qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2903,7 +2903,7 @@
         }
       ],
       "classicDisposition": "Classic connected-host policy avoids eager model port; shared exact outward approval boundary retained",
-      "sourceReview": "Source/callers inspected. Relevant implementation written and regression cases added; tests and full workflow verification not run yet.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2915,7 +2915,7 @@
         }
       ],
       "classicDisposition": "Classic service log display uses shared local redactor and omits unused decision backend guard",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2927,7 +2927,7 @@
         }
       ],
       "classicDisposition": "Classic transcript export keeps redaction/source guards and omits unused decision owner",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2939,7 +2939,7 @@
         }
       ],
       "classicDisposition": "Classic literal privilege restrictions retained, ambiguous mentions return null/unassessed, real background start blocks unknown with foreground/owner guidance. Only pure semantic classification is inside Preferred fallback; consumer effects run once outside. Source privacy/native options/sync owner/cancel/policy fences preserved.",
-      "sourceReview": "Source and actual caller inspected; implementation and zero-I/O/Preferred exhaustion/terminal failure/cancellation/no consumer replay regressions authored, unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2951,7 +2951,7 @@
         }
       ],
       "classicDisposition": "Classic browser/device catalog retains local matches instead of discarding them for absent judgment receipts. Shared platform exact declared capability/boolean helper returns null for unassessed prose, conflicts or missing facts; ready device routes require exact capability declaration and native ready status, no aliases/term inference. Read-only protected source leases/caller/definition/registry/revision/cancel guards retained; Preferred exact pure-phase exhaustion only. Browser/PWA and native device snapshots own whole policy scope; null readiness prevents certification, explicit metadata records partial fallback. Pairing reports unknown sensor publication rather than absence when published records remain unassessed.",
-      "sourceReview": "193f6cc4; actual browser PWA/device discovery/pairing/media call sites inspected. classic-browser-device-catalog.test.ts authored UNRUN: zero Classic installed+private service requests, local lookup, native booleans/exact ready declarations, prose/blocked/contradiction unknown, partial Preferred positive then outage, terminal failures and native owner/cancellation. Existing source tests unrun; media remains native readiness fallback when no exact remote route matches.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2963,7 +2963,7 @@
         }
       ],
       "classicDisposition": "Classic protected runtime inspection uses exact platform metadata and unassessed schema/route meanings; ambiguous keybinding modifiers require exact native booleans before persistence. Preferred pure reading phases only fall back on typed availability exhaustion; complete original source/native/definition/cancel restrictions retained.",
-      "sourceReview": "Source traced through interactive-runtime records and keybinding persistence; implementation committed 8dec7e736cc1ff6f59e22b4e39f8540eb654446a. Added zero decision/privacy request, native source mutation, refusal/cancel/exhaustion and keybinding no-write regression cases; all authored UNRUN. Whole-application qualification still pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -2983,7 +2983,7 @@
         }
       ],
       "classicDisposition": "Literal Classic catalog retrieval with no model judgments or confidence; original source/currentness fences retained",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3007,7 +3007,7 @@
         }
       ],
       "classicDisposition": "Exact declared identity only in Classic; semantic backend guards retired after Preferred fallback while source guards remain",
-      "sourceReview": "Source inspected and implementation written. New regression tests written where relevant; not run. End-to-end qualification pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3019,7 +3019,7 @@
         }
       ],
       "classicDisposition": "Classic execution history/record detail/local search retain native ledger outcomes, bounded args/output, process inspection and recovery routes without deciding verification role. Explicit not-evaluated observations/provenance replace hidden semantic dependency. Preferred exact exhaustion is isolated to pure verification classification inside original privacy lease; completed yes/no/uncertain readings remain, unattempted records become unassessed. Source/caller/backend/definition/cancel and full original projection guards retained; no effects or reruns.",
-      "sourceReview": "f18e8fb4; actual summary/item callers, grouping/verification output and source owners inspected. classic-execution-history.test.ts authored UNRUN: Classic source endpoints+installed port zero traffic; native statuses/detail/search; Preferred first yes/no/uncertain then outage; terminal errors; cancellation/source/owner replacement.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3031,7 +3031,7 @@
         }
       ],
       "classicDisposition": "Classic curator performs protected native inspection with null score/priority and explicit unassessed states. Stored review/eligibility facts remain visible, native flags/counts retained; automatic proposal/quality/duplicate analysis is not implied by zero counts. Direct semantic APIs and consolidation/transition resolution report a clear feature limitation before effects. Preferred fallback wraps only read-only candidate derivation over the same retained source; full Classic source admitted through native protected owner, genuine refusals/uncertainty/errors do not activate fallback. Source/registry/definition/caller/privacy/cancel/currentness preserved; unassessed collections permanently lack automatic transition authority even after scope exit.",
-      "sourceReview": "5d6c5960; all curator grade/target/class/duplicate/survivor readers, builder/proposal/consolidation sources, issued collection/transition proofs and public summary/detail/resolver inspected. Added tests to agent-learning-curator-readings.test.ts UNRUN: zero Classic installed+local source requests, real stored records/prompt eligibility and null grades, full summary/exact detail, source mutation/cancel, Preferred availability only, terminal kinds and permanent post-scope transition denial. Native explicit registry actions remain separate; existing mutation/transition/field-accessor tests unrun. Classic full-source privacy can hold private material rather than publishing it; no privacy waiver.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3043,7 +3043,7 @@
         }
       ],
       "classicDisposition": "Classic benchmark snapshots/history credit exact native benchmarkKind declarations and exact sourceArtifactId links, retain actual human choices and numeric latency evidence, and mark unmarked membership not-evaluated without loading original bodies or making model requests. Undeclared stack remains null, never inferred from model names; exact declared winnerStack uses shared platform helper. Distinct unassessed-history prevents false absence claim. Whole snapshot policy scope retains Preferred transition across artifacts; pure membership fallback inside original protected-source lease, earlier yes/no/held observations preserved, no rerun. Original artifact/bytes/hash/clock/store/options/method/policy/definition/source/cancel guards remain; only obsolete semantic installation proof is disarmed on actual Classic fallback.",
-      "sourceReview": "4a7fdde7; read startup/explicit snapshot and native history/latency/evidence APIs plus actual routing/cookbook callers. Added agent-local-benchmark-membership.test.ts cases UNRUN: zero Classic port/private service/body loads, known native tags/source links and latency127 retained, unknown model names/null stack, unmarked-history truthful state, Preferred negative then actual outage, terminal kinds. Existing mutation/clock/policy tests unrun.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3055,7 +3055,7 @@
         }
       ],
       "classicDisposition": "Classic native publisher facts/cancellation/source guards, no eager decision-port capture; schema not-evaluated, real metrics and declared model routes retained; no probes or edits",
-      "sourceReview": "Source inspected; implementation and full tool view/ownership regressions written; not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3083,7 +3083,7 @@
         }
       ],
       "classicDisposition": "Shared platform exact literals in Classic; free prose unknown/null, certification unassessed; Preferred typed exhaustion only, native ownership restrictions retained",
-      "sourceReview": "Source inspected; implementation and full tool view/ownership regressions written; not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3095,7 +3095,7 @@
         }
       ],
       "classicDisposition": "Classic external provider inspection retains native booleans/counts/stable ids and exact-purpose native receipts; interpreted roles are unassessed, credential/membership/schema questions null/unknown with explicit unassessed certification and setup/contract states. Shared platform exact-id selection only; local credential-like spans receive no semantic disclosure exemptions. Whole provider, receipt, and public memory posture operations own one policy scope. Preferred pure interpretation exhaustion only, earlier actual negatives retained, no effect replay. Original source/producer/definition/registry/caller/retainer/privacy/cancel guards remain, selected original providers rechecked before publication. Ordinary local memory count/review/vector UI remains native.",
-      "sourceReview": "ef5432f8; read all seven helper paths and actual external-provider normalization/certification/receipts plus public memory posture roots. classic-memory-providers.test.ts authored UNRUN: Classic zero installed/local I/O, native facts/receipts/lookup/empty, full memory posture/detail explicit limitations, Preferred prior negative then exhaustion, terminal errors/missing config/cancel/source changes and retained source revisions. General personal-ops readers still require separate broader audit; these callers isolate their pure boolean/receipt interpretation phases.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3107,7 +3107,7 @@
         }
       ],
       "classicDisposition": "Classic deferred model/hardware-fit scores/confidence/decision IDs null with provenance; explicit native unavailable state retained; owner/source checks and no route effects",
-      "sourceReview": "Source inspected; implementation and full tool view/ownership regressions written; not run",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3119,7 +3119,7 @@
         }
       ],
       "classicDisposition": "Classic lane discovery keeps native literal matches. Full protected source/native option and retained lifetime guards surround only replaceable pure interpretation phases. Native conventional result fields and exact receipt statuses; prose/contradictions unassessed. Connector tool lane/effect meanings unassessed, schemas explicitly inspectable; no read-only classification or automatic dispatch from names. Native boolean flags retained; ambiguous inbox/conflict flags remain unknown. Complete public PersonalOps, lane, queue, review and watcher acquisitions own policy so exhaustion is not retried per field or replayed as an effect.",
-      "sourceReview": "Actual callers traced through discovery, provider records, runner, saved receipts and watcher projections. 4303d9df6e919ecb813b3d4e35dd212e1dd101a9 implementation committed. Added Classic zero decision/privacy traffic, native field/receipt/cancellation/source mutation, Preferred actual exhaustion and terminal-error cases, all authored UNRUN. Broader workflow qualification remains pending.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3135,7 +3135,7 @@
         }
       ],
       "classicDisposition": "Side-effect-free lifetime decision fallback; consume/spawn occurs once after chosen guard",
-      "sourceReview": "source inspected; implementation written; workflow tests pending",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3147,7 +3147,7 @@
         }
       ],
       "classicDisposition": "Classic remote schema/operation meaning explicitly unassessed; native outcomes/status/ids/workspaces retained without inferred certification or category. Whole publisher settlement owns policy so Preferred exact exhaustion sticks across remaining fields, never replays source effects. Prior actual schema yes/no remains, partial metadata explicit. Source/projection/method/complete field/privacy/caller/cancel restrictions and one-use capture/current display binding preserved; malformed/refusal/uncertain paths retire the capture, not fallback.",
-      "sourceReview": "5bcd59d9 (+ explicit generic union in ef5432f8); source callers remote-read-models settlement and Agent orchestration/publisher normalization inspected. classic-remote-publisher.test.ts authored UNRUN: zero Classic installed/local services, actual records/workspace native guards/bind/one-use, preserved negative schema then outage, uncertainty and terminal errors, cancel/source revocation.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     },
     {
@@ -3159,7 +3159,7 @@
         }
       ],
       "classicDisposition": "Classic saved comparison synthesis retains native winner/dimension counts and authored reasons, explicitly not-evaluated theme categorization; no original artifact loads or decision requests solely for disabled optional themes. Preferred pure-phase actual exhaustion returns distinct Classic status and persists across all synthesis judgments. No false uncategorized/no-theme result; genuine uncertainty and terminal errors remain held. Full original source/privacy/store/definition/model/caller guards retained on actual reading path; synchronous native owner/cancel guards run even on Classic omission. No route updates/writes.",
-      "sourceReview": "2f1f9957; actual formatComparisonSynthesis and saved artifact/native analytics caller inspected. Added tests to agent-model-compare-themes.test.ts, UNRUN: Classic zero installed calls+zero optional artifact loads, native counts/labels, Preferred single attempt then no later reclassification, terminal failures, cancellation and invalid async/native owner callbacks.",
+      "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
       "workflowQualification": "pending"
     }
   ]

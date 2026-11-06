@@ -878,6 +878,8 @@ readonly unknown: "Unintelligible or disconnected material that conveys no notic
 export interface NoticeSeverityReading {
     // (undocumented)
     readonly assertCurrent: () => void;
+    // (undocumented)
+    readonly provenance?: 'classic';
     readonly recordPublication: () => void;
     // (undocumented)
     readonly severity: NoticeSeverity | undefined;
@@ -1098,6 +1100,8 @@ export interface ProcessOutputReading {
     readonly errors: ReadonlyMap<string, boolean | undefined>;
     // (undocumented)
     readonly port: number | undefined;
+    // (undocumented)
+    readonly provenance?: 'classic';
     // (undocumented)
     readonly recordPublication: () => void;
 }

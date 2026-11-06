@@ -276,7 +276,7 @@
       "path": "core/system-message-noise.ts",
       "baselineTuiLines": 87,
       "baselineSimilarity": 0.8,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "core/system-message-router.ts",
@@ -408,7 +408,7 @@
       "path": "input/commands/fresh-conversation.ts",
       "baselineTuiLines": 98,
       "baselineSimilarity": 0.9239,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/guidance-runtime.ts",
@@ -540,7 +540,7 @@
       "path": "input/commands/recall-shared.ts",
       "baselineTuiLines": 35,
       "baselineSimilarity": 0.7719,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/commands/runtime-services.ts",
@@ -1634,7 +1634,7 @@
       "path": "runtime/workspace-update-policy.ts",
       "baselineTuiLines": 7,
       "baselineSimilarity": 0.7143,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "shell/blocking-input.ts",
@@ -1712,7 +1712,7 @@
       "path": "version.ts",
       "baselineTuiLines": 26,
       "baselineSimilarity": 0.6222,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     }
   ]
 }

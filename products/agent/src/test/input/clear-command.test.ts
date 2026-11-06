@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { journalPathFor, openTranscriptJournal, replayJournal } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
 import { clearTurnAnchors, getTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/sdk/platform/rewind';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
@@ -104,6 +105,20 @@ describe('/clear starts a fresh conversation', () => {
     expect(view.turns).toBeUndefined();
   });
 
+  test('the live snapshot and journal remain empty after an immediate disk reload', async () => {
+    const s = setup();
+    s.sessionManager.save(s.runtime.sessionId, s.conversation.getMessageSnapshot(), {
+      title: s.conversation.title, model: 'm1', provider: 'p', timestamp: 1,
+    });
+    const journal = openTranscriptJournal(journalPathFor(s.surface, s.runtime.sessionId), s.runtime.sessionId);
+    journal.appendRecord('assistant_turn', s.conversation.getMessageSnapshot());
+    await s.registry.execute('clear', [], s.ctx);
+    const reloaded = new SessionManager(s.dir, { surface: s.surface }).load(s.runtime.sessionId);
+    expect(reloaded.messages).toEqual([]);
+    expect(reloaded.meta.title).toBe('');
+    expect(replayJournal(journal.path, 0).records).toEqual([]);
+  });
+
   test('refused while a turn runs: nothing changes', async () => {
     const s = setup({ generating: true });
     await s.registry.execute('clear', [], s.ctx);
@@ -125,6 +140,7 @@ describe('/clear starts a fresh conversation', () => {
     s.conversation.resetAll();
     await s.registry.execute('clear', [], s.ctx);
     expect(s.toasts).toHaveLength(0);
-    expect(s.sessionManager.list().length).toBe(0);
+    expect(s.sessionManager.list().map(row => row.name)).toEqual([s.runtime.sessionId]);
+    expect(s.sessionManager.load(s.runtime.sessionId).messages).toEqual([]);
   });
 });

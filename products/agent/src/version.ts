@@ -1,22 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-// Read version from package.json at runtime (eliminates build-time sync issues).
-// Fallback for compiled binaries where package.json may not be present.
-// The prebuild script updates the fallback value before compilation.
-// Uses import.meta.dir (Bun) to locate package.json relative to this file,
-// which is correct regardless of the process working directory.
+import { readProductVersion } from '@goodvibes-jev/engine/sdk/platform/utils/product-identity';
+// Kept as a literal for prebuild and monorepo version synchronization.
 let _version = '3.0.0-dev.0';
-try {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf-8')) as {
-    readonly name?: unknown;
-    readonly version?: unknown;
-  };
-  if (pkg.name === '@goodvibes-jev/agent' && typeof pkg.version === 'string' && pkg.version.length > 0) {
-    _version = pkg.version;
-  }
-} catch {
-  // Compiled binary or missing package.json - use fallback.
-}
-
-export const VERSION = _version;
+export const VERSION = readProductVersion(import.meta.dir, '@goodvibes-jev/agent', _version);

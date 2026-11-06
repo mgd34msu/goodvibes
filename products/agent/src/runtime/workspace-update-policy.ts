@@ -1,7 +1,3 @@
 import manifest from '../../package.json';
-
-/** A private workspace product has no separately published binary update channel. */
-export const IS_WORKSPACE_DISTRIBUTION = manifest.private === true
-  && manifest.dependencies['@goodvibes-jev/engine'] === 'workspace:*';
-export const WORKSPACE_REBUILD_COMMAND = 'bun run --filter @goodvibes-jev/agent build';
-export const WORKSPACE_UPDATE_GUIDANCE = `This Agent is built from a private Jev workspace. Update the workspace and build the engine, then run ${WORKSPACE_REBUILD_COMMAND} from the workspace root.`;
+import { workspaceProductUpdatePolicy } from '@goodvibes-jev/engine/sdk/platform/utils/product-identity';
+export const { isWorkspaceDistribution: IS_WORKSPACE_DISTRIBUTION, rebuildCommand: WORKSPACE_REBUILD_COMMAND, guidance: WORKSPACE_UPDATE_GUIDANCE } = workspaceProductUpdatePolicy(manifest, '@goodvibes-jev/agent', 'Agent');

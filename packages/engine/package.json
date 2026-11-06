@@ -2138,6 +2138,26 @@
       "bun": "./terminal-shell/src/renderer/composer-fragments.ts",
       "types": "./terminal-shell/dist/renderer/composer-fragments.d.ts",
       "import": "./terminal-shell/dist/renderer/composer-fragments.js"
+    },
+    "./sdk/platform/utils/product-identity": {
+      "bun": "./sdk/src/platform/utils/product-identity.ts",
+      "types": "./sdk/dist/platform/utils/product-identity.d.ts",
+      "import": "./sdk/dist/platform/utils/product-identity.js"
+    },
+    "./terminal-shell/recall-shared": {
+      "bun": "./terminal-shell/src/recall-shared.ts",
+      "types": "./terminal-shell/dist/recall-shared.d.ts",
+      "import": "./terminal-shell/dist/recall-shared.js"
+    },
+    "./terminal-shell/system-message-noise": {
+      "bun": "./terminal-shell/src/system-message-noise.ts",
+      "types": "./terminal-shell/dist/system-message-noise.d.ts",
+      "import": "./terminal-shell/dist/system-message-noise.js"
+    },
+    "./terminal-shell/fresh-conversation": {
+      "bun": "./terminal-shell/src/fresh-conversation.ts",
+      "types": "./terminal-shell/dist/fresh-conversation.d.ts",
+      "import": "./terminal-shell/dist/fresh-conversation.js"
     }
   },
   "publishConfig": {

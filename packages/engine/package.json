@@ -2103,6 +2103,41 @@
       "bun": "./terminal-shell/src/modal-stack.ts",
       "types": "./terminal-shell/dist/modal-stack.d.ts",
       "import": "./terminal-shell/dist/modal-stack.js"
+    },
+    "./terminal-shell/diff-engine": {
+      "bun": "./terminal-shell/src/renderer/diff.ts",
+      "types": "./terminal-shell/dist/renderer/diff.d.ts",
+      "import": "./terminal-shell/dist/renderer/diff.js"
+    },
+    "./terminal-shell/compositor": {
+      "bun": "./terminal-shell/src/renderer/compositor.ts",
+      "types": "./terminal-shell/dist/renderer/compositor.d.ts",
+      "import": "./terminal-shell/dist/renderer/compositor.js"
+    },
+    "./terminal-shell/terminal-escapes": {
+      "bun": "./terminal-shell/src/renderer/terminal-escapes.ts",
+      "types": "./terminal-shell/dist/renderer/terminal-escapes.d.ts",
+      "import": "./terminal-shell/dist/renderer/terminal-escapes.js"
+    },
+    "./terminal-shell/ui-factory": {
+      "bun": "./terminal-shell/src/renderer/ui-factory.ts",
+      "types": "./terminal-shell/dist/renderer/ui-factory.d.ts",
+      "import": "./terminal-shell/dist/renderer/ui-factory.js"
+    },
+    "./terminal-shell/block-description": {
+      "bun": "./terminal-shell/src/block-description.ts",
+      "types": "./terminal-shell/dist/block-description.d.ts",
+      "import": "./terminal-shell/dist/block-description.js"
+    },
+    "./terminal-shell/block-actions-overlay": {
+      "bun": "./terminal-shell/src/renderer/block-actions-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/block-actions-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/block-actions-overlay.js"
+    },
+    "./terminal-shell/composer-fragments": {
+      "bun": "./terminal-shell/src/renderer/composer-fragments.ts",
+      "types": "./terminal-shell/dist/renderer/composer-fragments.d.ts",
+      "import": "./terminal-shell/dist/renderer/composer-fragments.js"
     }
   },
   "publishConfig": {

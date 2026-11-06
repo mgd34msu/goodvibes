@@ -1,9 +1,11 @@
+import { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/block-description';
+export { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/block-description';
 export * from '@goodvibes-jev/engine/terminal-shell/input-content';
 import { activeTokens } from '../renderer/theme.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
-import type { BlockMeta, ConversationManager } from '../core/conversation';
+import type { ConversationManager } from '../core/conversation';
 import type { PermissionCategory } from '@goodvibes-jev/engine/sdk/platform/permissions';
 
 import type { CommandContext } from './command-registry.ts';
@@ -22,25 +24,7 @@ import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
  * so the transcript always says exactly what was acted on, never just an
  * internal collapseKey or a bare "done".
  */
-export function describeBlockForReceipt(block: BlockMeta): string {
-  const lineText = `${block.lineCount} line${block.lineCount === 1 ? '' : 's'}`;
-  switch (block.type) {
-    case 'tool':
-      return block.toolName ? `tool result: ${block.toolName} (${lineText})` : `tool result (${lineText})`;
-    case 'assistant_turn':
-      return block.toolName
-        ? `assistant turn: ${block.toolName} (${lineText})`
-        : `assistant turn (${lineText})`;
-    case 'diff':
-      return block.filePath ? `diff: ${block.filePath} (${lineText})` : `diff (${lineText})`;
-    case 'code':
-      return `code block (${lineText})`;
-    case 'thinking':
-      return `thinking (${lineText})`;
-    default:
-      return `${block.type} (${lineText})`;
-  }
-}
+
 
 export function handleCopy(
   selection: SelectionManager,

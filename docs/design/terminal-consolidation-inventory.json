@@ -660,7 +660,8 @@
         "cleanupMarkerRegistry",
         "findMarkerAtPos",
         "handleClipboardPaste",
-        "handleCtrlC"
+        "handleCtrlC",
+        "describeBlockForReceipt"
       ]
     },
     {
@@ -944,7 +945,7 @@
       "path": "renderer/block-actions-overlay.ts",
       "baselineTuiLines": 41,
       "baselineSimilarity": 0.7917,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/block-actions.ts",
@@ -980,7 +981,7 @@
       "path": "renderer/compositor.ts",
       "baselineTuiLines": 215,
       "baselineSimilarity": 0.6972,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/context-inspector.ts",
@@ -1016,7 +1017,7 @@
       "path": "renderer/diff.ts",
       "baselineTuiLines": 204,
       "baselineSimilarity": 0.8365,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/file-picker-overlay.ts",
@@ -1196,7 +1197,7 @@
       "path": "renderer/status-glyphs.ts",
       "baselineTuiLines": 22,
       "baselineSimilarity": 0.5641,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/status-line.ts",
@@ -1262,7 +1263,7 @@
       "path": "renderer/terminal-escapes.ts",
       "baselineTuiLines": 20,
       "baselineSimilarity": 0.1429,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/terminal-palette-probe.ts",
@@ -1316,13 +1317,13 @@
       "path": "renderer/ui-factory.ts",
       "baselineTuiLines": 184,
       "baselineSimilarity": 0.5906,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/ui-primitives.ts",
       "baselineTuiLines": 18,
       "baselineSimilarity": 0.6522,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/user-message.ts",

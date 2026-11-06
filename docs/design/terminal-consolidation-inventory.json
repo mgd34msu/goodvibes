@@ -91,7 +91,8 @@
       "path": "cli/entrypoint.ts",
       "baselineTuiLines": 283,
       "baselineSimilarity": 0.4932,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns native argument merge, metadata precedence (including Agent early boot), override failure handling, root defaults and model selection. Product adapters retain profile homes, config migration/roots, output sinks, host pairing, status diagnostics and override ordering."
     },
     {
       "path": "cli/help.ts",

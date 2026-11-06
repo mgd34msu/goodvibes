@@ -1,3 +1,13 @@
+import {
+  parseNativeShellCli,
+  shellMetadataResult,
+  requireValidCliOverrides,
+  applyCliModelSelection,
+  resolveShellRoots,
+  type ShellEntrypointOwnership,
+  type ShellEntrypointRoots,
+} from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
+export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { canonicalizePairingHost, readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
@@ -35,13 +45,12 @@ import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
-import { backfillCheckpointEligibilityIfNeeded, migrateLegacyWorkspaceRegistryIfNeeded, resolveCheckpointEligibilitySync } from '../config/workspace-registration.ts';
+import {
+  backfillCheckpointEligibilityIfNeeded,
+  migrateLegacyWorkspaceRegistryIfNeeded,
+  resolveCheckpointEligibilitySync,
+} from '../config/workspace-registration.ts';
 import { resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
-
-type ShellEntrypointOwnership = {
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-};
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
   const runtimeUrl = process.env['GOODVIBES_AGENT_RUNTIME_URL'];
@@ -50,11 +59,6 @@ function readEnvRuntimeUrl(): { readonly source: string; readonly value: string 
   if (legacyBaseUrl !== undefined) return { source: 'GOODVIBES_AGENT_BASE_URL', value: legacyBaseUrl };
   return null;
 }
-
-export type ShellEntrypointRoots = {
-  readonly defaultWorkingDirectory: string;
-  readonly homeDirectory: string;
-};
 
 export type PreparedShellCliRuntime = {
   readonly cli: ReturnType<typeof parseGoodVibesCli>;
@@ -77,10 +81,7 @@ export function resolveShellEntrypointOwnership(
       ? resolveSelectedAgentRuntimeProfileHome(roots.homeDirectory)
       : null;
   const homeDirectory = selectedProfile?.homeDirectory ?? roots.homeDirectory;
-  return {
-    workingDirectory: workingDirOverride ?? roots.defaultWorkingDirectory,
-    homeDirectory,
-  };
+  return resolveShellRoots(roots, workingDirOverride, homeDirectory);
 }
 
 export async function prepareShellCliRuntime(
@@ -88,11 +89,7 @@ export async function prepareShellCliRuntime(
   roots: ShellEntrypointRoots,
   binary = 'goodvibes-agent',
 ): Promise<PreparedShellCliRuntime> {
-  const native = extractNativeHeadlessOptions(argv);
-  const parsed = parseGoodVibesCli(native.argv, binary);
-  const nativeErrors = [...native.errors];
-  if (native.mode !== 'submit' && parsed.command !== 'run') nativeErrors.push('Native intake recovery requires the run or exec command.');
-  const cli = { ...parsed, errors: [...parsed.errors, ...nativeErrors] };
+  const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
 
   if (cli.errors.length > 0) {
     writeFatalLine(cli.errors.join('\n'));
@@ -101,42 +98,28 @@ export async function prepareShellCliRuntime(
     process.exit(2);
   }
 
-  if (cli.flags.help || cli.command === 'help') {
-    const helpTopic = cli.command === 'help'
-      ? cli.commandArgs[0]
-      : cli.rawCommand ?? undefined;
-    writeExitingStdoutLine(helpTopic ? renderGoodVibesCommandHelp(helpTopic, binary) : renderGoodVibesHelp(binary));
-    process.exit(0);
-  }
-
-  if (cli.flags.version || cli.command === 'version') {
-    writeExitingStdoutLine(renderGoodVibesVersion(binary));
-    process.exit(0);
-  }
-
-  if (cli.command === 'completion') {
-    writeExitingStdoutLine(renderCompletion(cli.commandArgs[0], binary));
-    process.exit(0);
+  const metadata = shellMetadataResult(cli, binary, {
+    help: renderGoodVibesHelp,
+    commandHelp: renderGoodVibesCommandHelp,
+    version: renderGoodVibesVersion,
+    completion: renderCompletion,
+  });
+  if (metadata) {
+    writeExitingStdoutLine(metadata.stdout ?? '');
+    process.exit(metadata.exitCode);
   }
 
   let ownership: ShellEntrypointOwnership;
   try {
-    ownership = resolveShellEntrypointOwnership(
-      roots,
-      cli.flags.workingDir ?? (cli.command === 'tui' ? cli.commandArgs[0] : undefined),
-      {
-        agentProfile: cli.command === 'profiles' ? undefined : cli.flags.agentProfile,
-        useSelectedProfile: cli.command !== 'profiles',
-      },
-    );
+    ownership = resolveShellEntrypointOwnership(roots, cli.flags.workingDir ?? (cli.command === 'tui' ? cli.commandArgs[0] : undefined), {
+      agentProfile: cli.command === 'profiles' ? undefined : cli.flags.agentProfile,
+      useSelectedProfile: cli.command !== 'profiles',
+    });
   } catch (error) {
     writeFatalLine(error instanceof Error ? error.message : String(error));
     process.exit(2);
   }
-  const {
-    workingDirectory: bootstrapWorkingDir,
-    homeDirectory: bootstrapHomeDirectory,
-  } = ownership;
+  const { workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory } = ownership;
   configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
   // Daemon-owned settings (chat surfaces, control-plane binding, watchers,
   // device grants, retention) have one home: the daemon's own store. Move them
@@ -163,34 +146,26 @@ export async function prepareShellCliRuntime(
   new GlobalNetworkTransportInstaller().install(configManager);
 
   const envRuntimeUrl = readEnvRuntimeUrl();
-  const envRuntimeUrlErrors = envRuntimeUrl
-    ? applyRuntimeUrlOverride(configManager, envRuntimeUrl.value, envRuntimeUrl.source)
-    : [];
-  if (envRuntimeUrlErrors.length > 0) {
-    writeFatalLine(envRuntimeUrlErrors.join('\n'));
-    process.exit(2);
-  }
+  const envRuntimeUrlErrors = envRuntimeUrl ? applyRuntimeUrlOverride(configManager, envRuntimeUrl.value, envRuntimeUrl.source) : [];
+  requireValidCliOverrides(envRuntimeUrlErrors, writeFatalLine, process.exit);
 
   const overrideErrors = applyRuntimeConfigOverrides(configManager, cli.flags.configOverrides);
-  if (overrideErrors.length > 0) {
-    writeFatalLine(overrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(overrideErrors, writeFatalLine, process.exit);
   const featureOverrideErrors = applyRuntimeFeatureOverrides(configManager, {
     enableFeatures: cli.flags.enableFeatures,
     disableFeatures: cli.flags.disableFeatures,
   });
-  if (featureOverrideErrors.length > 0) {
-    writeFatalLine(featureOverrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(featureOverrideErrors, writeFatalLine, process.exit);
 
-  if (cli.flags.provider !== undefined || cli.flags.model !== undefined) {
-    const currentModel = configManager.get('provider.model');
-    const provider = cli.flags.provider ?? getProviderIdFromModel(currentModel);
-    const model = cli.flags.model ?? getModelIdFromProviderModel(currentModel);
-    applyRuntimeConfigValue(configManager, 'provider.model', formatProviderModel(provider, model));
-  }
+  applyCliModelSelection(cli.flags, {
+    current: () => configManager.get('provider.model'),
+    provider: getProviderIdFromModel,
+    model: getModelIdFromProviderModel,
+    format: formatProviderModel,
+    apply: (model) => {
+      applyRuntimeConfigValue(configManager, 'provider.model', model);
+    },
+  });
   if (cli.flags.runtimeUrl !== undefined) {
     const runtimeUrlErrors = applyRuntimeUrlOverride(configManager, cli.flags.runtimeUrl);
     if (runtimeUrlErrors.length > 0) {
@@ -199,13 +174,15 @@ export async function prepareShellCliRuntime(
     }
   }
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
-  if (endpointOverrideErrors.length > 0) {
-    writeFatalLine(endpointOverrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(endpointOverrideErrors, writeFatalLine, process.exit);
 
   if (cli.command === 'run') {
-    process.exit(await runNativeHeadlessCommand({ cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory }, native.mode));
+    process.exit(
+      await runNativeHeadlessCommand(
+        { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
+        native.mode,
+      ),
+    );
   }
 
   if (cli.command === 'onboarding' && cli.commandArgs[0] === 'status') {
@@ -213,8 +190,18 @@ export async function prepareShellCliRuntime(
     const selectedHost = canonicalizePairingHost(resolveConnectedHostBaseUrl(configManager)) ?? '(invalid endpoint)';
     const nativeReadiness = await readConnectedHostReadiness({ configManager, homeDirectory: bootstrapHomeDirectory });
     const pairingStatus = readAgentHostPairing(bootstrapHomeDirectory, selectedHost).status;
-    writeExitingStdoutLine(renderOnboardingCliStatus({ configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory,
-      onboardingMarkers: readOnboardingCheckMarkers(shellPaths), nativeReadiness, pairingStatus, selectedHost, outputFormat: cli.flags.outputFormat }));
+    writeExitingStdoutLine(
+      renderOnboardingCliStatus({
+        configManager,
+        workingDirectory: bootstrapWorkingDir,
+        homeDirectory: bootstrapHomeDirectory,
+        onboardingMarkers: readOnboardingCheckMarkers(shellPaths),
+        nativeReadiness,
+        pairingStatus,
+        selectedHost,
+        outputFormat: cli.flags.outputFormat,
+      }),
+    );
     process.exit(0);
   }
 
@@ -243,13 +230,11 @@ export async function prepareShellCliRuntime(
     // read:telemetry scope-missing case) rather than rendering zeros.
     const connectedHostMetrics = externalRuntime.reachable
       ? await inspectConnectedHostMetrics({
-        configManager,
-        homeDirectory: bootstrapHomeDirectory,
-      })
+          configManager,
+          homeDirectory: bootstrapHomeDirectory,
+        })
       : undefined;
-    const effectiveOperatorTokenPath = externalRuntime.operatorToken.present
-      ? externalRuntime.operatorToken.path
-      : operatorTokenPath;
+    const effectiveOperatorTokenPath = externalRuntime.operatorToken.present ? externalRuntime.operatorToken.path : operatorTokenPath;
     const registrationMigration = migrateLegacyWorkspaceRegistryIfNeeded(shellPaths);
     if (registrationMigration) {
       logger.info('Migrated the local workspace registry into the shared registration store', { ...registrationMigration });

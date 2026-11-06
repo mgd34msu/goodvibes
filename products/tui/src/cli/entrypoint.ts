@@ -1,3 +1,12 @@
+import {
+  parseNativeShellCli,
+  shellMetadataResult,
+  requireValidCliOverrides,
+  applyCliModelSelection,
+  resolveShellRoots,
+  type ShellEntrypointRoots,
+} from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
+export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 import { runTuiHostCommand } from './host-pair-command.ts';
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
@@ -39,16 +48,6 @@ import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.
 import { describeDaemonConfigMigration } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
-type ShellEntrypointOwnership = {
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-};
-
-export type ShellEntrypointRoots = {
-  readonly defaultWorkingDirectory: string;
-  readonly homeDirectory: string;
-};
-
 export type PreparedShellCliRuntime = {
   readonly cli: ReturnType<typeof parseGoodVibesCli>;
   readonly configManager: ConfigManager;
@@ -56,12 +55,7 @@ export type PreparedShellCliRuntime = {
   readonly bootstrapHomeDirectory: string;
 };
 
-function resolveShellEntrypointOwnership(roots: ShellEntrypointRoots, workingDirOverride?: string): ShellEntrypointOwnership {
-  return {
-    workingDirectory: workingDirOverride ?? roots.defaultWorkingDirectory,
-    homeDirectory: roots.homeDirectory,
-  };
-}
+const resolveShellEntrypointOwnership = resolveShellRoots;
 
 export async function prepareShellCliRuntime(
   argv: readonly string[],
@@ -70,11 +64,7 @@ export async function prepareShellCliRuntime(
 ): Promise<PreparedShellCliRuntime> {
   // Product-owned host pairing is isolated from shared CLI/model dispatch.
   if (argv[0] === 'host') process.exit(await runTuiHostCommand(argv.slice(1), roots));
-  const native = extractNativeHeadlessOptions(argv);
-  const parsed = parseGoodVibesCli(native.argv, binary);
-  const nativeErrors = [...native.errors];
-  if (native.mode !== 'submit' && parsed.command !== 'run') nativeErrors.push('Native intake recovery requires the run or exec command.');
-  const cli = { ...parsed, errors: [...parsed.errors, ...nativeErrors] };
+  const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
 
   if (cli.errors.length > 0) {
     console.error(cli.errors.join('\n'));
@@ -89,22 +79,15 @@ export async function prepareShellCliRuntime(
     }
   }
 
-  if (cli.flags.help || cli.command === 'help') {
-    const helpTopic = cli.command === 'help'
-      ? cli.commandArgs[0]
-      : cli.rawCommand ?? undefined;
-    console.log(helpTopic ? renderGoodVibesCommandHelp(helpTopic, binary) : renderGoodVibesHelp(binary));
-    process.exit(0);
-  }
-
-  if (cli.flags.version || cli.command === 'version') {
-    console.log(renderGoodVibesVersion(binary));
-    process.exit(0);
-  }
-
-  if (cli.command === 'completion') {
-    console.log(renderCompletion(cli.commandArgs[0], binary));
-    process.exit(0);
+  const metadata = shellMetadataResult(cli, binary, {
+    help: renderGoodVibesHelp,
+    commandHelp: renderGoodVibesCommandHelp,
+    version: renderGoodVibesVersion,
+    completion: renderCompletion,
+  });
+  if (metadata) {
+    console.log(metadata.stdout ?? '');
+    process.exit(metadata.exitCode);
   }
 
   if (cli.command === 'serve') {
@@ -112,22 +95,26 @@ export async function prepareShellCliRuntime(
     // it never hosts one, so `serve` names something it cannot do. Say which
     // command to run instead rather than starting a daemon that would be a
     // second, drifting copy of the real one.
-    console.error('`goodvibes serve` is gone: the daemon is a separate program now. Run `goodvibes-daemon serve` (installed alongside this app), or `goodvibes service start` to start the installed service.');
+    console.error(
+      '`goodvibes serve` is gone: the daemon is a separate program now. Run `goodvibes-daemon serve` (installed alongside this app), or `goodvibes service start` to start the installed service.',
+    );
     process.exit(2);
   }
 
-  const {
-    workingDirectory: bootstrapWorkingDir,
-    homeDirectory: bootstrapHomeDirectory,
-  } = resolveShellEntrypointOwnership(roots, cli.flags.workingDir ?? (cli.command === 'tui' ? cli.commandArgs[0] : undefined));
+  const { workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory } = resolveShellEntrypointOwnership(
+    roots,
+    cli.flags.workingDir ?? (cli.command === 'tui' ? cli.commandArgs[0] : undefined),
+  );
   configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
   // Only prints the first time the rule is actually appended (not on every
   // launch), see ensureGoodvibesGitignore's return-value doc.
   if (cli.command !== 'run' && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
-    console.log("[goodvibes] added '.goodvibes/' to .gitignore: this directory holds transient TUI state (logs, session cache, exec output), not project source.");
+    console.log(
+      "[goodvibes] added '.goodvibes/' to .gitignore: this directory holds transient TUI state (logs, session cache, exec output), not project source.",
+    );
   }
   const daemonConfigMigration = runDaemonConfigMigration(bootstrapHomeDirectory);
-  if (daemonConfigMigration?.migrated && (daemonConfigMigration.marker.moved.length + daemonConfigMigration.marker.discarded.length) > 0) {
+  if (daemonConfigMigration?.migrated && daemonConfigMigration.marker.moved.length + daemonConfigMigration.marker.discarded.length > 0) {
     (cli.command === 'run' ? console.error : console.log)(`[goodvibes] ${describeDaemonConfigMigration(daemonConfigMigration.marker)}`);
   }
   const configManager = new TuiConfigManager({
@@ -138,30 +125,24 @@ export async function prepareShellCliRuntime(
   new GlobalNetworkTransportInstaller().install(configManager);
 
   const overrideErrors = applyRuntimeConfigOverrides(configManager, cli.flags.configOverrides);
-  if (overrideErrors.length > 0) {
-    console.error(overrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(overrideErrors, console.error, process.exit);
   const featureOverrideErrors = applyRuntimeFeatureFlagOverrides(configManager, {
     enableFeatures: cli.flags.enableFeatures,
     disableFeatures: cli.flags.disableFeatures,
   });
-  if (featureOverrideErrors.length > 0) {
-    console.error(featureOverrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(featureOverrideErrors, console.error, process.exit);
 
-  if (cli.flags.provider !== undefined || cli.flags.model !== undefined) {
-    const currentModel = configManager.get('provider.model');
-    const provider = cli.flags.provider ?? getProviderIdFromModel(currentModel);
-    const model = cli.flags.model ?? getModelIdFromProviderModel(currentModel);
-    applyRuntimeConfigValue(configManager, 'provider.model', formatProviderModel(provider, model));
-  }
+  applyCliModelSelection(cli.flags, {
+    current: () => configManager.get('provider.model'),
+    provider: getProviderIdFromModel,
+    model: getModelIdFromProviderModel,
+    format: formatProviderModel,
+    apply: (model) => {
+      applyRuntimeConfigValue(configManager, 'provider.model', model);
+    },
+  });
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
-  if (endpointOverrideErrors.length > 0) {
-    console.error(endpointOverrideErrors.join('\n'));
-    process.exit(2);
-  }
+  requireValidCliOverrides(endpointOverrideErrors, console.error, process.exit);
 
   if (cli.command === 'doctor' && ['explain', 'routing', 'hooks'].includes(cli.commandArgs[0] ?? '')) {
     const result = await handleDoctorSubcommand({
@@ -179,7 +160,12 @@ export async function prepareShellCliRuntime(
   }
 
   if (cli.command === 'run') {
-    process.exit(await runNativeHeadlessCommand({ cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory }, native.mode));
+    process.exit(
+      await runNativeHeadlessCommand(
+        { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
+        native.mode,
+      ),
+    );
   }
 
   if (cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'onboarding' && cli.commandArgs[0] === 'status')) {
@@ -260,9 +246,7 @@ export async function prepareShellCliRuntime(
       relay: relayStatus,
     };
     const snapshot = buildCliStatusSnapshot(statusOptions);
-    console.log(cli.command === 'onboarding'
-      ? renderOnboardingCliStatus(statusOptions)
-      : renderCliStatus(statusOptions));
+    console.log(cli.command === 'onboarding' ? renderOnboardingCliStatus(statusOptions) : renderCliStatus(statusOptions));
     // Advisory findings are notes on an otherwise-usable install and must
     // never make a healthy install report failure, only a must-fix finding
     // exits non-zero; --strict (for CI) flips advisories to failures too.

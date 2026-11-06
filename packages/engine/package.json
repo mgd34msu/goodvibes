@@ -3063,6 +3063,11 @@
       "bun": "./terminal-shell/src/native/bound-work-ledger-host.ts",
       "types": "./terminal-shell/dist/native/bound-work-ledger-host.d.ts",
       "import": "./terminal-shell/dist/native/bound-work-ledger-host.js"
+    },
+    "./terminal-shell/cli-entrypoint": {
+      "bun": "./terminal-shell/src/cli-entrypoint.ts",
+      "types": "./terminal-shell/dist/cli-entrypoint.d.ts",
+      "import": "./terminal-shell/dist/cli-entrypoint.js"
     }
   },
   "publishConfig": {

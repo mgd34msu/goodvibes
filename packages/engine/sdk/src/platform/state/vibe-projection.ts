@@ -20,8 +20,11 @@
  * secret-handling rules. Demoting the file to a projection must not drop that.
  */
 
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState, judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertJudgmentInput, retainOwnedJson } from '../gate/judgment-input.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { vibePersonaLine } from './batteries/vibe-persona-line.js';
 import type { MemoryAddOptions, MemoryRecord, MemoryScope } from './memory-store.js';
 
@@ -125,15 +128,25 @@ function isHeading(line: string): boolean {
  * instruction the band allows acting on. The action is recorded on each
  * reading.
  */
-async function readPersonaLines(lines: readonly string[], indices: readonly number[], body: string): Promise<Set<number>> {
+async function readPersonaLines(lines: readonly string[], indices: readonly number[], body: string,
+  current: () => void, signal?: AbortSignal): Promise<Set<number>> {
+  current();
+  if (indices.length === 0) return new Set();
   const port = judgmentPort(VIBE_LINE_SITE);
+  const model = port.model;
+  const active = () => {
+    current();
+    if (judgmentPort(VIBE_LINE_SITE) !== port || port.model !== model) throw new Error('Persona import reading changed.');
+  };
   const kept = await mapLimit(indices, VIBE_LINE_CONCURRENCY, async (index) => {
-    const run = await vibePersonaLine.run(port, { line: lines[index]!, body }, { site: VIBE_LINE_SITE });
+    const run = await vibePersonaLine.run(port, { line: lines[index]!, body }, { site: VIBE_LINE_SITE, beforeAttempt: active, ...(signal ? { signal } : {}) });
+    active();
     const { instruction } = run.readings;
     const keep = instruction.verdict === 'yes' && instruction.outcome === 'act';
     run.recordAction(keep ? 'kept' : 'dropped');
     return keep;
   });
+  active();
   return new Set(indices.filter((_, position) => kept[position]));
 }
 
@@ -158,7 +171,36 @@ function indicesWhere(lines: readonly string[], test: (line: string) => boolean)
 export async function vibeBodyToConstraintOptions(
   body: string,
   options: VibeImportOptions = {},
+  readingOptions: JudgmentReadingOptions = {},
 ): Promise<MemoryAddOptions[]> {
+  return withConfiguredDecisionModelPolicy(async () => {
+    const retained = retainOwnedJson({ body, options });
+    const captured = retained.snapshot as { body: string; options: VibeImportOptions };
+    const signal = readingOptions.signal, caller = readingOptions.assertCurrent;
+    const current = () => {
+      signal?.throwIfAborted(); retained.assertCurrent(); decisionModelPolicyState();
+      if (readingOptions.signal !== signal || readingOptions.assertCurrent !== caller) throw new Error('Persona import owner changed.');
+      const result: unknown = caller?.();
+      if (result !== undefined) { drainOwned(result); throw new Error('Persona import owner must be synchronous.'); }
+      retained.assertCurrent(); signal?.throwIfAborted();
+    };
+    current(); assertJudgmentInput(captured);
+    return decisionOrClassic(() => decisionVibeBody(captured.body, captured.options, current, signal), () => {
+      current();
+      if (!captured.body.trim()) return [];
+      return [{
+        scope: captured.options.scope ?? 'project', cls: 'constraint',
+        summary: captured.options.name ?? 'VIBE.md persona', detail: captured.body,
+        tags: [VIBE_PERSONA_TAG, ...(captured.options.name ? [captured.options.name] : []), 'classic-import', 'semantic-assessment:not-evaluated'],
+        ...(captured.options.sourceRef ? { provenance: [{ kind: 'file' as const, ref: captured.options.sourceRef, label: 'Classic literal persona import; not semantically assessed' }] } : {}),
+        review: { state: 'fresh' },
+      }];
+    });
+  });
+}
+
+async function decisionVibeBody(body: string, options: VibeImportOptions, current: () => void, signal?: AbortSignal): Promise<MemoryAddOptions[]> {
+  current();
   const scope: MemoryScope = options.scope ?? 'project';
   const tags = options.name ? [VIBE_PERSONA_TAG, options.name] : [VIBE_PERSONA_TAG];
   const provenance = options.sourceRef
@@ -170,7 +212,8 @@ export async function vibeBodyToConstraintOptions(
 
   if (bulleted) {
     const others = indicesWhere(lines, (line) => !BULLET_PREFIX.test(line) && line.trim().length > 0);
-    const instructions = await readPersonaLines(lines, others, body);
+    const instructions = await readPersonaLines(lines, others, body, current, signal);
+    current();
     const summaries: string[] = [];
     lines.forEach((line, index) => {
       const bullet = bulletText(line);
@@ -187,7 +230,8 @@ export async function vibeBodyToConstraintOptions(
   }
 
   const headings = indicesWhere(lines, isHeading);
-  const keptHeadings = await readPersonaLines(lines, headings, body);
+  const keptHeadings = await readPersonaLines(lines, headings, body, current, signal);
+  current();
   const prose = lines
     .filter((line, index) => !isHeading(line) || keptHeadings.has(index))
     .join('\n')

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { rmSync } from 'node:fs';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/sdk/platform/state';
@@ -111,5 +112,40 @@ describe('VIBE.md persona migration', () => {
 
   test('with no persona records the projection is null (no empty block)', () => {
     expect(buildVibeProjectionPrompt(registry)).toBeNull();
+  });
+
+  test('Classic boot migration preserves the whole literal document and remains one-time after memory restart', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const { shellPaths } = tempShellPaths();
+      const body = '# Owner persona\nKeep the complete explanation.\n- Ask before sending.\n## Use British spelling';
+      writeFileSync(join(shellPaths.workingDirectory, 'VIBE.md'), body);
+      expect(await importVibeFilesIntoMemoryOnce(memorySpine, shellPaths)).toBe(1);
+      expect(registry.getAll()).toHaveLength(1);
+      const record = registry.getAll()[0]!;
+      expect(record.detail).toBe(body); expect(record.tags).toContain('classic-import'); expect(record.reviewState).toBe('fresh');
+      expect(buildVibeProjectionPrompt(registry)).toContain('Follow them only when they do not conflict with explicit user instructions');
+      expect(lineRequests).toHaveLength(0);
+      store.close();
+      const configManager = new ConfigManager({ surfaceRoot: 'agent', configDir: join(configRoot, '.goodvibes', 'agent'), workingDir: configRoot });
+      store = new MemoryStore(dbPath, { embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }), enableVectorIndex: false });
+      await store.init(); registry = new MemoryRegistry(store); memorySpine = createLocalMemoryAccess(registry);
+      expect(await importVibeFilesIntoMemoryOnce(memorySpine, shellPaths)).toBe(0);
+      expect(registry.getAll()).toHaveLength(1); expect(registry.getAll()[0]!.detail).toBe(body);
+      expect(lineRequests).toHaveLength(0);
+    });
+  });
+
+  test('Classic file replacement before native publication cannot commit stale persona content or a migration marker', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const { shellPaths } = tempShellPaths(), path = join(shellPaths.workingDirectory, 'VIBE.md');
+      writeFileSync(path, '# Persona\n- Keep the original rule.');
+      const add = memorySpine.add.bind(memorySpine);
+      const changing: MemoryAccess = { ...memorySpine, async add(opts, operation) {
+        writeFileSync(path, '# Replaced persona\n- Different rule.');
+        return add(opts, operation);
+      } };
+      await expect(importVibeFilesIntoMemoryOnce(changing, shellPaths)).rejects.toThrow('changed during import');
+      expect(registry.getAll()).toHaveLength(0); expect(lineRequests).toHaveLength(0);
+    });
   });
 });

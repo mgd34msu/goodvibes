@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
@@ -193,5 +194,48 @@ describe('persona records round-trip through the bundle seam', () => {
     expect(projectionB).toBe(projectionA);
     expect(selectVibeRecords(await storeB.search({})).length).toBe(2);
     storeB.close();
+  });
+});
+
+for (const policy of ['Classic - Off', 'Preferred'] as const) {
+  test(`${policy} literal persona import preserves complete owner text with fresh provenance and no invented semantic review`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted decision chain'); }); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => policy, async () => {
+      const body = '# Persona\nAlways use British spelling.\n\n- Keep replies direct.\n## Ask before sending\nExplain important limits.';
+      const options = await vibeBodyToConstraintOptions(body, { name: 'Owner persona', sourceRef: '/repo/VIBE.md' });
+      expect(options).toHaveLength(1);
+      expect(options[0]).toMatchObject({ cls: 'constraint', detail: body, review: { state: 'fresh' } });
+      expect(options[0]!.tags).toContain('classic-import'); expect(options[0]!.tags).toContain('semantic-assessment:not-evaluated');
+      expect(options[0]!.provenance?.[0]).toMatchObject({ kind: 'file', ref: '/repo/VIBE.md' });
+      expect(options[0]!.review?.confidence).toBeUndefined();
+      const root = mkdtempSync(join(tmpdir(), 'gv-classic-vibe-')); tmpRoots.push(root);
+      const store = openStore(root); await store.init();
+      try {
+        const record = await store.add(options[0]!);
+        expect(record.reviewState).toBe('fresh');
+        const rendered = renderVibeProjection(store.getAll());
+        expect(rendered).toContain(body); expect(rendered).toContain(VIBE_PROJECTION_CAVEAT);
+      } finally { store.close(); }
+      expect(policy === 'Classic - Off' ? fake.requests.length === 0 : fake.requests.length > 0).toBe(true);
+    });
+  });
+}
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+  test(`Preferred persona ${kind} is not converted into a literal import`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); }); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.')).rejects.toThrow();
+    });
+  });
+}
+
+test('Classic persona import retains cancellation and whole-document secret admission', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.', {}, { signal: controller.signal })).rejects.toThrow();
+    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.\npassword=synthetic-private-secret')).rejects.toThrow();
+    expect(fake.requests).toHaveLength(0);
   });
 });

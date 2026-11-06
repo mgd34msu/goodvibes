@@ -11,6 +11,8 @@ import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-f
 // the same '## VIBE.md' block from those records (caveat preserved); the file is
 // demoted to an import/export FORMAT folded in via vibeBodyToConstraintOptions.
 import { renderVibeProjection, vibeBodyToConstraintOptions } from '@goodvibes-jev/engine/sdk/platform/state';
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type { MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/sdk/platform/state';
 // Writes go through the memory-spine's MemoryAccess surface (add), not the raw
 // MemoryRegistry, so this import folds correctly whether the agent is local or has
@@ -227,6 +229,17 @@ export function buildVibeProjectionPrompt(memoryRecords: { getAll(): readonly Me
   return renderVibeProjection(memoryRecords.getAll());
 }
 
+/** A literal import retains the same file and memory backend through publication. */
+function captureVibeImport(file: AgentVibeFile, memory: MemoryAccess): () => void {
+  const original = readFileSync(file.path, 'utf8');
+  if (JSON.stringify(readVibeCandidate(file.path, file.scope)) !== JSON.stringify(file)) throw new Error('VIBE.md changed before import.');
+  const backend = memory.captureOperationScope?.();
+  return () => {
+    decisionModelPolicyState(); backend?.();
+    if (readFileSync(file.path, 'utf8') !== original) throw new Error('VIBE.md changed during import.');
+  };
+}
+
 /**
  * Fold discovered VIBE.md files into the store as persona/constraint
  * records, the file demoted to an IMPORT FORMAT. Each bullet becomes one record so a
@@ -240,22 +253,28 @@ export async function importVibeFilesIntoMemory(
   memorySpine: MemoryAccess,
   shellPaths: AgentVibePaths,
 ): Promise<number> {
-  const snapshot = discoverVibeFiles(shellPaths);
-  let created = 0;
-  for (const file of snapshot.files) {
-    const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
-    const name = file.frontmatter.name?.trim();
-    const options = await vibeBodyToConstraintOptions(file.body, {
-      scope,
-      ...(name ? { name } : {}),
-      sourceRef: file.path,
-    });
-    for (const opts of options) {
-      await memorySpine.add(opts);
-      created += 1;
+  return withConfiguredDecisionModelPolicy(async () => {
+    const snapshot = discoverVibeFiles(shellPaths);
+    let created = 0;
+    for (const file of snapshot.files) {
+      const current = captureVibeImport(file, memorySpine);
+      current();
+      const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
+      const name = file.frontmatter.name?.trim();
+      const options = await vibeBodyToConstraintOptions(file.body, {
+        scope,
+        ...(name ? { name } : {}),
+        sourceRef: file.path,
+      }, { assertCurrent: current });
+      for (const opts of options) {
+        current();
+        await memorySpine.add(opts, { assertCurrent: current });
+        created += 1;
+        current();
+      }
     }
-  }
-  return created;
+    return created;
+  });
 }
 
 /**
@@ -311,31 +330,37 @@ export async function importVibeFilesIntoMemoryOnce(
   memorySpine: MemoryAccess,
   shellPaths: AgentVibePaths,
 ): Promise<number> {
-  const markerPath = vibeImportMarkerPath(shellPaths);
-  const marker = readVibeImportMarker(markerPath);
-  const snapshot = discoverVibeFiles(shellPaths);
-  let created = 0;
-  let changed = false;
-  for (const file of snapshot.files) {
-    const key = resolve(file.path);
-    const hash = hashVibeBody(file.body);
-    if (marker.migrated[key] === hash) continue; // already migrated this exact content
-    const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
-    const name = file.frontmatter.name?.trim();
-    const options = await vibeBodyToConstraintOptions(file.body, {
-      scope,
-      ...(name ? { name } : {}),
-      sourceRef: file.path,
-    });
-    for (const opts of options) {
-      await memorySpine.add(opts);
-      created += 1;
+  return withConfiguredDecisionModelPolicy(async () => {
+    const markerPath = vibeImportMarkerPath(shellPaths);
+    const marker = readVibeImportMarker(markerPath);
+    const snapshot = discoverVibeFiles(shellPaths);
+    let created = 0;
+    let changed = false;
+    for (const file of snapshot.files) {
+      const key = resolve(file.path);
+      const hash = hashVibeBody(file.body);
+      if (marker.migrated[key] === hash) continue; // already migrated this exact content
+      const current = captureVibeImport(file, memorySpine);
+      current();
+      const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
+      const name = file.frontmatter.name?.trim();
+      const options = await vibeBodyToConstraintOptions(file.body, {
+        scope,
+        ...(name ? { name } : {}),
+        sourceRef: file.path,
+      }, { assertCurrent: current });
+      for (const opts of options) {
+        current();
+        await memorySpine.add(opts, { assertCurrent: current });
+        created += 1;
+        current();
+      }
+      marker.migrated[key] = hash;
+      changed = true;
     }
-    marker.migrated[key] = hash;
-    changed = true;
-  }
-  if (changed) writeVibeImportMarker(markerPath, marker);
-  return created;
+    if (changed) writeVibeImportMarker(markerPath, marker);
+    return created;
+  });
 }
 
 export function formatVibeStatus(snapshot: AgentVibeSnapshot): string {

@@ -369,7 +369,15 @@
       "path": "input/command-registry.ts",
       "baselineTuiLines": 685,
       "baselineSimilarity": 0.5846,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "CommandRegistry",
+        "SlashCommand",
+        "isDirectOwnerCommandContext",
+        "directOwnerWorkstreamInput",
+        "directOwnerRemoteInput",
+        "directOwnerPlanningInput"
+      ]
     },
     {
       "path": "input/commands.ts",

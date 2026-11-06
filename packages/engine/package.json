@@ -2268,6 +2268,11 @@
       "bun": "./terminal-shell/src/mcp-workspace-input.ts",
       "types": "./terminal-shell/dist/mcp-workspace-input.d.ts",
       "import": "./terminal-shell/dist/mcp-workspace-input.js"
+    },
+    "./terminal-shell/command-registry": {
+      "bun": "./terminal-shell/src/command-registry.ts",
+      "types": "./terminal-shell/dist/command-registry.d.ts",
+      "import": "./terminal-shell/dist/command-registry.js"
     }
   },
   "publishConfig": {

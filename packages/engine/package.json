@@ -2968,6 +2968,11 @@
       "bun": "./terminal-shell/src/cli-status-facts.ts",
       "types": "./terminal-shell/dist/cli-status-facts.d.ts",
       "import": "./terminal-shell/dist/cli-status-facts.js"
+    },
+    "./terminal-shell/release-update-preflight": {
+      "bun": "./terminal-shell/src/release-update-preflight.ts",
+      "types": "./terminal-shell/dist/release-update-preflight.d.ts",
+      "import": "./terminal-shell/dist/release-update-preflight.js"
     }
   },
   "publishConfig": {

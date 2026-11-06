@@ -1,3 +1,10 @@
+import { reportUpdateRollback, createSelfUpdateCommand } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import {
+  checkReleaseUpdate,
+  prepareReleaseUpdate,
+  requireBinaryUpdateInstall,
+  type ReleaseUpdateCheck,
+} from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
 /**
  * `/update`, a real self-update path for binary installs. The
@@ -53,7 +60,7 @@ import {
   verifyChecksum,
   type UpdateFileIo,
 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import {
   BROWSER_DRIVER_ARCHIVE_NAME,
@@ -66,15 +73,7 @@ import {
   resolveSqliteVecArchive,
 } from '../../runtime/release-artifacts.ts';
 import { extractTarGzTree } from '../../runtime/tar-archive.ts';
-import {
-  compareVersions,
-  detectInstallKind,
-  fallbackUpdateCommand,
-  normalizeVersion,
-  resolveLatestReleaseTag,
-  type InstallKind,
-  type UpdateFetchLike,
-} from '../../runtime/update-check.ts';
+import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
 
 const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-agent/releases/latest';
 
@@ -132,11 +131,7 @@ export const realUpdateDirectoryIo: UpdateDirectoryIo = {
  * only once that has completed do the two renames that make it live. A failure
  * anywhere before the final rename leaves the existing driver untouched.
  */
-export function swapDirectory(
-  targetPath: string,
-  archive: Buffer,
-  io: UpdateDirectoryIo,
-): void {
+export function swapDirectory(targetPath: string, archive: Buffer, io: UpdateDirectoryIo): void {
   const incoming = `${targetPath}.incoming`;
   const kept = `${targetPath}${PREVIOUS_FILE_SUFFIX}`;
   io.removeTree(incoming);
@@ -148,15 +143,10 @@ export function swapDirectory(
   io.rename(incoming, targetPath);
 }
 
-export interface CheckForUpdateResult {
-  readonly latestTag: string;
-  readonly isCurrent: boolean;
-}
+export type CheckForUpdateResult = ReleaseUpdateCheck;
 
 export async function checkForUpdate(fetchImpl: UpdateFetchLike, currentVersion: string): Promise<CheckForUpdateResult> {
-  const latestTag = await resolveLatestReleaseTag(fetchImpl, REPO_RELEASES_LATEST_URL);
-  const isCurrent = compareVersions(currentVersion, latestTag) >= 0;
-  return { latestTag, isCurrent };
+  return checkReleaseUpdate(fetchImpl, currentVersion, REPO_RELEASES_LATEST_URL);
 }
 
 export interface ApplyUpdateOptions {
@@ -183,32 +173,19 @@ export interface ApplyUpdateOptions {
  * instead.
  */
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
-  const installKind: InstallKind = detectInstallKind(options.execPath);
-  if (installKind !== 'binary') {
-    options.print(
-      [
-        `This install is not a self-updatable binary install (detected: ${installKind === 'bun-global-package' ? 'bun/npm package install' : 'running from source'}).`,
-        `Update with: ${fallbackUpdateCommand(installKind)}`,
-      ].join('\n'),
-    );
-    return;
-  }
-
-  const latestTag = await resolveLatestReleaseTag(options.fetchImpl, REPO_RELEASES_LATEST_URL);
-  if (compareVersions(options.currentVersion, latestTag) >= 0) {
-    options.print(`Already current: running v${normalizeVersion(options.currentVersion)}, latest release is ${latestTag}.`);
-    return;
-  }
-
-  const binaryAsset = resolveAgentBinaryAssetName(options.platform, options.arch);
-  if (!binaryAsset) {
-    options.print(`No prebuilt binaries are published for ${options.platform}-${options.arch}; cannot self-update.`);
-    return;
-  }
-
-  options.print(`Update available: ${latestTag} (running v${normalizeVersion(options.currentVersion)}). Downloading and verifying...`);
-
-  const baseUrl = releaseDownloadBaseUrl(latestTag);
+  const prepared = await prepareReleaseUpdate(
+    { ...options },
+    {
+      latestUrl: REPO_RELEASES_LATEST_URL,
+      downloadBase: releaseDownloadBaseUrl,
+      asset: resolveAgentBinaryAssetName,
+      fallback: fallbackUpdateCommand,
+      unsupportedSuffix: '',
+    },
+  );
+  if (!prepared) return;
+  const { latestTag, baseUrl } = prepared;
+  const binaryAsset = prepared.asset;
   const io = options.io ?? realUpdateFileIo;
   const appBinaryPath = options.execPath;
 
@@ -249,7 +226,9 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
     verifyChecksum(BROWSER_DRIVER_ARCHIVE_NAME, sha256(driverArchiveBytes), checksums.get(BROWSER_DRIVER_ARCHIVE_NAME));
     for (const required of BROWSER_DRIVER_REQUIRED_ENTRIES) {
       if (extractTarGzEntry(driverArchiveBytes, required) === null) {
-        throw new Error(`browser driver archive ${BROWSER_DRIVER_ARCHIVE_NAME} verified but holds no ${required}, refusing a partial update`);
+        throw new Error(
+          `browser driver archive ${BROWSER_DRIVER_ARCHIVE_NAME} verified but holds no ${required}, refusing a partial update`,
+        );
       }
     }
     driverTargetPath = join(dirname(appBinaryPath), BROWSER_DRIVER_DIR_NAME);
@@ -282,7 +261,9 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
         : [`  vector addon:  the ${latestTag} release ships no ${addon?.assetName ?? 'addon archive'} for this platform, left untouched`]),
       ...(driverTargetPath
         ? [`  browser driver: ${driverTargetPath}`]
-        : [`  browser driver: the ${latestTag} release ships no ${BROWSER_DRIVER_ARCHIVE_NAME}, left untouched; the browser tool installs a driver for itself on first use`]),
+        : [
+            `  browser driver: the ${latestTag} release ships no ${BROWSER_DRIVER_ARCHIVE_NAME}, left untouched; the browser tool installs a driver for itself on first use`,
+          ]),
       '',
       'Restart goodvibes-agent to run the new version.',
     ].join('\n'),
@@ -326,16 +307,7 @@ export function rollbackDirectory(targetPath: string, io: UpdateDirectoryIo): bo
  * is downloaded.
  */
 export function rollbackUpdate(options: RollbackUpdateOptions): void {
-  const installKind: InstallKind = detectInstallKind(options.execPath);
-  if (installKind !== 'binary') {
-    options.print(
-      [
-        `This install is not a self-updatable binary install (detected: ${installKind === 'bun-global-package' ? 'bun/npm package install' : 'running from source'}), so there is no kept previous binary to roll back to.`,
-        `Install a specific version with your package manager instead, e.g.: ${fallbackUpdateCommand(installKind)}`,
-      ].join('\n'),
-    );
-    return;
-  }
+  if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
 
   const io = options.io ?? realUpdateFileIo;
   const addon = resolveSqliteVecArchive(options.platform, options.arch);
@@ -351,80 +323,24 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   // the forward path exists to prevent.
   const driverPath = join(dirname(options.execPath), BROWSER_DRIVER_DIR_NAME);
   const driverRolledBack = rollbackDirectory(driverPath, options.directoryIo ?? realUpdateDirectoryIo);
-  if (result.restored.length === 0 && !driverRolledBack) {
-    options.print(
-      `No previous version is kept beside this install (nothing at ${options.execPath}${PREVIOUS_FILE_SUFFIX}). ` +
-      'The previous version is kept from the next update onward.',
-    );
-    return;
-  }
-
-  options.print(
-    [
-      'Rolled back to the previously installed version.',
-      ...result.restored.map((target) => `  ${target.label}: ${target.path} (the replaced version is kept at ${target.path}${PREVIOUS_FILE_SUFFIX})`),
-      ...(driverRolledBack ? [`  browser driver: ${driverPath} (the replaced version is kept at ${driverPath}${PREVIOUS_FILE_SUFFIX})`] : []),
-      '',
-      'Restart goodvibes-agent to run the restored version.',
-    ].join('\n'),
-  );
+  reportUpdateRollback(options, result.restored, driverRolledBack ? [{ label: 'browser driver', path: driverPath }] : [], () => [
+    'Restart goodvibes-agent to run the restored version.',
+  ]);
 }
 
 export function registerUpdateCommand(registry: CommandRegistry): void {
-  registry.register({
-    name: 'update',
-    aliases: ['upgrade'],
-    description: 'Check for a newer GoodVibes Agent release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
-    usage: '[check|apply|rollback]',
-    async handler(args, ctx) {
-      if (IS_WORKSPACE_DISTRIBUTION) { ctx.print(WORKSPACE_UPDATE_GUIDANCE); return; }
-      const sub = args[0] ?? 'check';
-
-      if (sub === 'check') {
-        try {
-          const result = await checkForUpdate(fetch as UpdateFetchLike, VERSION);
-          ctx.print(
-            result.isCurrent
-              ? `Already current: running v${normalizeVersion(VERSION)} (latest release is ${result.latestTag}).`
-              : `Update available: ${result.latestTag} (running v${normalizeVersion(VERSION)}). Run /update apply to install it.`,
-          );
-        } catch (error) {
-          ctx.print(`Could not check for updates: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'apply') {
-        try {
-          await applyUpdate({
-            fetchImpl: fetch as UpdateFetchLike,
-            execPath: process.execPath,
-            platform: process.platform,
-            arch: process.arch,
-            currentVersion: VERSION,
-            print: ctx.print,
-          });
-        } catch (error) {
-          ctx.print(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'rollback') {
-        try {
-          rollbackUpdate({
-            execPath: process.execPath,
-            platform: process.platform,
-            arch: process.arch,
-            print: ctx.print,
-          });
-        } catch (error) {
-          ctx.print(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-
-      ctx.print('Usage: /update [check|apply|rollback]');
-    },
-  });
+  registry.register(selfUpdateCommand);
 }
+
+const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
+  description:
+    'Check for a newer GoodVibes Agent release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
+  usage: '[check|apply|rollback]',
+  help: 'Usage: /update [check|apply|rollback]',
+  version: VERSION,
+  workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
+  workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
+  check: checkForUpdate,
+  apply: (options, _ctx) => applyUpdate({ ...options }),
+  rollback: (options, _ctx) => rollbackUpdate({ ...options }),
+});

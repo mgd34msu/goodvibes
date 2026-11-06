@@ -1,3 +1,10 @@
+import { reportUpdateRollback, createSelfUpdateCommand } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
+import {
+  checkReleaseUpdate,
+  prepareReleaseUpdate,
+  requireBinaryUpdateInstall,
+  type ReleaseUpdateCheck,
+} from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
 /**
  * `/update`, a real self-update path for binary installs. The
@@ -57,24 +64,11 @@ import {
   type UpdateFileIo,
   type UpdateTarget,
 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
-import {
-  CHECKSUM_MANIFEST_NAME,
-  parseChecksumFile,
-  resolveArtifactNames,
-  resolveSqliteVecAsset,
-} from '../../runtime/release-artifacts.ts';
-import {
-  compareVersions,
-  detectInstallKind,
-  fallbackUpdateCommand,
-  normalizeVersion,
-  resolveLatestReleaseTag,
-  type InstallKind,
-  type UpdateFetchLike,
-} from '../../runtime/update-check.ts';
+import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, resolveArtifactNames, resolveSqliteVecAsset } from '../../runtime/release-artifacts.ts';
+import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveConfiguredServiceName } from '../../runtime/legacy-daemon-migration.ts';
 import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 
@@ -181,15 +175,10 @@ export function detectDaemonServiceManaged(
   return { managed, unitName, restartCommand: `systemctl --user restart ${unitName}.service` };
 }
 
-export interface CheckForUpdateResult {
-  readonly latestTag: string;
-  readonly isCurrent: boolean;
-}
+export type CheckForUpdateResult = ReleaseUpdateCheck;
 
 export async function checkForUpdate(fetchImpl: UpdateFetchLike, currentVersion: string): Promise<CheckForUpdateResult> {
-  const latestTag = await resolveLatestReleaseTag(fetchImpl, REPO_RELEASES_LATEST_URL);
-  const isCurrent = compareVersions(currentVersion, latestTag) >= 0;
-  return { latestTag, isCurrent };
+  return checkReleaseUpdate(fetchImpl, currentVersion, REPO_RELEASES_LATEST_URL);
 }
 
 export interface ApplyUpdateOptions {
@@ -226,45 +215,31 @@ export interface ApplyUpdateOptions {
  * prints the exact command for that install method instead.
  */
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
-  options = { ...options, io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
-    configManager: { get: options.configManager.get.bind(options.configManager) } };
-  const installKind: InstallKind = detectInstallKind(options.execPath);
-  if (installKind !== 'binary') {
-    options.print(
-      [
-        `This install is not a self-updatable binary install (detected: ${installKind === 'bun-global-package' ? 'bun/npm package install' : 'running from source'}).`,
-        `Update with: ${fallbackUpdateCommand(installKind)}`,
-      ].join('\n'),
-    );
-    return;
-  }
-
-  // Every network call from here carries the caller's signal, so an abort
-  // cancels the request in flight rather than orphaning it.
-  const signal = options.signal;
-  const progress = options.progress;
+  options = {
+    ...options,
+    io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
+    configManager: { get: options.configManager.get.bind(options.configManager) },
+  };
+  const signal = options.signal,
+    progress = options.progress;
   const fetchImpl = abortableFetch(options.fetchImpl, signal);
-
-  throwIfAborted(signal);
-  const latestTag = await resolveLatestReleaseTag(fetchImpl, REPO_RELEASES_LATEST_URL, signal ? { signal } : {});
-  if (compareVersions(options.currentVersion, latestTag) >= 0) {
-    options.print(`Already current: running v${normalizeVersion(options.currentVersion)}, latest release is ${latestTag}.`);
-    return;
-  }
-
-  const artifacts = resolveArtifactNames(options.platform, options.arch);
-  if (!artifacts) {
-    options.print(`No prebuilt binaries are published for ${options.platform}-${options.arch}; cannot self-update. Update with: ${fallbackUpdateCommand('source')}`);
-    return;
-  }
-
-  // Named before the first download, so a caller that gives up on a slow apply
-  // can still report WHICH version the work was installing.
-  if (progress) progress.targetTag = latestTag;
-
-  options.print(`Update available: ${latestTag} (running v${normalizeVersion(options.currentVersion)}). Downloading and verifying...`);
-
-  const baseUrl = releaseDownloadBaseUrl(latestTag);
+  const prepared = await prepareReleaseUpdate(
+    { ...options, fetchImpl },
+    {
+      latestUrl: REPO_RELEASES_LATEST_URL,
+      downloadBase: releaseDownloadBaseUrl,
+      asset: resolveArtifactNames,
+      fallback: fallbackUpdateCommand,
+      unsupportedSuffix: ' Update with: ' + fallbackUpdateCommand('source'),
+      assertActive: () => throwIfAborted(signal),
+      target: (tag) => {
+        if (progress) progress.targetTag = tag;
+      },
+    },
+  );
+  if (!prepared) return;
+  const { latestTag, baseUrl } = prepared;
+  const artifacts = prepared.asset;
   const io = options.io ?? realUpdateFileIo;
   const appBinaryPath = options.execPath;
 
@@ -284,15 +259,11 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   const checksums = parseChecksumFile(checksumText);
   const addon = resolveSqliteVecAsset(options.platform, options.arch);
   const addonIncluded = addon !== null && checksums.get(addon.assetName) !== undefined;
-  const addonTargetPath = addon && addonIncluded
-    ? join(dirname(appBinaryPath), 'lib', addon.dirName, addon.fileName)
-    : null;
+  const addonTargetPath = addon && addonIncluded ? join(dirname(appBinaryPath), 'lib', addon.dirName, addon.fileName) : null;
 
   const targets: UpdateTarget[] = [
     { label: 'app binary', path: appBinaryPath, assetName: artifacts.app, executable: true },
-    ...(addon && addonTargetPath
-      ? [{ label: 'vector addon', path: addonTargetPath, assetName: addon.assetName, executable: false }]
-      : []),
+    ...(addon && addonTargetPath ? [{ label: 'vector addon', path: addonTargetPath, assetName: addon.assetName, executable: false }] : []),
   ];
 
   // The canonical helper stages all targets, checks cancellation immediately
@@ -308,7 +279,10 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
       platform: options.platform,
       ...(signal ? { signal } : {}),
     });
-    if (progress) { progress.begun = true; progress.committed = true; }
+    if (progress) {
+      progress.begun = true;
+      progress.committed = true;
+    }
   } catch (error) {
     if (progress && error instanceof UpdateTransactionError) {
       progress.begun = error.receipt.committed || error.receipt.recoveryRequired;
@@ -357,16 +331,7 @@ export interface RollbackUpdateOptions {
  * untouched; nothing is downloaded.
  */
 export function rollbackUpdate(options: RollbackUpdateOptions): void {
-  const installKind: InstallKind = detectInstallKind(options.execPath);
-  if (installKind !== 'binary') {
-    options.print(
-      [
-        `This install is not a self-updatable binary install (detected: ${installKind === 'bun-global-package' ? 'bun/npm package install' : 'running from source'}), so there is no kept previous binary to roll back to.`,
-        `Install a specific version with your package manager instead, e.g.: ${fallbackUpdateCommand(installKind)}`,
-      ].join('\n'),
-    );
-    return;
-  }
+  if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
 
   const io = options.io ?? realUpdateFileIo;
   const addon = resolveSqliteVecAsset(options.platform, options.arch);
@@ -379,26 +344,15 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   ];
 
   const result = rollbackKeptPrevious(targets, io);
-  if (result.restored.length === 0) {
-    options.print(
-      `No previous version is kept beside this install (nothing at ${options.execPath}${PREVIOUS_FILE_SUFFIX}). ` +
-      'The previous version is kept from the next update onward.',
-    );
-    return;
-  }
-
-  const serviceInfo = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
-  options.print(
-    [
-      'Rolled back to the previously installed version.',
-      ...result.restored.map((target) => `  ${target.label}: ${target.path} (the replaced version is kept at ${target.path}${PREVIOUS_FILE_SUFFIX})`),
-      '',
+  reportUpdateRollback(options, result.restored, [], () => {
+    const serviceInfo = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
+    return [
       'Restart goodvibes to run the restored version.',
       serviceInfo.managed
         ? `The daemon was not rolled back; it updates itself on its own release line (it runs under ${serviceInfo.unitName}.service).`
         : 'The daemon was not rolled back; it updates itself on its own release line.',
-    ].join('\n'),
-  );
+    ];
+  });
 }
 
 interface UpdateBundle {
@@ -423,63 +377,55 @@ function inspectUpdateBundle(bundle: UpdateBundle): string {
 }
 
 export function registerUpdateCommand(registry: CommandRegistry): void {
-  registry.register({
-    name: 'update',
-    aliases: ['upgrade'],
-    description: 'Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
-    usage: '[check|apply|rollback|review|bundle export <path>|bundle inspect <path>]',
-    async handler(args, ctx) {
-      if (IS_WORKSPACE_DISTRIBUTION) { ctx.print(WORKSPACE_UPDATE_GUIDANCE); return; }
-      const sub = args[0] ?? 'check';
+  registry.register(selfUpdateCommand);
+}
 
-      if (sub === 'check') {
-        try {
-          const result = await checkForUpdate(fetch, VERSION);
-          ctx.print(
-            result.isCurrent
-              ? `Already current: running v${normalizeVersion(VERSION)} (latest release is ${result.latestTag}).`
-              : `Update available: ${result.latestTag} (running v${normalizeVersion(VERSION)}). Run /update apply to install it.`,
-          );
-        } catch (error) {
-          ctx.print(`Could not check for updates: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
+const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
+  description:
+    'Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
+  usage: '[check|apply|rollback|review|bundle export <path>|bundle inspect <path>]',
+  help: 'Usage: /update [check|apply|rollback|review|bundle export <path>|bundle inspect <path>]',
+  version: VERSION,
+  workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
+  workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
+  check: checkForUpdate,
+  apply: (options, ctx) => applyUpdate({ ...options, configManager: ctx.platform.configManager }),
+  rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
+  extra: async (args, ctx) => {
+    const sub = args[0] ?? 'check';
+    if (sub === 'review') {
+      const installKind = detectInstallKind(process.execPath);
+      const subscriptions = requireSubscriptionManager(ctx);
+      const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
+      const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
+      const sandboxProfile = [
+        `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
+        `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
+        `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
+      ].join('/');
+      ctx.print(
+        [
+          'Update Review',
+          `  version: ${VERSION}`,
+          `  install kind: ${installKind}`,
+          `  built-in subscription providers: ${builtinProviders.length}${builtinProviders.length > 0 ? ` (${builtinProviders.join(', ')})` : ''}`,
+          `  active subscriptions: ${activeSubscriptions.length}${activeSubscriptions.length > 0 ? ` (${activeSubscriptions.join(', ')})` : ''}`,
+          `  sandbox profile: ${sandboxProfile}`,
+          '  use /update check to look for a newer release, /update apply to install it, /update rollback to return to the kept previous version',
+        ].join('\n'),
+      );
+      return true;
+    }
+    if (sub === 'bundle') {
+      const shellPaths = requireShellPaths(ctx);
+      const mode = args[1];
+      const pathArg = args[2];
+      if ((mode === 'export' || mode === 'inspect') && !pathArg) {
+        ctx.print(`Usage: /update bundle ${mode} <path>`);
+        return true;
       }
-
-      if (sub === 'apply') {
-        try {
-          await applyUpdate({
-            fetchImpl: fetch,
-            execPath: process.execPath,
-            platform: process.platform,
-            arch: process.arch,
-            currentVersion: VERSION,
-            print: ctx.print,
-            configManager: ctx.platform.configManager,
-          });
-        } catch (error) {
-          ctx.print(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'rollback') {
-        try {
-          rollbackUpdate({
-            execPath: process.execPath,
-            platform: process.platform,
-            arch: process.arch,
-            print: ctx.print,
-            configManager: ctx.platform.configManager,
-          });
-        } catch (error) {
-          ctx.print(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'review') {
-        const installKind = detectInstallKind(process.execPath);
+      const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+      if (mode === 'export') {
         const subscriptions = requireSubscriptionManager(ctx);
         const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
         const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
@@ -488,63 +434,29 @@ export function registerUpdateCommand(registry: CommandRegistry): void {
           `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
           `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
         ].join('/');
-        ctx.print(
-          [
-            'Update Review',
-            `  version: ${VERSION}`,
-            `  install kind: ${installKind}`,
-            `  built-in subscription providers: ${builtinProviders.length}${builtinProviders.length > 0 ? ` (${builtinProviders.join(', ')})` : ''}`,
-            `  active subscriptions: ${activeSubscriptions.length}${activeSubscriptions.length > 0 ? ` (${activeSubscriptions.join(', ')})` : ''}`,
-            `  sandbox profile: ${sandboxProfile}`,
-            '  use /update check to look for a newer release, /update apply to install it, /update rollback to return to the kept previous version',
-          ].join('\n'),
-        );
-        return;
+        const bundle: UpdateBundle = {
+          version: 1,
+          exportedAt: Date.now(),
+          appVersion: VERSION,
+          installKind: detectInstallKind(process.execPath),
+          subscriptionProviders: [...new Set([...builtinProviders, ...activeSubscriptions])],
+          sandboxProfile,
+          notes: [
+            'installKind reflects how THIS running process was launched, detected from process.execPath.',
+            'OAuth-backed provider subscriptions survive updates and continue to apply to supported provider surfaces.',
+          ],
+        };
+        mkdirSync(dirname(targetPath), { recursive: true });
+        writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+        ctx.print(`Update bundle exported to ${targetPath}`);
+        return true;
       }
-
-      if (sub === 'bundle') {
-        const shellPaths = requireShellPaths(ctx);
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /update bundle ${mode} <path>`);
-          return;
-        }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
-        if (mode === 'export') {
-          const subscriptions = requireSubscriptionManager(ctx);
-          const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
-          const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
-          const sandboxProfile = [
-            `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
-            `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
-            `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
-          ].join('/');
-          const bundle: UpdateBundle = {
-            version: 1,
-            exportedAt: Date.now(),
-            appVersion: VERSION,
-            installKind: detectInstallKind(process.execPath),
-            subscriptionProviders: [...new Set([...builtinProviders, ...activeSubscriptions])],
-            sandboxProfile,
-            notes: [
-              'installKind reflects how THIS running process was launched, detected from process.execPath.',
-              'OAuth-backed provider subscriptions survive updates and continue to apply to supported provider surfaces.',
-            ],
-          };
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-          ctx.print(`Update bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as UpdateBundle;
-          ctx.print(inspectUpdateBundle(bundle));
-          return;
-        }
+      if (mode === 'inspect') {
+        const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as UpdateBundle;
+        ctx.print(inspectUpdateBundle(bundle));
+        return true;
       }
-
-      ctx.print('Usage: /update [check|apply|rollback|review|bundle export <path>|bundle inspect <path>]');
-    },
-  });
-}
+    }
+    return false;
+  },
+});

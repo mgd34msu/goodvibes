@@ -791,7 +791,8 @@
       "path": "input/commands/update-runtime.ts",
       "baselineTuiLines": 550,
       "baselineSimilarity": 0.4388,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns update check/eligibility/target/progress announcement, workspace-distribution refusal, check/apply/rollback dispatch and rollback reporting; SDK owns verified file swap/compensation. Retained standalone adapters select actual release assets, TUI cohort/cancellation/service status versus Agent addon archives/browser-directory staging, and TUI review bundles. Private monorepo updates still stop at workspace guidance before network or file effects."
     },
     {
       "path": "input/concealed-input.ts",

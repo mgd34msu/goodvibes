@@ -1,3 +1,4 @@
+import {projectCommandProviderServices} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { EvalRegistry } from '@goodvibes-jev/engine/sdk/platform/observe';
 import { activeTokens } from '../renderer/theme.ts';
 import { getConfigSnapshot } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -345,14 +346,7 @@ export function createBootstrapCommandProviderSection(
     BootstrapCommandSectionOptions,
     'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'
   >,
-): BootstrapCommandProviderSection {
-  return {
-    providerRegistry: options.providerRegistry,
-    providerOptimizer: options.providerOptimizer,
-    favoritesStore: options.favoritesStore,
-    benchmarkStore: options.benchmarkStore,
-  };
-}
+): BootstrapCommandProviderSection {return projectCommandProviderServices(options);}
 
 export function createBootstrapCommandWorkspaceSection(
   options: Pick<

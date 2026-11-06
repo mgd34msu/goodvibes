@@ -1,71 +1,20 @@
-import { createTerminalUiServices } from '@goodvibes-jev/engine/terminal-shell/ui-services';
+import {
+  createTerminalUiServices,
+  type TerminalUiRuntimeSharedServices,
+  type TerminalUiRuntimeServices,
+} from '@goodvibes-jev/engine/terminal-shell/ui-services';
 import type { RuntimeServices } from './services.ts';
-import type { RemoteRunnerRegistry } from '@/runtime/index.ts';
-import type { RemoteSupervisor } from '@/runtime/index.ts';
-import { type UiRuntimeEvents } from '@/runtime/index.ts';
-import { createUiReadModels, type UiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
+import { createUiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import type { ApprovalBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { SessionUnionCache, type SessionReadFacade } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
-import type { ShellPathService } from '@/runtime/index.ts';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { SecretsManager } from '../config/secrets.ts';
 import type { RelayReadAccessors } from './relay-reachability-bridge.ts';
 
-export interface UiEnvironmentServices {
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-  readonly shellPaths: ShellPathService;
-}
-
-export interface UiShellServices {
-  readonly keybindingsManager: RuntimeServices['keybindingsManager'];
-  readonly processManager: RuntimeServices['processManager'];
-  readonly profileManager: RuntimeServices['profileManager'];
-  readonly bookmarkManager: RuntimeServices['bookmarkManager'];
-}
-
-export interface UiAgentServices {
-  readonly agentManager: RuntimeServices['agentManager'];
-  readonly agentMessageBus: RuntimeServices['agentMessageBus'];
-  readonly contractRunner: RuntimeServices['contractRunner'];
-}
-
-export interface UiProviderServices {
-  readonly providerRegistry: RuntimeServices['providerRegistry'];
-  readonly favoritesStore: RuntimeServices['favoritesStore'];
-  readonly benchmarkStore: RuntimeServices['benchmarkStore'];
-}
-
-export interface UiSessionServices {
-  readonly sessionManager: RuntimeServices['sessionManager'];
-  /**
-   * The modal-facing session READ source is the cross-surface union
-   * facade, not the raw local broker, in adopted-daemon ('external') mode the
-   * local broker misses sessions hosted for other surfaces. Sync signature
-   * preserved; the facade's cache makes that honest (see session-union-cache.ts).
-   */
-  readonly sessionBroker: SessionReadFacade;
-  readonly sessionOrchestration: RuntimeServices['sessionOrchestration'];
-  readonly sessionMemoryStore: RuntimeServices['sessionMemoryStore'];
-}
-
-export interface UiPlatformServices {
-  readonly configManager: RuntimeServices['configManager'];
-  readonly localUserAuthManager: RuntimeServices['localUserAuthManager'];
-  readonly mcpRegistry: RuntimeServices['mcpRegistry'];
-  readonly serviceRegistry: RuntimeServices['serviceRegistry'];
-  readonly surfaceRegistry: RuntimeServices['surfaceRegistry'];
-  readonly subscriptionManager: RuntimeServices['subscriptionManager'];
+type PlatformExtras = {
   readonly secretsManager: SecretsManager;
-  /** Per-device pairing tokens, backs the pairing modal QR and the settings device surface. */
   readonly pairingTokens: RuntimeServices['pairingTokens'];
-  readonly tokenAuditor: RuntimeServices['tokenAuditor'];
-  readonly replayEngine: RuntimeServices['replayEngine'];
-  readonly webhookNotifier: RuntimeServices['webhookNotifier'];
-  readonly focusTracker: RuntimeServices['focusTracker'];
-  readonly policyRuntimeState: RuntimeServices['policyRuntimeState'];
   readonly externalServices?: RelayReadAccessors & {
     inspect(): {
       readonly daemonRunning: boolean;
@@ -88,55 +37,22 @@ export interface UiPlatformServices {
       readonly httpListenerStatus?: HostServiceStatus;
     }>;
   };
-}
-
-export interface UiPlanningServices {
-  readonly planManager: RuntimeServices['planManager'];
-  readonly adaptivePlanner: RuntimeServices['adaptivePlanner'];
-  readonly projectPlanningService: RuntimeServices['projectPlanningService'];
-  readonly projectPlanningProjectId: RuntimeServices['projectPlanningProjectId'];
-  readonly workPlanStore: RuntimeServices['workPlanStore'];
-}
-
-export interface UiCoordinationServices {
-  readonly approvalBroker: ApprovalBroker;
-}
-
-export interface UiRuntimeSharedServices {
-  readonly environment: UiEnvironmentServices;
-  readonly shell: UiShellServices;
-  readonly agents: UiAgentServices;
-  readonly providers: UiProviderServices;
-  readonly sessions: UiSessionServices;
-  readonly platform: UiPlatformServices;
-  readonly planning: UiPlanningServices;
-  readonly coordination: UiCoordinationServices;
-  readonly runtime: {
-    readonly distributedRuntime: RuntimeServices['distributedRuntime'];
-    readonly remoteRunnerRegistry: RuntimeServices['remoteRunnerRegistry'] & RemoteRunnerRegistry;
-    readonly remoteSupervisor: RuntimeServices['remoteSupervisor'] & RemoteSupervisor;
-    /** the shared live process registry backing the Agents modal. */
-    readonly processRegistry: RuntimeServices['processRegistry'];
-    /** The Agents modal's read model: local rows union the adopted daemon's. */
-    readonly fleetReadModel: RuntimeServices['fleetReadModel'];
-    /** The shared runtime event bus, the Agents modal subscribes to its 'communication' domain for the honest steer-consumed signal. */
-    readonly runtimeBus: RuntimeServices['runtimeBus'];
-  };
-}
-
-export interface UiRuntimeServices {
-  readonly environment: UiEnvironmentServices;
-  readonly shell: UiShellServices;
-  readonly agents: UiAgentServices;
-  readonly providers: UiProviderServices;
-  readonly sessions: UiSessionServices;
-  readonly platform: UiPlatformServices;
-  readonly planning: UiPlanningServices;
-  readonly coordination: UiCoordinationServices;
-  readonly runtime: UiRuntimeSharedServices['runtime'];
-  readonly events: UiRuntimeEvents;
-  readonly readModels: UiReadModels;
-}
+};
+type RuntimeExtras = {
+  readonly processRegistry: RuntimeServices['processRegistry'];
+  readonly fleetReadModel: RuntimeServices['fleetReadModel'];
+  readonly runtimeBus: RuntimeServices['runtimeBus'];
+};
+export type UiRuntimeSharedServices = TerminalUiRuntimeSharedServices<RuntimeServices, SessionReadFacade, PlatformExtras, RuntimeExtras>;
+export type UiRuntimeServices = TerminalUiRuntimeServices<RuntimeServices, SessionReadFacade, PlatformExtras, RuntimeExtras>;
+export type UiEnvironmentServices = UiRuntimeSharedServices['environment'];
+export type UiShellServices = UiRuntimeSharedServices['shell'];
+export type UiAgentServices = UiRuntimeSharedServices['agents'];
+export type UiProviderServices = UiRuntimeSharedServices['providers'];
+export type UiSessionServices = UiRuntimeSharedServices['sessions'];
+export type UiPlatformServices = UiRuntimeSharedServices['platform'];
+export type UiPlanningServices = UiRuntimeSharedServices['planning'];
+export type UiCoordinationServices = UiRuntimeSharedServices['coordination'];
 
 export interface UiRuntimeServicesOptions extends UiReadModelOptions {
   readonly forensicsRegistry?: ForensicsRegistry;
@@ -149,14 +65,15 @@ export interface UiRuntimeServicesOptions extends UiReadModelOptions {
   readonly sessionUnionCache?: SessionUnionCache;
 }
 
-export function createUiRuntimeServices(
-  runtimeServices: RuntimeServices,
-  options: UiRuntimeServicesOptions = {},
-): UiRuntimeServices {
+export function createUiRuntimeServices(runtimeServices: RuntimeServices, options: UiRuntimeServicesOptions = {}): UiRuntimeServices {
   return createTerminalUiServices(runtimeServices, {
     sessionBroker: options.sessionUnionCache ?? new SessionUnionCache({ local: runtimeServices.sessionBroker }),
     platform: { pairingTokens: runtimeServices.pairingTokens },
-    runtime: { processRegistry: runtimeServices.processRegistry, fleetReadModel: runtimeServices.fleetReadModel, runtimeBus: runtimeServices.runtimeBus },
+    runtime: {
+      processRegistry: runtimeServices.processRegistry,
+      fleetReadModel: runtimeServices.fleetReadModel,
+      runtimeBus: runtimeServices.runtimeBus,
+    },
     readModels: createUiReadModels(runtimeServices, options),
   });
 }

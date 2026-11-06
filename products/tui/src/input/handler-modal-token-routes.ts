@@ -1,4 +1,4 @@
-import { withModalState as withState } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
+import { createModalTokenPipeline } from '@goodvibes-jev/engine/terminal-shell/modal-token-pipeline';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { ConversationManager } from '../core/conversation';
@@ -82,10 +82,7 @@ export type ModalTokenRouteState = {
   scroll: (delta: number) => void;
   getScrollTop: () => number;
   /** Callback to open the model picker with a specific target (helper or tool). Optional, only wired when available. */
-  openModelPickerWithTarget?: (
-    target: import('./model-picker.ts').ModelPickerTarget,
-    source?: 'settings' | 'onboarding',
-  ) => boolean;
+  openModelPickerWithTarget?: (target: import('./model-picker.ts').ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   openProviderModelPickerWithTarget?: (
     target: import('./model-picker.ts').ModelPickerTarget,
     source?: 'settings' | 'onboarding',
@@ -98,188 +95,64 @@ export type ModalTokenRouteState = {
   onStepChange?: () => void;
 };
 
-export function handleModalTokenRoutes(state: ModalTokenRouteState, token: InputToken): {
-  handled: boolean;
-  selectionCallback: ((result: SelectionResult | null) => void) | null;
-  helpOverlayActive: boolean;
-  helpScrollOffset: number;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
-  prompt: string;
-  cursorPos: number;
-  nextImageId: number;
-} {
-  if (handleSearchModeToken({
-    searchManager: state.searchManager,
-    requestRender: state.requestRender,
-    scroll: state.scroll,
-    getScrollTop: state.getScrollTop,
-    getViewportHeight: state.getViewportHeight,
-    conversationManager: state.conversationManager,
-  }, token, state.history, state.searchShortcutMatch)) {
-    return withState(state, true);
-  }
-
-  const selectionState = {
-    selectionModal: state.selectionModal,
-    selectionCallback: state.selectionCallback,
-    getSelectionCallback: state.getSelectionCallback,
-    setSelectionCallback: state.setSelectionCallback,
-    modalStack: state.modalStack,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  };
-  if (handleSelectionModalToken(selectionState, token)) {
-    return withState(state, true, { selectionCallback: selectionState.selectionCallback });
-  }
-
-  if (handleBookmarkModalToken({
-    bookmarkModal: state.bookmarkModal,
-    commandContext: state.commandContext,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  if (handleSettingsModalToken({
-    settingsModal: state.settingsModal,
-    commandContext: state.commandContext,
-    openModelPickerWithTarget: state.openModelPickerWithTarget,
-    openProviderModelPickerWithTarget: state.openProviderModelPickerWithTarget,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  if (handleMcpWorkspaceToken(
-    state.mcpWorkspace,
-    token,
-    state.handleEscape,
-    state.requestRender,
-  )) {
-    return withState(state, true);
-  }
-
-  if (handleSessionPickerToken({
-    sessionPickerModal: state.sessionPickerModal,
-    commandContext: state.commandContext,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  if (handleProfilePickerToken({
-    profilePickerModal: state.profilePickerModal,
-    commandContext: state.commandContext,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  if (handleConfigModalToken({
-    configModal: state.configModal,
-    commandContext: state.commandContext,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  const overlayState = {
-    helpOverlayActive: state.helpOverlayActive,
-    helpScrollOffset: state.helpScrollOffset,
-    shortcutsOverlayActive: state.shortcutsOverlayActive,
-    shortcutsScrollOffset: state.shortcutsScrollOffset,
-    overlayFilters: state.overlayFilters,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  };
-  if (handleOverlayToken(overlayState, token)) {
-    return withState(state, true, overlayState);
-  }
-
-  const historyState = {
-    historySearch: state.historySearch,
-    prompt: state.prompt,
-    cursorPos: state.cursorPos,
-    requestRender: state.requestRender,
-  };
-  if (handleHistorySearchToken(historyState, token)) {
-    return withState(state, true, historyState);
-  }
-
-  if (handleModelPickerToken({
-    modelPicker: state.modelPicker,
-    modalStack: state.modalStack,
-    commandContext: state.commandContext,
-    getViewportHeight: state.getViewportHeight,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-    onModelPickerCommit: state.onModelPickerCommit,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  if (handleOnboardingWizardToken({
-    onboardingWizard: state.onboardingWizard,
-    getViewportHeight: state.getViewportHeight,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-    openModelPickerWithTarget: state.openModelPickerWithTarget,
-    onAction: state.onOnboardingAction,
-    onStepChange: state.onStepChange,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  // retirement: the live-tail, agent-detail, and process-modal token
-  // routes were removed with those modals (F2 now opens Fleet, which subsumes
-  // the live process tree; the three modals were structurally unreachable after
-  // the F2 repoint and were deleted).
-
-  if (handleEscapeOnlyModalToken({
-    active: state.contextInspectorModal.active,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-    scroll: (delta) => state.contextInspectorModal.scrollBy(delta),
-  }, token)) {
-    return withState(state, true);
-  }
-
-  const filePickerState = {
-    filePicker: state.filePicker,
-    prompt: state.prompt,
-    cursorPos: state.cursorPos,
-    imageRegistry: state.imageRegistry,
-    nextImageId: state.nextImageId,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-    saveUndoState: state.saveUndoState,
-    ensureInputCursorVisible: state.ensureInputCursorVisible,
-    formatFileSize: state.formatFileSize,
-    mediaTypeFromExt: state.mediaTypeFromExt,
-    imageExtensions: state.imageExtensions,
-  };
-  if (handleFilePickerToken(filePickerState, token)) {
-    return withState(state, true, {
-      prompt: filePickerState.prompt,
-      cursorPos: filePickerState.cursorPos,
-      nextImageId: filePickerState.nextImageId,
-    });
-  }
-
-  if (handleBlockActionsToken({
-    blockActionsMenu: state.blockActionsMenu,
-    executeBlockAction: state.executeBlockAction,
-    requestRender: state.requestRender,
-    handleEscape: state.handleEscape,
-  }, token)) {
-    return withState(state, true);
-  }
-
-  return withState(state, false);
-}
+export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteState>(
+  {
+    handleSearchModeToken,
+    handleSelectionModalToken,
+    handleBookmarkModalToken,
+    handleSettingsModalToken,
+    handleMcpWorkspaceToken,
+    handleSessionPickerToken,
+    handleProfilePickerToken,
+    handleOverlayToken,
+    handleHistorySearchToken,
+    handleModelPickerToken,
+    handleEscapeOnlyModalToken,
+    handleFilePickerToken,
+    handleBlockActionsToken,
+  },
+  {
+    order: [
+      'handleSearchModeToken',
+      'handleSelectionModalToken',
+      'handleBookmarkModalToken',
+      'handleSettingsModalToken',
+      'handleMcpWorkspaceToken',
+      'handleSessionPickerToken',
+      'handleProfilePickerToken',
+      'config',
+      'handleOverlayToken',
+      'handleHistorySearchToken',
+      'handleModelPickerToken',
+      'onboarding',
+      'handleEscapeOnlyModalToken',
+      'handleFilePickerToken',
+      'handleBlockActionsToken',
+    ],
+    additional: {
+      config: (state, token) =>
+        handleConfigModalToken(
+          {
+            configModal: state.configModal,
+            commandContext: state.commandContext,
+            requestRender: state.requestRender,
+            handleEscape: state.handleEscape,
+          },
+          token,
+        ),
+      onboarding: (state, token) =>
+        handleOnboardingWizardToken(
+          {
+            onboardingWizard: state.onboardingWizard,
+            getViewportHeight: state.getViewportHeight,
+            requestRender: state.requestRender,
+            handleEscape: state.handleEscape,
+            openModelPickerWithTarget: state.openModelPickerWithTarget,
+            onAction: state.onOnboardingAction,
+            onStepChange: state.onStepChange,
+          },
+          token,
+        ),
+    },
+  },
+);

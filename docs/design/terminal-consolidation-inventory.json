@@ -507,7 +507,7 @@
       "path": "input/commands/mcp-runtime.ts",
       "baselineTuiLines": 432,
       "baselineSimilarity": 0.6922,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/memory.ts",
@@ -657,7 +657,7 @@
       "path": "input/commands/subscription-runtime.ts",
       "baselineTuiLines": 434,
       "baselineSimilarity": 0.5799,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "extractAuthorizationCode"
       ]
@@ -784,7 +784,7 @@
       "path": "input/handler-modal-token-routes.ts",
       "baselineTuiLines": 311,
       "baselineSimilarity": 0.8379,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "withModalState"
       ]
@@ -793,7 +793,7 @@
       "path": "input/handler-picker-routes.ts",
       "baselineTuiLines": 410,
       "baselineSimilarity": 0.7596,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "handleFilePickerToken",
         "handleBlockActionsToken",
@@ -1490,13 +1490,17 @@
       "path": "runtime/bootstrap-command-context.ts",
       "baselineTuiLines": 333,
       "baselineSimilarity": 0.832,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "platformModule": "terminal-shell/bootstrap-command-context"
     },
     {
       "path": "runtime/bootstrap-command-parts.ts",
       "baselineTuiLines": 443,
       "baselineSimilarity": 0.7517,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "createBootstrapCommandProviderSection"
+      ]
     },
     {
       "path": "runtime/bootstrap-core.ts",
@@ -1838,10 +1842,11 @@
       "path": "runtime/ui-services.ts",
       "baselineTuiLines": 219,
       "baselineSimilarity": 0.878,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "createTerminalUiServices"
-      ]
+      ],
+      "platformModule": "terminal-shell/ui-services"
     },
     {
       "path": "runtime/update-check.ts",

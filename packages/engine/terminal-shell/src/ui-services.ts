@@ -58,3 +58,21 @@ export function createTerminalUiServices<T extends UiSource, SessionBroker, Plat
     readModels: options.readModels,
   };
 }
+
+export type TerminalUiRuntimeSharedServices<T extends UiSource, SessionBroker, Platform extends object, Runtime extends object> = Omit<
+  TerminalUiServiceGroups<T>,
+  'sessions' | 'platform' | 'runtime'
+> & {
+  readonly sessions: TerminalUiServiceGroups<T>['sessions'] & { readonly sessionBroker: SessionBroker };
+  readonly platform: TerminalUiServiceGroups<T>['platform'] & Platform;
+  readonly runtime: TerminalUiServiceGroups<T>['runtime'] & Runtime;
+};
+export type TerminalUiRuntimeServices<
+  T extends UiSource,
+  SessionBroker,
+  Platform extends object,
+  Runtime extends object,
+> = TerminalUiRuntimeSharedServices<T, SessionBroker, Platform, Runtime> & {
+  readonly events: ReturnType<typeof createUiRuntimeEvents>;
+  readonly readModels: UiReadModels;
+};

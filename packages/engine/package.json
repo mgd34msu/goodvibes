@@ -2493,6 +2493,41 @@
       "bun": "./terminal-shell/src/recall-review.ts",
       "types": "./terminal-shell/dist/recall-review.d.ts",
       "import": "./terminal-shell/dist/recall-review.js"
+    },
+    "./terminal-shell/modal-token-pipeline": {
+      "bun": "./terminal-shell/src/modal-token-pipeline.ts",
+      "types": "./terminal-shell/dist/modal-token-pipeline.d.ts",
+      "import": "./terminal-shell/dist/modal-token-pipeline.js"
+    },
+    "./terminal-shell/bootstrap-command-context": {
+      "bun": "./terminal-shell/src/bootstrap-command-context.ts",
+      "types": "./terminal-shell/dist/bootstrap-command-context.d.ts",
+      "import": "./terminal-shell/dist/bootstrap-command-context.js"
+    },
+    "./terminal-shell/model-picker-token-route": {
+      "bun": "./terminal-shell/src/model-picker-token-route.ts",
+      "types": "./terminal-shell/dist/model-picker-token-route.d.ts",
+      "import": "./terminal-shell/dist/model-picker-token-route.js"
+    },
+    "./terminal-shell/command-confirmation": {
+      "bun": "./terminal-shell/src/command-confirmation.ts",
+      "types": "./terminal-shell/dist/command-confirmation.d.ts",
+      "import": "./terminal-shell/dist/command-confirmation.js"
+    },
+    "./terminal-shell/slash-command-parser": {
+      "bun": "./terminal-shell/src/slash-command-parser.ts",
+      "types": "./terminal-shell/dist/slash-command-parser.d.ts",
+      "import": "./terminal-shell/dist/slash-command-parser.js"
+    },
+    "./terminal-shell/mcp-runtime-commands": {
+      "bun": "./terminal-shell/src/mcp-runtime-commands.ts",
+      "types": "./terminal-shell/dist/mcp-runtime-commands.d.ts",
+      "import": "./terminal-shell/dist/mcp-runtime-commands.js"
+    },
+    "./terminal-shell/subscription-runtime-commands": {
+      "bun": "./terminal-shell/src/subscription-runtime-commands.ts",
+      "types": "./terminal-shell/dist/subscription-runtime-commands.d.ts",
+      "import": "./terminal-shell/dist/subscription-runtime-commands.js"
     }
   },
   "publishConfig": {

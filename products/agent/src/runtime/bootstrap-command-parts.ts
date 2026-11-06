@@ -1,3 +1,4 @@
+import {projectCommandProviderServices} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { getConfigSnapshot } from '../config/index.ts';
 import { describeServingEffort, publishActiveEffortOptions, resolveRequestedEffortForServingModel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -325,14 +326,7 @@ export function createBootstrapCommandProviderSection(
     BootstrapCommandSectionOptions,
     'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'
   >,
-): BootstrapCommandProviderSection {
-  return {
-    providerRegistry: options.providerRegistry,
-    providerOptimizer: options.providerOptimizer,
-    favoritesStore: options.favoritesStore,
-    benchmarkStore: options.benchmarkStore,
-  };
-}
+): BootstrapCommandProviderSection {return projectCommandProviderServices(options);}
 
 export function createBootstrapCommandWorkspaceSection(
   options: Pick<

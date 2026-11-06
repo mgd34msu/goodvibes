@@ -1,4 +1,6 @@
 import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/brief-fidelity.js';
+import { classicAgentInput } from './classic-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
 import { readAgentSessionHistory } from '../../agents/session-history.js';
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
@@ -45,6 +47,7 @@ function agentTopology(record: AgentRecord) {
 
 function agentExecutionContract(record: AgentRecord) {
   return {
+    ...(record.decisionPolicy ? { decisionPolicy: record.decisionPolicy } : {}),
     executionIntent: record.executionIntent ?? null,
     tools: record.tools,
     capabilityCeilingTools: record.capabilityCeilingTools ?? record.tools,
@@ -75,6 +78,7 @@ async function childFailureFor(manager: AgentManager, record: AgentRecord,
 
 function agentSummary(record: AgentRecord) {
   return {
+    ...(record.decisionPolicy ? { decisionPolicy: record.decisionPolicy } : {}),
     id: record.id,
     task: record.task,
     template: record.template,
@@ -344,9 +348,9 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     if (!('mode' in args) || typeof (args as Record<string, unknown>).mode !== 'string') {
       return { success: false, error: 'Missing required parameter: mode' };
     }
-    const input = args as unknown as AgentInput;
+    const input = classicAgentInput(args as unknown as AgentInput);
     const completionRepair = readCompletionRepairContext();
-    if (isNativeConversationTurn() && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
+    if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'classic' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
     }
 
@@ -363,6 +367,8 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const delegationSession = config.resolveSessionId();
     const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');
     const heldPlan = heldPlans.get(delegationKey);
+    if (heldPlan && decisionModelPolicyState().policy === 'Preferred' && decisionModelPolicyState().operation === 'classic')
+      return publish({ success: false, error: 'The previous delegation plan remains held. Availability fallback cannot override its semantic refusal.' });
     const holdPlan = (assignments: readonly { readonly task: string }[], error: unknown, mode: 'spawn' | 'batch-spawn' = 'batch-spawn') => {
       const reason = summarizeError(error);
       const proposal = { sessionId: delegationSession, request: input.authoritativeTask!, assignments, reason, mode,
@@ -793,7 +799,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           const templateError = validateTemplate(taskDef.template, archetypeLoader);
           if (templateError) return { success: false, error: templateError };
         }
-        const spawnInputs = input.tasks.map((taskDef) => batchTaskToSpawnInput(input, taskDef));
+        const spawnInputs = input.tasks.map((taskDef) => classicAgentInput(batchTaskToSpawnInput(input, taskDef)));
         // Every requester is checked before anything starts, so a refused task never leaves half a batch running.
         try {
           for (const requester of new Set([input.parentAgentId, ...spawnInputs.map((spawnInput) => spawnInput.parentAgentId)])) {

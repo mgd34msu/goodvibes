@@ -1,4 +1,5 @@
 import { captureAutonomousSource } from '../permissions/autonomous.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
 import { pinContractInputAdmission } from './input-authority.js';
@@ -610,6 +611,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         if (existing.payloadRevision !== durablePayloadRevision(frozen)) throw new DurableContractAdmissionError('conflict');
         return durableResult(existing);
       }
+      requireDecisionFeature('autonomous contract planning and acceptance');
       // Never mint another binding if a compatibility checkpoint proves the receipt went missing.
       for (const storedId of deps.store.listStoredIds()) {
         const stored = deps.store.load(storedId);
@@ -621,6 +623,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const id = newContractId();
       durableLeases.set(id, lease);
       try {
+        requireDecisionFeature('autonomous contract planning and acceptance');
         const execution = resolveExecution(frozen.input, id);
         const owner = spawnOwner(frozen.input, id);
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
@@ -661,6 +664,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       captureStartInput(admission.input);
       const result = durableResult(admission);
       if (runs.has(admission.contractId) || result.state === 'terminal') return result;
+      requireDecisionFeature('autonomous contract planning and acceptance');
       // Old receipts remain inspectable/replayable, but their mutable checkpoint is
       // not evidence of the isolation/configuration originally selected at admission.
       if (admission.execution === undefined) throw new DurableContractAdmissionError('checkpoint');
@@ -671,6 +675,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       try {
         assertDurableCheckpoint(contract, admission);
         if (contract.inputSnapshot !== undefined) contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
+        requireDecisionFeature('autonomous contract planning and acceptance');
       }
       catch (error) { durableLeases.delete(admission.contractId); lease(); throw error; }
       deps.store.hold(contract);
@@ -695,6 +700,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function start(input: StartContractInput): StartedContract {
+    requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
     const id = newContractId();
@@ -702,6 +708,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function startFromPlan(input: StartFromPlanInput): StartedContract {
+    requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const { draft, ...rest } = { ...input, ...captureStartInput(input) };
     const draftPlan = numberDraft(draft);
@@ -710,6 +717,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function startForOwner(record: AgentRecord, requireSettlement = false): StartedContract {
+    requireDecisionFeature('autonomous contract planning and acceptance');
     if (deps.nativeDecisions !== undefined) throw new Error('Native agent starts require source-bearing host admission');
     if (disposed) throw new Error('Contract runner is disposed');
     if (record.contractId !== undefined) throw new Error(`agent ${record.id} already belongs to contract ${record.contractId}`);

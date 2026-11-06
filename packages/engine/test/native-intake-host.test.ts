@@ -6,7 +6,9 @@ import type { NativeConversationContinuationOwner } from '../sdk/src/platform/wo
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { nativeConversationIntakeCaptureRequestSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
@@ -74,6 +76,54 @@ test('standalone admission preserves its recorded original-source judgment envel
       expect(disposition.instructions).toContain('Act only on the offered operation.');
     }
   }
+});
+
+test('Classic authenticated intake survives duplicate admission and restart without a model or fabricated act', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = await fixture();
+    const captured = await f.capture();
+    const [first, duplicate] = await Promise.all([f.host.admit(f.target(captured), f.authority), f.host.admit(f.target(captured), f.authority)]);
+    expect(first).toEqual(duplicate);
+    expect(first).toMatchObject({ kind: 'turn', route: 'converse', text: f.original.text,
+      sourceRef: { classic: { provenance: 'owner', policy: 'Classic - Off', reason: 'selected' } } });
+    const retained = f.storage.current({ principalId: f.principalId, inputId: f.original.inputId });
+    expect(retained?.decisions).toEqual([]);
+    expect(retained?.association).toBeNull();
+    expect(f.log.query()).toEqual([]);
+    expect(f.fake.requests).toEqual([]);
+    expect(f.proposals()).toBe(0);
+    expect((await (await f.store.openWorkLedgerStorage('project')).read()).works).toEqual([]);
+    await f.host.close();
+    const restarted = createNativeConversationIntakeHost(f.deps);
+    cleanups.push(() => restarted.close());
+    expect(await restarted.resume(f.target(first), f.authority)).toEqual(first);
+    expect(f.fake.requests).toEqual([]);
+  });
+});
+
+test('Preferred intake exhaustion records actual owner fallback rather than inventing a decision receipt', async () => {
+  let calls = 0;
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = await fixture({ decorate: port => ({ ...port, async ask() { calls++; throw new JudgmentError('unavailable', 'synthetic endpoint outage'); } }) });
+    const captured = await f.capture();
+    const admitted = await f.host.admit(f.target(captured), f.authority);
+    expect(admitted).toMatchObject({ kind: 'turn', sourceRef: { classic: { policy: 'Preferred', reason: 'unavailable', provenance: 'owner' } } });
+    expect(calls).toBe(1);
+    expect(f.proposals()).toBe(0);
+    expect(f.storage.current({ principalId: f.principalId, inputId: f.original.inputId })?.decisions).toEqual([]);
+    expect(f.fake.requests).toEqual([]);
+  });
+});
+
+test('Classic source provenance cannot be supplied through the capture request', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = await fixture();
+    expect(nativeConversationIntakeCaptureRequestSchema.safeParse({ ...f.original,
+      classic: { provenance: 'owner', policy: 'Classic - Off', reason: 'selected' } }).success).toBe(false);
+    const captured = await f.capture();
+    await expect(f.host.admit({ ...f.target(captured), sourceRevision: 'stale-source' }, f.authority)).rejects.toMatchObject({ code: 'stale' });
+    expect(f.fake.requests).toEqual([]);
+  });
 });
 
 test('capture is byte-preserving, model-free and atomic admission creates exactly one work and claim', async () => {

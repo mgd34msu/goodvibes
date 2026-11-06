@@ -457,6 +457,7 @@ export async function runAgentTask(
   record: AgentRecord,
 ): Promise<void> {
   return withDecisionModelPolicy(() => context.configManager?.get('judgment.policy'), () => runAgentTaskWithPolicy(context, record), state => {
+    record.decisionPolicy = state;
     context.emitAgentProgress(record.id, `[Decision policy] ${state.reason === 'unavailable'
       ? 'Decision models unavailable; continuing with Classic operation.' : 'Classic - Off; no independent semantic verification.'}`, 'operator');
   });

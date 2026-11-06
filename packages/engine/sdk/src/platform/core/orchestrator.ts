@@ -10,7 +10,7 @@ import { TurnCancellationFence, type TurnCancellationResult } from './turn-cance
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { inheritClassicDecisionFallback, withDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
 import { ResponseCompletionError } from './response-completion.js';
@@ -415,7 +415,7 @@ export class Orchestrator {
         },
       },
       execute: async (args, options): Promise<{ success: boolean; output: string }> => {
-        if (isNativeConversationTurn()) return { success: false, output: NATIVE_TURN_EXECUTION_REFUSAL };
+        if (isNativeConversationTurn() && !isClassicOperation()) return { success: false, output: NATIVE_TURN_EXECUTION_REFUSAL };
         if (this.toolRegistry.has('agent')) return { success: false, output: 'Use the agent tool and revalidate any held delegation plan. Legacy ACP delegation cannot replace that plan.' };
         if (!this.acpManager) {
           return { success: false, output: 'ACP manager not initialized' };

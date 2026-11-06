@@ -5,8 +5,10 @@ import type { TurnInjectionRecord } from '../../agents/turn-knowledge-injection.
 import type { ProgressBearingRecord } from '../../agents/progress-audience.js';
 import type { ContractAgentRole } from '../../../events/contract.js';
 import type { AgentInput } from './schema.js';
+import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 export interface AgentRecord extends ProgressBearingRecord {
+  decisionPolicy?: DecisionModelPolicyState;
   id: string;
   task: string;
   template: string;

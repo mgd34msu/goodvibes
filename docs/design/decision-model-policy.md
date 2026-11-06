@@ -71,6 +71,16 @@ Only declared public HTTP headers bypass credential handling; unknown custom
 headers remain protected. Explicit memory/code searches retain literal or vector
 retrieval, with score sources named; optional semantic prompt enrichment is omitted.
 
+Ordinary Classic agent spawns use the platform's existing standalone worker
+execution and owned cancellation/settlement machinery. Their tools, capability
+ceilings, workspace and execution intent remain bound; records identify Classic
+and do not claim contract acceptance. A native Classic conversation can delegate
+through this path. Autonomous contract starts and fresh resumes explicitly require
+decision models before creating new work; existing durable receipts remain readable.
+Automated checkout also reports that requirement before driver acquisition,
+reservations, approval windows, card filling or payment submission. Budget and
+payment-ledger inspection remain independent of that unavailable automation.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

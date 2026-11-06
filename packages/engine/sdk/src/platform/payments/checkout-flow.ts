@@ -66,6 +66,7 @@
  */
 import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } from './cart.js';
 import { checkPaymentGates, type GateInput } from './gates.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { decidePurchase, type BudgetDraw } from './decide.js';
 import { readShippingTiers } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
@@ -268,6 +269,7 @@ export async function runCheckout(
   controls: CheckoutControls,
   deps: CheckoutFlowDeps,
 ): Promise<CheckoutOutcome> {
+  requireDecisionFeature('automated checkout cart and merchant interpretation');
   const { registry, driver, ledger, notifier, now } = deps;
 
   // ── 0. Terminal gates ───────────────────────────────────────────────────

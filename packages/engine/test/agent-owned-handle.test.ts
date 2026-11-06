@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { AgentManager, OwnedAgentExecutionUnavailableError, type AgentRecord } from '../sdk/src/platform/tools/agent/manager.js';
 import { run } from '../sdk/src/platform/hooks/runners/agent.js';
 import { HookActivityTracker } from '../sdk/src/platform/hooks/activity.js';
@@ -28,6 +29,32 @@ function manager(runAgent: (record: AgentRecord) => Promise<void> = async () => 
     executor: { runAgent },
   });
 }
+
+test('Classic ordinary owned spawn runs and settles a standalone worker without a contract runner', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const pending = deferred();
+    let executions = 0;
+    const m = manager(async record => {
+      executions++;
+      record.status = 'running';
+      await pending.promise;
+      record.fullOutput = 'Completed the assigned inspection.';
+      record.status = 'completed';
+    });
+    const execution = m.spawnOwned({ mode: 'spawn', task: 'Inspect the selected file.', tools: ['read'], restrictTools: true });
+    await tick();
+    expect(executions).toBe(1);
+    expect(execution.record).toMatchObject({ outsideContract: true, reviewMode: 'none', tools: ['read'],
+      decisionPolicy: { policy: 'Classic - Off', operation: 'classic' } });
+    expect(execution.record.contractId).toBeUndefined();
+    let settled = false;
+    void execution.settled.then(() => { settled = true; });
+    await tick(); expect(settled).toBe(false);
+    pending.resolve();
+    expect(await execution.settled).toMatchObject({ status: 'completed', fullOutput: 'Completed the assigned inspection.' });
+    expect(executions).toBe(1);
+  });
+});
 
 for (const status of ['completed', 'running'] as const) {
   test(`owned hook refuses legacy ${status} driver without admitting work, including empty options`, async () => {

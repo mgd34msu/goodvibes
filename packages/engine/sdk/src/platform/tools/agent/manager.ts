@@ -1,4 +1,6 @@
 import { bindContractInputAuthority } from '../../contract/input-authority.js';
+import { classicAgentInput } from './classic-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
@@ -327,6 +329,7 @@ export class AgentManager {
    * it. A legacy contract driver is refused before any record/event/work exists.
    */
   spawnOwned(input: AgentInput, options: { readonly signal?: AbortSignal | undefined } = {}): OwnedAgentExecution {
+    input = classicAgentInput(input);
     options.signal?.throwIfAborted();
     const startOwned = this.contractRunner?.startOwnedForOwner;
     if (!input.outsideContract) {
@@ -392,6 +395,7 @@ export class AgentManager {
   }
 
   private spawnInternal(input: AgentInput, spawnBinding?: AgentConstructionBinding, owned?: OwnedSpawnContext): AgentRecord {
+    if (spawnBinding === undefined) input = classicAgentInput(input);
     const executionModeOwner = currentExecutionModeOwner();
     const { unit: binding, owner: ownerBinding } = splitContractBinding(spawnBinding);
     const task = input.task;
@@ -499,6 +503,7 @@ export class AgentManager {
     const orchestrationNodeId = orchestrationGraphId ? (input.orchestrationNodeId ?? id) : undefined;
     const parentNodeId = input.parentNodeId ?? parentRecord?.orchestrationNodeId;
     const record: AgentRecord = {
+      ...(decisionModelPolicyState().operation === 'classic' ? { decisionPolicy: decisionModelPolicyState() } : {}),
       id,
       task,
       template,

@@ -30,6 +30,7 @@
  * decision in flight" enforceable across two independent invocations.
  */
 import { BudgetLedger, type BudgetLimits } from './budget.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { CheckoutRegistry, describeInterruption, type CheckoutJournal, type InFlightCheckout, type InterruptedVerdict } from './checkout-registry.js';
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
 import { CardMaterialRedactor } from './card-redaction.js';
@@ -261,6 +262,7 @@ export class PaymentsGatewayServiceImpl {
    * should apply to this purchase.
    */
   async beginCheckout(input: BeginCheckoutInput, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<PaymentBeginResult> {
+    requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
 

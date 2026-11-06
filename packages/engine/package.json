@@ -2818,6 +2818,11 @@
       "bun": "./terminal-shell/src/onboarding-apply-pipeline.ts",
       "types": "./terminal-shell/dist/onboarding-apply-pipeline.d.ts",
       "import": "./terminal-shell/dist/onboarding-apply-pipeline.js"
+    },
+    "./terminal-shell/service-posture": {
+      "bun": "./terminal-shell/src/service-posture.ts",
+      "types": "./terminal-shell/dist/service-posture.d.ts",
+      "import": "./terminal-shell/dist/service-posture.js"
     }
   },
   "publishConfig": {

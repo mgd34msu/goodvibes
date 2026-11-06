@@ -1,40 +1,30 @@
+import {
+  readServiceLogPosture,
+  retainServicePostureInput,
+  readServiceEndpoints,
+  serviceEndpointIssues,
+  type CliServiceRuntime,
+  type CliServiceEndpointPosture,
+  type CliServiceLogPosture,
+} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+export type {
+  CliServiceRuntime,
+  CliServiceEndpointPosture,
+  CliServiceLogPosture,
+} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
+import '@goodvibes-jev/judgment/decisions';
+import 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ConfigKey, ConfigManager } from '../config/index.ts';
-import { resolveRuntimeEndpointBinding } from './endpoints.ts';
-import type { RuntimeEndpointBinding, RuntimeEndpointId } from './endpoints.ts';
-import { classifyBindPosture, isNetworkFacing, redactText } from '@goodvibes-jev/engine/terminal-shell';
+import type { ConfigKey } from '../config/index.ts';
+import './endpoints.ts';
+import type { RuntimeEndpointId } from './endpoints.ts';
+import '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { dialHostForConfiguredHost } from '../config/connected-host-dial.ts';
-
-export interface CliServiceRuntime {
-  readonly configManager: ConfigManager;
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-}
-
-export interface CliServiceEndpointPosture {
-  readonly id: RuntimeEndpointId;
-  readonly label: string;
-  readonly enabled: boolean;
-  readonly binding: RuntimeEndpointBinding;
-  readonly bindPosture: ReturnType<typeof classifyBindPosture>;
-  readonly networkFacing: boolean;
-  readonly reachable?: boolean;
-}
-
-export interface CliServiceLogPosture {
-  readonly path: string | null;
-  readonly exists: boolean;
-  readonly size: number;
-  readonly modifiedAt: number | null;
-  readonly tail?: string;
-  readonly readError?: string;
-}
 
 export interface CliExternalHostLifecyclePosture {
   readonly platform: 'manual';
@@ -96,48 +86,8 @@ interface CliServicePostureOptions extends JudgmentReadingOptions {
 /** A TCP probe from this process, so a wildcard bind resolves to loopback. */
 const connectHostForBindHost = dialHostForConfiguredHost;
 
-function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
-
-async function readLogPosture(path: string | undefined, tailBytes: number, options: JudgmentReadingOptions, captureOwner: () => void): Promise<CliServiceLogPosture> {
-  if (!path) return { path: null, exists: false, size: 0, modifiedAt: null };
-  if (!existsSync(path)) return { path, exists: false, size: 0, modifiedAt: null };
-  try {
-    const stat = statSync(path);
-    const length = Math.min(stat.size, Math.max(0, tailBytes));
-    if (length === 0) {
-      return { path, exists: true, size: stat.size, modifiedAt: stat.mtimeMs, tail: '' };
-    }
-    const raw = Buffer.alloc(length);
-    const fd = openSync(path, 'r');
-    try {
-      readSync(fd, raw, 0, length, Math.max(0, stat.size - length));
-    } finally {
-      closeSync(fd);
-    }
-    captureOwner();
-    return {
-      path,
-      exists: true,
-      size: stat.size,
-      modifiedAt: stat.mtimeMs,
-      tail: await redactText(raw.toString('utf-8'), options),
-    };
-  } catch {
-    return {
-      path,
-      exists: true,
-      size: 0,
-      modifiedAt: null,
-      readError: 'Service log could not be read safely.',
-    };
-  }
-}
-
-function endpointsConflict(a: CliServiceEndpointPosture, b: CliServiceEndpointPosture): boolean {
-  if (a.binding.port !== b.binding.port) return false;
-  const hostA = a.binding.host;
-  const hostB = b.binding.host;
-  return hostA === hostB || hostA === '0.0.0.0' || hostB === '0.0.0.0' || hostA === '::' || hostB === '::';
+function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {
+  return probe(host, port, timeoutMs, connectHostForBindHost);
 }
 
 function resolveConfiguredLogPath(runtime: CliServiceRuntime): string | undefined {
@@ -168,40 +118,27 @@ export async function buildCliServicePosture(
   runtime: CliServiceRuntime,
   options: CliServicePostureOptions = {},
 ): Promise<CliServicePosture> {
-  const configManager = runtime.configManager;
-  const workingDirectory = runtime.workingDirectory;
-  const homeDirectory = runtime.homeDirectory;
-  const retainedConfig = retainCliConfig(configManager);
-  const signal = options.signal;
-  const callerCurrent = options.assertCurrent;
-  const sourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent || runtime.configManager !== configManager
-      || runtime.workingDirectory !== workingDirectory || runtime.homeDirectory !== homeDirectory) throw new Error('Service posture input changed before publication.');
-    try { retainedConfig.assertCurrent(); }
-    catch { throw new Error('Service posture input changed before publication.'); }
-  };
-  const assertCurrent = () => {
-    sourceCurrent();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Service posture ownership must be synchronous.'); }
-    sourceCurrent();
-  };
+  const retainedConfig = retainCliConfig(runtime.configManager);
+  const assertCurrent = retainServicePostureInput(
+    runtime,
+    options,
+    () => {
+      try {
+        retainedConfig.assertCurrent();
+      } catch {
+        throw new Error('Service posture input changed before publication.');
+      }
+    },
+    'Service posture input changed before publication.',
+  );
   const reading = { ...options, assertCurrent };
   assertCurrent();
-  const endpoints = await Promise.all(ENDPOINTS.map(async (endpoint): Promise<CliServiceEndpointPosture> => {
-    const enabled = runtime.configManager.get(endpoint.enabledKey) === true;
-    const binding = resolveRuntimeEndpointBinding(runtime.configManager, endpoint.id);
-    return {
-      id: endpoint.id,
-      label: endpoint.label,
-      enabled,
-      binding,
-      bindPosture: classifyBindPosture(binding),
-      networkFacing: isNetworkFacing(enabled, binding),
-      ...(options.probe && enabled && resolveConnectedHostDialEnabled(runtime.configManager) ? { reachable: await probeTcp(binding.host, binding.port) } : {}),
-    };
-  }));
+  const endpoints = await readServiceEndpoints(runtime, ENDPOINTS, {
+    probe: options.probe,
+    assertCurrent,
+    probeTcp,
+    mayProbe: () => resolveConnectedHostDialEnabled(runtime.configManager),
+  });
 
   const config = {
     enabled: runtime.configManager.get('service.enabled') === true,
@@ -213,9 +150,7 @@ export async function buildCliServicePosture(
   // Dialing is what the daemon-backed features consult, so a machine that does
   // not adopt a daemon but does dial a connected one is server-backed, which
   // is exactly the topology this product is designed for.
-  const serverBackedEnabled = config.daemonEnabled
-    || config.connectedHostDialEnabled
-    || endpoints.some((endpoint) => endpoint.enabled);
+  const serverBackedEnabled = config.daemonEnabled || config.connectedHostDialEnabled || endpoints.some((endpoint) => endpoint.enabled);
   const issues: string[] = [];
   const advisories: string[] = [];
 
@@ -225,26 +160,19 @@ export async function buildCliServicePosture(
     // visible here only once the Agent began reading the shared daemon tier.
     advisories.push('Connected-host settings are present, but Agent host ownership is disabled by design.');
   }
-  for (const endpoint of endpoints) {
-    if (endpoint.enabled && options.probe && endpoint.reachable === false) {
-      issues.push(`${endpoint.label} is enabled but not reachable on ${endpoint.binding.host}:${endpoint.binding.port}.`);
-    }
-  }
-  const enabledEndpoints = endpoints.filter((endpoint) => endpoint.enabled);
-  for (let outer = 0; outer < enabledEndpoints.length; outer += 1) {
-    for (let inner = outer + 1; inner < enabledEndpoints.length; inner += 1) {
-      const left = enabledEndpoints[outer]!;
-      const right = enabledEndpoints[inner]!;
-      if (endpointsConflict(left, right)) {
-        issues.push(`${left.label} and ${right.label} are configured to bind the same host/port envelope (${left.binding.host}:${left.binding.port}, ${right.binding.host}:${right.binding.port}).`);
-      }
-    }
-  }
+  issues.push(...serviceEndpointIssues(endpoints, options.probe));
   const configuredLogPath = resolveConfiguredLogPath(runtime);
   let logOwner: JudgmentPortCapture | undefined;
-  const logReading = { ...reading, assertCurrent: () => { assertCurrent(); logOwner?.assertCurrent(); } };
-  const log = await readLogPosture(configuredLogPath, options.logTailBytes ?? 4096, logReading,
-    () => { logOwner = captureJudgmentPort('agent.cli.service-log', reading); });
+  const logReading = {
+    ...reading,
+    assertCurrent: () => {
+      assertCurrent();
+      logOwner?.assertCurrent();
+    },
+  };
+  const log = await readServiceLogPosture(configuredLogPath, options.logTailBytes ?? 4096, logReading, () => {
+    logOwner = captureJudgmentPort('agent.cli.service-log', reading);
+  });
   if (log.readError) {
     issues.push(`Service log exists but could not be read: ${log.readError}`);
   }
@@ -261,10 +189,6 @@ export async function buildCliServicePosture(
   };
 }
 
-function yesNo(value: boolean): string {
-  return value ? 'yes' : 'no';
-}
-
 export function formatCliServicePosture(posture: CliServicePosture, json = false): string {
   if (json) return JSON.stringify(posture, null, 2);
   return [
@@ -279,8 +203,9 @@ export function formatCliServicePosture(posture: CliServicePosture, json = false
     ...(posture.log.readError ? [`  log read error: ${posture.log.readError}`] : []),
     '',
     'Connected API checks',
-    ...posture.endpoints.map((endpoint) =>
-      `  ${endpoint.label} enabled ${yesNo(endpoint.enabled)}  ${endpoint.binding.hostMode} ${endpoint.binding.host}:${endpoint.binding.port}  posture ${endpoint.bindPosture.label}${endpoint.reachable === undefined ? '' : `  reachable ${yesNo(endpoint.reachable)}`}`,
+    ...posture.endpoints.map(
+      (endpoint) =>
+        `  ${endpoint.label} enabled ${yesNo(endpoint.enabled)}  ${endpoint.binding.hostMode} ${endpoint.binding.host}:${endpoint.binding.port}  posture ${endpoint.bindPosture.label}${endpoint.reachable === undefined ? '' : `  reachable ${yesNo(endpoint.reachable)}`}`,
     ),
     '',
     posture.issues.length === 0 ? 'Readiness ready' : 'Readiness needs attention',

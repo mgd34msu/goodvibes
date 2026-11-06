@@ -1,9 +1,24 @@
-import {isExecutable} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import {
+  readServiceLogPosture,
+  retainServicePostureInput,
+  readServiceEndpoints,
+  serviceEndpointIssues,
+  type CliServiceRuntime,
+  type CliServiceEndpointPosture,
+  type CliServiceLogPosture,
+} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+export type {
+  CliServiceRuntime,
+  CliServiceEndpointPosture,
+  CliServiceLogPosture,
+} from '@goodvibes-jev/engine/terminal-shell/service-posture';
+import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { isExecutable } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import '@goodvibes-jev/judgment/decisions';
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
-import type { Stats } from 'node:fs';
+import { realpathSync } from 'node:fs';
+
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -11,37 +26,12 @@ import { PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemo
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
-import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
+import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
+import './network-posture.ts';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
-
-export interface CliServiceRuntime {
-  readonly configManager: ConfigManager;
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-}
-
-export interface CliServiceEndpointPosture {
-  readonly id: RuntimeEndpointId;
-  readonly label: string;
-  readonly enabled: boolean;
-  readonly binding: RuntimeEndpointBinding;
-  readonly bindPosture: ReturnType<typeof classifyBindPosture>;
-  readonly networkFacing: boolean;
-  readonly reachable?: boolean;
-}
-
-export interface CliServiceLogPosture {
-  readonly path: string | null;
-  readonly exists: boolean;
-  readonly size: number;
-  readonly modifiedAt: number | null;
-  readonly tail?: string;
-  readonly readError?: string;
-}
 
 export interface CliServicePosture {
   readonly config: {
@@ -59,7 +49,11 @@ export interface CliServicePosture {
   readonly issues: readonly string[];
 }
 
-const ENDPOINTS: readonly { readonly id: RuntimeEndpointId; readonly label: string; readonly enabledKey: string }[] = [
+const ENDPOINTS: readonly {
+  readonly id: RuntimeEndpointId;
+  readonly label: string;
+  readonly enabledKey: Parameters<ConfigManager['get']>[0];
+}[] = [
   { id: 'controlPlane', label: 'control plane', enabledKey: 'controlPlane.enabled' },
   { id: 'httpListener', label: 'HTTP listener', enabledKey: 'danger.httpListener' },
   { id: 'web', label: 'web surface', enabledKey: 'web.enabled' },
@@ -122,9 +116,9 @@ function connectHostForBindHost(host: string): string {
   return host || '127.0.0.1';
 }
 
-function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
-
-
+function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {
+  return probe(host, port, timeoutMs, connectHostForBindHost);
+}
 
 function platformDaemonArtifactName(platform = process.platform, arch = process.arch): string {
   if (platform === 'linux' && arch === 'x64') return 'goodvibes-daemon-linux-x64';
@@ -140,10 +134,7 @@ function executablePathCandidates(path: string): string[] {
   const dir = dirname(path);
   const name = basename(path);
   const artifact = platformDaemonArtifactName();
-  const candidates = [
-    join(dir, 'goodvibes-daemon'),
-    join(dir, artifact),
-  ];
+  const candidates = [join(dir, 'goodvibes-daemon'), join(dir, artifact)];
   if (name.startsWith('goodvibes-') && !name.startsWith('goodvibes-daemon-')) {
     candidates.push(join(dir, name.replace(/^goodvibes-/, 'goodvibes-daemon-')));
   }
@@ -153,9 +144,7 @@ function executablePathCandidates(path: string): string[] {
 
 function resolveCommandFromPath(command: string, pathValue: string | undefined): string | null {
   const pathEntries = (pathValue ?? '').split(delimiter).filter(Boolean);
-  const extensions = process.platform === 'win32'
-    ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
-    : [''];
+  const extensions = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean) : [''];
   for (const entry of pathEntries) {
     for (const extension of extensions) {
       const candidate = join(entry, `${command}${extension}`);
@@ -190,9 +179,7 @@ function packageArtifactForBinWrapper(path: string): string | null {
   ]);
 }
 
-export function resolveGoodVibesDaemonExecutable(
-  options: DaemonExecutableResolutionOptions = {},
-): DaemonExecutableResolution {
+export function resolveGoodVibesDaemonExecutable(options: DaemonExecutableResolutionOptions = {}): DaemonExecutableResolution {
   const env = options.env ?? process.env;
   const override = env.GOODVIBES_DAEMON_COMMAND?.trim();
   if (override) {
@@ -210,10 +197,7 @@ export function resolveGoodVibesDaemonExecutable(
 
   const argv = options.argv ?? process.argv;
   const execPath = options.execPath ?? process.execPath;
-  const sibling = firstExecutable([
-    ...executablePathCandidates(execPath),
-    ...executablePathCandidates(argv[1] ?? ''),
-  ]);
+  const sibling = firstExecutable([...executablePathCandidates(execPath), ...executablePathCandidates(argv[1] ?? '')]);
   if (sibling) {
     return {
       command: packageArtifactForBinWrapper(sibling) ?? sibling,
@@ -242,11 +226,7 @@ function pidFilePath(runtime: CliServiceRuntime, platform: ManagedServiceStatus[
   return join(getServiceStateRoot(runtime), 'service', `${platform}.pid`);
 }
 
-function runStatusCommand(
-  command: string,
-  args: readonly string[],
-  options: CliServicePostureOptions,
-): CliServiceStatusCommandResult {
+function runStatusCommand(command: string, args: readonly string[], options: CliServicePostureOptions): CliServiceStatusCommandResult {
   if (options.runCommand) return options.runCommand(command, args);
   return spawnSync(command, [...args], {
     stdio: 'pipe',
@@ -269,16 +249,17 @@ function reconcileSystemdServiceStatus(
   if (status.platform !== 'systemd') return status;
 
   const name = String(runtime.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
-  const result = runStatusCommand('systemctl', [
-    '--user',
-    'show',
-    `${name}.service`,
-    '--property=LoadState,ActiveState,UnitFileState,MainPID',
-    '--no-page',
-  ], options);
+  const result = runStatusCommand(
+    'systemctl',
+    ['--user', 'show', `${name}.service`, '--property=LoadState,ActiveState,UnitFileState,MainPID', '--no-page'],
+    options,
+  );
   if ((result.status ?? 1) !== 0) return status;
 
-  const lines = (result.stdout ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = (result.stdout ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   const loadState = parseSystemdShowValue(lines, 'LoadState');
   const activeState = parseSystemdShowValue(lines, 'ActiveState');
   const unitFileState = parseSystemdShowValue(lines, 'UnitFileState');
@@ -292,55 +273,6 @@ function reconcileSystemdServiceStatus(
     running: activeState === 'active',
     ...(pid === undefined ? {} : { pid }),
   };
-}
-
-async function readLogPosture(path: string | undefined, tailBytes: number, options: JudgmentReadingOptions): Promise<CliServiceLogPosture> {
-  options.signal?.throwIfAborted();
-  options.assertCurrent?.();
-  if (!path) return { path: null, exists: false, size: 0, modifiedAt: null };
-  if (!existsSync(path)) return { path, exists: false, size: 0, modifiedAt: null };
-  let captured: { readonly stat: Stats; readonly text: string };
-  try {
-    const stat = statSync(path);
-    const length = Math.min(stat.size, Math.max(0, tailBytes));
-    if (length === 0) {
-      return { path, exists: true, size: stat.size, modifiedAt: stat.mtimeMs, tail: '' };
-    }
-    const raw = Buffer.alloc(length);
-    const fd = openSync(path, 'r');
-    try {
-      readSync(fd, raw, 0, length, Math.max(0, stat.size - length));
-    } finally {
-      closeSync(fd);
-    }
-    captured = { stat, text: raw.toString('utf-8') };
-  } catch {
-    return {
-      path,
-      exists: true,
-      size: 0,
-      modifiedAt: null,
-      readError: 'Service log could not be read.',
-    };
-  }
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted();
-    options.assertCurrent?.();
-    const current = statSync(path);
-    const original = captured.stat;
-    if (current.dev !== original.dev || current.ino !== original.ino || current.size !== original.size
-      || current.mtimeMs !== original.mtimeMs || current.ctimeMs !== original.ctimeMs) throw new Error('Service log changed during redaction.');
-  };
-  const tail = await redactText(captured.text, { ...options, assertCurrent });
-  assertCurrent();
-  return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, tail };
-}
-
-function endpointsConflict(a: CliServiceEndpointPosture, b: CliServiceEndpointPosture): boolean {
-  if (a.binding.port !== b.binding.port) return false;
-  const hostA = a.binding.host;
-  const hostB = b.binding.host;
-  return hostA === hostB || hostA === '0.0.0.0' || hostB === '0.0.0.0' || hostA === '::' || hostB === '::';
 }
 
 export function createPlatformServiceManager(runtime: CliServiceRuntime): PlatformServiceManager {
@@ -381,43 +313,29 @@ export async function buildCliServicePosture(
   options: CliServicePostureOptions = {},
 ): Promise<CliServicePosture> {
   const configManager = runtime.configManager;
-  const workingDirectory = runtime.workingDirectory, homeDirectory = runtime.homeDirectory;
   const snapshot = captureStrictJudgmentJson(configManager.getRaw());
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const sourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent || runtime.configManager !== configManager
-      || runtime.workingDirectory !== workingDirectory || runtime.homeDirectory !== homeDirectory
-      || !isDeepStrictEqual(captureStrictJudgmentJson(configManager.getRaw()), snapshot)) throw new Error('Service posture input changed.');
-  };
-  const assertCurrent = () => {
-    sourceCurrent();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Service posture ownership must be synchronous.'); }
-    sourceCurrent();
-  };
+  const assertCurrent = retainServicePostureInput(
+    runtime,
+    options,
+    () => {
+      if (!isDeepStrictEqual(captureStrictJudgmentJson(configManager.getRaw()), snapshot))
+        throw new Error('Service posture input changed.');
+    },
+    'Service posture input changed.',
+  );
   assertCurrent();
   const manager = options.manager ?? createPlatformServiceManager(runtime);
   const capturedStatus = captureStrictJudgmentJson(reconcileSystemdServiceStatus(runtime, manager.status(), options));
-  const actionError = capturedStatus.actionError === undefined ? undefined
-    : await redactText(capturedStatus.actionError, { ...options, assertCurrent });
+  const actionError =
+    capturedStatus.actionError === undefined ? undefined : await redactText(capturedStatus.actionError, { ...options, assertCurrent });
   assertCurrent();
   const status = actionError === undefined ? capturedStatus : { ...capturedStatus, actionError };
-  const endpoints = await Promise.all(ENDPOINTS.map(async (endpoint): Promise<CliServiceEndpointPosture> => {
-    const enabled = runtime.configManager.get(endpoint.enabledKey as never) === true;
-    const binding = resolveRuntimeEndpointBinding(runtime.configManager, endpoint.id);
-    return {
-      id: endpoint.id,
-      label: endpoint.label,
-      enabled,
-      binding,
-      bindPosture: classifyBindPosture(binding),
-      networkFacing: isNetworkFacing(enabled, binding),
-      // Never TCP-probe the fallback endpoint of an unrecognized hostMode,
-      // a probe asserts a binding that does not exist.
-      ...(options.probe && enabled && binding.recognized ? { reachable: await probeTcp(binding.host, binding.port) } : {}),
-    };
-  }));
+  const endpoints = await readServiceEndpoints(runtime, ENDPOINTS, {
+    probe: options.probe,
+    assertCurrent,
+    probeTcp,
+    mayProbe: () => true,
+  });
 
   const config = {
     enabled: runtime.configManager.get('service.enabled') === true,
@@ -446,22 +364,8 @@ export async function buildCliServicePosture(
   if (status.actionError) {
     issues.push(`Service manager reported an error: ${status.actionError}`);
   }
-  for (const endpoint of endpoints) {
-    if (endpoint.enabled && options.probe && endpoint.reachable === false) {
-      issues.push(`${endpoint.label} is enabled but not reachable on ${endpoint.binding.host}:${endpoint.binding.port}.`);
-    }
-  }
-  const enabledEndpoints = endpoints.filter((endpoint) => endpoint.enabled);
-  for (let outer = 0; outer < enabledEndpoints.length; outer += 1) {
-    for (let inner = outer + 1; inner < enabledEndpoints.length; inner += 1) {
-      const left = enabledEndpoints[outer]!;
-      const right = enabledEndpoints[inner]!;
-      if (endpointsConflict(left, right)) {
-        issues.push(`${left.label} and ${right.label} are configured to bind the same host/port envelope (${left.binding.host}:${left.binding.port}, ${right.binding.host}:${right.binding.port}).`);
-      }
-    }
-  }
-  const log = await readLogPosture(status.logPath, options.logTailBytes ?? 4096, { ...options, assertCurrent });
+  issues.push(...serviceEndpointIssues(endpoints, options.probe));
+  const log = await readServiceLogPosture(status.logPath, options.logTailBytes ?? 4096, { ...options, assertCurrent });
   if (log.readError) {
     issues.push(`Service log exists but could not be read: ${log.readError}`);
   }
@@ -478,10 +382,6 @@ export async function buildCliServicePosture(
     log,
     issues,
   };
-}
-
-function yesNo(value: boolean): string {
-  return value ? 'yes' : 'no';
 }
 
 export function formatCliServicePosture(posture: CliServicePosture, json = false): string {
@@ -505,8 +405,9 @@ export function formatCliServicePosture(posture: CliServicePosture, json = false
     `  command: ${posture.managed.commandPreview}`,
     '',
     'Endpoints:',
-    ...posture.endpoints.map((endpoint) =>
-      `  ${endpoint.label}: enabled=${yesNo(endpoint.enabled)} ${formatRuntimeEndpointBinding(endpoint.binding)} posture=${endpoint.binding.recognized ? endpoint.bindPosture.label : 'unknown'}${endpoint.reachable === undefined ? '' : ` reachable=${yesNo(endpoint.reachable)}`}`,
+    ...posture.endpoints.map(
+      (endpoint) =>
+        `  ${endpoint.label}: enabled=${yesNo(endpoint.enabled)} ${formatRuntimeEndpointBinding(endpoint.binding)} posture=${endpoint.binding.recognized ? endpoint.bindPosture.label : 'unknown'}${endpoint.reachable === undefined ? '' : ` reachable=${yesNo(endpoint.reachable)}`}`,
     ),
     '',
     posture.issues.length === 0 ? 'Readiness: ready' : 'Readiness: needs attention',

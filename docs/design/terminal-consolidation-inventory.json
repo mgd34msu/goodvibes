@@ -186,10 +186,11 @@
       "path": "cli/service-posture.ts",
       "baselineTuiLines": 533,
       "baselineSimilarity": 0.4293,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "probeTcp"
-      ]
+      ],
+      "notes": "Platform owns retained synchronous ownership, endpoint capture/probing/conflicts and bounded file-identity-bound redacted log reads. TUI retains executable discovery/systemd service ownership and Agent retains external-host lifecycle and dial policy; their diagnostic wording describes those different responsibilities. Unrecognized bindings are never probed and cancellation/redaction failures propagate."
     },
     {
       "path": "cli/status.ts",

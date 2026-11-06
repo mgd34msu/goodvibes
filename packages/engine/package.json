@@ -2613,6 +2613,51 @@
       "bun": "./terminal-shell/src/markdown-frontmatter.ts",
       "types": "./terminal-shell/dist/markdown-frontmatter.d.ts",
       "import": "./terminal-shell/dist/markdown-frontmatter.js"
+    },
+    "./terminal-shell/renderer/polish-core": {
+      "bun": "./terminal-shell/src/renderer/polish-core.ts",
+      "types": "./terminal-shell/dist/renderer/polish-core.d.ts",
+      "import": "./terminal-shell/dist/renderer/polish-core.js"
+    },
+    "./terminal-shell/renderer/polish-blocks": {
+      "bun": "./terminal-shell/src/renderer/polish-blocks.ts",
+      "types": "./terminal-shell/dist/renderer/polish-blocks.d.ts",
+      "import": "./terminal-shell/dist/renderer/polish-blocks.js"
+    },
+    "./terminal-shell/renderer/polish-workspace": {
+      "bun": "./terminal-shell/src/renderer/polish-workspace.ts",
+      "types": "./terminal-shell/dist/renderer/polish-workspace.d.ts",
+      "import": "./terminal-shell/dist/renderer/polish-workspace.js"
+    },
+    "./terminal-shell/renderer/polish-tables": {
+      "bun": "./terminal-shell/src/renderer/polish-tables.ts",
+      "types": "./terminal-shell/dist/renderer/polish-tables.d.ts",
+      "import": "./terminal-shell/dist/renderer/polish-tables.js"
+    },
+    "./terminal-shell/renderer/polish": {
+      "bun": "./terminal-shell/src/renderer/polish.ts",
+      "types": "./terminal-shell/dist/renderer/polish.d.ts",
+      "import": "./terminal-shell/dist/renderer/polish.js"
+    },
+    "./terminal-shell/input-feed-adapters": {
+      "bun": "./terminal-shell/src/input-feed-adapters.ts",
+      "types": "./terminal-shell/dist/input-feed-adapters.d.ts",
+      "import": "./terminal-shell/dist/input-feed-adapters.js"
+    },
+    "./terminal-shell/companion-input": {
+      "bun": "./terminal-shell/src/companion-input.ts",
+      "types": "./terminal-shell/dist/companion-input.d.ts",
+      "import": "./terminal-shell/dist/companion-input.js"
+    },
+    "./terminal-shell/knowledge-labels": {
+      "bun": "./terminal-shell/src/knowledge-labels.ts",
+      "types": "./terminal-shell/dist/knowledge-labels.d.ts",
+      "import": "./terminal-shell/dist/knowledge-labels.js"
+    },
+    "./terminal-shell/model-selection-action": {
+      "bun": "./terminal-shell/src/model-selection-action.ts",
+      "types": "./terminal-shell/dist/model-selection-action.d.ts",
+      "import": "./terminal-shell/dist/model-selection-action.js"
     }
   },
   "publishConfig": {

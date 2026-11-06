@@ -1,10 +1,11 @@
+import {cleanInline,sourceLabel,createKnowledgeLabels} from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
+export {cleanInline,sourceLabel} from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
+export const {nodeLabel}=createKnowledgeLabels('  confidence ');
 import type { KnowledgeMapResult, KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 
 export type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
 
-export function cleanInline(value: unknown): string {
-  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
-}
+
 
 export function formatKnowledgeMap(result: KnowledgeMapResult): string {
   return [
@@ -15,30 +16,9 @@ export function formatKnowledgeMap(result: KnowledgeMapResult): string {
   ].join('\n');
 }
 
-export function nodeLabel(node: { readonly kind?: string; readonly title?: string; readonly summary?: string; readonly confidence?: number }): string {
-  const kind = cleanInline(node.kind) || 'node';
-  const title = cleanInline(node.title) || 'untitled';
-  const summary = cleanInline(node.summary);
-  const confidence = typeof node.confidence === 'number' ? `  confidence ${node.confidence}` : '';
-  return summary ? `[${kind}] ${title}${confidence} - ${summary}` : `[${kind}] ${title}${confidence}`;
-}
 
-export function sourceLabel(source: {
-  readonly id?: string;
-  readonly sourceType?: string;
-  readonly title?: string;
-  readonly canonicalUri?: string;
-  readonly sourceUri?: string;
-  readonly summary?: string;
-  readonly status?: string;
-}): string {
-  const title = cleanInline(source.title) || cleanInline(source.canonicalUri) || cleanInline(source.sourceUri) || cleanInline(source.id) || 'untitled';
-  const type = cleanInline(source.sourceType) || 'source';
-  const status = cleanInline(source.status);
-  const summary = cleanInline(source.summary);
-  const suffix = status ? `/${status}` : '';
-  return summary ? `[${type}${suffix}] ${title} - ${summary}` : `[${type}${suffix}] ${title}`;
-}
+
+
 
 export function renderKnowledgeAskResult(result: KnowledgeAskResult): string {
   const answer = result.answer;

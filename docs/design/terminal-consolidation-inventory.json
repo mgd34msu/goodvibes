@@ -1553,7 +1553,8 @@
       "baselineSimilarity": 0.7517,
       "status": "pending-convergence",
       "platformFunctions": [
-        "createBootstrapCommandProviderSection"
+        "createBootstrapCommandProviderSection",
+        "createBootstrapCommandActions.completeModelSelection"
       ]
     },
     {
@@ -2080,6 +2081,44 @@
         "products/agent/src/input/settings-modal-mcp-entries.ts"
       ],
       "reason": "One detached security-entry projection for MCP settings.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "paths": [
+        "products/tui/src/views/polish-core.ts",
+        "products/tui/src/views/polish.ts",
+        "products/tui/src/views/polish-tables.ts",
+        "products/agent/src/renderer/polish.ts"
+      ],
+      "platformModule": "terminal-shell/renderer/polish",
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "reason": "Shared palette refresh, cells, blocks, tables and workspace allocation; original title/search padding, tail crop and summary-row reservation policies retained."
+    },
+    {
+      "platformModule": "terminal-shell/input-feed-adapters",
+      "paths": [
+        "products/tui/src/input/handler-feed.ts",
+        "products/agent/src/input/handler-feed.ts"
+      ],
+      "reason": "Shared detached command snapshot and work-tree routing projection over original product context references.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "platformModule": "terminal-shell/companion-input",
+      "paths": [
+        "products/tui/src/runtime/bootstrap-core.ts",
+        "products/agent/src/runtime/bootstrap-core-helpers.ts"
+      ],
+      "reason": "One companion-origin metadata projection.",
+      "status": "platform-implementation-with-product-policy-adapter"
+    },
+    {
+      "platformModule": "terminal-shell/knowledge-labels",
+      "paths": [
+        "products/tui/src/input/commands/knowledge.ts",
+        "products/agent/src/input/commands/knowledge-format.ts"
+      ],
+      "reason": "One source label and node formatter, preserving product confidence copy.",
       "status": "platform-implementation-with-product-policy-adapter"
     }
   ]

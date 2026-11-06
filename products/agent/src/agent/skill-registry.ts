@@ -1,4 +1,5 @@
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import {isExecutable as canExecute} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
@@ -135,14 +136,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function canExecute(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
+
 
 function commandExists(command: string, pathValue: string | undefined): boolean {
   if (!pathValue) return false;

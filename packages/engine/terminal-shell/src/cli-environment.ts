@@ -1,3 +1,4 @@
+import { accessSync, constants } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { spawn } from 'node:child_process';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -25,5 +26,14 @@ export function openBrowser(url: string): string {
     return 'browser open requested';
   } catch (error) {
     return `browser open failed: ${summarizeError(error)}`;
+  }
+}
+
+export function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
   }
 }

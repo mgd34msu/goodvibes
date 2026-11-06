@@ -1,3 +1,5 @@
+import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
 /**
  * bootstrap-core-helpers.ts, the pure parts of the interactive bootstrap.
  *
@@ -12,11 +14,11 @@
  */
 import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
 import type { PermissionPromptRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
-import { RuntimeEventBus } from '@/runtime/index.ts';
-import type { SessionEvent } from '@/runtime/index.ts';
 
-export type CompanionMessagePayload = Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>;
+import { RuntimeEventBus } from '@/runtime/index.ts';
+
+
+
 
 /**
  * Registers the webhook notifier for the runtime session.
@@ -38,23 +40,7 @@ export function registerWebhookNotifier(
   runtimeUnsubs.push(() => webhookNotifier.detach());
 }
 
-export function companionMessageToOrchestratorInputOptions(
-  payload: CompanionMessagePayload,
-): OrchestratorUserInputOptions {
-  const metadata = payload.metadata;
-  const surface = typeof metadata?.surface === 'string' ? metadata.surface : undefined;
-  const topic = typeof metadata?.topic === 'string' ? metadata.topic : undefined;
 
-  return {
-    origin: {
-      source: payload.source,
-      messageId: payload.messageId,
-      ...(surface ? { surface } : {}),
-      ...(topic ? { topic } : {}),
-      ...(metadata ? { metadata } : {}),
-    },
-  };
-}
 
 /**
  * Fleet-attention wiring: derive the shared-approval metadata for a

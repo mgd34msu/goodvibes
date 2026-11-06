@@ -1,7 +1,8 @@
+import {isExecutable} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,14 +124,7 @@ function connectHostForBindHost(host: string): string {
 
 function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
 
-function isExecutable(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
+
 
 function platformDaemonArtifactName(platform = process.platform, arch = process.arch): string {
   if (platform === 'linux' && arch === 'x64') return 'goodvibes-daemon-linux-x64';

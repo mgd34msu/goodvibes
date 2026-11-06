@@ -1,3 +1,5 @@
+import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
@@ -6,7 +8,7 @@ import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { registerSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { ConfigManager, getConfiguredSystemPrompt } from '@goodvibes-jev/engine/sdk/platform/config';
+import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/sdk/platform/config';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -126,7 +128,7 @@ export interface BootstrapCoreState {
 
 }
 
-export type CompanionMessagePayload = Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>;
+
 
 // --- Operator narration of inbound channel events ---
 
@@ -199,23 +201,7 @@ export function narrateInboundEvent(event: {
   return `${label}${eventDetail} inbound event → agent triggered`;
 }
 
-export function companionMessageToOrchestratorInputOptions(
-  payload: CompanionMessagePayload,
-): OrchestratorUserInputOptions {
-  const metadata = payload.metadata;
-  const surface = typeof metadata?.surface === 'string' ? metadata.surface : undefined;
-  const topic = typeof metadata?.topic === 'string' ? metadata.topic : undefined;
 
-  return {
-    origin: {
-      source: payload.source,
-      messageId: payload.messageId,
-      ...(surface ? { surface } : {}),
-      ...(topic ? { topic } : {}),
-      ...(metadata ? { metadata } : {}),
-    },
-  };
-}
 
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,

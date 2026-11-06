@@ -1,6 +1,7 @@
+import {createModelSelectionAction} from '@goodvibes-jev/engine/terminal-shell/model-selection-action';
 import {projectCommandProviderServices} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { getConfigSnapshot } from '../config/index.ts';
-import { describeServingEffort, publishActiveEffortOptions, resolveRequestedEffortForServingModel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
+import { publishActiveEffortOptions, toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { AdaptivePlanner } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { ConversationManager } from '../core/conversation';
@@ -49,7 +50,7 @@ import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts
 import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
 import type { AgentExecutionLedger } from './execution-ledger.ts';
 import type { ApprovalsView } from './client/approvals-view.ts';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/sdk/platform/utils';
 import type { ConsolidationReceiptSource } from '../agent/memory-consolidation-proposals.ts';
 import { listPendingConsolidationProposals } from '../agent/memory-consolidation-proposals.ts';
 import { activeTokens } from '../renderer/theme.ts';
@@ -208,75 +209,7 @@ export function createBootstrapCommandActions(
     clearScreen: () => unwiredShellAction('clearScreen'),
     activatePlan,
     requestPermission: (request) => requestPermission(request),
-    completeModelSelection: ({ model, effort, contextCap, target, effortChosenByUser }) => {
-      if (!model) return;
-      const def = model;
-      const key = def.registryKey ?? `${def.provider}:${def.id}`;
-      const resolvedTarget = target ?? 'main';
-      try {
-        if (resolvedTarget === 'helper') {
-          // Write to helper config keys and enable the helper
-          configManager.set('helper.globalProvider', def.provider);
-          configManager.set('helper.globalModel', key);
-          configManager.set('helper.enabled', true);
-          conversation.log(`Helper model set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
-        } else if (resolvedTarget === 'tool') {
-          // Write to tool LLM config keys and enable the tool LLM
-          configManager.set('tools.llmProvider', def.provider);
-          configManager.set('tools.llmModel', key);
-          configManager.setDynamic('tools.llmEnabled', true);
-          conversation.log(`Tool LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
-        } else if (resolvedTarget === 'tts') {
-          configManager.set('tts.llmProvider', def.provider);
-          configManager.set('tts.llmModel', key);
-          conversation.log(`TTS LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
-        } else {
-          // Default: main provider/model
-          if (contextCap != null && contextCap > 0) {
-            providerRegistry.setModelContextCap(key, contextCap);
-          }
-          providerRegistry.setCurrentModel(key);
-          runtime.model = key;
-          runtime.provider = def.provider;
-          // Two levels, kept apart on purpose. Config `provider.reasoningEffort`
-          // holds what the USER asked for; `runtime.reasoningEffort` holds what
-          // the model now serving will actually receive, which is the requested
-          // level snapped DOWN to this model's own levels.
-          //
-          // The picker's effort STEP is the only user choice here, and only it
-          // writes the preference. That step is skipped for a model with
-          // nothing configurable, so `effort` can otherwise be a level merely
-          // carried over from whatever was selected before; storing that is
-          // what used to ratchet the preference down for good, one hop
-          // through a model that caps at 'medium' and 'xhigh' was gone from
-          // config, so hopping back could not restore it.
-          //
-          // A stored 'xhigh' that becomes 'high' on the wire would make a
-          // single-value display a lie, so the display carries BOTH values with
-          // their provenance (describeServingEffort) rather than the preference
-          // being corrupted to match.
-          const switchedTo = toEffortModel(providerRegistry.getCurrentModel());
-          // Publish this model's real levels first, so both the preference
-          // write below and any later `config set provider.reasoningEffort`
-          // are validated against them.
-          publishActiveEffortOptions(switchedTo, runtime.sessionId);
-          if (effortChosenByUser && effort) configManager.set('provider.reasoningEffort', effort);
-          const serving = resolveRequestedEffortForServingModel(configManager, switchedTo);
-          runtime.reasoningEffort = serving.effective ?? '';
-          configManager.set('provider.model', key);
-          const ctxNote = contextCap != null && contextCap > 0
-            ? `, context cap: ${contextCap.toLocaleString()}`
-            : '';
-          const effortNote = serving.requested !== '' ? `, effort: ${describeServingEffort(serving, switchedTo)}` : '';
-          conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}${ctxNote}`, { fg: activeTokens().secondary });
-          if (serving.note) conversation.log(serving.note, { fg: activeTokens().secondary });
-        }
-      } catch (e) {
-        conversation.log(`Error switching model: ${summarizeError(e)}`, { fg: activeTokens().error });
-      }
-      completeModelSelectionSideEffect?.();
-      requestRender();
-    },
+    completeModelSelection: createModelSelectionAction({providerRegistry,configManager,conversation,runtime,requestRender,completeModelSelectionSideEffect},{setToolEnabled:()=>configManager.setDynamic('tools.llmEnabled',true),effortModel:()=>toEffortModel(providerRegistry.getCurrentModel()),publishEffortOptions:model=>publishActiveEffortOptions(model,runtime.sessionId),alwaysShowEffort:false,noteColor:()=>activeTokens().secondary}),
     jumpToBookmark: () => unwiredShellAction('jumpToBookmark'),
     scrollToLine: () => unwiredShellAction('scrollToLine'),
     print: (text: string) => {

@@ -1,3 +1,4 @@
+import {createCommandModeFeedRoute,createWorkTreeFeedRoute} from '@goodvibes-jev/engine/terminal-shell/input-feed-adapters';
 import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
@@ -25,7 +26,7 @@ import { ProfilePickerModal } from './profile-picker-modal.ts';
 import { IMAGE_EXTENSIONS, formatFileSize, mediaTypeFromExt } from './handler-content-actions.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
 import type { WrappedPromptInfo } from './handler-prompt-buffer.ts';
-import { getViewportBottomLine } from '../renderer/conversation-layout.ts';
+import '../renderer/conversation-layout.ts';
 import { handleWorkTreeToken } from './handler-work-tree-route.ts';
 
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
@@ -244,26 +245,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
       token,
     );
   },
-  workTree: (context, token, { viewportHeight, scrollTop, lineCount }) => {
-    const keybindings = context.keybindingsManager;
-    return handleWorkTreeToken(
-      {
-        conversationManager: context.conversationManager,
-        enterMatch: token.type === 'key' && keybindings.matches('focus-work-tree', token),
-        anchorLine: getViewportBottomLine(scrollTop, viewportHeight, lineCount),
-        scrollTop: context.getScrollTop(),
-        viewportHeight,
-        scroll: context.scroll,
-        requestRender: context.requestRender,
-        onCopied: () => {
-          /* the copy receipt is the transcript line handleBlockCopy logs */
-        },
-        openAgent: (id) => context.commandContext?.openSessionView?.({ kind: 'agent', id }) ?? false,
-        openProcess: (id) => context.commandContext?.openSessionView?.({ kind: 'process', id }) ?? false,
-      },
-      token,
-    );
-  },
+  workTree: createWorkTreeFeedRoute<InputFeedContext>(handleWorkTreeToken),
   indicator: (context, token) => {
     return handleIndicatorFocusToken(
       {
@@ -385,28 +367,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     const handled = handleGlobalShortcutToken(shortcutState, token, viewportHeight);
     return { ...shortcutState, handled };
   },
-  command: (context, token) => {
-    const commandState = {
-      commandMode: context.commandMode,
-      prompt: context.prompt,
-      cursorPos: context.cursorPos,
-      autocomplete: context.autocomplete,
-      modalStack: context.modalStack,
-      commandRegistry: context.commandRegistry,
-      commandContext: context.commandContext,
-      conversationManager: context.conversationManager,
-      requestRender: context.requestRender,
-      handleEscape: context.handleEscape,
-      projectRoot: context.projectRoot,
-      pasteRegistry: context.pasteRegistry,
-      imageRegistry: context.imageRegistry,
-      nextPasteId: context.nextPasteId,
-      nextImageId: context.nextImageId,
-      saveUndoState: context.saveUndoState,
-      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-    };
-    const handled = handleCommandModeToken(commandState, token);
-    return { ...commandState, handled };
-  },
+  command: createCommandModeFeedRoute<InputFeedContext>(handleCommandModeToken),
   beforeComposer: (context, token, { now }) => guardCommandPaste(context, token, now),
 });

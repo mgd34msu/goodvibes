@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "status": "Source dispositions and implementation recorded; final qualification, CI and release pending.",
-  "sourceRevision": "17a6ca4ea4d7d6284b379f9f2cada4824243ef68",
+  "sourceRevision": "da3efc26fce32b9123bc4b37f17ca4cc522596f1",
   "scope": "Tracked TypeScript source only. Excludes vendor, generated, dist, test/tests/e2e and runtime .goodvibes copies. Includes explicit developer tooling and foundation transport.",
   "method": "Index literal judgmentPort/captureJudgmentPort/createSystemOnePort access sites and declarations, then trace actual enclosing consumers and native/semantic branches. These counts are source navigation, not request counts or exhaustive transitive-call proof.",
-  "verification": "Earlier focused platform, Agent/TUI process, daemon hosted HTTP and WebUI checks passed within their documented scopes. The latest browser-boundary, settings acknowledgement and scheduled-job repairs have authored regression tests but have not been run. Final API refresh, full current-source verification, required CI and release remain pending.",
+  "verification": "On implementation revision da3efc26 the full build and fresh API extraction passed. The platform repair suite passed35 tests across6files (browser source/published entrypoints, native formatting, schedules, policy/router/transport); daemon policy suite passed9 across3files (all3policies through paired hosted HTTP, settings persistence and containment posture). Earlier broad scoped evidence remains documented separately. Full current-source typechecking, remaining workflows, exact-final-SHA CI and release remain pending; no per-origin certification is implied.",
   "files": [
     {
       "file": "packages/engine/errors/src/failure-reading.ts",

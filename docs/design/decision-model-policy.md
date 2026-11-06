@@ -1,10 +1,12 @@
 # Decision-model policy
 
-Status: source implementation written; final qualification pending. Earlier focused
-platform, Agent/TUI process, daemon hosted HTTP and WebUI checks passed before the
-latest browser-boundary, settings-acknowledgement and scheduled-job repairs. Those
-repairs have authored regression coverage but have not been run. Final generated
-API refresh, full delivery qualification, final-commit CI and release remain pending.
+Status: source implementation written; final qualification pending. The full build
+and fresh API extraction pass on implementation revision `da3efc26`. The 35-test
+platform repair suite covers source/published browser imports, native formatting,
+schedule bookkeeping and policy/router behavior; the 9-test daemon suite covers
+all three policies through paired hosted HTTP plus persisted settings writes.
+Full current-source typechecking, remaining workflow qualification, final-commit
+CI and release remain pending. These scoped results do not certify every caller.
 
 The [source inventory](decision-model-policy-inventory.json) records concrete
 port access sites and their Classic dispositions. It indexes source review;

@@ -39,7 +39,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/judgment/test/retry.test.ts](../judgment/test/retry.test.ts) |
 | [packages/judgment/test/truth.test.ts](../judgment/test/truth.test.ts) |
 
-## Engine platform (1923 files)
+## Engine platform (1947 files)
 
 | File |
 | --- |
@@ -268,6 +268,29 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/ci-watch-gh-logs.test.ts](test/ci-watch-gh-logs.test.ts) |
 | [packages/engine/test/ci-watch-polling.test.ts](test/ci-watch-polling.test.ts) |
 | [packages/engine/test/ci-watch.test.ts](test/ci-watch.test.ts) |
+| [packages/engine/test/classic-browser-voice-calendar.test.ts](test/classic-browser-voice-calendar.test.ts) |
+| [packages/engine/test/classic-contracts-and-bookkeeping.test.ts](test/classic-contracts-and-bookkeeping.test.ts) |
+| [packages/engine/test/classic-conversation-entrypoints.test.ts](test/classic-conversation-entrypoints.test.ts) |
+| [packages/engine/test/classic-diagnostics.test.ts](test/classic-diagnostics.test.ts) |
+| [packages/engine/test/classic-google-automation.test.ts](test/classic-google-automation.test.ts) |
+| [packages/engine/test/classic-google-diagnostics.test.ts](test/classic-google-diagnostics.test.ts) |
+| [packages/engine/test/classic-home-graph.test.ts](test/classic-home-graph.test.ts) |
+| [packages/engine/test/classic-imap.test.ts](test/classic-imap.test.ts) |
+| [packages/engine/test/classic-inspection.test.ts](test/classic-inspection.test.ts) |
+| [packages/engine/test/classic-knowledge-ingest.test.ts](test/classic-knowledge-ingest.test.ts) |
+| [packages/engine/test/classic-knowledge.test.ts](test/classic-knowledge.test.ts) |
+| [packages/engine/test/classic-memory.test.ts](test/classic-memory.test.ts) |
+| [packages/engine/test/classic-multimodal.test.ts](test/classic-multimodal.test.ts) |
+| [packages/engine/test/classic-occasions.test.ts](test/classic-occasions.test.ts) |
+| [packages/engine/test/classic-outward-approval.test.ts](test/classic-outward-approval.test.ts) |
+| [packages/engine/test/classic-payment-inspection.test.ts](test/classic-payment-inspection.test.ts) |
+| [packages/engine/test/classic-planning.test.ts](test/classic-planning.test.ts) |
+| [packages/engine/test/classic-progress-and-read-approval.test.ts](test/classic-progress-and-read-approval.test.ts) |
+| [packages/engine/test/classic-provider-and-runtime.test.ts](test/classic-provider-and-runtime.test.ts) |
+| [packages/engine/test/classic-runtime-boundaries.test.ts](test/classic-runtime-boundaries.test.ts) |
+| [packages/engine/test/classic-scheduling-and-catalog.test.ts](test/classic-scheduling-and-catalog.test.ts) |
+| [packages/engine/test/classic-tool-and-finalization.test.ts](test/classic-tool-and-finalization.test.ts) |
+| [packages/engine/test/classic-tool-repair.test.ts](test/classic-tool-repair.test.ts) |
 | [packages/engine/test/cli-config-overrides.test.ts](test/cli-config-overrides.test.ts) |
 | [packages/engine/test/cli-endpoints.test.ts](test/cli-endpoints.test.ts) |
 | [packages/engine/test/cli-network-posture.test.ts](test/cli-network-posture.test.ts) |
@@ -1003,6 +1026,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/knowledge-browser-capture-outcomes.test.ts](test/knowledge-browser-capture-outcomes.test.ts) |
 | [packages/engine/test/knowledge-browser-history.test.ts](test/knowledge-browser-history.test.ts) |
 | [packages/engine/test/knowledge-choice-admission.test.ts](test/knowledge-choice-admission.test.ts) |
+| [packages/engine/test/knowledge-classic-semantic-boundaries.test.ts](test/knowledge-classic-semantic-boundaries.test.ts) |
 | [packages/engine/test/knowledge-clock-admission.test.ts](test/knowledge-clock-admission.test.ts) |
 | [packages/engine/test/knowledge-compile-atomic.test.ts](test/knowledge-compile-atomic.test.ts) |
 | [packages/engine/test/knowledge-consolidation-judgment.test.ts](test/knowledge-consolidation-judgment.test.ts) |
@@ -2744,7 +2768,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/tui/src/test/views/workstream-graph-render.test.ts](../../products/tui/src/test/views/workstream-graph-render.test.ts) |
 | [products/tui/src/widget/widget.test.ts](../../products/tui/src/widget/widget.test.ts) |
 
-## Agent (750 files)
+## Agent (757 files)
 
 | File |
 | --- |
@@ -2819,6 +2843,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/agent/src/test/cli/channel-profiles-command.test.ts](../../products/agent/src/test/cli/channel-profiles-command.test.ts) |
 | [products/agent/src/test/cli/ci-command.test.ts](../../products/agent/src/test/cli/ci-command.test.ts) |
 | [products/agent/src/test/cli/config-owner.test.ts](../../products/agent/src/test/cli/config-owner.test.ts) |
+| [products/agent/src/test/cli/decision-policy-real-workflows.test.ts](../../products/agent/src/test/cli/decision-policy-real-workflows.test.ts) |
 | [products/agent/src/test/cli/entrypoint-profile.test.ts](../../products/agent/src/test/cli/entrypoint-profile.test.ts) |
 | [products/agent/src/test/cli/fleet-command.test.ts](../../products/agent/src/test/cli/fleet-command.test.ts) |
 | [products/agent/src/test/cli/help.test.ts](../../products/agent/src/test/cli/help.test.ts) |
@@ -3348,6 +3373,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/agent/src/test/tools/agent-harness-catalog-bootstrap.test.ts](../../products/agent/src/test/tools/agent-harness-catalog-bootstrap.test.ts) |
 | [products/agent/src/test/tools/agent-harness-catalog-empty-page.test.ts](../../products/agent/src/test/tools/agent-harness-catalog-empty-page.test.ts) |
 | [products/agent/src/test/tools/agent-harness-catalog-ranking.test.ts](../../products/agent/src/test/tools/agent-harness-catalog-ranking.test.ts) |
+| [products/agent/src/test/tools/agent-harness-classic-catalog.test.ts](../../products/agent/src/test/tools/agent-harness-classic-catalog.test.ts) |
 | [products/agent/src/test/tools/agent-harness-comms-redaction.test.ts](../../products/agent/src/test/tools/agent-harness-comms-redaction.test.ts) |
 | [products/agent/src/test/tools/agent-harness-connectors.test.ts](../../products/agent/src/test/tools/agent-harness-connectors.test.ts) |
 | [products/agent/src/test/tools/agent-harness-core.test.ts](../../products/agent/src/test/tools/agent-harness-core.test.ts) |
@@ -3467,6 +3493,11 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [products/agent/src/test/tools/agent.test.ts](../../products/agent/src/test/tools/agent.test.ts) |
 | [products/agent/src/test/tools/background-process-output-screening.test.ts](../../products/agent/src/test/tools/background-process-output-screening.test.ts) |
 | [products/agent/src/test/tools/capability-advertisement-availability.test.ts](../../products/agent/src/test/tools/capability-advertisement-availability.test.ts) |
+| [products/agent/src/test/tools/classic-background-privilege.test.ts](../../products/agent/src/test/tools/classic-background-privilege.test.ts) |
+| [products/agent/src/test/tools/classic-browser-device-catalog.test.ts](../../products/agent/src/test/tools/classic-browser-device-catalog.test.ts) |
+| [products/agent/src/test/tools/classic-execution-history.test.ts](../../products/agent/src/test/tools/classic-execution-history.test.ts) |
+| [products/agent/src/test/tools/classic-memory-providers.test.ts](../../products/agent/src/test/tools/classic-memory-providers.test.ts) |
+| [products/agent/src/test/tools/classic-remote-publisher.test.ts](../../products/agent/src/test/tools/classic-remote-publisher.test.ts) |
 | [products/agent/src/test/tools/device-settings-behavior.test.ts](../../products/agent/src/test/tools/device-settings-behavior.test.ts) |
 | [products/agent/src/test/tools/execution-mode-policy.test.ts](../../products/agent/src/test/tools/execution-mode-policy.test.ts) |
 | [products/agent/src/test/tools/fetch-auth.test.ts](../../products/agent/src/test/tools/fetch-auth.test.ts) |

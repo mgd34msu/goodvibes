@@ -10570,6 +10570,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "operationProvenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "proof": {
+        "proved": false,
+        "stage": "synthesize",
+        "phrase": "sample",
+        "transcript": "sample",
+        "wordOverlap": 0,
+        "comparison": "yes",
+        "operationProvenance": "classic",
+        "semanticAssessment": "not-evaluated",
+        "proofBasis": "native-word-sequence",
+        "error": "sample",
+        "summary": "sample"
+      },
+      "notes": [
+        "sample"
+      ],
       "provisioned": false,
       "platform": "sample",
       "tts": {
@@ -15132,6 +15150,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "operationProvenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "readinessAssessment": {
+        "basis": "native-structure-and-owner-approval",
+        "semanticAssessment": "specified"
+      },
       "ok": false,
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
@@ -15265,6 +15289,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -15480,6 +15508,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -15620,6 +15652,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -18242,6 +18278,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "provenance": "classic",
+      "subjectAssessment": "not-evaluated",
       "today": "sample",
       "timezone": "sample",
       "occasions": [
@@ -18305,6 +18343,19 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "provenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "open": [
+        {
+          "occasionId": "sample",
+          "title": "sample",
+          "person": "sample",
+          "kind": "gift-giving",
+          "proximity": "approaching",
+          "subject": "owner",
+          "acknowledged": false
+        }
+      ],
       "today": "sample",
       "nudge": {
         "id": "sample",
@@ -18510,6 +18561,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     },
     "status": 200,
     "body": {
+      "provenance": "classic",
+      "semanticAssessment": "not-evaluated",
       "ranAt": 0,
       "today": "sample",
       "hold": "sample",
@@ -24852,6 +24905,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -24882,6 +24940,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -24912,6 +24975,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -24942,6 +25010,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -24972,6 +25045,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

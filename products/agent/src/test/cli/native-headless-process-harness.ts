@@ -3,7 +3,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 import type { NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import type { NativeIntakeJournalRecord } from '../../runtime/native-conversation-intake-journal.ts';
-import { isolatedEnv, lastUserText, makeHome, removeHome, startStubModel, type E2EHome } from '../e2e/harness.ts';
+import { isolatedEnv, lastUserText, makeHome, removeHome, startStubModel, type E2EHome, type ModelRequest, type ModelReply } from '../e2e/harness.ts';
+import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { startE2ENativeHost } from '../e2e/native-host-fixture.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
@@ -92,16 +93,24 @@ function command(product: HeadlessProduct): string[] {
   return [process.execPath, join(productsRoot, product, 'src/main.ts')];
 }
 
-export async function makeHeadlessFixture(product: HeadlessProduct, reply = HEADLESS_REPLY) {
+export interface HeadlessFixtureOptions {
+  readonly policy?: DecisionModelPolicy;
+  readonly unavailable?: boolean;
+  readonly missingCredentials?: boolean;
+  readonly settings?: Readonly<Record<string, unknown>>;
+  readonly answer?: (request: ModelRequest, index: number) => ModelReply | Promise<ModelReply>;
+}
+
+export async function makeHeadlessFixture(product: HeadlessProduct, reply = HEADLESS_REPLY, options: HeadlessFixtureOptions = {}) {
   let heldModel: Promise<void> | undefined;
   let releaseModel = () => {};
   let modelEntered = () => {};
-  const model = startStubModel(async request => {
+  const model = startStubModel(async (request, index) => {
     if (heldModel && lastUserText(request) === HEADLESS_PROMPT) {
       modelEntered();
       await heldModel;
     }
-    return { text: reply };
+    return options.answer ? options.answer(request, index) : { text: reply };
   });
   let home: E2EHome | undefined;
   let host: Awaited<ReturnType<typeof startE2ENativeHost>> | undefined;
@@ -109,6 +118,9 @@ export async function makeHeadlessFixture(product: HeadlessProduct, reply = HEAD
   const children = new Set<ReturnType<typeof Bun.spawn>>();
   try {
     home = await makeHome(model);
+    if (options.policy) home.setAgentSetting('judgment.policy', options.policy);
+    for (const [key, value] of Object.entries(options.settings ?? {})) home.setAgentSetting(key, value);
+    if (options.unavailable) home.judgments.setUnavailable(true);
     home.judgments.expectTextOnlyCompletion(HEADLESS_PROMPT, reply, product);
     mkdirSync(join(home.root, 'tmp'), { recursive: true });
     // The two products keep separate provider/config state, but use the same fixture contract.
@@ -118,7 +130,7 @@ export async function makeHeadlessFixture(product: HeadlessProduct, reply = HEAD
     cpSync(join(home.home, '.goodvibes/agent/settings.json'), join(tuiRoot, 'settings.json'));
     const tuiConfig = new ConfigManager({ homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' });
     seedProviderMetadataCacheFixture({ configManager: tuiConfig, homeDirectory: home.home, workingDirectory: home.workspace, surfaceRoot: 'tui' });
-    host = await startE2ENativeHost(home);
+    host = await startE2ENativeHost(home, options.policy ? { policy: options.policy } : {});
     door = nativeDoor(host.daemon.baseUrl);
     const pairedToken = host.env.GOODVIBES_CONNECTED_HOST_TOKEN;
     const pairedPrincipal = host.daemon.services.pairingTokens.authenticateNative(pairedToken);
@@ -148,6 +160,7 @@ export async function makeHeadlessFixture(product: HeadlessProduct, reply = HEAD
       GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1',
       GOODVIBES_AGENT_RUNTIME_URL: door.baseUrl,
       GOODVIBES_CONNECTED_HOST_TOKEN: pairedToken,
+      ...(options.missingCredentials ? { TYPESAFE_API_KEY: '' } : {}),
     });
     const journalPath = join(home.home, '.goodvibes', product, 'native-work-submission.json.intake');
     const start = (args: readonly string[], token = pairedToken) => {

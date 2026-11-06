@@ -7,8 +7,9 @@ import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvi
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import type { E2EHome } from './harness.ts';
+import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 
-export async function startE2ENativeHost(home: E2EHome) {
+export async function startE2ENativeHost(home: E2EHome, options: { readonly policy?: DecisionModelPolicy } = {}) {
   // These fixtures prove local permit delivery. Remote-owner coverage uses a
   // hosted-enabled daemon and must never rely on a failed route falling back.
   home.setAgentSetting('hostedSessions.routeConversationTurns', false);
@@ -24,6 +25,7 @@ export async function startE2ENativeHost(home: E2EHome) {
     const daemon = await startDaemonFixture({ root: join(home.root, 'native-host'), hostSessions: false,
       configure(configManager) {
         configManager.set('judgment.endpoint', home.judgments.baseURL);
+        if (options.policy) configManager.set('judgment.policy', options.policy);
         seedProviderMetadataCacheFixture({ configManager, homeDirectory: join(home.root, 'native-host/home'),
           workingDirectory: join(home.root, 'native-host/workspace'), surfaceRoot: 'goodvibes' });
         seedProviderModelListCacheFixture(configManager, 'openai');

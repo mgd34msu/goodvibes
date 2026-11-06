@@ -9,7 +9,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.0.0
+ * Contract product version: 3.1.0
  * Methods: 542 total, 470 REST-routed, 72 ws-only invoke.
  */
 
@@ -12976,6 +12976,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "voice.local.install": {
     "input": {},
     "output": {
+      "operationProvenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "proof": {
+        "proved": false,
+        "stage": "synthesize",
+        "phrase": "sample",
+        "transcript": "sample",
+        "wordOverlap": 0,
+        "comparison": "yes",
+        "operationProvenance": "classic",
+        "semanticAssessment": "not-evaluated",
+        "proofBasis": "native-word-sequence",
+        "error": "sample",
+        "summary": "sample"
+      },
+      "notes": [
+        "sample"
+      ],
       "provisioned": false,
       "platform": "sample",
       "tts": {
@@ -17714,6 +17732,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "state": {}
     },
     "output": {
+      "operationProvenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "readinessAssessment": {
+        "basis": "native-structure-and-owner-approval",
+        "semanticAssessment": "specified"
+      },
       "ok": false,
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
@@ -17847,6 +17871,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -18058,6 +18086,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -18197,6 +18229,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sample"
         ],
         "readiness": "sample",
+        "readinessAssessment": {
+          "basis": "native-structure-and-owner-approval",
+          "semanticAssessment": "specified"
+        },
         "executionApproved": false,
         "createdAt": 0,
         "updatedAt": 0,
@@ -21027,6 +21063,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "occasions.list": {
     "input": {},
     "output": {
+      "provenance": "classic",
+      "subjectAssessment": "not-evaluated",
       "today": "sample",
       "timezone": "sample",
       "occasions": [
@@ -21085,6 +21123,19 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "occasions.pending": {
     "input": {},
     "output": {
+      "provenance": "classic",
+      "semanticAssessment": "not-evaluated",
+      "open": [
+        {
+          "occasionId": "sample",
+          "title": "sample",
+          "person": "sample",
+          "kind": "gift-giving",
+          "proximity": "approaching",
+          "subject": "owner",
+          "acknowledged": false
+        }
+      ],
       "today": "sample",
       "nudge": {
         "id": "sample",
@@ -21285,6 +21336,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "admission": "autonomous"
     },
     "output": {
+      "provenance": "classic",
+      "semanticAssessment": "not-evaluated",
       "ranAt": 0,
       "today": "sample",
       "hold": "sample",
@@ -27737,6 +27790,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -27765,6 +27823,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -27809,6 +27872,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -27836,6 +27904,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -27864,6 +27937,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceId": "sample",
         "sourceRevision": "sample",
         "sessionId": "sample",
+        "classic": {
+          "provenance": "owner",
+          "policy": "Preferred",
+          "reason": "selected"
+        },
         "continuation": {
           "sessionId": "sample",
           "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

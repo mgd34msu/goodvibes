@@ -165,6 +165,7 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
   const unavailableDiagnostics: unknown[] = [];
   const unavailablePrivacy: unknown[] = [];
   let rejectCancellationTimings = false;
+  let unavailable = false;
   // Captured background registry probes intentionally receive no synthetic
   // classification. They stay unavailable; any new semantic request is a failure.
   const expectedNegative = new Set(unavailableModelRoutes.map(stable));
@@ -173,6 +174,7 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
     let body: unknown;
     try { body = await request.json(); } catch { return new Response('invalid JSON', { status: 400 }); }
     allRequests.push(body);
+    if (unavailable) return Response.json({ error: { message: 'Synthetic decision endpoint outage' } }, { status: 503 });
     const diagnostic = diagnosticAnswer(body, options.ownedRoot);
     if (diagnostic) {
       acceptedDiagnostics.push({ kind: diagnostic.kind, body });
@@ -198,6 +200,7 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
     return Response.json({ model: 'jev-1.13.0', answers: reading.answers, usage: { input_tokens: 10, output_tokens: 3 } });
   } });
   return { baseURL: `http://127.0.0.1:${server.port}`, accepted, acceptedDiagnostics, allRequests, rejected, unexpected, unavailableDiagnostics, unavailablePrivacy,
+    setUnavailable(value: boolean) { unavailable = value; },
     expectTextOnlyCompletion(request: string, response: string, product: 'agent' | 'tui' = 'agent') {
       const transcript = [{ role: 'user', content: request }];
       const questions = structuredClone(headlessCompletion.questions);

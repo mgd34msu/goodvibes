@@ -6,7 +6,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
   "product": {
     "id": "goodvibes",
     "surface": "operator",
-    "version": "3.0.0"
+    "version": "3.1.0"
   },
   "auth": {
     "modes": [
@@ -26527,6 +26527,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "skipped-disabled",
                       "skipped-quiet-hours",
                       "skipped-stale",
+                      "skipped-decision-models-disabled",
                       "cancelled",
                       "error"
                     ]
@@ -60730,7 +60731,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "voice.local.install",
         "title": "Install the Managed Local-Voice Runtime",
-        "description": "One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). After this, local TTS works with zero further configuration. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.",
+        "description": "One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.",
         "category": "health",
         "source": "builtin",
         "access": "authenticated",
@@ -60753,6 +60754,91 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "outputSchema": {
           "type": "object",
           "properties": {
+            "operationProvenance": {
+              "type": "string",
+              "enum": [
+                "classic"
+              ]
+            },
+            "semanticAssessment": {
+              "type": "string",
+              "enum": [
+                "not-evaluated"
+              ]
+            },
+            "proof": {
+              "type": "object",
+              "properties": {
+                "proved": {
+                  "type": "boolean"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "synthesize",
+                    "transcribe",
+                    "compare"
+                  ]
+                },
+                "phrase": {
+                  "type": "string"
+                },
+                "transcript": {
+                  "type": "string"
+                },
+                "wordOverlap": {
+                  "type": "number"
+                },
+                "comparison": {
+                  "type": "string",
+                  "enum": [
+                    "yes",
+                    "no",
+                    "uncertain",
+                    "unavailable",
+                    "classic-exact-match",
+                    "classic-mismatch"
+                  ]
+                },
+                "operationProvenance": {
+                  "type": "string",
+                  "enum": [
+                    "classic"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "not-evaluated"
+                  ]
+                },
+                "proofBasis": {
+                  "type": "string",
+                  "enum": [
+                    "native-word-sequence"
+                  ]
+                },
+                "error": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "proved",
+                "stage",
+                "phrase",
+                "summary"
+              ],
+              "additionalProperties": false
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "provisioned": {
               "type": "boolean"
             },
@@ -91370,6 +91456,44 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "outputSchema": {
           "type": "object",
           "properties": {
+            "operationProvenance": {
+              "type": "string",
+              "enum": [
+                "classic"
+              ]
+            },
+            "semanticAssessment": {
+              "type": "string",
+              "enum": [
+                "not-evaluated"
+              ]
+            },
+            "readinessAssessment": {
+              "type": "object",
+              "properties": {
+                "basis": {
+                  "type": "string",
+                  "enum": [
+                    "native-structure-and-owner-approval",
+                    "semantic-and-native"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "specified",
+                    "ambiguous",
+                    "unavailable",
+                    "not-evaluated"
+                  ]
+                }
+              },
+              "required": [
+                "basis",
+                "semanticAssessment"
+              ],
+              "additionalProperties": false
+            },
             "ok": {
               "type": "boolean"
             },
@@ -91967,6 +92091,32 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "readiness": {
                   "type": "string"
+                },
+                "readinessAssessment": {
+                  "type": "object",
+                  "properties": {
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "native-structure-and-owner-approval",
+                        "semantic-and-native"
+                      ]
+                    },
+                    "semanticAssessment": {
+                      "type": "string",
+                      "enum": [
+                        "specified",
+                        "ambiguous",
+                        "unavailable",
+                        "not-evaluated"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "basis",
+                    "semanticAssessment"
+                  ],
+                  "additionalProperties": false
                 },
                 "executionApproved": {
                   "type": "boolean"
@@ -93070,6 +93220,32 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "readiness": {
                       "type": "string"
                     },
+                    "readinessAssessment": {
+                      "type": "object",
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": [
+                            "native-structure-and-owner-approval",
+                            "semantic-and-native"
+                          ]
+                        },
+                        "semanticAssessment": {
+                          "type": "string",
+                          "enum": [
+                            "specified",
+                            "ambiguous",
+                            "unavailable",
+                            "not-evaluated"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "basis",
+                        "semanticAssessment"
+                      ],
+                      "additionalProperties": false
+                    },
                     "executionApproved": {
                       "type": "boolean"
                     },
@@ -93750,6 +93926,32 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "readiness": {
                       "type": "string"
+                    },
+                    "readinessAssessment": {
+                      "type": "object",
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": [
+                            "native-structure-and-owner-approval",
+                            "semantic-and-native"
+                          ]
+                        },
+                        "semanticAssessment": {
+                          "type": "string",
+                          "enum": [
+                            "specified",
+                            "ambiguous",
+                            "unavailable",
+                            "not-evaluated"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "basis",
+                        "semanticAssessment"
+                      ],
+                      "additionalProperties": false
                     },
                     "executionApproved": {
                       "type": "boolean"
@@ -106423,6 +106625,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "outputSchema": {
           "type": "object",
           "properties": {
+            "provenance": {
+              "type": "string",
+              "enum": [
+                "classic"
+              ]
+            },
+            "subjectAssessment": {
+              "type": "string",
+              "enum": [
+                "not-evaluated"
+              ]
+            },
             "today": {
               "type": "string"
             },
@@ -106694,6 +106908,72 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "outputSchema": {
           "type": "object",
           "properties": {
+            "provenance": {
+              "type": "string",
+              "enum": [
+                "classic"
+              ]
+            },
+            "semanticAssessment": {
+              "type": "string",
+              "enum": [
+                "not-evaluated"
+              ]
+            },
+            "open": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "occasionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "person": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "gift-giving",
+                      "remember-only",
+                      "neither"
+                    ]
+                  },
+                  "proximity": {
+                    "type": "string",
+                    "enum": [
+                      "approaching",
+                      "soon",
+                      "imminent"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string",
+                    "enum": [
+                      "owner",
+                      "other",
+                      "unattributed"
+                    ]
+                  },
+                  "acknowledged": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "occasionId",
+                  "title",
+                  "person",
+                  "kind",
+                  "proximity",
+                  "subject",
+                  "acknowledged"
+                ],
+                "additionalProperties": false
+              }
+            },
             "today": {
               "type": "string"
             },
@@ -107650,6 +107930,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             {
               "type": "object",
               "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "classic"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "not-evaluated"
+                  ]
+                },
                 "ranAt": {
                   "type": "number"
                 },
@@ -143990,6 +144282,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -144149,6 +144472,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -144328,6 +144682,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -144699,6 +145084,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -144874,6 +145290,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -145042,6 +145489,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -145201,6 +145679,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -145795,6 +146304,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -145954,6 +146494,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -146133,6 +146704,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -146504,6 +147106,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -146679,6 +147312,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -146847,6 +147511,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -147006,6 +147701,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -147723,6 +148449,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -147882,6 +148639,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -148061,6 +148849,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -148432,6 +149251,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -148607,6 +149457,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -148775,6 +149656,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -148934,6 +149846,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -149524,6 +150467,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "minLength": 1,
                           "maxLength": 200
                         },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
                         "continuation": {
                           "type": "object",
                           "properties": {
@@ -149683,6 +150657,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 200
+                        },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
                         },
                         "continuation": {
                           "type": "object",
@@ -149862,6 +150867,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 200
+                        },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
                         },
                         "continuation": {
                           "type": "object",
@@ -150233,6 +151269,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "minLength": 1,
                           "maxLength": 200
                         },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
                         "continuation": {
                           "type": "object",
                           "properties": {
@@ -150408,6 +151475,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "minLength": 1,
                           "maxLength": 200
                         },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
                         "continuation": {
                           "type": "object",
                           "properties": {
@@ -150576,6 +151674,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "minLength": 1,
                           "maxLength": 200
                         },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
                         "continuation": {
                           "type": "object",
                           "properties": {
@@ -150735,6 +151864,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 200
+                        },
+                        "classic": {
+                          "type": "object",
+                          "properties": {
+                            "provenance": {
+                              "type": "string",
+                              "enum": [
+                                "owner"
+                              ]
+                            },
+                            "policy": {
+                              "type": "string",
+                              "enum": [
+                                "Preferred",
+                                "Classic - Off"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "selected",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provenance",
+                            "policy",
+                            "reason"
+                          ],
+                          "additionalProperties": false
                         },
                         "continuation": {
                           "type": "object",
@@ -151346,6 +152506,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -151505,6 +152696,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -151684,6 +152906,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",
@@ -152055,6 +153308,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -152230,6 +153514,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -152398,6 +153713,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minLength": 1,
                       "maxLength": 200
                     },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    },
                     "continuation": {
                       "type": "object",
                       "properties": {
@@ -152557,6 +153903,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "classic": {
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "owner"
+                          ]
+                        },
+                        "policy": {
+                          "type": "string",
+                          "enum": [
+                            "Preferred",
+                            "Classic - Off"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "unavailable"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provenance",
+                        "policy",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     },
                     "continuation": {
                       "type": "object",

@@ -26732,6 +26732,7 @@ Return the visible receipts of past check-in runs (newest first): each run recor
               "skipped-disabled",
               "skipped-quiet-hours",
               "skipped-stale",
+              "skipped-decision-models-disabled",
               "cancelled",
               "error"
             ]
@@ -61418,7 +61419,7 @@ The host sleep-ownership state: whether the automatic work inhibitor is held (an
 
 #### `voice.local.install`
 
-One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). After this, local TTS works with zero further configuration. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
+One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
 
 - Title: `Install the Managed Local-Voice Runtime`
 - Source: `builtin`
@@ -61446,6 +61447,91 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
 {
   "type": "object",
   "properties": {
+    "operationProvenance": {
+      "type": "string",
+      "enum": [
+        "classic"
+      ]
+    },
+    "semanticAssessment": {
+      "type": "string",
+      "enum": [
+        "not-evaluated"
+      ]
+    },
+    "proof": {
+      "type": "object",
+      "properties": {
+        "proved": {
+          "type": "boolean"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "synthesize",
+            "transcribe",
+            "compare"
+          ]
+        },
+        "phrase": {
+          "type": "string"
+        },
+        "transcript": {
+          "type": "string"
+        },
+        "wordOverlap": {
+          "type": "number"
+        },
+        "comparison": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no",
+            "uncertain",
+            "unavailable",
+            "classic-exact-match",
+            "classic-mismatch"
+          ]
+        },
+        "operationProvenance": {
+          "type": "string",
+          "enum": [
+            "classic"
+          ]
+        },
+        "semanticAssessment": {
+          "type": "string",
+          "enum": [
+            "not-evaluated"
+          ]
+        },
+        "proofBasis": {
+          "type": "string",
+          "enum": [
+            "native-word-sequence"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proved",
+        "stage",
+        "phrase",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "provisioned": {
       "type": "boolean"
     },
@@ -92370,6 +92456,44 @@ Validate planning state and return gaps/next-question hints without mutating sta
 {
   "type": "object",
   "properties": {
+    "operationProvenance": {
+      "type": "string",
+      "enum": [
+        "classic"
+      ]
+    },
+    "semanticAssessment": {
+      "type": "string",
+      "enum": [
+        "not-evaluated"
+      ]
+    },
+    "readinessAssessment": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "type": "string",
+          "enum": [
+            "native-structure-and-owner-approval",
+            "semantic-and-native"
+          ]
+        },
+        "semanticAssessment": {
+          "type": "string",
+          "enum": [
+            "specified",
+            "ambiguous",
+            "unavailable",
+            "not-evaluated"
+          ]
+        }
+      },
+      "required": [
+        "basis",
+        "semanticAssessment"
+      ],
+      "additionalProperties": false
+    },
     "ok": {
       "type": "boolean"
     },
@@ -92967,6 +93091,32 @@ Validate planning state and return gaps/next-question hints without mutating sta
         },
         "readiness": {
           "type": "string"
+        },
+        "readinessAssessment": {
+          "type": "object",
+          "properties": {
+            "basis": {
+              "type": "string",
+              "enum": [
+                "native-structure-and-owner-approval",
+                "semantic-and-native"
+              ]
+            },
+            "semanticAssessment": {
+              "type": "string",
+              "enum": [
+                "specified",
+                "ambiguous",
+                "unavailable",
+                "not-evaluated"
+              ]
+            }
+          },
+          "required": [
+            "basis",
+            "semanticAssessment"
+          ],
+          "additionalProperties": false
         },
         "executionApproved": {
           "type": "boolean"
@@ -94082,6 +94232,32 @@ Return the current project-scoped planning state artifact. The TUI owns the acti
             "readiness": {
               "type": "string"
             },
+            "readinessAssessment": {
+              "type": "object",
+              "properties": {
+                "basis": {
+                  "type": "string",
+                  "enum": [
+                    "native-structure-and-owner-approval",
+                    "semantic-and-native"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "specified",
+                    "ambiguous",
+                    "unavailable",
+                    "not-evaluated"
+                  ]
+                }
+              },
+              "required": [
+                "basis",
+                "semanticAssessment"
+              ],
+              "additionalProperties": false
+            },
             "executionApproved": {
               "type": "boolean"
             },
@@ -94766,6 +94942,32 @@ Persist project-scoped planning state from the TUI interview loop and evaluate r
             },
             "readiness": {
               "type": "string"
+            },
+            "readinessAssessment": {
+              "type": "object",
+              "properties": {
+                "basis": {
+                  "type": "string",
+                  "enum": [
+                    "native-structure-and-owner-approval",
+                    "semantic-and-native"
+                  ]
+                },
+                "semanticAssessment": {
+                  "type": "string",
+                  "enum": [
+                    "specified",
+                    "ambiguous",
+                    "unavailable",
+                    "not-evaluated"
+                  ]
+                }
+              },
+              "required": [
+                "basis",
+                "semanticAssessment"
+              ],
+              "additionalProperties": false
             },
             "executionApproved": {
               "type": "boolean"
@@ -107627,6 +107829,18 @@ Return every occasion declared in the owner profile, with its next occurrence, h
 {
   "type": "object",
   "properties": {
+    "provenance": {
+      "type": "string",
+      "enum": [
+        "classic"
+      ]
+    },
+    "subjectAssessment": {
+      "type": "string",
+      "enum": [
+        "not-evaluated"
+      ]
+    },
     "today": {
       "type": "string"
     },
@@ -107902,6 +108116,72 @@ Return everything unresolved, without delivering anything: the batched nudge, an
 {
   "type": "object",
   "properties": {
+    "provenance": {
+      "type": "string",
+      "enum": [
+        "classic"
+      ]
+    },
+    "semanticAssessment": {
+      "type": "string",
+      "enum": [
+        "not-evaluated"
+      ]
+    },
+    "open": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "occasionId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "person": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "gift-giving",
+              "remember-only",
+              "neither"
+            ]
+          },
+          "proximity": {
+            "type": "string",
+            "enum": [
+              "approaching",
+              "soon",
+              "imminent"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "other",
+              "unattributed"
+            ]
+          },
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "occasionId",
+          "title",
+          "person",
+          "kind",
+          "proximity",
+          "subject",
+          "acknowledged"
+        ],
+        "additionalProperties": false
+      }
+    },
     "today": {
       "type": "string"
     },
@@ -108879,6 +109159,18 @@ Run one pass immediately: reap expired and orphaned state, find the occasions en
     {
       "type": "object",
       "properties": {
+        "provenance": {
+          "type": "string",
+          "enum": [
+            "classic"
+          ]
+        },
+        "semanticAssessment": {
+          "type": "string",
+          "enum": [
+            "not-evaluated"
+          ]
+        },
         "ranAt": {
           "type": "number"
         },
@@ -145960,6 +146252,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -146119,6 +146442,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -146298,6 +146652,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -146669,6 +147054,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -146844,6 +147260,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -147012,6 +147459,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -147171,6 +147649,37 @@ Start the single initial semantic admission of captured conversation text. Repla
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -147765,6 +148274,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -147924,6 +148464,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -148103,6 +148674,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -148474,6 +149076,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -148649,6 +149282,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -148817,6 +149481,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -148976,6 +149671,37 @@ Persist a terminal intake cancellation before work admission. If admission alrea
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -149693,6 +150419,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -149852,6 +150609,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -150031,6 +150819,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -150402,6 +151221,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -150577,6 +151427,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -150745,6 +151626,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -150904,6 +151816,37 @@ Persist exact original conversation text and unsupported-source disclosures on t
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -151494,6 +152437,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "minLength": 1,
                   "maxLength": 200
                 },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
                 "continuation": {
                   "type": "object",
                   "properties": {
@@ -151653,6 +152627,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200
+                },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 },
                 "continuation": {
                   "type": "object",
@@ -151832,6 +152837,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200
+                },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 },
                 "continuation": {
                   "type": "object",
@@ -152203,6 +153239,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "minLength": 1,
                   "maxLength": 200
                 },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
                 "continuation": {
                   "type": "object",
                   "properties": {
@@ -152378,6 +153445,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "minLength": 1,
                   "maxLength": 200
                 },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
                 "continuation": {
                   "type": "object",
                   "properties": {
@@ -152546,6 +153644,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "minLength": 1,
                   "maxLength": 200
                 },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
                 "continuation": {
                   "type": "object",
                   "properties": {
@@ -152705,6 +153834,37 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200
+                },
+                "classic": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "enum": [
+                        "owner"
+                      ]
+                    },
+                    "policy": {
+                      "type": "string",
+                      "enum": [
+                        "Preferred",
+                        "Classic - Off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "selected",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "provenance",
+                    "policy",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 },
                 "continuation": {
                   "type": "object",
@@ -153316,6 +154476,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -153475,6 +154666,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -153654,6 +154876,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",
@@ -154025,6 +155278,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -154200,6 +155484,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -154368,6 +155683,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "minLength": 1,
               "maxLength": 200
             },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
             "continuation": {
               "type": "object",
               "properties": {
@@ -154527,6 +155873,37 @@ Explicitly recover captured conversation admission with a fresh semantic operati
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "classic": {
+              "type": "object",
+              "properties": {
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "owner"
+                  ]
+                },
+                "policy": {
+                  "type": "string",
+                  "enum": [
+                    "Preferred",
+                    "Classic - Off"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "selected",
+                    "unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "provenance",
+                "policy",
+                "reason"
+              ],
+              "additionalProperties": false
             },
             "continuation": {
               "type": "object",

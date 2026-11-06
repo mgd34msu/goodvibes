@@ -1,9 +1,33 @@
+import '@goodvibes-jev/engine/terminal-shell/input-handler-state';
+import {
+  captureFeedContextMutable,
+  projectFeedContextStable,
+  projectFeedContextClosures,
+} from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import { syncFeedContextFromHost } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import { TerminalComposerController } from '@goodvibes-jev/engine/terminal-shell/composer-controller';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import '@goodvibes-jev/engine/terminal-shell/composer-controller';
+import 'node:fs';
+import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
-import { clearModalStackForHandler, cleanupMarkerRegistryForHandler, executeBlockActionForHandler, expandPromptForHandler, findMarkerAtPosForHandler, getImageAttachmentsForHandler, handleBlockCopyForHandler, handleBlockRerunForHandler, handleBlockSaveForHandler, handleBlockToggleForHandler, handleBookmarkForHandler, handleCopyForHandler, handleCtrlCForHandler, handleEscapeForHandler, handlePasteForHandler, modalOpenedForHandler, registerPasteForHandler } from './handler-interactions.ts';
+import {
+  clearModalStackForHandler,
+  cleanupMarkerRegistryForHandler,
+  executeBlockActionForHandler,
+  expandPromptForHandler,
+  findMarkerAtPosForHandler,
+  getImageAttachmentsForHandler,
+  handleBlockCopyForHandler,
+  handleBlockRerunForHandler,
+  handleBlockSaveForHandler,
+  handleBlockToggleForHandler,
+  handleBookmarkForHandler,
+  handleCopyForHandler,
+  handleCtrlCForHandler,
+  handleEscapeForHandler,
+  handlePasteForHandler,
+  modalOpenedForHandler,
+  registerPasteForHandler,
+} from './handler-interactions.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandRegistry, CommandContext } from './command-registry.ts';
@@ -13,8 +37,8 @@ import { ModelPickerModal } from './model-picker.ts';
 import { SelectionModal } from './selection-modal.ts';
 import type { SelectionResult, SelectionAction } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
-import { InputHistory, HistorySearch } from './input-history.ts';
-import type { BlockMeta, ConversationManager } from '../core/conversation';
+import { InputHistory } from './input-history.ts';
+import type { ConversationManager } from '../core/conversation';
 import { ProcessModal } from '../renderer/process-modal.ts';
 import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
@@ -29,11 +53,9 @@ import { parseSlashCommand } from './slash-command-parser.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {
-  IMAGE_EXTENSIONS,
   cleanupMarkerRegistry,
   expandPrompt,
   findMarkerAtPos,
-  formatFileSize,
   handleBlockCopy,
   handleBlockRerun,
   handleBlockSave,
@@ -42,29 +64,12 @@ import {
   handleClipboardPaste,
   handleCopy,
   handleCtrlC,
-  mediaTypeFromExt,
   registerPaste,
 } from './handler-content-actions.ts';
-import {
-  handleIndicatorFocusToken,
-  handleMouseToken,
-  handlePromptKeyToken,
-  handlePromptTextToken,
-} from './handler-feed-routes.ts';
-import {
-  ensureInputCursorVisible,
-  findPathToken,
-  getWrappedPromptInfo,
-  handlePathCompletion,
-  moveCursorVertical,
-  redoPromptState,
-  saveUndoState,
-  undoPromptState,
-  wordWrapLine,
-  type WrappedPromptInfo,
-} from './handler-prompt-buffer.ts';
+import './handler-feed-routes.ts';
+import { saveUndoState } from './handler-prompt-buffer.ts';
 import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
-import { maskConcealedText, type ConcealedInputRequest } from './concealed-input.ts';
+import { type ConcealedInputRequest } from './concealed-input.ts';
 import type { PlainLineInputRequest } from './plain-line-input.ts';
 import {
   beginConcealedInputForHandler,
@@ -72,9 +77,9 @@ import {
   submitLinePromptForHandler,
   cancelLinePromptForHandler,
 } from './handler-line-prompts.ts';
-import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
-import { handleCommandModeToken } from './handler-command-route.ts';
-import { handleGlobalShortcutToken } from './handler-shortcuts.ts';
+import './handler-modal-token-routes.ts';
+import './handler-command-route.ts';
+import './handler-shortcuts.ts';
 import { pasteImageFromClipboard, pasteFromClipboard } from '../utils/clipboard.ts';
 import type { ClipboardPasteSource } from './handler-content-actions.ts';
 import { feedInputTokens } from './handler-feed.ts';
@@ -85,7 +90,6 @@ import type { PasteBurstGuardState } from './paste-flood-guard.ts';
 
 type SelectionModalCallback = (result: SelectionResult | null) => void;
 
-
 /**
  * InputHandler - Owns prompt text, paste registry, and keyboard/mouse handling.
  * Extracted from main.ts and StateManager.
@@ -93,15 +97,14 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
 export class InputHandler {
   public setupPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean } | null = null;
   public prompt = '';
-  public cursorPos = 0;
-  public showExitNotice = false;
+
   /**
    * Active concealed-input request, or null. When set, the composer masks its
    * echo (see getWrappedPromptInfo) and diverts submission to the request's
    * onSubmit (see submitConcealedInput) instead of the normal chat/command
    * path, so the plaintext never reaches input history or the transcript.
    */
-  public concealedInput: ConcealedInputRequest | null = null;
+
   /**
    * Active plain-line request, or null. Same chaining shape as concealedInput
    * but echoed normally, see plain-line-input.ts for why the two are separate
@@ -112,17 +115,13 @@ export class InputHandler {
   /** Max visible rows for the input area. Content beyond this scrolls internally. */
   public static readonly MAX_INPUT_ROWS = 8;
   /** Internal scroll offset for the input area when content exceeds MAX_INPUT_ROWS. */
-  public inputScrollTop = 0;
-  public lastCopyTime = 0;
+
   /** True when the user has entered slash-command mode (prompt starts with '/'). */
-  public commandMode = false;
+
   /** True when the process indicator bar has keyboard focus. */
-  public indicatorFocused = false;
 
   public tokenizer = new InputTokenizer();
-  public pasteRegistry = new Map<string, string>();
-  public nextPasteId = 1;
-  public lastCtrlCTime = 0;
+
   /** Ported from goodvibes-tui, unbracketed-paste-flood guard state, mutated in place. */
   public burstGuard: PasteBurstGuardState = { timestamps: [], suspended: false, hintShown: false };
   /** Long-lived feed context, reused across every feed() call to avoid per-keystroke allocation. */
@@ -144,7 +143,7 @@ export class InputHandler {
   /** The main transcript's scroll, for Esc while scrolled back (handler-modal-stack.ts); null until the shell wires it. */
   public transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null = null;
   /** Screen rows above the transcript, set each frame by the shell: the header, the chips, the gap under them. */
-  public bodyTopRow = 2;
+
   public bookmarkModal: BookmarkModal;
   public blockActionsMenu = new BlockActionsMenu();
   public settingsModal = new SettingsModal();
@@ -155,54 +154,45 @@ export class InputHandler {
    * Modal navigation stack. Each element is the name of an open modal.
    * Used to support back-navigation via Escape.
    */
-  public modalStack: string[] = [];
-  public modalReturnFocus: 'prompt' | 'indicator' = 'prompt';
+
   public sessionPickerModal: SessionPickerModal;
   public profilePickerModal: ProfilePickerModal;
   /** True when the help overlay is visible. */
-  public helpOverlayActive = false;
-  public helpScrollOffset = 0;
-  public shortcutsOverlayActive = false;
-  public shortcutsScrollOffset = 0;
-  public inputHistory: InputHistory | null = null;
+
   public filePicker: FilePickerModal;
-  public historySearch: HistorySearch = new HistorySearch(() => this.inputHistory?.getEntries() ?? []);
+
   public conversationManager: ConversationManager | null = null;
   public selectionCallback: SelectionModalCallback | null = null;
 
   get waitingForOwner(): boolean {
-    return (this.selectionModal.active && this.selectionCallback !== null)
-      || this.concealedInput !== null || this.plainLineInput !== null
-      || this.surfaceModals.waitingForOwner
-      || (this.settingsModal.active && (this.settingsModal.mcpAllowAllConfirmationTarget !== null
-        || this.settingsModal.subscriptionLogoutConfirmationTarget !== null))
-      || (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null)
-      || (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null);
+    return (
+      (this.selectionModal.active && this.selectionCallback !== null) ||
+      this.concealedInput !== null ||
+      this.plainLineInput !== null ||
+      this.surfaceModals.waitingForOwner ||
+      (this.settingsModal.active &&
+        (this.settingsModal.mcpAllowAllConfirmationTarget !== null || this.settingsModal.subscriptionLogoutConfirmationTarget !== null)) ||
+      (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null) ||
+      (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
+    );
   }
   public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** Time of last [COPIED] block feedback, for brief display. */
-  public lastBlockCopyTime = 0;
-  public mouseDownRow = -1;
-  public mouseDownCol = -1;
 
   /** Pasted images: maps marker IDs to base64 image data. */
-  public imageRegistry = new Map<string, { data: string; mediaType: string }>();
-  public nextImageId = 1;
 
   // ── Undo / Redo ────────────────────────────────────────────────────────────
-  public undoStack: Array<{ prompt: string; cursorPos: number }> = [];
-  public redoStack: Array<{ prompt: string; cursorPos: number }> = [];
+
   public static readonly MAX_UNDO = 50;
 
   // ── Path completion (Tab on path-like token) ───────────────────────────────
   /** Current list of path completions cycling on repeated Tab presses. */
-  public pathCompletions: string[] = [];
+
   /** Index into pathCompletions for Tab cycling. */
-  public pathCompletionIndex = -1;
+
   /** The raw prefix that triggered path completion (e.g. 'src/in'). */
-  public pathCompletionPrefix = '';
+
   /** Start offset in prompt where the path token begins. */
-  public pathCompletionStart = 0;
 
   constructor(
     public requestRender: () => void,
@@ -212,13 +202,7 @@ export class InputHandler {
     public getHistory: () => InfiniteBuffer,
     public scroll: (delta: number) => void,
     public exitApp: () => void,
-    public readonly uiServices: Pick<UiRuntimeServices,
-      'environment'
-      | 'platform'
-      | 'providers'
-      | 'sessions'
-      | 'shell'
-    >,
+    public readonly uiServices: Pick<UiRuntimeServices, 'environment' | 'platform' | 'providers' | 'sessions' | 'shell'>,
   ) {
     super(InputHandler.MAX_INPUT_ROWS);
     this.filePicker = new FilePickerModal(uiServices.environment.shellPaths);
@@ -245,87 +229,33 @@ export class InputHandler {
    */
   public initFeedContext(): void {
     this.feedContext = buildInitialFeedContext(
+      captureFeedContextMutable(this),
       {
-        prompt: this.prompt, cursorPos: this.cursorPos, inputScrollTop: this.inputScrollTop, commandMode: this.commandMode,
-        indicatorFocused: this.indicatorFocused,
-        helpOverlayActive: this.helpOverlayActive, helpScrollOffset: this.helpScrollOffset,
-        shortcutsOverlayActive: this.shortcutsOverlayActive, shortcutsScrollOffset: this.shortcutsScrollOffset,
-        nextPasteId: this.nextPasteId, nextImageId: this.nextImageId,
-        mouseDownRow: this.mouseDownRow, mouseDownCol: this.mouseDownCol,
-        contentWidth: this.contentWidth,
-        selectionCallback: this.selectionCallback,
-      },
-      {
-        selection: this.selection,
-        pasteRegistry: this.pasteRegistry,
-        imageRegistry: this.imageRegistry,
+        ...projectFeedContextStable(this),
         burstGuard: this.burstGuard,
-        focusTracker: this.uiServices.platform.focusTracker,
-        projectRoot: this.uiServices.environment.shellPaths.workingDirectory,
-        selectionModal: this.selectionModal,
-        bookmarkModal: this.bookmarkModal,
-        settingsModal: this.settingsModal,
-        mcpWorkspace: this.mcpWorkspace,
         agentWorkspace: this.agentWorkspace,
-        sessionPickerModal: this.sessionPickerModal,
-        profilePickerModal: this.profilePickerModal,
-        historySearch: this.historySearch,
-        commandRegistry: this.commandRegistry,
-        commandContext: this.commandContext,
-        autocomplete: this.autocomplete,
-        filePicker: this.filePicker,
-        modelPicker: this.modelPicker,
         processModal: this.processModal,
         liveTailModal: this.liveTailModal,
-        contextInspectorModal: this.contextInspectorModal,
-        overlayFilters: this.overlayFilters,
-        surfaceModals: this.surfaceModals,
-        blockActionsMenu: this.blockActionsMenu,
-        searchManager: this.searchManager,
-        modalStack: this.modalStack,
-        inputHistory: this.inputHistory,
-        conversationManager: this.conversationManager,
-        keybindingsManager: this.uiServices.shell.keybindingsManager,
-        getHistory: this.getHistory,
-        getViewportHeight: this.getViewportHeight,
-        getScrollTop: this.getScrollTop,
-        scroll: this.scroll,
-        exitApp: this.exitApp,
       },
       {
-        modalOpened: (name: string) => this.modalOpened(name),
-        getSessionView: () => this.sessionView,
-        // Escape cancels a pending concealed prompt FIRST. Falling through to
-        // the normal modal-stack escape would leave the request dangling, its
-        // onCancel never fires, the caller's chained flow never resumes or
-        // stops, and the composer silently stays in masked mode.
-        handleEscape: () => { if (!this.cancelConcealedInput()) this.handleEscape(); this.syncFeedContextMutableFields(); },
-        submitConcealedInput: (value: string) => this.submitConcealedInput(value),
-        handleCopy: () => this.handleCopy(),
-        handleCtrlC: () => { this.handleCtrlC(); this.syncFeedContextMutableFields(); },
-        handleBlockCopy: () => this.handleBlockCopy(),
-        handleBookmark: () => this.handleBookmark(),
-        handleBlockSave: () => this.handleBlockSave(),
-        // These three edit this.prompt, so they report back where it landed;
-        // the shortcut route copies that into its own state, which is what the
-        // feed loop reads when the token is handled.
-        handleUndo: () => { this.handleUndo(); this.syncFeedContextMutableFields(); return this.promptEdit(); },
-        handleRedo: () => { this.handleRedo(); this.syncFeedContextMutableFields(); return this.promptEdit(); },
-        handlePaste: () => { this.handlePaste(); this.syncFeedContextMutableFields(); return this.promptEdit(); },
-        saveUndoState: () => this.saveUndoState(),
-        ensureInputCursorVisible: (contentWidth?: number) => this.ensureInputCursorVisible(contentWidth),
-        registerPaste: (content: string) => this.registerPaste(content),
-        executeBlockAction: (id: string) => this.executeBlockAction(id),
+        ...projectFeedContextClosures(this),
+        handleUndo: () => {
+          this.handleUndo();
+          this.syncFeedContextMutableFields();
+          return this.promptEdit();
+        },
+        handleRedo: () => {
+          this.handleRedo();
+          this.syncFeedContextMutableFields();
+          return this.promptEdit();
+        },
+        handlePaste: () => {
+          this.handlePaste();
+          this.syncFeedContextMutableFields();
+          return this.promptEdit();
+        },
         cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => this.cycleAgentWorkspaceCategory(direction),
         dismissAgentWorkspace: () => this.dismissAgentWorkspace(),
-        getWrappedPromptInfo: (contentWidth: number) => this.getWrappedPromptInfo(contentWidth),
-        moveCursorVertical: (direction: -1 | 1) => this.moveCursorVertical(direction),
-        handlePathCompletion: () => this.handlePathCompletion(),
-        bodyTopRow: () => this.bodyTopRow,
-        handleBlockToggle: () => this.handleBlockToggle(),
-        findMarkerAtPos: (pos: number) => this.findMarkerAtPos(pos),
-        cleanupMarkerRegistry: (text: string) => this.cleanupMarkerRegistry(text),
-        expandPrompt: (text: string) => this.expandPrompt(text),
         openModelPickerWithTarget: (target: ModelPickerTarget) => this.openModelPickerWithTarget(target),
         openProviderModelPickerWithTarget: (target: ModelPickerTarget) => this.openProviderModelPickerWithTarget(target),
         onModelPickerCommit: () => this.handleModelPickerCommit(),
@@ -339,10 +269,14 @@ export class InputHandler {
   }
 
   /** Sync mutable handler fields back into feedContext after in-feed mutations. */
-  public syncFeedContextMutableFields(): void { syncFeedContextFromHost(this, this.feedContext); }
+  public syncFeedContextMutableFields(): void {
+    syncFeedContextFromHost(this, this.feedContext);
+  }
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
-  public setHistory(history: InputHistory): void { this.inputHistory = history; }
+  public setHistory(history: InputHistory): void {
+    this.inputHistory = history;
+  }
 
   /** Wire in the slash command registry and context. Must be called before commands work. */
   public setCommandRegistry(registry: CommandRegistry, context: CommandContext): void {
@@ -352,7 +286,9 @@ export class InputHandler {
   }
 
   /** Wire in the conversation manager for block copy/collapse. */
-  public setConversationManager(cm: ConversationManager): void { this.conversationManager = cm; }
+  public setConversationManager(cm: ConversationManager): void {
+    this.conversationManager = cm;
+  }
 
   /**
    * openSelection - Open the generic selection modal with a callback.
@@ -361,12 +297,14 @@ export class InputHandler {
   public openSelection(
     title: string,
     items: import('./selection-modal.ts').SelectionItem[],
-    opts: {
-      preSelectId?: string;
-      allowSearch?: boolean;
-      customActions?: Map<string, SelectionAction>;
-      onHighlight?: (item: import('./selection-modal.ts').SelectionItem | null) => void;
-    } | undefined,
+    opts:
+      | {
+          preSelectId?: string;
+          allowSearch?: boolean;
+          customActions?: Map<string, SelectionAction>;
+          onHighlight?: (item: import('./selection-modal.ts').SelectionItem | null) => void;
+        }
+      | undefined,
     callback: SelectionModalCallback,
   ): void {
     this.modalOpened('selection');
@@ -376,19 +314,45 @@ export class InputHandler {
     this.requestRender();
   }
 
-  public registerPaste(content: string): string { return registerPasteForHandler(this, content); }
-  public expandPrompt(text: string) { return expandPromptForHandler(this, text); }
-  public getImageAttachments(): Map<string, { data: string; mediaType: string }> { return getImageAttachmentsForHandler(this); }
-  public cleanupMarkerRegistry(markerText: string): void { cleanupMarkerRegistryForHandler(this, markerText); }
-  public findMarkerAtPos(pos: number): { start: number; end: number } | null { return findMarkerAtPosForHandler(this, pos); }
-  public handleCopy(): void { handleCopyForHandler(this); }
-  public handleBlockCopy(): void { handleBlockCopyForHandler(this); }
-  public handleBookmark(): void { handleBookmarkForHandler(this); }
-  public handleBlockSave(): void { handleBlockSaveForHandler(this); }
-  public executeBlockAction(actionId: string): void { executeBlockActionForHandler(this, actionId); }
-  public handleBlockRerun(): void { handleBlockRerunForHandler(this); }
-  public handleBlockToggle(): void { handleBlockToggleForHandler(this); }
-  public handleCtrlC(): void { handleCtrlCForHandler(this); }
+  public registerPaste(content: string): string {
+    return registerPasteForHandler(this, content);
+  }
+  public expandPrompt(text: string) {
+    return expandPromptForHandler(this, text);
+  }
+  public getImageAttachments(): Map<string, { data: string; mediaType: string }> {
+    return getImageAttachmentsForHandler(this);
+  }
+  public cleanupMarkerRegistry(markerText: string): void {
+    cleanupMarkerRegistryForHandler(this, markerText);
+  }
+  public findMarkerAtPos(pos: number): { start: number; end: number } | null {
+    return findMarkerAtPosForHandler(this, pos);
+  }
+  public handleCopy(): void {
+    handleCopyForHandler(this);
+  }
+  public handleBlockCopy(): void {
+    handleBlockCopyForHandler(this);
+  }
+  public handleBookmark(): void {
+    handleBookmarkForHandler(this);
+  }
+  public handleBlockSave(): void {
+    handleBlockSaveForHandler(this);
+  }
+  public executeBlockAction(actionId: string): void {
+    executeBlockActionForHandler(this, actionId);
+  }
+  public handleBlockRerun(): void {
+    handleBlockRerunForHandler(this);
+  }
+  public handleBlockToggle(): void {
+    handleBlockToggleForHandler(this);
+  }
+  public handleCtrlC(): void {
+    handleCtrlCForHandler(this);
+  }
   public modalOpened(name: string): void {
     this.setupPairing?.cancelForTakeover();
     const keepAgentWorkspaceUnderlay = name === 'modelPicker' || name === 'settings';
@@ -397,22 +361,36 @@ export class InputHandler {
     }
     modalOpenedForHandler(this, name);
   }
-  public clearModalStack(): void { clearModalStackForHandler(this); }
-  public handleEscape(): void { handleEscapeForHandler(this); }
+  public clearModalStack(): void {
+    clearModalStackForHandler(this);
+  }
+  public handleEscape(): void {
+    handleEscapeForHandler(this);
+  }
 
   // ── Composer line prompts (see handler-line-prompts.ts) ─────────────────
 
   /** Begin one line of masked composer entry. */
-  public beginConcealedInput(request: ConcealedInputRequest): void { this.setupPairing?.cancelForTakeover(); beginConcealedInputForHandler(this, request); }
+  public beginConcealedInput(request: ConcealedInputRequest): void {
+    this.setupPairing?.cancelForTakeover();
+    beginConcealedInputForHandler(this, request);
+  }
 
   /** Begin one line of ordinary, echoed composer entry. */
-  public beginPlainInput(request: PlainLineInputRequest): void { this.setupPairing?.cancelForTakeover(); beginPlainInputForHandler(this, request); }
+  public beginPlainInput(request: PlainLineInputRequest): void {
+    this.setupPairing?.cancelForTakeover();
+    beginPlainInputForHandler(this, request);
+  }
 
   /** Deliver an Enter to a pending line prompt. True means it was consumed. */
-  public submitConcealedInput(value: string): boolean { return submitLinePromptForHandler(this, value); }
+  public submitConcealedInput(value: string): boolean {
+    return submitLinePromptForHandler(this, value);
+  }
 
   /** Cancel a pending line prompt of either kind (Escape). */
-  public cancelConcealedInput(): boolean { return cancelLinePromptForHandler(this); }
+  public cancelConcealedInput(): boolean {
+    return cancelLinePromptForHandler(this);
+  }
 
   public openModelPickerWithTarget(target: ModelPickerTarget): boolean {
     const openModelPicker = this.commandContext?.openModelPicker;
@@ -506,26 +484,29 @@ export class InputHandler {
         const omitted = capturedLines.length - lines.length;
         return omitted > 0 ? `… (${omitted} line(s) truncated)\n${joined}` : joined || '(no output)';
       };
-      void context.executeCommand(name, [...args]).then(() => {
-        context.print = originalPrint;
-        this.agentWorkspace.lastActionResult = {
-          kind: 'dispatched',
-          title: `Result: ${command}`,
-          detail: buildCapturedDetail(),
-          command,
-          safety: 'safe',
-        };
-        this.requestRender();
-      }).catch((error: unknown) => {
-        context.print = originalPrint;
-        this.agentWorkspace.lastActionResult = {
-          kind: 'error',
-          title: `${command} failed`,
-          detail: error instanceof Error ? error.message : String(error),
-          command,
-        };
-        this.requestRender();
-      });
+      void context
+        .executeCommand(name, [...args])
+        .then(() => {
+          context.print = originalPrint;
+          this.agentWorkspace.lastActionResult = {
+            kind: 'dispatched',
+            title: `Result: ${command}`,
+            detail: buildCapturedDetail(),
+            command,
+            safety: 'safe',
+          };
+          this.requestRender();
+        })
+        .catch((error: unknown) => {
+          context.print = originalPrint;
+          this.agentWorkspace.lastActionResult = {
+            kind: 'error',
+            title: `${command} failed`,
+            detail: error instanceof Error ? error.message : String(error),
+            command,
+          };
+          this.requestRender();
+        });
       return;
     }
     // compose (default): close workspace then execute
@@ -542,8 +523,9 @@ export class InputHandler {
     context.submitInput?.(prompt);
     this.requestRender();
   }
-  public handleModelPickerCommit(): boolean { return false; }
-
+  public handleModelPickerCommit(): boolean {
+    return false;
+  }
 
   /**
    * feed - Process raw stdin data through the tokenizer.
@@ -591,7 +573,7 @@ export class InputHandler {
       this.syncFeedSelectionCallback = (callback) => {
         context.selectionCallback = callback;
       };
-      context.handleSetupPairingToken = token => this.setupPairing?.handleToken(token) ?? false;
+      context.handleSetupPairingToken = (token) => this.setupPairing?.handleToken(token) ?? false;
       feedInputTokens(context, this.tokenizer.feed(data));
       this.prompt = context.prompt;
       this.cursorPos = context.cursorPos;
@@ -633,10 +615,8 @@ export class InputHandler {
   public clipboardSource: ClipboardPasteSource = { pasteImageFromClipboard, pasteFromClipboard };
 
   /** Content width for wrapping, set by main.ts via setContentWidth(). */
-  public contentWidth = 76;
 
   /** Set the content width used for wrapping calculations. Call from main.ts. */
-
 
   /**
    * Move cursor up or down by one WRAPPED line.
@@ -644,24 +624,20 @@ export class InputHandler {
    * Returns true if the cursor moved, false if at boundary.
    */
 
-
   /**
    * Ensure the cursor's wrapped line is visible within the input scroll window.
    */
-
 
   /**
    * Get the number of visible prompt lines (capped at MAX_INPUT_ROWS),
    * accounting for word-wrapping within the content width.
    */
 
-
   /**
    * Word-wrap the prompt and compute cursor display coordinates.
    * Returns wrapped lines, the cursor's position in wrapped coordinates,
    * and the visible slice respecting inputScrollTop.
    */
-
 
   // ── Undo / Redo methods ─────────────────────────────────────────────────
 
@@ -677,11 +653,9 @@ export class InputHandler {
    * handleUndo - Ctrl+Z: pop from undo stack, push current to redo stack.
    */
 
-
   /**
    * handleRedo - Ctrl+Shift+Z: pop from redo stack, push current to undo stack.
    */
-
 
   // ── Path completion methods ─────────────────────────────────────────────
 
@@ -698,9 +672,6 @@ export class InputHandler {
    * Repeated Tab cycles through matches.
    * Returns true if path completion was performed.
    */
-
-
-
 
   public cycleAgentWorkspaceCategory(direction: 'next' | 'prev'): void {
     const context = this.commandContext;
@@ -724,5 +695,4 @@ export class InputHandler {
    * Word-wrap a single line to fit within maxW columns.
    * Breaks at spaces; words wider than maxW are force-broken.
    */
-
 }

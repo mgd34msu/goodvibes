@@ -930,7 +930,7 @@
       "path": "input/handler.ts",
       "baselineTuiLines": 776,
       "baselineSimilarity": 0.6944,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "setContentWidth",
         "moveCursorVertical",
@@ -944,7 +944,8 @@
         "wordWrapLine",
         "TerminalComposerController",
         "syncFeedContextFromHost"
-      ]
+      ],
+      "notes": "Platform owns composer operations, per-instance common input state, feed mutable/stable snapshots and live handler-method closures, content/clipboard/escape/key routing and modal helpers. Product classes compose actual modal types and keep TUI pairing-takeover draft revision, onboarding/footers/undo coalescing versus Agent plain-line/workspace/process adapters and distinct undo caps."
     },
     {
       "path": "input/input-history.ts",

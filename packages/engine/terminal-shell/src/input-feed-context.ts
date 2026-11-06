@@ -105,7 +105,11 @@ export function syncFeedContextMutableFields(fields: FeedContextMutableInit, ctx
 
 /** Capture all mutable slots before writing any target slot; host setters cannot interleave a new snapshot. */
 export function syncFeedContextFromHost(host: FeedContextMutableInit, target: FeedContextMutableInit): void {
-  const snapshot: FeedContextMutableInit = {
+  syncFeedContextMutableFields(captureFeedContextMutable(host), target);
+}
+
+export function captureFeedContextMutable(host: FeedContextMutableInit): FeedContextMutableInit {
+  return {
     prompt: host.prompt,
     cursorPos: host.cursorPos,
     inputScrollTop: host.inputScrollTop,
@@ -122,5 +126,105 @@ export function syncFeedContextFromHost(host: FeedContextMutableInit, target: Fe
     mouseDownCol: host.mouseDownCol,
     contentWidth: host.contentWidth,
   };
-  syncFeedContextMutableFields(snapshot, target);
+}
+
+const STABLE_HOST_KEYS = [
+  'selection',
+  'pasteRegistry',
+  'imageRegistry',
+  'selectionModal',
+  'bookmarkModal',
+  'settingsModal',
+  'mcpWorkspace',
+  'sessionPickerModal',
+  'profilePickerModal',
+  'historySearch',
+  'commandRegistry',
+  'commandContext',
+  'autocomplete',
+  'filePicker',
+  'modelPicker',
+  'contextInspectorModal',
+  'overlayFilters',
+  'blockActionsMenu',
+  'surfaceModals',
+  'searchManager',
+  'modalStack',
+  'inputHistory',
+  'conversationManager',
+  'getHistory',
+  'getViewportHeight',
+  'getScrollTop',
+  'scroll',
+  'exitApp',
+] as const;
+export function projectFeedContextStable<
+  Host extends { readonly [Key in (typeof STABLE_HOST_KEYS)[number]]: unknown } & {
+    readonly uiServices: {
+      readonly environment: { readonly shellPaths: { readonly workingDirectory: string } };
+      readonly shell: { readonly keybindingsManager: unknown };
+      readonly platform: { readonly focusTracker: unknown };
+    };
+  },
+>(host: Host) {
+  const fields = {} as Pick<Host, (typeof STABLE_HOST_KEYS)[number]>;
+  for (const key of STABLE_HOST_KEYS) fields[key] = host[key];
+  return {
+    ...fields,
+    projectRoot: host.uiServices.environment.shellPaths.workingDirectory,
+    keybindingsManager: host.uiServices.shell.keybindingsManager as Host['uiServices']['shell']['keybindingsManager'],
+    focusTracker: host.uiServices.platform.focusTracker as Host['uiServices']['platform']['focusTracker'],
+  };
+}
+
+const FEED_FORWARD_KEYS = [
+  'modalOpened',
+  'submitConcealedInput',
+  'handleCopy',
+  'handleBlockCopy',
+  'handleBookmark',
+  'handleBlockSave',
+  'saveUndoState',
+  'ensureInputCursorVisible',
+  'registerPaste',
+  'executeBlockAction',
+  'getWrappedPromptInfo',
+  'moveCursorVertical',
+  'handlePathCompletion',
+  'handleBlockToggle',
+  'findMarkerAtPos',
+  'cleanupMarkerRegistry',
+  'expandPrompt',
+] as const;
+/** Resolve methods at invocation time and preserve the handler as their receiver. */
+export function projectFeedContextClosures<
+  Host extends { readonly [Key in (typeof FEED_FORWARD_KEYS)[number]]: (...args: never[]) => unknown } & {
+    readonly sessionView: unknown;
+    readonly bodyTopRow: number;
+    cancelConcealedInput(): boolean;
+    handleEscape(): void;
+    handleCtrlC(): void;
+    syncFeedContextMutableFields(): void;
+  },
+>(host: Host) {
+  const forwards = {} as Pick<Host, (typeof FEED_FORWARD_KEYS)[number]>;
+  const bind = <Key extends (typeof FEED_FORWARD_KEYS)[number]>(key: Key): Host[Key] =>
+    ((...args: Parameters<Host[Key]>) => {
+      const result: unknown = Reflect.apply(host[key], host, args);
+      return result as ReturnType<Host[Key]>;
+    }) as Host[Key];
+  for (const key of FEED_FORWARD_KEYS) forwards[key] = bind(key);
+  return {
+    ...forwards,
+    getSessionView: () => host.sessionView as Host['sessionView'],
+    handleEscape: () => {
+      if (!host.cancelConcealedInput()) host.handleEscape();
+      host.syncFeedContextMutableFields();
+    },
+    handleCtrlC: () => {
+      host.handleCtrlC();
+      host.syncFeedContextMutableFields();
+    },
+    bodyTopRow: () => host.bodyTopRow,
+  };
 }

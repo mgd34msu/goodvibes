@@ -2903,6 +2903,11 @@
       "bun": "./terminal-shell/src/session-content-commands.ts",
       "types": "./terminal-shell/dist/session-content-commands.d.ts",
       "import": "./terminal-shell/dist/session-content-commands.js"
+    },
+    "./terminal-shell/input-handler-state": {
+      "bun": "./terminal-shell/src/input-handler-state.ts",
+      "types": "./terminal-shell/dist/input-handler-state.d.ts",
+      "import": "./terminal-shell/dist/input-handler-state.js"
     }
   },
   "publishConfig": {

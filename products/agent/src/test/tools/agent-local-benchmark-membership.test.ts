@@ -1,3 +1,6 @@
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -420,4 +423,63 @@ test.each(['store', 'registry', 'store-owner', 'store-list', 'store-read', 'regi
     if (originalGetDescriptor) Object.defineProperty(routingRegistry, 'get', originalGetDescriptor);
     else Reflect.deleteProperty(routingRegistry, 'get');
   }
+});
+
+test('Classic benchmark history preserves explicit native latency and source links without inferring unmarked membership or stack names', async () => {
+  const f = await fixture();
+  const native = await comparison(f.store, 'Native declared benchmark.', { benchmarkKind: 'local-model-route' });
+  const unmarked = await comparison(f.store, 'This prose mentions a local benchmark.');
+  const linked = await judgment(f.store, 'Saved human preference.', { sourceArtifactId: native.id, winnerModel: 'opaque-route-containing-ollama' });
+  const privacy = researchScreeningFixture(); let asks = 0, loads = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('must not ask'); } });
+  const context: BenchmarkArtifactContext = { platform: { artifactStore: {
+    list: limit => f.store.list(limit), async readContent(id) { loads++; return f.store.readContent(id); },
+  } } };
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const snapshot = await readLocalModelBenchmarkSnapshot(context, { sourceOwner: privacy.owner });
+    expect(snapshot).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated',
+      comparisons: [expect.objectContaining({ id: native.id })], judgments: [expect.objectContaining({ id: linked.id })],
+      membership: [expect.objectContaining({ artifactId: unmarked.id, outcome: 'not-evaluated', verdict: 'unknown', provenance: 'classic' })],
+      stacks: [{ artifactId: linked.id, stack: null }],
+    });
+    const history = localModelBenchmarkHistoryFrom(snapshot, true);
+    expect(history).toMatchObject({ status: 'history-found', provenance: 'classic' });
+    expect(history.evidence.comparisonCount).toBe(1);
+    expect(localBenchmarkRouteLatencyMapFor(snapshot).get('synthetic:route')?.latencyMs).toBe(127);
+    expect(history.interpretationNotice).toContain('Unmarked membership');
+    expect(asks).toBe(0); expect(loads).toBe(0); expect(privacy.calls).toEqual([]);
+  });
+});
+
+test('Classic unmarked benchmark candidates produce unassessed history rather than a false absent-history claim', async () => {
+  const f = await fixture(); await comparison(f.store, 'Unmarked stored comparison.');
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const history = await readLocalModelBenchmarkHistory(f.context, true, { sourceOwner: ordinaryResearchOwner() });
+    expect(history).toMatchObject({ status: 'unassessed-history', provenance: 'classic', count: 0 });
+    expect(history.evidence.summary).toContain('unmarked artifact(s) were not interpreted');
+  });
+});
+
+test('Preferred benchmark exhaustion retains a genuine negative membership without crediting or replaying either artifact', async () => {
+  const f = await fixture(); await comparison(f.store, 'First unmarked comparison.'); await comparison(f.store, 'Second unmarked comparison.');
+  let asks = 0; const base = fakePort(() => noulAnswer(0.001));
+  installJudgmentPort({ ...base.port, async ask(request) { asks++; if (asks === 2) throw new JudgmentError('unavailable', 'fixture exhausted'); return base.port.ask(request); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const snapshot = await readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() });
+    expect(snapshot.provenance).toBe('classic'); expect(snapshot.semanticAssessment).toBe('partial');
+    expect(snapshot.comparisons).toEqual([]);
+    expect(snapshot.membership.filter(row => row.outcome === 'act' && row.verdict === 'no')).toHaveLength(1);
+    expect(snapshot.membership.filter(row => row.outcome === 'not-evaluated')).toHaveLength(1);
+    expect(asks).toBe(2);
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`benchmark ${kind} cannot activate Preferred`, async () => {
+  const f = await fixture(); await comparison(f.store, 'Unmarked comparison.');
+  installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await expect(readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
+    expect(decisionModelPolicyState().operation).toBe('decision');
+  });
 });

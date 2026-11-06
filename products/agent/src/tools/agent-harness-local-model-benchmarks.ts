@@ -1,3 +1,5 @@
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { declaredClassicModelStack } from '@goodvibes-jev/engine/sdk/platform/routing';
 import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -210,13 +212,16 @@ export function localBenchmarkEvidence(
 }
 
 export interface LocalBenchmarkMembership {
+  readonly provenance?: 'classic';
   readonly artifactId: string;
-  readonly outcome: 'act' | 'hold';
+  readonly outcome: 'act' | 'hold' | 'not-evaluated';
   readonly verdict: 'yes' | 'no' | 'unknown';
   readonly decisionId?: string | undefined;
   readonly reason?: string | undefined;
 }
 export interface LocalModelBenchmarkSnapshot {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly storeAvailable: boolean;
   readonly comparisons: readonly ArtifactDescriptor[];
   readonly judgments: readonly ArtifactDescriptor[];
@@ -235,13 +240,17 @@ interface CompleteBenchmarkArtifact {
 /** Startup snapshots credit native typed declarations and exact links only. */
 export function localModelBenchmarkSnapshot(context: BenchmarkArtifactContext): LocalModelBenchmarkSnapshot {
   const store = context.platform.artifactStore ?? null;
-  if (!store?.list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [] };
+  if (!store?.list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [],
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
+  };
   const allArtifacts = store.list(100);
   const comparisons = allArtifacts.filter(isLocalModelBenchmarkArtifact);
   const ids = new Set(comparisons.map(artifact => artifact.id));
   const judgments = allArtifacts.filter(artifact => isModelCompareJudgmentArtifact(artifact)
     && ids.has(readString(artifact.metadata.sourceArtifactId)));
-  return { storeAvailable: true, comparisons, judgments, stacks: [], membership: [] };
+  return { storeAvailable: true, comparisons, judgments, stacks: [], membership: [],
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
+  };
 }
 
 export function localBenchmarkRouteLatencyMapFor(snapshot: LocalModelBenchmarkSnapshot): ReadonlyMap<string, LocalModelBenchmarkRouteLatency> {
@@ -250,6 +259,7 @@ export function localBenchmarkRouteLatencyMapFor(snapshot: LocalModelBenchmarkSn
 
 export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnapshot, includeParameters: boolean): LocalModelBenchmarkHistory {
   if (!snapshot.storeAvailable) return {
+    ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment } : {}),
     status: 'unavailable', count: 0, reason: 'Artifact history is unavailable in this runtime.',
     saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" confirm:true explicitUserRequest:"..."',
     evidence: localBenchmarkEvidence([], [], false),
@@ -257,13 +267,20 @@ export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnap
   const artifacts = snapshot.comparisons.slice(0, includeParameters ? 10 : 3);
   const judgments = snapshot.judgments.slice(0, includeParameters ? 10 : 3);
   const stacks = new Map(snapshot.stacks.map(entry => [entry.artifactId, entry.stack]));
+  const unknown = snapshot.membership.filter(entry => entry.outcome === 'not-evaluated').length;
   const evidence = localBenchmarkEvidence(artifacts, judgments, true, stacks);
   return {
-    status: artifacts.length > 0 ? 'history-found' : 'no-history', count: artifacts.length,
+    ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment,
+      interpretationNotice: 'Classic credits exact benchmark tags and source links. Unmarked membership and undeclared model stacks are not interpreted.' } : {}),
+    status: artifacts.length > 0 ? 'history-found' : unknown ? 'unassessed-history' : 'no-history', count: artifacts.length,
     artifacts: artifacts.map(describeLocalBenchmarkArtifact),
     judgments: judgments.map(artifact => describeLocalBenchmarkJudgment(artifact, stacks.get(artifact.id) ?? null)),
-    evidence, membership: snapshot.membership,
-    nextAction: artifacts.length > 0
+    evidence: unknown ? { ...evidence, summary: (artifacts.length ? evidence.summary + ' ' : 'No benchmark membership was established from the native tags or links. ')
+      + `${unknown} unmarked artifact(s) were not interpreted during Classic operation.` } : evidence,
+    membership: snapshot.membership,
+    nextAction: unknown > 0 && artifacts.length === 0
+      ? 'Inspect the saved unmarked artifacts or declare their benchmark kind before crediting them as local benchmark evidence.'
+      : artifacts.length > 0
       ? evidence.status === 'reviewed-winner'
         ? 'Use the revealed saved judgment as evidence only; apply/update still needs a separate confirmed user request.'
         : `Review saved local benchmark ${artifacts[0]!.id}, then save a revealed judgment before recommending any default-model change.`
@@ -286,54 +303,60 @@ function benchmarkReadingSource(source: CompleteBenchmarkArtifact) {
 async function readBenchmarkMembership(source: { readonly artifact: ReturnType<typeof benchmarkReadingSource> }, options: ModelReadingOptions): Promise<LocalBenchmarkMembership> {
   localBenchmarkPromptPolicy.assertCurrent();
   return withModelReadingSource(source, options, async (state, scoped) => {
-    assertProjectionCurrent(scoped.assertCurrent);
-    const assertRegistry = captureCatalogMethods(routingRegistry, ['get']);
-    const getDecision = routingRegistry.get; assertRegistry();
-    if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('unavailable');
-    const assertDefinitionSlots = captureCatalogMethods(localBenchmarkPrompt,
-      ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtures', 'fixtureCount', 'checkFixtures', 'run']);
-    const definition = { name: localBenchmarkPrompt.name, version: localBenchmarkPrompt.version, description: localBenchmarkPrompt.description,
-      accuracyFloor: localBenchmarkPrompt.accuracyFloor, model: localBenchmarkPrompt.model, items: localBenchmarkPrompt.items, fixtures: localBenchmarkPrompt.fixtures };
-    const capturedDefinition = captureModelReadingInput(definition);
-    const installation = captureJudgmentPort(localBenchmarkPrompt.name, { signal: scoped.signal, prepareResultCapture: prepareJudgmentResult });
-    let assertInstallation = installation.assertCurrent;
-    const assertBackendBindings = () => {
-      localBenchmarkPromptPolicy.assertCurrent();
-      assertRegistry(); assertDefinitionSlots(); assertModelReadingInputCurrent(definition, JSON.stringify(capturedDefinition)); assertInstallation();
-    };
-    const assertBackend = () => {
-      assertBackendBindings();
-      if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('held');
-      assertBackendBindings();
-    };
-    scoped.retainCurrent?.(assertBackend);
-    const assertCurrent = () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); assertBackend(); };
-    const port = installation.port, recorder = port.recorder;
-    const guardedPort: JudgmentPort = { model: port.model, ...(recorder ? { recorder: {
-      recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertCurrent(); recorder.recordReadings(...args); assertCurrent(); },
-      recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertCurrent(); recorder.recordAction(...args); assertCurrent(); },
-    } } : {}), ask: async request => {
-      assertCurrent();
-      const result = await port.ask({ ...request,
-        beforeAttempt: () => { assertProjectionCurrent(request.beforeAttempt); assertCurrent(); },
-        assertLogCurrent: () => { assertProjectionCurrent(request.assertLogCurrent); assertCurrent(); },
-      });
-      assertCurrent(); return result;
-    } };
-    try {
-      const result = await localBenchmarkPrompt.run(guardedPort, personalOpsEntry(state),
-        { site: localBenchmarkPrompt.name, ...(scoped.signal ? { signal: scoped.signal } : {}) });
-      assertCurrent();
-      const reading = result.readings.member;
-      const verdict = reading.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no') ? reading.verdict : 'unknown';
-      result.recordAction(verdict === 'yes' ? 'local benchmark history membership admitted'
-        : verdict === 'no' ? 'local benchmark history membership rejected' : 'local benchmark history membership held');
-      assertCurrent();
-      return { artifactId: state.artifact.descriptor.id, outcome: verdict === 'unknown' ? 'hold' : 'act',
-        verdict, decisionId: result.result.decisionId };
-    } finally {
-      const observation = installation.consumeObservation(); assertInstallation = observation.assertCurrent; assertBackend();
-    }
+    return decisionOrClassic<LocalBenchmarkMembership>(async () => {
+      assertProjectionCurrent(scoped.assertCurrent);
+      const assertRegistry = captureCatalogMethods(routingRegistry, ['get']);
+      const getDecision = routingRegistry.get; assertRegistry();
+      if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('unavailable');
+      const assertDefinitionSlots = captureCatalogMethods(localBenchmarkPrompt,
+        ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtures', 'fixtureCount', 'checkFixtures', 'run']);
+      const definition = { name: localBenchmarkPrompt.name, version: localBenchmarkPrompt.version, description: localBenchmarkPrompt.description,
+        accuracyFloor: localBenchmarkPrompt.accuracyFloor, model: localBenchmarkPrompt.model, items: localBenchmarkPrompt.items, fixtures: localBenchmarkPrompt.fixtures };
+      const capturedDefinition = captureModelReadingInput(definition);
+      const installation = captureJudgmentPort(localBenchmarkPrompt.name, { signal: scoped.signal, prepareResultCapture: prepareJudgmentResult });
+      let assertInstallation = installation.assertCurrent;
+      const assertBackendBindings = () => {
+        localBenchmarkPromptPolicy.assertCurrent();
+        assertRegistry(); assertDefinitionSlots(); assertModelReadingInputCurrent(definition, JSON.stringify(capturedDefinition));
+        scoped.signal?.throwIfAborted(); installation.signal.throwIfAborted();
+        if (!isClassicOperation()) assertInstallation();
+      };
+      const assertBackend = () => {
+        assertBackendBindings();
+        if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('held');
+        assertBackendBindings();
+      };
+      scoped.retainCurrent?.(assertBackend);
+      const assertCurrent = () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); assertBackend(); };
+      const port = installation.port, recorder = port.recorder;
+      const guardedPort: JudgmentPort = { model: port.model, ...(recorder ? { recorder: {
+        recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertCurrent(); recorder.recordReadings(...args); assertCurrent(); },
+        recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertCurrent(); recorder.recordAction(...args); assertCurrent(); },
+      } } : {}), ask: async request => {
+        assertCurrent();
+        const result = await port.ask({ ...request,
+          beforeAttempt: () => { assertProjectionCurrent(request.beforeAttempt); assertCurrent(); },
+          assertLogCurrent: () => { assertProjectionCurrent(request.assertLogCurrent); assertCurrent(); },
+        });
+        assertCurrent(); return result;
+      } };
+      try {
+        const result = await localBenchmarkPrompt.run(guardedPort, personalOpsEntry(state),
+          { site: localBenchmarkPrompt.name, ...(scoped.signal ? { signal: scoped.signal } : {}) });
+        assertCurrent();
+        const reading = result.readings.member;
+        const verdict = reading.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no') ? reading.verdict : 'unknown';
+        result.recordAction(verdict === 'yes' ? 'local benchmark history membership admitted'
+          : verdict === 'no' ? 'local benchmark history membership rejected' : 'local benchmark history membership held');
+        assertCurrent();
+        return { artifactId: state.artifact.descriptor.id, outcome: verdict === 'unknown' ? 'hold' : 'act',
+          verdict, decisionId: result.result.decisionId };
+      } finally {
+        const observation = installation.consumeObservation(); assertInstallation = observation.assertCurrent; assertBackend();
+      }
+    }, () => { assertProjectionCurrent(scoped.assertCurrent); return { artifactId: state.artifact.descriptor.id,
+      outcome: 'not-evaluated', verdict: 'unknown', provenance: 'classic', reason: 'decision-models-disabled' }; },
+    () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); return true; });
   });
 }
 
@@ -347,6 +370,11 @@ function benchmarkArtifactDescriptor(record: ArtifactDescriptor): ArtifactDescri
 
 /** Explicit readers preserve the whole native artifact and its source/store owner. */
 export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifactContext, options: ModelReadingOptions): Promise<LocalModelBenchmarkSnapshot> {
+  return withConfiguredDecisionModelPolicy(() => readOwnedLocalModelBenchmarkSnapshot(context, options));
+}
+
+async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactContext, options: ModelReadingOptions): Promise<LocalModelBenchmarkSnapshot> {
+  const beganClassic = isClassicOperation();
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, originalAssert = options.assertCurrent;
   const assertCaller = () => { assertOptions(); signal?.throwIfAborted(); assertProjectionCurrent(originalAssert); assertOptions(); signal?.throwIfAborted(); };
@@ -377,7 +405,9 @@ export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifact
   };
   const assertCurrent = () => { assertCaller(); assertNativeCurrent(); };
   assertCurrent(); options.retainCurrent?.(assertNativeCurrent);
-  if (!list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [] };
+  if (!list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [],
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
+  };
   const load = async (artifact: ArtifactDescriptor): Promise<CompleteBenchmarkArtifact | undefined> => {
     assertCurrent(); const existing = loaded.get(artifact.id); if (existing) return existing;
     if (!readContent) return undefined;
@@ -401,6 +431,9 @@ export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifact
   };
   const comparisons: ArtifactDescriptor[] = [], judgments: ArtifactDescriptor[] = [], membership: LocalBenchmarkMembership[] = [];
   const readUnmarked = async (artifact: ArtifactDescriptor): Promise<boolean> => {
+    assertCurrent();
+    if (isClassicOperation()) { membership.push({ artifactId: artifact.id, outcome: 'not-evaluated', verdict: 'unknown',
+      provenance: 'classic', reason: 'decision-models-disabled' }); return false; }
     const source = options.sourceOwner ? await load(artifact) : undefined; assertCurrent();
     if (!source) { membership.push({ artifactId: artifact.id, outcome: 'hold', verdict: 'unknown',
       reason: options.sourceOwner ? 'complete-artifact-source-unavailable' : 'protected-source-owner-unavailable' }); return false; }
@@ -422,7 +455,12 @@ export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifact
   const stacks: { artifactId: string; stack: string | null }[] = [];
   for (const artifact of judgments) {
     const winnerModel = readString(artifact.metadata.winnerModel);
-    if (!winnerModel || !options.sourceOwner) continue;
+    if (!winnerModel) continue;
+    if (isClassicOperation()) {
+      stacks.push({ artifactId: artifact.id, stack: declaredClassicModelStack(readString(artifact.metadata.winnerStack)) });
+      assertCurrent(); continue;
+    }
+    if (!options.sourceOwner) continue;
     const source = await load(artifact); assertCurrent();
     if (!source) { stacks.push({ artifactId: artifact.id, stack: null }); continue; }
     const stack = await localStackFor(winnerModel, { ...options, assertCurrent }, benchmarkReadingSource(source)); assertCurrent();
@@ -432,6 +470,7 @@ export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifact
   // its typed clock projection. Keep raw epochs for native consumers without
   // reclassifying those producer clocks as borrowed payment material.
   const result: LocalModelBenchmarkSnapshot = Object.freeze({ storeAvailable: true,
+    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     comparisons: Object.freeze(comparisons), judgments: Object.freeze(judgments),
     stacks: captureModelReadingInput(stacks), membership: captureModelReadingInput(membership) });
   assertCurrent(); return result;

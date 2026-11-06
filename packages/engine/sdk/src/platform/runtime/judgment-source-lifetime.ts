@@ -44,6 +44,7 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
         : snapshot?.state === 'absent' ? [snapshot.state, snapshot.revision] : [snapshot?.state];
     });
     const observation = [configBefore, secretBefore?.generation,
+      source.config.get('judgment.policy'),
       source.config.get('judgment.endpoint'), keySource, keyName, source.env[keyName],
       source.config.get('judgment.model'), source.config.get('judgment.timeoutMs'),
       JSON.stringify(captureJudgmentBackendSettings(source.config.get('judgment.backend'))),

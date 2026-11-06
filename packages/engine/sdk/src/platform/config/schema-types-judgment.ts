@@ -7,6 +7,7 @@
 
 /** Where the judgment API key is read from. */
 export type JudgmentKeySource = 'env' | 'secret' | 'none';
+import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 
 import type { JudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 
@@ -20,6 +21,8 @@ export interface JudgmentFallbackSettings {
 }
 
 export interface JudgmentSettings {
+  /** Missing on older installations; defaults to Default - On. */
+  policy?: DecisionModelPolicy;
   /** System One endpoint base URL; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. */
   endpoint: string;
   /** `env` reads TYPESAFE_API_KEY from the process environment; `secret` reads it from the secret store. */
@@ -37,6 +40,7 @@ export interface JudgmentSettings {
 }
 
 export type JudgmentConfigKey =
+  | 'judgment.policy'
   | 'judgment.endpoint'
   | 'judgment.keySource'
   | 'judgment.keyName'
@@ -47,6 +51,7 @@ export type JudgmentConfigKey =
 
 /** The value of every `judgment.*` key, folded into ConfigValue with one arm. */
 export interface JudgmentConfigValueMap {
+  'judgment.policy': DecisionModelPolicy;
   'judgment.endpoint': string;
   'judgment.keySource': JudgmentKeySource;
   'judgment.keyName': string;

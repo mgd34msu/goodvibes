@@ -1,4 +1,5 @@
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
+import { assertDecisionModelsEnabled } from './decision-policy.js';
 
 /** One installation lifetime; restoring the same port never restores old readers. */
 interface Installation {
@@ -34,6 +35,7 @@ export function restoreJudgmentPort(owner: JudgmentPort, previous: JudgmentPort 
 
 /** The installed port; throws when none is installed. */
 export function judgmentPort(site: string): JudgmentPort {
+  assertDecisionModelsEnabled(site);
   if (installed === undefined) throw new JudgmentPortMissingError(site);
   return installed.port;
 }

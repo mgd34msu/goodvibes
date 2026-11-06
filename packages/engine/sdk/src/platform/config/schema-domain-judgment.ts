@@ -12,6 +12,7 @@ import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decision
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
+    policy: 'Default - On',
     endpoint: '',
     keySource: 'env',
     keyName: 'TYPESAFE_API_KEY',
@@ -34,6 +35,11 @@ function isEndpoint(value: unknown): boolean {
 }
 
 export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[] = [
+  {
+    key: 'judgment.policy', type: 'enum', default: 'Default - On',
+    enumValues: ['Default - On', 'Preferred', 'Classic - Off'],
+    description: 'Default - On requires available decision models. Preferred tries the configured chain and falls back to Classic only on availability exhaustion. Classic - Off makes no decision-model calls, uses owner-approved tool execution and ordinary completion, and exposes decision-only feature limitations.',
+  },
   {
     key: 'judgment.endpoint',
     type: 'string',

@@ -1,4 +1,6 @@
 import { composeJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
+import { configureDecisionModelPolicy } from './decision-policy.js';
+import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
 import {
@@ -28,7 +30,7 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks'): unknown;
+    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks'): unknown;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;
   };
@@ -160,6 +162,7 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       return settingsModel(source);
     },
     async ask(request) {
+      assertDecisionModelsEnabled('configured decision transport');
       const signal = request.signal;
       if (!signal) throw new JudgmentError('invalid-request', 'settings judgment calls require an owning AbortSignal');
       const config = await activeSettings(source, signal);
@@ -167,7 +170,12 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       // Never create another transport or send a late request in that case.
       signal.throwIfAborted();
       if (current === undefined || !sameConfig(current.config, config)) current = { config, port: createSystemOnePort(config) };
-      return current.port.ask({ ...request, signal });
+      const beforeAttempt = request.beforeAttempt;
+      return current.port.ask({ ...request, signal, beforeAttempt() {
+        signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
+        beforeAttempt?.();
+        signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
+      } });
     },
   };
 }
@@ -202,6 +210,8 @@ export interface JudgmentServicesInput extends JudgmentSettingsSource {
  * When still installed, the port it replaced is restored unless retired too.
  */
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
+  const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'));
+  input.disposal.add('decision-model policy', restorePolicy);
   const decisionLog = openStateDecisionLog(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
   // Publish one completed response per event-loop turn. Each response records

@@ -51041,9 +51041,10 @@
       "name": "DecisionModelPolicyChangedError",
       "kind": "class",
       "publicMembers": [
+        "[Symbol.hasInstance]",
         "constructor"
       ],
-      "text": "export declare class DecisionModelPolicyChangedError extends Error { constructor(); }"
+      "text": "export declare class DecisionModelPolicyChangedError extends Error { constructor(); static [Symbol.hasInstance](value: unknown): boolean; }"
     },
     {
       "name": "DecisionModelPolicyState",

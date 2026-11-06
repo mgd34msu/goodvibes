@@ -2988,6 +2988,21 @@
       "bun": "./terminal-shell/src/onboarding-config-apply.ts",
       "types": "./terminal-shell/dist/onboarding-config-apply.d.ts",
       "import": "./terminal-shell/dist/onboarding-config-apply.js"
+    },
+    "./terminal-shell/native/work-ledger-projection": {
+      "bun": "./terminal-shell/src/native/work-ledger-projection.ts",
+      "types": "./terminal-shell/dist/native/work-ledger-projection.d.ts",
+      "import": "./terminal-shell/dist/native/work-ledger-projection.js"
+    },
+    "./terminal-shell/native/selected-work-ledger": {
+      "bun": "./terminal-shell/src/native/selected-work-ledger.ts",
+      "types": "./terminal-shell/dist/native/selected-work-ledger.d.ts",
+      "import": "./terminal-shell/dist/native/selected-work-ledger.js"
+    },
+    "./terminal-shell/native/bound-work-ledger": {
+      "bun": "./terminal-shell/src/native/bound-work-ledger.ts",
+      "types": "./terminal-shell/dist/native/bound-work-ledger.d.ts",
+      "import": "./terminal-shell/dist/native/bound-work-ledger.js"
     }
   },
   "publishConfig": {

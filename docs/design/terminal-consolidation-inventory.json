@@ -1767,7 +1767,8 @@
       "path": "runtime/native-work-ledger.ts",
       "baselineTuiLines": 159,
       "baselineSimilarity": 0.0526,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns selected-host and explicitly bound reader lifetimes, execution controls, contiguous durable cursor validation and immediate provenance redaction. Products retain host selection and their view action contract; the two reader APIs preserve their different polling/notification behavior."
     },
     {
       "path": "runtime/native-work-submission-host.ts",

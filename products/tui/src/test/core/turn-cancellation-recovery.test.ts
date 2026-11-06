@@ -3,7 +3,7 @@ import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/sdk/pla
 import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import { createCancelGeneration, runOwnedTurnRetry } from '../../core/turn-cancellation.ts';
-import { nativeRetryPermissionManager } from '../helpers/held-native-retry.ts';
+import { nativeRetryConfigManager, nativeRetryPermissionManager } from '../helpers/held-native-retry.ts';
 
 function deferred() {
   let resolve!: () => void;
@@ -27,6 +27,7 @@ for (const cause of ['grace expiry', 'real cancel action', 'cancel during admiss
     const orchestrator = new Orchestrator({ conversation, getViewportHeight: () => 0, scrollToEnd() {}, toolRegistry: new ToolRegistry(),
       permissionManager: nativeRetryPermissionManager(), services: { agentManager: { list: () => [], spawn: () => { throw new Error('Unexpected legacy spawn'); } },
       contractRunner: { list: () => [] }, contractIntake: { intake: async () => { throw new Error('Unexpected legacy intake'); } } } });
+    orchestrator.setCoreServices({ configManager: nativeRetryConfigManager });
     orchestrator.bindNativeConversationProject('p');
     const authority = new AbortController();
     let prepared = false;
@@ -36,7 +37,7 @@ for (const cause of ['grace expiry', 'real cancel action', 'cancel during admiss
     // Register rejection handling before releasing the held native validator.
     const outcome = pending.then(() => undefined, error => error as unknown);
     try {
-      await entered.promise;
+      await Promise.race([entered.promise, outcome.then(error => { throw error ?? new Error('Retry settled before native admission'); })]);
       expect(prepared).toBe(true); expect(orchestrator.isThinking).toBe(false);
       if (cause === 'real cancel action') {
         createCancelGeneration(orchestrator, { stop: () => false }, () => { authority.abort(); return true; })();

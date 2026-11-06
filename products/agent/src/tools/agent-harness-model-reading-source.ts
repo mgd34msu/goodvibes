@@ -340,6 +340,12 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
     assertSynchronous(originalRetain ? () => originalRetain(guard, key) : undefined);
     assertOptions();
   };
+  // Native results still depend on the complete original source after this
+  // function releases its privacy receipt. Retain data/cancellation ownership,
+  // without retaining a receipt whose lifetime ends in the finally block.
+  retainCurrent(() => {
+    assertOptions(); assertNoSerializer(); checkSignal(); assertSourceSnapshot(source);
+  }, 'model-reading.native-source');
   const owner = options.sourceOwner;
   if (!owner) throw new ToolInputProjectionError('unavailable');
   const assertOwnerMethods = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);

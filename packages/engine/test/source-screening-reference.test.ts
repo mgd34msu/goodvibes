@@ -211,10 +211,10 @@ test('an explicit retry after a protected decision outage sends identical name-o
   expect(JSON.stringify([f.calls, progress])).not.toContain('synthetic-sentinel');
 }, 10_000);
 
-test('wrong-model answers remain operationally unavailable rather than permitting or permanently classifying a name', async () => {
+test('wrong-model answers are malformed and never permit or permanently classify a name', async () => {
   const f = fixture({ judge: (_body, count) => answer(0, count === 1 ? 'wrong-model' : 'jev-1.13.0') });
   const source = f.owner.captureResearchReference('https://example.test/?id=synthetic-sentinel');
-  expect(await f.owner.screenResearchReference(source)).toEqual({ status: 'held', reason: 'route-unavailable' });
+  expect(await f.owner.screenResearchReference(source)).toEqual({ status: 'held', reason: 'malformed' });
   expect((await f.owner.screenResearchReference(source)).status).toBe('settled'); expect(f.calls).toHaveLength(2);
 });
 

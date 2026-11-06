@@ -1,5 +1,5 @@
 import { Orchestrator, ConversationManager } from '@goodvibes-jev/engine/sdk/platform/core';
-import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
+import { DEFAULT_CONFIG, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import { PolicyRuntimeState } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
 import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -24,13 +24,24 @@ export function nativeRetryPermissionManager(): PermissionManager {
   return new PermissionManager(undefined, config, new PolicyRuntimeState());
 }
 
+/** Admission reads the persisted decision policy before validating the permit. */
+export const nativeRetryConfigManager = {
+  get: () => undefined,
+  getCategory: () => ({}),
+  getWorkingDirectory: () => '/synthetic/native-retry',
+} as unknown as Pick<ConfigManager, 'get' | 'getCategory' | 'getWorkingDirectory'>;
+
 /** Real SDK admission held after the product's memory await, before submission. */
 export async function heldNativeRetry() {
   const phases: NativeRetryPhase[] = [];
   let releaseGate!: () => void; let entered!: () => void;
   const gate = new Promise<void>(resolve => { releaseGate = resolve; });
   const release = () => { phases.push('released'); releaseGate(); };
-  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  let admissionFailed!: (reason: unknown) => void;
+  const waiting = Promise.race([
+    new Promise<void>(resolve => { entered = resolve; }),
+    new Promise<never>((_resolve, reject) => { admissionFailed = reject; }),
+  ]);
   const id = crypto.randomUUID(); const text = 'Explain the recorded change';
   const result: NativeConversationIntakeResult = { kind: 'turn', projectId: 'p', requestId: id, route: 'answer', text,
     sourceRef: { version: 1, inputId: id, sourceId: id, sourceRevision: 'r1', sessionId: 's' } };
@@ -43,6 +54,7 @@ export async function heldNativeRetry() {
   const orchestrator = new Orchestrator({ conversation, getViewportHeight: () => 0, scrollToEnd() {}, toolRegistry: new ToolRegistry(),
     permissionManager: nativeRetryPermissionManager(), services: { agentManager: { list: () => [], spawn: () => { throw new Error('Unexpected legacy spawn'); } },
       contractRunner: { list: () => [] }, contractIntake: { intake: async () => { throw new Error('Unexpected legacy intake'); } } } });
+  orchestrator.setCoreServices({ configManager: nativeRetryConfigManager });
   orchestrator.bindNativeConversationProject('p');
   const controller = new AbortController();
   const start = (signal: AbortSignal = controller.signal, isCurrent = () => !signal.aborted): Promise<NativeRetryOutcome> => {
@@ -50,7 +62,7 @@ export async function heldNativeRetry() {
     // phases at settlement so a failure explains the ordering without adding
     // waits or allowing later disposal to rewrite the evidence.
     const snapshot = () => ({ phases: [...phases], signalAborted: signal.aborted, messageCount: conversation.getMessageCount() });
-    return runOwnedTurnRetry({
+    const attempt = runOwnedTurnRetry({
       prepare: async () => { phases.push('prepared'); },
       submit: () => { phases.push('submit-entered'); return orchestrator.handleUserInput(text, undefined, { nativeConversationTurnPermit: permit }); },
       abort: () => { phases.push('abort-relayed'); orchestrator.abort(); }, isCurrent, signal,
@@ -58,6 +70,8 @@ export async function heldNativeRetry() {
       () => ({ status: 'fulfilled' as const, ...snapshot() }),
       reason => ({ status: 'rejected' as const, reason: reason as unknown, ...snapshot() }),
     );
+    void attempt.then(outcome => admissionFailed(outcome.status === 'rejected' ? outcome.reason : new Error('Retry settled before native admission')));
+    return attempt;
   };
   return { orchestrator, conversation, waiting, release, start, cancel: () => { phases.push('cancel-requested'); controller.abort(); return true; },
     dispose: () => { controller.abort(); orchestrator.abort(); release(); orchestrator.dispose(); client.dispose(); } };

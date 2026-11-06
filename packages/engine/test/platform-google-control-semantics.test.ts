@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { findElement, requireElement, looksLikeGoogleSignIn, consumeGoogleElement } from '../sdk/src/platform/google/browser-elements.ts';
@@ -56,7 +56,9 @@ describe('Google setup semantic control contract', () => {
     if (mode === 'unavailable') installJudgmentPort({ model: 'jev-1.13.0', ask: async () => { throw new Error('password=synthetic'); } });
     if (mode === 'weak') installJudgmentPort(selection('control_1', 0.6).port);
     const rig = browserRig();
-    await expect(findElement(rig.elements(), { purpose: 'Create client' }, { browser: rig.browser })).rejects.toThrow('Google setup page reading');
+    const reading = findElement(rig.elements(), { purpose: 'Create client' }, { browser: rig.browser });
+    if (mode === 'missing') await expect(reading).rejects.toBeInstanceOf(JudgmentPortMissingError);
+    else await expect(reading).rejects.toThrow(mode === 'malformed' ? 'answer "pick" has no probabilities object' : 'Google setup page reading');
     expect(rig.clicked).toEqual([]);
   });
   for (const mode of ['snapshot', 'page', 'port', 'cancel', 'request'] as const) test(`held ${mode} invalidation prevents a late action`, async () => {

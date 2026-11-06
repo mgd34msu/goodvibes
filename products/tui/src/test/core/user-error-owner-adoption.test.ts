@@ -227,7 +227,8 @@ test('a terminal turn rejects late duplicate errors and stale terminal events ca
 
 test('an external model change aborts an already-entered native retry admission', async () => {
   const { heldNativeRetry } = await import('../helpers/held-native-retry.ts');
-  const native = await heldNativeRetry(); reader();
+  const native = await heldNativeRetry(); reader({ publicLines: ['failed'] });
+  await preparePublicErrorText(['failed']);
   let outcome: Promise<unknown> | undefined;
   // A real turn hold signal is needed to own post-entry SDK cancellation.
   const controller = new AbortController(); let live = true;

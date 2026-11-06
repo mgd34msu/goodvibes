@@ -19,7 +19,7 @@
 |           Provider         8      false: disabled or not allowed for this setting.                 |
 |           Pricing          1      4 more ↓ · pgdn                                                  |
 |           Subscriptions    1                                                                       |
-|           Judgment         7      lineNumbers                                      off             |
+|           Judgment         8      lineNumbers                                      off             |
 |           Helper           3      collapseThreshold                                 30             |
 |           Tools            9      theme                                      goodvibes             |
 |           TTS              6      themeMode                                       auto             |

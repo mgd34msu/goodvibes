@@ -1,3 +1,4 @@
+import { createRecallDispatch } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
 /**
  * /recall command handler.
  *
@@ -15,10 +16,29 @@
 
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
 import { handleRecallAdd, handleRecallCapture } from './recall-capture.ts';
-import { handleRecallExport, handleRecallHandoffExport, handleRecallHandoffImport, handleRecallHandoffInspect, handleRecallImport } from './recall-bundle.ts';
-import { handleRecallGet, handleRecallLink, handleRecallList, handleRecallRemove, handleRecallSearch, handleRecallVector } from './recall-query.ts';
-import { handleRecallExplain, handleRecallInjections, handleRecallPromote, handleRecallQueue, handleRecallReview } from './recall-review.ts';
-import { VALID_CLASSES, VALID_REVIEW_STATES, VALID_SCOPES } from './recall-shared.ts';
+import {
+  handleRecallExport,
+  handleRecallHandoffExport,
+  handleRecallHandoffImport,
+  handleRecallHandoffInspect,
+  handleRecallImport,
+} from './recall-bundle.ts';
+import {
+  handleRecallGet,
+  handleRecallLink,
+  handleRecallList,
+  handleRecallRemove,
+  handleRecallSearch,
+  handleRecallVector,
+} from './recall-query.ts';
+import {
+  handleRecallExplain,
+  handleRecallInjections,
+  handleRecallPromote,
+  handleRecallQueue,
+  handleRecallReview,
+} from './recall-review.ts';
+import { VALID_CLASSES } from './recall-shared.ts';
 import { handleRecallFilesApply, handleRecallFilesReview, handleRecallFilesSync } from './recall-files.ts';
 
 // ── Top-level command ─────────────────────────────────────────────────────────
@@ -60,7 +80,7 @@ function printRecallUsage(context: CommandContext): void {
     '  contradict <id> [reason...]                     — Mark a record contradicted with an operator reason',
     '  files sync [--dir <path>]                       — Project standing (project/team) records to git-backed markdown files',
     '  files review [--dir <path>]                     — Diff the projection directory against the store; prints proposals, applies nothing',
-    '  files apply <id> [<id> ...] | --all [--dir <path>] — Apply only the named proposals from the last review, through the store\'s own update/delete',
+    "  files apply <id> [<id> ...] | --all [--dir <path>] — Apply only the named proposals from the last review, through the store's own update/delete",
     '  explain <task...> [--scope <path> ...]         — Show the knowledge records that would be injected for a task',
     '  injections [agentId]                           — Show per-turn passive knowledge injection records; no id shows the main session, an id shows that spawned agent',
     '  promote <id> <scope>                           — Promote a memory record into session|project|team scope',
@@ -75,10 +95,31 @@ function printRecallUsage(context: CommandContext): void {
   context.print(usage);
 }
 
+const dispatchRecall = createRecallDispatch<CommandContext>({
+  add: handleRecallAdd,
+  search: handleRecallSearch,
+  vector: handleRecallVector,
+  capture: handleRecallCapture,
+  get: handleRecallGet,
+  queue: handleRecallQueue,
+  review: handleRecallReview,
+  explain: handleRecallExplain,
+  promote: handleRecallPromote,
+  link: handleRecallLink,
+  list: handleRecallList,
+  remove: handleRecallRemove,
+  export: handleRecallExport,
+  import: handleRecallImport,
+  handoffExport: handleRecallHandoffExport,
+  handoffInspect: handleRecallHandoffInspect,
+  handoffImport: handleRecallHandoffImport,
+});
+
 export const recallCommand: SlashCommand = {
   name: 'recall',
   aliases: ['rc', 'memory', 'mem'],
-  description: 'Bare opens the Memory modal; project memory subcommands add decisions, constraints, incidents, and patterns with provenance',
+  description:
+    'Bare opens the Memory modal; project memory subcommands add decisions, constraints, incidents, and patterns with provenance',
   usage: '[<subcommand> [args]]: bare opens the modal; report prints the subcommand usage text',
   argsHint: 'add|search|link|get|list|remove|report',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
@@ -92,27 +133,11 @@ export const recallCommand: SlashCommand = {
       return;
     }
 
+    if (await dispatchRecall(sub, rest, context)) return;
+
     switch (sub) {
       case 'report':
         printRecallUsage(context);
-        break;
-
-      case 'add':
-        await handleRecallAdd(rest, context);
-        break;
-
-      case 'search':
-      case 'find':
-        await handleRecallSearch(rest, context);
-        break;
-
-      case 'vector':
-      case 'vectors':
-        handleRecallVector(rest, context);
-        break;
-
-      case 'capture':
-        await handleRecallCapture(rest, context);
         break;
 
       case 'files': {
@@ -134,74 +159,8 @@ export const recallCommand: SlashCommand = {
         break;
       }
 
-      case 'get':
-      case 'show':
-        await handleRecallGet(rest, context);
-        break;
-
-      case 'queue':
-        await handleRecallQueue(rest, context);
-        break;
-
-      case 'review':
-        await handleRecallReview(rest, context);
-        break;
-
-      case 'stale':
-        await handleRecallReview([rest[0] ?? '', 'stale', '--reason', ...rest.slice(1)], context);
-        break;
-
-      case 'contradict':
-      case 'contradicted':
-        await handleRecallReview([rest[0] ?? '', 'contradicted', '--reason', ...rest.slice(1)], context);
-        break;
-
-      case 'explain':
-        await handleRecallExplain(rest, context);
-        break;
-
       case 'injections':
         handleRecallInjections(rest, context);
-        break;
-
-      case 'promote':
-        await handleRecallPromote(rest, context);
-        break;
-
-      case 'link':
-        await handleRecallLink(rest, context);
-        break;
-
-      case 'list':
-      case 'ls':
-        await handleRecallList(rest, context);
-        break;
-
-      case 'remove':
-      case 'delete':
-      case 'rm':
-        await handleRecallRemove(rest, context);
-        break;
-
-      case 'export':
-        await handleRecallExport(rest, context);
-        break;
-
-      case 'import':
-        await handleRecallImport(rest, context);
-        break;
-
-      case 'handoff-export':
-      case 'share':
-        await handleRecallHandoffExport(rest, context);
-        break;
-
-      case 'handoff-inspect':
-        handleRecallHandoffInspect(rest, context);
-        break;
-
-      case 'handoff-import':
-        await handleRecallHandoffImport(rest, context);
         break;
 
       default:

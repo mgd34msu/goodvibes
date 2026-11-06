@@ -543,7 +543,8 @@
       "path": "input/commands/memory.ts",
       "baselineTuiLines": 212,
       "baselineSimilarity": 0.551,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns shared recall verb dispatch, aliases, review argument rewriting and the underlying recall handlers. Product adapters retain usage text, TUI memory modal/files/injection entry points, and Agent confirmed mutation handlers."
     },
     {
       "path": "input/commands/notify-runtime.ts",

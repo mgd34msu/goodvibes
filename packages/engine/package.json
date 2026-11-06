@@ -3018,6 +3018,21 @@
       "bun": "./terminal-shell/src/permission-prompt-facts.ts",
       "types": "./terminal-shell/dist/permission-prompt-facts.d.ts",
       "import": "./terminal-shell/dist/permission-prompt-facts.js"
+    },
+    "./terminal-shell/recall-dispatch": {
+      "bun": "./terminal-shell/src/recall-dispatch.ts",
+      "types": "./terminal-shell/dist/recall-dispatch.d.ts",
+      "import": "./terminal-shell/dist/recall-dispatch.js"
+    },
+    "./terminal-shell/command-arguments": {
+      "bun": "./terminal-shell/src/command-arguments.ts",
+      "types": "./terminal-shell/dist/command-arguments.d.ts",
+      "import": "./terminal-shell/dist/command-arguments.js"
+    },
+    "./terminal-shell/knowledge-answer": {
+      "bun": "./terminal-shell/src/knowledge-answer.ts",
+      "types": "./terminal-shell/dist/knowledge-answer.d.ts",
+      "import": "./terminal-shell/dist/knowledge-answer.js"
     }
   },
   "publishConfig": {

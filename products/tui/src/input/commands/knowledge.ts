@@ -1,5 +1,13 @@
-import { sourceLabel, createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
-const {nodeLabel}=createKnowledgeLabels(' confidence=');
+import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
+import {
+  readFlag,
+  readStringListFlag,
+  readPositiveIntFlag,
+  readJsonObjectFlag,
+  positionalArgs,
+} from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
+const { nodeLabel } = createKnowledgeLabels(' confidence=');
 import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -7,7 +15,7 @@ import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 
 const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
 
-type KnowledgeReviewAction = typeof KNOWLEDGE_REVIEW_ACTIONS[number];
+type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
 type KnowledgeAskMode = NonNullable<KnowledgeAskInput['mode']>;
@@ -21,101 +29,28 @@ function requireKnowledgeApi(context: CommandContext) {
   return knowledgeApi;
 }
 
-function readFlag(args: string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
-}
-
-function readStringListFlag(args: string[], name: string): string[] {
-  const value = readFlag(args, name);
-  if (!value) return [];
-  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
-}
-
-function readPositiveIntFlag(args: string[], name: string, fallback: number): number {
-  const raw = readFlag(args, name);
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function readJsonObjectFlag(args: string[], name: string): Record<string, unknown> | null | undefined {
-  const value = readFlag(args, name);
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function positionalArgs(args: string[], valuedFlags: readonly string[] = []): string[] {
-  return args.filter((token, index) => {
-    if (token.startsWith('--')) return false;
-    if (index > 0 && valuedFlags.includes(args[index - 1]!)) return false;
-    return true;
-  });
-}
-
 function requireKnowledgeAsk(context: CommandContext): ((input: KnowledgeAskInput) => Promise<KnowledgeAskResult>) | null {
   const serviceAsk = context.extensions.knowledgeService?.ask?.bind(context.extensions.knowledgeService);
   if (serviceAsk) return serviceAsk;
 
-  const clientAsk = (context.clients?.knowledgeApi as unknown as { ask?: (input: KnowledgeAskInput) => Promise<KnowledgeAskResult> } | undefined)?.ask;
+  const clientAsk = (
+    context.clients?.knowledgeApi as unknown as { ask?: (input: KnowledgeAskInput) => Promise<KnowledgeAskResult> } | undefined
+  )?.ask;
   if (clientAsk) return clientAsk;
 
   context.print('[knowledge] Knowledge ask is not available in this runtime.');
   return null;
 }
 
-
-
-
-
-
-
-function renderKnowledgeAskResult(result: KnowledgeAskResult): string {
-  const answer = result.answer;
-  const lines = [
-    `[knowledge] ${result.query}`,
-    answer.text,
-    '',
-    `mode: ${answer.mode}  confidence: ${answer.confidence}  synthesized: ${answer.synthesized ? 'yes' : 'no'}`,
-  ];
-
-  if (answer.sources.length > 0) {
-    lines.push('', 'Sources:');
-    for (const source of answer.sources) lines.push(`  - ${sourceLabel(source)}`);
-  }
-
-  if (answer.facts.length > 0) {
-    lines.push('', 'Facts:');
-    for (const fact of answer.facts) lines.push(`  - ${nodeLabel(fact)}`);
-  }
-
-  if (answer.linkedObjects.length > 0) {
-    lines.push('', 'Linked objects:');
-    for (const object of answer.linkedObjects) lines.push(`  - ${nodeLabel(object)}`);
-  }
-
-  if (answer.gaps.length > 0) {
-    lines.push('', 'Gaps:');
-    for (const gap of answer.gaps) lines.push(`  - ${nodeLabel(gap)}`);
-  }
-
-  return lines.join('\n');
-}
+const renderKnowledgeAskResult = createKnowledgeAnswerRenderer({ nodeLabel, separator: ': ' });
 
 export const knowledgeCommand: SlashCommand = {
   name: 'knowledge',
   aliases: ['know'],
   description: 'Structured knowledge graph: ingest URLs/bookmarks, inspect issues, and build compact prompt packets',
   usage: '<subcommand> [args]',
-  argsHint: 'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate',
+  argsHint:
+    'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const knowledge = requireKnowledgeApi(context);
     if (!knowledge) {
@@ -126,11 +61,18 @@ export const knowledgeCommand: SlashCommand = {
     const lifetime = conversation.captureHistoryReadingLifetime();
     const assertCurrent = () => {
       lifetime.assertCurrent();
-      if (context.session.conversationManager !== conversation || context.session.runtime.sessionId !== sessionId
-        || context.clients?.knowledgeApi !== knowledge) throw new JudgmentAuthorityRetiredError();
+      if (
+        context.session.conversationManager !== conversation ||
+        context.session.runtime.sessionId !== sessionId ||
+        context.clients?.knowledgeApi !== knowledge
+      )
+        throw new JudgmentAuthorityRetiredError();
     };
     const readingOptions = { signal: lifetime.signal, assertCurrent };
-    const print = (text: string) => { assertCurrent(); context.print(text); };
+    const print = (text: string) => {
+      assertCurrent();
+      context.print(text);
+    };
     if (args.length === 0 && context.openKnowledgeView) {
       context.openKnowledgeView();
       return;
@@ -145,13 +87,14 @@ export const knowledgeCommand: SlashCommand = {
         const valuedFlags = ['--space', '--knowledge-space', '--limit', '--mode'];
         const query = positionalArgs(rest, valuedFlags).join(' ').trim();
         if (!query) {
-          print('[knowledge] Usage: /knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]');
+          print(
+            '[knowledge] Usage: /knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
+          );
           return;
         }
         const requestedMode = readFlag(rest, '--mode') as KnowledgeAskMode | undefined;
-        const mode: KnowledgeAskMode = requestedMode && ['concise', 'standard', 'detailed'].includes(requestedMode)
-          ? requestedMode
-          : 'standard';
+        const mode: KnowledgeAskMode =
+          requestedMode && ['concise', 'standard', 'detailed'].includes(requestedMode) ? requestedMode : 'standard';
         const result = await ask({
           query,
           knowledgeSpaceId: readFlag(rest, '--space') ?? readFlag(rest, '--knowledge-space'),
@@ -167,15 +110,17 @@ export const knowledgeCommand: SlashCommand = {
 
       case 'status': {
         const status = await knowledge.status.get();
-        print([
-          '[knowledge] Structured knowledge status',
-          `  ready: ${status.ready ? 'yes' : 'no'}`,
-          `  storage: ${status.storagePath}`,
-          `  sources: ${status.sourceCount}`,
-          `  nodes: ${status.nodeCount}`,
-          `  edges: ${status.edgeCount}`,
-          `  issues: ${status.issueCount}`,
-        ].join('\n'));
+        print(
+          [
+            '[knowledge] Structured knowledge status',
+            `  ready: ${status.ready ? 'yes' : 'no'}`,
+            `  storage: ${status.storagePath}`,
+            `  sources: ${status.sourceCount}`,
+            `  nodes: ${status.nodeCount}`,
+            `  edges: ${status.edgeCount}`,
+            `  issues: ${status.issueCount}`,
+          ].join('\n'),
+        );
         break;
       }
 
@@ -267,7 +212,9 @@ export const knowledgeCommand: SlashCommand = {
         }
         print(`[knowledge] ${sources.length} source(s):`);
         for (const source of sources) {
-          print(`  ${source.id} [${source.sourceType}/${source.status}] ${source.title ?? source.canonicalUri ?? source.sourceUri ?? 'untitled'}`);
+          print(
+            `  ${source.id} [${source.sourceType}/${source.status}] ${source.title ?? source.canonicalUri ?? source.sourceUri ?? 'untitled'}`,
+          );
           if (source.summary) print(`    ${source.summary}`);
         }
         break;
@@ -370,7 +317,9 @@ export const knowledgeCommand: SlashCommand = {
         const [issueId, actionValue] = positionalArgs(rest, ['--reviewer', '--value']);
         const action = actionValue?.toLowerCase();
         if (!issueId || !action || !KNOWLEDGE_REVIEW_ACTIONS.includes(action as KnowledgeReviewAction)) {
-          print('[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]');
+          print(
+            '[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
+          );
           return;
         }
         const value = readJsonObjectFlag(rest, '--value');
@@ -385,14 +334,20 @@ export const knowledgeCommand: SlashCommand = {
             reviewer: readFlag(rest, '--reviewer') ?? 'tui',
             ...(value ? { value } : {}),
           });
-          print([
-            `[knowledge] Reviewed issue ${result.issue.id}`,
-            `  action: ${action}`,
-            `  status: ${result.issue.status}`,
-            ...(result.node ? [`  node: ${result.node.id} ${result.node.title}`] : []),
-            ...(result.source ? [`  source: ${result.source.id} ${result.source.title ?? result.source.canonicalUri ?? result.source.sourceUri ?? 'untitled'}`] : []),
-            ...(result.appliedFacts ? [`  applied facts: ${Object.keys(result.appliedFacts).join(', ') || 'none'}`] : []),
-          ].join('\n'));
+          print(
+            [
+              `[knowledge] Reviewed issue ${result.issue.id}`,
+              `  action: ${action}`,
+              `  status: ${result.issue.status}`,
+              ...(result.node ? [`  node: ${result.node.id} ${result.node.title}`] : []),
+              ...(result.source
+                ? [
+                    `  source: ${result.source.id} ${result.source.title ?? result.source.canonicalUri ?? result.source.sourceUri ?? 'untitled'}`,
+                  ]
+                : []),
+              ...(result.appliedFacts ? [`  applied facts: ${Object.keys(result.appliedFacts).join(', ') || 'none'}`] : []),
+            ].join('\n'),
+          );
         } catch (error) {
           print(`[knowledge] ${summarizeError(error)}`);
         }
@@ -483,13 +438,15 @@ export const knowledgeCommand: SlashCommand = {
 
       case 'reindex': {
         const result = await knowledge.status.reindex();
-        print([
-          '[knowledge] Reindex complete',
-          `  sources: ${result.status.sourceCount}`,
-          `  nodes: ${result.status.nodeCount}`,
-          `  edges: ${result.status.edgeCount}`,
-          `  issues: ${result.status.issueCount}`,
-        ].join('\n'));
+        print(
+          [
+            '[knowledge] Reindex complete',
+            `  sources: ${result.status.sourceCount}`,
+            `  nodes: ${result.status.nodeCount}`,
+            `  edges: ${result.status.edgeCount}`,
+            `  issues: ${result.status.issueCount}`,
+          ].join('\n'),
+        );
         break;
       }
 
@@ -502,27 +459,29 @@ export const knowledgeCommand: SlashCommand = {
       }
 
       default:
-        print([
-          'Usage: /knowledge <subcommand>',
-          '  status',
-          '  ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
-          '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
-          '  import-bookmarks <path>',
-          '  import-urls <path>',
-          '  list [--kind <sources|nodes|issues>] [--limit <n>]',
-          '  search <query> [--limit <n>]',
-          '  get <id>',
-          '  queue [limit]',
-          '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
-          '  candidates [limit]',
-          '  reports [limit]',
-          '  schedules',
-          '  lint',
-          '  packet <task...> [--scope <path> ...]',
-          '  explain <task...> [--scope <path> ...]',
-          '  reindex',
-          '  consolidate [light|deep]',
-        ].join('\n'));
+        print(
+          [
+            'Usage: /knowledge <subcommand>',
+            '  status',
+            '  ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
+            '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
+            '  import-bookmarks <path>',
+            '  import-urls <path>',
+            '  list [--kind <sources|nodes|issues>] [--limit <n>]',
+            '  search <query> [--limit <n>]',
+            '  get <id>',
+            '  queue [limit]',
+            '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
+            '  candidates [limit]',
+            '  reports [limit]',
+            '  schedules',
+            '  lint',
+            '  packet <task...> [--scope <path> ...]',
+            '  explain <task...> [--scope <path> ...]',
+            '  reindex',
+            '  consolidate [light|deep]',
+          ].join('\n'),
+        );
     }
   },
 };

@@ -1,3 +1,4 @@
+import { createRecallDispatch } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
 /**
  * /memory command handler.
  *
@@ -15,12 +16,45 @@
 
 import type { SlashCommand, CommandContext } from '../command-registry.ts';
 import { handleRecallAdd, handleRecallCapture } from './recall-capture.ts';
-import { handleRecallExport, handleRecallHandoffExport, handleRecallHandoffImport, handleRecallHandoffInspect, handleRecallImport } from './recall-bundle.ts';
-import { handleRecallGet, handleRecallLink, handleRecallList, handleRecallRemove, handleRecallSearch, handleRecallVector } from './recall-query.ts';
+import {
+  handleRecallExport,
+  handleRecallHandoffExport,
+  handleRecallHandoffImport,
+  handleRecallHandoffInspect,
+  handleRecallImport,
+} from './recall-bundle.ts';
+import {
+  handleRecallGet,
+  handleRecallLink,
+  handleRecallList,
+  handleRecallRemove,
+  handleRecallSearch,
+  handleRecallVector,
+} from './recall-query.ts';
 import { handleRecallExplain, handleRecallPromote, handleRecallQueue, handleRecallReview } from './recall-review.ts';
-import { VALID_CLASSES, VALID_REVIEW_STATES, VALID_SCOPES } from './recall-shared.ts';
+import { VALID_CLASSES } from './recall-shared.ts';
 
 // ── Top-level command ─────────────────────────────────────────────────────────
+
+const dispatchRecall = createRecallDispatch<CommandContext>({
+  add: handleRecallAdd,
+  search: handleRecallSearch,
+  vector: handleRecallVector,
+  capture: handleRecallCapture,
+  get: handleRecallGet,
+  queue: handleRecallQueue,
+  review: handleRecallReview,
+  explain: handleRecallExplain,
+  promote: handleRecallPromote,
+  link: handleRecallLink,
+  list: handleRecallList,
+  remove: handleRecallRemove,
+  export: handleRecallExport,
+  import: handleRecallImport,
+  handoffExport: handleRecallHandoffExport,
+  handoffInspect: handleRecallHandoffInspect,
+  handoffImport: handleRecallHandoffImport,
+});
 
 export const recallCommand: SlashCommand = {
   name: 'recall',
@@ -31,91 +65,9 @@ export const recallCommand: SlashCommand = {
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 
+    if (await dispatchRecall(sub, rest, context)) return;
+
     switch (sub) {
-      case 'add':
-        await handleRecallAdd(rest, context);
-        break;
-
-      case 'search':
-      case 'find':
-        await handleRecallSearch(rest, context);
-        break;
-
-      case 'vector':
-      case 'vectors':
-        handleRecallVector(rest, context);
-        break;
-
-      case 'capture':
-        await handleRecallCapture(rest, context);
-        break;
-
-      case 'get':
-      case 'show':
-        handleRecallGet(rest, context);
-        break;
-
-      case 'queue':
-        await handleRecallQueue(rest, context);
-        break;
-
-      case 'review':
-        handleRecallReview(rest, context);
-        break;
-
-      case 'stale':
-        handleRecallReview([rest[0] ?? '', 'stale', '--reason', ...rest.slice(1)], context);
-        break;
-
-      case 'contradict':
-      case 'contradicted':
-        handleRecallReview([rest[0] ?? '', 'contradicted', '--reason', ...rest.slice(1)], context);
-        break;
-
-      case 'explain':
-        await handleRecallExplain(rest, context);
-        break;
-
-      case 'promote':
-        handleRecallPromote(rest, context);
-        break;
-
-      case 'link':
-        await handleRecallLink(rest, context);
-        break;
-
-      case 'list':
-      case 'ls':
-        await handleRecallList(rest, context);
-        break;
-
-      case 'remove':
-      case 'delete':
-      case 'rm':
-        handleRecallRemove(rest, context);
-        break;
-
-      case 'export':
-        handleRecallExport(rest, context);
-        break;
-
-      case 'import':
-        await handleRecallImport(rest, context);
-        break;
-
-      case 'handoff-export':
-      case 'share':
-        handleRecallHandoffExport(rest, context);
-        break;
-
-      case 'handoff-inspect':
-        handleRecallHandoffInspect(rest, context);
-        break;
-
-      case 'handoff-import':
-        await handleRecallHandoffImport(rest, context);
-        break;
-
       default: {
         const usage = [
           'Usage: /memory <subcommand>',

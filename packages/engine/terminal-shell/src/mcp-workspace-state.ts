@@ -21,6 +21,11 @@ export interface McpWorkspaceStatePorts<Context, Form extends McpWorkspaceFormBa
   readonly paths: (context: Context) => ShellPathService;
   readonly createForm: (server?: McpServerConfig | undefined) => Form;
   readonly showToolStatusOnOpen: boolean;
+  readonly formStatus: {
+    readonly add: string;
+    readonly edit: (name: string, scope: 'project' | 'global', hasLaunch: boolean) => string;
+    readonly remove: (name: string, scope: 'project' | 'global') => string;
+  };
   readonly requestRender: (context: Context) => void;
 }
 function isTextField(field: string): field is 'name' | 'command' | 'args' | 'env' | 'allowedPaths' | 'allowedHosts' {
@@ -53,6 +58,29 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
   abstract get formFields(): readonly McpWorkspaceFormField<'confirm'>[];
   protected abstract publishStatus(text: string, tone?: ('info' | 'warning' | 'error') | undefined): void;
   abstract reloadRuntime(): Promise<void>;
+  openAddForm(): void {
+    this.mode = 'form';
+    this.formIndex = 0;
+    this.editingServerName = null;
+    this.form = this.ports.createForm();
+    this.publishStatus(this.ports.formStatus.add);
+  }
+  openEditForm(serverName: string): void {
+    const entry = this.snapshot.effectiveConfig.servers.find((item) => item.server.name === serverName);
+    this.mode = 'form';
+    this.formIndex = 0;
+    this.editingServerName = serverName;
+    const scope = entry?.source.scope === 'global' ? 'global' : 'project';
+    this.form = { ...this.ports.createForm(entry?.server), scope };
+    this.publishStatus(this.ports.formStatus.edit(serverName, scope, entry !== undefined), entry ? 'info' : 'warning');
+  }
+  requestDelete(serverName: string): void {
+    this.mode = 'delete-confirm';
+    this.editingServerName = serverName;
+    const entry = this.snapshot.effectiveConfig.servers.find((item) => item.server.name === serverName);
+    const scope = entry?.source.scope === 'global' ? 'global' : 'project';
+    this.publishStatus(this.ports.formStatus.remove(serverName, scope));
+  }
   open(context: Context): void {
     this.context = context;
     this.active = true;

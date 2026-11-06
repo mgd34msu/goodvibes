@@ -823,12 +823,13 @@
       "path": "input/handler-modal-routes.ts",
       "baselineTuiLines": 686,
       "baselineSimilarity": 0.7284,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "handleSelectionModalToken",
         "handleBookmarkModalToken",
         "syncRuntimeAfterSettingReset"
-      ]
+      ],
+      "notes": "Platform owns settings keyboard/picker routing and searchable session/profile navigation. Product ports retain resume versus local load, inline reset/confirmation rules, timezone action and TUI-only declarative config-modal host."
     },
     {
       "path": "input/handler-modal-stack.ts",
@@ -922,7 +923,7 @@
       "path": "input/mcp-workspace.ts",
       "baselineTuiLines": 594,
       "baselineSimilarity": 0.8405,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "MCP_WORKSPACE_MODAL_NAME",
         "MCP_ROLES",
@@ -941,7 +942,8 @@
         "mergeServers",
         "McpWorkspaceState",
         "handleMcpWorkspaceToken"
-      ]
+      ],
+      "notes": "Common workspace state, inspection, filtering, input and add/edit/delete transitions live in platform. Product code owns direct SDK writes versus confirmed command dispatch and semantic status presentation."
     },
     {
       "path": "input/model-picker-open.ts",
@@ -1287,10 +1289,11 @@
       "path": "renderer/mcp-workspace.ts",
       "baselineTuiLines": 202,
       "baselineSimilarity": 0.719,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "formRows"
-      ]
+      ],
+      "notes": "One platform MCP renderer owns browsing, details, forms, confirmations, status layout and overflow; product copy, origin labels and status-tone policies remain adapters."
     },
     {
       "path": "renderer/modal-utils.ts",

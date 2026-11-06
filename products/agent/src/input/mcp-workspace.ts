@@ -52,6 +52,15 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
   constructor() {
     super({
       api: requireMcpApi,
+      formStatus: {
+        add: 'Draft an MCP server. Type yes on the Confirm field, then press Enter on Save server.',
+        edit: (name, _scope, hasLaunch) =>
+          hasLaunch
+            ? 'Editing ' + name + '. Type yes on the Confirm field, then press Enter on Save server to update it.'
+            : 'Viewing ' + name + '. Runtime status exists, but no launch config was found.',
+        remove: (name, scope) =>
+          'Confirm removal of ' + name + ' from ' + scope + ' MCP config. Press Enter or y to remove; Esc or n cancels.',
+      },
       paths: requireShellPaths,
       createForm: serverConfigToForm,
       showToolStatusOnOpen: false,
@@ -148,33 +157,6 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
 
   async reloadRuntime(): Promise<void> {
     await this.dispatchMcpCommand(['reload', '--yes'], 'MCP runtime reload');
-  }
-
-  openAddForm(): void {
-    this.mode = 'form';
-    this.formIndex = 0;
-    this.editingServerName = null;
-    this.form = serverConfigToForm();
-    this.status = 'Draft an MCP server. Type yes on the Confirm field, then press Enter on Save server.';
-  }
-
-  openEditForm(serverName: string): void {
-    const entry = this.snapshot.effectiveConfig.servers.find((configEntry) => configEntry.server.name === serverName);
-    this.mode = 'form';
-    this.formIndex = 0;
-    this.editingServerName = serverName;
-    this.form = { ...serverConfigToForm(entry?.server), scope: entry?.source.scope === 'global' ? 'global' : 'project' };
-    this.status = entry
-      ? `Editing ${serverName}. Type yes on the Confirm field, then press Enter on Save server to update it.`
-      : `Viewing ${serverName}. Runtime status exists, but no launch config was found.`;
-  }
-
-  requestDelete(serverName: string): void {
-    this.mode = 'delete-confirm';
-    this.editingServerName = serverName;
-    const entry = this.snapshot.effectiveConfig.servers.find((configEntry) => configEntry.server.name === serverName);
-    const scope = entry?.source.scope === 'global' ? 'global' : 'project';
-    this.status = `Confirm removal of ${serverName} from ${scope} MCP config. Press Enter or y to remove; Esc or n cancels.`;
   }
 
   async saveForm(): Promise<void> {

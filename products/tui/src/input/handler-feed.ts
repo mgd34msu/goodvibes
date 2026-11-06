@@ -1,3 +1,4 @@
+import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/input-feed-pipeline';
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
@@ -21,21 +22,12 @@ import type { ConfigModal } from './config-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import type { OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
-import {
-  IMAGE_EXTENSIONS,
-  formatFileSize,
-  mediaTypeFromExt,
-} from './handler-content-actions.ts';
-import {
-  handleIndicatorFocusToken,
-  handleMouseToken,
-  handlePromptKeyToken,
-  handlePromptTextToken,
-} from './handler-feed-routes.ts';
+import { IMAGE_EXTENSIONS, formatFileSize, mediaTypeFromExt } from './handler-content-actions.ts';
+import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
 import type { WrappedPromptInfo } from './handler-prompt-buffer.ts';
 import { getViewportBottomLine } from '../renderer/conversation-layout.ts';
 import { handleWorkTreeToken } from './handler-work-tree-route.ts';
-import { handleSessionViewToken } from './handler-session-view-route.ts';
+
 import { expandTextPastes } from './handler-content-actions.ts';
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
 import { handleCommandModeToken } from './handler-command-route.ts';
@@ -179,278 +171,134 @@ export interface InputFeedContext {
   readonly exitApp: () => void;
 }
 
-export function feedInputTokens(context: InputFeedContext, tokens: readonly InputToken[]): void {
-  const history = context.getHistory();
-  const viewportHeight = context.getViewportHeight();
-  const scrollTop = context.getScrollTop();
-  const lineCount = history.getLineCount();
-  const keybindings = context.keybindingsManager;
-
-  // The footer process indicator's Enter opens the Agents modal (so does F2).
-  const openAgentsView = (): void => {
-    context.commandContext?.openAgents?.();
-  };
-
-  for (const token of tokens) {
-    // Focus-reporting tokens (CSI ?1004h) never reach the composer or any
-    // modal route, consumed here, first, unconditionally. No render needed.
-    if (token.type === 'focus') {
-      context.focusTracker.setFocused(token.action === 'in');
-      continue;
-    }
-
-    if (context.handleHostPairingToken?.(token)) continue;
-
-    if (token.type === 'key' && context.keybindingsManager.matches('clear-cancel', token)) {
-      context.handleCtrlC();
-      continue;
-    }
-
-    // Kit modals sit on top of everything else: focus belongs to the top one.
-    // Esc goes through the shared chain (handler-modal-stack.ts), which pops
-    // exactly one level of the host before anything else.
-    if (context.surfaceModals?.active) {
-      if (token.type === 'key' && token.logicalName === 'escape') context.handleEscape();
-      else context.surfaceModals.handleToken(token);
-      context.requestRender();
-      continue;
-    }
-
-    const modalRoute = handleModalTokenRoutes({
-      history,
-      conversationManager: context.conversationManager,
-      searchShortcutMatch: token.type === 'key' && keybindings.matches('search', token),
-      selectionModal: context.selectionModal,
-      selectionCallback: context.selectionCallback,
-      getSelectionCallback: () => context.selectionCallback,
-      setSelectionCallback: (callback) => {
-        context.selectionCallback = callback;
-      },
-      bookmarkModal: context.bookmarkModal,
-      settingsModal: context.settingsModal,
-      mcpWorkspace: context.mcpWorkspace,
-      sessionPickerModal: context.sessionPickerModal,
-      profilePickerModal: context.profilePickerModal,
-      configModal: context.configModal,
-      onboardingWizard: context.onboardingWizard,
-      helpOverlayActive: context.helpOverlayActive,
-      helpScrollOffset: context.helpScrollOffset,
-      shortcutsOverlayActive: context.shortcutsOverlayActive,
-      shortcutsScrollOffset: context.shortcutsScrollOffset,
-      historySearch: context.historySearch,
-      prompt: context.prompt,
-      cursorPos: context.cursorPos,
-      modelPicker: context.modelPicker,
-      modalStack: context.modalStack,
-      commandContext: context.commandContext,
-      getViewportHeight: context.getViewportHeight,
-      requestRender: context.requestRender,
-      handleEscape: context.handleEscape,
-      contextInspectorModal: context.contextInspectorModal,
-      overlayFilters: context.overlayFilters,
-      modalOpened: context.modalOpened,
-      filePicker: context.filePicker,
-      imageRegistry: context.imageRegistry,
-      nextImageId: context.nextImageId,
-      saveUndoState: context.saveUndoState,
-      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-      formatFileSize,
-      mediaTypeFromExt,
-      imageExtensions: IMAGE_EXTENSIONS,
-      blockActionsMenu: context.blockActionsMenu,
-      executeBlockAction: context.executeBlockAction,
-      searchManager: context.searchManager,
-      scroll: context.scroll,
-      getScrollTop: context.getScrollTop,
-      openModelPickerWithTarget: context.openModelPickerWithTarget,
-      openProviderModelPickerWithTarget: context.openProviderModelPickerWithTarget,
-      onModelPickerCommit: context.onModelPickerCommit,
-      onOnboardingAction: context.onOnboardingAction,
-      onStepChange: context.onStepChange,
-    }, token);
-    context.selectionCallback = modalRoute.selectionCallback;
-    context.helpOverlayActive = modalRoute.helpOverlayActive;
-    context.helpScrollOffset = modalRoute.helpScrollOffset;
-    context.shortcutsOverlayActive = modalRoute.shortcutsOverlayActive;
-    context.shortcutsScrollOffset = modalRoute.shortcutsScrollOffset;
-    context.prompt = modalRoute.prompt;
-    context.cursorPos = modalRoute.cursorPos;
-    context.nextImageId = modalRoute.nextImageId;
-    if (modalRoute.handled) {
-      continue;
-    }
-
-    // An agent or process open full screen, and the session chips' Tab (handler-session-view-route.ts).
-    const sessionView = context.getSessionView();
-    const viewState = {
-      controls: sessionView,
-      expandPastes: (text: string) => expandTextPastes(context.pasteRegistry, text),
-      prompt: context.prompt,
-      cursorPos: context.cursorPos,
-      commandMode: context.commandMode,
-      saveUndoState: context.saveUndoState,
-      requestRender: context.requestRender,
-    };
-    if (handleSessionViewToken(viewState, token)) {
-      context.prompt = viewState.prompt;
-      context.cursorPos = viewState.cursorPos;
-      continue;
-    }
-
-    // The keyboard inside the work tree (Alt+Up enters, Esc leaves; see
-    // handler-work-tree-route.ts). The work tree is main's: inside a view it is not on screen.
-    if (!sessionView?.active && handleWorkTreeToken({
-      conversationManager: context.conversationManager,
-      enterMatch: token.type === 'key' && keybindings.matches('focus-work-tree', token),
-      anchorLine: getViewportBottomLine(scrollTop, viewportHeight, lineCount),
-      scrollTop: context.getScrollTop(),
-      viewportHeight,
-      scroll: context.scroll,
-      requestRender: context.requestRender,
-      onCopied: () => { /* the copy receipt is the transcript line handleBlockCopy logs */ },
-      openAgent: (id) => context.commandContext?.openSessionView?.({ kind: 'agent', id }) ?? false,
-      openProcess: (id) => context.commandContext?.openSessionView?.({ kind: 'process', id }) ?? false,
-    }, token)) {
-      continue;
-    }
-
-    if (token.type === 'key') {
-      // Snapshot these BEFORE dispatch so the write-back below can tell a
-      // pipeline-driven change (see comment there) from a stale copy.
-      const promptBefore = context.prompt;
-      const cursorPosBefore = context.cursorPos;
-      const commandModeBefore = context.commandMode;
-      const shortcutState = {
-        prompt: context.prompt,
-        cursorPos: context.cursorPos,
-        commandMode: context.commandMode,
-        autocomplete: context.autocomplete,
+export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
+  surfaceModalTokens: 'all',
+  guardModalWrites: false,
+  pairing: (context, token) => context.handleHostPairingToken?.(token) ?? false,
+  modal: (context, token, { history }) => {
+    const keybindings = context.keybindingsManager;
+    return handleModalTokenRoutes(
+      {
+        history,
+        conversationManager: context.conversationManager,
+        searchShortcutMatch: token.type === 'key' && keybindings.matches('search', token),
+        selectionModal: context.selectionModal,
+        selectionCallback: context.selectionCallback,
+        getSelectionCallback: () => context.selectionCallback,
+        setSelectionCallback: (callback) => {
+          context.selectionCallback = callback;
+        },
+        bookmarkModal: context.bookmarkModal,
+        settingsModal: context.settingsModal,
+        mcpWorkspace: context.mcpWorkspace,
+        sessionPickerModal: context.sessionPickerModal,
+        profilePickerModal: context.profilePickerModal,
+        configModal: context.configModal,
+        onboardingWizard: context.onboardingWizard,
+        helpOverlayActive: context.helpOverlayActive,
+        helpScrollOffset: context.helpScrollOffset,
+        shortcutsOverlayActive: context.shortcutsOverlayActive,
+        shortcutsScrollOffset: context.shortcutsScrollOffset,
         historySearch: context.historySearch,
-        searchManager: context.searchManager,
-        conversationManager: context.conversationManager,
-        commandContext: context.commandContext,
-        contentWidth: context.contentWidth,
-        getScrollTop: context.getScrollTop,
-        getWrappedPromptInfo: context.getWrappedPromptInfo,
-        saveUndoState: context.saveUndoState,
-        requestRender: context.requestRender,
-        scroll: context.scroll,
-        ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-        handleCopy: context.handleCopy,
-        handleCtrlC: context.handleCtrlC,
-        handleBlockCopy: context.handleBlockCopy,
-        handleBookmark: context.handleBookmark,
-        handleBlockSave: context.handleBlockSave,
-        handleDiffApply: context.handleDiffApply,
-        handleUndo: context.handleUndo,
-        handleRedo: context.handleRedo,
-        handlePaste: context.handlePaste,
-        handleEscape: context.handleEscape,
-        keybindingsManager: context.keybindingsManager,
-        killRing: context.killRing,
-      };
-      if (handleGlobalShortcutToken(shortcutState, token, viewportHeight)) {
-        // Some branches (handleEscape, handleCtrlC, handleUndo, handleRedo,
-        // handlePaste) mutate handler state directly and immediately sync it
-        // into this same `context` via syncFeedContextMutableFields, e.g.
-        // Escape closing the slash-command palette clears context.prompt and
-        // context.commandMode on the live handler mid-call. `shortcutState`
-        // above is a snapshot taken BEFORE that call, so applying it
-        // unconditionally would stomp the live update right back to its
-        // stale pre-action value (undoing the very close it just performed,
-        // and even re-arming the palette below). This is the same class of
-        // bug as the overlay-flag write-back guard in handler.ts's feed().
-        // Only apply the snapshot for a field the dispatched action did NOT
-        // already update out from under us.
-        context.prompt = context.prompt === promptBefore ? shortcutState.prompt : context.prompt;
-        context.cursorPos = context.cursorPos === cursorPosBefore ? shortcutState.cursorPos : context.cursorPos;
-        context.commandMode = context.commandMode === commandModeBefore ? shortcutState.commandMode : context.commandMode;
-        if (context.commandMode) {
-          if (!context.prompt.startsWith('/')) {
-            context.commandMode = false;
-            context.autocomplete?.reset();
-          } else {
-            const q = context.prompt.slice(1);
-            if (q.indexOf(' ') === -1) {
-              context.autocomplete?.update(q);
-            } else {
-              context.autocomplete?.reset();
-            }
-          }
-        }
-        continue;
-      }
-    }
-
-    const indicatorRoute = handleIndicatorFocusToken({
-      indicatorFocused: context.indicatorFocused,
-      modalOpened: context.modalOpened,
-      openAgentsView,
-      requestRender: context.requestRender,
-    }, token);
-    context.indicatorFocused = indicatorRoute.indicatorFocused;
-    if (indicatorRoute.handled) {
-      continue;
-    }
-
-    const textRoute = handlePromptTextToken({
-      prompt: context.prompt,
-      cursorPos: context.cursorPos,
-      commandMode: context.commandMode,
-      nextPasteId: context.nextPasteId,
-      nextImageId: context.nextImageId,
-      pasteRegistry: context.pasteRegistry,
-      imageRegistry: context.imageRegistry,
-      inputHistory: context.inputHistory,
-      commandRegistry: context.commandRegistry,
-      commandContext: context.commandContext,
-      autocomplete: context.autocomplete,
-      filePicker: context.filePicker,
-      modalOpened: context.modalOpened,
-      saveUndoState: context.saveUndoState,
-      saveUndoStateForText: context.saveUndoStateForText,
-      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-      registerPaste: context.registerPaste,
-      requestRender: context.requestRender,
-      killRing: context.killRing,
-    }, token);
-    if (textRoute.handled) {
-      context.prompt = textRoute.prompt;
-      context.cursorPos = textRoute.cursorPos;
-      context.commandMode = textRoute.commandMode;
-      continue;
-    }
-
-    if (token.type === 'key') {
-      const commandState = {
-        commandMode: context.commandMode,
         prompt: context.prompt,
         cursorPos: context.cursorPos,
-        autocomplete: context.autocomplete,
+        modelPicker: context.modelPicker,
         modalStack: context.modalStack,
-        commandRegistry: context.commandRegistry,
         commandContext: context.commandContext,
-        conversationManager: context.conversationManager,
+        getViewportHeight: context.getViewportHeight,
         requestRender: context.requestRender,
         handleEscape: context.handleEscape,
-        projectRoot: context.projectRoot,
-        pasteRegistry: context.pasteRegistry,
+        contextInspectorModal: context.contextInspectorModal,
+        overlayFilters: context.overlayFilters,
+        modalOpened: context.modalOpened,
+        filePicker: context.filePicker,
         imageRegistry: context.imageRegistry,
-        nextPasteId: context.nextPasteId,
         nextImageId: context.nextImageId,
         saveUndoState: context.saveUndoState,
         ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
-      };
-      if (handleCommandModeToken(commandState, token)) {
-        context.commandMode = commandState.commandMode;
-        context.prompt = commandState.prompt;
-        context.cursorPos = commandState.cursorPos;
-        context.nextPasteId = commandState.nextPasteId;
-        context.nextImageId = commandState.nextImageId;
-        continue;
-      }
-
-      const keyRoute = handlePromptKeyToken({
+        formatFileSize,
+        mediaTypeFromExt,
+        imageExtensions: IMAGE_EXTENSIONS,
+        blockActionsMenu: context.blockActionsMenu,
+        executeBlockAction: context.executeBlockAction,
+        searchManager: context.searchManager,
+        scroll: context.scroll,
+        getScrollTop: context.getScrollTop,
+        openModelPickerWithTarget: context.openModelPickerWithTarget,
+        openProviderModelPickerWithTarget: context.openProviderModelPickerWithTarget,
+        onModelPickerCommit: context.onModelPickerCommit,
+        onOnboardingAction: context.onOnboardingAction,
+        onStepChange: context.onStepChange,
+      },
+      token,
+    );
+  },
+  workTree: (context, token, { viewportHeight, scrollTop, lineCount }) => {
+    const keybindings = context.keybindingsManager;
+    return handleWorkTreeToken(
+      {
+        conversationManager: context.conversationManager,
+        enterMatch: token.type === 'key' && keybindings.matches('focus-work-tree', token),
+        anchorLine: getViewportBottomLine(scrollTop, viewportHeight, lineCount),
+        scrollTop: context.getScrollTop(),
+        viewportHeight,
+        scroll: context.scroll,
+        requestRender: context.requestRender,
+        onCopied: () => {
+          /* the copy receipt is the transcript line handleBlockCopy logs */
+        },
+        openAgent: (id) => context.commandContext?.openSessionView?.({ kind: 'agent', id }) ?? false,
+        openProcess: (id) => context.commandContext?.openSessionView?.({ kind: 'process', id }) ?? false,
+      },
+      token,
+    );
+  },
+  indicator: (context, token) => {
+    const openAgentsView = (): void => {
+      context.commandContext?.openAgents?.();
+    };
+    return handleIndicatorFocusToken(
+      {
+        indicatorFocused: context.indicatorFocused,
+        modalOpened: context.modalOpened,
+        openAgentsView,
+        requestRender: context.requestRender,
+      },
+      token,
+    );
+  },
+  text: (context, token) => {
+    return handlePromptTextToken(
+      {
+        prompt: context.prompt,
+        cursorPos: context.cursorPos,
+        commandMode: context.commandMode,
+        nextPasteId: context.nextPasteId,
+        nextImageId: context.nextImageId,
+        pasteRegistry: context.pasteRegistry,
+        imageRegistry: context.imageRegistry,
+        inputHistory: context.inputHistory,
+        commandRegistry: context.commandRegistry,
+        commandContext: context.commandContext,
+        autocomplete: context.autocomplete,
+        filePicker: context.filePicker,
+        modalOpened: context.modalOpened,
+        saveUndoState: context.saveUndoState,
+        saveUndoStateForText: context.saveUndoStateForText,
+        ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
+        registerPaste: context.registerPaste,
+        requestRender: context.requestRender,
+        killRing: context.killRing,
+      },
+      token,
+    );
+  },
+  key: (context, token, { viewportHeight, scrollTop, lineCount }) => {
+    const openAgentsView = (): void => {
+      context.commandContext?.openAgents?.();
+    };
+    return handlePromptKeyToken(
+      {
         prompt: context.prompt,
         cursorPos: context.cursorPos,
         inputScrollTop: context.inputScrollTop,
@@ -482,18 +330,14 @@ export function feedInputTokens(context: InputFeedContext, tokens: readonly Inpu
         exitApp: context.exitApp,
         requestRender: context.requestRender,
         killRing: context.killRing,
-      }, token);
-      if (keyRoute.handled) {
-        context.prompt = keyRoute.prompt;
-        context.cursorPos = keyRoute.cursorPos;
-        context.inputScrollTop = keyRoute.inputScrollTop;
-        context.commandMode = keyRoute.commandMode;
-        context.indicatorFocused = keyRoute.indicatorFocused;
-        continue;
-      }
-    } else if (token.type === 'mouse') {
-      const mouseRoute = handleMouseToken({
-        openSessionView: target => context.commandContext?.openSessionView?.(target) ?? false,
+      },
+      token,
+    );
+  },
+  mouse: (context, token, { viewportHeight, scrollTop, lineCount }) => {
+    return handleMouseToken(
+      {
+        openSessionView: (target) => context.commandContext?.openSessionView?.(target) ?? false,
         conversationManager: context.conversationManager,
         selection: context.selection,
         mouseDownRow: context.mouseDownRow,
@@ -508,14 +352,80 @@ export function feedInputTokens(context: InputFeedContext, tokens: readonly Inpu
         footerTargetAt: context.footerTargetAt,
         openFooterTarget: context.openFooterTarget,
         bodyTopRow: context.bodyTopRow,
-      }, token);
-      context.mouseDownRow = mouseRoute.mouseDownRow;
-      context.mouseDownCol = mouseRoute.mouseDownCol;
-      if (mouseRoute.handled) {
-        continue;
+      },
+      token,
+    );
+  },
+  shortcut: (context, token, { viewportHeight }) => {
+    const shortcutState = {
+      prompt: context.prompt,
+      cursorPos: context.cursorPos,
+      commandMode: context.commandMode,
+      autocomplete: context.autocomplete,
+      historySearch: context.historySearch,
+      searchManager: context.searchManager,
+      conversationManager: context.conversationManager,
+      commandContext: context.commandContext,
+      contentWidth: context.contentWidth,
+      getScrollTop: context.getScrollTop,
+      getWrappedPromptInfo: context.getWrappedPromptInfo,
+      saveUndoState: context.saveUndoState,
+      requestRender: context.requestRender,
+      scroll: context.scroll,
+      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
+      handleCopy: context.handleCopy,
+      handleCtrlC: context.handleCtrlC,
+      handleBlockCopy: context.handleBlockCopy,
+      handleBookmark: context.handleBookmark,
+      handleBlockSave: context.handleBlockSave,
+      handleDiffApply: context.handleDiffApply,
+      handleUndo: context.handleUndo,
+      handleRedo: context.handleRedo,
+      handlePaste: context.handlePaste,
+      handleEscape: context.handleEscape,
+      keybindingsManager: context.keybindingsManager,
+      killRing: context.killRing,
+    };
+    const handled = handleGlobalShortcutToken(shortcutState, token, viewportHeight);
+    return { ...shortcutState, handled };
+  },
+  command: (context, token) => {
+    const commandState = {
+      commandMode: context.commandMode,
+      prompt: context.prompt,
+      cursorPos: context.cursorPos,
+      autocomplete: context.autocomplete,
+      modalStack: context.modalStack,
+      commandRegistry: context.commandRegistry,
+      commandContext: context.commandContext,
+      conversationManager: context.conversationManager,
+      requestRender: context.requestRender,
+      handleEscape: context.handleEscape,
+      projectRoot: context.projectRoot,
+      pasteRegistry: context.pasteRegistry,
+      imageRegistry: context.imageRegistry,
+      nextPasteId: context.nextPasteId,
+      nextImageId: context.nextImageId,
+      saveUndoState: context.saveUndoState,
+      ensureInputCursorVisible: () => context.ensureInputCursorVisible(),
+    };
+    const handled = handleCommandModeToken(commandState, token);
+    return { ...commandState, handled };
+  },
+  afterShortcut: (context) => {
+    if (context.commandMode) {
+      if (!context.prompt.startsWith('/')) {
+        context.commandMode = false;
+        context.autocomplete?.reset();
+      } else {
+        const q = context.prompt.slice(1);
+        if (q.indexOf(' ') === -1) {
+          context.autocomplete?.update(q);
+        } else {
+          context.autocomplete?.reset();
+        }
       }
     }
-  }
-
-  context.requestRender();
-}
+  },
+  expandPastes: (context, text) => expandTextPastes(context.pasteRegistry, text),
+});

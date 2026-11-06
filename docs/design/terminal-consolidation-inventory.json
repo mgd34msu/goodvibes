@@ -677,7 +677,7 @@
       "path": "input/handler-feed.ts",
       "baselineTuiLines": 521,
       "baselineSimilarity": 0.7856,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/handler-interactions.ts",

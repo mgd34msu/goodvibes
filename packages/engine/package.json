@@ -2228,6 +2228,16 @@
       "bun": "./terminal-shell/src/keybinding-catalog.ts",
       "types": "./terminal-shell/dist/keybinding-catalog.d.ts",
       "import": "./terminal-shell/dist/keybinding-catalog.js"
+    },
+    "./terminal-shell/input-feed-pipeline": {
+      "bun": "./terminal-shell/src/input-feed-pipeline.ts",
+      "types": "./terminal-shell/dist/input-feed-pipeline.d.ts",
+      "import": "./terminal-shell/dist/input-feed-pipeline.js"
+    },
+    "./terminal-shell/paste-flood-guard": {
+      "bun": "./terminal-shell/src/paste-flood-guard.ts",
+      "types": "./terminal-shell/dist/paste-flood-guard.d.ts",
+      "import": "./terminal-shell/dist/paste-flood-guard.js"
     }
   },
   "publishConfig": {

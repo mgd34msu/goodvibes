@@ -14,4 +14,4 @@ export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionMod
 
 export { prepareSystemMessagePresentation, peekSystemMessagePresentation, type SystemMessagePresentation } from './system-message-presentation.js';
 
-export { declaredClassicCapabilityEvidence } from './classic-capability-facts.js';
+export { declaredClassicCapabilityEvidence, declaredClassicRuntimeMetadata } from './classic-capability-facts.js';

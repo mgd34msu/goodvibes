@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -166,4 +168,18 @@ describe('keybinding modifier interpretation before durable writes', () => {
       });
     });
   }
+});
+
+
+test('Classic keybindings accept exact booleans and reject ambiguous modifiers before persistence', async () => {
+  const fake = modifierReadings('true'); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', () => withKeybindings(async ({ context, manager, configPath }) => {
+    await setHarnessKeybinding(context, { actionId: 'search', combo: { key: 'g', ctrl: 'true', shift: false } });
+    const before = readFileSync(configPath, 'utf-8');
+    await expect(setHarnessKeybinding(context, { actionId: 'search', combo: { key: 'j', ctrl: 'on' } }, { sourceOwner: ordinaryResearchOwner() }))
+      .rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(manager.matches('search', { logicalName: 'g', ctrl: true })).toBe(true);
+    expect(fake.requests).toHaveLength(0);
+  }));
 });

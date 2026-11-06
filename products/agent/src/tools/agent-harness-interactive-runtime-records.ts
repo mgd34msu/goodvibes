@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -9,11 +10,15 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
 
-export type AgentHarnessInteractiveRuntimeKind = 'process-output' | 'pty-session' | 'sudo-mediation' | 'browser-desktop-receipt';
+export type AgentHarnessInteractiveRuntimeKind = 'process-output' | 'pty-session' | 'sudo-mediation' | 'browser-desktop-receipt' | 'unassessed';
 export type AgentHarnessInteractiveRuntimeStatus = 'ready' | 'running' | 'completed' | 'blocked' | 'failed' | 'attention' | 'unknown';
 
 export interface AgentHarnessInteractiveRuntimeCertification {
-  readonly schemaStatus: 'certified' | 'legacy';
+  readonly schemaStatus: 'certified' | 'legacy' | 'unassessed';
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
+  readonly rawSecretReturned?: boolean | null;
+  readonly rawValueReturned?: boolean | null;
   readonly schemaVersion?: string;
   readonly publicationGuarantee?: string;
   readonly publisher?: string;
@@ -171,14 +176,14 @@ async function outputChunks(evidence: InteractiveRuntimeEvidence, options: Catal
       text,
       chars: readNumber(chunk.chars) ?? text.length,
       bytes: readNumber(chunk.bytes) ?? Buffer.byteLength(text),
-      truncated: truncated ?? false,
+      truncated: truncated === undefined ? (isClassicOperation() ? null : false) : truncated,
       createdAt: readTimestamp(chunk.createdAt ?? chunk.timestamp),
     });
   }
   if (chunks.length > 0) return chunks.slice(0, 5);
   return ['stdoutTail', 'stderrTail', 'stdout', 'stderr'].flatMap((key) => {
     const text = redactedPreview(record[key] ?? output[key], 600);
-    return text ? [{ chunkId: key, stream: key.includes('stderr') ? 'stderr' : 'stdout', text, chars: text.length, bytes: Buffer.byteLength(text), truncated: false }] : [];
+    return text ? [{ chunkId: key, stream: key.includes('stderr') ? 'stderr' : 'stdout', text, chars: text.length, bytes: Buffer.byteLength(text), truncated: isClassicOperation() ? null : false }] : [];
   }).slice(0, 5);
 }
 
@@ -191,6 +196,7 @@ async function certification(input: {
   readonly chunks: readonly Record<string, unknown>[];
   readonly evidence: InteractiveRuntimeEvidence;
   readonly options: CatalogRankingOptions;
+  readonly startedClassic: boolean;
 }): Promise<AgentHarnessInteractiveRuntimeCertification> {
   const records = certificationRecords(input.record);
   const status = await readRuntimeSchema(input.evidence, input.options);
@@ -207,7 +213,8 @@ async function certification(input: {
   const rawSecretReturned = await readRuntimeBoolean(input.evidence, 'rawSecretReturned', input.record.rawSecretReturned, 'Whether the publisher returned raw secret material.', input.options);
   const rawValueReturned = await readRuntimeBoolean(input.evidence, 'rawValueReturned', input.record.rawValueReturned, 'Whether the publisher returned raw credential values.', input.options);
   const missingSignals = [
-    ...(status === 'certified' ? [] : [`Certified ${input.kind} schema is not published.`]),
+    ...(status === 'unassessed' ? ['Runtime schema certification and route roles were not semantically assessed in Classic operation.']
+      : status === 'certified' ? [] : [`Certified ${input.kind} schema is not published.`]),
     ...(input.id ? [] : [`Durable ${input.kind} id is not published.`]),
     ...(publicationGuarantee ? [] : [`${input.kind} publication guarantee is not published.`]),
     ...(publisher ? [] : [`${input.kind} publisher is not published.`]),
@@ -219,6 +226,8 @@ async function certification(input: {
   ];
   return {
     schemaStatus: status,
+    rawSecretReturned: rawSecretReturned ?? null, rawValueReturned: rawValueReturned ?? null,
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: input.startedClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     ...(firstString(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']) ? { schemaVersion: redactedPreview(firstString(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']), 80) } : {}),
     ...(publicationGuarantee ? { publicationGuarantee: redactedPreview(publicationGuarantee, 220) } : {}),
     ...(publisher ? { publisher: redactedPreview(publisher, 80) } : {}),
@@ -232,6 +241,7 @@ async function certification(input: {
 
 async function normalizeRecord(evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<AgentHarnessInteractiveRuntimeRecord | null> {
   const { record, source } = evidence;
+  const startedClassic = isClassicOperation();
   if (Object.keys(record).length === 0) return null;
   const kind = await readRuntimeKind(evidence, options);
   const id = readId(record, kind);
@@ -257,7 +267,7 @@ async function normalizeRecord(evidence: InteractiveRuntimeEvidence, options: Ca
     ...(chunks.length > 0 ? { outputChunks: chunks } : {}),
     routes,
     ...(readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) ? { updatedAt: readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) } : {}),
-    certification: await certification({ record, source, kind, id, routes, chunks, evidence, options }),
+    certification: await certification({ record, source, kind, id, routes, chunks, evidence, options, startedClassic }),
   };
 }
 
@@ -341,7 +351,11 @@ export interface InteractiveRuntimeSnapshot {
   readonly assertCurrent: () => void;
 }
 
-export async function acquireInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions = {}): Promise<InteractiveRuntimeSnapshot> {
+export function acquireInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions = {}): Promise<InteractiveRuntimeSnapshot> {
+  return withConfiguredDecisionModelPolicy(() => acquireOwnedInteractiveRuntimeSnapshot(context, options));
+}
+
+async function acquireOwnedInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<InteractiveRuntimeSnapshot> {
   const optionSlots = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
   optionSlots();
   const originalAssertCurrent = options.assertCurrent, originalRetainCurrent = options.retainCurrent, signal = options.signal;
@@ -441,6 +455,9 @@ export function summarizeInteractiveRuntimeRecords(records: readonly AgentHarnes
     status: certified.length > 0 ? 'certified-live-runtime' : records.length > 0 ? 'attention' : 'not-published',
     recordCount: records.length,
     certifiedRecordCount: certified.length,
+    unassessedRecordCount: records.filter(record => record.certification.schemaStatus === 'unassessed').length,
+    ...(records.some(record => record.certification.operationProvenance === 'classic') ? { operationProvenance: 'classic', semanticAssessment: records.some(record => record.certification.semanticAssessment === 'partial') ? 'partial' : 'not-evaluated',
+      limitation: 'Published native output and exact metadata remain available. Semantic schema certification and control-route discovery require a decision model; use the native tool routes with their own authorization.' } : {}),
     liveProcessOutput: kindSummary(records, 'process-output'),
     ptySessions: kindSummary(records, 'pty-session'),
     sudoMediation: kindSummary(records, 'sudo-mediation'),

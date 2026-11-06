@@ -1,5 +1,7 @@
+import { withDecisionModelPolicy, declaredClassicRuntimeMetadata } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, JudgmentPortMissingError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
 import { SandboxSessionRegistry } from '@goodvibes-jev/engine/sdk/platform/runtime/sandbox';
 import { ToolInputProjectionError, ToolRegistry, ProcessManager, type BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -11,7 +13,7 @@ import { captureBrowserControlPosture } from '../../tools/agent-harness-browser-
 import { backgroundProcessSummary } from '../../tools/agent-harness-background-processes.ts';
 import { executionPostureSummary, describeHarnessExecutionRoute } from '../../tools/agent-harness-execution-posture.ts';
 import type { CatalogRankingOptions } from '../../tools/agent-harness-catalog-ranking.ts';
-import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
+import { cleanupResearchScreeningFixtures, ordinaryResearchOwner, researchScreeningFixture } from '../helpers/research-screening.ts';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousPort = installJudgmentPort(undefined); });
@@ -410,4 +412,65 @@ describe('native cancellation in acquired browser and runtime guards', () => {
       });
     }
   }
+});
+
+
+describe('Classic native interactive runtime inspection', () => {
+  test('exact declarations and output remain inspectable with zero decision or privacy requests', async () => {
+    const published = { ...record(), kind: 'pty-session', status: 'running', schemaStatus: 'certified' };
+    const { context } = runtimeContext([published]);
+    const fake = runtimeReadings(), privacy = researchScreeningFixture(); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const snapshot = await acquireInteractiveRuntimeSnapshot(context, { sourceOwner: privacy.owner });
+      expect(snapshot.records[0]).toMatchObject({ id: 'native-session', kind: 'pty-session', status: 'running', routes: [],
+        outputChunks: [{ text: 'published output', truncated: null }],
+        certification: { schemaStatus: 'unassessed', operationProvenance: 'classic', semanticAssessment: 'not-evaluated', rawSecretReturned: false, rawValueReturned: null } });
+      expect(snapshot.capabilitySummary).toMatchObject({ certifiedRecordCount: 0, unassessedRecordCount: 1, operationProvenance: 'classic' });
+      expect(snapshot.parityStatus).toMatchObject({ ptyContract: false, sudoMediationContract: false, browserDesktopControlContract: false });
+      expect(fake.requests).toHaveLength(0); expect(privacy.calls).toEqual([]);
+      snapshot.assertCurrent();
+      published.publicationDetails = 'Changed original native publication';
+      expect(snapshot.assertCurrent).toThrow(ToolInputProjectionError);
+      expect(fake.requests).toHaveLength(0); expect(privacy.calls).toEqual([]);
+    });
+  });
+
+  test('prose, source-container names, and conflicting declarations never become native readiness', () => {
+    expect(declaredClassicRuntimeMetadata({ kind: 'pty-session', status: 'ready', state: 'blocked' })).toEqual({ kind: 'pty-session', status: 'unknown' });
+    expect(declaredClassicRuntimeMetadata({ kind: 'some ready terminal session', status: 'it is ready' })).toEqual({ kind: 'unassessed', status: 'unknown' });
+  });
+
+  test('Preferred exhaustion switches the same protected snapshot to native inspection', async () => {
+    const published = { ...record(), kind: 'process-output', status: 'completed' };
+    const { context } = runtimeContext([published]); let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const snapshot = await acquireInteractiveRuntimeSnapshot(context, { sourceOwner: ordinaryResearchOwner() });
+      expect(snapshot.records[0]).toMatchObject({ kind: 'process-output', status: 'completed', certification: { schemaStatus: 'unassessed', operationProvenance: 'classic' } });
+      expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+      expect(asks).toBe(1); snapshot.assertCurrent(); expect(asks).toBe(1);
+    });
+  });
+
+  for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+    test(`runtime ${kind} cannot activate Preferred fallback`, async () => {
+      const { context } = runtimeContext([record()]);
+      installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await expect(acquireInteractiveRuntimeSnapshot(context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    });
+  }
+
+  test('Classic still holds private source content and cancelled acquisition before requests', async () => {
+    const fake = runtimeReadings(); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const privateSource = runtimeContext([{ ...record(), description: 'password=unprotected-runtime-fixture' }]);
+      await expect(acquireInteractiveRuntimeSnapshot(privateSource.context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
+      const abort = new AbortController(); abort.abort();
+      await expect(acquireInteractiveRuntimeSnapshot(runtimeContext([record()]).context, { sourceOwner: ordinaryResearchOwner(), signal: abort.signal })).rejects.toThrow();
+      expect(fake.requests).toHaveLength(0);
+    });
+  });
 });

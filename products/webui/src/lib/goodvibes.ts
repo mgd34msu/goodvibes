@@ -338,7 +338,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
   // on one dedicated probe, since this is the one HTTP helper nearly every operator
   // call passes through.
   recordObservedClientCompatibilityFloor(readClientCompatibilityFloor(response.headers));
-  if (options.authenticated !== false) browserDecisionPolicy.observe(response.headers);
+  if (options.authenticated !== false && isClientLifetimeCurrent(failureLifetime)) browserDecisionPolicy.observe(response.headers);
   const body = await readJson(response);
   check();
   if (!response.ok) {

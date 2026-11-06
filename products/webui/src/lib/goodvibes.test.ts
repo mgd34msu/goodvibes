@@ -14,6 +14,8 @@ import {
 } from './goodvibes';
 import { getObservedClientCompatibilityFloor } from './client-compatibility';
 import type { OperatorMethodOutput } from './goodvibes';
+import { browserDecisionPolicy } from './decision-policy';
+import { tokenStore } from './client-lifetime';
 
 describe('isRuntimeDomain', () => {
   test('returns true for known domains', () => {
@@ -892,6 +894,38 @@ describe('requestJson records the daemon-announced client-build floor off every 
     stubFetch({ sessionId: 'sess-1', deleted: true });
     await sdk.operator.sessions.delete('sess-1');
     expect(getObservedClientCompatibilityFloor()).toBeUndefined();
+  });
+});
+
+describe('decision policy observations belong to the authenticated client identity', () => {
+  const originalFetch = globalThis.fetch;
+  const classicResponse = () => Response.json({ sessionId: 'sess-1', deleted: true }, {
+    headers: { 'x-goodvibes-decision-policy': JSON.stringify({ policy: 'Classic - Off', operation: 'classic', reason: 'selected', revision: 0 }) },
+  });
+  beforeEach(() => browserDecisionPolicy.reset());
+  afterEach(async () => { globalThis.fetch = originalFetch; await tokenStore.clearToken(); browserDecisionPolicy.reset(); });
+
+  test('an authenticated facade response publishes Classic observation without an extra model request', async () => {
+    await tokenStore.setToken('synthetic-current-account');
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => { requests.push(String(input)); return classicResponse(); }) as typeof fetch;
+    await sdk.operator.sessions.delete('sess-1');
+    expect(requests).toHaveLength(1);
+    expect(browserDecisionPolicy.snapshot()).toMatchObject({ policy: 'Classic - Off', operation: 'classic' });
+  });
+
+  test('a late response from a replaced account cannot repopulate its cleared policy notice', async () => {
+    await tokenStore.setToken('synthetic-original-account');
+    const held = Promise.withResolvers<Response>(), entered = Promise.withResolvers<void>();
+    globalThis.fetch = (async () => { entered.resolve(); return held.promise; }) as typeof fetch;
+    const pending = sdk.operator.sessions.delete('sess-1');
+    try {
+      await entered.promise;
+      await tokenStore.setToken('synthetic-replacement-account');
+      held.resolve(classicResponse());
+      await pending;
+      expect(browserDecisionPolicy.snapshot()).toBeUndefined();
+    } finally { held.resolve(classicResponse()); await pending; }
   });
 });
 

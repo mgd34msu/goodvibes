@@ -291,3 +291,46 @@ export function deriveReopenEditAcknowledgementState(
     auth,
   };
 }
+
+/** Shared facts; capability selections and deployment exposure remain product policy. */
+export function onboardingAccessSignals(
+  snapshot: OnboardingSignalSnapshot & {
+    readonly auth: {
+      readonly snapshot: { readonly userCount: number; readonly sessionCount: number; readonly bootstrapCredentialPresent: boolean };
+    };
+  },
+) {
+  return {
+    providers: hasConfiguredProviderState(snapshot) || hasCustomizedProviderRouting(snapshot),
+    subscriptions: snapshot.subscriptions.active.length > 0 || snapshot.subscriptions.pending.length > 0,
+    auth:
+      snapshot.auth.snapshot.userCount > 0 || snapshot.auth.snapshot.sessionCount > 0 || snapshot.auth.snapshot.bootstrapCredentialPresent,
+  };
+}
+export function hasOnboardingWebhookIngress(snapshot: OnboardingSignalSnapshot): boolean {
+  return (
+    hasInboundEventSurface(snapshot) ||
+    snapshot.services.services.some(
+      (service) => service.hasWebhookUrl || service.hasSigningSecret || service.hasPublicKey || service.hasAppToken,
+    )
+  );
+}
+export function onboardingIntegrationSignalCount(snapshot: OnboardingSignalSnapshot): number {
+  return new Set([...getExternalIntegrationServiceIds(snapshot), ...getConfiguredSurfaceKinds(snapshot)]).size;
+}
+
+/** Compose a step snapshot without substituting another product's capability or network policy. */
+export function deriveOnboardingState<Snapshot, Capabilities, Network, Acknowledgements>(
+  snapshot: Snapshot,
+  ports: {
+    readonly capabilities: (snapshot: Snapshot) => Capabilities;
+    readonly network: (snapshot: Snapshot) => Network;
+    readonly acknowledgements: (snapshot: Snapshot) => Acknowledgements;
+  },
+) {
+  return {
+    step1Capabilities: ports.capabilities(snapshot),
+    step1_5NetworkMode: ports.network(snapshot),
+    reopenEditAcknowledgements: ports.acknowledgements(snapshot),
+  };
+}

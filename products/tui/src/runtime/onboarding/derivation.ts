@@ -1,9 +1,21 @@
+import {
+  onboardingAccessSignals,
+  hasOnboardingWebhookIngress,
+  onboardingIntegrationSignalCount,
+  deriveOnboardingState,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
-import { hasCustomizedProviderRouting, hasConfiguredProviderState, getConfiguredSurfaceKinds, countConfiguredSurfaceKinds, hasInboundEventSurface, getExternalIntegrationServiceIds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+import { countConfiguredSurfaceKinds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
 import '@goodvibes-jev/engine/sdk/platform/config';
 import '@goodvibes-jev/engine/sdk/platform/providers';
-import type { OnboardingNetworkMode, OnboardingReopenEditAcknowledgementState, OnboardingSnapshotState, OnboardingStep1CapabilityItem, OnboardingStepDerivationState } from './types.ts';
+import type {
+  OnboardingNetworkMode,
+  OnboardingReopenEditAcknowledgementState,
+  OnboardingSnapshotState,
+  OnboardingStep1CapabilityItem,
+  OnboardingStepDerivationState,
+} from './types.ts';
 
 function hasAnyServerEnabled(snapshot: OnboardingSnapshotState): boolean {
   return (
@@ -50,13 +62,7 @@ function hasRemoteDeviceAccess(snapshot: OnboardingSnapshotState): boolean {
 }
 
 function hasWebhookOrEventIngress(snapshot: OnboardingSnapshotState): boolean {
-  return (
-    snapshot.bindSettings.httpListenerEnabled ||
-    hasInboundEventSurface(snapshot) ||
-    snapshot.services.services.some(
-      (service) => service.hasWebhookUrl || service.hasSigningSecret || service.hasPublicKey || service.hasAppToken,
-    )
-  );
+  return snapshot.bindSettings.httpListenerEnabled || hasOnboardingWebhookIngress(snapshot);
 }
 
 function hasCloudflareBatch(snapshot: OnboardingSnapshotState): boolean {
@@ -102,7 +108,7 @@ function describeWebhookIngress(snapshot: OnboardingSnapshotState): string {
 }
 
 function describeExternalIntegrations(snapshot: OnboardingSnapshotState): string {
-  const integrationCount = new Set<string>([...getExternalIntegrationServiceIds(snapshot), ...getConfiguredSurfaceKinds(snapshot)]).size;
+  const integrationCount = onboardingIntegrationSignalCount(snapshot);
 
   if (integrationCount === 0) {
     return 'Enable setup screens for Slack, Discord, Telegram, Home Assistant, Teams, Matrix, and other app surfaces you choose.';
@@ -171,12 +177,12 @@ export function deriveStep1CapabilityFlags(snapshot: OnboardingSnapshotState): {
   readonly surfaces: boolean;
   readonly cloudflare: boolean;
 } {
+  const access = onboardingAccessSignals(snapshot);
   return {
-    providers: hasConfiguredProviderState(snapshot) || hasCustomizedProviderRouting(snapshot),
+    providers: access.providers,
     services: snapshot.services.total > 0,
-    subscriptions: snapshot.subscriptions.active.length > 0 || snapshot.subscriptions.pending.length > 0,
-    auth:
-      snapshot.auth.snapshot.userCount > 0 || snapshot.auth.snapshot.sessionCount > 0 || snapshot.auth.snapshot.bootstrapCredentialPresent,
+    subscriptions: access.subscriptions,
+    auth: access.auth,
     controlPlane: snapshot.bindSettings.daemonEnabled || snapshot.bindSettings.controlPlane.enabled,
     httpListener: snapshot.bindSettings.httpListenerEnabled,
     web: snapshot.bindSettings.web.enabled,
@@ -219,9 +225,9 @@ export function deriveReopenEditAcknowledgementState(snapshot: OnboardingSnapsho
 }
 
 export function deriveOnboardingStepState(snapshot: OnboardingSnapshotState): OnboardingStepDerivationState {
-  return {
-    step1Capabilities: deriveStep1Capabilities(snapshot),
-    step1_5NetworkMode: deriveStep1_5NetworkMode(snapshot.bindSettings),
-    reopenEditAcknowledgements: deriveReopenEditAcknowledgementState(snapshot),
-  };
+  return deriveOnboardingState(snapshot, {
+    capabilities: deriveStep1Capabilities,
+    network: (current) => deriveStep1_5NetworkMode(current.bindSettings),
+    acknowledgements: deriveReopenEditAcknowledgementState,
+  });
 }

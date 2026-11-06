@@ -1828,7 +1828,7 @@
       "path": "runtime/onboarding/derivation.ts",
       "baselineTuiLines": 539,
       "baselineSimilarity": 0.7476,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "isDeepEqual",
         "countPermissionToolOverrides",
@@ -1849,7 +1849,8 @@
         "buildNotNeededAcknowledgement",
         "buildRequiredAcknowledgement",
         "deriveReopenEditAcknowledgementState"
-      ]
+      ],
+      "notes": "Platform derives shared auth/provider/subscription/webhook/integration facts and step snapshots. Capabilities and network policy intentionally differ: TUI may expose local servers; Agent adopts an external host and isolated Agent Knowledge."
     },
     {
       "path": "runtime/onboarding/index.ts",

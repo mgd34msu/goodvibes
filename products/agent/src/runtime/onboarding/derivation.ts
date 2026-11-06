@@ -1,17 +1,32 @@
+import {
+  onboardingAccessSignals,
+  hasOnboardingWebhookIngress,
+  onboardingIntegrationSignalCount,
+  deriveOnboardingState,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
-import { countPermissionToolOverrides, hasCustomizedProviderRouting, getConfiguredProviderSignalIds, hasConfiguredProviderState, getConfiguredSurfaceKinds, hasInboundEventSurface, hasCustomizedWorkspaceDefaults, getExternalIntegrationServiceIds, hasExternalIntegrations } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
+import {
+  countPermissionToolOverrides,
+  hasCustomizedProviderRouting,
+  getConfiguredProviderSignalIds,
+  hasConfiguredProviderState,
+  hasCustomizedWorkspaceDefaults,
+  hasExternalIntegrations,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
 import { DEFAULT_CONFIG } from '../../config/index.ts';
 import '../../config/provider-model.ts';
-import type { OnboardingNetworkMode, OnboardingReopenEditAcknowledgementState, OnboardingSnapshotState, OnboardingStep1CapabilityFlags, OnboardingStep1CapabilityItem, OnboardingStepDerivationState } from './types.ts';
+import type {
+  OnboardingNetworkMode,
+  OnboardingReopenEditAcknowledgementState,
+  OnboardingSnapshotState,
+  OnboardingStep1CapabilityFlags,
+  OnboardingStep1CapabilityItem,
+  OnboardingStepDerivationState,
+} from './types.ts';
 
 function hasWebhookOrEventIngress(snapshot: OnboardingSnapshotState): boolean {
-  return (
-    hasInboundEventSurface(snapshot) ||
-    snapshot.services.services.some(
-      (service) => service.hasWebhookUrl || service.hasSigningSecret || service.hasPublicKey || service.hasAppToken,
-    )
-  );
+  return hasOnboardingWebhookIngress(snapshot);
 }
 
 function hasLocalBehaviorCustomization(snapshot: OnboardingSnapshotState): boolean {
@@ -73,7 +88,7 @@ function countDiscoveredLocalBehavior(snapshot: OnboardingSnapshotState): number
 }
 
 function describeCommunicationChannels(snapshot: OnboardingSnapshotState): string {
-  const integrationCount = new Set<string>([...getExternalIntegrationServiceIds(snapshot), ...getConfiguredSurfaceKinds(snapshot)]).size;
+  const integrationCount = onboardingIntegrationSignalCount(snapshot);
 
   if (integrationCount === 0) {
     return 'Connect only the channels the Agent should use, and keep outbound delivery explicit until a user action allows it.';
@@ -142,11 +157,11 @@ export function deriveStep1Capabilities(snapshot: OnboardingSnapshotState): read
 }
 
 export function deriveStep1CapabilityFlags(snapshot: OnboardingSnapshotState): OnboardingStep1CapabilityFlags {
+  const access = onboardingAccessSignals(snapshot);
   return {
-    providerAccess: hasConfiguredProviderState(snapshot) || hasCustomizedProviderRouting(snapshot),
-    subscriptions: snapshot.subscriptions.active.length > 0 || snapshot.subscriptions.pending.length > 0,
-    auth:
-      snapshot.auth.snapshot.userCount > 0 || snapshot.auth.snapshot.sessionCount > 0 || snapshot.auth.snapshot.bootstrapCredentialPresent,
+    providerAccess: access.providers,
+    subscriptions: access.subscriptions,
+    auth: access.auth,
     agentKnowledge: true,
     localBehavior: hasLocalBehaviorCustomization(snapshot),
     communicationChannels: hasCommunicationChannelSignals(snapshot),
@@ -169,9 +184,9 @@ export function deriveReopenEditAcknowledgementState(snapshot: OnboardingSnapsho
 }
 
 export function deriveOnboardingStepState(snapshot: OnboardingSnapshotState): OnboardingStepDerivationState {
-  return {
-    step1Capabilities: deriveStep1Capabilities(snapshot),
-    step1_5NetworkMode: deriveStep1_5NetworkMode(),
-    reopenEditAcknowledgements: deriveReopenEditAcknowledgementState(snapshot),
-  };
+  return deriveOnboardingState(snapshot, {
+    capabilities: deriveStep1Capabilities,
+    network: deriveStep1_5NetworkMode,
+    acknowledgements: deriveReopenEditAcknowledgementState,
+  });
 }

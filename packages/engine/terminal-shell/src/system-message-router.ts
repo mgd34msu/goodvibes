@@ -21,6 +21,7 @@ export interface SystemMessageConversation {
 export interface SystemMessagePresentationPolicy {
   readonly typedConversation: boolean;
   readonly forceConversationPrefixes: readonly string[];
+  readonly suppressCapturedOutput?: boolean;
 }
 export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed = SystemMessageActivityFeed> {
   /** Buffered provider "from last session" replay lines, folded on a microtask. */
@@ -44,7 +45,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     // Noise gate, keep first-run plumbing out of the Recent feed / transcript
     // while the information stays reachable via other live surfaces (activity
     // log, /health, /model). Dropped noise is drop-from-the-feed, not delete.
-    const verdict = classifyNoise(message, this.noiseDeps);
+    const verdict = classifyNoise(message, this.noiseDeps, this.presentation.suppressCapturedOutput);
     if (verdict.action === 'drop') return;
     if (verdict.action === 'foldProviderReplay') {
       this.bufferProviderReplay(message);

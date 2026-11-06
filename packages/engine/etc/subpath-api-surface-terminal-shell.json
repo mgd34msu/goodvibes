@@ -11512,7 +11512,7 @@
         "forceConversationPrefixes",
         "typedConversation"
       ],
-      "text": "export interface SystemMessagePresentationPolicy { readonly typedConversation: boolean; readonly forceConversationPrefixes: readonly string[]; }"
+      "text": "export interface SystemMessagePresentationPolicy { readonly typedConversation: boolean; readonly forceConversationPrefixes: readonly string[]; readonly suppressCapturedOutput?: boolean; }"
     },
     {
       "name": "SystemMessagePriority",
@@ -13218,7 +13218,7 @@
     {
       "name": "orphanResultBead",
       "kind": "function",
-      "text": "export declare function orphanResultBead(message: ToolMessage, index: number, collapse: ReadonlyMap<string, boolean>): BeadModel; ;; via ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; } ;; ToolMessage = type ToolMessage = Extract<Message, { role: 'tool'; }>;"
+      "text": "export declare function orphanResultBead(message: ToolMessage, index: number, collapse: ReadonlyMap<string, boolean>, presentation?: WorkTreePresentation): BeadModel; ;; via ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; } ;; ToolMessage = type ToolMessage = Extract<Message, { role: 'tool'; }>;"
     },
     {
       "name": "transcriptUnits",

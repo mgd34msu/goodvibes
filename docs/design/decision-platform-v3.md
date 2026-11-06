@@ -1,7 +1,7 @@
 # Decision platform and v3 consolidation
 
-Status: implementation complete; documentation refresh and integrated qualification
-are in progress. Checked implementation items are not a release-readiness claim.
+Status: implementation and documentation complete; integrated qualification
+is in progress. Checked implementation items are not a release-readiness claim.
 Unchecked items below remain required before publishing v3.
 
 All first-party packages share the root version. Development uses
@@ -36,8 +36,10 @@ Historical changelogs identify retired packages as `legacy-package:name`.
 - [x] Share equivalent rejected-promise draining without hiding meaningful errors.
 - [x] Add deterministic judgment-call budgets for representative operations,
   distinguishing logical decisions from wire attempts. Live calibration is optional.
-- [ ] Clarify current versus target behavior in docs; retain justified negative
-  type tests and guarded optional-import shims. Refresh test navigation.
+- [x] Clarify current versus target behavior in docs; retain justified negative
+  type tests and guarded optional-import shims. Refresh test navigation. See the
+  [exception inventory](../../packages/engine/docs/type-suppressions-and-optional-imports.md)
+  and [test navigation](../../packages/engine/COVERAGE.md).
 - [ ] Complete focused and integrated checks, generated contract/API checks,
   packaging and installed-artifact qualification, and CI on the merged revision.
 

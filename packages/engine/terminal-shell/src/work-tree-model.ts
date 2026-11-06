@@ -603,7 +603,7 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
             // A result whose call is not in this turn (a cleared display, a replayed
             // journal): its own bead, where it sits.
             toolCount++;
-            const orphan = orphanResultBead(m, abs, ctx.collapse);
+            const orphan = orphanResultBead(m, abs, ctx.collapse, ctx.presentation);
             ctx.beadKeys.push(beadKeyOf(orphan.id));
             items.push({ row: { kind: 'bead', bead: orphan }, t: undefined });
             continue;
@@ -826,8 +826,8 @@ export function turnHasOpenDiff(model: TurnModel): boolean {
  * mid-turn): one bead of its own, named from the result, with the same body,
  * block and open state as any other bead.
  */
-export function orphanResultBead(message: ToolMessage, index: number, collapse: ReadonlyMap<string, boolean>): BeadModel {
-    const ctx: BuildContext = { sources: {}, collapse, waiting: new Set(), now: 0, lanes: 0, live: false, beadKeys: [] };
+export function orphanResultBead(message: ToolMessage, index: number, collapse: ReadonlyMap<string, boolean>, presentation?: WorkTreePresentation): BeadModel {
+    const ctx: BuildContext = { presentation, sources: {}, collapse, waiting: new Set(), now: 0, lanes: 0, live: false, beadKeys: [] };
     // A result stored without its call and without a tool name is named from
     // its own shape when that is unambiguous, otherwise "result", never "tool".
     const call: ToolCall = { id: message.callId, name: message.toolName ?? inferResultToolName(message.content), arguments: {} };

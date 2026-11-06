@@ -32865,6 +32865,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "dispatched": {
+                    "type": "boolean"
+                  },
                   "endpointKind": {
                     "type": "string",
                     "enum": [
@@ -40361,6 +40364,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "dispatched": {
+                          "type": "boolean"
                         },
                         "endpointKind": {
                           "type": "string",
@@ -47966,6 +47972,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "dispatched": {
+                        "type": "boolean"
                       },
                       "endpointKind": {
                         "type": "string",

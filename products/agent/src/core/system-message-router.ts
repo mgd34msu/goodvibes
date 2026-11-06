@@ -19,7 +19,7 @@ export class SystemMessageRouter extends TerminalSystemMessageRouter<ActivityFee
     target: (kind: SystemMessageKind) => SystemMessageTarget = defaultSystemMessageTarget,
     noise: NoiseGateDeps = {},
   ) {
-    super(conversation, feed, target, noise, { typedConversation: false, forceConversationPrefixes: [] });
+    super(conversation, feed, target, noise, { typedConversation: false, forceConversationPrefixes: [], suppressCapturedOutput: true });
   }
 }
 export function createSystemMessageRouter(

@@ -587,7 +587,8 @@
       "path": "input/commands/provider-accounts-runtime.ts",
       "baselineTuiLines": 178,
       "baselineSimilarity": 0.4551,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns account command dispatch and executable recommended-action presentation. Product adapters retain snapshot acquisition, account-route wording and interactive repairs versus Agent read-only repair guidance."
     },
     {
       "path": "input/commands/qrcode-runtime.ts",
@@ -749,11 +750,12 @@
       "path": "input/commands/tasks-runtime.ts",
       "baselineTuiLines": 314,
       "baselineSimilarity": 0.4168,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "sortUnionTasks",
         "summarizeTaskResult"
-      ]
+      ],
+      "notes": "Platform owns task union client construction, read formatting, dispatch, local mutation validation and remote-owner write routing; Agent refuses mutation before obtaining write APIs and product adapters supply daemon authority and worktree attachments."
     },
     {
       "path": "input/commands/transcript-reading.ts",

@@ -38,3 +38,43 @@ export function statusBadge(status: string): string {
       return '[?]';
   }
 }
+
+/** Canonical task fields with per-surface labels; attachments are supplied by the owner. */
+export function taskDetailLines(
+  entry: UnionTask,
+  labels: {
+    readonly title: string;
+    readonly status: string;
+    readonly owner: string;
+    readonly runsOn: string;
+    readonly localOrigin: string;
+    readonly cancellable: string;
+    readonly queued: string;
+    readonly started: string;
+    readonly ended: string;
+    readonly parent: string;
+    readonly children: string;
+    readonly correlation: string;
+    readonly summary: string;
+  },
+  attachments: readonly string[] = [],
+): string[] {
+  const { task, origin } = entry;
+  return [
+    `Task ${task.id}`,
+    labels.title + task.title,
+    `  kind: ${task.kind}`,
+    labels.status + task.status,
+    labels.owner + task.owner,
+    labels.runsOn + (origin === 'local' ? labels.localOrigin : 'the daemon'),
+    labels.cancellable + (task.cancellable ? 'yes' : 'no'),
+    labels.queued + new Date(task.queuedAt).toISOString(),
+    labels.started + (task.startedAt ? new Date(task.startedAt).toISOString() : 'n/a'),
+    labels.ended + (task.endedAt ? new Date(task.endedAt).toISOString() : 'n/a'),
+    labels.parent + (task.parentTaskId ?? 'none'),
+    labels.children + (task.childTaskIds.join(', ') || '(none)'),
+    labels.correlation + (task.correlationId ?? 'n/a'),
+    ...attachments,
+    labels.summary + summarizeTaskResult(task),
+  ];
+}

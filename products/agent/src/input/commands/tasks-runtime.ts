@@ -1,4 +1,5 @@
-import { sortUnionTasks, summarizeTaskResult } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
+import { taskDetailLines } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
+import '@goodvibes-jev/engine/terminal-shell/task-presentation';
 /**
  * `/tasks`, the Agent's read-only view of runtime tasks.
  *
@@ -13,154 +14,73 @@ import { sortUnionTasks, summarizeTaskResult } from '@goodvibes-jev/engine/termi
  * limit of the client: normal work belongs in the conversation, durable work in
  * /workplan, and implementation work goes to the terminal through /delegate.
  */
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { RuntimeTask, TaskLifecycleState } from '@/runtime/index.ts';
-import { createTasksClient, type TasksClient, type UnionTask } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import type { CommandContext } from '../command-registry.ts';
+
+import '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 
-const BLOCKED_TASK_MUTATIONS: ReadonlySet<string> = new Set([
-  'create',
-  'update',
-  'complete',
-  'fail',
-  'cancel',
-  'pause',
-  'resume',
-  'retry',
-]);
+const BLOCKED_TASK_MUTATIONS: ReadonlySet<string> = new Set(['create', 'update', 'complete', 'fail', 'cancel', 'pause', 'resume', 'retry']);
 
 function printTaskMutationBlocked(print: (text: string) => void, subcommand: string): void {
-  print([
-    `Task mutation "${subcommand}" is blocked in GoodVibes Agent.`,
-    '  policy connected-host tasks are read-only from the Agent TUI; normal work stays in the main conversation.',
-    '  durable tasks use /workplan for visible planning and task tracking.',
-    '  build/fix/review use /delegate <task> to hand explicit implementation work to GoodVibes TUI.',
-    '  result no local task state was changed.',
-  ].join('\n'));
+  print(
+    [
+      `Task mutation "${subcommand}" is blocked in GoodVibes Agent.`,
+      '  policy connected-host tasks are read-only from the Agent TUI; normal work stays in the main conversation.',
+      '  durable tasks use /workplan for visible planning and task tracking.',
+      '  build/fix/review use /delegate <task> to hand explicit implementation work to GoodVibes TUI.',
+      '  result no local task state was changed.',
+    ].join('\n'),
+  );
 }
 
-/** The union reader: this process's own registry plus the connected daemon. */
-function tasksClientFor(ctx: CommandContext): TasksClient {
-  const operatorClient = requireOperatorClient(ctx);
-  return createTasksClient({
-    local: {
-      list: (limit) => operatorClient.tasks.list(limit),
-      get: (taskId) => operatorClient.tasks.get(taskId),
-    },
-    verbs: createAgentDaemonVerbCaller({
-      configManager: ctx.platform.configManager,
-      // Lazy: a disabled-daemon context with no shell paths wired still gets
-      // the honest reason from probe() instead of throwing on the way in.
-      homeDirectory: () => requireShellPaths(ctx).homeDirectory,
-    }),
-  });
-}
+import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
+export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
+  description: 'Inspect connected-host tasks without starting or mutating local background work',
+  usage: '[list [status|kind] | show <taskId> | output <taskId>]',
+  hidden: true,
+  listTitle: 'Tasks',
+  local: (ctx) => requireOperatorClient(ctx).tasks,
+  verbs: (ctx) =>
+    createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
 
-
-
-
-
-export function registerTasksRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'tasks',
-    aliases: ['task'],
-    description: 'Inspect connected-host tasks without starting or mutating local background work',
-    hidden: true,
-    usage: '[list [status|kind] | show <taskId> | output <taskId>]',
-    async handler(args, ctx) {
-      const subcommand = args[0]?.toLowerCase() ?? 'list';
-      if (subcommand === 'open' || subcommand === 'panel') {
-        ctx.print('Open Agent Workspace -> Work & Approvals -> Filter host tasks for the workspace view, or run /tasks list for compact command output.');
-        return;
-      }
-
-      if (BLOCKED_TASK_MUTATIONS.has(subcommand)) {
-        printTaskMutationBlocked(ctx.print, subcommand);
-        return;
-      }
-
-      const tasksClient = tasksClientFor(ctx);
-
-      if (subcommand === 'list') {
-        const { tasks: union, daemonUnavailable } = await tasksClient.list(500);
-        const tasks = sortUnionTasks(union);
-        const filter = args[1]?.toLowerCase();
-        const filtered = tasks.filter((entry) => !filter || entry.task.status === filter || entry.task.kind === filter);
-        // The daemon note rides ALONGSIDE whatever was found rather than
-        // replacing it: the local half is real work, and hiding it behind an
-        // error would lose tasks that are genuinely running here.
-        const daemonNote = daemonUnavailable
-          ? [`  (the daemon's tasks are not included: ${daemonUnavailable})`]
-          : [];
-        if (filtered.length === 0) {
-          ctx.print([
-            filter ? `No tasks matched "${filter}".` : 'No tasks recorded yet.',
-            ...daemonNote,
-          ].join('\n'));
-          return;
-        }
-        ctx.print([
-          `Tasks (${filtered.length})`,
-          ...filtered.slice(0, 20).map(({ task, origin }) => `  ${task.id}  ${task.status.padEnd(9)} ${task.kind.padEnd(11)} ${task.owner.padEnd(10)} ${origin.padEnd(6)} ${task.title}`),
-          ...daemonNote,
-        ].join('\n'));
-        return;
-      }
-
-      if (subcommand === 'show') {
-        const taskId = args[1];
-        if (!taskId) {
-          ctx.print('Usage: /tasks show <taskId>');
-          return;
-        }
-        const found = await tasksClient.get(taskId);
-        if (!found) {
-          ctx.print(`Unknown task ${taskId}`);
-          return;
-        }
-        const { task, origin } = found;
-        ctx.print([
-          `Task ${task.id}`,
-          `  title ${task.title}`,
-          `  kind: ${task.kind}`,
-          `  status ${task.status}`,
-          `  owner ${task.owner}`,
-          `  runs on ${origin === 'local' ? 'this Agent' : 'the daemon'}`,
-          `  cancellable ${task.cancellable ? 'yes' : 'no'}`,
-          `  queued at ${new Date(task.queuedAt).toISOString()}`,
-          `  started at ${task.startedAt ? new Date(task.startedAt).toISOString() : 'n/a'}`,
-          `  ended at ${task.endedAt ? new Date(task.endedAt).toISOString() : 'n/a'}`,
-          `  parent ${task.parentTaskId ?? 'none'}`,
-          `  children ${task.childTaskIds.join(', ') || '(none)'}`,
-          `  correlation ID ${task.correlationId ?? 'n/a'}`,
-          `  summary ${summarizeTaskResult(task)}`,
-        ].join('\n'));
-        return;
-      }
-
-      if (subcommand === 'output') {
-        const taskId = args[1];
-        if (!taskId) {
-          ctx.print('Usage: /tasks output <taskId>');
-          return;
-        }
-        const found = await tasksClient.get(taskId);
-        if (!found) {
-          ctx.print(`Unknown task ${taskId}`);
-          return;
-        }
-        const { task } = found;
-        const payload = typeof task.result === 'string'
-          ? task.result
-          : task.result !== undefined
-            ? JSON.stringify(task.result, null, 2)
-            : task.error ?? task.description ?? task.title;
-        ctx.print(String(payload));
-        return;
-      }
-
-      ctx.print(`Unknown tasks subcommand ${subcommand}`);
-    },
-  });
-}
+  beforeRead(args, ctx) {
+    const subcommand = args[0]?.toLowerCase() ?? 'list';
+    if (subcommand === 'open' || subcommand === 'panel') {
+      ctx.print(
+        'Open Agent Workspace -> Work & Approvals -> Filter host tasks for the workspace view, or run /tasks list for compact command output.',
+      );
+      return true;
+    }
+    if (BLOCKED_TASK_MUTATIONS.has(subcommand)) {
+      printTaskMutationBlocked(ctx.print, subcommand);
+      return true;
+    }
+    return false;
+  },
+  row: ({ task, origin }) =>
+    `  ${task.id}  ${task.status.padEnd(9)} ${task.kind.padEnd(11)} ${task.owner.padEnd(10)} ${origin.padEnd(6)} ${task.title}`,
+  detail(_ctx, entry) {
+    return taskDetailLines(
+      entry,
+      {
+        title: '  title ',
+        status: '  status ',
+        owner: '  owner ',
+        runsOn: '  runs on ',
+        localOrigin: 'this Agent',
+        cancellable: '  cancellable ',
+        queued: '  queued at ',
+        started: '  started at ',
+        ended: '  ended at ',
+        parent: '  parent ',
+        children: '  children ',
+        correlation: '  correlation ID ',
+        summary: '  summary ',
+      },
+      [],
+    );
+  },
+  unknown: (id) => `Unknown task ${id}`,
+  unknownSubcommand: (subcommand) => `Unknown tasks subcommand ${subcommand}`,
+});

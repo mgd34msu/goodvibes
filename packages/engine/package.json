@@ -2823,6 +2823,21 @@
       "bun": "./terminal-shell/src/service-posture.ts",
       "types": "./terminal-shell/dist/service-posture.d.ts",
       "import": "./terminal-shell/dist/service-posture.js"
+    },
+    "./terminal-shell/tasks-runtime-commands": {
+      "bun": "./terminal-shell/src/tasks-runtime-commands.ts",
+      "types": "./terminal-shell/dist/tasks-runtime-commands.d.ts",
+      "import": "./terminal-shell/dist/tasks-runtime-commands.js"
+    },
+    "./terminal-shell/provider-account-commands": {
+      "bun": "./terminal-shell/src/provider-account-commands.ts",
+      "types": "./terminal-shell/dist/provider-account-commands.d.ts",
+      "import": "./terminal-shell/dist/provider-account-commands.js"
+    },
+    "./terminal-shell/provider-account-actions": {
+      "bun": "./terminal-shell/src/provider-account-actions.ts",
+      "types": "./terminal-shell/dist/provider-account-actions.d.ts",
+      "import": "./terminal-shell/dist/provider-account-actions.js"
     }
   },
   "publishConfig": {

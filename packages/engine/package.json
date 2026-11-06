@@ -2973,6 +2973,16 @@
       "bun": "./terminal-shell/src/release-update-preflight.ts",
       "types": "./terminal-shell/dist/release-update-preflight.d.ts",
       "import": "./terminal-shell/dist/release-update-preflight.js"
+    },
+    "./terminal-shell/global-shortcuts": {
+      "bun": "./terminal-shell/src/global-shortcuts.ts",
+      "types": "./terminal-shell/dist/global-shortcuts.d.ts",
+      "import": "./terminal-shell/dist/global-shortcuts.js"
+    },
+    "./terminal-shell/kill-ring": {
+      "bun": "./terminal-shell/src/kill-ring.ts",
+      "types": "./terminal-shell/dist/kill-ring.d.ts",
+      "import": "./terminal-shell/dist/kill-ring.js"
     }
   },
   "publishConfig": {

@@ -922,7 +922,8 @@
       "path": "input/handler-shortcuts.ts",
       "baselineTuiLines": 339,
       "baselineSimilarity": 0.5781,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns shared shortcut dispatch and prompt/kill-ring editing. Product adapters retain action vocabulary, modified-page-key policy, permission-mode authority, and modal capabilities."
     },
     {
       "path": "input/handler-ui-state.ts",

@@ -1,3 +1,5 @@
+import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
@@ -128,10 +130,6 @@ function checkpointsStatusLine(checkpoints: CliCheckpointsStatus): { active: boo
   return { active: false, line: 'checkpoints off: workspace not registered' };
 }
 
-function yesNo(value: unknown): string {
-  return value === true ? 'yes' : 'no';
-}
-
 /**
  * The connected-host runtime-metrics lines. Each non-ok state is rendered as a
  * plain sentence naming exactly why there are no numbers to show, most
@@ -155,7 +153,9 @@ function connectedHostMetricsLines(snapshot: CliConnectedHostMetricsSnapshot | n
       ];
     }
     case 'scope_missing':
-      return [`  not shown: the connected-host token does not include the ${snapshot.requiredScope} scope required by ${snapshot.methodId}.`];
+      return [
+        `  not shown: the connected-host token does not include the ${snapshot.requiredScope} scope required by ${snapshot.methodId}.`,
+      ];
     case 'auth_required':
       return ['  not shown: connected-host operator token is missing or unauthenticated.'];
     case 'route_unavailable':
@@ -171,13 +171,6 @@ function connectedHostMetricsLines(snapshot: CliConnectedHostMetricsSnapshot | n
 /** Display the same effective execution preset used by the permission owner. */
 function readApprovalPosture(config: Pick<ConfigManager, 'get'>): ApprovalPosture {
   return readApprovalPostureFromConfig(config);
-}
-
-function secretPolicyLabel(policy: unknown): string {
-  if (policy === 'preferred_secure') return 'Use secure storage when available';
-  if (policy === 'require_secure') return 'Require secure storage';
-  if (policy === 'plaintext_allowed') return 'Allow plaintext storage';
-  return String(policy ?? 'unknown');
 }
 
 export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliDoctorFinding[] {
@@ -197,7 +190,8 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         severity: 'warning',
         summary: 'Connected GoodVibes host is not reachable.',
         cause: `Agent could not reach ${options.externalRuntime.baseUrl}${options.externalRuntime.error ? `: ${options.externalRuntime.error}` : '.'}`,
-        impact: 'Companion chat, isolated Agent Knowledge, approvals, automation status, and build delegation cannot work until the connected GoodVibes host is available.',
+        impact:
+          'Companion chat, isolated Agent Knowledge, approvals, automation status, and build delegation cannot work until the connected GoodVibes host is available.',
         action: 'Make the owning GoodVibes host available, then rerun goodvibes-agent status.',
       });
     } else if (!options.externalRuntime.compatible) {
@@ -224,14 +218,19 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       });
     }
 
-    if (options.externalRuntime.reachable && options.externalRuntime.operatorToken.present && !options.externalRuntime.agentKnowledge.ready) {
+    if (
+      options.externalRuntime.reachable &&
+      options.externalRuntime.operatorToken.present &&
+      !options.externalRuntime.agentKnowledge.ready
+    ) {
       findings.push({
         id: 'agent-knowledge-route-not-ready',
         area: 'runtime',
         severity: 'warning',
         summary: 'Isolated Agent Knowledge route is not ready.',
         cause: `${options.externalRuntime.agentKnowledge.route} returned ${options.externalRuntime.agentKnowledge.kind}${options.externalRuntime.agentKnowledge.statusCode === null ? '' : ` (${options.externalRuntime.agentKnowledge.statusCode})`}.`,
-        impact: 'Agent Knowledge ask/search will not use default or non-Agent knowledge fallback; it will fail closed until the Agent route is available.',
+        impact:
+          'Agent Knowledge ask/search will not use default or non-Agent knowledge fallback; it will fail closed until the Agent route is available.',
         action: 'Update the connected GoodVibes host so public Agent routes are compatible, then verify goodvibes-agent compat.',
       });
     }
@@ -320,38 +319,25 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const controlPlaneBinding = resolveRuntimeEndpointBinding(config, 'controlPlane');
-  const httpListenerBinding = resolveRuntimeEndpointBinding(config, 'httpListener');
-  const webBinding = resolveRuntimeEndpointBinding(config, 'web');
-  const marker = options.onboardingMarkers?.effective;
+  const common = captureCliStatusFacts(config, options.onboardingMarkers?.effective, options.service, getProviderIdFromModel);
+
   const findings = buildCliDoctorFindings(options);
   const posture = readApprovalPosture(config);
   return {
     title: options.doctor ? 'GoodVibes Agent doctor' : 'GoodVibes Agent status',
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
-    provider: {
-      provider: getProviderIdFromModel(config.get('provider.model')),
-      model: String(config.get('provider.model')),
-      reasoning: String(config.get('provider.reasoningEffort')),
-    },
+    provider: { ...common.provider },
     auth: {
-      permissionMode: config.get('permissions.mode'),
+      ...common.auth,
       permissionLabel: posture.label,
       autoApprove: posture.autoApprove,
       automaticApprovals: posture.automaticApprovals,
       bypassesPrompts: posture.bypassesPrompts,
       permissionDetail: posture.detail,
-      secretPolicy: config.get('storage.secretPolicy'),
-      secretPolicyLabel: secretPolicyLabel(config.get('storage.secretPolicy')),
       runtimeAuthSignal: options.auth ?? null,
     },
-    runtimeConnection: {
-      enabled: config.get('service.enabled'),
-      autostart: config.get('service.autostart'),
-      restartOnFailure: config.get('service.restartOnFailure'),
-      ...(options.service ? { lifecycle: options.service } : {}),
-    },
+    runtimeConnection: common.service,
     externalRuntime: options.externalRuntime ?? null,
     connectedHostMetrics: options.connectedHostMetrics ?? null,
     relay: {
@@ -360,23 +346,15 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
       requireStepUpForMutations: config.get('relay.requireStepUpForMutations') === true,
       liveVerified: false,
     },
-    runtimeEndpoints: {
-      controlPlane: { enabled: config.get('controlPlane.enabled'), ...controlPlaneBinding },
-      httpListener: { enabled: config.get('danger.httpListener'), ...httpListenerBinding },
-      web: { enabled: config.get('web.enabled'), ...webBinding },
-    },
-    onboarding: {
-      checked: Boolean(marker?.exists),
-      scope: marker?.scope ?? 'none',
-      updatedAt: marker?.payload?.updatedAt ?? null,
-    },
+    runtimeEndpoints: common.endpoints,
+    onboarding: common.onboarding,
     checkpoints: options.checkpoints
       ? {
-        automaticCheckpointsActive: checkpointsStatusLine(options.checkpoints).active,
-        workspaceRegistered: options.checkpoints.workspaceRegistered,
-        unregisteredWorkspaceMode: options.checkpoints.unregisteredWorkspaceMode,
-        statusLine: checkpointsStatusLine(options.checkpoints).line,
-      }
+          automaticCheckpointsActive: checkpointsStatusLine(options.checkpoints).active,
+          workspaceRegistered: options.checkpoints.workspaceRegistered,
+          unregisteredWorkspaceMode: options.checkpoints.unregisteredWorkspaceMode,
+          statusLine: checkpointsStatusLine(options.checkpoints).line,
+        }
       : null,
     findings,
   };
@@ -417,21 +395,21 @@ export function renderCliStatus(options: CliStatusOptions): string {
       : '  connected host token unknown',
     '',
     'Connected GoodVibes host:',
-    ...(externalRuntime ? [
-      `  baseUrl: ${externalRuntime.baseUrl}`,
-      `  reachable: ${yesNo(externalRuntime.reachable)}${externalRuntime.statusCode === null ? '' : ` (HTTP ${externalRuntime.statusCode})`}`,
-      `  compatible: ${yesNo(externalRuntime.compatible)}`,
-      `  access token: ${externalRuntime.operatorToken.present ? 'present' : 'missing'} (${externalRuntime.operatorToken.path})`,
-      `  Agent Knowledge: ${externalRuntime.agentKnowledge.ready ? 'ready' : `not ready (${formatAgentKnowledgeFailureKind(externalRuntime.agentKnowledge.kind)})`}`,
-      ...(externalRuntime.error ? [`  error: ${externalRuntime.error}`] : []),
-    ] : [
-      '  live check unavailable',
-    ]),
+    ...(externalRuntime
+      ? [
+          `  baseUrl: ${externalRuntime.baseUrl}`,
+          `  reachable: ${yesNo(externalRuntime.reachable)}${externalRuntime.statusCode === null ? '' : ` (HTTP ${externalRuntime.statusCode})`}`,
+          `  compatible: ${yesNo(externalRuntime.compatible)}`,
+          `  access token: ${externalRuntime.operatorToken.present ? 'present' : 'missing'} (${externalRuntime.operatorToken.path})`,
+          `  Agent Knowledge: ${externalRuntime.agentKnowledge.ready ? 'ready' : `not ready (${formatAgentKnowledgeFailureKind(externalRuntime.agentKnowledge.kind)})`}`,
+          ...(externalRuntime.error ? [`  error: ${externalRuntime.error}`] : []),
+        ]
+      : ['  live check unavailable']),
     '',
     'Connected host metrics (runtime.metrics.get; read:telemetry):',
     ...connectedHostMetricsLines(snapshot.connectedHostMetrics),
     '',
-    'Relay (connected host\'s imported config; not live-verified, see goodvibes-agent relay status):',
+    "Relay (connected host's imported config; not live-verified, see goodvibes-agent relay status):",
     `  relay.enabled: ${yesNo(snapshot.relay.enabled)}`,
     `  relay.url: ${snapshot.relay.url || '(empty)'}`,
     `  relay.requireStepUpForMutations: ${yesNo(snapshot.relay.requireStepUpForMutations)}`,
@@ -440,23 +418,23 @@ export function renderCliStatus(options: CliStatusOptions): string {
     '  product: interactive operator TUI',
     '  host lifecycle: external',
     '  starts or exposes host: no',
-    ...(options.service ? [
-      `  host log signal ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`,
-    ] : []),
+    ...(options.service
+      ? [`  host log signal ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`]
+      : []),
     'Onboarding',
     `  checked ${marker?.exists ? 'yes' : 'no'}`,
     `  scope ${marker?.scope ?? 'none'}`,
     `  updated ${marker?.payload ? appendTemporalLabel(new Date(marker.payload.updatedAt).toISOString(), marker.payload.updatedAt) : 'n/a'}`,
     '',
     'Checkpoints',
-    ...(snapshot.checkpoints ? [
-      `  ${snapshot.checkpoints.statusLine}`,
-      `  unregisteredWorkspaces mode: ${snapshot.checkpoints.unregisteredWorkspaceMode}`,
-      '  next goodvibes-agent workspaces list',
-      ...(snapshot.checkpoints.workspaceRegistered ? [] : ['  next goodvibes-agent workspaces register --yes']),
-    ] : [
-      '  checkpoint posture unknown',
-    ]),
+    ...(snapshot.checkpoints
+      ? [
+          `  ${snapshot.checkpoints.statusLine}`,
+          `  unregisteredWorkspaces mode: ${snapshot.checkpoints.unregisteredWorkspaceMode}`,
+          '  next goodvibes-agent workspaces list',
+          ...(snapshot.checkpoints.workspaceRegistered ? [] : ['  next goodvibes-agent workspaces register --yes']),
+        ]
+      : ['  checkpoint posture unknown']),
   ];
 
   if (options.doctor) {
@@ -488,12 +466,20 @@ export function renderCliStatus(options: CliStatusOptions): string {
 
 export function renderOnboardingCliStatus(options: CliStatusOptions): string {
   const marker = options.onboardingMarkers?.effective;
-  if (options.outputFormat === 'json') return JSON.stringify({
-    title: 'GoodVibes Agent setup status', selectedHost: options.selectedHost ?? null,
-    nativeReadiness: options.nativeReadiness ?? { status: 'unverified', detail: 'No live auth check was performed.' },
-    pairingStatus: options.pairingStatus ?? 'unverified', checked: marker?.exists ?? false,
-    scope: marker?.scope ?? 'none', workingDirectory: options.workingDirectory,
-  }, null, 2);
+  if (options.outputFormat === 'json')
+    return JSON.stringify(
+      {
+        title: 'GoodVibes Agent setup status',
+        selectedHost: options.selectedHost ?? null,
+        nativeReadiness: options.nativeReadiness ?? { status: 'unverified', detail: 'No live auth check was performed.' },
+        pairingStatus: options.pairingStatus ?? 'unverified',
+        checked: marker?.exists ?? false,
+        scope: marker?.scope ?? 'none',
+        workingDirectory: options.workingDirectory,
+      },
+      null,
+      2,
+    );
   return [
     'GoodVibes Agent setup status',
     `  selected host ${options.selectedHost ?? '(unavailable)'}`,

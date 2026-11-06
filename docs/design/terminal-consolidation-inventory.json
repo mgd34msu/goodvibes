@@ -200,7 +200,8 @@
       "path": "cli/status.ts",
       "baselineTuiLines": 715,
       "baselineSimilarity": 0.367,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns common provider/secret policy/service/endpoint/onboarding facts and boolean/secret-policy formatting. Product assessments and report sections retain actual policies: TUI local service/exposure/workspace/sandbox diagnostics versus Agent private-host readiness, approval signals, checkpoint state, temporal labels and isolated-Knowledge reports."
     },
     {
       "path": "cli/tui-startup.ts",

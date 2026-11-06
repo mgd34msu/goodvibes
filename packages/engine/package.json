@@ -2963,6 +2963,11 @@
       "bun": "./terminal-shell/src/package-inspection.ts",
       "types": "./terminal-shell/dist/package-inspection.d.ts",
       "import": "./terminal-shell/dist/package-inspection.js"
+    },
+    "./terminal-shell/cli-status-facts": {
+      "bun": "./terminal-shell/src/cli-status-facts.ts",
+      "types": "./terminal-shell/dist/cli-status-facts.d.ts",
+      "import": "./terminal-shell/dist/cli-status-facts.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,5 @@
+import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -157,17 +159,6 @@ export interface CliExposureSurface {
   readonly originAllowlist: string;
 }
 
-function yesNo(value: unknown): string {
-  return value === true ? 'yes' : 'no';
-}
-
-function secretPolicyLabel(policy: unknown): string {
-  if (policy === 'preferred_secure') return 'Use secure storage when available';
-  if (policy === 'require_secure') return 'Require secure storage';
-  if (policy === 'plaintext_allowed') return 'Allow plaintext storage';
-  return String(policy ?? 'unknown');
-}
-
 function bindLine(label: string, enabled: unknown, binding: RuntimeEndpointBinding): string {
   return `  ${label}: ${yesNo(enabled)} (${formatRuntimeEndpointBinding(binding)})`;
 }
@@ -182,9 +173,7 @@ function registrationLine(workspace: CliWorkspaceStatus): string {
     case 'declined':
       return 'not registered (declined for this directory)';
     case 'unknown':
-      return workspace.registrationBroad
-        ? 'not registered (root too broad to register)'
-        : 'not registered (never asked)';
+      return workspace.registrationBroad ? 'not registered (root too broad to register)' : 'not registered (never asked)';
   }
 }
 
@@ -204,11 +193,7 @@ function renderWorkspaceSection(workspace: CliWorkspaceStatus | null): string[] 
 function renderSandboxSection(sandbox: CliSandboxStatus | null): string[] {
   if (!sandbox) return [];
   const active = sandbox.configEnabled && sandbox.featureEnabled && sandbox.available;
-  const network = !sandbox.available
-    ? 'n/a'
-    : sandbox.networkIsolationGuaranteed
-      ? 'isolation confirmed'
-      : 'isolation unknown';
+  const network = !sandbox.available ? 'n/a' : sandbox.networkIsolationGuaranteed ? 'isolation confirmed' : 'isolation unknown';
   return [
     'Exec sandbox:',
     `  active: ${active ? 'yes' : 'no'}`,
@@ -447,7 +432,9 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
   if (config.get('behavior.autoApprove') === true) {
     findings.push({
-      id: 'auto-approve-permissions', area: 'security', severity: 'risk',
+      id: 'auto-approve-permissions',
+      area: 'security',
+      severity: 'risk',
       summary: 'Broad automatic approvals are enabled.',
       cause: 'behavior.autoApprove is true.',
       impact: describeConfiguredPermissions(config).detail,
@@ -491,9 +478,11 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     });
   }
 
-  if (isNetworkFacing(controlPlaneEnabled, controlPlaneBinding)
-    && config.get('controlPlane.cors.enabled') === true
-    && parseAllowedOrigins(config.get('controlPlane.cors.allowedOrigins')).includes('*')) {
+  if (
+    isNetworkFacing(controlPlaneEnabled, controlPlaneBinding) &&
+    config.get('controlPlane.cors.enabled') === true &&
+    parseAllowedOrigins(config.get('controlPlane.cors.allowedOrigins')).includes('*')
+  ) {
     findings.push({
       id: 'control-plane-cors-wildcard-origin',
       area: 'network',
@@ -552,48 +541,29 @@ export function resolveDoctorExitCode(findings: readonly CliDoctorFinding[], str
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const controlPlaneBinding = resolveRuntimeEndpointBinding(config, 'controlPlane');
-  const httpListenerBinding = resolveRuntimeEndpointBinding(config, 'httpListener');
-  const webBinding = resolveRuntimeEndpointBinding(config, 'web');
-  const marker = options.onboardingMarkers?.effective;
+  const common = captureCliStatusFacts(config, options.onboardingMarkers?.effective, options.service, getProviderIdFromModel);
+
   const findings = buildCliDoctorFindings(options);
   return {
     title: options.doctor ? 'GoodVibes doctor' : 'GoodVibes status',
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
     provider: {
-      provider: getProviderIdFromModel(config.get('provider.model')),
-      model: String(config.get('provider.model')),
-      reasoning: String(config.get('provider.reasoningEffort')),
+      ...common.provider,
       reasoningResolved: describeConfiguredEffort(
         String(config.get('provider.model') ?? ''),
         String(config.get('provider.reasoningEffort') ?? ''),
       ),
     },
     auth: {
-      permissionMode: config.get('permissions.mode'),
+      ...common.auth,
       permissionLabel: describeConfiguredPermissions(config).label,
       permissionDetail: describeConfiguredPermissions(config).detail,
-      secretPolicy: config.get('storage.secretPolicy'),
-      secretPolicyLabel: secretPolicyLabel(config.get('storage.secretPolicy')),
       localUsers: options.auth ?? null,
     },
-    service: {
-      enabled: config.get('service.enabled'),
-      autostart: config.get('service.autostart'),
-      restartOnFailure: config.get('service.restartOnFailure'),
-      ...(options.service ? { lifecycle: options.service } : {}),
-    },
-    surfaces: {
-      controlPlane: { enabled: config.get('controlPlane.enabled'), ...controlPlaneBinding },
-      httpListener: { enabled: config.get('danger.httpListener'), ...httpListenerBinding },
-      web: { enabled: config.get('web.enabled'), ...webBinding },
-    },
-    onboarding: {
-      checked: Boolean(marker?.exists),
-      scope: marker?.scope ?? 'none',
-      updatedAt: marker?.payload?.updatedAt ?? null,
-    },
+    service: common.service,
+    surfaces: common.endpoints,
+    onboarding: common.onboarding,
     workspace: options.workspace ?? null,
     sandbox: options.sandbox ?? null,
     relay: options.relay ?? null,
@@ -651,14 +621,16 @@ export function renderCliStatus(options: CliStatusOptions): string {
     `  enabled: ${yesNo(serviceEnabled)}`,
     `  autostart: ${yesNo(serviceAutostart)}`,
     `  restartOnFailure: ${yesNo(restartOnFailure)}`,
-    ...(options.service ? [
-      `  platform: ${options.service.managed.platform}`,
-      `  installed: ${yesNo(options.service.managed.installed)}`,
-      `  running: ${yesNo(options.service.managed.running)}`,
-      `  pid: ${options.service.managed.pid ?? 'n/a'}`,
-      `  definition: ${options.service.managed.path}`,
-      `  log: ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`,
-    ] : []),
+    ...(options.service
+      ? [
+          `  platform: ${options.service.managed.platform}`,
+          `  installed: ${yesNo(options.service.managed.installed)}`,
+          `  running: ${yesNo(options.service.managed.running)}`,
+          `  pid: ${options.service.managed.pid ?? 'n/a'}`,
+          `  definition: ${options.service.managed.path}`,
+          `  log: ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`,
+        ]
+      : []),
     '',
     'Surfaces:',
     bindLine('controlPlane', controlPlaneEnabled, controlPlaneBinding),

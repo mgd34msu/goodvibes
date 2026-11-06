@@ -1,20 +1,17 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+import {
+  classifyServiceSettingChange,
+  type ServiceSettingChange,
+  type ServiceSettingResult,
+} from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
+
 import type { CliServiceRuntime } from '../cli/service-posture.ts';
 
-export const AGENT_EXTERNAL_HOST_SERVICE_MESSAGE = 'GoodVibes Agent uses a connected GoodVibes host and does not install, start, stop, restart, or uninstall it. Manage host lifecycle outside Agent.';
+export const AGENT_EXTERNAL_HOST_SERVICE_MESSAGE =
+  'GoodVibes Agent uses a connected GoodVibes host and does not install, start, stop, restart, or uninstall it. Manage host lifecycle outside Agent.';
 
-export interface ServiceSettingsSyncChange {
-  readonly key: ConfigKey;
-  readonly previousValue: unknown;
-  readonly value: unknown;
-}
+export type ServiceSettingsSyncChange = ServiceSettingChange;
 
-export interface ServiceSettingsSyncResult {
-  readonly handled: boolean;
-  readonly action?: 'connected-host-blocked' | 'unchanged';
-  readonly message?: string;
-  readonly error?: string;
-}
+export type ServiceSettingsSyncResult = ServiceSettingResult<'connected-host-blocked' | 'unchanged'>;
 
 export interface ServiceSettingsSyncOptions {
   readonly allowExternalHostMutation?: false;
@@ -25,8 +22,9 @@ export function syncServiceSettingToPlatform(
   change: ServiceSettingsSyncChange,
   _options: ServiceSettingsSyncOptions = {},
 ): ServiceSettingsSyncResult {
-  if (!String(change.key).startsWith('service.')) return { handled: false };
-  if (change.previousValue === change.value) {
+  const classification = classifyServiceSettingChange(change);
+  if (classification === 'unrelated') return { handled: false };
+  if (classification === 'unchanged') {
     return {
       handled: true,
       action: 'unchanged',

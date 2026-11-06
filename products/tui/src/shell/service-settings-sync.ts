@@ -1,13 +1,14 @@
+import {
+  classifyServiceSettingChange,
+  type ServiceSettingChange,
+  type ServiceSettingResult,
+} from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
 import { mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import {
-  createPlatformServiceManager,
-  getServiceStateRoot,
-  type CliServiceRuntime,
-} from '../cli/service-posture.ts';
+import { createPlatformServiceManager, getServiceStateRoot, type CliServiceRuntime } from '../cli/service-posture.ts';
 
 type ManagedServiceAction = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status';
 
@@ -26,18 +27,10 @@ export interface CommandResult {
   readonly stderr?: string;
 }
 
-export interface ServiceSettingsSyncChange {
-  readonly key: ConfigKey;
-  readonly previousValue: unknown;
-  readonly value: unknown;
-}
+export type ServiceSettingsSyncChange = ServiceSettingChange;
 
-export interface ServiceSettingsSyncResult {
-  readonly handled: boolean;
-  readonly action?: ManagedServiceAction | 'install-start' | 'disable';
+export interface ServiceSettingsSyncResult extends ServiceSettingResult<ManagedServiceAction | 'install-start' | 'disable'> {
   readonly status?: ManagedServiceStatus;
-  readonly message?: string;
-  readonly error?: string;
 }
 
 export interface ServiceSettingsSyncOptions {
@@ -89,9 +82,8 @@ function disableSystemService(
   const before = manager.status();
   let disableError: string | null = null;
   if (before.platform === 'systemd') {
-    disableError = before.installed || before.running
-      ? runSystemd(runtime, ['disable', '--now', `${serviceName(runtime)}.service`], options)
-      : null;
+    disableError =
+      before.installed || before.running ? runSystemd(runtime, ['disable', '--now', `${serviceName(runtime)}.service`], options) : null;
     if (disableError) {
       logger.warn('Settings service sync: systemd disable failed', { error: disableError });
     }
@@ -212,8 +204,9 @@ export function syncServiceSettingToPlatform(
   change: ServiceSettingsSyncChange,
   options: ServiceSettingsSyncOptions = {},
 ): ServiceSettingsSyncResult {
-  if (!String(change.key).startsWith('service.')) return { handled: false };
-  if (change.previousValue === change.value) return { handled: true, message: 'Service setting unchanged' };
+  const classification = classifyServiceSettingChange(change);
+  if (classification === 'unrelated') return { handled: false };
+  if (classification === 'unchanged') return { handled: true, message: 'Service setting unchanged' };
 
   const manager = options.createManager?.(runtime) ?? createPlatformServiceManager(runtime);
 

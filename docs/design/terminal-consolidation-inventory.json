@@ -347,7 +347,8 @@
       "path": "core/voice-stt-gateway.ts",
       "baselineTuiLines": 73,
       "baselineSimilarity": 0.2823,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared transcription/availability contracts and platform voice routing. TUI resolves authenticated operator RPC with cancellation; Agent supplies connected-host and in-process candidates to the platform STT router with diagnostics. Preserve these different available route capabilities."
     },
     {
       "path": "core/wake-provision-status.ts",
@@ -442,7 +443,8 @@
       "path": "input/commands/calendar-runtime.ts",
       "baselineTuiLines": 245,
       "baselineSimilarity": 0.0827,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Reviewed distinct workflows: TUI invokes daemon calendar status/list/get/create with explicit-write invocation context; Agent owns local ICS events, subscriptions and OAuth calendars with preview/confirmation. Shared calendar parsing/provider services are already platform owned; registration metadata is product configuration."
     },
     {
       "path": "input/commands/config.ts",
@@ -705,7 +707,8 @@
       "path": "input/commands/schedule-runtime.ts",
       "baselineTuiLines": 400,
       "baselineSimilarity": 0.1144,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Reviewed distinct authority adapters: TUI configures its AutomationManager; Agent blocks local jobs and uses confirmed connected-host schedule actions, reminder/routine promotion and receipts. Platform owns schedule parsing/execution, while each product retains its supported verbs and confirmations."
     },
     {
       "path": "input/commands/session-content.ts",
@@ -2023,7 +2026,8 @@
       "path": "shell/service-settings-sync.ts",
       "baselineTuiLines": 273,
       "baselineSimilarity": 0.183,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared change classification and result contracts. TUI owns OS service lifecycle; Agent reverses a requested service change and refuses external-host mutation. These are deliberately different authority policies, not alternate implementations of one permitted operation."
     },
     {
       "path": "shell/session-views.ts",

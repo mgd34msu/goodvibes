@@ -3033,6 +3033,16 @@
       "bun": "./terminal-shell/src/knowledge-answer.ts",
       "types": "./terminal-shell/dist/knowledge-answer.d.ts",
       "import": "./terminal-shell/dist/knowledge-answer.js"
+    },
+    "./terminal-shell/voice-stt-contract": {
+      "bun": "./terminal-shell/src/voice-stt-contract.ts",
+      "types": "./terminal-shell/dist/voice-stt-contract.d.ts",
+      "import": "./terminal-shell/dist/voice-stt-contract.js"
+    },
+    "./terminal-shell/service-setting-change": {
+      "bun": "./terminal-shell/src/service-setting-change.ts",
+      "types": "./terminal-shell/dist/service-setting-change.d.ts",
+      "import": "./terminal-shell/dist/service-setting-change.js"
     }
   },
   "publishConfig": {

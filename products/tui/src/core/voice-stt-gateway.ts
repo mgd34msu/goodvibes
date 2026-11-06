@@ -1,3 +1,4 @@
+import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '@goodvibes-jev/engine/terminal-shell/voice-stt-contract';
 /**
  * voice-stt-gateway.ts, speech-to-text for captured audio.
  *
@@ -17,24 +18,20 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk';
-import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/sdk/platform/voice';
+
 import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/operator-rpc.ts';
 
 /** voice.stt output, the recognised text plus the provider that produced it. */
 export type VoiceTranscriptionResult = OperatorMethodOutput<'voice.stt'>;
 
 /** The narrow verb surface a capture consumer needs. */
-export interface VoiceSttGateway {
-  /** Transcribe one captured utterance; resolves to the recognised text. */
-  transcribe(audio: UtteranceAudioArtifact, options?: { readonly signal?: AbortSignal }): Promise<string>;
-}
+export type VoiceSttGateway = SpeechTranscriptionGateway<[options?: { readonly signal?: AbortSignal }]>;
 
 /**
  * Why transcription is unavailable, surfaced verbatim so a capture path prints
  * the daemon's reason instead of inventing one.
  */
-export type VoiceSttGatewayResolution =
-  | { readonly available: true; readonly gateway: VoiceSttGateway }
+export type VoiceSttGatewayResolution = SpeechTranscriptionResolution<VoiceSttGateway>; readonly gateway: VoiceSttGateway }
   | { readonly available: false; readonly reason: string };
 
 export interface VoiceSttGatewayDeps {

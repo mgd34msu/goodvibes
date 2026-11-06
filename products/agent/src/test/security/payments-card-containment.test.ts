@@ -135,6 +135,10 @@ function createConfigManager(root: string): ConfigManager {
   });
 }
 
+test.each(['__proto__', 'constructor', 'prototype'])('postal config lookup rejects inherited field %s', field => {
+  expect(() => paymentsAddressConfigKey('shipping', field)).toThrow('Unknown payments address field');
+});
+
 describe('payments card containment (agent terminal)', () => {
   useSecurityReadings();
   const originalCwd = process.cwd();

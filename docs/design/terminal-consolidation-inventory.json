@@ -501,7 +501,13 @@
       "path": "input/commands/product-runtime.ts",
       "baselineTuiLines": 391,
       "baselineSimilarity": 0.4242,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "TrustReviewBundle",
+        "buildTrustReviewBundle",
+        "formatTrustReview",
+        "inspectTrustBundle"
+      ]
     },
     {
       "path": "input/commands/provider-accounts-runtime.ts",
@@ -838,7 +844,7 @@
       "path": "input/payments-config.ts",
       "baselineTuiLines": 167,
       "baselineSimilarity": 0.5112,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "input/profile-picker-modal.ts",

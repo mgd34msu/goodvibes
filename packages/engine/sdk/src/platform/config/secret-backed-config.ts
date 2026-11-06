@@ -1,3 +1,4 @@
+import { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from './payment-config-keys.js';
 import { isSecretRefInput } from './secret-refs.js';
 import { isDaemonOwnedConfigKey } from './config-ownership.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
@@ -44,16 +45,7 @@ export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
     'surfaces.bluebubbles.password',
     'surfaces.mattermost.botToken',
     'surfaces.matrix.accessToken',
-    // Terminal synthetic sub-keys, one level under the SDK's real `payments`
-    // section (not a scalar CONFIG_SCHEMA entry, same situation as
-    // behavior.notifyAfterSeconds and the other synthetics in
-    // settings-modal-data.ts), hence the cast. See input/payments-config.ts for why these are named flat
-    // (payments.cardNumber, not payments.card.number): a flat one-level leaf is
-    // the shape the real ConfigManager tolerates for an undeclared key.
-    'payments.cardNumber' as ConfigKey,
-    'payments.cardExpiry' as ConfigKey,
-    'payments.cardCvv' as ConfigKey,
-    'payments.cardholderName' as ConfigKey,
+    ...PAYMENTS_SYNTHETIC_CONFIG_KEYS,
 ]);
 export function createSecretConfigKeyRegistry(extraKeys: readonly ConfigKey[]) {
     const keys = new Set<ConfigKey>([...SECRET_CONFIG_KEYS, ...extraKeys]);

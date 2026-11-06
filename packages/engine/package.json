@@ -2238,6 +2238,16 @@
       "bun": "./terminal-shell/src/paste-flood-guard.ts",
       "types": "./terminal-shell/dist/paste-flood-guard.d.ts",
       "import": "./terminal-shell/dist/paste-flood-guard.js"
+    },
+    "./terminal-shell/payments-settings": {
+      "bun": "./terminal-shell/src/payments-settings.ts",
+      "types": "./terminal-shell/dist/payments-settings.d.ts",
+      "import": "./terminal-shell/dist/payments-settings.js"
+    },
+    "./terminal-shell/trust-review": {
+      "bun": "./terminal-shell/src/trust-review.ts",
+      "types": "./terminal-shell/dist/trust-review.d.ts",
+      "import": "./terminal-shell/dist/trust-review.js"
     }
   },
   "publishConfig": {

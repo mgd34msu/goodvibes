@@ -1,4 +1,5 @@
-import { isConversationUsageAvailable } from '../core/conversation-usage.ts';
+import { createLiveContextAccountingSource } from '@goodvibes-jev/engine/terminal-shell/context-accounting-source';
+import '../core/conversation-usage.ts';
 /**
  * context-accounting-source.ts
  *
@@ -63,9 +64,7 @@ export interface BindOrchestratorContextAccountingOptions {
  * lifetime; bootstrap.ts pushes the returned function into `runtimeUnsubs` so
  * shutdown leaves no dangling bus subscription.
  */
-export function bindOrchestratorContextAccounting(
-  options: BindOrchestratorContextAccountingOptions,
-): () => void {
+export function bindOrchestratorContextAccounting(options: BindOrchestratorContextAccountingOptions): () => void {
   const { orchestrator, holder, runtimeBus, runtimeStore, sessionId, getContextWindow } = options;
   const scope = options.scope ?? 'main session';
 
@@ -76,30 +75,16 @@ export function bindOrchestratorContextAccounting(
   // background agent's own compaction does not inflate the main session's
   // number).
   let compactionCount = 0;
-  const unsubReceipt = runtimeBus.on<Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>>(
-    'COMPACTION_RECEIPT',
-    ({ payload }) => {
-      if (payload.sessionId === sessionId && payload.outcome === 'applied') compactionCount += 1;
-    },
-  );
+  const unsubReceipt = runtimeBus.on<Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>>('COMPACTION_RECEIPT', ({ payload }) => {
+    if (payload.sessionId === sessionId && payload.outcome === 'applied') compactionCount += 1;
+  });
 
-  const source: ContextAccountingSource = {
-    scope,
-    sessionId,
-    getTurnInjections: () => orchestrator.getTurnInjections(),
-    getTokenState: () => {
-      if (!isConversationUsageAvailable(orchestrator.usage)) throw new TypeError('Session usage unavailable: saved token usage is invalid.');
-      return {
-        measured: {
-          input: orchestrator.usage.input,
-          output: orchestrator.usage.output,
-          cacheRead: orchestrator.usage.cacheRead,
-          cacheWrite: orchestrator.usage.cacheWrite,
-        },
-        lastInputTokens: orchestrator.lastInputTokens,
-        contextWindow: getContextWindow(),
-      };
-    },
+  const source: ContextAccountingSource = createLiveContextAccountingSource({
+    orchestrator: orchestrator,
+    sessionId: sessionId,
+    scope: scope,
+    copyAllUsage: false,
+    getContextWindow: getContextWindow,
     getCompactionState: () => {
       const compactionState = runtimeStore.getState().session.compactionState;
       return {
@@ -107,7 +92,7 @@ export function bindOrchestratorContextAccounting(
         compactionCount,
       };
     },
-  };
+  });
 
   holder.setSource(source);
 

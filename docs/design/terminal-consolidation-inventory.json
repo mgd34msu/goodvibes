@@ -141,7 +141,8 @@
       "path": "cli/native-headless-command.ts",
       "baselineTuiLines": 58,
       "baselineSimilarity": 0.5472,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns prompt extraction, signal lifetime through cleanup, final pipe flush and exit result. Product composition binds private host credentials, bootstrap and persisted-session shutdown; ordinary TUI submit and admitted native Agent submit retain separate authority."
     },
     {
       "path": "cli/native-headless-options.ts",
@@ -153,7 +154,8 @@
       "path": "cli/native-headless-turn.ts",
       "baselineTuiLines": 86,
       "baselineSimilarity": 0.4444,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns event observation, stream output, response/stop/error accounting, empty-response detection and final result. TUI retains the extra contract/standalone-agent drain because its executor can delegate implementation; Agent accepts only its native permit path."
     },
     {
       "path": "cli/native-headless.ts",
@@ -1658,7 +1660,8 @@
       "path": "runtime/context-accounting-source.ts",
       "baselineTuiLines": 120,
       "baselineSimilarity": 0.1513,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns live injection/token counter capture, validation and source shape. TUI retains compaction activity/lineage subscriptions; Agent retains session-filtered receipt counting and runtime reducer state. Both read real windows and counters."
     },
     {
       "path": "runtime/context.ts",

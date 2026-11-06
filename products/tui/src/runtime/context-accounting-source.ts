@@ -1,4 +1,5 @@
-import { isConversationUsageAvailable } from '../core/conversation-usage.ts';
+import { createLiveContextAccountingSource } from '@goodvibes-jev/engine/terminal-shell/context-accounting-source';
+import '../core/conversation-usage.ts';
 import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { SessionLineageTracker } from '@goodvibes-jev/engine/sdk/platform/core';
@@ -53,11 +54,7 @@ const COMPACTION_START_EVENT_TYPES = [
 ] as const;
 
 /** Events that mark a compaction run ending (successfully, rejected, or failed). */
-const COMPACTION_END_EVENT_TYPES = [
-  'COMPACTION_DONE',
-  'COMPACTION_FAILED',
-  'COMPACTION_RECEIPT',
-] as const;
+const COMPACTION_END_EVENT_TYPES = ['COMPACTION_DONE', 'COMPACTION_FAILED', 'COMPACTION_RECEIPT'] as const;
 
 export interface ContextAccountingSourceHandle {
   readonly source: ContextAccountingSource;
@@ -71,37 +68,42 @@ export function createContextAccountingSource(deps: ContextAccountingSourceDeps)
   if (deps.runtimeBus) {
     const bus = deps.runtimeBus;
     for (const type of COMPACTION_START_EVENT_TYPES) {
-      unsubs.push(bus.on(type, () => { isCompacting = true; }));
+      unsubs.push(
+        bus.on(type, () => {
+          isCompacting = true;
+        }),
+      );
     }
     for (const type of COMPACTION_END_EVENT_TYPES) {
-      unsubs.push(bus.on(type, () => { isCompacting = false; }));
+      unsubs.push(
+        bus.on(type, () => {
+          isCompacting = false;
+        }),
+      );
     }
   }
 
-  const source: ContextAccountingSource = {
-    scope: deps.scope ?? 'main session',
+  const source: ContextAccountingSource = createLiveContextAccountingSource({
+    orchestrator: deps.orchestrator,
     sessionId: deps.sessionId,
-    getTurnInjections: () => deps.orchestrator.getTurnInjections(),
-    getTokenState: () => {
-      if (!isConversationUsageAvailable(deps.orchestrator.usage)) throw new TypeError('Session usage unavailable: saved token usage is invalid.');
+    scope: deps.scope,
+    copyAllUsage: true,
+    getContextWindow: () => {
       const currentModel = deps.providerRegistry.getCurrentModel();
-      // null when nothing states the window (a guess, or disproven by a larger accepted request).
       const contextWindow = deps.providerRegistry.getKnownContextWindowForModel(currentModel);
-      return {
-        measured: { ...deps.orchestrator.usage },
-        lastInputTokens: deps.orchestrator.lastInputTokens,
-        contextWindow: contextWindow !== null && contextWindow > 0 ? contextWindow : null,
-      };
+      return contextWindow !== null && contextWindow > 0 ? contextWindow : null;
     },
     getCompactionState: () => ({
       isCompacting,
       compactionCount: deps.sessionLineageTracker.getCompactionCount(),
     }),
-  };
+  });
 
   return {
     source,
-    dispose: () => { for (const unsub of unsubs) unsub(); },
+    dispose: () => {
+      for (const unsub of unsubs) unsub();
+    },
   };
 }
 

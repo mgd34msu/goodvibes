@@ -2848,6 +2848,21 @@
       "bun": "./terminal-shell/src/renderer/settings-context.ts",
       "types": "./terminal-shell/dist/renderer/settings-context.d.ts",
       "import": "./terminal-shell/dist/renderer/settings-context.js"
+    },
+    "./terminal-shell/headless-command": {
+      "bun": "./terminal-shell/src/native/headless-command.ts",
+      "types": "./terminal-shell/dist/native/headless-command.d.ts",
+      "import": "./terminal-shell/dist/native/headless-command.js"
+    },
+    "./terminal-shell/headless-turn-events": {
+      "bun": "./terminal-shell/src/native/headless-turn-events.ts",
+      "types": "./terminal-shell/dist/native/headless-turn-events.d.ts",
+      "import": "./terminal-shell/dist/native/headless-turn-events.js"
+    },
+    "./terminal-shell/context-accounting-source": {
+      "bun": "./terminal-shell/src/context-accounting-source.ts",
+      "types": "./terminal-shell/dist/context-accounting-source.d.ts",
+      "import": "./terminal-shell/dist/context-accounting-source.js"
     }
   },
   "publishConfig": {

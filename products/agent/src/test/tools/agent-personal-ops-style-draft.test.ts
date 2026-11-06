@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { StyleReplyReadingError } from '@goodvibes-jev/engine/sdk/platform/email';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from '../../tools/agent-harness-personal-ops-style-draft.ts';
 import { cleanupResearchScreeningFixtures, exactSensitiveSpans, researchScreeningFixture } from '../helpers/research-screening.ts';
 
@@ -77,4 +78,20 @@ test.each([
   const owner = researchScreeningFixture();
   await expect(runPersonalOpsStyleDraft(input, { sourceOwner: owner.owner })).rejects.toThrow();
   expect(owner.calls).toHaveLength(0);
+});
+
+test('Classic Personal Ops retains protected draft review with zero decision or source-network requests', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const owner = researchScreeningFixture(), input = { ...fields(),
+      inbound: { from: 'Alice Smith <alice@example.com>', subject: 'Project update', bodyPreview: 'Complete inbound message.' },
+      sentMessages: [{ bodyPreview: 'Dear owner,\nRespectfully requesting approval.\nSincerely' }],
+    };
+    const result = await runPersonalOpsStyleDraft(input, { sourceOwner: owner.owner });
+    expect(result).toMatchObject({ status: 'drafted', provenance: 'classic', styleAssessment: 'not-evaluated' });
+    const draft = object(result.draft), profile = object(draft.profile);
+    expect(draft.requiresBeforeSendReview).toBe(true); expect(draft.body).toContain(input.context);
+    expect(draft.body).not.toContain('Alice'); expect(profile.isDefault).toBe(true);
+    expect(profile.assessment).toBe('not-evaluated'); expect(fake.requests).toHaveLength(0); expect(owner.calls).toHaveLength(0);
+  });
 });

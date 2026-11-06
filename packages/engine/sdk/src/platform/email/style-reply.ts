@@ -2,6 +2,7 @@
 import type { SecretLikeTextPredicate } from '../google/account-registry.js';
 import type { EmailSummary } from './email-service.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { readStyleFrequency, readStyleSenderName, readStyleSentenceCount, readStyleTone, StyleReplyReadingError, withEmailStyleSource, type StyleReplyReadingOptions } from './style-reply-readings.js';
 export { StyleReplyReadingError } from './style-reply-readings.js';
 export type { StyleReplyReadingOptions } from './style-reply-readings.js';
@@ -14,6 +15,9 @@ export type StyleReplyMessage = Pick<EmailSummary, 'from' | 'subject' | 'bodyPre
 export type StyleSentMessage = Pick<EmailSummary, 'bodyPreview'>;
 
 export interface StyleProfile {
+  readonly provenance?: 'classic';
+  /** Defaults in Classic are a template choice, never a learned writing style. */
+  readonly assessment?: 'not-evaluated';
   /** Most common greeting prefix found in sent messages, e.g. 'Hi', 'Hello', 'Hey'. */
   readonly greeting: string;
   /** Most common sign-off found in sent messages, e.g. 'Thanks', 'Best', 'Cheers'. */
@@ -22,7 +26,7 @@ export interface StyleProfile {
   readonly medianSentenceCount: number;
   /** Dominant tone established by the corpus reading: 'formal' | 'casual' | 'neutral'. */
   readonly tone: 'formal' | 'casual' | 'neutral';
-  /** True when the corpus is empty, all values are defaults. */
+  /** True when values are explicit defaults, including an unassessed Classic template. */
   readonly isDefault: boolean;
 }
 
@@ -111,6 +115,7 @@ export async function classifyTone(bodies: readonly string[], options: StyleRepl
 /** Read supplied sent messages; an actually empty corpus has explicit defaults. */
 export async function extractStyleProfile(sentMessages: readonly StyleSentMessage[], options: StyleReplyReadingOptions = {}): Promise<StyleProfile> {
   return withEmailStyleSource({ sentMessages }, options, source => { requireSentMessages(source.sentMessages); return source.sentMessages.length > 0; }, async (source, readings) => {
+    if (isClassicOperation()) return { ...DEFAULT_STYLE_PROFILE, provenance: 'classic' as const, assessment: 'not-evaluated' as const };
     const bodies = source.sentMessages.map(message => message.bodyPreview).filter(body => body.length > 0);
     if (!bodies.length) return { greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: source.sentMessages.length === 0 };
     if (!readings) throw new StyleReplyReadingError();
@@ -125,10 +130,12 @@ export async function extractStyleProfile(sentMessages: readonly StyleSentMessag
     const tone = await readStyleTone(bodies, readings);
     readings.assertCurrent();
     return { greeting, signOff, medianSentenceCount: Math.max(1, median(sentenceCounts, 3)), tone, isDefault: false };
-  });
+  }, undefined, true);
 }
 
 export interface DraftReplyResult {
+  readonly provenance?: 'classic';
+  readonly styleAssessment?: 'not-evaluated';
   /** Fully composed draft body. Never includes credentials or secret-looking text. */
   readonly body: string;
   /** The style profile used to compose this draft. */
@@ -150,7 +157,8 @@ export async function composeDraftReply(
   options: StyleReplyReadingOptions = {},
 ): Promise<DraftReplyResult> {
   return withEmailStyleSource({ inbound, profile, context }, options, source => { requireDraftInput(source.inbound, source.profile, source.context); return true; }, async (source, readings) => {
-    const senderName = source.inbound.from.trim()
+    const classic = isClassicOperation();
+    const senderName = !classic && source.inbound.from.trim()
       ? await (readings ? readStyleSenderName(source.inbound.from, readings) : Promise.reject(new StyleReplyReadingError())) : '';
     const subjectLine = replySubject(source.inbound.subject);
     const usedInbound = source.inbound;
@@ -177,7 +185,7 @@ export async function composeDraftReply(
 
     // Filler sentences to approximate median length (when no context provided
     // and the profile expects more sentences than the acknowledgement alone)
-    if (!usedContext.trim() && usedProfile.medianSentenceCount > 2) {
+    if (!classic && !usedContext.trim() && usedProfile.medianSentenceCount > 2) {
       lines.push('');
       lines.push(buildPlaceholderBody(usedProfile.medianSentenceCount - 1, usedProfile.tone));
     }
@@ -196,11 +204,13 @@ export async function composeDraftReply(
 
     readings?.assertCurrent();
     return {
+      ...(classic ? { provenance: 'classic' as const, styleAssessment: 'not-evaluated' as const } : {}),
       body,
       profile: usedProfile,
       subject: subjectLine,
       requiresBeforeSendReview: true,
       reviewBoundary:
+        (classic ? 'Classic uses the supplied/default template; writing style and personal salutation were not inferred. ' : '') +
         'This is a DRAFT only. Review the content before sending. ' +
         'Sending requires confirm:true on the email send path (SMTP or connector) ' +
         'with explicit user confirmation of recipients and body.',
@@ -211,7 +221,7 @@ export async function composeDraftReply(
       if (value && typeof value === 'object') for (const child of Object.values(value)) visit(child);
     };
     visit(source);
-  });
+  }, true);
 }
 
 // ---------------------------------------------------------------------------

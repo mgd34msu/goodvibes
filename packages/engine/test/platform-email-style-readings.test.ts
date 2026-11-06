@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { classifyTone, composeDraftReply, countSentences, extractSenderName, extractStyleProfile, StyleReplyReadingError } from '../sdk/src/platform/email/style-reply.js';
 import { taskRouteSourceFixture, exactRouteSourceSpans } from './_helpers/task-route-source.ts';
@@ -176,3 +177,76 @@ test('empty sender does not drop complete inbound and context protection', async
   await expect(composeDraftReply({ from: '', subject: 'Project update', bodyPreview: 'Complete ordinary body.' }, profile, privateText, () => false, { sourceOwner: owner.owner })).rejects.toBeInstanceOf(StyleReplyReadingError);
   expect(JSON.stringify(owner.calls)).toContain(privateText); expect(fake.requests).toHaveLength(0);
 });
+
+test('Classic protected email draft uses declared/default template with zero screening or decision requests', async () => {
+  const fake = fakePort(() => { throw new Error('Classic must not ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const owner = source();
+    const corpus = [{ bodyPreview: 'Dear committee,\nI respectfully request your review.\nSincerely' }];
+    const profile = await extractStyleProfile(corpus, { sourceOwner: owner.owner });
+    expect(profile).toMatchObject({ greeting: 'Hi', signOff: 'Thanks', isDefault: true, provenance: 'classic', assessment: 'not-evaluated' });
+    const guards: Array<() => void> = [], inbound = { from: 'Maria del Carmen Ruiz <maria@example.com>', subject: 'Current milestone', bodyPreview: 'Please share the update.' };
+    const draft = await composeDraftReply(inbound, profile, 'The milestone is ready.', () => false, {
+      sourceOwner: owner.owner, retainCurrent: guard => guards.push(guard), assertCurrent: () => guards.forEach(guard => guard()),
+    });
+    expect(draft).toMatchObject({ provenance: 'classic', styleAssessment: 'not-evaluated', requiresBeforeSendReview: true });
+    expect(draft.body).toStartWith('Hi,'); expect(draft.body).not.toContain('Maria');
+    expect(draft.body).toContain('The milestone is ready.'); expect(draft.reviewBoundary).toContain('were not inferred');
+    guards.forEach(guard => guard()); inbound.bodyPreview = 'Replaced source';
+    expect(() => guards.forEach(guard => guard())).toThrow();
+    expect(owner.calls).toHaveLength(0); expect(fake.requests).toHaveLength(0);
+  });
+});
+
+test('Preferred style exhaustion keeps the admitted source and returns an explicitly unassessed draft', async () => {
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const owner = source();
+    const profile = await extractStyleProfile([{ bodyPreview: 'Full supplied writing sample.' }], { sourceOwner: owner.owner });
+    expect(profile.assessment).toBe('not-evaluated'); expect(profile.provenance).toBe('classic');
+    expect(decisionModelPolicyState().operation).toBe('classic');
+    const attempted = fake.requests.length, screened = owner.calls.length;
+    expect(attempted).toBeGreaterThan(0);
+    const draft = await composeDraftReply({ from: 'Alice Smith <alice@example.com>', subject: 'Update', bodyPreview: 'Complete inbound.' }, profile, 'Exact owner key points.', () => false, { sourceOwner: owner.owner });
+    expect(draft.provenance).toBe('classic'); expect(draft.body).toContain('Exact owner key points.');
+    expect(fake.requests).toHaveLength(attempted); expect(owner.calls).toHaveLength(screened);
+  });
+});
+
+test('Classic email drafting still requires source ownership, protected-literal admission and cancellation', async () => {
+  const fake = fakePort(() => { throw new Error('Classic must not ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const inbound = { from: 'sender@example.com', subject: 'Update', bodyPreview: 'Complete inbound.' };
+    const profile = { greeting: 'Hello', signOff: 'Regards', medianSentenceCount: 5, tone: 'formal', isDefault: false } as const;
+    await expect(composeDraftReply(inbound, profile, 'Owner context.', () => false)).rejects.toBeInstanceOf(StyleReplyReadingError);
+    const owner = source();
+    await expect(composeDraftReply(inbound, profile, 'password=synthetic-private-secret', () => false, { sourceOwner: owner.owner })).rejects.toBeInstanceOf(StyleReplyReadingError);
+    const controller = new AbortController(); controller.abort();
+    await expect(composeDraftReply(inbound, profile, 'Owner context.', () => false, { sourceOwner: owner.owner, signal: controller.signal })).rejects.toThrow();
+    const draft = await composeDraftReply(inbound, profile, '', () => false, { sourceOwner: owner.owner });
+    expect(draft.body).toStartWith('Hello,'); expect(draft.body).not.toContain('I have reviewed');
+    expect(draft.styleAssessment).toBe('not-evaluated');
+    expect(owner.calls).toHaveLength(0); expect(fake.requests).toHaveLength(0);
+  });
+});
+
+test('Classic standalone semantic style helpers report their feature limitation without port lookup', async () => {
+  const fake = fakePort(() => { throw new Error('Classic must not ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(classifyTone(['A supplied writing sample.'])).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(countSentences('A sentence.')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(extractSenderName('Alice Smith <alice@example.com>')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+  test(`Preferred email style ${kind} cannot become an unassessed success`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); }); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const owner = source();
+      await expect(extractStyleProfile([{ bodyPreview: 'Full supplied writing sample.' }], { sourceOwner: owner.owner })).rejects.toBeInstanceOf(StyleReplyReadingError);
+      expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  });
+}

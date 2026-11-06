@@ -2,7 +2,8 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Email style readings. Code counts settled items and composes a draft; readers never send. */
 import { types as nodeTypes } from 'node:util';
 import { defineBattery, defineCounter, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, decisionOrClassic, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import { awaitPermission } from '../permissions/cancellation.js';
@@ -104,79 +105,107 @@ function retainSlots(subject: object, keys: readonly string[]) {
   };
 }
 
-/** Screen the complete supplied native DTO once and retain it through every reading and cleanup. */
+/** Screen the complete native DTO through cleanup. Work is read/draft-only:
+ * it must not send, write a mailbox, or publish effects. Classic-enabled work
+ * must accept absent readings and return explicitly unassessed native output.
+ */
 export async function withEmailStyleSource<T, R>(
   source: T, options: StyleReplyReadingOptions,
   needsReading: (captured: T) => boolean,
   work: (captured: T, readings: StyleReplyReadings | undefined) => Promise<R>,
   assertPrivate?: ((captured: T) => void) | undefined,
+  classicAllowed = false,
 ): Promise<R> {
-  let release: (() => Promise<void>) | undefined;
-  let receipt: SourceScreeningReceipt | undefined;
-  let current: (() => void) | undefined;
-  let installed: ReturnType<typeof captureJudgmentPort> | undefined;
-  let consumed: ReturnType<ReturnType<typeof captureJudgmentPort>['consumeObservation']> | undefined;
-  try {
-    const optionsCurrent = retainSlots(options, ['sourceOwner', 'signal', 'assertCurrent', 'retainCurrent']);
-    const signal = options.signal, caller = options.assertCurrent, owner = options.sourceOwner, retain = options.retainCurrent;
-    const retained = retainStrictJudgmentJson(source, () => new StyleReplyReadingError());
-    const captured = retained.snapshot;
-    current = () => {
-      optionsCurrent(); retained.assertCurrent();
-      if (signal?.aborted) throw new StyleReplyReadingError();
-      const returned: unknown = caller?.();
-      if (returned !== undefined) { drainOwned(returned); throw new StyleReplyReadingError(); }
-      optionsCurrent(); retained.assertCurrent();
-      if (signal?.aborted) throw new StyleReplyReadingError();
-    };
-    current(); assertJudgmentInput(captured);
-    const requiresSource = needsReading(captured);
-    assertPrivate?.(captured); current();
-    if (!requiresSource) {
-      const result = await work(captured, undefined); current();
-      retain?.(() => { optionsCurrent(); retained.assertCurrent(); if (signal?.aborted) throw new StyleReplyReadingError(); });
-      current(); return result;
-    }
-    if (!owner) throw new StyleReplyReadingError();
-    const methodsCurrent = retainSlots(owner, ['capture', 'screen', 'project', 'release']);
-    const capture = owner.capture, screen = owner.screen, project = owner.project, originalRelease = owner.release;
-    if ([capture, screen, project, originalRelease].some(method => typeof method !== 'function')) throw new StyleReplyReadingError();
-    const sourceCurrent = current;
-    const sourceRestriction = () => { optionsCurrent(); retained.assertCurrent(); methodsCurrent(); if (signal?.aborted) throw new StyleReplyReadingError(); };
-    const serialized = JSON.stringify(captured);
-    let protectedSource: ProtectedSource;
-    const ownerCurrent = () => {
-      sourceCurrent(); methodsCurrent();
-      if (receipt) {
-        const projected = project.call(owner, receipt);
-        if (projected.length !== 1 || projected[0] !== serialized) throw new StyleReplyReadingError();
+  return withConfiguredDecisionModelPolicy(async () => {
+    let release: (() => Promise<void>) | undefined;
+    let receipt: SourceScreeningReceipt | undefined;
+    let current: (() => void) | undefined;
+    let installed: ReturnType<typeof captureJudgmentPort> | undefined;
+    let consumed: ReturnType<ReturnType<typeof captureJudgmentPort>['consumeObservation']> | undefined;
+    try {
+      const optionsCurrent = retainSlots(options, ['sourceOwner', 'signal', 'assertCurrent', 'retainCurrent']);
+      const signal = options.signal, caller = options.assertCurrent, owner = options.sourceOwner, retain = options.retainCurrent;
+      const retained = retainStrictJudgmentJson(source, () => new StyleReplyReadingError());
+      const captured = retained.snapshot;
+      current = () => {
+        optionsCurrent(); retained.assertCurrent();
+        if (signal?.aborted) throw new StyleReplyReadingError();
+        const returned: unknown = caller?.();
+        if (returned !== undefined) { drainOwned(returned); throw new StyleReplyReadingError(); }
+        optionsCurrent(); retained.assertCurrent();
+        if (signal?.aborted) throw new StyleReplyReadingError();
+      };
+      current(); assertJudgmentInput(captured);
+      const requiresSource = needsReading(captured);
+      assertPrivate?.(captured); current();
+      if (!requiresSource) {
+        const result = await work(captured, undefined); current();
+        retain?.(() => { optionsCurrent(); retained.assertCurrent(); if (signal?.aborted) throw new StyleReplyReadingError(); });
+        current(); return result;
       }
-      methodsCurrent(); sourceCurrent();
-    };
-    current = ownerCurrent;
-    current(); protectedSource = capture.call(owner, [serialized]);
-    release = () => originalRelease.call(owner, protectedSource);
-    current();
-    const screened = await awaitPermission(() => screen.call(owner, protectedSource), signal);
-    current();
-    if (screened.status !== 'settled') throw new StyleReplyReadingError();
-    receipt = screened.receipt; current();
-    installed = captureJudgmentPort('email.style', { signal, assertCurrent: current, prepareResultCapture: questions => prepareJudgmentResult(questions, () => new StyleReplyReadingError()) });
-    const readings: StyleReplyReadings = { port: installed.port, signal: installed.signal, assertCurrent: installed.assertCurrent };
-    readings.assertCurrent();
-    const result = await work(captured, readings);
-    readings.assertCurrent(); current();
-    const portRestriction = installed.consumeObservation(); consumed = portRestriction;
-    retain?.(() => { sourceRestriction(); portRestriction.assertCurrent(); });
-    return result;
-  } catch { throw new StyleReplyReadingError(); }
-  finally {
-    if (release) {
-      receipt = undefined;
-      try { await release(); current?.(); if (consumed) consumed.assertCurrent(); else installed?.assertCurrent(); }
-      catch { throw new StyleReplyReadingError(); }
+      if (!classicAllowed) requireDecisionFeature('semantic email style, sentence or salutation assessment');
+      if (!owner) throw new StyleReplyReadingError();
+      const methodsCurrent = retainSlots(owner, ['capture', 'screen', 'project', 'release']);
+      const capture = owner.capture, screen = owner.screen, project = owner.project, originalRelease = owner.release;
+      if ([capture, screen, project, originalRelease].some(method => typeof method !== 'function')) throw new StyleReplyReadingError();
+      const sourceCurrent = current;
+      const sourceRestriction = () => { optionsCurrent(); retained.assertCurrent(); methodsCurrent(); if (signal?.aborted) throw new StyleReplyReadingError(); };
+      const serialized = JSON.stringify(captured);
+      let protectedSource: ProtectedSource;
+      const ownerCurrent = () => {
+        sourceCurrent(); methodsCurrent();
+        if (receipt) {
+          const projected = project.call(owner, receipt);
+          if (projected.length !== 1 || projected[0] !== serialized) throw new StyleReplyReadingError();
+        }
+        methodsCurrent(); sourceCurrent();
+      };
+      current = ownerCurrent;
+      current(); protectedSource = capture.call(owner, [serialized]);
+      release = () => originalRelease.call(owner, protectedSource);
+      current();
+      const screened = await awaitPermission(() => screen.call(owner, protectedSource), signal);
+      current();
+      if (screened.status !== 'settled') throw new StyleReplyReadingError();
+      receipt = screened.receipt; current();
+      const semantic = async () => {
+        installed = captureJudgmentPort('email.style', { signal, assertCurrent: ownerCurrent, prepareResultCapture: questions => prepareJudgmentResult(questions, () => new StyleReplyReadingError()) });
+        const readings: StyleReplyReadings = { port: installed.port, signal: installed.signal, assertCurrent: installed.assertCurrent };
+        readings.assertCurrent();
+        const result = await work(captured, readings);
+        readings.assertCurrent(); ownerCurrent();
+        const portRestriction = installed.consumeObservation(); consumed = portRestriction;
+        retain?.(() => { sourceRestriction(); portRestriction.assertCurrent(); });
+        return result;
+      };
+      if (!classicAllowed) return await semantic();
+      return await decisionOrClassic(semantic, async () => {
+        // Drop only the failed semantic observation. Source admission, privacy,
+        // original DTO ownership and cancellation still fence this native draft.
+        installed = undefined;
+        ownerCurrent();
+        const result = await work(captured, undefined);
+        ownerCurrent();
+        retain?.(sourceRestriction);
+        ownerCurrent();
+        return result;
+      });
+    } catch (error) {
+      if (error instanceof DecisionModelsDisabledError) throw error;
+      if (activateClassicFallback(error)) {
+        installed = undefined;
+        throw new DecisionModelsDisabledError('semantic email style, sentence or salutation assessment');
+      }
+      throw new StyleReplyReadingError();
     }
-  }
+    finally {
+      if (release) {
+        receipt = undefined;
+        try { await release(); current?.(); if (consumed) consumed.assertCurrent(); else installed?.assertCurrent(); }
+        catch { throw new StyleReplyReadingError(); }
+      }
+    }
+  });
 }
 
 export async function readStyleFrequency(bodies: readonly string[], candidates: readonly string[], fallback: string, purpose: 'phrase' | 'greeting' | 'signOff', readings: StyleReplyReadings): Promise<string> {

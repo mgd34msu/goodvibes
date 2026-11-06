@@ -2,6 +2,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { JudgmentHeldError, requireActingReading } from '../types/judgment-held.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 
 const greetings = { Hi: 'Hi', Hello: 'Hello', Hey: 'Hey', Dear: 'Dear', Greetings: 'Greetings', 'Good morning': 'Good morning', 'Good afternoon': 'Good afternoon', none: 'No offered greeting is characteristic of the author.' };
 const signOffs = { 'Kind regards': 'Kind regards', 'Best regards': 'Best regards', 'All the best': 'All the best', 'Thank you': 'Thank you', Thanks: 'Thanks', Sincerely: 'Sincerely', 'Take care': 'Take care', Cheers: 'Cheers', Regards: 'Regards', Best: 'Best', none: 'No offered closing is characteristic of the author.' };
@@ -32,6 +33,8 @@ export const emailStyle = defineBattery({
   ],
 });
 export async function readEmailStyle(bodies: readonly string[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  requireDecisionFeature('learning email writing style from a message corpus');
   const state = { bodies: [...bodies] };
   assertJudgmentInput(state);
   if (JSON.stringify(state).length > 160_000) throw new JudgmentInputError('unsupported-input');

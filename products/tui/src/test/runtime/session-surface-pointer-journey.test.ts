@@ -79,7 +79,7 @@ function persistOneTurn(sessionId: string, dir: string, messages: Array<Record<s
     surface: makeTestSurface(dir),
     gitStatusProvider: { refresh: async () => null },
     lastGitInfoRef: { value: null },
-    buildSessionContinuityHints: () => ({}),
+    buildSessionContinuityHints: () => ({ pendingApprovals: 0 }),
     render: () => {},
     webhookNotifier: null,
   });

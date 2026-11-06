@@ -178,7 +178,7 @@ test('interrupted new selector resumes once and preserves an answered weak selec
   const progress = { previous: current, onReceipt(source: typeof captured, value: Awaited<ReturnType<typeof readStaticInput>>) { readings[staticInputKey(source)] = value; } };
   using log = new SqliteDecisionLog(':memory:');
   const interruption = fakePort(() => { throw new Error('Interrupted before selector answer'); });
-  await expect(readStaticInput(withDecisionLog(interruption.port, log), log, captured, undefined, progress)).rejects.toThrow('the judgment provider could not answer');
+  await expect(readStaticInput(withDecisionLog(interruption.port, log), log, captured, undefined, progress)).rejects.toThrow('No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.');
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
   const resumed = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.8) : noulAnswer(0.5));
   const receipt = await readStaticInput(withDecisionLog(resumed.port, log), log, captured, undefined, progress);

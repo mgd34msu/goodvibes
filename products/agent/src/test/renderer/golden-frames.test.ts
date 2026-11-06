@@ -1,3 +1,4 @@
+import { settleSyntaxHighlighting } from '../../renderer/code-block.ts';
 // ---------------------------------------------------------------------------
 // golden-frames.test.ts, deterministic whole-screen snapshots of every Agent
 // surface, each one run through the design's layout audit.
@@ -71,7 +72,8 @@ function snapshotDiff(name: string, expected: string, actual: string): string | 
   const act = split(actual);
   const out: string[] = [`[${name}] golden-frame mismatch:`];
   for (let i = 0; i < Math.max(exp.text.length, act.text.length); i++) {
-    if (exp.text[i] !== act.text[i]) out.push(`  TEXT row ${i}:`, `    expected: ${exp.text[i] ?? '<missing>'}`, `    actual:   ${act.text[i] ?? '<missing>'}`);
+    if (exp.text[i] !== act.text[i])
+      out.push(`  TEXT row ${i}:`, `    expected: ${exp.text[i] ?? '<missing>'}`, `    actual:   ${act.text[i] ?? '<missing>'}`);
   }
   let styleDiffs = 0;
   for (const s of exp.styles) if (!act.styles.has(s) && styleDiffs++ < 20) out.push(`  STYLE removed: ${s}`);
@@ -82,10 +84,12 @@ function snapshotDiff(name: string, expected: string, actual: string): string | 
 for (const set of SETS) {
   describe(`golden frames : ${set.theme}`, () => {
     for (const fixture of frameFixtures()) {
-      test(fixture.name, () => {
+      test(fixture.name, async () => {
         setActiveThemeName(set.theme);
         setActiveThemeMode('dark');
         try {
+          fixture.render();
+          await settleSyntaxHighlighting();
           const lines = fixture.render();
           expect(lines).toHaveLength(fixture.height);
           expect(lines.every((line) => line.length === fixture.width)).toBe(true);

@@ -1,3 +1,4 @@
+import { settleSyntaxHighlighting } from '../../renderer/code-block.ts';
 // ---------------------------------------------------------------------------
 // golden-frames-stack.test.ts, the bottom of the main screen, whole: output
 // text, the throbber, the input area and the status line, with the gaps
@@ -39,7 +40,11 @@ const HEIGHT = 30;
 type Mode = 'rest' | 'thinking' | 'tool' | 'tree' | 'scrolled' | 'scrolled-tool';
 
 const THINKING: ThrobberState = { spinner: '⠋', frame: 0, activity: { kind: 'model', phrase: 'Thinking...', elapsedMs: 12_000 } };
-const TOOL: ThrobberState = { spinner: '⠙', frame: 0, activity: { kind: 'tool', tool: 'Running a command', argument: 'bun test src/net/retry.test.ts', elapsedMs: 3_000 } };
+const TOOL: ThrobberState = {
+  spinner: '⠙',
+  frame: 0,
+  activity: { kind: 'tool', tool: 'Running a command', argument: 'bun test src/net/retry.test.ts', elapsedMs: 3_000 },
+};
 
 function blank(width: number): Line {
   const line = createEmptyLine(width);
@@ -47,13 +52,20 @@ function blank(width: number): Line {
   return line;
 }
 
-
 /** The work tree with the keyboard on its first bead. */
 function treeTranscript(width: number): Line[] {
   const scene = singleLaneScene();
   const lines: Line[] = [];
   const context: ConversationRenderContext = {
-    history: { addLine: (l) => { lines.push(l); }, addLines: (ls) => { lines.push(...ls); }, getLineCount: () => lines.length },
+    history: {
+      addLine: (l) => {
+        lines.push(l);
+      },
+      addLines: (ls) => {
+        lines.push(...ls);
+      },
+      getLineCount: () => lines.length,
+    },
     blockRegistry: [],
     collapseState: new Map(scene.collapse),
     errorLineRegistry: [],
@@ -94,7 +106,9 @@ describe('golden-frames : the stack under the transcript', () => {
   for (const width of [80, 120, 160]) {
     for (const mode of ['rest', 'thinking', 'tool', 'tree', 'scrolled', 'scrolled-tool'] as const) {
       const name = `stack-${mode}-${width}`;
-      test(name, () => {
+      test(name, async () => {
+        screen(width, mode);
+        await settleSyntaxHighlighting();
         const lines = screen(width, mode);
         expect(lines).toHaveLength(HEIGHT);
         expect(lines.every((l) => l.length === width)).toBe(true);
@@ -143,7 +157,9 @@ describe('golden-frames : the stack under the transcript', () => {
         } else {
           // The throbber, then one full empty row, then the output text.
           expect(text(lines[H - 7]).slice(3, 5)).toMatch(/^[⠋⠙] $/);
-          expect(text(lines[H - 7])).toContain(mode === 'thinking' ? 'Thinking... · 12s' : 'Running a command · bun test src/net/retry.test.ts · 3s');
+          expect(text(lines[H - 7])).toContain(
+            mode === 'thinking' ? 'Thinking... · 12s' : 'Running a command · bun test src/net/retry.test.ts · 3s',
+          );
           expect(isBlank(lines[H - 8])).toBe(true);
           if (mode !== 'tree') expect(text(lines[H - 9])).toContain('└');
           expect(text(lines[H - 1])).toContain(mode === 'tree' ? 'esc  back to typing' : 'interrupt');

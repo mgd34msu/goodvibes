@@ -175,7 +175,10 @@ export function createOnboardingVerifier<
     if (operation.kind === 'ensure-auth-user') return verifyAuthOperation(deps, operation);
     return verifyAcknowledgementOperation(deps, operation);
   }
-  return async (deps: Dependencies, request: { readonly operations: readonly Operation[] }): Promise<OnboardingVerificationResult> => {
+  return async <Request extends { readonly operations: readonly Operation[] }>(
+    deps: Dependencies,
+    request: Request,
+  ): Promise<OnboardingVerificationResult> => {
     const items = await Promise.all(request.operations.map((operation) => verifyOperation(deps, operation)));
     return { verifiedAt: deps.clock?.() ?? Date.now(), ok: items.every((item) => item.status === 'pass'), items };
   };

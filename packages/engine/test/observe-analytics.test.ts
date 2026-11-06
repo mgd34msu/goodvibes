@@ -104,9 +104,9 @@ async function seededLog(): Promise<SqliteDecisionLog> {
   await team.route(port, 'refund please', { site: 'router' });
   await team.route(port, 'crash', { site: 'router' });
   state.fail = true;
-  await expect(urgency.run(port, 'lost', { site: 'intake' })).rejects.toMatchObject({ kind: 'unavailable', message: 'the judgment provider could not answer' });
+  await expect(urgency.run(port, 'lost', { site: 'intake' })).rejects.toMatchObject({ kind: 'unavailable', message: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.' });
   const [failed] = log.query({ site: 'intake', status: 'failed' });
-  expect(failed).toMatchObject({ context: { battery: urgency.name, site: 'intake' }, error: { kind: 'unavailable', message: 'the judgment provider could not answer' } });
+  expect(failed).toMatchObject({ context: { battery: urgency.name, site: 'intake' }, error: { kind: 'unavailable', message: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.' } });
   expect(JSON.stringify(failed)).not.toContain('endpoint down');
   state.fail = false;
   clock = DAY2 + 3_600_000;

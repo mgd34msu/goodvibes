@@ -1,3 +1,4 @@
+import { settleSyntaxHighlighting } from '../../renderer/code-block.ts';
 // ---------------------------------------------------------------------------
 // golden-frames-work-tree.test.ts, the conversation work tree's golden frames.
 //
@@ -42,7 +43,10 @@ const W = 120;
   const body = edit && result?.role === 'tool' ? beadBody(edit, 'ok', result.content) : null;
   if (body?.kind === 'diff' && body.path) {
     primeSemanticSummary(body.diff, body.path, {
-      symbols: [{ kind: 'modified', symbolKind: 'function', name: 'withRetry' }, { kind: 'added', symbolKind: 'variable', name: 'backoff' }],
+      symbols: [
+        { kind: 'modified', symbolKind: 'function', name: 'withRetry' },
+        { kind: 'added', symbolKind: 'variable', name: 'backoff' },
+      ],
       imports: [],
       totalChanges: 2,
     });
@@ -52,7 +56,15 @@ const W = 120;
 function render(scene: WorkTreeScene, glyphs: TreeGlyphSetName = 'rounded', width = W): Line[] {
   const lines: Line[] = [];
   const context: ConversationRenderContext = {
-    history: { addLine: (l) => { lines.push(l); }, addLines: (ls) => { lines.push(...ls); }, getLineCount: () => lines.length },
+    history: {
+      addLine: (l) => {
+        lines.push(l);
+      },
+      addLines: (ls) => {
+        lines.push(...ls);
+      },
+      getLineCount: () => lines.length,
+    },
     blockRegistry: [],
     collapseState: new Map(scene.collapse),
     errorLineRegistry: [],
@@ -70,7 +82,9 @@ function render(scene: WorkTreeScene, glyphs: TreeGlyphSetName = 'rounded', widt
 describe(`golden-frames : work tree (${THEME})`, () => {
   for (const make of WORK_TREE_SCENES) {
     const name = make().name;
-    test(`work-tree-${name}`, () => {
+    test(`work-tree-${name}`, async () => {
+      render(make());
+      await settleSyntaxHighlighting();
       const lines = render(make());
       expect(lines.length).toBeGreaterThan(0);
       assertGoldenIn(DIR, `work-tree-${name}`, lines);

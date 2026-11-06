@@ -324,7 +324,7 @@ GoodVibes ships **161** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/mcp` | None | `[add\|remove\|reload\|config\|review\|tools [<server>]\|auth-review\|repair [server]]` | Manage MCP servers and their tools |
+| `/mcp` | None | `[servers\|review\|tools [<server>]\|config\|add\|remove\|reload\|auth-review\|repair [server]]` | Manage MCP servers and their tools |
 
 ## Memory
 

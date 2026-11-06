@@ -1,3 +1,4 @@
+import { renderThrobberLine } from './throbber.ts';
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
 import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
@@ -200,6 +201,7 @@ export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: s
 export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
   blankRow,
   renderStatusLine,
+  renderThrobberLine,
   cost: (options) => statusCostText(options.usage, options.model),
   barColor: (options) => composerModeStyle(options).color,
   modeChips: (options) => modeChips(composerModeStyle(options).label, options.dangerMode === true),

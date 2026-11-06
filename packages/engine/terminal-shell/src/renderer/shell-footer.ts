@@ -120,6 +120,7 @@ const WORK_TREE_KEYS: ReadonlyArray<readonly [string, string]> = [
 export function createShellFooter<Options extends SharedShellFooterOptions>(ports: {
   readonly blankRow: (width: number) => Line;
   readonly renderStatusLine?: typeof renderStatusLine | undefined;
+  readonly renderThrobberLine?: typeof renderThrobberLine | undefined;
   readonly decorateStatus?: ((line: Line) => Line) | undefined;
   readonly hints?: ((options: Options) => readonly Line[]) | undefined;
   readonly barColor: (options: Options) => string;
@@ -154,7 +155,10 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
     const above: Line[] = [];
     above.push(...(ports.hints?.(options) ?? []));
     // The throbber: main's activity, led by "main" inside a view.
-    if (options.throbber) above.push(renderThrobberLine(options.width, view ? { ...options.throbber, owner: 'main' } : options.throbber));
+    if (options.throbber)
+      above.push(
+        (ports.renderThrobberLine ?? renderThrobberLine)(options.width, view ? { ...options.throbber, owner: 'main' } : options.throbber),
+      );
     // The back-to-bottom pill is a fill row: a full empty row keeps it off any text row above it.
     if (options.backToBottom) {
       if (above.length > 0) above.push(blankRow(options.width));

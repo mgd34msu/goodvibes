@@ -124,7 +124,7 @@ function makeMinimalOptions(
     surface: makeTestSurface('/tmp/test-workdir', '/tmp/test-home'),
     gitStatusProvider: { refresh: async () => null },
     lastGitInfoRef: { value: null },
-    buildSessionContinuityHints: () => ({}),
+    buildSessionContinuityHints: () => ({ pendingApprovals: 0 }),
     render: () => {},
     webhookNotifier: null,
     _clock: () => 0,

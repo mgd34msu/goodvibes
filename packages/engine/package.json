@@ -2023,6 +2023,21 @@
       "bun": "./terminal-shell/src/agent-view-render.ts",
       "types": "./terminal-shell/dist/agent-view-render.d.ts",
       "import": "./terminal-shell/dist/agent-view-render.js"
+    },
+    "./terminal-shell/conversation-splash-state": {
+      "bun": "./terminal-shell/src/conversation-splash-state.ts",
+      "types": "./terminal-shell/dist/conversation-splash-state.d.ts",
+      "import": "./terminal-shell/dist/conversation-splash-state.js"
+    },
+    "./terminal-shell/terminal-conversation": {
+      "bun": "./terminal-shell/src/terminal-conversation.ts",
+      "types": "./terminal-shell/dist/terminal-conversation.d.ts",
+      "import": "./terminal-shell/dist/terminal-conversation.js"
+    },
+    "./terminal-shell/term-caps": {
+      "bun": "./terminal-shell/src/term-caps.ts",
+      "types": "./terminal-shell/dist/term-caps.d.ts",
+      "import": "./terminal-shell/dist/term-caps.js"
     }
   },
   "publishConfig": {

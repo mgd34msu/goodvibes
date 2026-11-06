@@ -28,6 +28,10 @@ export interface TermColorCaps {
   syncedOutput: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Capability probe
+// ---------------------------------------------------------------------------
+
 /**
  * Probe terminal color capabilities from environment and the write stream.
  * Call once at compositor/renderer construction time.
@@ -52,7 +56,7 @@ export function probeTermCaps(stdout: NodeJS.WriteStream): TermColorCaps {
     : 1;
 
   let capability: ColorCapability;
-  if (depth >= 24) {
+  if (depth >= 24 || (depth >= 8 && advertisesTruecolor(process.env))) {
     capability = 'truecolor';
   } else if (depth >= 8) {
     capability = 'ansi256';
@@ -65,6 +69,45 @@ export function probeTermCaps(stdout: NodeJS.WriteStream): TermColorCaps {
   const syncedOutput = capability !== 'none';
   return { capability, syncedOutput };
 }
+
+/** TERM values of terminals that draw 24-bit color without saying so in COLORTERM. */
+const TRUECOLOR_TERMS: ReadonlySet<string> = new Set([
+  'xterm-ghostty', 'xterm-kitty', 'alacritty', 'foot', 'foot-extra', 'wezterm', 'contour', 'rio', 'xterm-direct',
+]);
+
+/** TERM_PROGRAM values of terminals that draw 24-bit color. */
+const TRUECOLOR_PROGRAMS: ReadonlySet<string> = new Set([
+  'ghostty', 'wezterm', 'iterm.app', 'vscode', 'hyper', 'tabby', 'rio', 'warpterminal',
+]);
+
+/**
+ * Whether the environment says the terminal draws 24-bit color. The stream's
+ * own depth check only trusts COLORTERM and a short list, so it reports 256
+ * colors for Ghostty, kitty, Alacritty and foot, and a 256-color downsample
+ * turns every gradient into visible bands. This reads COLORTERM
+ * (truecolor / 24bit), a TERM ending in "-direct" (the terminfo convention for
+ * direct color), and TERM / TERM_PROGRAM values of terminals known to draw it.
+ */
+function advertisesTruecolor(env: Readonly<Record<string, string | undefined>>): boolean {
+  const colorterm = (env['COLORTERM'] ?? '').toLowerCase();
+  if (colorterm === 'truecolor' || colorterm === '24bit') return true;
+  const term = (env['TERM'] ?? '').toLowerCase();
+  if (term.endsWith('-direct') || TRUECOLOR_TERMS.has(term)) return true;
+  return TRUECOLOR_PROGRAMS.has((env['TERM_PROGRAM'] ?? '').toLowerCase());
+}
+
+/**
+ * Whether the terminal can draw unicode (box drawing, beads, triangles), read
+ * from the environment: TERM=dumb cannot, and a locale naming a charset other
+ * than UTF-8 (including C and POSIX) cannot. No locale variables at all counts
+ * as capable, which is what modern terminal emulators report in practice.
+ * The conversation work tree draws ascii on a terminal this reports as limited.
+ */
+export { probeUnicodeSupport } from './renderer/lane-graph-glyphs.js';
+
+// ---------------------------------------------------------------------------
+// Color parsing helpers
+// ---------------------------------------------------------------------------
 
 /** Parse "#rrggbb" → [r, g, b]. Returns null for invalid input. */
 function parseHex(hex: string): [number, number, number] | null {
@@ -97,6 +140,10 @@ function parseRgbString(color: string): [number, number, number] | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// 256-color cube math
+// ---------------------------------------------------------------------------
 
 /**
  * Map [r, g, b] (0-255 each) to the nearest xterm-256 palette index.
@@ -162,6 +209,10 @@ export function nearestAnsi256(r: number, g: number, b: number): number {
   return grayDist < cubeDist ? gi : ci;
 }
 
+// ---------------------------------------------------------------------------
+// 16-color nearest-color table
+// ---------------------------------------------------------------------------
+
 /**
  * Standard 16 ANSI colors. Each entry is [r, g, b, fgCode, bgCode].
  * The fg code is the SGR parameter for foreground (30-37, 90-97);
@@ -213,13 +264,17 @@ function ansi16FgToBg(fgCode: number): number {
   return fgCode + 10;
 }
 
+// ---------------------------------------------------------------------------
+// Public downsampler
+// ---------------------------------------------------------------------------
+
 /**
  * Downsample a color for the given capability.
  *
- * @param rawColor - A cell's foreground or background color string, in any of
- *   the forms a grid cell may carry:
+ * @param rawColor - A color string as seen in Cell.fg / Cell.bg, before
+ *   sanitizeColor() decomposition. Supported forms:
  *   - "#rrggbb"  hex
- *   - "r;g;b"    RGB already decomposed into SGR parameter form
+ *   - "r;g;b"    pre-decomposed RGB (from sanitizeColor)
  *   - "N"        already a palette index, returned as-is for ansi256/truecolor,
  *                or omitted for none
  *
@@ -237,9 +292,7 @@ function ansi16FgToBg(fgCode: number): number {
  *     style += isRgb ? `\x1b[38;2;${fg}m` : `\x1b[38;5;${fg}m`;
  *   }
  *
- * For basic16 the returned value is already a complete SGR parameter (e.g.
- * "31" or "101"), so the caller emits `\x1b[<value>m` directly rather than
- * wrapping it in a 38/48 extended-color prefix.
+ * For basic16 the caller must use a different SGR prefix, see applyStyles.
  */
 export function downsampleColor(
   rawColor: string,

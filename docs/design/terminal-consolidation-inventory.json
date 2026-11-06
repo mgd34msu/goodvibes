@@ -246,12 +246,7 @@
       "path": "core/conversation.ts",
       "baselineTuiLines": 886,
       "baselineSimilarity": 0.6939,
-      "status": "pending-convergence",
-      "platformFunctions": [
-        "search-expansion bookkeeping",
-        "nearestBlock",
-        "resolveTranscriptEventLine"
-      ]
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "core/notices.ts",
@@ -1219,7 +1214,7 @@
       "path": "renderer/term-caps.ts",
       "baselineTuiLines": 359,
       "baselineSimilarity": 0.1383,
-      "status": "pending-convergence"
+      "status": "platform-forwarder"
     },
     {
       "path": "renderer/terminal-bg-probe.ts",

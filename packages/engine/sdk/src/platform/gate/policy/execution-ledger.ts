@@ -1,4 +1,5 @@
 import { readExecutionPurpose } from '../batteries/execution-purpose.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 /**
  * The execution ledger: one record per tool call the runtime handles, built
  * from the `tools` event domain, for the execution surfaces to list and
@@ -50,6 +51,8 @@ export interface AgentExecutionResultSummary {
 }
 
 export interface AgentExecutionRecord {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly callId: string;
   readonly turnId: string;
@@ -80,6 +83,8 @@ export interface AgentExecutionRecord {
 }
 
 interface MutableAgentExecutionRecord {
+  operationProvenance?: 'classic';
+  semanticAssessment?: 'not-evaluated' | 'partial';
   id: string;
   callId: string;
   turnId: string;
@@ -229,13 +234,15 @@ const ARG_READING_FAILED = 'Execution argument judgment unavailable; values with
 const READING_CANCELLED = 'Execution judgment cancelled; values withheld.';
 
 /** Reads the call's route kind; uncertainty never becomes a guessed kind. */
-async function readRouteKind(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ routeKind: AgentExecutionRouteKind; routeKindError?: string }> {
+async function readRouteKind(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }> {
   try {
     signal.throwIfAborted();
-    const reading = await readSideEffectKind(tool, args, EXECUTION_LEDGER_SITE, signal);
-    signal.throwIfAborted();
-    if (!reading.confident) return { routeKind: 'other', routeKindError: 'Execution route judgment uncertain.' };
-    return { routeKind: reading.kind };
+    return await decisionOrClassic<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }>(async () => {
+      const reading = await readSideEffectKind(tool, args, EXECUTION_LEDGER_SITE, signal);
+      signal.throwIfAborted();
+      if (!reading.confident) return { routeKind: 'other', routeKindError: 'Execution route judgment uncertain.' };
+      return { routeKind: reading.kind };
+    }, () => { signal.throwIfAborted(); return { routeKind: 'other', classic: true }; }, () => { signal.throwIfAborted(); return true; });
   } catch {
     if (!signal.aborted) logger.warn('AgentExecutionLedger: route kind reading failed');
     return { routeKind: 'other', routeKindError: ROUTE_READING_FAILED };
@@ -243,9 +250,11 @@ async function readRouteKind(tool: string, args: Record<string, unknown>, signal
 }
 
 /** Argument values stay withheld on any failed reading. */
-async function readArgRolesReported(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ roles: ReadonlyMap<string, ArgRole> | null; error?: string }> {
+async function readArgRolesReported(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ roles: ReadonlyMap<string, ArgRole> | null; error?: string; classic?: true }> {
   try {
-    return { roles: await readArgRoles(tool, args, signal) };
+    return await decisionOrClassic<{ roles: ReadonlyMap<string, ArgRole> | null; classic?: true }>(
+      async () => ({ roles: await readArgRoles(tool, args, signal) }),
+      () => { signal.throwIfAborted(); return { roles: null, classic: true }; }, () => { signal.throwIfAborted(); return true; });
   } catch {
     if (!signal.aborted) logger.warn('AgentExecutionLedger: argument reading failed');
     return { roles: null, error: ARG_READING_FAILED };
@@ -375,9 +384,14 @@ export class AgentExecutionLedger {
   }
 
   private recordReceived(event: Extract<ToolEvent, { type: 'TOOL_RECEIVED' }>, timestamp: number): void {
+    return withConfiguredDecisionModelPolicy(() => this.recordOwnedReceived(event, timestamp));
+  }
+
+  private recordOwnedReceived(event: Extract<ToolEvent, { type: 'TOOL_RECEIVED' }>, timestamp: number): void {
     // Capture at delivery, before our first await. The event bus owns the
     // earlier asynchronous dispatch boundary; this is not an emitter snapshot.
     if (this.records.has(event.callId)) return;
+    const startedClassic = isClassicOperation();
     let args: Record<string, unknown> = {};
     let refusal: string | undefined;
     try { args = snapshotJudgmentInput(event.args, event.tool) as Record<string, unknown>; }
@@ -385,11 +399,12 @@ export class AgentExecutionLedger {
       refusal = error instanceof JudgmentInputError ? error.message : ARG_READING_FAILED;
     }
     const record: MutableAgentExecutionRecord = {
+      ...(startedClassic ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
       id: event.callId, callId: event.callId, turnId: event.turnId,
       tool: refusal ? '[protected tool call]' : event.tool,
       routeKind: 'other', status: 'running', phase: event.type,
       receivedAt: timestamp, updatedAt: timestamp,
-      argsPreview: refusal ? '[redacted: protected input]' : '[judgment pending: values withheld]',
+      argsPreview: refusal ? '[redacted: protected input]' : startedClassic ? '[Classic: argument values withheld; semantic roles unassessed]' : '[judgment pending: values withheld]',
       argsKeys: [],
       ...(refusal ? { routeKindError: refusal, argsReadingError: refusal } : {}),
     };
@@ -407,6 +422,13 @@ export class AgentExecutionLedger {
     }
     this.notify();
     if (this.disposed || refusal || this.records.get(record.id) !== record) return;
+    const markClassic = (partial: boolean): void => {
+      record.operationProvenance = 'classic'; record.semanticAssessment = partial ? 'partial' : 'not-evaluated';
+      record.argsPreview = '[Classic: argument values withheld; semantic roles unassessed]';
+      record.argsKeys = []; record.routeKind = 'other'; record.verification = undefined;
+      record.commandPreview = undefined; record.targetPreview = undefined;
+    };
+    if (isClassicOperation()) { markClassic(false); this.notify(); return; }
     if (isYoloExecution()) {
       record.argsPreview = '[YOLO: values withheld]';
       this.notify();
@@ -422,11 +444,13 @@ export class AgentExecutionLedger {
       // cannot reach the independent, value-bearing route reader.
       const roles = await readArgRolesReported(record.tool, args, controller.signal);
       if (!active()) return;
+      if (roles.classic) { markClassic(false); this.notify(); return; }
       const safeArgs = readingArgs(args, roles.roles) as Record<string, unknown>;
       const route = roles.error
         ? { routeKind: 'other' as const, routeKindError: ARG_READING_FAILED }
         : await readRouteKind(record.tool, safeArgs, controller.signal);
       if (!active()) return;
+      if ('classic' in route && route.classic) { markClassic(true); this.notify(); return; }
       record.routeKind = route.routeKind;
       record.routeKindError = route.routeKindError;
       record.argsReadingError = roles.error;
@@ -438,8 +462,12 @@ export class AgentExecutionLedger {
       this.notify();
       if (!roles.error) {
         try {
-          const verification = await readExecutionPurpose(record.tool, safeArgs, controller.signal);
-          if (active()) { record.verification = verification; this.notify(); }
+          const verification = await decisionOrClassic<boolean | undefined>(() => readExecutionPurpose(record.tool, safeArgs, controller.signal),
+            () => { controller.signal.throwIfAborted(); return undefined; }, () => { controller.signal.throwIfAborted(); return true; });
+          if (active()) {
+            if (isClassicOperation()) { record.operationProvenance = 'classic'; record.semanticAssessment = 'partial'; }
+            record.verification = verification; this.notify();
+          }
         } catch { /* Unknown purpose stays unclassified; lifecycle history remains visible. */ }
       }
     };

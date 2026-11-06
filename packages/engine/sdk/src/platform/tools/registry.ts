@@ -2,7 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { types as nodeTypes } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import {
   ToolInputProjectionError, assertProjectionCurrent, assertProjectionSignal, captureProjectionArgs, captureProjectionStructure,
   combineProjectionSignals, projectionContext, projectionFunction, projectionProperty, projectionSignal,
@@ -695,6 +696,12 @@ export class ToolRegistry {
 
   private repairPort(record: CapturedProjection, ids: string[], inner?: JudgmentPort): JudgmentPort {
     const registry = this;
+    // Native repairs do not borrow a supplied transport's metadata or recorder.
+    // A handle created in Classic cannot become a semantic capability after its scope ends.
+    if (isClassicOperation()) {
+      const disabled = (): never => { throw new DecisionModelsDisabledError('semantic tool argument repair; supply exact schema parameters'); };
+      return { get model() { return disabled(); }, ask: disabled };
+    }
     // Preserve the installed recorder without requiring a port for calls needing no repair.
     let captured = inner;
     if (!captured) { try { captured = judgmentPort('tools.input-projection.repair'); } catch { /* Lazily fail if a reading is needed. */ } }
@@ -705,7 +712,11 @@ export class ToolRegistry {
       async ask(request) {
         const prior = request.beforeAttempt;
         registry.assertPreparationCurrent(record);
-        const result = await port().ask({ ...request, beforeAttempt() { prior?.(); registry.assertPreparationCurrent(record); } });
+        requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
+        const result = await port().ask({ ...request, beforeAttempt() {
+          prior?.(); registry.assertPreparationCurrent(record);
+          requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
+        } });
         registry.assertPreparationCurrent(record);
         if (inner && !result.decisionId) throw new JudgmentError('unrecorded', 'argument repair has no recorded provenance');
         if (result.decisionId) ids.push(result.decisionId);

@@ -1,3 +1,6 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 // The execution ledger hoisted from goodvibes-agent src/runtime/execution-ledger.ts.
 // Its route kind is Jev's side-effect kind reading (the agent's tool-name
 // keyword ladder is gone), answered here by a fake port. The reading is
@@ -150,5 +153,48 @@ describe('AgentExecutionLedger', () => {
     received(bus, 'c2', 'read');
     await settle(ledger);
     expect(ledger.getSnapshot().total).toBe(1);
+  });
+});
+
+
+describe('native Classic execution ledger', () => {
+  test('records successful lifecycle and actual permission with zero semantic requests or verification claims', async () => {
+    let asks = 0;
+    const previous = installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
+    const bus = new RuntimeEventBus(), ledger = new AgentExecutionLedger(bus);
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        received(bus, 'classic', 'exec', { commands: [{ cmd: 'echo native' }] });
+        emitToolPermissioned(bus, CTX, { callId: 'classic', turnId: 'turn-1', tool: 'exec', approved: true });
+        emitToolSucceeded(bus, CTX, { callId: 'classic', turnId: 'turn-1', tool: 'exec', durationMs: 5 });
+        await settle(ledger);
+        const record = ledger.getSnapshot().records[0];
+        expect(record).toMatchObject({ callId: 'classic', status: 'succeeded', permissionApproved: true,
+          operationProvenance: 'classic', semanticAssessment: 'not-evaluated', routeKind: 'other' });
+        expect(record?.verification).toBeUndefined(); expect(record?.autonomousDecision).toBeUndefined();
+        expect(record?.routeKindError).toBeUndefined(); expect(record?.argsReadingError).toBeUndefined();
+        expect(record?.argsPreview).toContain('Classic'); expect(record?.argsPreview).not.toContain('echo native');
+        expect(asks).toBe(0);
+      });
+    } finally { ledger.dispose(); installJudgmentPort(previous); }
+  });
+
+  test('Preferred actual exhaustion marks unassessed enrichment and retains later native cancellation', async () => {
+    let asks = 0;
+    const previous = installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    const bus = new RuntimeEventBus(), ledger = new AgentExecutionLedger(bus);
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        received(bus, 'preferred', 'exec', { nativeFieldForExhaustion: 'opaque' });
+        await settle(ledger);
+        expect(asks).toBe(1);
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+        expect(ledger.getSnapshot().records[0]).toMatchObject({ operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+        emitToolCancelled(bus, CTX, { callId: 'preferred', turnId: 'turn-1', tool: 'exec', reason: 'owner cancelled execution' });
+        await settle(ledger);
+        expect(ledger.getSnapshot().records[0]?.status).toBe('cancelled');
+        expect(asks).toBe(1);
+      });
+    } finally { ledger.dispose(); installJudgmentPort(previous); }
   });
 });

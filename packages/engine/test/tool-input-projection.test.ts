@@ -1,3 +1,4 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
 import { spawnSync } from 'node:child_process';
 import { expect, test } from 'bun:test';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -512,4 +513,22 @@ test('local capture accepts large payloads, wide batches and deep JSON without a
   for (let i = 0; i < 1000; i++) { expect(Object.isFrozen(leaf)).toBe(true); leaf = leaf.child as Record<string, unknown>; }
   expect(leaf.value).toBe(payload);
   expect(() => snapshotJudgmentInput({ apiKey: 'synthetic-private-key' })).toThrow('inline credential');
+});
+
+
+test('Classic preparation never borrows a supplied semantic port recorder and executes a native repair once', async () => {
+  let metadataReads = 0, asks = 0;
+  const port: JudgmentPort = { get model() { metadataReads++; throw new Error('Semantic model metadata borrowed'); },
+    get recorder() { metadataReads++; throw new Error('Semantic recorder borrowed'); },
+    async ask() { asks++; throw new Error('Classic must not ask'); } };
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const { registry, tool, bodies } = fixture({ type: 'object', properties: { count: { type: 'number' } }, required: ['count'] });
+    registry.register(tool);
+    const prepared = await registry.prepareCall('classic-native', tool.definition.name, { count: '7' }, { port });
+    expect(prepared.args).toEqual({ count: 7 }); expect(prepared.judgmentDecisionIds).toEqual([]);
+    expect(await registry.executePrepared(prepared, () => {})).toMatchObject({ success: true });
+    expect(bodies.map(body => body.args)).toEqual([{ count: 7 }]);
+    await expect(registry.executePrepared(prepared, () => {})).rejects.toThrow();
+    expect(bodies).toHaveLength(1); expect(metadataReads).toBe(0); expect(asks).toBe(0);
+  });
 });

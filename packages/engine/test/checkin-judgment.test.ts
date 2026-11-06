@@ -113,10 +113,11 @@ describe('canonical check-in judgment and verified content', () => {
 });
 
 for (const revoke of [false, true]) {
-  test(`shared transport owns outage retry, revoke=${revoke}`, async () => {
+  test(`shared transport owns configured failover, revoke=${revoke}`, async () => {
     let attempts = 0;
     let invalidate = () => {};
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-only' }, model: 'jev-1.13.0', timeoutMs: 1000,
+      fallbacks: Array.from({ length: 1 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: 'http://127.0.0.1:' + (index + 2), apiKey: 'synthetic-backup' }, model: 'jev-1.13.0' })),
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async () => {
         attempts++;
         if (revoke) invalidate();

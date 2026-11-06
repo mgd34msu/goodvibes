@@ -88,7 +88,9 @@ test.skipIf(!availability.available)('actual wakeWithSteer reuses captured autho
       executionProtocol: 'direct', reviewMode: 'none', model: 'repl-wake-fixture:fixture',
     }, { inputReadAuthority: authority });
     agentId = record.id;
-    await waitFor(() => record.status === 'failed' || record.status === 'completed', 'first captured REPL run settlement', 60_000);
+    // Contained Bun/SDK cold startup exceeded 60s on hosted CI. This only
+    // bounds reaching the history assertions; run/owner semantics stay exact.
+    await waitFor(() => record.status === 'failed' || record.status === 'completed', 'first captured REPL run settlement', 90_000);
     await runtime.agentManager.join(record.id);
     expect(record.status, record.error).toBe('failed');
     expect(record.failureReason).toBe(TURN_BUDGET_EXHAUSTED);
@@ -117,4 +119,4 @@ test.skipIf(!availability.available)('actual wakeWithSteer reuses captured autho
     runtime.dispose(); installJudgmentPort(previous);
     rmSync(root, { recursive: true, force: true });
   }
-}, 90_000);
+}, 120_000);

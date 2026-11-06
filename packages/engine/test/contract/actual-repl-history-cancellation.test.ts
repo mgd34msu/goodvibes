@@ -120,7 +120,9 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
       agentId = record.id;
       // Bound the real eval and the pending-policy entry separately: the
       // latter should not inherit time already spent doing contained work.
-      expect((await observed(historyRequested.promise, 45_000)).state,
+      // Cold contained Bun/SDK startup takes 36s locally and exceeded 45s on
+      // hosted CI; keep that startup budget separate from the 2s cancel proof.
+      expect((await observed(historyRequested.promise, 90_000)).state,
         `real eval did not reach history: ${record.status} ${record.error}`).toBe('settled');
       expect((await observed(entered.promise, 5_000)).state,
         `history policy not entered: callbacks=${callbackCalls} progress=${record.progress}`).toBe('settled');
@@ -153,5 +155,5 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
       readTap?.mockRestore(); runtime.dispose(); installJudgmentPort(previous);
       rmSync(root, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 120_000);
 }

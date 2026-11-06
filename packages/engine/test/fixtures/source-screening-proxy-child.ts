@@ -117,9 +117,11 @@ try {
       onRetry() { retries++; process.env.HTTP_PROXY = proxyUrl; },
     });
     try {
-      const result = await owner.screen(owner.capture(['Ordinary synthetic source.']));
-      assert.deepEqual(result, { status: 'held', reason: 'route-unavailable' });
-      assert.equal(retries, 1);
+      const source = owner.capture(['Ordinary synthetic source.']);
+      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'route-unavailable' });
+      process.env.HTTP_PROXY = proxyUrl;
+      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'route-unavailable' });
+      assert.equal(retries, 0);
       assert.equal(localCalls, 2);
     } finally { await owner.close(); }
   } else {

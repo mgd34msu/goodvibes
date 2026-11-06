@@ -321,10 +321,11 @@ describe('Home Graph shared answer judgments (authored synthetic evidence)', () 
     expect(JSON.stringify(evidence?.state)).not.toContain('B7-US');
   });
 
-  test('owned synthetic transport retains shared retries and recorded decisions', async () => {
+  test('owned synthetic transport retains configured failover and recorded decisions', async () => {
     const f = await fixture(); await source(f.store); await object(f.store); const fake = readings();
     using log = new SqliteDecisionLog(':memory:'); let attempts = 0;
     const transport = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-fixture-key' }, model: DEFAULT_MODEL, timeoutMs: 1_000,
+      fallbacks: Array.from({ length: 3 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: 'http://127.0.0.1:' + (index + 2), apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL })),
       retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fetch: async (_url, init) => {
         if (++attempts <= 3) return new Response('', { status: 503 });
         // Owned in-process endpoint source; no genuine provider or credential.

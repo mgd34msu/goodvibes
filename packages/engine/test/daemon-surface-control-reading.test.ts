@@ -153,12 +153,13 @@ describe('the real daemon surface control caller', () => {
     await expect(result).rejects.toBeDefined(); expect(h.effects).toEqual([]);
     expect(log.query({})).toHaveLength(0);
   });
-  test('shared transport recovers from an outage without premature effects or a caller retry loop', async () => {
+  test('shared transport fails over an outage without premature effects or a caller retry loop', async () => {
     const h = harness(); const text = 'Stop run-1'; await h.authorize(text);
     let wires = 0; let retries = 0;
     installJudgmentPort(withDecisionLog(createSystemOnePort({
       endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' },
-      model: DEFAULT_MODEL, timeoutMs: 100, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      model: DEFAULT_MODEL, timeoutMs: 100, fallbacks: Array.from({ length: 2 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: 'http://127.0.0.1:' + (index + 2), apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL })),
+      retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
       fetch: async (_url, init) => {
         wires++; expect(h.effects).toEqual([]);
         if (wires <= 2) return Response.json({}, { status: 503 });
@@ -171,11 +172,12 @@ describe('the real daemon surface control caller', () => {
     expect(wires).toBe(3); expect(retries).toBe(2); expect(log.query({})).toHaveLength(1);
     await h.context.performSurfaceControlCommand(command!); expect(h.effects).toEqual(['cancel:run-1']);
   });
-  for (const invalidation of ['policy', 'cancel']) test(`shared retry backoff obeys ${invalidation} without another wire attempt`, async () => {
+  for (const invalidation of ['policy', 'cancel']) test(`shared failover obeys ${invalidation} without another wire attempt`, async () => {
     const h = harness(); const text = 'Stop run-1'; await h.authorize(text); const abort = new AbortController(); let wires = 0;
     installJudgmentPort(withDecisionLog(createSystemOnePort({
       endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' },
-      model: DEFAULT_MODEL, timeoutMs: 100, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+      model: DEFAULT_MODEL, timeoutMs: 100, fallbacks: Array.from({ length: 2 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: 'http://127.0.0.1:' + (index + 2), apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL })),
+      retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
       fetch: async () => { wires++; return Response.json({}, { status: 503 }); },
     }), log));
     await expect(h.context.parseSurfaceControlCommand(text, { signal: abort.signal,

@@ -205,7 +205,7 @@ describe('source-screening exact loopback transport', () => {
     await isolatedProxyScenario('next-dispatch');
   });
 
-  test('canonical judgment retry refuses a proxy that appears after the first attempt', async () => {
+  test('an explicit protected judgment retry refuses a proxy introduced after the first attempt', async () => {
     await isolatedProxyScenario('judgment-retry');
   });
 

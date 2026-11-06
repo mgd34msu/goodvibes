@@ -13071,6 +13071,7 @@ export interface OperatorMethodOutputMap {
                 attempt: {
                     attempt: number;
                     endpointIndex: number;
+                    dispatched?: boolean;
                     endpointKind: "hosted" | "local";
                     requestedModel: string;
                     latencyMs: number;
@@ -14348,6 +14349,7 @@ export interface OperatorMethodOutputMap {
                     attempt: {
                         attempt: number;
                         endpointIndex: number;
+                        dispatched?: boolean;
                         endpointKind: "hosted" | "local";
                         requestedModel: string;
                         latencyMs: number;
@@ -15634,6 +15636,7 @@ export interface OperatorMethodOutputMap {
                     attempt: {
                         attempt: number;
                         endpointIndex: number;
+                        dispatched?: boolean;
                         endpointKind: "hosted" | "local";
                         requestedModel: string;
                         latencyMs: number;

@@ -90,7 +90,7 @@ describe('native semantic callers', () => {
     expect(result.nativeDecisions!.history.some(item => item.stage === 'stall')).toBe(true); noOwner(h, contract.id);
   });
 
-  test.each(['stall', 'fix-plan'] as const)('a native %s transport failure retains its exact correction and planner output', async stage => {
+  test.each(['stall', 'fix-plan'] as const)('a native %s transport exhaustion halts while retaining its exact source and spent correction budget', async stage => {
     let attempts = 0;
     const scripted = stepPlanner(plan(), { fix: () => plannerOutput(fixPlan([{ serves: ['u1.c1'] }])) });
     const h = use({ planner: scripted.runner, contract: { stallLimit: 1, maxNudgesPerUnit: 1, maxFixRounds: 1 },
@@ -105,15 +105,15 @@ describe('native semantic callers', () => {
       } });
     const { contract } = startContract(h, { nativeSource: source });
     const result = await done(h, contract.id);
-    expect(result.status).toBe('passed');
-    expect(attempts).toBe(2);
+    expect(result.status).toBe('failed');
+    expect(attempts).toBe(1);
     expect(result.nativeSource).toEqual(source);
-    expect(result.units[0]!.fixRounds).toBe(1);
-    expect(result.nativeDecisions!.spent['fix:u1:1']).toBe(1);
-    expect(scripted.of('fix')).toHaveLength(1);
+    expect(result.units[0]!.fixRounds).toBe(stage === 'stall' ? 0 : 1);
+    expect(result.nativeDecisions!.spent['fix:u1:1']).toBe(stage === 'stall' ? undefined : 1);
+    expect(scripted.of('fix')).toHaveLength(stage === 'stall' ? 0 : 1);
     expect(h.agentsOf('u1')).toHaveLength(1);
-    expect(h.agentsOf('u1.f1.u1')).toHaveLength(1);
-    expect(result.nativeDecisions!.history.filter(record => record.stage === stage)).toHaveLength(1);
+    expect(h.agentsOf('u1.f1.u1')).toHaveLength(0);
+    expect(result.nativeDecisions!.history.filter(record => record.stage === stage)).toHaveLength(0);
     noOwner(h, contract.id);
   }, 20_000);
 
@@ -144,7 +144,7 @@ describe('native semantic callers', () => {
     expect(h.events.some(event => event.type === 'CONTRACT_ATTEMPTS_SELECTED' && event.outcome !== 'act')).toBe(false);
   }, 20_000);
 
-  test.each(['recover', 'cancel', 'revoke'] as const)('real shared transport %s keeps native execution pending without semantic defer', async mode => {
+  test.each(['recover', 'cancel', 'revoke'] as const)('real shared transport failover %s retains current native authority without semantic defer', async mode => {
     using log = new SqliteDecisionLog(':memory:');
     let authorityRevision = '1'; let attempts = 0; let sawWaiting = false; let sawSemanticDefer = false; let contractId = '';
     const scripted = runnerPort();
@@ -158,7 +158,8 @@ describe('native semantic callers', () => {
       },
     }) });
     const real = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-key' }, model: DEFAULT_MODEL,
-      timeoutMs: 1000, retry: { backoffInitialMs: 2, backoffMaxMs: 2, backoffJitter: 0 },
+      timeoutMs: 1000, fallbacks: Array.from({ length: 2 }, (_, index) => ({ endpoint: { kind: 'local' as const, baseURL: 'http://127.0.0.1:' + (index + 2), apiKey: 'synthetic-backup' }, model: DEFAULT_MODEL })),
+      retry: { backoffInitialMs: 2, backoffMaxMs: 2, backoffJitter: 0 },
       fetch: async (_url, init) => {
         const request = JSON.parse(String(init?.body)) as { state: EntryType; questions: Questions };
         if ('disposition' in request.questions && ++attempts < (mode === 'recover' ? 3 : 100)) return Response.json({}, { status: 503 });

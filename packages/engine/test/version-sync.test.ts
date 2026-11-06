@@ -35,7 +35,7 @@ for (const product of ['tui', 'agent']) {
     expect(manifest.name).toBe(`@goodvibes-jev/${product}`);
     expect(manifest.version).toBe(root.version);
     expect(source.match(/^let _version = '([^']+)';$/m)?.[1]).toBe(root.version);
-    expect(source).toContain(`pkg${product === 'tui' ? '?' : ''}.name === '${manifest.name}'`);
+    expect(source).toContain(`readProductVersion(import.meta.dir, '${manifest.name}', _version)`);
   });
 }
 });

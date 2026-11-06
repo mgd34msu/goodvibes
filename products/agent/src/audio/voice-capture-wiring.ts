@@ -1,3 +1,4 @@
+import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-wiring.ts, composes this surface's microphone path.
  *
@@ -14,14 +15,14 @@
  * which is what keeps this file out of the shell-UI layers.
  */
 
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
 import type { AudioInputDeviceEnumerator } from '@goodvibes-jev/engine/sdk/platform/voice/capture';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createAgentCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
-import { LocalStreamingAudioPlayer } from './player.ts';
+import './player.ts';
 import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';
@@ -72,50 +73,22 @@ export interface VoiceCaptureWiring {
 
 /** Compose wake detection over this surface's capture path. Opens no device by itself. */
 export function wireVoiceCapture(deps: VoiceCaptureWiringDeps): VoiceCaptureWiring {
-  const readConfig = (key: string): unknown => deps.configManager.get(key as ConfigKey);
-  const warn = (message: string, meta?: Readonly<Record<string, unknown>>): void => {
-    logger.debug(`voice capture: ${message}`, meta ?? {});
-  };
-  // The RAW opener, deliberately unwrapped: the SDK listener wraps it with the
-  // platform's speexdsp stage, so `voice.wake.noiseSuppression: "speex"` is applied
-  // between the device and every consumer without this surface claiming the
-  // capability or filtering twice (see capture.ts).
-  const openCapture = createAgentCaptureOpener({ warn });
-  const resolveTranscriber = () => {
-    const resolution = createVoiceSttGateway({
-      voiceService: deps.voiceService,
-      voiceProviders: deps.voiceProviders,
-      daemonVerbs: deps.daemonVerbs ?? null,
-      managedVoiceRoot: deps.managedVoiceRoot,
-    });
-    return resolution.available
-      ? { available: true as const, gateway: resolution.gateway }
-      : { available: false as const, reason: resolution.reason };
-  };
-  const subscribeConfig = (key: string, listener: () => void): (() => void) => deps.configManager.subscribe(key as ConfigKey, listener);
-  const player = deps.player ?? new LocalStreamingAudioPlayer();
-
-  const wake = wireWakeRuntime({
-    readConfig,
-    subscribeConfig,
-    openCapture,
-    managedRoot: deps.managedVoiceRoot,
-    assetDirectory: deps.assetDirectory,
-    resolveTranscriber,
-    playActivationSound: (sound) => playActivationSound(sound, { player, notify: deps.notify }),
-    submitTurn: deps.submitTurn,
-    writeDraft: deps.writeDraft,
-    notify: deps.notify,
-    render: deps.render,
-    sessionId: deps.sessionId,
-    warn,
-    ...(deps.ensureWakeProvisioned !== undefined ? { ensureProvisioned: deps.ensureWakeProvisioned } : {}),
-    // A configured device is checked against what this host can actually see.
-    enumerateInputDevices: deps.enumerateInputDevices ?? createInputDeviceEnumerator(),
+  const ports = createVoiceCapturePorts(deps, {
+    createOpener: createAgentCaptureOpener,
+    resolveTranscriber: () =>
+      createVoiceSttGateway({
+        voiceService: deps.voiceService,
+        voiceProviders: deps.voiceProviders,
+        daemonVerbs: deps.daemonVerbs ?? null,
+        managedVoiceRoot: deps.managedVoiceRoot,
+      }),
   });
 
-  return {
-    status: () => wake.status(),
-    unsubs: startWakeRuntime(wake, { subscribeConfig }),
-  };
+  const { wake, unsubs } = wireTerminalWakeCapture(
+    deps,
+    ports,
+    { wireWakeRuntime, startWakeRuntime, playActivationSound },
+    { ensureProvisioned: deps.ensureWakeProvisioned, enumerateInputDevices: deps.enumerateInputDevices ?? createInputDeviceEnumerator() },
+  );
+  return { status: () => wake.status(), unsubs: unsubs };
 }

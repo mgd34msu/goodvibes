@@ -1,3 +1,4 @@
+import { writeVoiceDraft } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-shell.ts, the shell's side of microphone capture.
  *
@@ -68,11 +69,7 @@ export function installVoiceCapture(deps: VoiceCaptureShellDeps): () => VoiceCap
     // own directory, beside its other managed state.
     assetDirectory: deps.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'onnxruntime'),
     sessionId: deps.sessionId,
-    writeDraft: (text) => {
-      deps.buffer.prompt = text;
-      deps.buffer.cursorPos = text.length;
-      deps.render();
-    },
+    writeDraft: (text) => writeVoiceDraft(deps.buffer, text, deps.render),
     submitTurn: (text) => deps.submitInput(text),
     notify: deps.notify,
     render: deps.render,

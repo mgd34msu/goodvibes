@@ -42,7 +42,8 @@
       "path": "audio/voice-capture-wiring.ts",
       "baselineTuiLines": 119,
       "baselineSimilarity": 0.5583,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns config subscriptions, capture-port/player allocation and wake composition. Product adapters retain TUI push-to-talk, the raw opener policy, daemon-only versus connected-host/local transcription routes and Agent device enumeration/provisioning."
     },
     {
       "path": "audio/wake-inference.ts",
@@ -1970,7 +1971,8 @@
       "path": "shell/voice-capture-shell.ts",
       "baselineTuiLines": 71,
       "baselineSimilarity": 0.6405,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Composer draft writes and pairing takeover are shared platform behavior. Remaining code is product dependency projection, isolated asset roots and TUI-only push-to-talk action registration."
     },
     {
       "path": "utils/clipboard.ts",

@@ -40,7 +40,7 @@ export interface TerminalWakeRuntimeDeps {
     | {
         readonly available: true;
         readonly gateway: {
-          transcribe(audio: UtteranceAudioArtifact, options?: { readonly signal?: AbortSignal | undefined } | undefined): Promise<string>;
+          transcribe(audio: UtteranceAudioArtifact, options?: { readonly signal?: AbortSignal } | undefined): Promise<string>;
         };
       }
     | { readonly available: false; readonly reason: string };
@@ -106,6 +106,8 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     let listener: WakeListener | null = null;
     let lifetime: AbortController | null = null;
     let starting: Promise<void> | null = null;
+    let epoch = 0;
+    let startingEpoch = 0;
     let phase: WakeListenerState['phase'] = 'idle';
     let deviceLabel: string | null = null;
     let detail: string | undefined;
@@ -308,6 +310,7 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     };
     const stop = async (): Promise<void> => {
       const active = listener;
+      epoch++;
       lifetime?.abort();
       lifetime = null;
       listener = null;
@@ -330,10 +333,12 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         }
         if (listener) return;
         if (starting) {
+          const ownerEpoch = startingEpoch;
           await starting;
-          if (!listener && resolve().active) await runtime.refresh();
+          if (ownerEpoch !== epoch && !listener && resolve().active) await runtime.refresh();
           return;
         }
+        startingEpoch = epoch;
         const pending = start(settings, provision);
         starting = pending;
         try {

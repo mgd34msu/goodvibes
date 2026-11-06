@@ -1,3 +1,4 @@
+import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes-jev/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-wiring.ts, composes the terminal's two voice consumers over ONE
  * capture path.
@@ -14,12 +15,12 @@
  * out of the shell-UI layers the architecture check bars src/audio from importing.
  */
 
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/utils';
+import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createTuiCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
-import { LocalStreamingAudioPlayer } from './player.ts';
+import './player.ts';
 import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { wireVoiceInputRuntime } from './voice-input-session.ts';
@@ -61,59 +62,26 @@ export interface VoiceCaptureWiring {
 
 /** Compose voice input and wake detection. Opens no device by itself. */
 export function wireVoiceCapture(deps: VoiceCaptureWiringDeps): VoiceCaptureWiring {
-  const readConfig = (key: string): unknown => deps.configManager.get(key as ConfigKey);
-  const warn = (message: string, meta?: Readonly<Record<string, unknown>>): void => {
-    logger.debug(`voice capture: ${message}`, meta ?? {});
-  };
-  // ONE opener, both consumers. The suppression stage is inside it, so `speex`
-  // is applied rather than refused (see capture.ts).
-  const openCapture = createTuiCaptureOpener({ warn });
-  const resolveTranscriber = () => {
-    const resolution = createVoiceSttGateway({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
-    return resolution.available
-      ? { available: true as const, gateway: resolution.gateway }
-      : { available: false as const, reason: resolution.reason };
-  };
-  // Push-to-talk uses capture settings, not the wake detector's model files.
-  // The footer reads these settings too: verifying wake artifacts here re-read
-  // and hashed megabytes on every keystroke and animation frame. The wake
-  // runtime verifies its own artifacts when resolving/starting the detector.
-  const readSettings = () => {
-    const { capture, captureMaxSeconds, indicator } = resolveWakeRuntimeSettings(readConfig, 'tui');
-    return { capture, captureMaxSeconds, indicator };
-  };
-  const subscribeConfig = (key: string, listener: () => void): (() => void) => deps.configManager.subscribe(key as ConfigKey, listener);
-  const player = deps.player ?? new LocalStreamingAudioPlayer();
-
+  const ports = createVoiceCapturePorts(deps, {
+    createOpener: createTuiCaptureOpener,
+    resolveTranscriber: () => createVoiceSttGateway({ configManager: deps.configManager, homeDirectory: deps.homeDirectory }),
+  });
   const voiceInput = wireVoiceInputRuntime({
-    openCapture,
-    readSettings,
-    resolveTranscriber,
+    openCapture: ports.openCapture,
+    readSettings: () => {
+      const { capture, captureMaxSeconds, indicator } = resolveWakeRuntimeSettings(ports.readConfig, 'tui');
+      return { capture, captureMaxSeconds, indicator };
+    },
+    resolveTranscriber: ports.resolveTranscriber,
     writeDraft: deps.writeDraft,
     readDraftRevision: deps.readDraftRevision,
     notify: deps.notify,
     render: deps.render,
   });
-
-  const wake = wireWakeRuntime({
-    readConfig,
-    subscribeConfig,
-    openCapture,
-    managedRoot: deps.managedVoiceRoot,
-    assetDirectory: deps.assetDirectory,
-    resolveTranscriber,
-    playActivationSound: (sound) => playActivationSound(sound, { player, notify: deps.notify }),
-    submitTurn: deps.submitTurn,
-    writeDraft: deps.writeDraft,
-    notify: deps.notify,
-    render: deps.render,
-    sessionId: deps.sessionId,
-    warn,
-  });
-
+  const { wake, unsubs } = wireTerminalWakeCapture(deps, ports, { wireWakeRuntime, startWakeRuntime, playActivationSound }, {});
   return {
     toggleVoiceInput: voiceInput.toggle,
     status: () => voiceInput.status() ?? wake.status(),
-    unsubs: [...startWakeRuntime(wake, { subscribeConfig }), () => voiceInput.release()],
+    unsubs: [...unsubs, () => voiceInput.release()],
   };
 }

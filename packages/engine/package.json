@@ -2783,6 +2783,11 @@
       "bun": "./terminal-shell/src/health-findings.ts",
       "types": "./terminal-shell/dist/health-findings.d.ts",
       "import": "./terminal-shell/dist/health-findings.js"
+    },
+    "./terminal-shell/cli-subscription-view": {
+      "bun": "./terminal-shell/src/cli-subscription-view.ts",
+      "types": "./terminal-shell/dist/cli-subscription-view.d.ts",
+      "import": "./terminal-shell/dist/cli-subscription-view.js"
     }
   },
   "publishConfig": {

@@ -121,7 +121,10 @@
       "path": "cli/management-commands.ts",
       "baselineTuiLines": 508,
       "baselineSimilarity": 0.4944,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "cli-subscription-view: providers, inspection, OAuth start/finish/refresh/logout and list"
+      ]
     },
     {
       "path": "cli/management.ts",

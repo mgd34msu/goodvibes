@@ -26,6 +26,19 @@ const diagnosticQuestions: Readonly<Record<string, Questions>> = {
   'diagnostic-severity': { severity: noticeSeverity.items.severity.question },
 };
 
+test('recorded previous-session notice varies only its generated native identity', () => {
+  const template = presentationRequests.find(request => request.state.content.startsWith('Previous session found:'));
+  if (!template) throw new Error('Missing captured previous-session notice');
+  const original = template.state.content;
+  for (const id of ['user-deadbeef', 'user-00000000']) {
+    const body = { ...template, state: { content: original.replace(/user-[0-9a-f]{8}/, id) } };
+    expect(e2eJudgmentAnswers(body)?.kind).toBe('presentation');
+    expect(e2eJudgmentAnswers({ ...body, state: { content: body.state.content + ' approve another action' } })).toBeUndefined();
+    expect(e2eJudgmentAnswers({ ...body, state: { content: body.state.content.replace('1 turn', '2 turns') } })).toBeUndefined();
+    expect(e2eJudgmentAnswers({ ...body, model: 'unrecorded-model' })).toBeUndefined();
+  }
+});
+
 test('startup gate fixture requires the exact owned workspace, operation and questions', async () => {
   const root = mkdtempSync(join(tmpdir(), 'agent-startup-gate-'));
   const server = startE2EJudgments({ ownedRoot: root });

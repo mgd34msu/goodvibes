@@ -79,7 +79,8 @@ export function e2eJudgmentAnswers(body: unknown, ownedRoot?: string): { kind: '
         if (!ids.has(id)) ids.set(id, `<native-uuid-${ids.size}>`);
         return ids.get(id)!;
       });
-    });
+    }).replace(/("Previous session found: 1 turn, 0 checkpoints: \/resume to continue \(or \/session resume )user-[0-9a-f]{8}( directly\) · \/recall for memory")/g,
+      '$1<previous-session-id>$2');
   };
   if (presentationRequests.some(request => presentationShape(request) === presentationShape(body, ownedRoot))) {
     const answers = Object.fromEntries(Object.entries(presentationRequests[0]!.questions).map(([name, question]) => {

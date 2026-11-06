@@ -15,7 +15,7 @@ export class DecisionModelPolicyChangedError extends Error {
     this.name = 'DecisionModelPolicyChangedError';
     hostState.revocations.add(this);
   }
-  static [Symbol.hasInstance](value: unknown): boolean {
+  static override [Symbol.hasInstance](value: unknown): boolean {
     return typeof value === 'object' && value !== null && hostState.revocations.has(value);
   }
 }

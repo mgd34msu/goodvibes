@@ -505,7 +505,8 @@
       "path": "input/commands/knowledge.ts",
       "baselineTuiLines": 549,
       "baselineSimilarity": 0.5337,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns shared read/mutation dispatch, argument parsing, result rendering and answer formatting. Agent adapter pins its isolated API, retains each method/source across awaits and requires confirmations; TUI adapter retains its own API/reading lifetime. Agent-only browser/connectors/artifact/map commands and scope rejection remain product capabilities."
     },
     {
       "path": "input/commands/legacy-work-ledger-import-runtime.ts",

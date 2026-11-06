@@ -1,6 +1,8 @@
-import { readKnowledgeTaskArguments, readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { handleKnowledgeMutationCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
+import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
+import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeAnswerRenderer } from '@goodvibes-jev/engine/terminal-shell/knowledge-answer';
-import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { createKnowledgeLabels } from '@goodvibes-jev/engine/terminal-shell/knowledge-labels';
 const { nodeLabel } = createKnowledgeLabels(' confidence=');
 import type { KnowledgeService } from '@goodvibes-jev/engine/sdk/platform/knowledge';
@@ -8,12 +10,8 @@ import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 
-const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
-
-type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
-type KnowledgeAskMode = NonNullable<KnowledgeAskInput['mode']>;
 
 function requireKnowledgeApi(context: CommandContext) {
   const knowledgeApi = context.clients?.knowledgeApi;
@@ -75,6 +73,58 @@ export const knowledgeCommand: SlashCommand = {
     const sub = (args[0] ?? 'status').toLowerCase();
     const rest = args.slice(1);
 
+    assertCurrent();
+    if (
+      await handleKnowledgeReadCommand(
+        sub,
+        rest,
+        print,
+        {
+          status: () => knowledge.status.get(),
+          nodes: (limit) => knowledge.graph.nodes.list(limit, readingOptions),
+          issues: (limit) => knowledge.graph.issues.list(limit, readingOptions),
+          sources: (limit) => knowledge.sources.list(limit, readingOptions),
+          search: (query, limit) => knowledge.graph.items.search(query, limit),
+          get: (id) => knowledge.graph.items.get(id, {}, readingOptions),
+          lint: () => knowledge.status.lint(),
+          candidates: (limit) => knowledge.consolidation.candidates(limit),
+          reports: (limit) => knowledge.consolidation.reports(limit),
+          schedules: (limit) => knowledge.jobs.schedules.list(limit),
+          packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes),
+          assertCurrent,
+        },
+        {
+          statusTitle: '[knowledge] Structured knowledge status',
+          headingSuffix: ':',
+          fieldSeparator: ': ',
+          scoreSeparator: '=',
+          nodeKind: 'kind',
+        },
+      )
+    )
+      return;
+    assertCurrent();
+    if (
+      await handleKnowledgeMutationCommand(
+        sub,
+        rest,
+        print,
+        {
+          sessionId: () => context.session.runtime.sessionId,
+          url: (input) => knowledge.ingest.url(input),
+          bookmarksFile: (input) => knowledge.ingest.bookmarksFile(input),
+          urlsFile: (input) => knowledge.ingest.urlsFile(input),
+          review: (input) => knowledge.graph.issues.review(input),
+          reindex: () => knowledge.status.reindex(),
+          run: (id, options) => knowledge.jobs.run(id, options),
+          allow: () => true,
+          describeError: summarizeError,
+        },
+        { fieldSeparator: ': ', reviewer: 'tui', confirmationSuffix: '', sourceLabel: 'source' },
+      )
+    )
+      return;
+    assertCurrent();
     switch (sub) {
       case 'ask': {
         const ask = requireKnowledgeAsk(context);
@@ -89,342 +139,6 @@ export const knowledgeCommand: SlashCommand = {
         }
         const result = await ask(input);
         print(renderKnowledgeAskResult(result));
-        break;
-      }
-
-      case 'status': {
-        const status = await knowledge.status.get();
-        print(
-          [
-            '[knowledge] Structured knowledge status',
-            `  ready: ${status.ready ? 'yes' : 'no'}`,
-            `  storage: ${status.storagePath}`,
-            `  sources: ${status.sourceCount}`,
-            `  nodes: ${status.nodeCount}`,
-            `  edges: ${status.edgeCount}`,
-            `  issues: ${status.issueCount}`,
-          ].join('\n'),
-        );
-        break;
-      }
-
-      case 'ingest-url': {
-        const [url] = positionalArgs(rest, ['--title', '--tags', '--folder']);
-        if (!url) {
-          print('[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]');
-          return;
-        }
-        const result = await knowledge.ingest.url({
-          url,
-          title: readFlag(rest, '--title'),
-          tags: readStringListFlag(rest, '--tags'),
-          folderPath: readFlag(rest, '--folder'),
-          sessionId: context.session.runtime.sessionId,
-          sourceType: 'url',
-          connectorId: 'url',
-        });
-        print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? url}`);
-        if (result.source.summary) print(`  ${result.source.summary}`);
-        if (result.artifactId) print(`  artifact: ${result.artifactId}`);
-        break;
-      }
-
-      case 'import-bookmarks': {
-        const [path] = positionalArgs(rest);
-        if (!path) {
-          print('[knowledge] Usage: /knowledge import-bookmarks <path>');
-          return;
-        }
-        const result = await knowledge.ingest.bookmarksFile({ path, sessionId: context.session.runtime.sessionId });
-        print(`[knowledge] Imported bookmarks: ${result.imported} ok, ${result.failed} failed`);
-        if (result.errors.length > 0) {
-          for (const error of result.errors.slice(0, 10)) print(`  error: ${error}`);
-        }
-        break;
-      }
-
-      case 'import-urls': {
-        const [path] = positionalArgs(rest);
-        if (!path) {
-          print('[knowledge] Usage: /knowledge import-urls <path>');
-          return;
-        }
-        const result = await knowledge.ingest.urlsFile({ path, sessionId: context.session.runtime.sessionId });
-        print(`[knowledge] Imported URL list: ${result.imported} ok, ${result.failed} failed`);
-        if (result.errors.length > 0) {
-          for (const error of result.errors.slice(0, 10)) print(`  error: ${error}`);
-        }
-        break;
-      }
-
-      case 'list': {
-        const limit = Math.max(1, Number.parseInt(readFlag(rest, '--limit') ?? '10', 10) || 10);
-        const kind = (readFlag(rest, '--kind') ?? 'sources').toLowerCase();
-        if (kind === 'nodes') {
-          const nodes = await knowledge.graph.nodes.list(limit, readingOptions);
-          assertCurrent();
-          if (nodes.length === 0) {
-            print('[knowledge] No nodes.');
-            return;
-          }
-          print(`[knowledge] ${nodes.length} node(s):`);
-          for (const node of nodes) {
-            print(`  ${node.id} [${node.kind}] ${node.title}`);
-            if (node.summary) print(`    ${node.summary}`);
-          }
-          return;
-        }
-        if (kind === 'issues') {
-          const issues = await knowledge.graph.issues.list(limit, readingOptions);
-          assertCurrent();
-          if (issues.length === 0) {
-            print('[knowledge] No issues.');
-            return;
-          }
-          print(`[knowledge] ${issues.length} issue(s):`);
-          for (const issue of issues) {
-            print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-            print(`    ${issue.message}`);
-          }
-          return;
-        }
-        const sources = await knowledge.sources.list(limit, readingOptions);
-        assertCurrent();
-        if (sources.length === 0) {
-          print('[knowledge] No sources.');
-          return;
-        }
-        print(`[knowledge] ${sources.length} source(s):`);
-        for (const source of sources) {
-          print(
-            `  ${source.id} [${source.sourceType}/${source.status}] ${source.title ?? source.canonicalUri ?? source.sourceUri ?? 'untitled'}`,
-          );
-          if (source.summary) print(`    ${source.summary}`);
-        }
-        break;
-      }
-
-      case 'search': {
-        const valuedFlags = ['--limit'];
-        const query = positionalArgs(rest, valuedFlags).join(' ').trim();
-        if (!query) {
-          print('[knowledge] Usage: /knowledge search <query> [--limit <n>]');
-          return;
-        }
-        const limit = Math.max(1, Number.parseInt(readFlag(rest, '--limit') ?? '10', 10) || 10);
-        const results = await knowledge.graph.items.search(query, limit);
-        assertCurrent();
-        if (results.length === 0) {
-          print('[knowledge] No results.');
-          return;
-        }
-        print(`[knowledge] ${results.length} result(s):`);
-        for (const result of results) {
-          const title = result.source?.title ?? result.source?.canonicalUri ?? result.node?.title ?? result.id;
-          print(`  ${result.id} [${result.kind}] score=${result.score} ${title}`);
-          print(`    ${result.reason}`);
-        }
-        break;
-      }
-
-      case 'get': {
-        const [id] = positionalArgs(rest);
-        if (!id) {
-          print('[knowledge] Usage: /knowledge get <id>');
-          return;
-        }
-        const item = await knowledge.graph.items.get(id, {}, readingOptions);
-        assertCurrent();
-        if (!item) {
-          print(`[knowledge] Unknown item: ${id}`);
-          return;
-        }
-        if (item.source) {
-          print(`[knowledge] source ${item.source.id}`);
-          print(`  title: ${item.source.title ?? 'untitled'}`);
-          print(`  uri: ${item.source.canonicalUri ?? item.source.sourceUri ?? 'n/a'}`);
-          print(`  status: ${item.source.status}`);
-          if (item.source.summary) print(`  summary: ${item.source.summary}`);
-        } else if (item.node) {
-          print(`[knowledge] node ${item.node.id}`);
-          print(`  kind: ${item.node.kind}`);
-          print(`  title: ${item.node.title}`);
-          if (item.node.summary) print(`  summary: ${item.node.summary}`);
-        } else if (item.issue) {
-          print(`[knowledge] issue ${item.issue.id}`);
-          print(`  severity: ${item.issue.severity}`);
-          print(`  code: ${item.issue.code}`);
-          print(`  message: ${item.issue.message}`);
-        }
-        if (item.relatedEdges.length > 0) {
-          print('  relations:');
-          for (const edge of item.relatedEdges.slice(0, 12)) {
-            print(`    ${edge.fromKind}:${edge.fromId} -[${edge.relation}]-> ${edge.toKind}:${edge.toId}`);
-          }
-        }
-        break;
-      }
-
-      case 'lint': {
-        const issues = await knowledge.status.lint();
-        if (issues.length === 0) {
-          print('[knowledge] No lint issues.');
-          return;
-        }
-        print(`[knowledge] ${issues.length} lint issue(s):`);
-        for (const issue of issues) {
-          print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-          print(`    ${issue.message}`);
-        }
-        break;
-      }
-
-      case 'queue': {
-        const [limitArg] = positionalArgs(rest);
-        const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-        const issues = await knowledge.graph.issues.list(limit, readingOptions);
-        assertCurrent();
-        if (issues.length === 0) {
-          print('Knowledge review queue is empty.');
-          return;
-        }
-        print(`[knowledge] Review queue (${issues.length}):`);
-        for (const issue of issues) {
-          print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-          print(`    ${issue.message}`);
-        }
-        break;
-      }
-
-      case 'review-issue':
-      case 'issue-review': {
-        const [issueId, actionValue] = positionalArgs(rest, ['--reviewer', '--value']);
-        const action = actionValue?.toLowerCase();
-        if (!issueId || !action || !KNOWLEDGE_REVIEW_ACTIONS.includes(action as KnowledgeReviewAction)) {
-          print(
-            '[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
-          );
-          return;
-        }
-        const value = readJsonObjectFlag(rest, '--value');
-        if (value === null) {
-          print('[knowledge] --value must be a JSON object.');
-          return;
-        }
-        try {
-          const result = await knowledge.graph.issues.review({
-            issueId,
-            action: action as KnowledgeReviewAction,
-            reviewer: readFlag(rest, '--reviewer') ?? 'tui',
-            ...(value ? { value } : {}),
-          });
-          print(
-            [
-              `[knowledge] Reviewed issue ${result.issue.id}`,
-              `  action: ${action}`,
-              `  status: ${result.issue.status}`,
-              ...(result.node ? [`  node: ${result.node.id} ${result.node.title}`] : []),
-              ...(result.source
-                ? [
-                    `  source: ${result.source.id} ${result.source.title ?? result.source.canonicalUri ?? result.source.sourceUri ?? 'untitled'}`,
-                  ]
-                : []),
-              ...(result.appliedFacts ? [`  applied facts: ${Object.keys(result.appliedFacts).join(', ') || 'none'}`] : []),
-            ].join('\n'),
-          );
-        } catch (error) {
-          print(`[knowledge] ${summarizeError(error)}`);
-        }
-        break;
-      }
-
-      case 'candidates': {
-        const [limitArg] = positionalArgs(rest);
-        const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-        const candidates = knowledge.consolidation.candidates(limit);
-        if (candidates.length === 0) {
-          print('[knowledge] No consolidation candidates.');
-          return;
-        }
-        print(`[knowledge] Consolidation candidates (${candidates.length}):`);
-        for (const candidate of candidates) {
-          print(`  ${candidate.id} [${candidate.status}] score=${candidate.score} ${candidate.title}`);
-          print(`    ${candidate.candidateType}`);
-        }
-        break;
-      }
-
-      case 'reports': {
-        const [limitArg] = positionalArgs(rest);
-        const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-        const reports = knowledge.consolidation.reports(limit);
-        if (reports.length === 0) {
-          print('[knowledge] No consolidation reports.');
-          return;
-        }
-        print(`[knowledge] Consolidation reports (${reports.length}):`);
-        for (const report of reports) {
-          print(`  ${report.id} [${report.kind}] ${report.title}`);
-          print(`    ${report.summary}`);
-        }
-        break;
-      }
-
-      case 'schedules': {
-        const schedules = knowledge.jobs.schedules.list(20);
-        if (schedules.length === 0) {
-          print('[knowledge] No knowledge schedules.');
-          return;
-        }
-        print(`[knowledge] Managed schedules (${schedules.length}):`);
-        for (const schedule of schedules) {
-          print(`  ${schedule.id} [${schedule.enabled ? 'enabled' : 'disabled'}] ${schedule.jobId}`);
-          print(`    ${schedule.label}`);
-        }
-        break;
-      }
-
-      case 'packet': {
-        const { scopeValues, query } = readKnowledgeTaskArguments(rest);
-        if (!query) {
-          print('[knowledge] Usage: /knowledge packet <task...> [--scope <path> ...]');
-          return;
-        }
-        const prompt = await knowledge.packets.buildPrompt(query, scopeValues);
-        print(prompt ?? '[knowledge] No structured knowledge matched that task.');
-        break;
-      }
-
-      case 'explain': {
-        const { scopeValues, query } = readKnowledgeTaskArguments(rest);
-        if (!query) {
-          print('[knowledge] Usage: /knowledge explain <task...> [--scope <path> ...]');
-          return;
-        }
-        const prompt = await knowledge.packets.buildPrompt(query, scopeValues);
-        print(prompt ?? '[knowledge] No structured knowledge matched that task.');
-        break;
-      }
-
-      case 'reindex': {
-        const result = await knowledge.status.reindex();
-        print(
-          [
-            '[knowledge] Reindex complete',
-            `  sources: ${result.status.sourceCount}`,
-            `  nodes: ${result.status.nodeCount}`,
-            `  edges: ${result.status.edgeCount}`,
-            `  issues: ${result.status.issueCount}`,
-          ].join('\n'),
-        );
-        break;
-      }
-
-      case 'consolidate': {
-        const mode = (positionalArgs(rest)[0] ?? 'light').toLowerCase();
-        const jobId = mode === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation';
-        const run = await knowledge.jobs.run(jobId, { mode: 'inline' });
-        print(`[knowledge] Consolidation run ${run.id} finished with status ${run.status}.`);
         break;
       }
 

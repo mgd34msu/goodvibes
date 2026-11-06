@@ -3108,6 +3108,16 @@
       "bun": "./terminal-shell/src/session-export-format.ts",
       "types": "./terminal-shell/dist/session-export-format.d.ts",
       "import": "./terminal-shell/dist/session-export-format.js"
+    },
+    "./terminal-shell/knowledge-read-command": {
+      "bun": "./terminal-shell/src/knowledge-read-command.ts",
+      "types": "./terminal-shell/dist/knowledge-read-command.d.ts",
+      "import": "./terminal-shell/dist/knowledge-read-command.js"
+    },
+    "./terminal-shell/knowledge-mutation-command": {
+      "bun": "./terminal-shell/src/knowledge-mutation-command.ts",
+      "types": "./terminal-shell/dist/knowledge-mutation-command.d.ts",
+      "import": "./terminal-shell/dist/knowledge-mutation-command.js"
     }
   },
   "publishConfig": {

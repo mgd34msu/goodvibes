@@ -1,26 +1,12 @@
-import { readKnowledgeTaskArguments, readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
-import {
-  readFlag,
-  readStringListFlag,
-  readPositiveIntFlag,
-  readJsonObjectFlag,
-  positionalArgs,
-} from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { handleKnowledgeMutationCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
+import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
+import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { readFlag, readStringListFlag, readPositiveIntFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { toBrowserKinds, toBrowserSourceKinds } from './knowledge-browser-flags.ts';
 import { formatKnowledgeMap, renderKnowledgeAskResult } from './knowledge-format.ts';
-
-const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
-
-type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
-type KnowledgeAskInput = Parameters<import('@goodvibes-jev/engine/sdk/platform/knowledge').KnowledgeService['ask']>[0];
-type KnowledgeAskMode = NonNullable<KnowledgeAskInput['mode']>;
-
-function isKnowledgeReviewAction(value: string | undefined): value is KnowledgeReviewAction {
-  return KNOWLEDGE_REVIEW_ACTIONS.some((action) => action === value);
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -208,6 +194,144 @@ export const knowledgeCommand: SlashCommand = {
 
     try {
       command.assertCurrent();
+      command.assertCurrent();
+      if (
+        await handleKnowledgeReadCommand(
+          sub,
+          rest,
+          print,
+          {
+            status: async () => {
+              const read = command.retain(knowledge.status, 'get', () => knowledge.status);
+              const result = await read.method.call(read.owner, {}, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            nodes: async (limit) => {
+              const read = command.retain(knowledge.graph.nodes, 'list', () => knowledge.graph.nodes);
+              const result = await read.method.call(read.owner, limit, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            issues: async (limit) => {
+              const read = command.retain(knowledge.graph.issues, 'list', () => knowledge.graph.issues);
+              const result = await read.method.call(read.owner, limit, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            sources: async (limit) => {
+              const read = command.retain(knowledge.sources, 'list', () => knowledge.sources);
+              const result = await read.method.call(read.owner, limit, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            search: async (query, limit) => {
+              const read = command.retain(knowledge.graph.items, 'search', () => knowledge.graph.items);
+              const result = await read.method.call(read.owner, query, limit, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            get: async (id) => {
+              const read = command.retain(knowledge.graph.items, 'get', () => knowledge.graph.items);
+              const result = await read.method.call(read.owner, id, {}, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            lint: async () => {
+              const read = command.retain(knowledge.status, 'lint', () => knowledge.status);
+              const result = await read.method.call(read.owner);
+              read.assertCurrent();
+              return result;
+            },
+            packet: async (query, scopes) => {
+              const read = command.retain(knowledge.packets, 'buildPrompt', () => knowledge.packets);
+              const result = await read.method.call(read.owner, query, scopes, undefined, read.options);
+              read.assertCurrent();
+              return result;
+            },
+            candidates: (limit) => knowledge.consolidation.candidates(limit),
+            reports: (limit) => knowledge.consolidation.reports(limit),
+            schedules: (limit) => knowledge.jobs.schedules.list(limit),
+            assertCurrent: command.assertCurrent,
+          },
+          {
+            statusTitle: '[knowledge] Agent Knowledge status',
+            headingSuffix: '',
+            fieldSeparator: ' ',
+            scoreSeparator: ' ',
+            nodeKind: 'type',
+          },
+        )
+      )
+        return;
+      command.assertCurrent();
+      if (
+        await handleKnowledgeMutationCommand(
+          sub,
+          rest,
+          print,
+          {
+            sessionId: () => context.session.runtime.sessionId,
+            url: async (input) => {
+              const operation = command.retain(knowledge.ingest, 'url', () => knowledge.ingest);
+              const result = await operation.method.call(operation.owner, input);
+              operation.assertCurrent();
+              return result;
+            },
+            bookmarksFile: async (input) => {
+              const operation = command.retain(knowledge.ingest, 'bookmarksFile', () => knowledge.ingest);
+              const result = await operation.method.call(operation.owner, input);
+              operation.assertCurrent();
+              return result;
+            },
+            urlsFile: async (input) => {
+              const operation = command.retain(knowledge.ingest, 'urlsFile', () => knowledge.ingest);
+              const result = await operation.method.call(operation.owner, input);
+              operation.assertCurrent();
+              return result;
+            },
+            review: async (input) => {
+              const operation = command.retain(knowledge.graph.issues, 'review', () => knowledge.graph.issues);
+              const result = await operation.method.call(operation.owner, input);
+              operation.assertCurrent();
+              return result;
+            },
+            reindex: async () => {
+              const operation = command.retain(knowledge.status, 'reindex', () => knowledge.status);
+              const result = await operation.method.call(operation.owner);
+              operation.assertCurrent();
+              return result;
+            },
+            run: async (id, options) => {
+              const operation = command.retain(knowledge.jobs, 'run', () => knowledge.jobs);
+              const result = await operation.method.call(operation.owner, id, options);
+              operation.assertCurrent();
+              return result;
+            },
+            describeError: (error) => (error instanceof Error ? error.message : String(error)),
+            allow(verb, subject, usage) {
+              if (confirmation.yes) return true;
+              const description =
+                verb === 'ingest-url'
+                  ? 'ingest URL into Agent Knowledge ' + subject
+                  : verb === 'import-bookmarks'
+                    ? 'import bookmark file into Agent Knowledge ' + subject
+                    : verb === 'import-urls'
+                      ? 'import URL list into Agent Knowledge ' + subject
+                      : verb === 'review-issue'
+                        ? 'review Agent Knowledge issue ' + subject
+                        : verb === 'reindex'
+                          ? 'reindex Agent Knowledge'
+                          : 'run Agent Knowledge consolidation';
+              requireYesFlag(context, description, usage + ' --yes');
+              return false;
+            },
+          },
+          { fieldSeparator: ' ', reviewer: 'agent', confirmationSuffix: ' --yes', sourceLabel: 'knowledge source' },
+        )
+      )
+        return;
+      command.assertCurrent();
       switch (sub) {
         case 'ask': {
           const service = context.extensions.agentKnowledgeService;
@@ -227,55 +351,6 @@ export const knowledgeCommand: SlashCommand = {
           const result = await ask.method.call(ask.owner, input);
           ask.assertCurrent();
           print(renderKnowledgeAskResult(result));
-          break;
-        }
-
-        case 'status': {
-          const read = command.retain(knowledge.status, 'get', () => knowledge.status);
-          const status = await read.method.call(read.owner, {}, read.options);
-          read.assertCurrent();
-          print(
-            [
-              '[knowledge] Agent Knowledge status',
-              `  ready: ${status.ready ? 'yes' : 'no'}`,
-              `  storage: ${status.storagePath}`,
-              `  sources: ${status.sourceCount}`,
-              `  nodes: ${status.nodeCount}`,
-              `  edges: ${status.edgeCount}`,
-              `  issues: ${status.issueCount}`,
-            ].join('\n'),
-          );
-          break;
-        }
-
-        case 'ingest-url': {
-          const [url] = positionalArgs(rest, ['--title', '--tags', '--folder']);
-          if (!url) {
-            print('[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] --yes');
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              `ingest URL into Agent Knowledge ${url}`,
-              '/knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-            );
-            return;
-          }
-          const ingest = command.retain(knowledge.ingest, 'url', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, {
-            url,
-            title: readFlag(rest, '--title'),
-            tags: readStringListFlag(rest, '--tags'),
-            folderPath: readFlag(rest, '--folder'),
-            sessionId: context.session.runtime.sessionId,
-            sourceType: 'url',
-            connectorId: 'url',
-          });
-          ingest.assertCurrent();
-          print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? url}`);
-          if (result.source.summary) print(`  ${result.source.summary}`);
-          if (result.artifactId) print(`  artifact: ${result.artifactId}`);
           break;
         }
 
@@ -336,46 +411,6 @@ export const knowledgeCommand: SlashCommand = {
           print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? artifactId}`);
           if (result.source.summary) print(`  ${result.source.summary}`);
           if (result.artifactId) print(`  artifact: ${result.artifactId}`);
-          break;
-        }
-
-        case 'import-bookmarks': {
-          const [path] = positionalArgs(rest);
-          if (!path) {
-            print('[knowledge] Usage: /knowledge import-bookmarks <path> --yes');
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(context, `import bookmark file into Agent Knowledge ${path}`, '/knowledge import-bookmarks <path> --yes');
-            return;
-          }
-          const ingest = command.retain(knowledge.ingest, 'bookmarksFile', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, { path, sessionId: context.session.runtime.sessionId });
-          ingest.assertCurrent();
-          print(`[knowledge] Imported bookmarks ${result.imported} ok, ${result.failed} failed`);
-          if (result.errors.length > 0) {
-            for (const error of result.errors.slice(0, 10)) print(`  error ${error}`);
-          }
-          break;
-        }
-
-        case 'import-urls': {
-          const [path] = positionalArgs(rest);
-          if (!path) {
-            print('[knowledge] Usage: /knowledge import-urls <path> --yes');
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(context, `import URL list into Agent Knowledge ${path}`, '/knowledge import-urls <path> --yes');
-            return;
-          }
-          const ingest = command.retain(knowledge.ingest, 'urlsFile', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, { path, sessionId: context.session.runtime.sessionId });
-          ingest.assertCurrent();
-          print(`[knowledge] Imported URL list ${result.imported} ok, ${result.failed} failed`);
-          if (result.errors.length > 0) {
-            for (const error of result.errors.slice(0, 10)) print(`  error ${error}`);
-          }
           break;
         }
 
@@ -450,119 +485,6 @@ export const knowledgeCommand: SlashCommand = {
           break;
         }
 
-        case 'list': {
-          const limit = Math.max(1, Number.parseInt(readFlag(rest, '--limit') ?? '10', 10) || 10);
-          const kind = (readFlag(rest, '--kind') ?? 'sources').toLowerCase();
-          if (kind === 'nodes') {
-            const read = command.retain(knowledge.graph.nodes, 'list', () => knowledge.graph.nodes);
-            const nodes = await read.method.call(read.owner, limit, read.options);
-            read.assertCurrent();
-            if (nodes.length === 0) {
-              print('[knowledge] No nodes.');
-              return;
-            }
-            print(`[knowledge] ${nodes.length} node(s)`);
-            for (const node of nodes) {
-              print(`  ${node.id} [${node.kind}] ${node.title}`);
-              if (node.summary) print(`    ${node.summary}`);
-            }
-            return;
-          }
-          if (kind === 'issues') {
-            const read = command.retain(knowledge.graph.issues, 'list', () => knowledge.graph.issues);
-            const issues = await read.method.call(read.owner, limit, read.options);
-            read.assertCurrent();
-            if (issues.length === 0) {
-              print('[knowledge] No issues.');
-              return;
-            }
-            print(`[knowledge] ${issues.length} issue(s)`);
-            for (const issue of issues) {
-              print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-              print(`    ${issue.message}`);
-            }
-            return;
-          }
-          const read = command.retain(knowledge.sources, 'list', () => knowledge.sources);
-          const sources = await read.method.call(read.owner, limit, read.options);
-          read.assertCurrent();
-          if (sources.length === 0) {
-            print('[knowledge] No sources.');
-            return;
-          }
-          print(`[knowledge] ${sources.length} source(s)`);
-          for (const source of sources) {
-            print(
-              `  ${source.id} [${source.sourceType}/${source.status}] ${source.title ?? source.canonicalUri ?? source.sourceUri ?? 'untitled'}`,
-            );
-            if (source.summary) print(`    ${source.summary}`);
-          }
-          break;
-        }
-
-        case 'search': {
-          const valuedFlags = ['--limit'];
-          const query = positionalArgs(rest, valuedFlags).join(' ').trim();
-          if (!query) {
-            print('[knowledge] Usage: /knowledge search <query> [--limit <n>]');
-            return;
-          }
-          const limit = Math.max(1, Number.parseInt(readFlag(rest, '--limit') ?? '10', 10) || 10);
-          const read = command.retain(knowledge.graph.items, 'search', () => knowledge.graph.items);
-          const results = await read.method.call(read.owner, query, limit, read.options);
-          read.assertCurrent();
-          if (results.length === 0) {
-            print('[knowledge] No results.');
-            return;
-          }
-          print(`[knowledge] ${results.length} result(s)`);
-          for (const result of results) {
-            const title = result.source?.title ?? result.source?.canonicalUri ?? result.node?.title ?? result.id;
-            print(`  ${result.id} [${result.kind}] score ${result.score} ${title}`);
-            print(`    ${result.reason}`);
-          }
-          break;
-        }
-
-        case 'get': {
-          const [id] = positionalArgs(rest);
-          if (!id) {
-            print('[knowledge] Usage: /knowledge get <id>');
-            return;
-          }
-          const read = command.retain(knowledge.graph.items, 'get', () => knowledge.graph.items);
-          const item = await read.method.call(read.owner, id, {}, read.options);
-          read.assertCurrent();
-          if (!item) {
-            print(`[knowledge] Unknown item ${id}`);
-            return;
-          }
-          if (item.source) {
-            print(`[knowledge] source ${item.source.id}`);
-            print(`  title ${item.source.title ?? 'untitled'}`);
-            print(`  uri ${item.source.canonicalUri ?? item.source.sourceUri ?? 'n/a'}`);
-            print(`  status ${item.source.status}`);
-            if (item.source.summary) print(`  summary ${item.source.summary}`);
-          } else if (item.node) {
-            print(`[knowledge] node ${item.node.id}`);
-            print(`  type ${item.node.kind}`);
-            print(`  title ${item.node.title}`);
-            if (item.node.summary) print(`  summary ${item.node.summary}`);
-          } else if (item.issue) {
-            print(`[knowledge] issue ${item.issue.id}`);
-            print(`  severity ${item.issue.severity}`);
-            print(`  code ${item.issue.code}`);
-            print(`  message ${item.issue.message}`);
-          }
-          if (item.relatedEdges.length > 0) {
-            print('  relations');
-            for (const edge of item.relatedEdges.slice(0, 12)) {
-              print(`    ${edge.fromKind}:${edge.fromId} -[${edge.relation}]-> ${edge.toKind}:${edge.toId}`);
-            }
-          }
-          break;
-        }
-
         case 'map': {
           const limit = readPositiveIntFlag(rest, '--limit', 50);
           const query = positionalArgs(rest, ['--limit']).join(' ').trim();
@@ -577,108 +499,6 @@ export const knowledgeCommand: SlashCommand = {
           );
           read.assertCurrent();
           print(formatKnowledgeMap(result));
-          break;
-        }
-
-        case 'lint': {
-          const read = command.retain(knowledge.status, 'lint', () => knowledge.status);
-          const issues = await read.method.call(read.owner);
-          read.assertCurrent();
-          if (issues.length === 0) {
-            print('[knowledge] No lint issues.');
-            return;
-          }
-          print(`[knowledge] ${issues.length} lint issue(s)`);
-          for (const issue of issues) {
-            print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-            print(`    ${issue.message}`);
-          }
-          break;
-        }
-
-        case 'queue': {
-          const [limitArg] = positionalArgs(rest);
-          const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-          const read = command.retain(knowledge.graph.issues, 'list', () => knowledge.graph.issues);
-          const issues = await read.method.call(read.owner, limit, read.options);
-          read.assertCurrent();
-          if (issues.length === 0) {
-            print('Knowledge review queue is empty.');
-            return;
-          }
-          print(`[knowledge] Review queue (${issues.length})`);
-          for (const issue of issues) {
-            print(`  ${issue.id} [${issue.severity}] ${issue.code}`);
-            print(`    ${issue.message}`);
-          }
-          break;
-        }
-
-        case 'review-issue':
-        case 'issue-review': {
-          const [issueId, actionValue] = positionalArgs(rest, ['--reviewer', '--value']);
-          const action = actionValue?.toLowerCase();
-          if (!issueId || !isKnowledgeReviewAction(action)) {
-            print(
-              '[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>] --yes',
-            );
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              `review Agent Knowledge issue ${issueId}`,
-              '/knowledge review-issue <issueId> <action> [--reviewer <name>] [--value <json-object>] --yes',
-            );
-            return;
-          }
-          const value = readJsonObjectFlag(rest, '--value');
-          if (value === null) {
-            print('[knowledge] --value must be a JSON object.');
-            return;
-          }
-          try {
-            const review = command.retain(knowledge.graph.issues, 'review', () => knowledge.graph.issues);
-            const result = await review.method.call(review.owner, {
-              issueId,
-              action,
-              reviewer: readFlag(rest, '--reviewer') ?? 'agent',
-              ...(value ? { value } : {}),
-            });
-            review.assertCurrent();
-            print(
-              [
-                `[knowledge] Reviewed issue ${result.issue.id}`,
-                `  action ${action}`,
-                `  status ${result.issue.status}`,
-                ...(result.node ? [`  node ${result.node.id} ${result.node.title}`] : []),
-                ...(result.source
-                  ? [
-                      `  knowledge source ${result.source.id} ${result.source.title ?? result.source.canonicalUri ?? result.source.sourceUri ?? 'untitled'}`,
-                    ]
-                  : []),
-                ...(result.appliedFacts ? [`  applied facts ${Object.keys(result.appliedFacts).join(', ') || 'none'}`] : []),
-              ].join('\n'),
-            );
-          } catch (error) {
-            print(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
-          }
-          break;
-        }
-
-        case 'candidates': {
-          const [limitArg] = positionalArgs(rest);
-          const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-          const candidates = knowledge.consolidation.candidates(limit);
-          if (candidates.length === 0) {
-            print('[knowledge] No consolidation candidates.');
-            return;
-          }
-          print(`[knowledge] Consolidation candidates (${candidates.length})`);
-          for (const candidate of candidates) {
-            print(`  ${candidate.id} [${candidate.status}] score ${candidate.score} ${candidate.title}`);
-            print(`    ${candidate.candidateType}`);
-          }
           break;
         }
 
@@ -739,96 +559,6 @@ export const knowledgeCommand: SlashCommand = {
             print(`  ${connector.id} [${connector.sourceType}] ${connector.displayName ?? connector.id}`);
             print(`    ${connector.description}`);
           }
-          break;
-        }
-
-        case 'reports': {
-          const [limitArg] = positionalArgs(rest);
-          const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-          const reports = knowledge.consolidation.reports(limit);
-          if (reports.length === 0) {
-            print('[knowledge] No consolidation reports.');
-            return;
-          }
-          print(`[knowledge] Consolidation reports (${reports.length})`);
-          for (const report of reports) {
-            print(`  ${report.id} [${report.kind}] ${report.title}`);
-            print(`    ${report.summary}`);
-          }
-          break;
-        }
-
-        case 'schedules': {
-          const schedules = knowledge.jobs.schedules.list(20);
-          if (schedules.length === 0) {
-            print('[knowledge] No knowledge schedules.');
-            return;
-          }
-          print(`[knowledge] Managed schedules (${schedules.length})`);
-          for (const schedule of schedules) {
-            print(`  ${schedule.id} [${schedule.enabled ? 'enabled' : 'disabled'}] ${schedule.jobId}`);
-            print(`    ${schedule.label}`);
-          }
-          break;
-        }
-
-        case 'packet': {
-          const { scopeValues, query } = readKnowledgeTaskArguments(rest);
-          if (!query) {
-            print('[knowledge] Usage: /knowledge packet <task...> [--scope <path> ...]');
-            return;
-          }
-          const read = command.retain(knowledge.packets, 'buildPrompt', () => knowledge.packets);
-          const prompt = await read.method.call(read.owner, query, scopeValues, undefined, read.options);
-          read.assertCurrent();
-          print(prompt ?? '[knowledge] No structured knowledge matched that task.');
-          break;
-        }
-
-        case 'explain': {
-          const { scopeValues, query } = readKnowledgeTaskArguments(rest);
-          if (!query) {
-            print('[knowledge] Usage: /knowledge explain <task...> [--scope <path> ...]');
-            return;
-          }
-          const read = command.retain(knowledge.packets, 'buildPrompt', () => knowledge.packets);
-          const prompt = await read.method.call(read.owner, query, scopeValues, undefined, read.options);
-          read.assertCurrent();
-          print(prompt ?? '[knowledge] No structured knowledge matched that task.');
-          break;
-        }
-
-        case 'reindex': {
-          if (!confirmation.yes) {
-            requireYesFlag(context, 'reindex Agent Knowledge', '/knowledge reindex --yes');
-            return;
-          }
-          const reindex = command.retain(knowledge.status, 'reindex', () => knowledge.status);
-          const result = await reindex.method.call(reindex.owner);
-          reindex.assertCurrent();
-          print(
-            [
-              '[knowledge] Reindex complete',
-              `  sources ${result.status.sourceCount}`,
-              `  nodes ${result.status.nodeCount}`,
-              `  edges ${result.status.edgeCount}`,
-              `  issues ${result.status.issueCount}`,
-            ].join('\n'),
-          );
-          break;
-        }
-
-        case 'consolidate': {
-          if (!confirmation.yes) {
-            requireYesFlag(context, 'run Agent Knowledge consolidation', '/knowledge consolidate [light|deep] --yes');
-            return;
-          }
-          const mode = (positionalArgs(rest)[0] ?? 'light').toLowerCase();
-          const jobId = mode === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation';
-          const consolidate = command.retain(knowledge.jobs, 'run', () => knowledge.jobs);
-          const run = await consolidate.method.call(consolidate.owner, jobId, { mode: 'inline' });
-          consolidate.assertCurrent();
-          print(`[knowledge] Consolidation run ${run.id} finished with status ${run.status}.`);
           break;
         }
 

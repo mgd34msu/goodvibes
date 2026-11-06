@@ -1,3 +1,4 @@
+import { projectOrchestratorCoreServices } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import type { OrchestratorCoreServices } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -52,13 +53,7 @@ export function buildSharedOrchestratorCoreServices(input: {
 }): OrchestratorCoreServices {
   const { services, configManager, providerRegistry } = input;
   return {
-    configManager,
-    providerRegistry,
-    planManager: services.planManager,
-    adaptivePlanner: services.adaptivePlanner,
-    sessionMemoryStore: services.sessionMemoryStore,
-    sessionLineageTracker: services.sessionLineageTracker,
-    idempotencyStore: services.idempotencyStore,
+    ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
     memoryRegistry: { getAll: () => services.memorySpine.recallSnapshot().records },
     // Main-session code auto-injection + tool-site reindex. Injection is
     // additionally gated by the default-off `agent-passive-code-injection` flag inside the

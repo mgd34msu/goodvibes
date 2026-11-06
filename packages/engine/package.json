@@ -3078,6 +3078,11 @@
       "bun": "./terminal-shell/src/blocking-permission-input.ts",
       "types": "./terminal-shell/dist/blocking-permission-input.d.ts",
       "import": "./terminal-shell/dist/blocking-permission-input.js"
+    },
+    "./terminal-shell/bootstrap-orchestrator": {
+      "bun": "./terminal-shell/src/bootstrap-orchestrator.ts",
+      "types": "./terminal-shell/dist/bootstrap-orchestrator.d.ts",
+      "import": "./terminal-shell/dist/bootstrap-orchestrator.js"
     }
   },
   "publishConfig": {

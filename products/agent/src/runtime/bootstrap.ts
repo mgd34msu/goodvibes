@@ -1,4 +1,9 @@
-import {buildPluginStartupContext} from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
+import {
+  createTerminalOrchestrator,
+  terminalCompanionInputHandler,
+  projectOrchestratorCoreServices,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
+import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
@@ -13,7 +18,7 @@ import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
  *   - main.ts: terminal setup, render loop, stdin/stdout handlers
  *   - lifecycle.ts: save/shutdown helpers
  */
-import { Orchestrator, type OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import '@goodvibes-jev/engine/sdk/platform/core';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { collectStartupAnnouncements } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
@@ -49,11 +54,7 @@ import { foldLegacySpineStore } from '@goodvibes-jev/engine/sdk/platform/runtime
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../agent/prompt-context-receipts.ts';
-import {
-  bindRestoreTurnAnchorsToSurface,
-  recordCompletedTurnAnchor,
-  startAnchorDurabilityHousekeeping,
-} from './rewind-anchor-wiring.ts';
+import { bindRestoreTurnAnchorsToSurface, recordCompletedTurnAnchor, startAnchorDurabilityHousekeeping } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import '../tools/agent-audit-tool.ts';
@@ -89,7 +90,6 @@ import '../tools/agent-vibe-tool.ts';
 import '../tools/agent-workspace-tool.ts';
 import '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './agent-operator-policy.ts';
-
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -165,10 +165,7 @@ export type BootstrapContext = RuntimeContext & {
  *  10. Input history, splash options
  *  11. Background: provider auto-registration, persisted providers, scan
  */
-export async function bootstrapRuntime(
-  stdout: NodeJS.WriteStream,
-  options: BootstrapOptions,
-): Promise<BootstrapContext> {
+export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: BootstrapOptions): Promise<BootstrapContext> {
   const workingDir = options.workingDir;
   const configManager = options.configManager;
   const controlPlaneRecentEventsRef: {
@@ -316,76 +313,69 @@ export async function bootstrapRuntime(
       memoryUsageTracker.onTurnAborted(event.payload.turnId);
     }),
   );
-  const {
-    automationManager,
-    hookDispatcher,
-    pluginManager,
-  } = services;
+  const { automationManager, hookDispatcher, pluginManager } = services;
 
   // ── Phase 6: Orchestrator and Agent-local task read models ───────────────
 
   // Mutable function refs so main.ts can patch these after constructing the scroll/viewport state.
   // The orchestrator closes over these refs, so patching them in main.ts takes immediate effect.
-  const orchestratorRefs = {
-    getViewportHeight: (): number => 20,
-    scrollToEnd: (_vHeight: number): void => { /* patched by main.ts */ },
-    requestRender: (): void => { requestRender(); },
-  };
 
   const systemPromptBySignal = new WeakMap<AbortSignal, Promise<string>>();
-  const orchestrator = new Orchestrator({
-    conversation,
-    getViewportHeight: () => orchestratorRefs.getViewportHeight(),
-    scrollToEnd: (vHeight: number) => orchestratorRefs.scrollToEnd(vHeight),
-    toolRegistry,
-    permissionManager,
-    getSystemPrompt: (signal) => {
-      const existing = signal ? systemPromptBySignal.get(signal) : undefined;
-      if (existing) return existing;
-      const currentModel = providerRegistry.getCurrentModel();
-      const turnId = activePromptTurnId;
-      const captured = {
-        sessionId: runtime.sessionId,
-        turnId,
-        source: turnId ? 'turn' as const : 'follow_up' as const,
-        provider: runtime.provider,
-        model: currentModel,
-        contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel),
-        runtimePrompt: runtime.systemPrompt,
-        operatorPolicy: GOODVIBES_AGENT_OPERATOR_POLICY,
-        shellPaths: services.shellPaths,
-        memoryRegistry: services.memoryRegistry,
-        turnText: activePromptTurnText,
-        memoryRecallSnapshot: services.memorySpineClient.recallSnapshot(),
-        capabilityIndex: capabilitySnapshot(),
-      };
-      const composedPrompt = (async () => {
-        signal?.throwIfAborted();
-        const tierPrompt = await readTierPromptSupplement(
-          factsFor({ catalog: providerRegistry }, currentModel), providerRegistry.modelTiers,
-          'agent.conversation-system-prompt', { audience: 'conversation', signal },
-        );
-        signal?.throwIfAborted();
-        const composed = await composeRuntimePromptWithReceipt({ ...captured, tierPrompt });
-        signal?.throwIfAborted();
-        promptContextReceipts.record(composed.receipt);
-        memoryUsageTracker.onComposed(turnId, composed.receipt);
-        return composed.prompt;
-      })();
-      if (signal) systemPromptBySignal.set(signal, composedPrompt);
-      return composedPrompt;
+  const { orchestrator, orchestratorRefs } = createTerminalOrchestrator(
+    {
+      conversation,
+      toolRegistry,
+      permissionManager,
+      getSystemPrompt: (signal) => {
+        const existing = signal ? systemPromptBySignal.get(signal) : undefined;
+        if (existing) return existing;
+        const currentModel = providerRegistry.getCurrentModel();
+        const turnId = activePromptTurnId;
+        const captured = {
+          sessionId: runtime.sessionId,
+          turnId,
+          source: turnId ? ('turn' as const) : ('follow_up' as const),
+          provider: runtime.provider,
+          model: currentModel,
+          contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel),
+          runtimePrompt: runtime.systemPrompt,
+          operatorPolicy: GOODVIBES_AGENT_OPERATOR_POLICY,
+          shellPaths: services.shellPaths,
+          memoryRegistry: services.memoryRegistry,
+          turnText: activePromptTurnText,
+          memoryRecallSnapshot: services.memorySpineClient.recallSnapshot(),
+          capabilityIndex: capabilitySnapshot(),
+        };
+        const composedPrompt = (async () => {
+          signal?.throwIfAborted();
+          const tierPrompt = await readTierPromptSupplement(
+            factsFor({ catalog: providerRegistry }, currentModel),
+            providerRegistry.modelTiers,
+            'agent.conversation-system-prompt',
+            { audience: 'conversation', signal },
+          );
+          signal?.throwIfAborted();
+          const composed = await composeRuntimePromptWithReceipt({ ...captured, tierPrompt });
+          signal?.throwIfAborted();
+          promptContextReceipts.record(composed.receipt);
+          memoryUsageTracker.onComposed(turnId, composed.receipt);
+          return composed.prompt;
+        })();
+        if (signal) systemPromptBySignal.set(signal, composedPrompt);
+        return composedPrompt;
+      },
+      hookDispatcher,
+      flagManager: services.featureFlags,
+      runtimeBus,
+      sessionId: runtime.sessionId,
+      services: {
+        agentManager: services.agentManager,
+        contractRunner: services.contractRunner,
+        contractIntake: services.contractIntake,
+      },
     },
-    hookDispatcher,
-    flagManager: services.featureFlags,
-    requestRender: () => orchestratorRefs.requestRender(),
-    runtimeBus,
-    sessionId: runtime.sessionId,
-    services: {
-      agentManager: services.agentManager,
-      contractRunner: services.contractRunner,
-      contractIntake: services.contractIntake,
-    },
-  });
+    requestRender,
+  );
   conversationFollowUpRef.value = (item) => orchestrator.enqueueConversationFollowUp(item);
   // Bind this repo's live interactive Orchestrator into the SDK's live-turn
   // controls holder (SDK round: sessions.toolCalls.cancel, sessions.
@@ -395,20 +385,12 @@ export async function bootstrapRuntime(
   // bind call the gateway verbs refuse honestly (LIVE_TURN_CONTROLS_UNAVAILABLE).
   services.sessionLiveTurnControls.bind(orchestrator);
   // Wire orchestratorHandleUserInputRef so COMPANION_MESSAGE_RECEIVED fires a real LLM turn.
-  orchestratorHandleUserInputRef.value = (text: string, options?: OrchestratorUserInputOptions) => {
-    orchestrator.handleUserInput(text, undefined, options).catch((err: unknown) => {
-      logger.debug('companion handleUserInput safety catch', { error: String(err) });
-    });
-  };
+  orchestratorHandleUserInputRef.value = terminalCompanionInputHandler(orchestrator, (err) => {
+    logger.debug('companion handleUserInput safety catch', { error: String(err) });
+  });
   orchestrator.setCoreServices({
-    configManager,
-    providerRegistry,
+    ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
     cacheHitTracker: services.cacheHitTracker,
-    planManager: services.planManager,
-    adaptivePlanner: services.adaptivePlanner,
-    sessionMemoryStore: services.sessionMemoryStore,
-    sessionLineageTracker: services.sessionLineageTracker,
-    idempotencyStore: services.idempotencyStore,
   });
   conversation.setSessionLineageTracker(services.sessionLineageTracker);
 
@@ -417,14 +399,16 @@ export async function bootstrapRuntime(
   // Must run after setCoreServices (nothing here depends on it, but this
   // keeps every orchestrator.* wiring call grouped) and before the first
   // turn, see context-accounting-source.ts for what each facet reads.
-  runtimeUnsubs.push(bindOrchestratorContextAccounting({
-    orchestrator,
-    holder: services.contextAccountingHolder,
-    runtimeBus,
-    runtimeStore: store,
-    sessionId: runtime.sessionId,
-    getContextWindow: () => providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()),
-  }));
+  runtimeUnsubs.push(
+    bindOrchestratorContextAccounting({
+      orchestrator,
+      holder: services.contextAccountingHolder,
+      runtimeBus,
+      runtimeStore: store,
+      sessionId: runtime.sessionId,
+      getContextWindow: () => providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()),
+    }),
+  );
 
   // featureFlags is REQUIRED here in practice, even though the SDK types it
   // optional. isFeatureGateEnabled(null, ...) is permissive by design, so
@@ -530,7 +514,14 @@ export async function bootstrapRuntime(
     requestRender,
   });
 
-  deferredStartup.schedule(createPluginStartupTask(pluginManager, ()=>buildPluginStartupContext({runtimeBus,commandRegistry:pluginCommandRegistry,providerRegistry,toolRegistry},services), requestRender, message => systemMessageRouter.high(message)));
+  deferredStartup.schedule(
+    createPluginStartupTask(
+      pluginManager,
+      () => buildPluginStartupContext({ runtimeBus, commandRegistry: pluginCommandRegistry, providerRegistry, toolRegistry }, services),
+      requestRender,
+      (message) => systemMessageRouter.high(message),
+    ),
+  );
   // Probe the daemon spine OFF the interactive path. On a reachable daemon,
   // fold the agent's own per-cwd legacy session store into it (once; marked
   // migrated). Waits for connected-host discovery (which may have just started
@@ -577,25 +568,26 @@ export async function bootstrapRuntime(
   // deactivates so the poller stops dialing a dead wire while keeping the bound
   // runner for the next attach.
   const sessionInputsClient = createAgentSessionInputsClient(services.daemonVerbs);
-  const reconcileMemorySpine = (): Promise<void> => reconcileMemorySpineAdoption({
-    memorySpineClient: services.memorySpineClient,
-    transport: services.memorySpineTransport,
-    probeReachability: () => services.sessionSpineClient.probeReachability(),
-    // Reachable is not usable: a daemon below this build's floor is refused here,
-    // so nothing activates and the spine keeps its local store. Re-asked per
-    // attempt, so a daemon updated mid-session is adopted on the next tick.
-    mayAdopt: () => services.mayAdoptDaemonBuild(),
-    // One consuming /status read per attach: a current daemon delivers its
-    // one-shot honesty receipts ("restarted after a crash at HH:MM", "updated
-    // from X to Y") only to a ?receipts=consume read, and this adoption edge is
-    // exactly where the agent (re)attaches to a daemon. The plain liveness probe
-    // stays receipt-neutral.
-    onAttach: () => {
-      services.sessionBroker.activate(sessionInputsClient);
-      return services.consumeDaemonReceipts();
-    },
-    onDetach: () => services.sessionBroker.deactivate('the connected host stopped answering'),
-  });
+  const reconcileMemorySpine = (): Promise<void> =>
+    reconcileMemorySpineAdoption({
+      memorySpineClient: services.memorySpineClient,
+      transport: services.memorySpineTransport,
+      probeReachability: () => services.sessionSpineClient.probeReachability(),
+      // Reachable is not usable: a daemon below this build's floor is refused here,
+      // so nothing activates and the spine keeps its local store. Re-asked per
+      // attempt, so a daemon updated mid-session is adopted on the next tick.
+      mayAdopt: () => services.mayAdoptDaemonBuild(),
+      // One consuming /status read per attach: a current daemon delivers its
+      // one-shot honesty receipts ("restarted after a crash at HH:MM", "updated
+      // from X to Y") only to a ?receipts=consume read, and this adoption edge is
+      // exactly where the agent (re)attaches to a daemon. The plain liveness probe
+      // stays receipt-neutral.
+      onAttach: () => {
+        services.sessionBroker.activate(sessionInputsClient);
+        return services.consumeDaemonReceipts();
+      },
+      onDetach: () => services.sessionBroker.deactivate('the connected host stopped answering'),
+    });
   deferredStartup.schedule({
     label: 'memory-spine',
     run: async () => {
@@ -669,7 +661,8 @@ export async function bootstrapRuntime(
     systemMessageRouter,
     requestRender,
   });
-  const mcpDiscovery = scheduleMcpSuggestionScanOnFirstUse({ // lazy, see mcp-lazy-start.ts
+  const mcpDiscovery = scheduleMcpSuggestionScanOnFirstUse({
+    // lazy, see mcp-lazy-start.ts
     mcpRegistry: services.mcpRegistry,
     systemMessageRouter,
     requestRender,
@@ -694,34 +687,46 @@ export async function bootstrapRuntime(
   bootstrapUnsubs.push(() => mcpAutoReload.stop());
   // The reclaim half of what the anchors above write. The live session id is
   // read at sweep time, so a resume repointing it is respected.
-  bootstrapUnsubs.push(startAnchorDurabilityHousekeeping({
-    surface: services.surface,
-    currentSessionId: () => runtimeSessionIdRef.value,
-  }));
+  bootstrapUnsubs.push(
+    startAnchorDurabilityHousekeeping({
+      surface: services.surface,
+      currentSessionId: () => runtimeSessionIdRef.value,
+    }),
+  );
   if (configManager.get('automation.enabled')) {
     logger.warn('Local automation startup is disabled in GoodVibes Agent; use connected-host observability instead.');
-    systemMessageRouter.low('[Startup] Local automation execution is disabled in GoodVibes Agent; use read-only automation observability or explicit connected-host actions.');
+    systemMessageRouter.low(
+      '[Startup] Local automation execution is disabled in GoodVibes Agent; use read-only automation observability or explicit connected-host actions.',
+    );
   }
 
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 
   fireSessionStart(runtime.sessionId, services.hookDispatcher);
-  emitSessionStarted(runtimeBus, {
-    sessionId: runtime.sessionId,
-    traceId: `${runtime.sessionId}:session-start`,
-    source: 'bootstrap',
-  }, {
-    sessionId: runtime.sessionId,
-    profileId: 'default',
-    workingDir,
-  });
-  emitSessionReady(runtimeBus, {
-    sessionId: runtime.sessionId,
-    traceId: `${runtime.sessionId}:session-ready`,
-    source: 'bootstrap',
-  }, {
-    sessionId: runtime.sessionId,
-  });
+  emitSessionStarted(
+    runtimeBus,
+    {
+      sessionId: runtime.sessionId,
+      traceId: `${runtime.sessionId}:session-start`,
+      source: 'bootstrap',
+    },
+    {
+      sessionId: runtime.sessionId,
+      profileId: 'default',
+      workingDir,
+    },
+  );
+  emitSessionReady(
+    runtimeBus,
+    {
+      sessionId: runtime.sessionId,
+      traceId: `${runtime.sessionId}:session-ready`,
+      source: 'bootstrap',
+    },
+    {
+      sessionId: runtime.sessionId,
+    },
+  );
 
   // ── Compose RuntimeContext ────────────────────────────────────────────────
 
@@ -775,7 +780,9 @@ export async function bootstrapRuntime(
       runtimeUnsubs,
       forensicsCollector,
       executionLedger: services.executionLedger,
-      disposeSessionWriteLedger: () => { services.disposeSessionWriteLedger(); },
+      disposeSessionWriteLedger: () => {
+        services.disposeSessionWriteLedger();
+      },
       disposeRuntimeGraph: () => services.close(),
       deferredStartup,
       agentExternalServices,

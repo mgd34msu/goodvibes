@@ -1,4 +1,5 @@
-import {buildPluginStartupContext} from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
+import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
+import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 /**
  * Bootstrap composition root for goodvibes-tui.
@@ -12,7 +13,7 @@ import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/pl
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import { Orchestrator, type OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
+import '@goodvibes-jev/engine/sdk/platform/core';
 import { AcpManager } from '@goodvibes-jev/engine/sdk/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
@@ -28,7 +29,21 @@ import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import { fireSessionStart, createTaskManager, OpsControlPlane, AcpTaskAdapter, emitSessionReady, emitSessionStarted, loadLastConversation, leaveHostedSessionOnExit, scheduleBackgroundMcpDiscovery, restoreSavedModel, startExternalServices, type ExternalServicesHandle, createDeferredStartupCoordinator } from '@/runtime/index.ts';
+import {
+  fireSessionStart,
+  createTaskManager,
+  OpsControlPlane,
+  AcpTaskAdapter,
+  emitSessionReady,
+  emitSessionStarted,
+  loadLastConversation,
+  leaveHostedSessionOnExit,
+  scheduleBackgroundMcpDiscovery,
+  restoreSavedModel,
+  startExternalServices,
+  type ExternalServicesHandle,
+  createDeferredStartupCoordinator,
+} from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { deriveSpineFooterStatus } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
@@ -45,11 +60,13 @@ import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import './daemon-attach-notices.ts';
 import { wireContextAccountingSource } from './context-accounting-source.ts';
-import { autostartInstalledDaemon, createDaemonServiceControl, describeDaemonAutostart } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
-import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import {
-  createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked,
-} from './client/host-service-status.ts';
+  autostartInstalledDaemon,
+  createDaemonServiceControl,
+  describeDaemonAutostart,
+} from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
+import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
 import { relayReadAccessors } from './relay-reachability-bridge.ts';
 import { startMcpConfigAutoReload } from '../mcp/runtime-reload.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
@@ -58,7 +75,10 @@ import { registerStartupProviders } from './startup-provider-registration.ts';
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[4]>;
 
 function joinPromptParts(...parts: Array<string | null | undefined>): string {
-  return parts.map((part) => part?.trim()).filter((part): part is string => Boolean(part)).join('\n\n');
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n');
 }
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
@@ -144,10 +164,7 @@ export type BootstrapContext = RuntimeContext & {
  *  10. Input history, splash options
  *  11. Provider auto-registration and persisted providers; discovery is explicit
  */
-export async function bootstrapRuntime(
-  stdout: NodeJS.WriteStream,
-  options: BootstrapOptions,
-): Promise<BootstrapContext> {
+export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: BootstrapOptions): Promise<BootstrapContext> {
   const workingDir = options.workingDir;
   const configManager = options.configManager;
   const controlPlaneRecentEventsRef: {
@@ -174,7 +191,8 @@ export async function bootstrapRuntime(
     bootstrapUnsubs,
     runtimeUnsubs,
     agentStatusIntervalRef,
-    permissionPromptRef, trustPromptRef,
+    permissionPromptRef,
+    trustPromptRef,
     systemMessageRouterRef,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,
@@ -186,11 +204,7 @@ export async function bootstrapRuntime(
     sessionUnionCache,
   } = await initializeBootstrapCore(stdout, options, (limit) => controlPlaneRecentEventsRef.value(limit));
   const providerRegistry = services.providerRegistry;
-  const {
-    automationManager,
-    hookDispatcher,
-    pluginManager,
-  } = services;
+  const { automationManager, hookDispatcher, pluginManager } = services;
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
   // A saved custom-provider model must never crash boot, see provider-fallback.ts.
   await ensureBootModelResolvable(providerRegistry, configManager);
@@ -199,54 +213,52 @@ export async function bootstrapRuntime(
 
   // Mutable function refs so main.ts can patch these after constructing the scroll/viewport state.
   // The orchestrator closes over these refs, so patching them in main.ts takes immediate effect.
-  const orchestratorRefs = {
-    getViewportHeight: (): number => 20,
-    scrollToEnd: (_vHeight: number): void => { /* patched by main.ts */ },
-    requestRender: (): void => { requestRender(); },
-  };
 
-  const orchestrator = new Orchestrator({
-    conversation,
-    getViewportHeight: () => orchestratorRefs.getViewportHeight(),
-    scrollToEnd: (vHeight: number) => orchestratorRefs.scrollToEnd(vHeight),
-    toolRegistry,
-    permissionManager,
-    getSystemPrompt: async (signal) => {
-      signal?.throwIfAborted();
-      const currentModel = providerRegistry.getCurrentModel();
-      const supplement = await readTierPromptSupplement(
-        factsFor({ catalog: providerRegistry }, currentModel),
-        providerRegistry.modelTiers,
-        'tui.conversation-system-prompt',
-        { audience: 'conversation', signal },
-      ).catch((error: unknown) => {
+  const { orchestrator, orchestratorRefs } = createTerminalOrchestrator(
+    {
+      conversation,
+      toolRegistry,
+      permissionManager,
+      getSystemPrompt: async (signal) => {
         signal?.throwIfAborted();
-        logger.warn('Optional model guidance unavailable; continuing conversation', { error: summarizeError(error) });
-        return '';
-      });
-      signal?.throwIfAborted();
-      return joinPromptParts(runtime.systemPrompt, supplement);
+        const currentModel = providerRegistry.getCurrentModel();
+        const supplement = await readTierPromptSupplement(
+          factsFor({ catalog: providerRegistry }, currentModel),
+          providerRegistry.modelTiers,
+          'tui.conversation-system-prompt',
+          { audience: 'conversation', signal },
+        ).catch((error: unknown) => {
+          signal?.throwIfAborted();
+          logger.warn('Optional model guidance unavailable; continuing conversation', { error: summarizeError(error) });
+          return '';
+        });
+        signal?.throwIfAborted();
+        return joinPromptParts(runtime.systemPrompt, supplement);
+      },
+      hookDispatcher,
+      flagManager: services.featureFlags,
+      runtimeBus,
+      sessionId: runtime.sessionId,
+      resolveSessionId: () => runtime.sessionId,
+      services: {
+        agentManager: services.agentManager,
+        contractRunner: services.contractRunner,
+        contractIntake: services.contractIntake,
+      },
     },
-    hookDispatcher,
-    flagManager: services.featureFlags,
-    requestRender: () => orchestratorRefs.requestRender(),
-    runtimeBus,
-    sessionId: runtime.sessionId,
-    resolveSessionId: () => runtime.sessionId,
-    services: {
-      agentManager: services.agentManager,
-      contractRunner: services.contractRunner,
-      contractIntake: services.contractIntake,
-    },
-  });
+    requestRender,
+  );
   conversationFollowUpRef.value = (item) => orchestrator.enqueueConversationFollowUp(item);
   // Companion messages follow the same direct conversation path as the composer.
-  orchestratorHandleUserInputRef.value = (text: string, options?: OrchestratorUserInputOptions) => {
-    void refreshMemoryRecallSnapshot(services);
-    void orchestrator.handleUserInput(text, undefined, options).catch((err: unknown) => {
+  orchestratorHandleUserInputRef.value = terminalCompanionInputHandler(
+    orchestrator,
+    (err) => {
       logger.debug('companion handleUserInput safety catch', { error: String(err) });
-    });
-  };
+    },
+    () => {
+      void refreshMemoryRecallSnapshot(services);
+    },
+  );
   // Shared payload (single source of truth, includes the memoryRegistry,
   // see orchestrator-core-services.ts) plus this site's cacheHitTracker.
   orchestrator.setCoreServices({
@@ -256,15 +268,24 @@ export async function bootstrapRuntime(
   conversation.setSessionLineageTracker(services.sessionLineageTracker);
 
   // Bind context_accounting's session source to the live Orchestrator (see context-accounting-source.ts).
-  wireContextAccountingSource({
-    orchestrator, providerRegistry, sessionLineageTracker: services.sessionLineageTracker, runtimeBus, sessionId: runtime.sessionId,
-  }, services.contextAccountingHolder, bootstrapUnsubs);
+  wireContextAccountingSource(
+    {
+      orchestrator,
+      providerRegistry,
+      sessionLineageTracker: services.sessionLineageTracker,
+      runtimeBus,
+      sessionId: runtime.sessionId,
+    },
+    services.contextAccountingHolder,
+    bootstrapUnsubs,
+  );
 
   const acpLifetime = new AbortController();
   bootstrapUnsubs.push(() => acpLifetime.abort());
   const acpManager = new AcpManager({
     permissionHost: { port: services.judgment.port, permissionManager, config: configManager, signal: acpLifetime.signal },
-    runtimeBus, hookDispatcher: services.hookDispatcher,
+    runtimeBus,
+    hookDispatcher: services.hookDispatcher,
   });
   const acpTaskAdapter = new AcpTaskAdapter(store);
   const ACP_TASK_SYNC_INTERVAL_MS = 1_000;
@@ -436,12 +457,18 @@ export async function bootstrapRuntime(
           workingDirectory: services.workingDirectory,
           homeDirectory: services.homeDirectory,
         }),
-        isReachable: async () => await sessionSpine.probeReachability() === 'online',
+        isReachable: async () => (await sessionSpine.probeReachability()) === 'online',
       });
       if (outcome.action === 'started' || outcome.action === 'came-online') {
-        const companionTokenRecord = resolveDaemonCompanionToken(join(services.homeDirectory, '.goodvibes', 'daemon'), GOODVIBES_TUI_SURFACE_ROOT);
+        const companionTokenRecord = resolveDaemonCompanionToken(
+          join(services.homeDirectory, '.goodvibes', 'daemon'),
+          GOODVIBES_TUI_SURFACE_ROOT,
+        );
         externalServicesPromise = startExternalServices(
-          configManager, runtimeBus, hookDispatcher, services,
+          configManager,
+          runtimeBus,
+          hookDispatcher,
+          services,
           createExternalServiceFactories(companionTokenRecord.token),
         );
         externalServices = await externalServicesPromise;
@@ -459,7 +486,8 @@ export async function bootstrapRuntime(
   };
 
   let externalServices: ExternalServicesHandle = {
-    daemonServer: null, httpListener: null,
+    daemonServer: null,
+    httpListener: null,
     daemonStatus: createPendingServiceStatus(configManager, 'daemon'),
     httpListenerStatus: createPendingServiceStatus(configManager, 'httpListener'),
     listRecentControlPlaneEvents: () => [],
@@ -506,9 +534,14 @@ export async function bootstrapRuntime(
   const daemonHandshake = createDaemonAttachHandshake({
     clientBuildGuard: services.clientBuildGuard,
     readDaemonStatus: () => externalServices.daemonStatus,
-    recordRefusal: (status) => { externalServices = { ...externalServices, daemonStatus: status }; },
+    recordRefusal: (status) => {
+      externalServices = { ...externalServices, daemonStatus: status };
+    },
     adopt: (status, daemonToken) => syncSessionSpineToHostStatus(status, daemonToken),
-    notify: (text) => { systemMessageRouter.high(`[Daemon] ${text}`); requestRender(); },
+    notify: (text) => {
+      systemMessageRouter.high(`[Daemon] ${text}`);
+      requestRender();
+    },
   });
   // A liveness flip is only PAINTED once something calls requestRender(); without
   // this, the footer's spine segment sat correct-but-undrawn until incidental activity redrew it (minutes, during an idle stretch).
@@ -517,7 +550,14 @@ export async function bootstrapRuntime(
     requestRender();
     daemonHandshake.onLivenessTransition(online);
   });
-  deferredStartup.schedule(createPluginStartupTask(pluginManager, ()=>buildPluginStartupContext({runtimeBus,commandRegistry:pluginCommandRegistry,providerRegistry,toolRegistry},services), requestRender, message => systemMessageRouter.high(message)));
+  deferredStartup.schedule(
+    createPluginStartupTask(
+      pluginManager,
+      () => buildPluginStartupContext({ runtimeBus, commandRegistry: pluginCommandRegistry, providerRegistry, toolRegistry }, services),
+      requestRender,
+      (message) => systemMessageRouter.high(message),
+    ),
+  );
   deferredStartup.schedule({
     label: 'external-services',
     run: async () => {
@@ -539,7 +579,9 @@ export async function bootstrapRuntime(
         logger.info(`[bootstrap] Pruned ${prune.prunedPaths.length} stale operator-token file(s): ${prune.prunedPaths.join(', ')}`);
       }
       if (prune.failedPaths.length > 0) {
-        logger.warn(`[bootstrap] Failed to prune ${prune.failedPaths.length} stale operator-token file(s) (permission/race): ${prune.failedPaths.join(', ')}`);
+        logger.warn(
+          `[bootstrap] Failed to prune ${prune.failedPaths.length} stale operator-token file(s) (permission/race): ${prune.failedPaths.join(', ')}`,
+        );
       }
       externalServicesPromise = startExternalServices(
         configManager,
@@ -625,22 +667,30 @@ export async function bootstrapRuntime(
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 
   fireSessionStart(runtime.sessionId, services.hookDispatcher);
-  emitSessionStarted(runtimeBus, {
-    sessionId: runtime.sessionId,
-    traceId: `${runtime.sessionId}:session-start`,
-    source: 'bootstrap',
-  }, {
-    sessionId: runtime.sessionId,
-    profileId: 'default',
-    workingDir,
-  });
-  emitSessionReady(runtimeBus, {
-    sessionId: runtime.sessionId,
-    traceId: `${runtime.sessionId}:session-ready`,
-    source: 'bootstrap',
-  }, {
-    sessionId: runtime.sessionId,
-  });
+  emitSessionStarted(
+    runtimeBus,
+    {
+      sessionId: runtime.sessionId,
+      traceId: `${runtime.sessionId}:session-start`,
+      source: 'bootstrap',
+    },
+    {
+      sessionId: runtime.sessionId,
+      profileId: 'default',
+      workingDir,
+    },
+  );
+  emitSessionReady(
+    runtimeBus,
+    {
+      sessionId: runtime.sessionId,
+      traceId: `${runtime.sessionId}:session-ready`,
+      source: 'bootstrap',
+    },
+    {
+      sessionId: runtime.sessionId,
+    },
+  );
 
   // ── Compose RuntimeContext ────────────────────────────────────────────────
 
@@ -675,7 +725,8 @@ export async function bootstrapRuntime(
     agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
-    permissionPromptRef, trustPromptRef,
+    permissionPromptRef,
+    trustPromptRef,
     loadLastConversation: () => loadLastConversation({ surface: services.surface }),
     _writeLastSessionPointer: writeSessionPointer,
     _getPinned: () => services.favoritesStore.getPinned(),

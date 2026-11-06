@@ -5,8 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { fieldKind } from '../sdk/src/platform/utils/batteries/field-kind.ts';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { OwnerProfileStore } from '../sdk/src/platform/owner-profile/store.ts';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
 import { registerOwnerProfileGatewayMethods, type OwnerProfileGatewayService } from '../sdk/src/platform/control-plane/routes/owner-profile.ts';
@@ -155,4 +156,33 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
     body: { name: 'Jo' }, context: {}, isAuthorized: () => authorized,
   })).rejects.toThrow();
   expect(authorized).toBe(false);
+});
+
+test('Classic private named-person inference is explicit unsupported, without substring selection or broad disclosure', async () => {
+  const fake = recorded(); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = fixture('- Ann, my neighbour.\n- Joanne knows Ann and has other private details.');
+    await expect(f.store.person('Ann')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(f.store.person('Everyone')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(await f.store.person('')).toEqual([]);
+    expect(contentRequests(fake)).toHaveLength(0);
+  });
+});
+
+test('Preferred named-person exhaustion reports an unsupported interpretation rather than no matching people', async () => {
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = fixture();
+    await expect(f.store.person('Jo')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(decisionModelPolicyState().operation).toBe('classic');
+  });
+});
+
+test('Classic named-person cancellation outranks capability reporting without source transmission', async () => {
+  const fake = recorded(); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = fixture(); const controller = new AbortController(); controller.abort();
+    await expect(f.store.person('Jo', { signal: controller.signal })).rejects.toThrow();
+    expect(contentRequests(fake)).toHaveLength(0);
+  });
 });

@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { types as nativeTypes } from 'node:util';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting } from './schema.js';
 import { CONFIG_SCHEMA } from './schema.js';
@@ -528,26 +529,31 @@ export class ConfigManager {
 
   /** One named address only. Never used by a dump/category/listing. */
   async preparePostalAddress(kind: PostalKind, options: PostalReadOptions = {}): Promise<PreparedPostalAddress> {
-    const revision = this.getConfigurationIncarnation();
-    const reader = this.profilePostalReader;
-    const installation = this.profilePostalEpoch;
-    const stored = Object.fromEntries(POSTAL_PARTS.map(part => {
-      const { parent, field } = this.resolvePath(`payments.${kind}Address.${part}` as ConfigKey);
-      return [part, typeof parent[field] === 'string' ? (parent[field] as string).trim() : ''];
-    })) as Record<typeof POSTAL_PARTS[number], string>;
-    const check = () => {
-      options.signal?.throwIfAborted();
-      const result: unknown = options.assertCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
-      if (this.getConfigurationIncarnation() !== revision || this.profilePostalReader !== reader || this.profilePostalEpoch !== installation) throw new PostalAddressHeldError();
-    };
-    check();
-    const fallback = reader && POSTAL_PARTS.some(part => stored[part] === '')
-      ? await reader(kind, { ...options, assertCurrent: check }) : null;
-    check(); fallback?.assertCurrent();
-    const value = Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => [part, stored[part] || fallback?.value?.[part] || ''])) as unknown as PostalParts);
-    return Object.freeze({ value: POSTAL_PARTS.some(part => value[part] !== '') ? value : null,
-      assertCurrent: () => { check(); fallback?.assertCurrent(); } });
+    return withDecisionModelPolicy(() => this.get('judgment.policy'), async () => {
+      const revision = this.getConfigurationIncarnation();
+      const reader = this.profilePostalReader;
+      const installation = this.profilePostalEpoch;
+      const stored = Object.fromEntries(POSTAL_PARTS.map(part => {
+        const { parent, field } = this.resolvePath(`payments.${kind}Address.${part}` as ConfigKey);
+        return [part, typeof parent[field] === 'string' ? (parent[field] as string).trim() : ''];
+      })) as Record<typeof POSTAL_PARTS[number], string>;
+      const check = () => {
+        options.signal?.throwIfAborted();
+        const result: unknown = options.assertCurrent?.();
+        if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
+        if (this.getConfigurationIncarnation() !== revision || this.profilePostalReader !== reader || this.profilePostalEpoch !== installation) throw new PostalAddressHeldError();
+      };
+      check();
+      const fallback = await decisionOrClassic<PreparedPostalAddress | null>(
+        () => reader && POSTAL_PARTS.some(part => stored[part] === '')
+          ? reader(kind, { ...options, assertCurrent: check }) : Promise.resolve(null),
+        () => null);
+      check(); fallback?.assertCurrent();
+      const value = Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => [part, stored[part] || fallback?.value?.[part] || ''])) as unknown as PostalParts);
+      return Object.freeze({ value: POSTAL_PARTS.some(part => value[part] !== '') ? value : null,
+        ...(isClassicOperation() ? { provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const } : {}),
+        assertCurrent: () => { check(); fallback?.assertCurrent(); } });
+    });
   }
 
   private resolvePath(

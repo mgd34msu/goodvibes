@@ -1,7 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** One exact closed-tier field; no shared address cache and no heuristic fallback. */
 import { checkAnswers, defineExtractionVerifier, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { POSTAL_PARTS, PostalAddressHeldError, type PostalParts, type ProfilePostalReader } from '../config/postal-address.js';
 import { capturePostalProposer, type PostalProviders } from './postal-proposer.js';
@@ -37,51 +38,66 @@ export function createProfilePostalReader(
   providers: PostalProviders | undefined,
 ): ProfilePostalReader {
   return async (kind, options) => {
-    try {
-      const current = source.captureRead();
-      const fieldId = `commerce.${kind}Address`;
-      const field = source.get(fieldId);
-      const fallbackEnabled = enabled();
-      if (fallbackEnabled && source.status().kind === 'unavailable') throw new PostalAddressHeldError();
-      const value = field?.value ?? '';
-      const valid = field?.valid;
-      const check = () => {
-        options.signal?.throwIfAborted(); current.assertCurrent();
-        const result: unknown = options.assertCurrent?.();
-        if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
-        const now = source.get(fieldId);
-        if (enabled() !== fallbackEnabled || now?.value !== field?.value || now?.valid !== valid) throw new PostalAddressHeldError();
-      };
-      check();
-      if (!fallbackEnabled || !valid || !value.trim()) return Object.freeze({ value: null, assertCurrent: check });
-      // Privacy-screen even when no provider is configured; never hash or log a raw rejected field.
-      snapshotJudgmentInput({ source: value });
-      if (!providers) throw new PostalAddressHeldError();
-      let providerCurrent = () => {};
-      const owner = captureJudgmentPort('engine.owner-profile.postal-address', { ...options, assertCurrent: () => { check(); providerCurrent(); } });
-      const proposer = capturePostalProposer(providers, check, owner.signal);
-      providerCurrent = proposer.assertCurrent;
-      const assertCurrent = () => { check(); owner.assertCurrent(); proposer.assertCurrent(); };
-      const proposal = await proposer.propose(value);
-      assertCurrent();
-      if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)
-        || Object.keys(proposal).length !== POSTAL_PARTS.length) throw new PostalAddressHeldError();
-      const record = proposal as Record<string, JsonValue>;
-      for (const part of POSTAL_PARTS) if (!Object.hasOwn(record, part) || (record[part] !== null && typeof record[part] !== 'string')) throw new PostalAddressHeldError();
-      // The canonical verifier receives only the captured field and the bounded proposed record.
-      const port: JudgmentPort = { ...owner.port, async ask(request) {
-        assertCurrent(); const response = await owner.port.ask(request); assertCurrent();
-        checkAnswers(request.questions, response.answers);
-        if (response.requestedModel !== owner.port.model) throw new PostalAddressHeldError();
-        return response;
-      } };
-      const verified = await postalAddressExtraction.verify(port, { instruction, source: value, fields, record }, {
-        signal: owner.signal, beforeAttempt: assertCurrent, site: 'owner-profile.postal-address',
-      });
-      assertCurrent();
-      if (verified.escalate || verified.checks.length < POSTAL_PARTS.length) throw new PostalAddressHeldError();
-      const parts = Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => [part, record[part] ?? ''])) as unknown as PostalParts);
-      return Object.freeze({ value: parts, assertCurrent });
-    } catch { throw new PostalAddressHeldError(); }
+    return withConfiguredDecisionModelPolicy(async () => {
+      let nativeCurrent = () => { options.signal?.throwIfAborted(); };
+      let decisionPhase = false;
+      try {
+        const current = source.captureRead();
+        const fieldId = `commerce.${kind}Address`;
+        const field = source.get(fieldId);
+        const fallbackEnabled = enabled();
+        if (fallbackEnabled && source.status().kind === 'unavailable') throw new PostalAddressHeldError();
+        const value = field?.value ?? '';
+        const valid = field?.valid;
+        const check = () => {
+          options.signal?.throwIfAborted(); current.assertCurrent();
+          const result: unknown = options.assertCurrent?.();
+          if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
+          const now = source.get(fieldId);
+          if (enabled() !== fallbackEnabled || now?.value !== field?.value || now?.valid !== valid) throw new PostalAddressHeldError();
+        };
+        nativeCurrent = check;
+        check();
+        if (!fallbackEnabled || !valid || !value.trim()) return Object.freeze({ value: null, assertCurrent: check });
+        // Privacy-screen even when no provider is configured; never hash or log a raw rejected field.
+        snapshotJudgmentInput({ source: value });
+        requireDecisionFeature('interpreting a prose profile address; configure the individual address fields to use them in Classic');
+        if (!providers) throw new PostalAddressHeldError();
+        let providerCurrent = () => {};
+        decisionPhase = true;
+        const owner = captureJudgmentPort('engine.owner-profile.postal-address', { ...options, assertCurrent: () => { check(); providerCurrent(); } });
+        decisionPhase = false;
+        const proposer = capturePostalProposer(providers, check, owner.signal);
+        providerCurrent = proposer.assertCurrent;
+        const assertCurrent = () => { check(); owner.assertCurrent(); proposer.assertCurrent(); };
+        const proposal = await proposer.propose(value);
+        assertCurrent();
+        if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)
+          || Object.keys(proposal).length !== POSTAL_PARTS.length) throw new PostalAddressHeldError();
+        const record = proposal as Record<string, JsonValue>;
+        for (const part of POSTAL_PARTS) if (!Object.hasOwn(record, part) || (record[part] !== null && typeof record[part] !== 'string')) throw new PostalAddressHeldError();
+        // The canonical verifier receives only the captured field and the bounded proposed record.
+        const port: JudgmentPort = { ...owner.port, async ask(request) {
+          assertCurrent(); const response = await owner.port.ask(request); assertCurrent();
+          checkAnswers(request.questions, response.answers);
+          if (response.requestedModel !== owner.port.model) throw new PostalAddressHeldError();
+          return response;
+        } };
+        decisionPhase = true;
+        const verified = await postalAddressExtraction.verify(port, { instruction, source: value, fields, record }, {
+          signal: owner.signal, beforeAttempt: assertCurrent, site: 'owner-profile.postal-address',
+        });
+        assertCurrent();
+        if (verified.escalate || verified.checks.length < POSTAL_PARTS.length) throw new PostalAddressHeldError();
+        const parts = Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => [part, record[part] ?? ''])) as unknown as PostalParts);
+        return Object.freeze({ value: parts, assertCurrent });
+      } catch (error) {
+        try { nativeCurrent(); } catch { throw new PostalAddressHeldError(); }
+        if (error instanceof DecisionModelsDisabledError) throw error;
+        // A content-proposal provider outage is not decision-chain exhaustion.
+        if (decisionPhase && activateClassicFallback(error)) throw new DecisionModelsDisabledError('interpreting a prose profile address; use explicitly configured address fields');
+        throw new PostalAddressHeldError();
+      }
+    });
   };
 }

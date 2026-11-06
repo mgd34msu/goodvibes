@@ -1,7 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Named People-line attribution is a reading, never permission to disclose a profile. */
 import { checkAnswers, defineBattery, STAKES_BANDS, toJson, yesNo, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { ProfileLine } from './types.js';
 
@@ -40,52 +41,61 @@ export async function readProfilePerson(
   options: ProfilePersonReadingOptions,
   profileCurrent: () => void,
 ): Promise<readonly ProfileLine[]> {
-  const { signal, assertCurrent: callerCurrent, retain } = options;
-  const original = { name, lines };
-  // Admit the complete original, including provenance, before projection or any
-  // model access. Return detached source lines, never model-generated content.
-  const captured = snapshotJudgmentInput(original) as typeof original;
-  const identity = JSON.stringify(captured);
-  const sourceCurrent = () => {
-    signal?.throwIfAborted(); synchronous(profileCurrent);
-    if (JSON.stringify(snapshotJudgmentInput(original)) !== identity) throw new ProfilePersonReadingHeldError();
-    signal?.throwIfAborted();
-  };
-  const current = () => { sourceCurrent(); synchronous(callerCurrent); sourceCurrent(); };
-  current();
-  if (retain) synchronous(() => retain(sourceCurrent));
-  current();
-  // Only negative structural guards remain local; no positive name matching.
-  if (typeof captured.name !== 'string' || !/[\p{L}\p{N}]/u.test(captured.name) || captured.lines.length === 0) return [];
-  const owner = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: current });
-  if (retain) {
-    // The retained restriction must not call the consumer that retains it:
-    // OccasionReadingWork also checks its retained restrictions itself.
-    const restriction = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: sourceCurrent });
-    synchronous(() => retain(restriction.assertCurrent));
-  }
-  owner.assertCurrent();
-  const port: JudgmentPort = { ...owner.port, async ask(request) {
-    owner.assertCurrent();
-    const response = await owner.port.ask(request);
-    owner.assertCurrent(); checkAnswers(request.questions, response.answers);
-    if (response.requestedModel !== owner.port.model || typeof response.model !== 'string' || !response.model.trim()) throw new ProfilePersonReadingHeldError();
-    return response;
-  } };
-  const people = captured.lines.map(line => line.text);
-  const selected: ProfileLine[] = [];
-  for (const line of captured.lines) {
-    owner.assertCurrent();
-    const result = await profilePersonLine.run(port, toJson({ name: captured.name, line: line.text, people }) as EntryType, {
-      signal: owner.signal, site: 'engine.owner-profile.person-line',
-    });
-    owner.assertCurrent();
-    const reading = result.readings.personLine;
-    if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new ProfilePersonReadingHeldError();
-    if (reading.verdict === 'yes') selected.push(line);
-    result.recordAction(reading.verdict === 'yes' ? 'retained named person line' : 'excluded unrelated person line');
-    owner.assertCurrent();
-  }
-  owner.assertCurrent();
-  return selected;
+  return withConfiguredDecisionModelPolicy(async () => {
+    const { signal, assertCurrent: callerCurrent, retain } = options;
+    const original = { name, lines };
+    // Admit the complete original, including provenance, before projection or any
+    // model access. Return detached source lines, never model-generated content.
+    const captured = snapshotJudgmentInput(original) as typeof original;
+    const identity = JSON.stringify(captured);
+    const sourceCurrent = () => {
+      signal?.throwIfAborted(); synchronous(profileCurrent);
+      if (JSON.stringify(snapshotJudgmentInput(original)) !== identity) throw new ProfilePersonReadingHeldError();
+      signal?.throwIfAborted();
+    };
+    const current = () => { sourceCurrent(); synchronous(callerCurrent); sourceCurrent(); };
+    current();
+    if (retain) synchronous(() => retain(sourceCurrent));
+    current();
+    // Only negative structural guards remain local; no positive name matching.
+    if (typeof captured.name !== 'string' || !/[\p{L}\p{N}]/u.test(captured.name) || captured.lines.length === 0) return [];
+    requireDecisionFeature('attributing private profile prose to a named person');
+    try {
+      const owner = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: current });
+      if (retain) {
+        // The retained restriction must not call the consumer that retains it:
+        // OccasionReadingWork also checks its retained restrictions itself.
+        const restriction = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: sourceCurrent });
+        synchronous(() => retain(restriction.assertCurrent));
+      }
+      owner.assertCurrent();
+      const port: JudgmentPort = { ...owner.port, async ask(request) {
+        owner.assertCurrent();
+        const response = await owner.port.ask(request);
+        owner.assertCurrent(); checkAnswers(request.questions, response.answers);
+        if (response.requestedModel !== owner.port.model || typeof response.model !== 'string' || !response.model.trim()) throw new ProfilePersonReadingHeldError();
+        return response;
+      } };
+      const people = captured.lines.map(line => line.text);
+      const selected: ProfileLine[] = [];
+      for (const line of captured.lines) {
+        owner.assertCurrent();
+        const result = await profilePersonLine.run(port, toJson({ name: captured.name, line: line.text, people }) as EntryType, {
+          signal: owner.signal, site: 'engine.owner-profile.person-line',
+        });
+        owner.assertCurrent();
+        const reading = result.readings.personLine;
+        if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new ProfilePersonReadingHeldError();
+        if (reading.verdict === 'yes') selected.push(line);
+        result.recordAction(reading.verdict === 'yes' ? 'retained named person line' : 'excluded unrelated person line');
+        owner.assertCurrent();
+      }
+      owner.assertCurrent();
+      return selected;
+    } catch (error) {
+      current();
+      if (activateClassicFallback(error)) throw new DecisionModelsDisabledError('attributing private profile prose to a named person');
+      throw error;
+    }
+  });
 }

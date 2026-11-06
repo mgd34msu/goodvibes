@@ -7,6 +7,9 @@ export class PostalAddressHeldError extends Error {
   constructor() { super('The stored address needs a current verified reading before it can be used.'); this.name = 'PostalAddressHeldError'; }
 }
 export interface PreparedPostalAddress {
+  readonly provenance?: 'classic';
+  /** Classic returns native stored fields; no prose profile address was interpreted. */
+  readonly profileAssessment?: 'not-evaluated';
   readonly value: PostalParts | null;
   /** Restriction only, never permission to disclose or place an order. */
   readonly assertCurrent: () => void;

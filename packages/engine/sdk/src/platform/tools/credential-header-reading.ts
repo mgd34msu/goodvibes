@@ -2,12 +2,25 @@ import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-inpu
 import type { CallOptions } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { credentialHeader } from './batteries/credential-header.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+
+const CLASSIC_PUBLIC_HEADERS = new Set(['accept', 'accept-language', 'accept-encoding', 'content-type', 'content-length',
+  'user-agent', 'cache-control', 'if-none-match', 'if-modified-since', 'range']);
 
 /** Name-only credential classification. Null means no acting reading; failures propagate. */
 export async function readCredentialHeader(
   header: string,
   options: CallOptions = {},
 ): Promise<boolean | null> {
+  return decisionOrClassic(() => readDecisionCredentialHeader(header, options), () => {
+    options.signal?.throwIfAborted(); options.beforeAttempt?.();
+    // Unknown names receive credential handling. A missing semantic answer must
+    // never clear a custom header's contents for unprotected transmission.
+    return !CLASSIC_PUBLIC_HEADERS.has(header.toLowerCase());
+  });
+}
+
+async function readDecisionCredentialHeader(header: string, options: CallOptions): Promise<boolean | null> {
   const captured = snapshotJudgmentInput(header);
   if (typeof captured !== 'string') throw new JudgmentInputError('unsupported-input');
   const site = options.site ?? 'tools.credential-header';

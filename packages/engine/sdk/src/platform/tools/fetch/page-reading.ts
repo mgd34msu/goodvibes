@@ -11,6 +11,7 @@ import { mapLimit, type Candidate } from '@goodvibes-jev/judgment';
 import { pageContent } from '../batteries/page-content.js';
 import { pageSummary, paragraphCandidate } from '../batteries/page-summary.js';
 import { pageBlocks, pageTitle, pageUnits } from './page-blocks.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 const READABLE_SITE = 'tools.fetch.readable';
 const SUMMARY_SITE = 'tools.fetch.summary';
@@ -28,6 +29,10 @@ export const NO_SUMMARY_NOTE = 'No paragraph on this page reads as saying what t
 
 /** The page's main content: every block except those read, with a no that acts, as not main content. */
 export async function readReadable(html: string): Promise<string> {
+  return decisionOrClassic(() => readDecisionReadable(html), () => pageBlocks(pageUnits(html)).map(block => block.text).join('\n\n'));
+}
+
+async function readDecisionReadable(html: string): Promise<string> {
   const blocks = pageBlocks(pageUnits(html)).map((block, index) => ({ number: index + 1, ...block }));
   const port = judgmentPort(READABLE_SITE);
   const readings = await pageContent.read(port, pageTitle(html), blocks, { site: READABLE_SITE });
@@ -62,6 +67,16 @@ async function pickSummary(title: string, candidates: readonly Candidate[]): Pro
  * about, then (for HTML) the page's headings as an outline.
  */
 export async function readSummary(body: string, isHtml: boolean): Promise<string> {
+  return decisionOrClassic(() => readDecisionSummary(body, isHtml), () => {
+    const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map(text => ({ text: text.trim(), headingLevel: undefined })).filter(unit => unit.text);
+    const first = units.find(unit => unit.headingLevel === undefined)?.text ?? '';
+    const headings = units.filter(unit => unit.headingLevel !== undefined).map(unit => `${'#'.repeat(unit.headingLevel!)} ${unit.text}`);
+    return ['[Classic page excerpt and outline; no semantic summary was generated.]', first,
+      ...(headings.length ? [`Headings:\n${headings.join('\n')}`] : [])].filter(Boolean).join('\n\n');
+  });
+}
+
+async function readDecisionSummary(body: string, isHtml: boolean): Promise<string> {
   const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map((text) => ({ text: text.trim(), headingLevel: undefined })).filter((unit) => unit.text);
   const paragraphs = units.filter((unit) => unit.headingLevel === undefined).map((unit) => unit.text);
   const candidates = paragraphs.map((text, index) => paragraphCandidate(`p${index + 1}`, text));

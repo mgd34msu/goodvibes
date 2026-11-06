@@ -42,6 +42,7 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { linkHost, linkHostView, renderedHost } from './batteries/link-host.js';
 import { registrableDomain } from './public-suffix.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** The decision site the link-host reading is logged under. */
 export const LINK_HOST_SITE = 'security.link-validation';
@@ -62,6 +63,7 @@ export type LinkRefusalReason =
   | 'too-many-redirects';
 
 export interface LinkAccepted {
+  readonly provenance?: 'classic';
   readonly ok: true;
   /** The normalized, safe-to-open URL. */
   readonly url: string;
@@ -165,6 +167,7 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
 
   // One request, two questions about the host's meaning; the domain
   // comparison below stays code. Anything short of a confident no refuses.
+  return decisionOrClassic<LinkValidation>(async () => {
   const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE });
   const refusesOn = (reading: (typeof run.readings)['lookalike']): boolean =>
     !(reading.verdict === 'no' && reading.outcome === 'act');
@@ -203,6 +206,8 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
   }
 
   return { ok: true, url: parsed.toString(), host, registrableDomain: actual };
+  }, () => actual === expected ? { ok: true, url: parsed.toString(), host, registrableDomain: actual, provenance: 'classic' }
+    : refuse('domain-mismatch', `Refused: the link goes to "${actual}" but this action is authorized for "${expected}".`, expected, actual));
 }
 
 /** A single HEAD/GET that reports only what redirect following needs. */

@@ -10,6 +10,9 @@ import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
 import { ResponseCompletionGuard } from '../sdk/src/platform/core/response-completion.js';
 import { prepareSystemMessagePresentation } from '../sdk/src/platform/runtime/system-message-presentation.js';
 import { readNormalizedError } from '../sdk/src/platform/utils/error-display.js';
+import { readReadable, readSummary } from '../sdk/src/platform/tools/fetch/page-reading.js';
+import { readCredentialHeader } from '../sdk/src/platform/tools/credential-header-reading.js';
+import { validateLinkTarget } from '../sdk/src/platform/security/link-validation.js';
 
 let prior: ReturnType<typeof installJudgmentPort>;
 let decisionRequests = 0;
@@ -73,6 +76,21 @@ test('Default - On reports exhaustion without selecting Classic', async () => {
   await withDecisionModelPolicy(() => 'Default - On', async () => {
     await expect(readWillPrompt('printf done', new AbortController().signal)).rejects.toMatchObject({ kind: 'unavailable' });
     expect(decisionModelPolicyState().operation).toBe('decision');
+  });
+});
+
+test('Classic fetch preparation keeps literal page content and deterministic URL/header boundaries', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const html = '<html><head><title>Example</title></head><body><h1>Overview</h1><p>Actual source paragraph.</p></body></html>';
+    expect(await readReadable(html)).toContain('Actual source paragraph.');
+    expect(await readSummary(html, true)).toContain('no semantic summary was generated');
+    expect(await readCredentialHeader('Accept')).toBe(false);
+    expect(await readCredentialHeader('Authorization')).toBe(true);
+    expect(await readCredentialHeader('x-unclassified-private-value')).toBe(true);
+    expect(await validateLinkTarget('https://docs.example.com/help', 'example.com')).toMatchObject({ ok: true, provenance: 'classic' });
+    expect(await validateLinkTarget('https://example.com@evil.example/help', 'example.com')).toMatchObject({ ok: false, reason: 'contains-userinfo' });
+    expect(await validateLinkTarget('https://example.com.evil.example/help', 'example.com')).toMatchObject({ ok: false, reason: 'domain-mismatch' });
+    expect(decisionRequests).toBe(0);
   });
 });
 

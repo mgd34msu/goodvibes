@@ -63,6 +63,14 @@ quotes history mechanically, marks clipping and leaves semantic quality scores
 absent. Automatic semantic repair is explicitly unavailable; validation errors
 and the original candidate remain available for a corrected explicit edit.
 
+Classic fetch exposes literal extracted page text and a clearly labelled excerpt
+and heading outline. URL syntax, HTTPS, credential-free addresses, permitted
+ports, exact registrable-domain comparison and per-hop redirect checks remain
+deterministic. An accepted Classic URL does not claim semantic host verification.
+Only declared public HTTP headers bypass credential handling; unknown custom
+headers remain protected. Explicit memory/code searches retain literal or vector
+retrieval, with score sources named; optional semantic prompt enrichment is omitted.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

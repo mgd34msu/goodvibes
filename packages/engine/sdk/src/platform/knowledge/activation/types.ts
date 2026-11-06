@@ -7,12 +7,18 @@ export interface KnowledgeNodeActivationOptions {
   /** A composed serving pass cannot consume a pending draft as a successful claim. */
   readonly requireAccepted?: boolean | undefined;
 }
-export type NodeActivationReason = 'no' | 'uncertain' | 'unavailable' | 'unconfigured' | 'missing-evidence' | 'foreign-space' | 'budget' | 'aborted' | 'stale' | 'malformed' | 'observation-revalidation' | 'owner-confidence-floor' | 'replacement-requires-review';
+export type NodeActivationReason = 'no' | 'uncertain' | 'unavailable' | 'unconfigured' | 'missing-evidence' | 'foreign-space' | 'budget' | 'aborted' | 'stale' | 'malformed' | 'rejected' | 'invalid-request' | 'unrecorded' | 'decision-model-disabled' | 'observation-revalidation' | 'owner-confidence-floor' | 'replacement-requires-review';
 export class KnowledgeNodeActivationHeldError extends Error {
   override readonly name = 'KnowledgeNodeActivationHeldError';
-  constructor(readonly reason: NodeActivationReason) { super(`Knowledge node activation held: ${reason}.`); }
+  constructor(readonly reason: NodeActivationReason) {
+    super(reason === 'decision-model-disabled'
+      ? 'Automatic knowledge activation requires a decision model in Classic operation; retain a draft or use explicit owner review.'
+      : `Knowledge node activation held: ${reason}.`);
+  }
 }
 export interface NodeActivationReading {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly outcome: 'accepted' | 'pending-review';
   readonly reason?: NodeActivationReason | undefined;
   readonly probability?: number | undefined;

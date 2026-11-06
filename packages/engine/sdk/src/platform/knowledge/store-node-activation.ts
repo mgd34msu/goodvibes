@@ -1,10 +1,12 @@
 import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-record-representation.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { captureKnowledgeSourceReferences, retainKnowledgeNodeActivationReferences } from './source-structural-references.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { nodeServingWithoutReview } from './activation/battery.js';
 import { snapshotNodeInput, activationMeaning, activationSubjectIds, type ActivationSubject, activationContent, activationEvidenceHash, activationSourceIds, projectNodeActivation, type ActivationEvidence } from './activation/projection.js';
-import { readNodeActivations } from './activation/reader.js';
+import { classicNodeActivation, readNodeActivations } from './activation/reader.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { supportHash } from './semantic/verification/projection.js';
 import { getKnowledgeNodeObservation, prepareKnowledgeNodeObservation, type ObservedEvidence, type resolveKnowledgeNodeObservation } from './store-node-observation.js';
@@ -48,9 +50,26 @@ function unchanged(draft: NodeMutationDraft): boolean {
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 
 export async function prepareNodeActivationPass(store: KnowledgeStore, drafts: readonly NodeMutationDraft[], options: KnowledgeNodeActivationOptions, ownerConfidenceFloor: number | undefined, scope: object, stage?: KnowledgeNodeActivationStage): Promise<KnowledgePreparedNodeWrites> {
+  return withConfiguredDecisionModelPolicy(() => prepareOwnedNodeActivationPass(store, drafts, options, ownerConfidenceFloor, scope, stage));
+}
+async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: readonly NodeMutationDraft[], options: KnowledgeNodeActivationOptions, ownerConfidenceFloor: number | undefined, scope: object, stage?: KnowledgeNodeActivationStage): Promise<KnowledgePreparedNodeWrites> {
   const assertCallerCurrent = options.assertCurrent;
-  assertCallerCurrent?.();
-  stage?.assertCurrent();
+  const signal = options.signal;
+  let retired = false;
+  const assertNative = () => {
+    if (signal?.aborted) throw new Held('aborted');
+    if (retired) throw new Held('stale');
+    try {
+      isClassicOperation(); // Policy changes retire the original operation; fallback does not change native scope.
+      if (options.signal !== signal || options.assertCurrent !== assertCallerCurrent) throw new Held('stale');
+      const result: unknown = assertCallerCurrent?.();
+      if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
+      stage?.assertCurrent();
+    } catch { retired = true; throw new Held('stale'); }
+    if (signal?.aborted) throw new Held('aborted');
+  };
+  assertNative();
+  if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 0 || options.timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   if (drafts.length > LIMITS.nodes) throw new Held('budget');
   const identities = new Map<string, string>();
   for (const { record } of drafts) {
@@ -98,6 +117,9 @@ export async function prepareNodeActivationPass(store: KnowledgeStore, drafts: r
     const receipt = existing?.metadata.nodeActivation;
     if (existing?.status === 'active' && unchanged(draft) && draft.preserveObservation
       && (!isRecord(receipt) || receipt.evidenceHash === draft.evidenceHash)) return existing;
+    // Ordinary native storage needs no model-bound projection or outbound privacy admission.
+    // Its synthesized content remains an untrusted draft; changed active content still holds below.
+    if (isClassicOperation()) return undefined;
     // Both projection and complete protected-input preflight run for every selected
     // synthesized candidate before the reader can send the first request.
     const projection = projectNodeActivation(record, draft.evidence, draft.subjects.map((subject) => ({ ...subject,
@@ -105,14 +127,20 @@ export async function prepareNodeActivationPass(store: KnowledgeStore, drafts: r
     requestIndices.set(index, requests.length); requests.push(projection);
     return undefined;
   });
-  const port = currentPort(), model = port?.model;
-  const readings = await readNodeActivations(requests, options);
+  const port = requests.length && !isClassicOperation() ? currentPort() : undefined;
+  let model: string | undefined;
+  try { model = port?.model; } catch { throw new Held('malformed'); }
+  const readings = requests.length ? await readNodeActivations(requests, { ...options, assertCurrent: assertNative }) : [];
+  assertNative();
+  const semantic = readings.some(reading => reading.model !== undefined);
+  if (semantic && (!port || port.model !== model || !isClassicOperation() && currentPort() !== port)) throw new Held('stale');
   const resolved = nodes.map((draft, index): PreparedNode => {
     if (direct[index]) {
       const record = direct[index]!;
       return { ...draft, record, observationEvidence: draft.observation ? prepareKnowledgeNodeObservation(record, draft.observation) : undefined };
     }
-    const measured = readings[requestIndices.get(index)!]!;
+    const requestIndex = requestIndices.get(index);
+    const measured = requestIndex === undefined ? classicNodeActivation() : readings[requestIndex]!;
     const reading = measured.outcome === 'accepted' && ownerConfidenceFloor !== undefined && draft.record.confidence < ownerConfidenceFloor
       ? { ...measured, outcome: 'pending-review' as const, reason: 'owner-confidence-floor' as const } : measured;
     if (reading.outcome !== 'accepted' && (draft.existing?.status === 'active' || options.requireAccepted)) throw new Held(reading.reason === 'missing-evidence' && draft.existing?.metadata.nodeObservation !== undefined ? 'observation-revalidation' : reading.reason ?? 'uncertain');
@@ -121,8 +149,9 @@ export async function prepareNodeActivationPass(store: KnowledgeStore, drafts: r
       ...(!draft.preserveObservation ? { nodeObservation: undefined } : {}),
       reviewProvenance: knowledgeDecisionStamp(draft.now, { state: accepted ? 'auto-accepted' : 'pending-review',
         reason: accepted ? 'Settled serving-without-review judgment; untrusted origin retained; not an operator review'
+          : reading.operationProvenance === 'classic' ? 'Classic operation: semantic serving approval was not evaluated; retain the untrusted draft for owner review'
           : `Pending review: serving judgment ${reading.reason ?? 'uncertain'}` }),
-      nodeActivation: { battery: nodeServingWithoutReview.name, version: nodeServingWithoutReview.version, ...reading,
+      nodeActivation: { ...(reading.operationProvenance === 'classic' ? {} : { battery: nodeServingWithoutReview.name, version: nodeServingWithoutReview.version }), ...reading,
         ownerConfidenceFloor, candidateHash: supportHash(activationContent(draft.record)), evidenceHash: draft.evidenceHash,
         evidence: draft.evidence.map(({ id, source, extraction }) => ({ sourceId: id, sourceHash: supportHash(source),
           extractionId: extraction?.id, extractionHash: supportHash(extraction) })),
@@ -132,7 +161,8 @@ export async function prepareNodeActivationPass(store: KnowledgeStore, drafts: r
     return { ...draft, record };
   });
   const token = Object.freeze({ count: resolved.length });
-  prepared.set(token, { store, scope, nodes: resolved, written: new Set(), committed: new Map(), port, model, signal: options.signal, assertCurrent: assertCallerCurrent, expires: Date.now() + 30_000, stage });
+  prepared.set(token, { store, scope, nodes: resolved, written: new Set(), committed: new Map(), port: semantic ? port : undefined, model: semantic ? model : undefined,
+    signal, assertCurrent: assertNative, expires: Date.now() + 30_000, stage });
   assertPreparedNodeWrites(store, token, scope);
   return token;
 }
@@ -142,7 +172,7 @@ export function assertPreparedNodeWrites(store: KnowledgeStore, token: Knowledge
   if (!pass || pass.scope !== scope) throw new Held('malformed');
   if (pass.signal?.aborted) throw new Held('aborted');
   if (Date.now() > pass.expires) throw new Held('stale');
-  if (currentPort() !== pass.port || pass.port?.model !== pass.model) throw new Held('stale');
+  if (pass.port && (pass.port.model !== pass.model || !isClassicOperation() && currentPort() !== pass.port)) throw new Held('stale');
   pass.assertCurrent?.();
   pass.stage?.assertCurrent();
   for (const [index, draft] of pass.nodes.entries()) {

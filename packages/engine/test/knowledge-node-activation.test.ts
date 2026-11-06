@@ -1,3 +1,6 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { importHomeGraphSpace } from '../sdk/src/platform/knowledge/home-graph/import-export.js';
 import type { KnowledgeNodeRecord } from '../sdk/src/platform/knowledge/types.js';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -296,5 +299,113 @@ describe('synthesized knowledge serving authority', () => {
     expect(isKnowledgePageFactCandidate(draft)).toBe(false);
     expect(readHomeGraphSearchState(store, 'global').nodes).not.toContainEqual(draft);
     expect(store.getNode(draft.id)).toEqual(draft);
+  });
+});
+
+
+describe('Classic knowledge activation disposition', () => {
+  test('stores persistent untrusted drafts without borrowing model metadata or fabricating a semantic receipt', async () => {
+    const { store, reload } = await fixture(); let asks = 0, metadata = 0;
+    installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed model metadata'); },
+      get recorder(): never { metadata++; throw new Error('Classic borrowed recorder'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const node = await store.upsertNode(input('classic', { status: 'active', confidence: 100 }));
+      expect(node.status).toBe('draft');
+      expect(node.metadata.reviewProvenance).toMatchObject({ state: 'pending-review' });
+      expect(node.metadata.nodeActivation).toMatchObject({ outcome: 'pending-review', reason: 'decision-model-disabled', operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+      const activation = node.metadata.nodeActivation as Record<string, unknown>;
+      for (const field of ['battery', 'version', 'decisionId', 'model', 'requestedModel', 'probability']) expect(activation[field]).toBeUndefined();
+      const next = await reload(); expect(next.getNode(node.id)).toEqual(node); await next.close();
+      expect(asks).toBe(0); expect(metadata).toBe(0);
+    });
+  });
+
+  test('native observation, unchanged active replay and explicit owner review work without decision models', async () => {
+    const { store } = await fixture(); let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const source = store.getSource('manual');
+      const observed = await upsertObservedKnowledgeNode(store, { id: 'native', kind: 'topic', slug: 'native', title: 'Native declaration' }, 'catalog-structure', source, () => store.getSource('manual'));
+      expect(observed.status).toBe('active'); expect((await store.upsertNode({ ...observed })).status).toBe('active');
+      const draft = await store.upsertNode(input('manual-review'));
+      const reviewed = (await reviewKnowledgeNodeRecord(store, { id: draft.id, decision: 'accept' })).node;
+      expect(reviewed?.status).toBe('active'); expect(reviewed?.metadata.reviewProvenance).toMatchObject({ state: 'reviewed' });
+      expect(asks).toBe(0);
+    });
+  });
+
+  test('changed active content and requireAccepted cannot turn an unassessed draft into a serving node', async () => {
+    const { store, dbPath } = await fixture(); reading(); const active = await store.upsertNode(input('active'));
+    let asks = 0; installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const bytes = readFileSync(dbPath);
+      await held(store.upsertNode({ ...active, summary: 'Unreviewed replacement' }), 'decision-model-disabled');
+      await held(store.prepareNodeWrites([input('require-active')], { requireAccepted: true }), 'decision-model-disabled');
+      expect(store.getNode('require-active')).toBeNull(); expect(store.getNode(active.id)).toEqual(active); expect(readFileSync(dbPath)).toEqual(bytes);
+      const prepared = await store.prepareNodeWrites([input('stale-source')]);
+      await store.upsertExtraction({ sourceId: 'manual', extractorId: 'synthetic', format: 'text', excerpt: 'Changed native evidence' });
+      await held(store.upsertPreparedNode(prepared, 0), 'stale'); expect(store.getNode('stale-source')).toBeNull(); expect(asks).toBe(0);
+    });
+  });
+
+  test('Preferred typed exhaustion produces the same native pending state without a fabricated reading', async () => {
+    const { store } = await fixture(); let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const node = await store.upsertNode(input('exhausted'));
+      expect(node).toMatchObject({ status: 'draft', metadata: { nodeActivation: { operationProvenance: 'classic', reason: 'decision-model-disabled' } } });
+      expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+      expect((await store.upsertNode(input('subsequent'))).status).toBe('draft'); expect(asks).toBe(1);
+    });
+  });
+
+  test('Preferred later exhaustion retains a completed semantic no and never upgrades it', async () => {
+    const { store } = await fixture(); const negative = fakePort(() => noulAnswer(0.01));
+    installJudgmentPort({ model: negative.port.model, async ask(request) {
+      const state = request.state as { candidate?: { title?: string } };
+      if (state.candidate?.title === 'Explicitly unsupported') return negative.port.ask(request);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      throw new JudgmentError('unavailable', 'fixture exhausted');
+    } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const prepared = await store.prepareNodeWrites([input('refused', { title: 'Explicitly unsupported' }), input('outage')]);
+      const refused = await store.upsertPreparedNode(prepared, 0), pending = await store.upsertPreparedNode(prepared, 1);
+      expect(refused.status).toBe('draft'); expect(refused.metadata.nodeActivation).toMatchObject({ reason: 'no', probability: 0.01 });
+      expect(pending.status).toBe('draft'); expect(pending.metadata.nodeActivation).toMatchObject({ reason: 'decision-model-disabled', operationProvenance: 'classic' });
+    });
+  });
+
+  for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'unrecorded'] as const) {
+    test(`activation ${kind} is a real hold and cannot activate Preferred fallback`, async () => {
+      const { store } = await fixture();
+      installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        const node = await store.upsertNode(input(kind));
+        expect(node.status).toBe('draft'); expect(node.metadata.nodeActivation).toMatchObject({ reason: kind === 'invalid-response' ? 'malformed' : kind });
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    });
+  }
+
+  test('Classic cancellation, stale native authority and invalid budgets remain holds before writes', async () => {
+    const { store } = await fixture(); const abort = new AbortController(); abort.abort();
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      await held(store.prepareNodeWrites([input('cancelled')], { signal: abort.signal }), 'aborted');
+      await held(store.prepareNodeWrites([input('retired')], { assertCurrent() { throw new JudgmentError('unavailable', 'native guard is not a provider outage'); } }), 'stale');
+      await held(store.prepareNodeWrites([input('budget')], { timeoutMs: -1 }), 'budget');
+      expect(['cancelled', 'retired', 'budget'].map(id => store.getNode(id))).toEqual([null, null, null]);
+    });
+  });
+});
+
+
+test('a native authority or model metadata error cannot masquerade as Preferred availability exhaustion', async () => {
+  const { store } = await fixture(); let asks = 0;
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await held(store.prepareNodeWrites([input('native-retired')], { assertCurrent() { throw new JudgmentError('unavailable', 'native owner retired'); } }), 'stale');
+    installJudgmentPort({ get model(): never { throw new JudgmentError('unavailable', 'invalid local metadata getter'); }, async ask() { asks++; throw new Error('must not ask'); } });
+    await held(store.upsertNode(input('bad-metadata')), 'malformed');
+    expect(store.getNode('native-retired')).toBeNull(); expect(store.getNode('bad-metadata')).toBeNull();
+    expect(decisionModelPolicyState().operation).toBe('decision'); expect(asks).toBe(0);
   });
 });

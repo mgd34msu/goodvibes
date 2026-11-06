@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
@@ -792,6 +793,10 @@ export class KnowledgeStore {
 
   /** Prepare a complete semantic write pass before any affected persistence. */
   async prepareNodeWrites(inputs: readonly KnowledgeNodeUpsertInput[], options: KnowledgeNodeActivationOptions = {}): Promise<KnowledgePreparedNodeWrites> {
+    return withConfiguredDecisionModelPolicy(() => this.prepareNodeWritesOwned(inputs, options));
+  }
+
+  private async prepareNodeWritesOwned(inputs: readonly KnowledgeNodeUpsertInput[], options: KnowledgeNodeActivationOptions = {}): Promise<KnowledgePreparedNodeWrites> {
     const snapshots = inputs.map((input) => snapshotNodeInput(input));
     await this.init();
     const drafts = snapshots.map((input, index) => this.prepareNodeMutation(input, undefined, inputs[index]));
@@ -800,6 +805,10 @@ export class KnowledgeStore {
 
   /** Stage imported evidence and judgments before a guarded all-or-none SQL/cache commit. */
   async applyImport(input: KnowledgeImportInput, options: KnowledgeNodeActivationOptions = {}): Promise<void> {
+    return withConfiguredDecisionModelPolicy(() => this.applyImportOwned(input, options));
+  }
+
+  private async applyImportOwned(input: KnowledgeImportInput, options: KnowledgeNodeActivationOptions = {}): Promise<void> {
     input = captureKnowledgeStoreInput(input);
     await this.init();
     await applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
@@ -808,7 +817,11 @@ export class KnowledgeStore {
   }
 
   /** Prepare a source-backed graph before committing evidence and nodes together. */
-  async applyPreparedIngest(input: KnowledgeImportInput, prepareGraph: PrepareKnowledgeImportGraph,
+  async applyPreparedIngest(input: KnowledgeImportInput, prepareGraph: PrepareKnowledgeImportGraph, options: KnowledgeNodeActivationOptions = {}, onCommitted?: () => void): Promise<KnowledgeImportReceipt> {
+    return withConfiguredDecisionModelPolicy(() => this.applyPreparedIngestOwned(input, prepareGraph, options, onCommitted));
+  }
+
+  private async applyPreparedIngestOwned(input: KnowledgeImportInput, prepareGraph: PrepareKnowledgeImportGraph,
     options: KnowledgeNodeActivationOptions = {}, onCommitted?: () => void): Promise<KnowledgeImportReceipt> {
     if (!nativePublicationApply(nativePublicationHas, nativeNodePublicationOwners, [this])) throw new KnowledgeNodeActivationHeldError('stale');
     input = copyKnowledgeRepresentation(input, captureKnowledgeStoreInput(input));
@@ -846,6 +859,10 @@ export class KnowledgeStore {
   }
 
   async upsertNode(input: KnowledgeNodeUpsertInput, mutation?: KnowledgeNodeMutationContext): Promise<KnowledgeNodeRecord> {
+    return withConfiguredDecisionModelPolicy(() => this.upsertNodeOwned(input, mutation));
+  }
+
+  private async upsertNodeOwned(input: KnowledgeNodeUpsertInput, mutation?: KnowledgeNodeMutationContext): Promise<KnowledgeNodeRecord> {
     const snapshot = snapshotNodeInput(input);
     await this.init();
     const prepared = await prepareNodeActivationPass(this, [this.prepareNodeMutation(snapshot, mutation, input)], {}, this.nodeActivationConfidenceFloor, this.nodeActivationScope);
@@ -865,6 +882,10 @@ export class KnowledgeStore {
   }
 
   async replaceNodeRecord(record: KnowledgeNodeRecord, mutation?: KnowledgeNodeMutationContext): Promise<void> {
+    return withConfiguredDecisionModelPolicy(() => this.replaceNodeRecordOwned(record, mutation));
+  }
+
+  private async replaceNodeRecordOwned(record: KnowledgeNodeRecord, mutation?: KnowledgeNodeMutationContext): Promise<void> {
     const restoration = mutation === undefined ? knowledgeNodeRestorationGuard(this, record, this.nodeActivationScope) : undefined;
     record = snapshotNodeInput(record);
     await this.init();

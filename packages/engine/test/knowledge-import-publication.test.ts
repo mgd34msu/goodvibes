@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -143,4 +145,34 @@ test('successful import publishes complete exact records and callback only after
   });
   expect(committed).toBe(1);
   expect(cacheState(await open(store.storagePath))).toEqual(cacheState(store));
+});
+
+
+test('Classic import publishes native records once and keeps synthesized active claims as unassessed drafts', async () => {
+  const store = await fixture(); let asks = 0, metadata = 0, prepared = 0, committed = 0;
+  const previous = installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed model metadata'); },
+    get recorder(): never { metadata++; throw new Error('Classic borrowed recorder'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+  const data: KnowledgeImportInput = { ...input, nodes: [{ ...input.nodes[0]!, status: 'active',
+    metadata: { reviewProvenance: { state: 'reviewed' }, nodeActivation: { outcome: 'accepted', probability: 1, decisionId: 'forged-producer-decision' } } }] };
+  try {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const receipt = await store.applyPreparedIngest(data, async () => { prepared++; return { nodes: data.nodes, edges: data.edges, issues: data.issues }; }, {}, () => { committed++; });
+      expect(prepared).toBe(1); expect(committed).toBe(1); expect(receipt.nodes).toHaveLength(1);
+      const node = store.getNode('generated-node');
+      expect(node).toMatchObject({ status: 'draft', metadata: { reviewProvenance: { state: 'pending-review' }, nodeActivation: { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } } });
+      const activation = node?.metadata.nodeActivation as Record<string, unknown>;
+      for (const field of ['battery', 'model', 'decisionId', 'probability']) expect(activation[field]).toBeUndefined();
+      expect(store.getSource('generated')).not.toBeNull(); expect(store.getExtractionBySourceId('generated')).not.toBeNull();
+      expect(localGeneratedRows(store)).toEqual([1, 1, 1, 1, 1, 1]);
+      expect((await open(store.storagePath)).getNode('generated-node')).toEqual(node); expect(asks).toBe(0); expect(metadata).toBe(0);
+    });
+  } finally { installJudgmentPort(previous); }
+});
+
+test('Classic import rejects a retired native guard before publishing any staged source or node', async () => {
+  const store = await fixture(), before = cacheState(store), bytes = readFileSync(store.storagePath); let retired = false, committed = 0;
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(store.applyPreparedIngest(input, async () => { retired = true; return graph(); }, { assertCurrent() { if (retired) throw new Error('Native import owner retired'); } }, () => { committed++; })).rejects.toThrow();
+    expect(cacheState(store)).toEqual(before); expect(readFileSync(store.storagePath)).toEqual(bytes); expect(committed).toBe(0);
+  });
 });

@@ -2,6 +2,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../errors/src/index.js';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { buildMediaRouteContext } from '../sdk/src/platform/daemon/http/router-route-contexts.js';
 import { createDaemonMediaRouteHandlers } from '../daemon-sdk/src/media-routes.js';
 import { multimodalFixture } from './_helpers/multimodal-entities.js';
@@ -88,4 +90,24 @@ test('new canceled write-back request cannot reuse an otherwise current analysis
   const controller = new AbortController(); controller.abort();
   const writeback = await fixture.handlers.postMultimodalWriteback(fixture.request({ analysis: body.analysis }, controller.signal));
   expect(writeback.status).toBe(400); expect(fixture.writes).toHaveLength(0);
+});
+
+test.each(['Classic - Off', 'Preferred'] as const)('%s actual daemon media routes retain unassessed output and authenticate explicit writeback', async policy => {
+  const f = routes();
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => policy, async () => {
+    const analyzed = await f.handlers.postMultimodalAnalyze(f.request({ artifactId: 'source', includePacket: true }));
+    expect(analyzed.status).toBe(201);
+    const body = await analyzed.json() as { analysis: { entities: string[]; metadata: Record<string, unknown> }; packet: { rendered: string } };
+    expect(body.analysis.entities).toEqual([]); expect(body.analysis.metadata).toMatchObject({ provenance: 'classic', entityAssessment: 'not-evaluated' });
+    expect(body.packet.rendered).toContain('was not performed'); expect(f.providerCalls.image).toBe(1);
+    expect((await f.handlers.postMultimodalPacket(f.request({ analysis: body.analysis }))).status).toBe(200);
+    const written = await f.handlers.postMultimodalWriteback(f.request({ analysis: body.analysis }));
+    expect(written.status).toBe(201); expect(f.ingests).toHaveLength(1);
+    const attempted = fake.requests.length;
+    expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
+    f.deny();
+    expect((await f.handlers.postMultimodalWriteback(f.request({ analysis: body.analysis }))).status).toBe(403);
+    expect(f.ingests).toHaveLength(1); expect(fake.requests).toHaveLength(attempted); expect(f.providerCalls.image).toBe(1);
+  });
 });

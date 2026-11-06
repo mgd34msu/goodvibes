@@ -177,13 +177,13 @@
       "path": "config/secret-config.ts",
       "baselineTuiLines": 210,
       "baselineSimilarity": 0.716,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "config/secrets.ts",
       "baselineTuiLines": 70,
       "baselineSimilarity": 0.4463,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "config/surface.ts",

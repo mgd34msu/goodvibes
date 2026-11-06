@@ -461,3 +461,7 @@ export type { RemoteSettingsImportPrecondition, RemoteSettingsImportPrecondition
 
 export { DEFAULT_DECISION_ROUTER_SETTINGS, captureDecisionRouterSettings } from './decision-router-settings.js';
 export type { DecisionRouterSettings, DecisionRouterTarget, DecisionRouterCategory } from './decision-router-settings.js';
+
+export { SECRET_CONFIG_KEYS, createSecretConfigKeyRegistry, createSecretBackedConfigWriter, isSecretConfigKey, normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope, persistSecretBackedConfigValue } from './secret-backed-config.js';
+export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore, DaemonCredentialWriter, SecretBackedConfigRoute } from './secret-backed-config.js';
+export { applyRawSecretLiteralHandling, LiteralSecretsManager } from './secret-literals.js';

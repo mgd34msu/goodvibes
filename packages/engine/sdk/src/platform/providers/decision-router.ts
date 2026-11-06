@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureDecisionRouterSettings, type DecisionRouterTarget } from '../config/decision-router-settings.js';
@@ -19,7 +20,8 @@ export interface DecisionRouterRouteInfo {
   readonly requestedEffort?: string;
   readonly effort?: string;
   readonly effortNote?: string;
-  readonly fallback?: 'empty-category' | 'uncertain';
+  readonly fallback?: 'empty-category' | 'uncertain' | 'classic';
+  readonly provenance?: 'decision' | 'classic';
   readonly expandedContext: boolean;
   readonly decisionIds: readonly string[];
   readonly decisionModels: readonly string[];
@@ -87,12 +89,29 @@ export class DecisionRouterProvider implements LLMProvider {
         this.turns.delete(expired);
       }
     }
-    const result = this.choose(input);
+    const result = decisionOrClassic(() => this.choose(input), () => this.classicGeneral(input));
     if (key !== undefined) {
       const entry = { result, pending: true }; this.turns.set(key, entry);
       void result.then(() => { entry.pending = false; }, () => { this.turns.delete(key); });
     }
     return result;
+  }
+
+  private classicGeneral(input: DecisionRouterPrepareInput): PreparedDecisionRoute {
+    const settings = captureDecisionRouterSettings(this.options.settings());
+    const target = settings.categories['general']?.target;
+    if (!target) throw new Error('Configure the Decision Router General model before selecting this provider.');
+    const resolved = this.options.resolveTarget(target);
+    if (target.provider === this.name || resolved.provider.name === this.name) throw new Error('Decision Router cannot route to itself.');
+    const current = () => { input.signal?.throwIfAborted(); input.assertCurrent?.(); };
+    current();
+    const effort = resolveEffortForModel(target.effort, resolved.model);
+    return { provider: resolved.provider, model: resolved.model, effort, assertCurrent: current,
+      info: Object.freeze({ category: 'general', resolvedCategory: 'general', provider: resolved.provider.name,
+        model: resolved.model.id, ...(target.effort === undefined ? {} : { requestedEffort: target.effort }),
+        ...(effort.value === undefined ? {} : { effort: effort.value }), ...(effort.note === undefined ? {} : { effortNote: effort.note }),
+        fallback: 'classic', provenance: 'classic', expandedContext: false, decisionIds: Object.freeze([]), decisionModels: Object.freeze([]) }),
+    };
   }
 
   private async choose(input: DecisionRouterPrepareInput): Promise<PreparedDecisionRoute> {
@@ -196,6 +215,7 @@ export async function prepareDecisionRouterTurn(provider: LLMProvider, input: De
 export function describeDecisionRoute(route: DecisionRouterRouteInfo): string {
   return `Decision Router: ${route.category}${route.resolvedCategory !== route.category ? ' → General' : ''} → ${route.provider} / ${route.model}`
     + (route.effort ? ` · effort ${route.effort}` : '') + (route.fallback === 'uncertain' ? ' · General after an uncertain classification' : '')
+    + (route.fallback === 'classic' ? ' · Classic operation; no decision classification' : '')
     + (route.effortNote ? ` · ${route.effortNote}` : '');
 }
 

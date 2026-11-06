@@ -11,6 +11,7 @@ import {
   type JudgmentReadingOptions,
   type JudgmentPortCapture,
 } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { AppError, ProviderError, type PlatformErrorCategory, type PlatformErrorSource, type ProviderErrorOptions } from '../types/errors.js';
 import type { StructuredDaemonErrorBody } from '../types/daemon-error-contract.js';
 import { captureFailureSnapshot } from '../gate/failure-input-snapshot.js';
@@ -382,6 +383,15 @@ export async function readNormalizedError(
   error: unknown,
   options: ErrorReadingOptions,
 ): Promise<NormalizedError> {
+  return decisionOrClassic(() => readDecisionNormalizedError(error, options), () => {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    const result = normalizeError(error, options);
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    return result;
+  });
+}
+
+async function readDecisionNormalizedError(error: unknown, options: ErrorReadingOptions): Promise<NormalizedError> {
   const sourceCurrent = captureNormalizationSource(error, options);
   const redactionSource = captureRedactionSource();
   const assertSource = () => { sourceCurrent(); redactionSource.assertCurrent(); sourceCurrent(); };

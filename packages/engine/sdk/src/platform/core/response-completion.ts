@@ -1,4 +1,5 @@
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 import { JudgmentInputError } from '../gate/judgment-input.js';
@@ -188,6 +189,7 @@ export class ResponseCompletionGuard {
   private publication: { source: string; identity: object; completion: Set<string>; consolidation: Set<string>; execution: Set<string> } | undefined;
 
   constructor(initial?: { readonly request: string; readonly conversation: ConversationManager; readonly verificationWriter?: VerificationWriter; readonly verificationStore?: VerificationStore; readonly onCompletionRequired?: () => void }) {
+    if (isClassicOperation()) { this.initial = null; return; }
     this.onCompletionRequired = initial?.onCompletionRequired;
     this.reviewStore = initial?.verificationStore;
     this.reviewKey = initial ? verificationHash(['completion-repair-checkpoint-v1', initial.request]) : undefined;
@@ -311,6 +313,7 @@ export class ResponseCompletionGuard {
   /** A progress observation permits only this prose, never a final response. */
   async checkProgress(input: ResponseCompletionInput, options: JudgmentReadingOptions = {}): Promise<{ readonly correction: string | null; readonly assertCurrent: () => void }> {
     this.accepted = undefined;
+    if (isClassicOperation()) return { correction: null, assertCurrent: this.classicPublication(input, options) };
     const held = { correction: '[Progress publication check] This interim text could not be accepted. Continue the authorized work with tools; publish only useful progress supported by observations. Do not repeat the withheld prose as a final answer.', assertCurrent: () => { throw new ResponseCompletionError('rejected'); } };
     try {
       const source = retainStrictJudgmentJson({ request: input.request, response: input.response,
@@ -337,6 +340,7 @@ export class ResponseCompletionGuard {
       return { correction: null, assertCurrent: () => { restriction.assertCurrent(); current(); } };
     } catch (error) {
       options.signal?.throwIfAborted(); options.assertCurrent?.();
+      if (activateClassicFallback(error)) return { correction: null, assertCurrent: this.classicPublication(input, options) };
       assertDecisionAvailable(error);
       const blocked = accessFailure(error);
       if (blocked) throw blocked;
@@ -363,7 +367,15 @@ export class ResponseCompletionGuard {
     this.describeHeld = undefined;
     this.sourceAdmitted = false;
     this.admittedDraft = undefined;
-    try { return await this.read(input, options, onWaiting); }
+    try { return await decisionOrClassic(() => this.read(input, options, onWaiting), () => {
+      const current = this.classicPublication(input, options);
+      this.accepted = response => {
+        if (response.content !== input.response) throw new ResponseCompletionError('stale-evidence');
+        current(); return current;
+      };
+      this.restoredCorrection = undefined;
+      return null;
+    }); }
     catch (error) {
       if (!options.signal?.aborted) try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the original failure. */ }
       options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -387,6 +399,23 @@ export class ResponseCompletionGuard {
         : error instanceof JudgmentError || this.sourceAdmitted ? 'invalid-response' : 'invalid-evidence';
       throw new ResponseCompletionError(problem, { cause: error });
     }
+  }
+
+  /** Ordinary response publication, with current transcript and cancellation fences, not a semantic certificate. */
+  private classicPublication(input: ResponseCompletionInput, options: JudgmentReadingOptions): () => void {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    const conversation = input.conversation, response = input.response;
+    const messages = conversation.getMessageSnapshot();
+    const prefix = JSON.stringify(messages);
+    const current = () => {
+      options.signal?.throwIfAborted(); options.assertCurrent?.();
+      const now = conversation.getMessageSnapshot();
+      if (input.conversation !== conversation || input.response !== response
+        || JSON.stringify(now.slice(0, messages.length)) !== prefix || now.length > messages.length + 1) throw new ResponseCompletionError('stale-evidence');
+      const added = now[messages.length];
+      if (added && (added.role !== 'assistant' || added.content !== response || added.toolCalls?.length)) throw new ResponseCompletionError('stale-evidence');
+    };
+    current(); return current;
   }
 
   /** Rebuild changed evidence, but never restart an exhausted provider chain. */

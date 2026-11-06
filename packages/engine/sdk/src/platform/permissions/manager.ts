@@ -1,4 +1,6 @@
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
 import { hashState, JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -750,7 +752,52 @@ export class PermissionManager {
   }
 
   /** One safety decision across prepared tools, external actions and raw checks. */
-  private async assessExecutionSafety(input: {
+  private assessExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
+    return decisionOrClassic(() => this.assessDecisionExecutionSafety(input), () => this.assessClassicExecutionSafety(input));
+  }
+
+  private async assessClassicExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
+    input.assertCurrent();
+    if (!input.policyResult.approved || input.mode === 'plan' || input.mode === 'yolo') return { result: input.policyResult };
+    const analysis = input.policyResult.analysis;
+    const remembered = await this.rememberedDecision(this.getApprovalKey(input.toolName, input.args), input.toolName, input.args,
+      { signal: input.signal, assertCurrent: input.assertCurrent });
+    remembered?.assertCurrent(); input.assertCurrent();
+    if (remembered) return { result: this.result(remembered.approved, true, remembered.source, remembered.reason, analysis) };
+    const tools = this.configReader.getSnapshot().permissions.tools;
+    const configured = tools?.[TOOL_CONFIG_KEYS[input.toolName] ?? 'unknown'];
+    if (configured === 'allow' || input.category === 'read' && configured !== 'prompt') {
+      input.assertCurrent();
+      return { result: this.result(true, false, 'config_policy', 'config_allow', analysis,
+        { detail: 'Classic operation: authorized by owner configuration and deterministic tool category; no semantic safety reading.' }) };
+    }
+    const approvedRevision = this.ownerRevisions.get(input.sourceId);
+    if (approvedRevision && approvedRevision.toolName === input.toolName
+      && approvedRevision.argsRevision === hashState(captureJsonEntry(input.args)) && approvedRevision.authorityRevision === input.authorityRevision) {
+      this.ownerRevisions.delete(input.sourceId);
+      return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
+    }
+    const reply = await awaitPermission(() => this.requestPermission({ callId: input.callId,
+      tool: input.toolName, args: input.args, category: input.category, analysis,
+      workingDirectory: input.workingDirectory,
+      ...(input.attribution ? { attribution: input.attribution } : {}),
+    }, { signal: input.signal }), input.signal);
+    input.assertCurrent();
+    const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
+    if (reply.approved && modified && hashState(captureJsonEntry(modified)) !== hashState(captureJsonEntry(input.args)) && input.source) {
+      const argsRevision = hashState(captureJsonEntry(modified));
+      if (this.ownerRevisions.size >= 10_000 && !this.ownerRevisions.has(input.sourceId)) throw new Error('Owner revision capacity reached');
+      this.ownerRevisions.set(input.sourceId, Object.freeze({ toolName: input.toolName, argsRevision, authorityRevision: input.authorityRevision }));
+      return { revision: Object.freeze({ ref: Object.freeze({ id: `owner-revision-${input.callId}`, revision: argsRevision, kind: 'revise-action' }),
+        toolName: input.toolName, args: modified }),
+        result: this.result(false, false, 'user_prompt', 'user_approved', analysis,
+          { modifiedArgs: modified, detail: 'Prepare the exact action revised and approved by the owner during Classic operation.' }) };
+    }
+    return { result: this.result(reply.approved, false, 'user_prompt', reply.approved ? 'user_approved' : 'user_denied', analysis,
+      { userReason: reply.reason, ...(modified ? { modifiedArgs: modified } : {}) }) };
+  }
+
+  private async assessDecisionExecutionSafety(input: {
     readonly callId: string;
     readonly toolName: string;
     readonly args: Record<string, unknown>;
@@ -1141,7 +1188,9 @@ export class PermissionManager {
     analysis: PermissionRequestAnalysis,
     extra: Partial<PermissionCheckResult> = {},
   ): PermissionCheckResult {
-    return { ...extra, approved, persisted, sourceLayer, reasonCode, analysis };
+    const policy = decisionModelPolicyState();
+    return { ...extra, approved, persisted, sourceLayer, reasonCode, analysis,
+      ...(policy.operation === 'classic' ? { decisionPolicy: policy } : {}) };
   }
 
   private async evaluateRuntimePolicy(
@@ -1176,7 +1225,8 @@ export class PermissionManager {
       rules,
       defaultEffect: 'deny',
     });
-    const decision = await evaluator.evaluateAsync(toolName, args, classification, { ...options, assertCurrent: current });
+    const decision = isClassicOperation() ? evaluator.evaluate(toolName, args, classification)
+      : await evaluator.evaluateAsync(toolName, args, classification, { ...options, assertCurrent: current });
     current(); evaluator.assertCurrent(decision);
     this.exportDecisionRecords(evaluator, mode);
     current(); evaluator.assertCurrent(decision);

@@ -1,4 +1,5 @@
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation } from '../../decision-policy.js';
 /**
  * Argument shape/content policy rule evaluator.
  *
@@ -144,6 +145,12 @@ export function evaluateArgShapeRule(rule: ArgShapeRule, toolName: string, args:
 export async function evaluateArgShapeRuleAsync(
   rule: ArgShapeRule, toolName: string, args: Record<string, unknown>, options: JudgmentReadingOptions = {},
 ): Promise<ArgShapeRuleResult> {
+  if (isClassicOperation()) {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    const result = evaluateArgShapeRule(rule, toolName, args);
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    return result;
+  }
   const before = JSON.stringify([rule, args]);
   const [capturedRule, capturedArgs] = structuredClone([rule, args]) as [ArgShapeRule, Record<string, unknown>];
   const current = () => {

@@ -10,6 +10,7 @@ import { TurnCancellationFence, type TurnCancellationResult } from './turn-cance
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
 import { ResponseCompletionError } from './response-completion.js';
@@ -802,8 +803,15 @@ export class Orchestrator {
       catch (error) { if (nativeTurn) failNativeConversationTurn(nativeTurn, false); throw error; }
       finally { if (nativeTurn) { settleNativeConversationTurn(nativeTurn); this.activeNativeConversationTurn = false; this.activeNativeConversationPermit = undefined; this.nativeAdmissionAbort = null; } }
     };
-    if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
-    else await withoutNativeConversationTurn(execute);
+    await withDecisionModelPolicy(() => requireConfigManager(this.coreServices).get('judgment.policy'), async () => {
+      if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
+      else await withoutNativeConversationTurn(execute);
+    }, state => {
+      this.conversation.addSystemMessage(`[Decision policy] ${state.reason === 'unavailable'
+        ? 'Preferred: decision models are unavailable; continuing this operation in Classic.'
+        : 'Classic - Off: decision models are disabled.'} Tools use the selected permission policy. Responses have no independent semantic verification.`);
+      this.requestRender();
+    });
   }
 
   private async runTurnBody(

@@ -2868,6 +2868,11 @@
       "bun": "./terminal-shell/src/ordered-shutdown.ts",
       "types": "./terminal-shell/dist/ordered-shutdown.d.ts",
       "import": "./terminal-shell/dist/ordered-shutdown.js"
+    },
+    "./terminal-shell/session-resume-publication": {
+      "bun": "./terminal-shell/src/session-resume-publication.ts",
+      "types": "./terminal-shell/dist/session-resume-publication.d.ts",
+      "import": "./terminal-shell/dist/session-resume-publication.js"
     }
   },
   "publishConfig": {

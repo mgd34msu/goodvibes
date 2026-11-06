@@ -1,14 +1,15 @@
+import { publishResumedSession } from '@goodvibes-jev/engine/terminal-shell/session-resume-publication';
 import { activeTokens } from '../renderer/theme.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { HookDispatcher } from '@goodvibes-jev/engine/sdk/platform/hooks';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
-import { registerBootstrapHookBridge } from '@/runtime/index.ts';
+import '@/runtime/index.ts';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { emitSessionResumed } from '@/runtime/index.ts';
-import { HelperModel } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
+import '@/runtime/index.ts';
 import type { SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import type { SessionSpineClient } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
 import type { SessionManager } from '@goodvibes-jev/engine/sdk/platform/sessions';
@@ -84,14 +85,18 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       // unchanged rather than repurposing it to a post-replay count).
       const { messages: rawMessages } = options.sessionManager.load(sessionId);
       options.cancelPendingRecovery?.();
-      emitSessionResumed(options.runtimeBus, {
-        sessionId: options.runtime.sessionId,
-        traceId: `${options.runtime.sessionId}:session-resume:${sessionId}`,
-        source: 'bootstrap',
-      }, {
-        sessionId,
-        turnCount: rawMessages.length,
-      });
+      emitSessionResumed(
+        options.runtimeBus,
+        {
+          sessionId: options.runtime.sessionId,
+          traceId: `${options.runtime.sessionId}:session-resume:${sessionId}`,
+          source: 'bootstrap',
+        },
+        {
+          sessionId,
+          turnCount: rawMessages.length,
+        },
+      );
 
       const outcome = await resumeSessionCore(sessionId, {
         sessionManager: options.sessionManager,
@@ -104,49 +109,19 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       });
       const { meta } = outcome;
 
-      options.onSessionIdChanged?.(sessionId);
-      options.writeLastSessionPointer(sessionId);
-      void options.sharedSessionBroker.reopenSession(sessionId).catch((err) => { logger.debug('session broker reopen session failed', { err }); });
-      // Fire-and-forget spine mirror (reopen:true, the user resume verb).
-      options.sessionSpine.reopen({ sessionId, project: options.project, title: options.conversation.title || meta.title });
-      options.conversation.log(`Resumed session: ${sessionId}`, { fg: activeTokens().secondary });
-      const returnContextMode = getReturnContextMode(options.configManager);
-      if (returnContextMode !== 'off' && meta.returnContext) {
-        // The SDK's session loader already dropped any legacy open-views list from a
-        // session saved by an older TUI, so the loaded return context is shown as-is.
-        for (const line of formatReturnContextForDisplay(meta.returnContext)) {
-          options.conversation.log(`Resume: ${line}`, { fg: activeTokens().textMuted });
-        }
-        if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
-          options.conversation.log(`Resume: Remote re-entry -> /remote recover ${meta.returnContext.remoteRunners![0]}`, { fg: activeTokens().textMuted });
-        }
-        if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
-          options.conversation.log('Resume: Worktree re-entry -> /worktree review', { fg: activeTokens().textMuted });
-        }
-        if (returnContextMode === 'assisted') {
-          const helperModel = new HelperModel({
-            configManager: options.configManager,
-            providerRegistry: options.providerRegistry,
-          });
-          void maybeAssistReturnContextSummary(options.configManager, helperModel, meta.returnContext).then((assisted) => {
-            if (!assisted.assistedNarrative) return;
-            options.conversation.log(`Resume: ${assisted.assistedNarrative}`, { fg: activeTokens().textMuted });
-            options.requestRender();
-          });
-        }
-      }
-      options.hookDispatcher.fire({
-        path: 'Lifecycle:session:load',
-        phase: 'Lifecycle',
-        category: 'session',
-        specific: 'load',
-        sessionId: options.runtime.sessionId,
-        timestamp: Date.now(),
-        payload: { sessionId },
-      }).catch((err: unknown) => logger.debug('Hook bridge fire error', {
-        path: 'Lifecycle:session:load',
-        error: summarizeError(err),
-      }));
+      publishResumedSession(options, sessionId, meta, {
+        reopen: () => {
+          options.sessionSpine.reopen({ sessionId, project: options.project, title: options.conversation.title || meta.title });
+        },
+        reentry: (summary) => {
+          const lines: string[] = [];
+          const runner = summary.remoteRunners?.[0];
+          if (runner) lines.push(`Resume: Remote re-entry -> /remote recover ${runner}`);
+          if ((summary.worktreePaths?.length ?? 0) > 0) lines.push('Resume: Worktree re-entry -> /worktree review');
+          return lines;
+        },
+        hookError: 'Hook bridge fire error',
+      });
     } catch (error) {
       logger.debug('resumeSession failed', { error: summarizeError(error) });
       options.conversation.log('Failed to resume session.', { fg: activeTokens().error });

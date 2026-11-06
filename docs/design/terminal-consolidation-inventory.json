@@ -1614,7 +1614,8 @@
       "path": "runtime/bootstrap-hook-bridge.ts",
       "baselineTuiLines": 156,
       "baselineSimilarity": 0.6324,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns completed-restore publication, continuity summary, last-session/broker notification and lifecycle hooks. Adapters retain async TUI live-instance confirmation/journal/model restore and synchronous Agent loaded-state restore, private spine targets and recovery guidance. Assisted summaries discard results after session switch and consume logged failures."
     },
     {
       "path": "runtime/bootstrap-shell.ts",

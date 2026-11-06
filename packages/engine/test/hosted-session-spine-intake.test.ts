@@ -22,7 +22,8 @@
 import { describe, expect, test, spyOn } from 'bun:test';
 import { logger } from '../sdk/src/platform/utils/logger.ts';
 import { useFailureReadings, failureReadingsPort } from './_helpers/failure-readings.ts';
-useFailureReadings([]);
+const readings = useFailureReadings([]);
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { HostedSessionSpineIntake, type HostedSessionSpine } from '../sdk/src/platform/hosted-sessions/spine-intake.ts';
 import type { HostedSessionRecord } from '../sdk/src/platform/hosted-sessions/types.ts';
 
@@ -73,6 +74,27 @@ function buildSpine(queued: Map<string, { id: string; body: string; correlationI
     },
   };
 }
+
+test('Classic reports a partially executed hosted turn without automatically replaying its effects', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'classic-input', body: 'Continue the work', correlationId: 'classic-correlation' }]]]));
+    const effects: string[] = [], alerts: string[] = [];
+    const intake = new HostedSessionSpineIntake({ spine, liveSessions: () => [record()], now: () => 1,
+      deliver: async () => {
+        effects.push('completed edit');
+        throw Object.assign(new Error('Answer provider failed after the edit'), { status: 503 });
+      }, alertOwner: message => { alerts.push(message); },
+    });
+    try {
+      for (let tick = 0; tick < 4; tick++) { await intake.tick(); await intake.drainDeliveries(); }
+      expect(effects).toEqual(['completed edit']);
+      expect(spine.log.failed.map(entry => entry.inputId)).toEqual(['classic-input']);
+      expect(spine.log.consumed).toEqual([]);
+      expect(alerts).toHaveLength(1);
+      expect(readings.requests).toHaveLength(0);
+    } finally { intake.stop(); }
+  });
+});
 
 describe('a delivery that failed is not a delivery that happened', () => {
   test('captured input correlation survives a collection await and delivery retry', async () => {

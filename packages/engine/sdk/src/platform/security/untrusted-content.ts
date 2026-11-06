@@ -47,6 +47,7 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import { findContentTaint, describeContentTaint, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
 import { judgmentInputProblem } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import {
   checkOwnerApproval,
   grantOwnerApproval,
@@ -418,7 +419,7 @@ function toTaintSources(ingests: readonly UntrustedIngest[]): readonly TaintSour
 export type OutwardContentAssessment =
   | { readonly kind: 'clean'; readonly findings: readonly TaintFinding[] }
   | { readonly kind: 'tainted'; readonly findings: readonly TaintFinding[] }
-  | { readonly kind: 'incomplete'; readonly findings: readonly TaintFinding[]; readonly reason: 'missing-content' | 'missing-sources' | 'protected-input' };
+  | { readonly kind: 'incomplete'; readonly findings: readonly TaintFinding[]; readonly reason: 'missing-content' | 'missing-sources' | 'protected-input' | 'decision-model-disabled' };
 
 /** Shared evidence comparison; callers select the relevant window without widening semantic reads. */
 export async function assessOutwardContent(
@@ -436,10 +437,16 @@ export async function assessOutwardContent(
   if (judgmentInputProblem(fields) || evidence.sources.some(source => judgmentInputProblem(source))) {
     return { kind: 'incomplete', findings: [], reason: 'protected-input' };
   }
-  const findings = await findContentTaint(fields, evidence.sources, options);
-  if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
-  evidence.assertCurrent();
-  return { kind: findings.length === 0 ? 'clean' : 'tainted', findings };
+  return decisionOrClassic<OutwardContentAssessment>(async () => {
+    const findings = await findContentTaint(fields, evidence.sources, options);
+    if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+    evidence.assertCurrent();
+    return { kind: findings.length === 0 ? 'clean' : 'tainted', findings };
+  }, () => {
+    if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+    evidence.assertCurrent();
+    return { kind: 'incomplete' as const, findings: [], reason: 'decision-model-disabled' as const };
+  });
 }
 
 /** An outward effect: something that reaches the world outside this machine. */
@@ -621,7 +628,9 @@ export async function evaluateOutwardEffect(input: {
     ? 'this action did not say which of its fields are about to leave'
     : assessment.reason === 'protected-input'
       ? 'protected material cannot be sent for a derivation reading'
-      : 'some source text is missing, empty, truncated, or no longer retained';
+      : assessment.reason === 'decision-model-disabled'
+        ? 'Classic does not assess semantic derivation from untrusted input'
+        : 'some source text is missing, empty, truncated, or no longer retained';
   return {
     allowed: false,
     untrustedOrigins: origins,

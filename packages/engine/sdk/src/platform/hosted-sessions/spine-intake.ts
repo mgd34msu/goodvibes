@@ -1,5 +1,6 @@
 import { captureJudgmentFailure } from '../gate/failure-input.js';
 import { judgmentPort, readFailureTransience, type FailureReadOptions } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 /**
  * spine-intake.ts, how a hosted session reaches the SHARED session spine, and
  * how a steer reaches a hosted turn.
@@ -442,22 +443,28 @@ export class HostedSessionSpineIntake {
   }
 
   private async resolveFailure(spine: HostedSessionSpine, pending: PendingDelivery, assertCurrent: () => void): Promise<void> {
+    return withConfiguredDecisionModelPolicy(() => this.resolveOwnedFailure(spine, pending, assertCurrent));
+  }
+  private async resolveOwnedFailure(spine: HostedSessionSpine, pending: PendingDelivery, assertCurrent: () => void): Promise<void> {
     assertCurrent();
     const failure = pending.failure!;
     if (failure.blocked) throw new Error('Hosted delivery failure evidence could not be admitted');
     let owner = this.sessionLifetimes.get(pending.sessionId);
     if (!owner) { owner = new AbortController(); this.sessionLifetimes.set(pending.sessionId, owner); }
-    const captured = failure.reading ?? { port: judgmentPort('engine.hosted-session.spine-delivery') };
-    const signal = AbortSignal.any([this.lifetime.signal, owner.signal, ...(captured.signal ? [captured.signal] : [])]);
-    const reading = { ...captured, signal, beforeAttempt: () => { assertCurrent(); const result = captured.beforeAttempt?.(); if (result !== undefined) return result; signal.throwIfAborted(); } };
+    const captured = await decisionOrClassic<FailureReadOptions | undefined>(async () => failure.reading ?? { port: judgmentPort('engine.hosted-session.spine-delivery') }, () => undefined);
+    const signal = AbortSignal.any([this.lifetime.signal, owner.signal, ...(captured?.signal ? [captured.signal] : [])]);
+    assertCurrent(); signal.throwIfAborted();
+    const reading = captured ? { ...captured, signal, beforeAttempt: () => { assertCurrent(); const result = captured.beforeAttempt?.(); if (result !== undefined) return result; signal.throwIfAborted(); } } : undefined;
     // Retain the exact owner if a reader failure needs a later reading attempt.
-    this.pending.set(pendingKey(pending.sessionId, pending.inputId), { ...pending, failure: { ...failure, reading: captured } });
-    const transience = await readFailureTransience(failure.error, 'engine.hosted-session.spine-delivery', { reading });
+    this.pending.set(pendingKey(pending.sessionId, pending.inputId), { ...pending, failure: { ...failure, ...(captured ? { reading: captured } : {}) } });
+    const transience = await readFailureTransience(failure.error, 'engine.hosted-session.spine-delivery', reading ? { reading } : {});
     assertCurrent(); signal.throwIfAborted();
     const key = pendingKey(pending.sessionId, pending.inputId);
     const cap = this.options.maxDeliveryAttempts ?? DEFAULT_MAX_DELIVERY_ATTEMPTS;
     // the count is only the mechanical ceiling AFTER eligibility.
-    if (transience.failureClass === 'retryable' && pending.attempts < cap) {
+    // A failed conversation may already have completed tools. Classic must
+    // surface that failure for resume/inspection, never replay the whole turn.
+    if (!isClassicOperation() && transience.failureClass === 'retryable' && pending.attempts < cap) {
       this.pending.set(key, { ...pending, failure: undefined });
       logger.warn('[hosted-sessions] a collected input could not be delivered; it stays queued for the next tick', {
         sessionId: pending.sessionId, inputId: pending.inputId, attempts: pending.attempts, error: failure.detail,

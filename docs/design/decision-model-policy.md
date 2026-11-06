@@ -173,6 +173,14 @@ without inferring a microphone/model cause or disabling an engine from prose.
 Calendar failures name a missing permission only from the supported exact
 authentication challenge; otherwise the original provider refusal remains.
 
+When a turn has read untrusted content, Classic cannot attest that outgoing
+content is unrelated to it. The shared outward-effect boundary uses its existing
+exact action-and-payload owner approval path, with the existing expiry and source
+rules. It does not invent a clean derivation result. Connected-host operator
+checks follow that same policy without eagerly acquiring an unused model port.
+If a hosted conversation fails after completing work, Classic reports the failed
+input for inspection/resume and does not automatically replay the whole turn.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

@@ -5,6 +5,8 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/too
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial } from './payments-channel-guard.ts';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
 /** Retain the local source record; this does not mint execution or human authority. */
 export function captureOperatorRequestPolicy() {
@@ -29,17 +31,17 @@ export function captureOperatorRequestPolicy() {
       { signal: options.signal, assertCurrent: check });
     check();
     if (card) throw new ToolInputProjectionError('held');
-    const port = judgmentPort(CONTENT_DERIVATION_SITE);
-    const decision = await evaluateOutwardEffect({ request: { toolName: request.toolName, action: request.methodId,
+    const evaluate = (port?: JudgmentPort) => evaluateOutwardEffect({ request: { toolName: request.toolName, action: request.methodId,
       description: 'invoking the selected connected-host operator effect' }, ledger, content,
-      taintOptions: { signal: options.signal, exactMatchFields: ['endpoint'], port: {
+      taintOptions: { signal: options.signal, exactMatchFields: ['endpoint'], ...(port ? { port: {
         get model() { return port.model; }, ...(port.recorder ? { recorder: port.recorder } : {}),
         async ask(reading) {
           check(); const prior = reading.beforeAttempt;
           const result = await port.ask({ ...reading, beforeAttempt() { prior?.(); check(); } });
           check(); return result;
         },
-      } } });
+      } } : {}) } });
+    const decision = await decisionOrClassic(() => evaluate(judgmentPort(CONTENT_DERIVATION_SITE)), () => evaluate());
     check();
     if (!decision.allowed) throw new ToolInputProjectionError('held');
   } };

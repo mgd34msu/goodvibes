@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import {
   MemoryUsageStatsStore,
   type MemoryDoctorReport,
@@ -327,20 +328,21 @@ function externalProviderContractChecklist(
 ): readonly MemoryExternalProviderContractCheck[] {
   const providerQuery = `${provider.id} memory provider`;
   const hasReceipts = receipts.length > 0;
+  const unresolved: MemoryExternalProviderContractStatus = liveRecord?.operationProvenance === 'classic' ? 'unassessed' : 'missing';
   const liveInspectRoute = liveRecord?.inspectRoute ?? `host action:"capability" query:${JSON.stringify(providerQuery)}`;
   const providerCertificationPublished: MemoryExternalProviderContractStatus = liveRecord?.certification?.schemaStatus === 'certified'
     && liveRecord.certification.missingSignals.length === 0
     ? 'published'
-    : 'missing';
+    : liveRecord?.certification?.schemaStatus === 'unassessed' ? 'unassessed' : 'missing';
   const statusRecordStatus: MemoryExternalProviderContractStatus = liveRecord ? 'published' : 'missing';
-  const credentialStatus: MemoryExternalProviderContractStatus = liveRecord && (liveRecord.credentialState !== null || liveRecord.configured !== null) ? 'published' : 'missing';
-  const readStatus: MemoryExternalProviderContractStatus = liveRecord?.readReady === true || liveRecord?.readRoute ? 'published' : 'missing';
-  const writeStatus: MemoryExternalProviderContractStatus = liveRecord?.writeReady === true || liveRecord?.writeRoute ? 'published' : 'missing';
-  const forgetStatus: MemoryExternalProviderContractStatus = liveRecord && (liveRecord.forgetReady !== null || liveRecord.forgetRoute) ? 'published' : 'missing';
+  const credentialStatus: MemoryExternalProviderContractStatus = liveRecord && (liveRecord.credentialState !== null || liveRecord.configured !== null) ? 'published' : unresolved;
+  const readStatus: MemoryExternalProviderContractStatus = liveRecord?.readReady === true || liveRecord?.readRoute ? 'published' : unresolved;
+  const writeStatus: MemoryExternalProviderContractStatus = liveRecord?.writeReady === true || liveRecord?.writeRoute ? 'published' : unresolved;
+  const forgetStatus: MemoryExternalProviderContractStatus = liveRecord && (liveRecord.forgetReady !== null || liveRecord.forgetRoute) ? 'published' : unresolved;
   const syncStatus: MemoryExternalProviderContractStatus = liveRecord?.syncReady === true || liveRecord?.syncRoute || liveRecord?.receiptRoute || liveRecord?.receiptIds.length
     ? 'published'
-    : hasReceipts ? 'artifact-evidence-found' : 'missing';
-  const promptPolicyStatus: MemoryExternalProviderContractStatus = liveRecord && liveRecord.promptEligible !== null ? 'published' : 'missing';
+    : hasReceipts ? 'artifact-evidence-found' : unresolved;
+  const promptPolicyStatus: MemoryExternalProviderContractStatus = liveRecord && liveRecord.promptEligible !== null ? 'published' : unresolved;
   return [
     {
       id: 'certified-provider-contract',
@@ -420,7 +422,8 @@ function externalProviderReceiptContract(
   const liveReceiptCertified = liveRecord?.certification?.schemaStatus === 'certified' && liveRecord.certification.missingSignals.length === 0;
   const artifactReceiptCertified = receipts.some((receipt) => receipt.certification?.schemaStatus === 'certified' && receipt.certification.missingSignals.length === 0);
   return {
-    status: liveReceiptsPublished && liveReceiptCertified ? 'published' : receipts.length > 0 && artifactReceiptCertified ? 'artifact-evidence-found' : 'missing',
+    status: liveReceiptsPublished && liveReceiptCertified ? 'published' : receipts.length > 0 && artifactReceiptCertified ? 'artifact-evidence-found'
+      : liveRecord?.certification?.schemaStatus === 'unassessed' || receipts.some(receipt => receipt.certification?.schemaStatus === 'unassessed') || isClassicOperation() ? 'unassessed' : 'missing',
     appliesTo: ['status', 'read', 'write', 'upsert', 'import', 'export', 'sync', 'forget'],
     requiredFields: EXTERNAL_MEMORY_RECEIPT_FIELDS,
     nextWhenPublished: `memory action:"provider" providerId:${JSON.stringify(providerId)} includeParameters:true should expose latest receipts and exact follow-up routes.`,
@@ -461,12 +464,16 @@ function externalProviderSetupGuide(
     userOutcome: liveRecord
       ? `Use ${provider.label} as an external memory backend through the daemon-published read model, with bounded reads visible before prompt use and every write/sync/forget route treated as confirmed external provider effect.`
       : `Use ${provider.label} as an external memory backend only after the SDK/daemon publishes provider setup, status, read, write, and receipt contracts for Agent to consume.`,
-    currentState: liveRecord
+    currentState: liveRecord?.operationProvenance === 'classic'
+      ? `Classic operation retains the published ${provider.label} facts (${readiness}), but operation roles and certification are unassessed. Inspect the native host methods before selecting an external-memory operation.`
+      : liveRecord
       ? `Live ${provider.label} provider record from ${liveRecord.source} reports ${readiness || liveRecord.status}.${latestReceipt ? ` Latest durable receipt artifact ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}.` : ''}`
       : latestReceipt
       ? `Latest durable ${provider.label} receipt artifact ${latestReceipt.artifactId} reports ${latestReceipt.operation} ${latestReceipt.status}; live provider status/read/write records are still not published by the current SDK/daemon contract.`
       : `No concrete ${provider.label} provider record is published by the current SDK/daemon contract.`,
-    safeFirstStep: liveRecord
+    safeFirstStep: liveRecord?.operationProvenance === 'classic'
+      ? `Inspect the native ${provider.label} host or MCP methods directly; automatic route interpretation is unavailable. Keep existing owner approvals for external effects.`
+      : liveRecord
       ? `Inspect the live ${provider.label} record and use only the published bounded read route until the user explicitly confirms any write, sync, import/export, forget/delete, or prompt-eligibility change.`
       : latestReceipt
       ? `Review ${latestReceipt.artifactId}, then keep Agent-local memory as the active prompt path until a ready provider record and prompt-eligibility policy exist.`
@@ -588,6 +595,7 @@ function providerSearchText(provider: MemoryPostureProvider): string {
 
 function compactProvider(provider: MemoryPostureProvider, includeParameters: boolean): Record<string, unknown> {
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic', externalInterpretation: 'unassessed' } : {}),
     id: provider.id,
     label: provider.label,
     kind: provider.kind,
@@ -684,6 +692,10 @@ function compactVector(vector: MemoryVectorStats | null): Record<string, unknown
 }
 
 export async function memoryPostureCatalogStatus(context: CommandContext, reading: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+  return withConfiguredDecisionModelPolicy(() => ownedMemoryPostureCatalogStatus(context, reading));
+}
+
+async function ownedMemoryPostureCatalogStatus(context: CommandContext, reading: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const options = memoryReadingOptions(context, undefined, reading);
   const snapshot = memoryPostureSnapshot(context);
   const doctor = await readMemoryDoctor(context, options);
@@ -694,6 +706,8 @@ export async function memoryPostureCatalogStatus(context: CommandContext, readin
   const vectorState = vectorStatus(vector);
   const usageSummary = readMemoryUsageSummary(context);
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic', externalInterpretation: 'unassessed',
+      interpretationNotice: 'Classic shows native local-memory and provider facts. Automatic external route, receipt discovery and certification interpretation is unavailable.' } : {}),
     modes: ['memory_posture', 'memory_provider'],
     usageTracked: usageSummary?.everInjected ?? 0,
     usageReferenced: usageSummary?.everReferenced ?? 0,
@@ -719,6 +733,10 @@ export async function memoryPostureCatalogStatus(context: CommandContext, readin
 }
 
 export async function memoryPostureSummary(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+  return withConfiguredDecisionModelPolicy(() => ownedMemoryPostureSummary(context, args, reading));
+}
+
+async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const options = memoryReadingOptions(context, args, reading);
   const includeParameters = args.includeParameters === true;
   const limit = readLimit(args.limit, 100);
@@ -735,6 +753,8 @@ export async function memoryPostureSummary(context: CommandContext, args: AgentH
   const filteredProviders = (ranked ? ranked.matches.map(({ entry }) => entry) : providers).slice(0, limit)
     .map(provider => compactProvider(provider, includeParameters));
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic', externalInterpretation: 'unassessed',
+      interpretationNotice: 'Classic shows native local-memory and provider facts. Automatic external route, receipt discovery and certification interpretation is unavailable.' } : {}),
     status,
     localMemory: {
       total: snapshot.localMemoryCount,
@@ -813,6 +833,10 @@ export async function memoryPostureSummary(context: CommandContext, args: AgentH
 }
 
 export async function describeMemoryProvider(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions = {}): Promise<MemoryProviderResolution> {
+  return withConfiguredDecisionModelPolicy(() => ownedDescribeMemoryProvider(context, args, reading));
+}
+
+async function ownedDescribeMemoryProvider(context: CommandContext, args: AgentHarnessMemoryPostureArgs, reading: CatalogRankingOptions): Promise<MemoryProviderResolution> {
   const options = memoryReadingOptions(context, args, reading);
   const input = readString(args.providerId) || readString(args.target) || readString(args.query);
   if (!input) {

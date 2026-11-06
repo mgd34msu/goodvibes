@@ -4,7 +4,7 @@ import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { readMemorySchemaCertified } from './agent-harness-memory-provider-readings.ts';
 
 export interface MemoryExternalProviderCertification {
-  readonly schemaStatus: 'certified' | 'legacy';
+  readonly schemaStatus: 'certified' | 'legacy' | 'unassessed';
   readonly schemaVersion?: string;
   readonly publicationGuarantee?: string;
   readonly publisher?: string;
@@ -90,7 +90,8 @@ async function certifiedBase(input: {
   readonly receiptIds?: readonly string[];
 }, options: CatalogRankingOptions): Promise<Omit<MemoryExternalProviderCertification, 'missingSignals' | 'policy'> & { readonly rawPublicationGuarantee: string; readonly rawPublisher: string; readonly rawReceiptRoute: string; readonly rawReceiptStreamStatus: string; readonly rawReceiptStatus: string; readonly rawSchemaVersion: string; readonly receiptIdsValue: readonly string[]; readonly schemaStatusValue: MemoryExternalProviderCertification['schemaStatus'] }> {
   const records = recordsForCertification(input.record);
-  const schemaStatus = await readMemorySchemaCertified({ record: input.record, sourcePath: input.sourcePath }, options) ? 'certified' : 'legacy';
+  const certified = await readMemorySchemaCertified({ record: input.record, sourcePath: input.sourcePath }, options);
+  const schemaStatus = certified === null ? 'unassessed' : certified ? 'certified' : 'legacy';
   const schemaVersion = firstAcross(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
   const publicationGuarantee = firstAcross(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'providerPublicationGuarantee', 'memoryPublicationGuarantee']);
   const publisher = firstAcross(records, ['publisher', 'publisherId', 'daemonId', 'hostId']);
@@ -146,16 +147,16 @@ export async function memoryExternalProviderLiveCertification(input: {
   } = base;
   const receiptPublished = base.receiptIdsValue.length > 0 || Boolean(input.receiptRoute) || Boolean(base.rawReceiptRoute) || Boolean(base.rawReceiptStreamStatus);
   const missingSignals = [
-    ...(schemaStatusValue === 'certified' ? [] : ['Certified external memory provider schema is not published.']),
+    ...(schemaStatusValue === 'unassessed' ? ['External memory provider certification was not evaluated during Classic operation.'] : schemaStatusValue === 'certified' ? [] : ['Certified external memory provider schema is not published.']),
     ...(input.providerId ? [] : ['Durable external memory provider id is not published.']),
     ...(rawPublicationGuarantee ? [] : ['Provider-side external memory publication guarantee is not published.']),
     ...(rawPublisher ? [] : ['Provider-side external memory publisher is not published.']),
     ...(certification.provenance?.length ? [] : ['Provider-side external memory provenance is not published.']),
-    ...(input.readContractPublished ? [] : ['Bounded read/search contract is not published.']),
-    ...(input.writeContractPublished ? [] : ['Confirmed write/upsert contract is not published.']),
-    ...(input.syncContractPublished ? [] : ['Confirmed sync/import/export contract is not published.']),
-    ...(input.forgetContractPublished ? [] : ['Forget/delete contract or explicit not-supported contract is not published.']),
-    ...(receiptPublished ? [] : ['External memory provider receipt stream or receipt ids are not published.']),
+    ...(input.readContractPublished ? [] : [schemaStatusValue === 'unassessed' ? 'Bounded read/search contract remains unassessed during Classic operation.' : 'Bounded read/search contract is not published.']),
+    ...(input.writeContractPublished ? [] : [schemaStatusValue === 'unassessed' ? 'Confirmed write/upsert contract remains unassessed during Classic operation.' : 'Confirmed write/upsert contract is not published.']),
+    ...(input.syncContractPublished ? [] : [schemaStatusValue === 'unassessed' ? 'Confirmed sync/import/export contract remains unassessed during Classic operation.' : 'Confirmed sync/import/export contract is not published.']),
+    ...(input.forgetContractPublished ? [] : [schemaStatusValue === 'unassessed' ? 'Forget/delete or explicit not-supported contract remains unassessed during Classic operation.' : 'Forget/delete contract or explicit not-supported contract is not published.']),
+    ...(receiptPublished ? [] : [schemaStatusValue === 'unassessed' ? 'No receipt ids or interpreted receipt route were established during Classic operation.' : 'External memory provider receipt stream or receipt ids are not published.']),
   ];
   return {
     ...certification,
@@ -184,7 +185,7 @@ export async function memoryExternalProviderReceiptCertification(input: {
     ...certification
   } = base;
   const missingSignals = [
-    ...(schemaStatusValue === 'certified' ? [] : ['Certified external memory receipt schema is not published.']),
+    ...(schemaStatusValue === 'unassessed' ? ['External memory receipt certification was not evaluated during Classic operation.'] : schemaStatusValue === 'certified' ? [] : ['Certified external memory receipt schema is not published.']),
     ...(input.providerId ? [] : ['Durable external memory provider id is not published.']),
     ...(input.artifactId || receiptIdsValue.length > 0 ? [] : ['Durable external memory receipt id is not published.']),
     ...(rawPublicationGuarantee ? [] : ['Provider-side external memory receipt publication guarantee is not published.']),

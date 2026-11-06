@@ -11,7 +11,7 @@ import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 async function withRemotePublisherReading<T>(source: unknown, options: CatalogRankingOptions, site: string,
   read: (captured: unknown, authority: JudgmentPortCapture) => Promise<T>): Promise<T | 'unassessed'> {
   return withConfiguredDecisionModelPolicy(() => withModelReadingSource(source, options, async (captured, current) => {
-    return decisionOrClassic(async () => {
+    return decisionOrClassic<T | 'unassessed'>(async () => {
       const authority = captureJudgmentPort(site, {
         signal: current.signal, assertCurrent: current.assertCurrent, prepareResultCapture: prepareJudgmentResult,
       });

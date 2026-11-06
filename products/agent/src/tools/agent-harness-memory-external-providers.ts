@@ -1,3 +1,4 @@
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { types as nodeTypes } from 'node:util';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { memoryExternalProviderLiveCertification, memoryExternalProviderReceiptCertification } from './agent-harness-memory-provider-certification.ts';
@@ -12,8 +13,8 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/too
 import type { PersonalOpsNativeSchema } from './agent-personal-ops-native-fields.ts';
 
 export type MemoryExternalProviderStatus = 'not-published' | 'receipt-evidence-found' | 'available' | 'needs-setup' | 'blocked' | 'error' | 'disabled' | 'unknown';
-export type MemoryExternalProviderSetupStatus = 'contract-needed' | 'receipt-evidence-found' | 'ready' | 'needs-setup' | 'blocked' | 'error' | 'disabled';
-export type MemoryExternalProviderContractStatus = 'missing' | 'artifact-evidence-found' | 'published';
+export type MemoryExternalProviderSetupStatus = 'unassessed' | 'contract-needed' | 'receipt-evidence-found' | 'ready' | 'needs-setup' | 'blocked' | 'error' | 'disabled';
+export type MemoryExternalProviderContractStatus = 'unassessed' | 'missing' | 'artifact-evidence-found' | 'published';
 
 export interface MemoryPostureProvider {
   readonly id: string;
@@ -75,6 +76,8 @@ export interface MemoryExternalProviderReceiptContract {
 }
 
 export interface MemoryExternalProviderLiveRecord {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly providerId: string;
   readonly label: string | null;
   readonly status: MemoryExternalProviderStatus;
@@ -107,6 +110,8 @@ export interface MemoryExternalProviderLiveRecord {
 }
 
 export interface MemoryExternalProviderReceiptEvidence {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly providerId: string;
   readonly artifactId: string;
   readonly filename: string | null;
@@ -241,13 +246,15 @@ async function readProviderIdentity(record: Record<string, unknown>, options: Ca
   return selected?.id ?? '';
 }
 
-async function readBoolean(value: unknown, parameter: string, record: unknown, options: CatalogRankingOptions): Promise<boolean> {
+async function readBoolean(value: unknown, parameter: string, record: unknown, options: CatalogRankingOptions): Promise<boolean | null> {
   assertMemoryCurrent(options);
   if (value === 1) return true;
   if (value === 0) return false;
-  const state = await readPersonalOpsBoolean({ parameter, value, record }, options);
+  const state = await decisionOrClassic(() => readPersonalOpsBoolean({ parameter, value, record }, options),
+    () => { assertMemoryCurrent(options); return typeof value === 'boolean' ? value : value === 'true' ? true : value === 'false' ? false : null; },
+    () => { assertMemoryCurrent(options); return true; });
   assertMemoryCurrent(options);
-  if (state === null) throw new ToolInputProjectionError('held');
+  if (state === null && !isClassicOperation()) throw new ToolInputProjectionError('held');
   return state;
 }
 
@@ -264,12 +271,15 @@ interface OperationEvidence { readonly route: string | null; readonly ready: boo
 
 async function publishedOperations(record: Record<string, unknown>, options: CatalogRankingOptions): Promise<ReadonlyMap<OperationRole, OperationEvidence>> {
   const result = new Map<OperationRole, OperationEvidence>();
+  assertMemoryCurrent(options);
+  if (isClassicOperation()) return result;
   const containers = [ { name: 'record', value: record }, ...['routes', 'modelRoutes', 'actions', 'commands', 'links',
     'capabilities', 'operations', 'features', 'supports', 'readiness'].map(name => ({ name, value: readRecord(record[name]) })) ];
   for (const container of containers) for (const [field, value] of Object.entries(container.value)) {
     // The full record and field are available to the registered reader. There is no lexical shortlist.
     const { role, form } = await readMemoryRouteRole({ record, container: container.name, field, value }, options);
     assertMemoryCurrent(options);
+    if (role === 'unassessed') return result;
     if (role === 'none') continue;
     const nested = readRecord(value);
     const ready = form === 'flag' && (value === null || typeof value !== 'object')
@@ -337,6 +347,7 @@ function liveRecordReceiptIds(record: Record<string, unknown>): readonly string[
 }
 
 async function normalizeExternalProviderLiveRecord(value: unknown, source: string, options: CatalogRankingOptions): Promise<MemoryExternalProviderLiveRecord | null> {
+  const beganClassic = isClassicOperation();
   const raw = readRecord(value);
   const nativeProviderId = readExternalProviderLiveRecordId(raw);
   const record = readRecord(await protectExternalMemoryData(value, options, 'memory-provider'));
@@ -366,6 +377,7 @@ async function normalizeExternalProviderLiveRecord(value: unknown, source: strin
   }, options);
   assertMemoryCurrent(options);
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     providerId, label, status, source, configured, reachable, credentialState, readReady, writeReady, syncReady, forgetReady, promptEligible,
     setupRoute, readRoute, writeRoute, syncRoute, forgetRoute, receiptRoute, receiptIds,
     sourceCount: readNumber(record.sourceCount ?? record.sourcesCount ?? readRecord(record.stats).sourceCount),
@@ -512,6 +524,10 @@ function awaitExternalProviderSnapshot(work: Promise<unknown>, signal?: AbortSig
 }
 
 export async function externalMemoryLiveProviderRecords(context: unknown, originalOptions: CatalogRankingOptions = {}): Promise<readonly MemoryExternalProviderLiveRecord[]> {
+  return withConfiguredDecisionModelPolicy(() => ownedExternalMemoryLiveProviderRecords(context, originalOptions));
+}
+
+async function ownedExternalMemoryLiveProviderRecords(context: unknown, originalOptions: CatalogRankingOptions): Promise<readonly MemoryExternalProviderLiveRecord[]> {
   const options = retainMemoryReadingOptions(originalOptions);
   const byProvider = new Map<string, MemoryExternalProviderLiveRecord>();
   assertMemoryCurrent(options);
@@ -590,11 +606,12 @@ export function externalProviderLiveReady(record: MemoryExternalProviderLiveReco
 
 export function setupStatusFromLiveRecord(record: MemoryExternalProviderLiveRecord | null): MemoryExternalProviderSetupStatus | null {
   if (!record) return null;
-  if (externalProviderLiveReady(record)) return 'ready';
   if (record.status === 'needs-setup') return 'needs-setup';
   if (record.status === 'blocked') return 'blocked';
   if (record.status === 'error') return 'error';
   if (record.status === 'disabled') return 'disabled';
+  if (record.certification?.schemaStatus === 'unassessed') return 'unassessed';
+  if (externalProviderLiveReady(record)) return 'ready';
   return 'needs-setup';
 }
 
@@ -609,6 +626,7 @@ export function aggregateExternalProviderLiveRecord(
     return null;
   };
   return {
+    ...(liveRecords.some(record => record.operationProvenance === 'classic') ? { operationProvenance: 'classic' as const, semanticAssessment: 'partial' as const } : {}),
     providerId: '<provider-id>',
     label: 'External memory provider',
     status: liveRecords.some(externalProviderLiveReady) ? 'available' : latest.status,
@@ -645,7 +663,8 @@ export function aggregateExternalProviderSetupStatus(
   liveRecords: readonly MemoryExternalProviderLiveRecord[],
   receipts: readonly MemoryExternalProviderReceiptEvidence[],
 ): MemoryExternalProviderSetupStatus {
-  if (liveRecords.length > 0) return liveRecords.some(externalProviderLiveReady) ? 'ready' : 'needs-setup';
+  if (liveRecords.length > 0) return liveRecords.some(record => setupStatusFromLiveRecord(record) === 'ready') ? 'ready'
+    : liveRecords.some(record => record.certification?.schemaStatus === 'unassessed') ? 'unassessed' : 'needs-setup';
   return receipts.length > 0 ? 'receipt-evidence-found' : 'contract-needed';
 }
 
@@ -653,7 +672,7 @@ export function aggregateExternalProviderSetupStatus(
 async function isExternalMemoryReceiptArtifact(artifact: Readonly<Record<string, unknown>>, options: CatalogRankingOptions): Promise<boolean> {
   const metadata = readRecord(artifact.metadata);
   const purpose = readString(metadata.purpose);
-  return EXTERNAL_MEMORY_RECEIPT_PURPOSES.has(purpose) || readMemoryReceiptMember(artifact, options);
+  return EXTERNAL_MEMORY_RECEIPT_PURPOSES.has(purpose) || (await readMemoryReceiptMember(artifact, options)) === true;
 }
 
 function readExternalMemoryReceiptProviderId(metadata: Record<string, unknown>): string {
@@ -672,6 +691,7 @@ function readReceiptCreatedAt(artifact: Readonly<Record<string, unknown>>, metad
 }
 
 async function describeExternalMemoryReceiptArtifact(value: unknown, options: CatalogRankingOptions): Promise<MemoryExternalProviderReceiptEvidence | null> {
+  const beganClassic = isClassicOperation();
   const original = readRecord(value), nativeArtifactId = readString(original.id);
   if (!nativeArtifactId) throw new ToolInputProjectionError('held');
   if (typeof original.createdAt !== 'number' || (original.expiresAt !== undefined && typeof original.expiresAt !== 'number'))
@@ -688,10 +708,12 @@ async function describeExternalMemoryReceiptArtifact(value: unknown, options: Ca
   if (nativeProviderId && readExternalMemoryReceiptProviderId(metadata) !== nativeProviderId) throw new ToolInputProjectionError('held');
   const operation = readString(metadata.operation) || readString(metadata.action) || readString(metadata.memoryOperation) || readString(metadata.receiptOperation) || 'external-memory';
   const nextRoute = readString(metadata.nextRoute) || `memory action:"provider" providerId:${JSON.stringify(providerId)} includeParameters:true`;
-  const status = await readPersonalOpsReceiptStatus(artifact, options);
+  const status = await decisionOrClassic(() => readPersonalOpsReceiptStatus(artifact, options),
+    () => { assertMemoryCurrent(options); return 'unassessed'; }, () => { assertMemoryCurrent(options); return true; });
   const certification = await memoryExternalProviderReceiptCertification({ metadata, sourcePath: `artifact ${nativeArtifactId}`, providerId, artifactId: nativeArtifactId }, options);
   assertMemoryCurrent(options);
   return {
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     providerId, artifactId: nativeArtifactId, filename: readString(artifact.filename) || null, operation, status,
     createdAt: readReceiptCreatedAt(original, metadata), sourceCount: readNumber(metadata.sourceCount ?? metadata.recordCount ?? metadata.itemCount),
     redaction: readString(metadata.redaction) || readString(metadata.redactionPolicy) || null,
@@ -702,6 +724,10 @@ async function describeExternalMemoryReceiptArtifact(value: unknown, options: Ca
 }
 
 export async function externalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions = {}): Promise<readonly MemoryExternalProviderReceiptEvidence[]> {
+  return withConfiguredDecisionModelPolicy(() => ownedExternalMemoryReceiptEvidence(context, originalOptions));
+}
+
+async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions): Promise<readonly MemoryExternalProviderReceiptEvidence[]> {
   const options = retainMemoryReadingOptions(originalOptions);
   const acquired = acquireSource(context, ['platform', 'artifactStore'], options);
   if (acquired.source === null || acquired.source === undefined) return [];

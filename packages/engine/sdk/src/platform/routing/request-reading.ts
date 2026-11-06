@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * Reads a piece of work before any model token is spent on it: the six
  * request batteries asked in one request (speculative fan-out), then the tier
@@ -77,6 +78,7 @@ export async function readRequest(
   request: RoutingRequest,
   options: import('@goodvibes-jev/judgment').CallOptions = {},
 ): Promise<RequestReading> {
+  requireDecisionFeature('semantic request classification; Classic routing uses the configured General target');
   const site = options.site ?? 'routing.request';
   const state = requestState(request);
   const run = await fanOut(judgmentPort(site), state, REQUEST_BATTERIES, {

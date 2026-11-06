@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../permissions/external-request-evidence.js';
 /**
  * The gate's Jev reading of one tool call: the risk-family and side-effect
@@ -134,6 +135,7 @@ export const GATE_SITE = 'engine.gate';
 
 /** Reads the independent gate batteries about one captured call in a shared request. */
 export async function readToolCall(input: ReadToolCallInput, site: string = GATE_SITE): Promise<GateReading> {
+  requireDecisionFeature('semantic tool-call risk assessment; Classic uses native permission rules and owner approvals');
   const { toolName, args, workingDirectory, signal: abortSignal, askKind = false, askObfuscated = false, port: scopedPort } = input;
   const external = readExternalRequestEvidence(input.externalRequestEvidence);
   const state: { [key: string]: JsonValue } = { ...readingState(toolName, args, workingDirectory), ...(external ? { externalRequest: readingArguments(external) } : {}) };
@@ -235,6 +237,7 @@ export function categoryForSideEffectKind(kind: SideEffectKind): PermissionCateg
 
 /** Reads only the side-effect kind of a call (the execution ledger's route kind). */
 export async function readSideEffectKind(toolName: string, args: Record<string, unknown>, site: string, signal?: AbortSignal): Promise<{ readonly kind: SideEffectKind; readonly confident: boolean }> {
+  requireDecisionFeature('semantic side-effect classification');
   const state = readingState(toolName, args);
   const run = await sideEffect.run(judgmentPort(site), state, { site, only: ['kind'], ...(signal === undefined ? {} : { signal }) });
   return { kind: run.readings.kind.choice, confident: run.readings.kind.outcome === 'act' };
@@ -276,6 +279,7 @@ export async function readCatastrophic(
   site = 'engine.gate.exec-time',
   signal?: AbortSignal,
 ): Promise<{ readonly verdict: YesNoReading['verdict']; readonly readByGate: boolean }> {
+  requireDecisionFeature('semantic catastrophic-command assessment; Classic retains native permission and approval handling');
   signal?.throwIfAborted();
   const state = readingState('exec', { command });
   const seen = CATASTROPHIC_SEEN.get(command);

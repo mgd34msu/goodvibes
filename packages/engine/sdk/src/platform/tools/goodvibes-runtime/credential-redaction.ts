@@ -28,6 +28,8 @@ import { configKeyDescription, holdsCredential } from '../../config/credential-k
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from '../../config/structured-credential-config.js';
 import { credentialValue, credentialValueState } from '../batteries/credential-value.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { redactSensitiveData } from '../../utils/redaction.js';
 
 const KEY_SITE = 'tools.goodvibes-runtime.credential-key';
 const VALUE_SITE = 'tools.goodvibes-runtime.credential-value';
@@ -42,16 +44,18 @@ export async function isCredentialConfigKey(key: string): Promise<boolean> {
 
 /** Whether a stored value is shown as it is: only a no that acts clears it. */
 async function valueMayShow(key: string, value: string): Promise<boolean> {
-  const state = credentialValueState(key, configKeyDescription(key), value);
-  const owner = captureJudgmentPort(VALUE_SITE, { prepareResultCapture: prepareJudgmentResult });
-  const run = await credentialValue.run(owner.port, state, { site: VALUE_SITE,
-    signal: owner.signal, beforeAttempt: owner.assertCurrent });
-  owner.assertCurrent();
-  const { verdict, outcome } = run.readings.credential_material;
-  const shown = verdict === 'no' && outcome === 'act';
-  run.recordAction(shown ? 'shown' : 'redacted');
-  owner.assertCurrent();
-  return shown;
+  return decisionOrClassic(async () => {
+    const state = credentialValueState(key, configKeyDescription(key), value);
+    const owner = captureJudgmentPort(VALUE_SITE, { prepareResultCapture: prepareJudgmentResult });
+    const run = await credentialValue.run(owner.port, state, { site: VALUE_SITE,
+      signal: owner.signal, beforeAttempt: owner.assertCurrent });
+    owner.assertCurrent();
+    const { verdict, outcome } = run.readings.credential_material;
+    const shown = verdict === 'no' && outcome === 'act';
+    run.recordAction(shown ? 'shown' : 'redacted');
+    owner.assertCurrent();
+    return shown;
+  }, () => redactSensitiveData(value) === value);
 }
 
 function redacted(value: unknown): Record<string, unknown> {

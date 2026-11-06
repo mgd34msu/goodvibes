@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 /**
  * `engine.provider.retry-wait`: which number in a provider's error message,
@@ -348,6 +349,10 @@ let memos = new WeakMap<JudgmentPort, Map<string, Promise<number | undefined>>>(
  * action taken is recorded on the decision. `site` names the decision site.
  */
 export async function readRetryWaitMs(evidence: RetryWaitEvidence, site: string): Promise<number | undefined> {
+  return decisionOrClassic(() => readDecisionRetryWaitMs(evidence, site), () => undefined);
+}
+
+async function readDecisionRetryWaitMs(evidence: RetryWaitEvidence, site: string): Promise<number | undefined> {
   assertJudgmentInput(evidence);
   if (evidence.message.length > MAX_RETRY_WAIT_MESSAGE_CHARS) return Promise.reject(new JudgmentInputError('unsupported-input'));
   const captured: RetryWaitEvidence = { message: evidence.message, status: evidence.status };

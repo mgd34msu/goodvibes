@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes-jev/judgment';
@@ -102,6 +103,7 @@ async function readIntakeSchedule(request: string, cadence: AutonomyCadence, por
 
 /** Screen the original in full before port lookup, then retain every reading and response field. */
 export async function readAutonomyIntake(request: string, options: AutonomyIntakeOptions = {}): Promise<AutonomyIntakeReading> {
+  requireDecisionFeature('semantic autonomy and schedule intake; use explicit native commands in Classic');
   const signal = options.signal, owner = options.sourceOwner, originalCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const capture = owner?.capture, screen = owner?.screen, project = owner?.project, release = owner?.release, close = owner?.close;
   const clock = Object.freeze({ now: Date.now(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });

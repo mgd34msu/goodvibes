@@ -2,6 +2,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { exportCredential, profileDistinctive, redactionCredential, residualCredential, type CredentialProjection, type RedactionPart } from './batteries/redaction.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 
 /** A source assertion must finish before any observation can proceed. */
 export function assertRedactionCurrent(check: (() => void) | undefined): void {
@@ -15,6 +16,8 @@ export function assertRedactionCurrent(check: (() => void) | undefined): void {
 
 export async function readResidualProjection(parts: readonly RedactionPart[], options: JudgmentReadingOptions): Promise<boolean | undefined> {
   try {
+    options.signal?.throwIfAborted(); assertRedactionCurrent(options.assertCurrent);
+    if (isClassicOperation()) return undefined;
     const state = { parts: parts.map((part) => ({ ...part })) };
     assertJudgmentInput(state); assertRedactionCurrent(options.assertCurrent);
     const owner = captureJudgmentPort(residualCredential.name, options);
@@ -30,6 +33,8 @@ export async function readResidualProjection(parts: readonly RedactionPart[], op
 export async function readCredentialProjection(projection: CredentialProjection,
   purpose: 'redaction' | 'export', options: JudgmentReadingOptions): Promise<{ line: boolean; span: boolean } | undefined> {
   try {
+    options.signal?.throwIfAborted(); assertRedactionCurrent(options.assertCurrent);
+    if (isClassicOperation()) return undefined;
     assertJudgmentInput(projection); assertRedactionCurrent(options.assertCurrent);
     const battery = purpose === 'export' ? exportCredential : redactionCredential;
     const owner = captureJudgmentPort(battery.name, options);
@@ -60,7 +65,11 @@ export class ProfileDistinctiveReader {
 
   read(role: ProfileRedactionRole, source: { readonly assertCurrent: () => void }): boolean | undefined {
     let owner: JudgmentPortCapture;
-    try { assertJudgmentInput(role); assertRedactionCurrent(() => source.assertCurrent()); owner = captureJudgmentPort(profileDistinctive.name); owner.assertCurrent(); }
+    try {
+      assertJudgmentInput(role); assertRedactionCurrent(() => source.assertCurrent());
+      if (isClassicOperation()) return undefined;
+      owner = captureJudgmentPort(profileDistinctive.name); owner.assertCurrent();
+    }
     catch { return undefined; }
     const key = JSON.stringify(role);
     const existing = this.entries.get(key);

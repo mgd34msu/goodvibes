@@ -1,12 +1,19 @@
-import { createOnboardingApplyPrimitives, getNow, verifyOnboardingWithRollback } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { isSecretRefInput } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../config/index.ts';
+import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
+const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
+  separator: ' ',
+  validateExtension: validateLegacyFeatureConfigValue,
+});
+import {
+  createOnboardingApplyPrimitives,
+  verifyOnboardingWithRollback,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
+import { existsSync, rmSync } from 'node:fs';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '../../config/index.ts';
 import {
   createAgentRuntimeProfile,
   getAgentRuntimeProfileTemplate,
   getAgentRuntimeProfileSelectionPath,
-  readAgentRuntimeProfileSelection,
   resolveAgentRuntimeProfileHome,
   setAgentRuntimeProfileSelection,
 } from '../../agent/runtime-profile.ts';
@@ -14,15 +21,8 @@ import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentPersonaRegistry, assertNoSecretLikeText } from '../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
-import {
-  expandLegacyFeatureConfigValue,
-  isLegacyFeatureConfigKey,
-} from '../feature-enablement.ts';
-import {
-  getOnboardingRuntimeStatePath,
-  readOnboardingRuntimeState,
-  writeOnboardingAcknowledgementState,
-} from './state.ts';
+import { expandLegacyFeatureConfigValue, isLegacyFeatureConfigKey } from '../feature-enablement.ts';
+import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import type {
@@ -33,19 +33,15 @@ import type {
   OnboardingApplyRequest,
   OnboardingApplyResult,
 } from './types.ts';
-import { isPlainObject, readJsonObject, restoreFile, runRollbacks, setNestedValue, snapshotFileRollback, writeJsonObject, type RollbackAction } from './apply-file-helpers.ts';
-
-
-
-function isGoodVibesSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
-
-function isMalformedGoodVibesSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://') && !isGoodVibesSecretReferenceValue(normalized);
-}
+import {
+  readJsonObject,
+  restoreFile,
+  runRollbacks,
+  setNestedValue,
+  snapshotFileRollback,
+  writeJsonObject,
+  type RollbackAction,
+} from './apply-file-helpers.ts';
 
 function validateLegacyFeatureConfigValue(operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>): boolean {
   if (!isLegacyFeatureConfigKey(operation.key)) return false;
@@ -57,63 +53,12 @@ function validateLegacyFeatureConfigValue(operation: Extract<OnboardingApplyOper
   return true;
 }
 
-function validateConfigValue(operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>): void {
-  if (typeof operation.value === 'string' && isMalformedGoodVibesSecretReferenceValue(operation.value)) {
-    throw new Error(`Config key ${operation.key} only accepts goodvibes://secrets/... secret references.`);
-  }
-
-  if (validateLegacyFeatureConfigValue(operation)) return;
-
-  const schema = CONFIG_SCHEMA.find((entry) => entry.key === operation.key);
-  if (!schema) {
-    const defaultValue = operation.key.split('.').reduce<unknown>((cursor, part) => (
-      isPlainObject(cursor) ? cursor[part] : undefined
-    ), DEFAULT_CONFIG);
-    if (defaultValue === undefined) throw new Error(`Unknown config key ${operation.key}`);
-    if (typeof defaultValue === 'boolean' && typeof operation.value !== 'boolean') {
-      throw new Error(`Config key ${operation.key} expects a boolean value.`);
-    }
-    if (typeof defaultValue === 'number' && typeof operation.value !== 'number') {
-      throw new Error(`Config key ${operation.key} expects a numeric value.`);
-    }
-    if (typeof defaultValue === 'string' && typeof operation.value !== 'string') {
-      throw new Error(`Config key ${operation.key} expects a string value.`);
-    }
-    return;
-  }
-  const stringValue = typeof operation.value === 'string' ? operation.value : null;
-
-  if (schema.type === 'boolean' && typeof operation.value !== 'boolean') {
-    throw new Error(`Config key ${operation.key} expects a boolean value.`);
-  }
-
-  if (schema.type === 'number' && typeof operation.value !== 'number') {
-    throw new Error(`Config key ${operation.key} expects a numeric value.`);
-  }
-
-  if ((schema.type === 'string' || schema.type === 'enum') && stringValue === null) {
-    throw new Error(`Config key ${operation.key} expects a string value.`);
-  }
-
-  if (schema.type === 'enum' && schema.enumValues && stringValue !== null && !schema.enumValues.includes(stringValue)) {
-    throw new Error(`Invalid value for ${operation.key} ${String(operation.value)}.`);
-  }
-
-  if (schema.validate && !schema.validate(operation.value)) {
-    throw new Error(`Invalid value for ${operation.key} ${String(operation.value)}.`);
-  }
-}
-
-
-
 function validateAuthOperation(
   _deps: OnboardingApplyDependencies,
   _operation: Extract<OnboardingApplyOperation, { kind: 'ensure-auth-user' }>,
 ): void {
   throw new Error('Runtime auth user/session administration is external to GoodVibes Agent onboarding.');
 }
-
-
 
 function validateCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
@@ -256,19 +201,11 @@ function applyConfigOperation(
   };
 }
 
-
-
-
-
-async function buildRollbackAction(
-  deps: OnboardingApplyDependencies,
-  operation: OnboardingApplyOperation,
-): Promise<RollbackAction> {
+async function buildRollbackAction(deps: OnboardingApplyDependencies, operation: OnboardingApplyOperation): Promise<RollbackAction> {
   if (operation.kind === 'set-config') {
     if ((operation.scope ?? 'global') === 'project') {
-      return snapshotFileRollback(
-        deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json'),
-        () => deps.config.load(),
+      return snapshotFileRollback(deps.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings.json'), () =>
+        deps.config.load(),
       );
     }
 
@@ -300,9 +237,7 @@ async function buildRollbackAction(
   }
 
   if (operation.kind === 'acknowledge') {
-    return snapshotFileRollback(
-      getOnboardingRuntimeStatePath(deps.shellPaths, deps.acknowledgementScope ?? 'project'),
-    );
+    return snapshotFileRollback(getOnboardingRuntimeStatePath(deps.shellPaths, deps.acknowledgementScope ?? 'project'));
   }
 
   if (operation.kind === 'create-agent-profile') {
@@ -340,8 +275,6 @@ async function buildRollbackAction(
   const neverOperation: never = operation;
   throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
 }
-
-
 
 function applyCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
@@ -445,28 +378,23 @@ function applyCreateLocalNoteOperation(
   };
 }
 
-function orderApplyOperations(
-  operations: readonly OnboardingApplyOperation[],
-): readonly OnboardingApplyOperation[] {
-  const secretPolicyOperations = operations.filter((operation) => (
-    operation.kind === 'set-config' && operation.key === 'storage.secretPolicy'
-  ));
+function orderApplyOperations(operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] {
+  const secretPolicyOperations = operations.filter(
+    (operation) => operation.kind === 'set-config' && operation.key === 'storage.secretPolicy',
+  );
   const authOperations = operations.filter((operation) => operation.kind === 'ensure-auth-user');
   const secretOperations = operations.filter((operation) => operation.kind === 'set-secret');
-  const configOperations = operations.filter((operation) => (
-    operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy'
-  ));
+  const configOperations = operations.filter((operation) => operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy');
   const agentProfileOperations = operations.filter((operation) => operation.kind === 'create-agent-profile');
   const agentProfileSelectionOperations = operations.filter((operation) => operation.kind === 'select-agent-profile');
-  const localBehaviorOperations = operations.filter((operation) => (
-    operation.kind === 'create-local-note'
-    || operation.kind === 'create-local-persona'
-    || operation.kind === 'create-local-skill'
-    || operation.kind === 'create-local-routine'
-  ));
-  const finalOperations = operations.filter((operation) => (
-    operation.kind === 'acknowledge'
-  ));
+  const localBehaviorOperations = operations.filter(
+    (operation) =>
+      operation.kind === 'create-local-note' ||
+      operation.kind === 'create-local-persona' ||
+      operation.kind === 'create-local-skill' ||
+      operation.kind === 'create-local-routine',
+  );
+  const finalOperations = operations.filter((operation) => operation.kind === 'acknowledge');
 
   return [
     ...secretPolicyOperations,
@@ -480,10 +408,7 @@ function orderApplyOperations(
   ];
 }
 
-function prevalidateApplyRequest(
-  deps: OnboardingApplyDependencies,
-  request: OnboardingApplyRequest,
-): OnboardingApplyError[] {
+function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
   const errors: OnboardingApplyError[] = [];
   const orderedOperations = orderApplyOperations(request.operations);
 
@@ -518,11 +443,12 @@ function prevalidateApplyRequest(
       }
 
       if (operation.kind === 'select-agent-profile') {
-        const createdEarlier = orderedOperations.some((candidate) => (
-          candidate.kind === 'create-agent-profile'
-          && resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, candidate.name).id
-            === resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, operation.name).id
-        ));
+        const createdEarlier = orderedOperations.some(
+          (candidate) =>
+            candidate.kind === 'create-agent-profile' &&
+            resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, candidate.name).id ===
+              resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, operation.name).id,
+        );
         if (!createdEarlier) validateSelectAgentProfileOperation(deps, operation);
         continue;
       }
@@ -675,13 +601,20 @@ export async function applyOnboardingRequest(
     return true;
   };
 
-  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => verifyOnboardingWithRollback(() => verifyOnboardingRequest(deps, { ...request, operations }), () => runRollbacks(rollbacks), applied, errors, getVerificationFailureKind);
+  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> =>
+    verifyOnboardingWithRollback(
+      () => verifyOnboardingRequest(deps, { ...request, operations }),
+      () => runRollbacks(rollbacks),
+      applied,
+      errors,
+      getVerificationFailureKind,
+    );
 
-  if (!await applyOperations(orderedOperations)) {
+  if (!(await applyOperations(orderedOperations))) {
     return { ok: false, applied, skipped, errors };
   }
 
-  if (!await verifyOrRollback(orderedOperations)) {
+  if (!(await verifyOrRollback(orderedOperations))) {
     return { ok: false, applied, skipped, errors };
   }
 
@@ -693,4 +626,10 @@ export async function applyOnboardingRequest(
   };
 }
 
-const { validateSecretOperation, applySecretOperation, buildSecretRollbackAction, validateAcknowledgementOperation, applyAcknowledgementOperation } = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);
+const {
+  validateSecretOperation,
+  applySecretOperation,
+  buildSecretRollbackAction,
+  validateAcknowledgementOperation,
+  applyAcknowledgementOperation,
+} = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);

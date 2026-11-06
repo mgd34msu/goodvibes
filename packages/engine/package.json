@@ -2728,6 +2728,21 @@
       "bun": "./terminal-shell/src/handler-content-bindings.ts",
       "types": "./terminal-shell/dist/handler-content-bindings.d.ts",
       "import": "./terminal-shell/dist/handler-content-bindings.js"
+    },
+    "./terminal-shell/cli-provider-views": {
+      "bun": "./terminal-shell/src/cli-provider-views.ts",
+      "types": "./terminal-shell/dist/cli-provider-views.d.ts",
+      "import": "./terminal-shell/dist/cli-provider-views.js"
+    },
+    "./terminal-shell/onboarding-config-validation": {
+      "bun": "./terminal-shell/src/onboarding-config-validation.ts",
+      "types": "./terminal-shell/dist/onboarding-config-validation.d.ts",
+      "import": "./terminal-shell/dist/onboarding-config-validation.js"
+    },
+    "./terminal-shell/transcript-review": {
+      "bun": "./terminal-shell/src/transcript-review.ts",
+      "types": "./terminal-shell/dist/transcript-review.d.ts",
+      "import": "./terminal-shell/dist/transcript-review.js"
     }
   },
   "publishConfig": {

@@ -10,7 +10,7 @@ export interface LocalCommandContext {
   readonly renderRequest: () => void;
   readonly submitInput?: ((text: string, content: ContentPart[]) => void) | undefined;
   readonly workspace: { readonly shellPaths?: { readonly workingDirectory: string } | undefined };
-  readonly platform: { readonly configManager: { getWorkingDirectory(): string | undefined } };
+  readonly platform: { readonly configManager: { getWorkingDirectory(): string | null | undefined } };
   readonly session: { readonly conversationManager: TerminalConversationManager };
 }
 /** Shared local operations; products provide presentation and explicit discovery policy. */

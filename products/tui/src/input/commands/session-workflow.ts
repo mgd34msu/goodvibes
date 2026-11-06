@@ -1,16 +1,23 @@
+import { createTranscriptReviewFormatter } from '@goodvibes-jev/engine/terminal-shell/transcript-review';
+const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(': ', ': ');
 import { parseTranscriptKind } from '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { captureTranscriptSource, readTranscriptIndex, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
+import { captureTranscriptSource, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { CommandContext } from '../command-registry.ts';
 import { type SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
+
 import type { ConversationTitleSource } from '../../core/conversation';
 import type { SessionReturnContextSummary } from '@/runtime/index.ts';
-import { formatReturnContextForDisplay, getReturnContextMode, loadedReturnContext, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
+import {
+  formatReturnContextForDisplay,
+  getReturnContextMode,
+  loadedReturnContext,
+  maybeAssistReturnContextSummary,
+} from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { checkSessionLiveness } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
@@ -31,56 +38,6 @@ function copySessionSidecars(ctx: CommandContext, destination: string): void {
   const tree = ctx.session.conversationManager.workTree;
   saveWorkTreeFolds(surface.sessionsDir, destination, tree.foldState(), tree.turnOutcomes());
 }
-
-async function buildTranscriptReviewLines(
-  ctx: CommandContext,
-  kind: TranscriptEventKind | 'all',
-  mode: 'events' | 'groups' | 'hotspots',
-  source: ReturnType<typeof captureTranscriptSource>,
-): Promise<string[]> {
-  const index = await readTranscriptIndex(ctx, source);
-  if (!index) return [TRANSCRIPT_UNAVAILABLE];
-  const events = kind === 'all' ? index.events : index.events.filter((event) => event.kind === kind);
-  const groups = kind === 'all' ? index.groups : index.groups.filter((group) => group.kind === kind);
-
-  if (mode === 'groups') {
-    return [
-      `Transcript Groups${kind === 'all' ? '' : `: ${kind}`}`,
-      `  groups: ${groups.length}`,
-      ...groups.slice(0, 12).map((group) => (
-        `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)} event(s)  msgs=${group.messageIndexes[0]}-${group.messageIndexes[group.messageIndexes.length - 1]}  ${group.title}`
-      )),
-      ...(groups.length > 12 ? [`  … ${groups.length - 12} more group(s)`] : []),
-    ];
-  }
-
-  if (mode === 'hotspots') {
-    const kindCounts = new Map<TranscriptEventKind, number>();
-    for (const event of index.events) {
-      kindCounts.set(event.kind, (kindCounts.get(event.kind) ?? 0) + 1);
-    }
-    const busiestGroups = [...index.groups]
-      .sort((a, b) => b.events.length - a.events.length || a.messageIndexes[0]! - b.messageIndexes[0]!)
-      .slice(0, 8);
-    return [
-      'Transcript Hotspots',
-      ...[...kindCounts.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([eventKind, count]) => `  ${eventKind.padEnd(20)} ${count}`),
-      '',
-      'Busiest groups',
-      ...busiestGroups.map((group) => `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)}  ${group.title}`),
-    ];
-  }
-
-  return [
-    `Transcript Events${kind === 'all' ? '' : `: ${kind}`}`,
-    `  events: ${events.length}`,
-    ...events.slice(0, 16).map((event) => `  #${String(event.messageIndex).padStart(3)}  ${event.kind.padEnd(20)} ${event.title}: ${event.detail}`),
-    ...(events.length > 16 ? [`  … ${events.length - 16} more event(s)`] : []),
-  ];
-}
-
 
 function printSessionExport(
   ctx: { print: (text: string) => void },
@@ -144,14 +101,16 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const title = ctx.session.conversationManager.title || '(untitled)';
     const meta = sm.getMeta(id);
     const started = meta ? new Date(meta.timestamp).toLocaleString() : 'this session';
-    ctx.print([
-      'Current session',
-      `  ID:       ${id}`,
-      `  Name:     ${title}`,
-      `  Started:  ${started}`,
-      `  Messages: ${msgCount}`,
-      `  Model:    ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
-    ].join('\n'));
+    ctx.print(
+      [
+        'Current session',
+        `  ID:       ${id}`,
+        `  Name:     ${title}`,
+        `  Started:  ${started}`,
+        `  Messages: ${msgCount}`,
+        `  Model:    ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
+      ].join('\n'),
+    );
     return true;
   }
 
@@ -173,7 +132,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
           session.returnContext.activeTasks ? `active=${session.returnContext.activeTasks}` : null,
           session.returnContext.blockedTasks ? `blocked=${session.returnContext.blockedTasks}` : null,
           session.returnContext.pendingApprovals ? `approvals=${session.returnContext.pendingApprovals}` : null,
-        ].filter(Boolean).join('  ');
+        ]
+          .filter(Boolean)
+          .join('  ');
         if (posture) lines.push(`     posture: ${posture}`);
       }
     }
@@ -217,7 +178,10 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     // session-id/name token itself (session ids never start with '--').
     const rawArgs = args.slice(1);
     const force = rawArgs.includes('--force');
-    const target = rawArgs.filter((a) => a !== '--force').join(' ').trim();
+    const target = rawArgs
+      .filter((a) => a !== '--force')
+      .join(' ')
+      .trim();
     if (!target) {
       ctx.print('Usage: /session resume <session-id-or-name> [--force]');
       return true;
@@ -225,7 +189,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];
@@ -243,7 +207,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     if (liveness.live && liveness.pid !== process.pid && !force) {
       ctx.print(
         `Session appears open in another terminal (pid ${liveness.pid}): resuming will fork its live state.\n` +
-        `Re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
+          `Re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
       );
       return true;
     }
@@ -263,7 +227,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       const { meta, journalReplay, restoredAnchorCount, resumedMessageCount } = outcome;
 
       ctx.renderRequest();
-      ctx.print(`Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${meta.model || ctx.session.runtime.model}`);
+      ctx.print(
+        `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${meta.model || ctx.session.runtime.model}`,
+      );
       if (restoredAnchorCount > 0) {
         ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);
       }
@@ -305,14 +271,14 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
 
   if (sub === 'fork') {
     const newId = `user-${randomBytes(4).toString('hex')}`;
-        const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
-        const messages = exportData.messages ?? [];
-        const currentTitle = ctx.session.conversationManager.title;
-        const forkName = args[1] ? args.slice(1).join(' ').trim() : `fork-of-${ctx.session.runtime.sessionId.slice(0, 8)}`;
-        const meta: SessionMeta = {
-          title: forkName,
-          model: ctx.session.runtime.model,
-          provider: ctx.session.runtime.provider,
+    const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
+    const messages = exportData.messages ?? [];
+    const currentTitle = ctx.session.conversationManager.title;
+    const forkName = args[1] ? args.slice(1).join(' ').trim() : `fork-of-${ctx.session.runtime.sessionId.slice(0, 8)}`;
+    const meta: SessionMeta = {
+      title: forkName,
+      model: ctx.session.runtime.model,
+      provider: ctx.session.runtime.provider,
       timestamp: Date.now(),
       titleSource: exportData.titleSource,
       // Same shape a session file is read back in: a legacy open-view list
@@ -328,7 +294,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       ctx.session.runtime.sessionId = newId;
       ctx.session.conversationManager.title = forkName;
       ctx.renderRequest();
-      ctx.print(`Session forked:\n  New ID: ${newId}\n  Name:   ${forkName}\n  From:   ${currentTitle || ctx.session.runtime.sessionId}\n  Messages: ${messages.length}`);
+      ctx.print(
+        `Session forked:\n  New ID: ${newId}\n  Name:   ${forkName}\n  From:   ${currentTitle || ctx.session.runtime.sessionId}\n  Messages: ${messages.length}`,
+      );
     } catch (e) {
       ctx.print(`Failed to fork session: ${summarizeError(e)}`);
     }
@@ -336,13 +304,13 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
   }
 
   if (sub === 'save') {
-        const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
-        const messages = exportData.messages ?? [];
-        const rawName = args[1] ? args.slice(1).join(' ').trim() : (ctx.session.conversationManager.title || ctx.session.runtime.sessionId);
-        const meta: SessionMeta = {
-          title: ctx.session.conversationManager.title,
-          model: ctx.session.runtime.model,
-          provider: ctx.session.runtime.provider,
+    const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
+    const messages = exportData.messages ?? [];
+    const rawName = args[1] ? args.slice(1).join(' ').trim() : ctx.session.conversationManager.title || ctx.session.runtime.sessionId;
+    const meta: SessionMeta = {
+      title: ctx.session.conversationManager.title,
+      model: ctx.session.runtime.model,
+      provider: ctx.session.runtime.provider,
       timestamp: Date.now(),
       titleSource: exportData.titleSource,
       // Same shape a session file is read back in: a legacy open-view list
@@ -371,7 +339,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];
@@ -380,16 +348,18 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       return true;
     }
     const date = new Date(found.timestamp).toLocaleString();
-    ctx.print([
-      `Session: ${found.name}`,
-      `  Title:    ${found.title || '(untitled)'}`,
-      `  Model:    ${found.model || '(unknown)'}`,
-      `  Provider: ${found.provider || '(unknown)'}`,
-      `  Date:     ${date}`,
-      `  Messages: ${found.messageCount}`,
-      `  File:     ${found.filePath}`,
-      ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
-    ].join('\n'));
+    ctx.print(
+      [
+        `Session: ${found.name}`,
+        `  Title:    ${found.title || '(untitled)'}`,
+        `  Model:    ${found.model || '(unknown)'}`,
+        `  Provider: ${found.provider || '(unknown)'}`,
+        `  Date:     ${date}`,
+        `  Messages: ${found.messageCount}`,
+        `  File:     ${found.filePath}`,
+        ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
+      ].join('\n'),
+    );
     return true;
   }
 
@@ -436,7 +406,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const lines = [`Search results for "${query}" (${results.length} session${results.length !== 1 ? 's' : ''}):\n`];
     for (const result of results) {
       const date = new Date(result.session.timestamp).toLocaleString();
-      lines.push(`  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`);
+      lines.push(
+        `  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`,
+      );
       for (const snippet of result.snippets) {
         lines.push(`    > ${snippet}`);
       }
@@ -449,8 +421,18 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
   if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
     const kind = parseTranscriptKind(args[1]);
     const source = captureTranscriptSource(ctx);
-    try { const lines = await buildTranscriptReviewLines(ctx, kind, sub, source); source.assertPublishable(); ctx.print(lines.join('\n')); }
-    catch (error) { try { source.assertPublishable(); } catch { return true; } if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE); }
+    try {
+      const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);
+      source.assertPublishable();
+      ctx.print(lines.join('\n'));
+    } catch (error) {
+      try {
+        source.assertPublishable();
+      } catch {
+        return true;
+      }
+      if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
+    }
     return true;
   }
 
@@ -463,7 +445,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];

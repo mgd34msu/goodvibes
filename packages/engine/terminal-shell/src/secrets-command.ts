@@ -1,7 +1,11 @@
 import {
+  isGoodVibesSecretReferenceValue as isGoodVibesSecretRefInput,
+  isMalformedGoodVibesSecretReferenceValue as isMalformedGoodVibesSecretRefInput,
+} from '@goodvibes-jev/engine/sdk/platform/config';
+export { isGoodVibesSecretRefInput, isMalformedGoodVibesSecretRefInput };
+import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
   describeSecretRef,
-  isSecretRefInput,
   resolveSecretRef,
   type LiteralSecretsManager,
   type SecretScope,
@@ -11,14 +15,6 @@ import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 
-export function isGoodVibesSecretRefInput(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
-export function isMalformedGoodVibesSecretRefInput(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://') && !isGoodVibesSecretRefInput(normalized);
-}
 interface SecretsCommandContext {
   readonly print: (message: string) => void;
   readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;

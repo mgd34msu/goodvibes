@@ -1,15 +1,19 @@
-import { createOnboardingApplyPrimitives, getNow, verifyOnboardingWithRollback } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
-import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev/engine/terminal-shell/onboarding-file-helpers';
-const { isPlainObject, readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } = createOnboardingFileHelpers();
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/sdk/platform/config';
-import { isSecretRefInput } from '@goodvibes-jev/engine/sdk/platform/config';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
+import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
+const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
+  separator: ': ',
+});
 import {
-  getOnboardingRuntimeStatePath,
-  readOnboardingRuntimeState,
-  writeOnboardingAcknowledgementState,
-} from './state.ts';
+  createOnboardingApplyPrimitives,
+  verifyOnboardingWithRollback,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
+import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev/engine/terminal-shell/onboarding-file-helpers';
+const { isPlainObject, readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
+  createOnboardingFileHelpers();
+import { existsSync, readFileSync } from 'node:fs';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
+import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import type {
   OnboardingApplyDependencies,
@@ -20,18 +24,6 @@ import type {
   OnboardingApplyResult,
 } from './types.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-
-
-
-
-
-
-
-
-
-
-
-
 
 interface BootstrapCredential {
   readonly username: string;
@@ -48,8 +40,6 @@ interface MutableAuthManager {
   readonly users?: Map<string, PersistedAuthUser>;
   readonly sessions?: Map<string, { readonly token: string; readonly username: string; readonly expiresAt: number }>;
 }
-
-
 
 function parseBootstrapCredential(content: string | null): BootstrapCredential | null {
   if (content === null) return null;
@@ -68,77 +58,14 @@ function parsePersistedAuthUsers(content: string): readonly PersistedAuthUser[] 
   if (!isPlainObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.users)) {
     throw new Error('Expected a version 1 local auth user store.');
   }
-  return parsed.users.filter((user): user is PersistedAuthUser => (
-    isPlainObject(user)
-    && typeof user.username === 'string'
-    && typeof user.passwordHash === 'string'
-    && (user.roles === undefined || (Array.isArray(user.roles) && user.roles.every((role) => typeof role === 'string')))
-  ));
+  return parsed.users.filter(
+    (user): user is PersistedAuthUser =>
+      isPlainObject(user) &&
+      typeof user.username === 'string' &&
+      typeof user.passwordHash === 'string' &&
+      (user.roles === undefined || (Array.isArray(user.roles) && user.roles.every((role) => typeof role === 'string'))),
+  );
 }
-
-
-
-
-
-function isGoodVibesSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
-
-function isMalformedGoodVibesSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://') && !isGoodVibesSecretReferenceValue(normalized);
-}
-
-function validateConfigValue(operation: Extract<OnboardingApplyOperation, { kind: 'set-config' }>): void {
-  if (typeof operation.value === 'string' && isMalformedGoodVibesSecretReferenceValue(operation.value)) {
-    throw new Error(`Config key ${operation.key} only accepts goodvibes://secrets/... secret references.`);
-  }
-
-  // Feature enablement arrives as plain domain settings writes (e.g.
-  // sandbox.enabled, controlPlane.gateway), validated by the schema path below
-  // like any other key, there is no separate enablement namespace.
-  const schema = CONFIG_SCHEMA.find((entry) => entry.key === operation.key);
-  if (!schema) {
-    const defaultValue = operation.key.split('.').reduce<unknown>((cursor, part) => (
-      isPlainObject(cursor) ? cursor[part] : undefined
-    ), DEFAULT_CONFIG);
-    if (defaultValue === undefined) throw new Error(`Unknown config key: ${operation.key}`);
-    if (typeof defaultValue === 'boolean' && typeof operation.value !== 'boolean') {
-      throw new Error(`Config key ${operation.key} expects a boolean value.`);
-    }
-    if (typeof defaultValue === 'number' && typeof operation.value !== 'number') {
-      throw new Error(`Config key ${operation.key} expects a numeric value.`);
-    }
-    if (typeof defaultValue === 'string' && typeof operation.value !== 'string') {
-      throw new Error(`Config key ${operation.key} expects a string value.`);
-    }
-    return;
-  }
-  const stringValue = typeof operation.value === 'string' ? operation.value : null;
-
-  if (schema.type === 'boolean' && typeof operation.value !== 'boolean') {
-    throw new Error(`Config key ${operation.key} expects a boolean value.`);
-  }
-
-  if (schema.type === 'number' && typeof operation.value !== 'number') {
-    throw new Error(`Config key ${operation.key} expects a numeric value.`);
-  }
-
-  if ((schema.type === 'string' || schema.type === 'enum') && stringValue === null) {
-    throw new Error(`Config key ${operation.key} expects a string value.`);
-  }
-
-  if (schema.type === 'enum' && schema.enumValues && stringValue !== null && !schema.enumValues.includes(stringValue)) {
-    throw new Error(`Invalid value for ${operation.key}: ${String(operation.value)}.`);
-  }
-
-  if (schema.validate && !schema.validate(operation.value)) {
-    throw new Error(`Invalid value for ${operation.key}: ${String(operation.value)}.`);
-  }
-}
-
-
 
 function validateAuthOperation(
   deps: OnboardingApplyDependencies,
@@ -154,8 +81,6 @@ function validateAuthOperation(
     throw new Error(`Existing local auth user ${username} is missing required role(s): ${requiredRoles.join(', ')}.`);
   }
 }
-
-
 
 function applyConfigOperation(
   deps: OnboardingApplyDependencies,
@@ -182,8 +107,6 @@ function applyConfigOperation(
     summary: `Updated ${operation.key} in global onboarding settings.`,
   };
 }
-
-
 
 function applyAuthOperation(
   deps: OnboardingApplyDependencies,
@@ -217,13 +140,9 @@ function applyAuthOperation(
 
   return {
     kind: operation.kind,
-    summary: existing
-      ? `Updated local auth user ${username}.`
-      : `Created local auth user ${username}.`,
+    summary: existing ? `Updated local auth user ${username}.` : `Created local auth user ${username}.`,
   };
 }
-
-
 
 function buildAuthRollbackAction(
   deps: OnboardingApplyDependencies,
@@ -235,17 +154,16 @@ function buildAuthRollbackAction(
   const username = operation.username.trim();
   const before = auth.inspect();
   const existingUser = before.users.find((user) => user.username === username);
-  const existingSessionFingerprints = new Set(before.sessions
-    .filter((session) => session.username === username)
-    .map((session) => session.tokenFingerprint));
+  const existingSessionFingerprints = new Set(
+    before.sessions.filter((session) => session.username === username).map((session) => session.tokenFingerprint),
+  );
   const userStoreSnapshot = existsSync(before.userStorePath) ? readFileSync(before.userStorePath, 'utf-8') : null;
   const bootstrapCredentialSnapshot = existsSync(before.bootstrapCredentialPath)
     ? readFileSync(before.bootstrapCredentialPath, 'utf-8')
     : null;
   const bootstrapCredential = parseBootstrapCredential(bootstrapCredentialSnapshot);
-  const beforeSessions = mutable.sessions instanceof Map
-    ? [...mutable.sessions.entries()].map(([token, session]) => [token, { ...session }] as const)
-    : [];
+  const beforeSessions =
+    mutable.sessions instanceof Map ? [...mutable.sessions.entries()].map(([token, session]) => [token, { ...session }] as const) : [];
 
   return () => {
     for (const session of auth.inspect().sessions) {
@@ -286,16 +204,10 @@ function buildAuthRollbackAction(
   };
 }
 
-async function buildRollbackAction(
-  deps: OnboardingApplyDependencies,
-  operation: OnboardingApplyOperation,
-): Promise<RollbackAction> {
+async function buildRollbackAction(deps: OnboardingApplyDependencies, operation: OnboardingApplyOperation): Promise<RollbackAction> {
   if (operation.kind === 'set-config') {
     if ((operation.scope ?? 'global') === 'project') {
-      return snapshotFileRollback(
-        deps.shellPaths.resolveProjectPath('tui', 'settings.json'),
-        () => deps.config.load(),
-      );
+      return snapshotFileRollback(deps.shellPaths.resolveProjectPath('tui', 'settings.json'), () => deps.config.load());
     }
 
     const previous = deps.config.get(operation.key as never);
@@ -313,45 +225,26 @@ async function buildRollbackAction(
   }
 
   if (operation.kind === 'acknowledge') {
-    return snapshotFileRollback(
-      getOnboardingRuntimeStatePath(deps.shellPaths, deps.acknowledgementScope ?? 'project'),
-    );
+    return snapshotFileRollback(getOnboardingRuntimeStatePath(deps.shellPaths, deps.acknowledgementScope ?? 'project'));
   }
 
   const neverOperation: never = operation;
   throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
 }
 
-
-
-function orderApplyOperations(
-  operations: readonly OnboardingApplyOperation[],
-): readonly OnboardingApplyOperation[] {
-  const secretPolicyOperations = operations.filter((operation) => (
-    operation.kind === 'set-config' && operation.key === 'storage.secretPolicy'
-  ));
+function orderApplyOperations(operations: readonly OnboardingApplyOperation[]): readonly OnboardingApplyOperation[] {
+  const secretPolicyOperations = operations.filter(
+    (operation) => operation.kind === 'set-config' && operation.key === 'storage.secretPolicy',
+  );
   const authOperations = operations.filter((operation) => operation.kind === 'ensure-auth-user');
   const secretOperations = operations.filter((operation) => operation.kind === 'set-secret');
-  const configOperations = operations.filter((operation) => (
-    operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy'
-  ));
-  const finalOperations = operations.filter((operation) => (
-    operation.kind === 'acknowledge'
-  ));
+  const configOperations = operations.filter((operation) => operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy');
+  const finalOperations = operations.filter((operation) => operation.kind === 'acknowledge');
 
-  return [
-    ...secretPolicyOperations,
-    ...authOperations,
-    ...secretOperations,
-    ...configOperations,
-    ...finalOperations,
-  ];
+  return [...secretPolicyOperations, ...authOperations, ...secretOperations, ...configOperations, ...finalOperations];
 }
 
-function prevalidateApplyRequest(
-  deps: OnboardingApplyDependencies,
-  request: OnboardingApplyRequest,
-): OnboardingApplyError[] {
+function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: OnboardingApplyRequest): OnboardingApplyError[] {
   const errors: OnboardingApplyError[] = [];
   const orderedOperations = orderApplyOperations(request.operations);
 
@@ -456,10 +349,7 @@ export async function applyOnboardingRequest(
         applied.length = 0;
         errors.push({
           kind: operation.kind,
-          message: [
-            summarizeError(error),
-            ...rollbackErrors.map((rollbackError) => `rollback: ${rollbackError}`),
-          ].join('; '),
+          message: [summarizeError(error), ...rollbackErrors.map((rollbackError) => `rollback: ${rollbackError}`)].join('; '),
         });
         return false;
       }
@@ -467,13 +357,20 @@ export async function applyOnboardingRequest(
     return true;
   };
 
-  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => verifyOnboardingWithRollback(() => verifyOnboardingRequest(deps, { ...request, operations }), () => runRollbacks(rollbacks), applied, errors, getVerificationFailureKind);
+  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> =>
+    verifyOnboardingWithRollback(
+      () => verifyOnboardingRequest(deps, { ...request, operations }),
+      () => runRollbacks(rollbacks),
+      applied,
+      errors,
+      getVerificationFailureKind,
+    );
 
-  if (!await applyOperations(orderedOperations)) {
+  if (!(await applyOperations(orderedOperations))) {
     return { ok: false, applied, skipped, errors };
   }
 
-  if (!await verifyOrRollback(orderedOperations)) {
+  if (!(await verifyOrRollback(orderedOperations))) {
     return { ok: false, applied, skipped, errors };
   }
 
@@ -485,4 +382,10 @@ export async function applyOnboardingRequest(
   };
 }
 
-const { validateSecretOperation, applySecretOperation, buildSecretRollbackAction, validateAcknowledgementOperation, applyAcknowledgementOperation } = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);
+const {
+  validateSecretOperation,
+  applySecretOperation,
+  buildSecretRollbackAction,
+  validateAcknowledgementOperation,
+  applyAcknowledgementOperation,
+} = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);

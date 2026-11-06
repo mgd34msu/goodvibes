@@ -125,10 +125,11 @@
       "path": "cli/management.ts",
       "baselineTuiLines": 512,
       "baselineSimilarity": 0.4207,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "probeTcp"
-      ]
+      ],
+      "notes": "Platform owns provider/model catalog views, auth classification memoization, selection and favorites. Product adapters retain runtime graph lifetime, CLI vocabulary/dispatch and TUI-only synthetic catalog displays."
     },
     {
       "path": "cli/native-headless-command.ts",
@@ -686,7 +687,8 @@
       "baselineSimilarity": 0.6137,
       "status": "pending-convergence",
       "platformFunctions": [
-        "parseTranscriptKind"
+        "parseTranscriptKind",
+        "transcript-review"
       ]
     },
     {
@@ -1756,7 +1758,8 @@
         "validateAcknowledgementOperation",
         "applyAcknowledgementOperation",
         "getNow",
-        "verifyOnboardingWithRollback"
+        "verifyOnboardingWithRollback",
+        "onboarding-config-validation"
       ]
     },
     {

@@ -1,15 +1,16 @@
+import { createTranscriptReviewFormatter } from '@goodvibes-jev/engine/terminal-shell/transcript-review';
+const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(' ', ', ');
 import { parseTranscriptKind } from '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { captureTranscriptSource, readTranscriptIndex, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
+import { captureTranscriptSource, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { CommandContext } from '../command-registry.ts';
 import { type SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import type { TranscriptEventKind } from '@goodvibes-jev/engine/sdk/platform/core';
-import type { SessionReturnContextSummary } from '@/runtime/index.ts';
+
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
@@ -22,59 +23,7 @@ import { readConversationMessageSnapshots } from '../../core/conversation-messag
 import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
 
 function formatSessionFailure(action: string, error: unknown): string {
-  return [
-    `Failed to ${action}`,
-    `  error ${summarizeError(error)}`,
-  ].join('\n');
-}
-
-async function buildTranscriptReviewLines(
-  ctx: CommandContext,
-  kind: TranscriptEventKind | 'all',
-  mode: 'events' | 'groups' | 'hotspots',
-  source: ReturnType<typeof captureTranscriptSource>,
-): Promise<string[]> {
-  const index = await readTranscriptIndex(ctx, source);
-  if (!index) return [TRANSCRIPT_UNAVAILABLE];
-  const events = kind === 'all' ? index.events : index.events.filter((event) => event.kind === kind);
-  const groups = kind === 'all' ? index.groups : index.groups.filter((group) => group.kind === kind);
-
-  if (mode === 'groups') {
-    return [
-      `Transcript Groups${kind === 'all' ? '' : ` ${kind}`}`,
-      `  groups ${groups.length}`,
-      ...groups.slice(0, 12).map((group) => (
-        `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)} event(s)  msgs=${group.messageIndexes[0]}-${group.messageIndexes[group.messageIndexes.length - 1]}  ${group.title}`
-      )),
-      ...(groups.length > 12 ? [`  … ${groups.length - 12} more group(s)`] : []),
-    ];
-  }
-
-  if (mode === 'hotspots') {
-    const kindCounts = new Map<TranscriptEventKind, number>();
-    for (const event of index.events) {
-      kindCounts.set(event.kind, (kindCounts.get(event.kind) ?? 0) + 1);
-    }
-    const busiestGroups = [...index.groups]
-      .sort((a, b) => b.events.length - a.events.length || a.messageIndexes[0]! - b.messageIndexes[0]!)
-      .slice(0, 8);
-    return [
-      'Transcript Hotspots',
-      ...[...kindCounts.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([eventKind, count]) => `  ${eventKind.padEnd(20)} ${count}`),
-      '',
-      'Busiest groups',
-      ...busiestGroups.map((group) => `  ${group.kind.padEnd(20)} ${String(group.events.length).padStart(2)}  ${group.title}`),
-    ];
-  }
-
-  return [
-    `Transcript Events${kind === 'all' ? '' : ` ${kind}`}`,
-    `  events ${events.length}`,
-    ...events.slice(0, 16).map((event) => `  #${String(event.messageIndex).padStart(3)}  ${event.kind.padEnd(20)} ${event.title}, ${event.detail}`),
-    ...(events.length > 16 ? [`  … ${events.length - 16} more event(s)`] : []),
-  ];
+  return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
 }
 
 async function printSessionExport(
@@ -88,14 +37,23 @@ async function printSessionExport(
 ): Promise<void> {
   const session = ctx.session;
   const readingOptions = ctx.judgmentReadingOptions;
-  const signal = readingOptions?.signal, ownerCurrent = readingOptions?.assertCurrent;
+  const signal = readingOptions?.signal,
+    ownerCurrent = readingOptions?.assertCurrent;
   const source = captureTranscriptSource(ctx, signal);
   const manager = requireSessionManager(ctx);
   const input = retainOwnedJson({ sessionId, title, messages, format, args });
   const fileBytes = filePath === undefined ? undefined : readFileSync(filePath);
   const fileStat = filePath === undefined ? undefined : statSync(filePath, { bigint: true });
-  const methods: { readonly key: 'print' | 'load'; readonly owner: object; readonly prototype: object | null; readonly descriptor?: PropertyDescriptor }[] = [];
-  for (const [target, key] of [[ctx, 'print'], [manager, 'load']] as const) {
+  const methods: {
+    readonly key: 'print' | 'load';
+    readonly owner: object;
+    readonly prototype: object | null;
+    readonly descriptor?: PropertyDescriptor;
+  }[] = [];
+  for (const [target, key] of [
+    [ctx, 'print'],
+    [manager, 'load'],
+  ] as const) {
     for (let owner: object | null = target; owner !== null; owner = Object.getPrototypeOf(owner)) {
       const descriptor = Object.getOwnPropertyDescriptor(owner, key);
       if (descriptor !== undefined && !('value' in descriptor)) throw new TranscriptSourceChangedError();
@@ -103,23 +61,38 @@ async function printSessionExport(
       if (descriptor !== undefined) break;
     }
   }
-  const print = ctx.print, load = manager.load;
+  const print = ctx.print,
+    load = manager.load;
   const saved = filePath === undefined ? captureOwnedJson(load.call(manager, sessionId)) : undefined;
   const assertSource = () => {
     source.assertPublishable();
     try {
       input.assertCurrent();
-      if (ctx.session !== session || ctx.judgmentReadingOptions !== readingOptions
-        || readingOptions?.signal !== signal || readingOptions?.assertCurrent !== ownerCurrent) throw new TranscriptSourceChangedError();
+      if (
+        ctx.session !== session ||
+        ctx.judgmentReadingOptions !== readingOptions ||
+        readingOptions?.signal !== signal ||
+        readingOptions?.assertCurrent !== ownerCurrent
+      )
+        throw new TranscriptSourceChangedError();
       for (const entry of methods) {
-        if (Object.getPrototypeOf(entry.owner) !== entry.prototype
-          || !isDeepStrictEqual(Object.getOwnPropertyDescriptor(entry.owner, entry.key), entry.descriptor)) throw new TranscriptSourceChangedError();
+        if (
+          Object.getPrototypeOf(entry.owner) !== entry.prototype ||
+          !isDeepStrictEqual(Object.getOwnPropertyDescriptor(entry.owner, entry.key), entry.descriptor)
+        )
+          throw new TranscriptSourceChangedError();
       }
       if (filePath !== undefined && fileBytes !== undefined && fileStat !== undefined) {
         const current = statSync(filePath, { bigint: true });
-        if (current.dev !== fileStat.dev || current.ino !== fileStat.ino || current.size !== fileStat.size
-          || current.mtimeNs !== fileStat.mtimeNs || current.ctimeNs !== fileStat.ctimeNs
-          || !readFileSync(filePath).equals(fileBytes)) throw new TranscriptSourceChangedError();
+        if (
+          current.dev !== fileStat.dev ||
+          current.ino !== fileStat.ino ||
+          current.size !== fileStat.size ||
+          current.mtimeNs !== fileStat.mtimeNs ||
+          current.ctimeNs !== fileStat.ctimeNs ||
+          !readFileSync(filePath).equals(fileBytes)
+        )
+          throw new TranscriptSourceChangedError();
       } else if (!isDeepStrictEqual(captureOwnedJson(load.call(manager, sessionId)), saved)) {
         throw new TranscriptSourceChangedError();
       }
@@ -131,7 +104,11 @@ async function printSessionExport(
   const assertCurrent = () => {
     assertSource();
     let result: unknown;
-    try { result = ownerCurrent?.(); } catch { throw new TranscriptSourceChangedError(); }
+    try {
+      result = ownerCurrent?.();
+    } catch {
+      throw new TranscriptSourceChangedError();
+    }
     if (result !== undefined) {
       drainOwned(result);
       throw new TranscriptSourceChangedError();
@@ -140,8 +117,11 @@ async function printSessionExport(
     assertSource();
   };
   assertCurrent();
-  try { readingOwner = captureJudgmentPort('agent.session-export', { signal, assertCurrent: assertSource }); }
-  catch (error) { if (!(error instanceof JudgmentPortMissingError)) throw error; }
+  try {
+    readingOwner = captureJudgmentPort('agent.session-export', { signal, assertCurrent: assertSource });
+  } catch (error) {
+    if (!(error instanceof JudgmentPortMissingError)) throw error;
+  }
   const lines: string[] = [];
   if (format === 'markdown') {
     lines.push(`# Session: ${title || sessionId}`);
@@ -192,10 +172,12 @@ async function printSessionExport(
 
 function conversationMessageContentText(message: ConversationMessageSnapshot): string {
   if (typeof message.content === 'string') return message.content;
-  return message.content.map((part) => {
-    if (part.type === 'text') return part.text;
-    return `[image: ${part.mediaType}]`;
-  }).join('\n');
+  return message.content
+    .map((part) => {
+      if (part.type === 'text') return part.text;
+      return `[image: ${part.mediaType}]`;
+    })
+    .join('\n');
 }
 
 export async function handleSessionWorkflowCommand(args: string[], ctx: CommandContext): Promise<boolean> {
@@ -212,14 +194,16 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const title = ctx.session.conversationManager.title || '(untitled)';
     const meta = sm.getMeta(id);
     const started = meta ? new Date(meta.timestamp).toLocaleString() : 'this session';
-    ctx.print([
-      'Current session',
-      `  id ${id}`,
-      `  name ${title}`,
-      `  started ${started}`,
-      `  messages ${msgCount}`,
-      `  model ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
-    ].join('\n'));
+    ctx.print(
+      [
+        'Current session',
+        `  id ${id}`,
+        `  name ${title}`,
+        `  started ${started}`,
+        `  messages ${msgCount}`,
+        `  model ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
+      ].join('\n'),
+    );
     return true;
   }
 
@@ -241,7 +225,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
           session.returnContext.activeTasks ? `active ${session.returnContext.activeTasks}` : null,
           session.returnContext.blockedTasks ? `blocked ${session.returnContext.blockedTasks}` : null,
           session.returnContext.pendingApprovals ? `approvals ${session.returnContext.pendingApprovals}` : null,
-        ].filter(Boolean).join('  ');
+        ]
+          .filter(Boolean)
+          .join('  ');
         if (posture) lines.push(`     posture ${posture}`);
       }
     }
@@ -272,10 +258,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       }
       sm.rename(ctx.session.runtime.sessionId, newName);
       ctx.session.conversationManager.title = newName;
-      ctx.print([
-        'Session renamed',
-        `  name ${newName}`,
-      ].join('\n'));
+      ctx.print(['Session renamed', `  name ${newName}`].join('\n'));
       ctx.renderRequest();
     } catch (e) {
       ctx.print(formatSessionFailure('rename session', e));
@@ -292,7 +275,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];
@@ -311,41 +294,51 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
           const selected = await providerApi.selectModel(model);
           model = selected.registryKey;
           provider = selected.providerId;
-        } catch { /* The saved model may no longer exist locally. */ }
+        } catch {
+          /* The saved model may no longer exist locally. */
+        }
       }
       if (ctx.isGenerating?.() || ctx.session.runtime.sessionId !== sourceSessionId) {
         throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
       }
-      const restoredAnchorCount = restoreLoadedSession(found.name, { meta, messages }, {
-        conversation: ctx.session.conversationManager,
-        runtime: ctx.session.runtime,
-        restoreTurnAnchors: ctx.session.restoreTurnAnchors,
-        surface: ctx.session.surface,
-      });
+      const restoredAnchorCount = restoreLoadedSession(
+        found.name,
+        { meta, messages },
+        {
+          conversation: ctx.session.conversationManager,
+          runtime: ctx.session.runtime,
+          restoreTurnAnchors: ctx.session.restoreTurnAnchors,
+          surface: ctx.session.surface,
+        },
+      );
       if (model) ctx.session.runtime.model = model;
       if (provider) ctx.session.runtime.provider = provider;
       ctx.session.writeLastSessionPointer?.(found.name);
       ctx.renderRequest();
-      ctx.print([
-        'Resumed session',
-        `  id ${found.name}`,
-        `  name ${meta.title || '(untitled)'}`,
-        `  messages ${messages.length}`,
-        `  model ${meta.model || ctx.session.runtime.model}`,
-        ...(restoredAnchorCount > 0
-          ? [`  rewind points ${restoredAnchorCount} restored from before the resume`]
-          : []),
-      ].join('\n'));
+      ctx.print(
+        [
+          'Resumed session',
+          `  id ${found.name}`,
+          `  name ${meta.title || '(untitled)'}`,
+          `  messages ${messages.length}`,
+          `  model ${meta.model || ctx.session.runtime.model}`,
+          ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
+        ].join('\n'),
+      );
       const returnContextMode = getReturnContextMode(ctx.platform.configManager);
       if (returnContextMode !== 'off' && meta.returnContext) {
         for (const line of formatReturnContextForDisplay(meta.returnContext)) {
           ctx.print(`  ${line}`);
         }
         if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
-          ctx.print('  Remote re-entry. Handle remote build-host recovery outside Agent; delegate explicit build/fix/review recovery from Agent.');
+          ctx.print(
+            '  Remote re-entry. Handle remote build-host recovery outside Agent; delegate explicit build/fix/review recovery from Agent.',
+          );
         }
         if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
-          ctx.print('  Worktree re-entry. Open GoodVibes TUI in the target workspace; delegate explicit build/fix/review recovery from Agent.');
+          ctx.print(
+            '  Worktree re-entry. Open GoodVibes TUI in the target workspace; delegate explicit build/fix/review recovery from Agent.',
+          );
         }
         if (returnContextMode === 'assisted') {
           const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
@@ -388,13 +381,15 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       ctx.session.writeLastSessionPointer?.(newId);
       ctx.session.conversationManager.title = forkName;
       ctx.renderRequest();
-      ctx.print([
-        'Session forked',
-        `  id ${newId}`,
-        `  name ${forkName}`,
-        `  from ${currentTitle || sourceSessionId}`,
-        `  messages ${messages.length}`,
-      ].join('\n'));
+      ctx.print(
+        [
+          'Session forked',
+          `  id ${newId}`,
+          `  name ${forkName}`,
+          `  from ${currentTitle || sourceSessionId}`,
+          `  messages ${messages.length}`,
+        ].join('\n'),
+      );
     } catch (e) {
       ctx.print(formatSessionFailure('fork session', e));
     }
@@ -403,7 +398,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
 
   if (sub === 'save') {
     const messages = ctx.session.conversationManager.getMessageSnapshot();
-    const rawName = args[1] ? args.slice(1).join(' ').trim() : (ctx.session.conversationManager.title || ctx.session.runtime.sessionId);
+    const rawName = args[1] ? args.slice(1).join(' ').trim() : ctx.session.conversationManager.title || ctx.session.runtime.sessionId;
     const meta: SessionMeta = {
       title: ctx.session.conversationManager.title,
       model: ctx.session.runtime.model,
@@ -418,12 +413,14 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       const { filePath, sanitizedName } = sm.save(rawName, messages, meta);
       copySessionSidecars(ctx.session.runtime.sessionId, sanitizedName, ctx.session.conversationManager, ctx.session.surface);
       ctx.session.runtime.sessionId = sanitizedName;
-      ctx.print([
-        'Session saved',
-        `  name ${rawName}`,
-        ...(sanitizedName !== rawName ? [`  saved as ${sanitizedName}`] : []),
-        `  path ${filePath}`,
-      ].join('\n'));
+      ctx.print(
+        [
+          'Session saved',
+          `  name ${rawName}`,
+          ...(sanitizedName !== rawName ? [`  saved as ${sanitizedName}`] : []),
+          `  path ${filePath}`,
+        ].join('\n'),
+      );
     } catch (e) {
       ctx.print(formatSessionFailure('save session', e));
     }
@@ -435,7 +432,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];
@@ -444,16 +441,18 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
       return true;
     }
     const date = new Date(found.timestamp).toLocaleString();
-    ctx.print([
-      `Session ${found.name}`,
-      `  title ${found.title || '(untitled)'}`,
-      `  model ${found.model || '(unknown)'}`,
-      `  provider ${found.provider || '(unknown)'}`,
-      `  date ${date}`,
-      `  messages ${found.messageCount}`,
-      `  file ${found.filePath}`,
-      ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
-    ].join('\n'));
+    ctx.print(
+      [
+        `Session ${found.name}`,
+        `  title ${found.title || '(untitled)'}`,
+        `  model ${found.model || '(unknown)'}`,
+        `  provider ${found.provider || '(unknown)'}`,
+        `  date ${date}`,
+        `  messages ${found.messageCount}`,
+        `  file ${found.filePath}`,
+        ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
+      ].join('\n'),
+    );
     return true;
   }
 
@@ -502,7 +501,9 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const lines = [`Search results for "${query}" (${results.length} session${results.length !== 1 ? 's' : ''})\n`];
     for (const result of results) {
       const date = new Date(result.session.timestamp).toLocaleString();
-      lines.push(`  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`);
+      lines.push(
+        `  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`,
+      );
       for (const snippet of result.snippets) {
         lines.push(`    > ${snippet}`);
       }
@@ -515,8 +516,18 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
   if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
     const kind = parseTranscriptKind(args[1]);
     const source = captureTranscriptSource(ctx);
-    try { const lines = await buildTranscriptReviewLines(ctx, kind, sub, source); source.assertPublishable(); ctx.print(lines.join('\n')); }
-    catch (error) { try { source.assertPublishable(); } catch { return true; } if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE); }
+    try {
+      const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);
+      source.assertPublishable();
+      ctx.print(lines.join('\n'));
+    } catch (error) {
+      try {
+        source.assertPublishable();
+      } catch {
+        return true;
+      }
+      if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
+    }
     return true;
   }
 
@@ -534,7 +545,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     const sessions = sm.list();
     const candidates = findSessionCandidates(sessions, target);
     if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map(session => session.name).join(', ')}`);
+      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       return true;
     }
     const found = candidates[0];
@@ -548,11 +559,7 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
     }
     try {
       sm.delete(found.name);
-      ctx.print([
-        'Session deleted',
-        `  id ${found.name}`,
-        ...(found.title ? [`  title ${found.title}`] : []),
-      ].join('\n'));
+      ctx.print(['Session deleted', `  id ${found.name}`, ...(found.title ? [`  title ${found.title}`] : [])].join('\n'));
     } catch (e) {
       ctx.print(formatSessionFailure('delete session', e));
     }

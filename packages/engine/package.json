@@ -3088,6 +3088,11 @@
       "bun": "./terminal-shell/src/bootstrap-lifecycle.ts",
       "types": "./terminal-shell/dist/bootstrap-lifecycle.d.ts",
       "import": "./terminal-shell/dist/bootstrap-lifecycle.js"
+    },
+    "./terminal-shell/security-command": {
+      "bun": "./terminal-shell/src/security-command.ts",
+      "types": "./terminal-shell/dist/security-command.d.ts",
+      "import": "./terminal-shell/dist/security-command.js"
     }
   },
   "publishConfig": {

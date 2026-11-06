@@ -1,7 +1,8 @@
+import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
 import type { CommandRegistry } from '../command-registry.ts';
-import { buildMcpAttackPathReview } from '@/runtime/index.ts';
+import '@/runtime/index.ts';
 import { buildKnowledgeInjectionPrompt, selectKnowledgeForTask } from '@goodvibes-jev/engine/sdk/platform/state';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
 import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
 import { getMemoryApi, getMemorySpine } from './recall-query.ts';
 
@@ -71,16 +72,20 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
         }
         if (mode === 'graph') {
           const cancelled = manager.cancelGraph(target);
-          ctx.print(cancelled.length > 0
-            ? `Cancelled ${cancelled.length} agent${cancelled.length !== 1 ? 's' : ''} in graph ${target}.`
-            : `No cancellable agents found in graph ${target}.`);
+          ctx.print(
+            cancelled.length > 0
+              ? `Cancelled ${cancelled.length} agent${cancelled.length !== 1 ? 's' : ''} in graph ${target}.`
+              : `No cancellable agents found in graph ${target}.`,
+          );
           return;
         }
         if (mode === 'subtree') {
           const cancelled = manager.cancelSubtree(target);
-          ctx.print(cancelled.length > 0
-            ? `Cancelled ${cancelled.length} agent${cancelled.length !== 1 ? 's' : ''} in subtree rooted at ${target}.`
-            : `No cancellable agents found in subtree rooted at ${target}.`);
+          ctx.print(
+            cancelled.length > 0
+              ? `Cancelled ${cancelled.length} agent${cancelled.length !== 1 ? 's' : ''} in subtree rooted at ${target}.`
+              : `No cancellable agents found in subtree rooted at ${target}.`,
+          );
           return;
         }
         ctx.print(`Unknown orchestration cancel target: ${mode}`);
@@ -104,87 +109,30 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
     },
   });
 
-  registry.register({
-    name: 'security',
-    aliases: [],
-    description: 'Inspect security posture, attack paths, and review state',
-    usage: '[review | attack-paths | tokens]',
-    handler(args, ctx) {
-      if (args.length === 0) {
-        if (ctx.openSecurityView) {
-          ctx.openSecurityView();
-          return;
-        }
-        ctx.print('The Security view is not available in this runtime.');
-        return;
-      }
-
-      const subcommand = args[0]?.toLowerCase() ?? 'review';
-      const audit = requireTokenAuditor(ctx).auditAll(Date.now());
-      const securitySnapshot = requireReadModels(ctx).security.getSnapshot();
-      const policySnapshot = ctx.extensions.policyRuntimeState?.getSnapshot();
-      if (!policySnapshot) {
-        ctx.print('Policy runtime state is not available in this runtime.');
-        return;
-      }
-      const attackPaths = buildMcpAttackPathReview({
-        servers: securitySnapshot.mcpServers,
-        recentDecisions: securitySnapshot.recentMcpDecisions,
-      });
-
-      if (subcommand === 'tokens') {
-        if (audit.results.length === 0) {
-          ctx.print('No registered API tokens are currently under audit.');
-          return;
-        }
-        ctx.print([
-          `Token Audit (${audit.results.length})`,
-          ...audit.results.map((result) => (
-            `  ${result.label}  policy=${result.scope.policyId}  scope=${result.scope.outcome}  rotation=${result.rotation.outcome}  blocked=${result.blocked ? 'yes' : 'no'}`
-          )),
-        ].join('\n'));
-        return;
-      }
-
-      if (subcommand === 'attack-paths') {
-        if (attackPaths.findings.length === 0) {
-          ctx.print('No MCP attack-path findings are currently active.');
-          return;
-        }
-        ctx.print([
-          `MCP Attack-Path Review`,
-          `  summary: ${attackPaths.summary}`,
-          ...attackPaths.findings.slice(0, 12).map((finding) => (
-            `  ${finding.severity.toUpperCase()} ${finding.serverName}  ${finding.route}\n    ${finding.reason}`
-          )),
-        ].join('\n'));
-        return;
-      }
-
-      const plugins = ctx.extensions.pluginManager?.list() ?? [];
-      const subscriptions = requireSubscriptionManager(ctx);
-      const builtinProviders = listBuiltinSubscriptionProviders();
-      ctx.print([
-        'Security Review',
-        `  tokens: ${audit.results.length}`,
-        `  blocked tokens: ${audit.blocked.length}`,
-        `  scope violations: ${audit.scopeViolations.length}`,
-        `  rotation overdue: ${audit.rotationOverdue.length}`,
-        `  rotation warnings: ${audit.rotationWarnings.length}`,
-        `  built-in subscription providers: ${builtinProviders.length}`,
-        `  active subscriptions: ${subscriptions.list().length}`,
-        `  pending subscriptions: ${subscriptions.listPending().length}`,
-        `  policy lint findings: ${policySnapshot.lintFindings.length}`,
-        `  policy preflight: ${policySnapshot.lastPreflightReview?.status ?? 'n/a'}`,
-        `  mcp servers: ${securitySnapshot.mcpServers.length}`,
-        `  mcp quarantined: ${securitySnapshot.mcpServers.filter((server) => server.schemaFreshness === 'quarantined').length}`,
-        `  mcp elevated: ${securitySnapshot.mcpServers.filter((server) => server.trustMode === 'allow-all').length}`,
-        `  mcp attack-path findings: ${attackPaths.findings.length}`,
-        `  quarantined plugins: ${plugins.filter((plugin) => plugin.quarantined).length}`,
-        `  untrusted plugins: ${plugins.filter((plugin) => plugin.trustTier === 'untrusted').length}`,
-      ].join('\n'));
-    },
-  });
+  registry.register(
+    createSecurityCommand<CommandContext>(
+      {
+        tokens: requireTokenAuditor,
+        security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
+        policy: (ctx) => ctx.extensions.policyRuntimeState?.getSnapshot(),
+        plugins: (ctx) => ctx.extensions.pluginManager?.list() ?? [],
+        subscriptions: requireSubscriptionManager,
+      },
+      {
+        hidden: false,
+        separator: '=',
+        tokenTitle: 'Token Audit',
+        emptyTokens: 'No registered API tokens are currently under audit.',
+        policyUnavailable: 'Policy runtime state is not available in this runtime.',
+        beforeRead(args, ctx) {
+          if (args.length > 0) return false;
+          if (ctx.openSecurityView) ctx.openSecurityView();
+          else ctx.print('The Security view is not available in this runtime.');
+          return true;
+        },
+      },
+    ),
+  );
 
   registry.register({
     name: 'project-memory',
@@ -212,10 +160,14 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
           ctx.print('Knowledge review queue is empty.');
           return;
         }
-        ctx.print([
-          `Knowledge Review Queue (${queue.length})`,
-          ...queue.map((record) => `  ${record.id}  [${record.scope}/${record.cls}] ${record.reviewState} ${record.confidence}%  ${record.summary}`),
-        ].join('\n'));
+        ctx.print(
+          [
+            `Knowledge Review Queue (${queue.length})`,
+            ...queue.map(
+              (record) => `  ${record.id}  [${record.scope}/${record.cls}] ${record.reviewState} ${record.confidence}%  ${record.summary}`,
+            ),
+          ].join('\n'),
+        );
         return;
       }
       if (subcommand === 'explain') {
@@ -225,9 +177,7 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
         const memory = getMemoryApi(ctx);
         if (!memory) return;
         const scopeIdx = args.indexOf('--scope');
-        const scopeValues = scopeIdx !== -1
-          ? args.slice(scopeIdx + 1).filter((token) => !token.startsWith('--'))
-          : [];
+        const scopeValues = scopeIdx !== -1 ? args.slice(scopeIdx + 1).filter((token) => !token.startsWith('--')) : [];
         const taskTokens = args.slice(1).filter((token, index) => {
           if (token === '--scope') return false;
           if (scopeIdx !== -1 && index + 1 > scopeIdx) return false;

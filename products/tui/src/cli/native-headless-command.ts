@@ -7,6 +7,7 @@ import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/sdk/platform/config';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
+import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
@@ -36,6 +37,9 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory),
         });
         try {
+          await restoreHeadlessSession(cli.flags, {
+            surface: ctx.services.surface, resume: ctx.commandContext.resumeSession,
+          }, signal);
           return await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat);
         } finally {
           await ctx.shutdown(ctx.conversation.toJSON() as Parameters<typeof ctx.shutdown>[0]);

@@ -5,6 +5,7 @@ import { bundleBrowserEntrypoint } from './_helpers/browser-bundle.ts';
 import {
   createOperatorNativeConversationIntakeClient, nativeConversationIntakeCaptureRequestSchema,
   nativeConversationIntakeResultSchema, nativeConversationIntakeLookupResultSchema, nativeConversationIntakeWorkReceiptSchema,
+  sameNativeConversationSource,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeWorkReceipt, type NativeConversationIntakeResult,
 } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-sdk/src/client-core.js';
@@ -35,6 +36,28 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason:
 const operations = ['capture', 'get', 'admit', 'resume', 'cancel'] as const;
 
 describe('native conversation intake browser contract', () => {
+  test('Classic admission may extend a captured source exactly once without replacing its identity', async () => {
+    const admission = { provenance: 'owner' as const, policy: 'Classic - Off' as const, reason: 'selected' as const };
+    const turn = { kind: 'turn' as const, ...common(), route: 'converse' as const, text: capture().text,
+      sourceRef: { ...sourceRef, classic: admission } };
+    let next: unknown = captured(); const f = fixture(() => next);
+    await f.client.capture(capture());
+    next = turn;
+    const admitted = await f.client.admit(transition());
+    expect(admitted).toMatchObject({ kind: 'turn', sourceRef: { classic: admission } });
+    // Borrowed output must not mutate the client's retained proof.
+    if (admitted.sourceRef.classic) Reflect.set(admitted.sourceRef.classic, 'reason', 'unavailable');
+    next = turn;
+    expect(await f.client.get({ inputId: sourceRef.inputId })).toMatchObject({ kind: 'turn', sourceRef: { classic: admission } });
+    next = { ...turn, sourceRef: { ...sourceRef } };
+    await expect(f.client.get({ inputId: sourceRef.inputId })).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(sameNativeConversationSource(sourceRef, { ...sourceRef, classic: admission }, 'turn')).toBe(true);
+    expect(sameNativeConversationSource(sourceRef, { ...sourceRef, classic: admission, sourceRevision: 'changed' }, 'turn')).toBe(false);
+    expect(sameNativeConversationSource(sourceRef, { ...sourceRef, classic: admission }, 'processing')).toBe(false);
+    expect(nativeConversationIntakeResultSchema.safeParse({ ...captured(), sourceRef: { ...sourceRef, classic: admission } }).success).toBe(false);
+    f.client.dispose();
+  });
+
   test('strict paired-owner descriptors expose all five POST operations and no caller authority', () => {
     const catalog = new GatewayMethodCatalog();
     for (const operation of operations) {

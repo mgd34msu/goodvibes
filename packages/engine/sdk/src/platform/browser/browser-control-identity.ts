@@ -84,7 +84,7 @@ export class BrowserControlIdentityWork {
   async credentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
     return decisionOrClassic<'yes' | 'no' | 'unresolved'>(() => this.readCredentialPage(state, currentPage), async () => {
       this.assertCurrent(); await currentPage(); this.assertCurrent();
-      return 'unresolved';
+      return 'unresolved' as const;
     });
   }
   private async readCredentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {

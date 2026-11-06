@@ -9,6 +9,7 @@ import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { resolveConnectedHostConnection } from '../runtime/client/daemon-verbs.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
+import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
@@ -30,6 +31,9 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
           const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
           try {
+            await restoreHeadlessSession(cli.flags, {
+              surface: ctx.services.surface, resume: ctx.commandContext.resumeSession,
+            }, signal);
             return await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat);
           } finally {
             const messages = ctx.conversation.getMessageSnapshot();

@@ -3,7 +3,8 @@ import type { NativeHeadlessMode } from './native-headless-options.js';
 import type { NativeHeadlessResult } from './native-headless.js';
 export interface HeadlessCommandRuntime {
   readonly cli: {
-    readonly flags: { readonly prompt?: string | undefined; readonly outputFormat: string };
+    readonly flags: { readonly prompt?: string | undefined; readonly outputFormat: string;
+      readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined };
     readonly commandArgs: readonly string[];
     readonly positionals: readonly string[];
   };

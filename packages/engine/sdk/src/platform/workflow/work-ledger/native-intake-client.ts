@@ -5,6 +5,7 @@ import {
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema,
   nativeConversationIntakeLookupResultSchema, nativeConversationIntakeWorkReceiptSchema,
+  sameNativeConversationSource,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest,
   type NativeConversationIntakeTransitionRequest, type NativeConversationIntakeResult,
   type NativeConversationIntakeLookupResult, type NativeConversationIntakeSourceRef,
@@ -113,16 +114,14 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
       || ('sourceRevision' in identity && sourceRef.sourceRevision !== identity.sourceRevision)
       || ('text' in identity && (sourceRef.continuation?.sessionId !== identity.continuation?.sessionId
         || JSON.stringify(sourceRef.continuation?.selectedDiff ?? null) !== JSON.stringify(identity.continuation?.selectedDiff ?? null)))
-      || (previous && (result.requestId !== previous.requestId || sourceRef.sourceId !== previous.sourceRef.sourceId
-        || sourceRef.sourceRevision !== previous.sourceRef.sourceRevision || sourceRef.sessionId !== previous.sourceRef.sessionId
-        || JSON.stringify(sourceRef.continuation ?? null) !== JSON.stringify(previous.sourceRef.continuation ?? null)))) {
+      || (previous && (result.requestId !== previous.requestId || !sameNativeConversationSource(previous.sourceRef, sourceRef, result.kind)))) {
       throw new NativeConversationIntakeClientError('invalid_response');
     }
     const text = 'text' in identity ? identity.text : previous?.text;
     if (text !== undefined && ((result.kind === 'work' && result.receipt.goal !== text)
       || (result.kind === 'turn' && result.text !== text))) throw new NativeConversationIntakeClientError('invalid_response');
     // Detached state: callers cannot mutate the identity used by later responses.
-    sources.set(identity.inputId, { requestId: result.requestId, sourceRef: { ...sourceRef, ...(sourceRef.continuation ? { continuation: { ...sourceRef.continuation, ...(sourceRef.continuation.selectedDiff ? { selectedDiff: { ...sourceRef.continuation.selectedDiff } } : {}) } } : {}) }, ...(text === undefined ? {} : { text }) });
+    sources.set(identity.inputId, { requestId: result.requestId, sourceRef: structuredClone(sourceRef), ...(text === undefined ? {} : { text }) });
   }
   function parseResult(value: unknown): NativeConversationIntakeResult {
     const result = nativeConversationIntakeResultSchema.safeParse(value);

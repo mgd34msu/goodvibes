@@ -3,7 +3,7 @@ import { nativeHostedTurnLines, type NativeHostedTurnClient, type NativeHostedTu
 import type { OperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import { nativeWorkExecutionLines, type NativeWorkExecutionState } from './native-work-execution.js';
 import { nativeConversationExecutionIntent, sameNativeExecutionIntent, inspectNativeConversationExecution, dispatchNativeConversationExecution } from './native-conversation-execution.js';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import type { NativeIntakeJournalBinding, NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
 /** Construction-owned product capabilities, never selected by a decision or tool argument. */
@@ -165,7 +165,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 || parsed.sourceRef.continuation?.sessionId !== command.continuation?.sessionId
                 || (!this.policy.allowSelectedDiff && (parsed.sourceRef.continuation?.selectedDiff !== undefined || command.continuation?.selectedDiff !== undefined))
                 || JSON.stringify(parsed.sourceRef.continuation?.selectedDiff) !== JSON.stringify(command.continuation?.selectedDiff)
-                || (observedSource && JSON.stringify(parsed.sourceRef) !== JSON.stringify(observedSource))
+                || (observedSource && !sameNativeConversationSource(observedSource, parsed.sourceRef, parsed.kind))
                 || (parsed.kind === 'turn' && parsed.text !== command.text) || (parsed.kind === 'work' && parsed.receipt.goal !== command.text))
                 throw new Error('Native intake source identity mismatch');
             observedSource = structuredClone(parsed.sourceRef);

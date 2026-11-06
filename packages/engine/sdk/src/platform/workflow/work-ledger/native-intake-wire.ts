@@ -53,6 +53,8 @@ export const nativeConversationIntakeResultSchema = union([
 ]).refine(value => value.kind !== 'work' || (value.receipt.projectId === value.projectId && value.receipt.requestId === value.requestId
   && value.receipt.inputId === value.sourceRef.inputId && value.receipt.source.sourceId === value.sourceRef.sourceId
   && value.receipt.source.sourceRevision === value.sourceRef.sourceRevision && value.receipt.source.sessionId === value.sourceRef.sessionId), 'Receipt source identity mismatch')
+  .refine(value => !value.sourceRef.classic || value.kind === 'cancelled' || value.kind === 'turn' && value.route === 'converse',
+    'Classic admission must describe an ordinary conversation or its cancellation')
   .refine(value => {
     const continuation = value.kind === 'turn' ? value.continuation : value.kind === 'work' ? value.receipt.source.continuation : value.sourceRef.continuation;
     return JSON.stringify(continuation ? { sessionId: continuation.sessionId, revision: continuation.revision, ...(continuation.selectedDiff ? { selectedDiff: 'unifiedDiff' in continuation.selectedDiff ? nativeSelectedDiffSelector(nativeSelectedDiffContextSchema.parse(continuation.selectedDiff)) : continuation.selectedDiff } : {}) } : null) === JSON.stringify(value.sourceRef.continuation ?? null);
@@ -70,3 +72,17 @@ export type NativeConversationIntakeSourceRef = z.infer<typeof nativeConversatio
 export type NativeConversationIntakeWorkReceipt = z.infer<typeof nativeConversationIntakeWorkReceiptSchema>;
 export type NativeConversationIntakeResult = z.infer<typeof nativeConversationIntakeResultSchema>;
 export type NativeConversationIntakeLookupResult = z.infer<typeof nativeConversationIntakeLookupResultSchema>;
+
+/** Source bytes stay fixed while the authenticated host may attach one terminal
+ * Classic admission. A later response cannot remove or rewrite that admission.
+ * Both references must already have passed the wire schema.
+ */
+export function sameNativeConversationSource(previous: NativeConversationIntakeSourceRef,
+  next: NativeConversationIntakeSourceRef, kind: NativeConversationIntakeResult['kind']): boolean {
+  const identity = (value: NativeConversationIntakeSourceRef) => {
+    const result = { ...value }; delete result.classic; return JSON.stringify(result);
+  };
+  if (identity(previous) !== identity(next)) return false;
+  if (previous.classic) return JSON.stringify(previous.classic) === JSON.stringify(next.classic);
+  return !next.classic || kind === 'turn';
+}

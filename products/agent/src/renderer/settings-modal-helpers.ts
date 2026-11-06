@@ -1,3 +1,11 @@
+import { createSettingsValueHelpers } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-value-helpers';
+export {
+  flagStateColor,
+  mcpTrustColor,
+  subscriptionStateColor,
+} from '@goodvibes-jev/engine/terminal-shell/renderer/settings-value-helpers';
+import { SHARED_SETTING_LABELS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
+import { SHARED_CATEGORY_LABELS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 export { inferSubscriptionRouteReason } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 /**
  * Pure formatting, label, and color helpers for renderSettingsModal.
@@ -5,123 +13,64 @@ export { inferSubscriptionRouteReason } from '@goodvibes-jev/engine/terminal-she
  * architecture cap. No layout logic lives here.
  */
 
-import type { SettingEntry, McpEntry, SubscriptionEntry } from '../input/settings-modal.ts';
+import type { SettingEntry } from '../input/settings-modal.ts';
 import type { SETTINGS_CATEGORIES } from '../input/settings-modal.ts';
 import { isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
-import { activeTokens } from './theme.ts';
-
-function maskSecretValue(value: string): string {
-  if (value.length === 0) return '(empty)';
-  if (isSecretReferenceValue(value)) return value;
-  if (value.length <= 4) return '••••';
-  return `${'•'.repeat(Math.min(12, Math.max(4, value.length - 4)))}${value.slice(-4)}`;
-}
-
-export function formatValue(entry: SettingEntry): string {
-  const val = entry.currentValue;
-  if (val === null || val === undefined) return '(unset)';
-  if (typeof val === 'boolean') return val ? 'true' : 'false';
-  if (typeof val === 'string' && isSecretConfigKey(entry.setting.key)) return maskSecretValue(val);
-  if (typeof val === 'string' && val === '') return '(empty)';
-  return String(val);
-}
+import './theme.ts';
 
 // Row colours come from the active theme: the accent marks modified or active
 // values, status tokens mark risk, and neutral values read muted.
-export function valueColor(entry: SettingEntry): string {
-  if (!entry.isDefault) return activeTokens().accent; // modified
-  return activeTokens().textMuted;                    // default
-}
-
-export function flagStateColor(state: string, killed: boolean): string {
-  const p = activeTokens();
-  if (killed) return p.error;
-  if (state === 'enabled') return p.accent;
-  return p.textMuted;
-}
-
-export function mcpTrustColor(mode: McpEntry['trustMode']): string {
-  const p = activeTokens();
-  switch (mode) {
-    case 'allow-all':
-      return p.error;
-    case 'ask-on-risk':
-      return p.warning;
-    case 'constrained':
-      return p.accent;
-    case 'blocked':
-      return p.textMuted;
-    default:
-      return p.textMuted;
-  }
-}
-
-export function subscriptionStateColor(state: SubscriptionEntry['state']): string {
-  const p = activeTokens();
-  switch (state) {
-    case 'active':
-      return p.accent;
-    case 'pending':
-      return p.warning;
-    case 'available':
-      return p.info;
-    default:
-      return p.textMuted;
-  }
-}
-
-
 
 export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], string> = {
-  display: 'Display',
-  ui: 'UI',
-  provider: 'Provider',
-  judgment: 'Judgment',
-  subscriptions: 'Subscriptions',
-  behavior: 'Behavior',
+  display: SHARED_CATEGORY_LABELS['display'],
+  ui: SHARED_CATEGORY_LABELS['ui'],
+  provider: SHARED_CATEGORY_LABELS['provider'],
+  judgment: SHARED_CATEGORY_LABELS['judgment'],
+  subscriptions: SHARED_CATEGORY_LABELS['subscriptions'],
+  behavior: SHARED_CATEGORY_LABELS['behavior'],
   profile: 'Your Profile',
   occasions: 'Dates and Plans',
-  storage: 'Storage',
-  permissions: 'Permissions',
-  diagnostics: 'Diagnostics',
-  helper: 'Helper',
-  tts: 'TTS',
+  storage: SHARED_CATEGORY_LABELS['storage'],
+  permissions: SHARED_CATEGORY_LABELS['permissions'],
+  diagnostics: SHARED_CATEGORY_LABELS['diagnostics'],
+  helper: SHARED_CATEGORY_LABELS['helper'],
+  tts: SHARED_CATEGORY_LABELS['tts'],
   voice: 'Local Voice',
-  automation: 'Automation',
-  checkin: 'Check-in',
-  service: 'Service',
-  controlPlane: 'Control Plane',
-  httpListener: 'HTTP Listener',
+  automation: SHARED_CATEGORY_LABELS['automation'],
+  checkin: SHARED_CATEGORY_LABELS['checkin'],
+  service: SHARED_CATEGORY_LABELS['service'],
+  controlPlane: SHARED_CATEGORY_LABELS['controlPlane'],
+  httpListener: SHARED_CATEGORY_LABELS['httpListener'],
   danger: 'Danger Zone',
-  web: 'Web',
-  watchers: 'Watchers',
-  network: 'Network',
-  relay: 'Relay',
+  web: SHARED_CATEGORY_LABELS['web'],
+  watchers: SHARED_CATEGORY_LABELS['watchers'],
+  network: SHARED_CATEGORY_LABELS['network'],
+  relay: SHARED_CATEGORY_LABELS['relay'],
   cluster: 'Cluster',
-  orchestration: 'Orchestration',
+  orchestration: SHARED_CATEGORY_LABELS['orchestration'],
   fleet: 'Fleet',
-  planner: 'Planner',
-  daemon: 'Daemon',
-  runtime: 'Runtime',
-  sandbox: 'Sandbox',
-  batch: 'Batch',
-  cloudflare: 'Cloudflare',
-  contract: 'Contracts',
-  telemetry: 'Telemetry',
-  cache: 'Cache',
-  mcp: 'MCP',
+  planner: SHARED_CATEGORY_LABELS['planner'],
+  daemon: SHARED_CATEGORY_LABELS['daemon'],
+  runtime: SHARED_CATEGORY_LABELS['runtime'],
+  sandbox: SHARED_CATEGORY_LABELS['sandbox'],
+  batch: SHARED_CATEGORY_LABELS['batch'],
+  cloudflare: SHARED_CATEGORY_LABELS['cloudflare'],
+  contract: SHARED_CATEGORY_LABELS['contract'],
+  telemetry: SHARED_CATEGORY_LABELS['telemetry'],
+  cache: SHARED_CATEGORY_LABELS['cache'],
+  mcp: SHARED_CATEGORY_LABELS['mcp'],
   surfaces: 'Channels',
-  conversationGate: 'Channel Message Handling',
+  conversationGate: SHARED_CATEGORY_LABELS['conversationGate'],
   hostedSessions: 'Daemon-Hosted Conversations',
   release: 'Update Channel',
-  tools: 'Tools',
+  tools: SHARED_CATEGORY_LABELS['tools'],
   flags: 'Feature Controls',
   atRest: 'At-Rest Protection',
   learning: 'Memory Consolidation',
   agents: 'Agent Runtime',
-  notifications: 'Notifications',
+  notifications: SHARED_CATEGORY_LABELS['notifications'],
   policy: 'Policy Bundles',
-  fetch: 'Fetch Safety',
+  fetch: SHARED_CATEGORY_LABELS['fetch'],
   security: 'Token Rotation',
   integrations: 'Delivery Reliability',
   update: 'Daemon Updates',
@@ -129,37 +78,37 @@ export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], strin
   power: 'Sleep and Power',
   device: 'Paired Phone Capabilities',
   memory: 'Memory Governance',
-  payments: 'Payments',
-  email: 'Email Connection',
-  calendar: 'Calendar Connections',
-  google: 'Google Connection',
+  payments: SHARED_CATEGORY_LABELS['payments'],
+  email: SHARED_CATEGORY_LABELS['email'],
+  calendar: SHARED_CATEGORY_LABELS['calendar'],
+  google: SHARED_CATEGORY_LABELS['google'],
 };
 
 export const SETTING_LABELS: Partial<Record<string, string>> = {
-  'ui.systemMessages': 'System Message Target',
-  'ui.operationalMessages': 'Operational Message Target',
+  'ui.systemMessages': SHARED_SETTING_LABELS['ui.systemMessages'],
+  'ui.operationalMessages': SHARED_SETTING_LABELS['ui.operationalMessages'],
   'ui.voiceEnabled': 'Voice Interaction',
-  'behavior.autoCompactThreshold': 'Auto-Compact %',
-  'behavior.staleContextWarnings': 'Context Warnings',
-  'behavior.returnContextMode': 'Return Context',
-  'behavior.guidanceMode': 'Guidance Mode',
-  'storage.secretPolicy': 'Secret Policy',
-  'tools.llmProvider': 'Tool LLM Provider',
-  'tools.llmModel': 'Tool LLM Model',
-  'tools.autoHeal': 'Auto-Heal',
-  'tools.defaultTokenBudget': 'Default Token Budget',
-  'tools.hooksFile': 'Hooks File',
-  'helper.enabled': 'Helper Enabled',
-  'helper.globalProvider': 'Helper Provider',
-  'helper.globalModel': 'Helper Model',
-  'surfaces.ntfy.enabled': 'ntfy Enabled',
-  'surfaces.ntfy.baseUrl': 'ntfy Base URL',
-  'surfaces.ntfy.topic': 'ntfy Default Delivery Topic',
-  'surfaces.ntfy.chatTopic': 'ntfy Chat Topic',
-  'surfaces.ntfy.agentTopic': 'ntfy Agent Topic',
+  'behavior.autoCompactThreshold': SHARED_SETTING_LABELS['behavior.autoCompactThreshold'],
+  'behavior.staleContextWarnings': SHARED_SETTING_LABELS['behavior.staleContextWarnings'],
+  'behavior.returnContextMode': SHARED_SETTING_LABELS['behavior.returnContextMode'],
+  'behavior.guidanceMode': SHARED_SETTING_LABELS['behavior.guidanceMode'],
+  'storage.secretPolicy': SHARED_SETTING_LABELS['storage.secretPolicy'],
+  'tools.llmProvider': SHARED_SETTING_LABELS['tools.llmProvider'],
+  'tools.llmModel': SHARED_SETTING_LABELS['tools.llmModel'],
+  'tools.autoHeal': SHARED_SETTING_LABELS['tools.autoHeal'],
+  'tools.defaultTokenBudget': SHARED_SETTING_LABELS['tools.defaultTokenBudget'],
+  'tools.hooksFile': SHARED_SETTING_LABELS['tools.hooksFile'],
+  'helper.enabled': SHARED_SETTING_LABELS['helper.enabled'],
+  'helper.globalProvider': SHARED_SETTING_LABELS['helper.globalProvider'],
+  'helper.globalModel': SHARED_SETTING_LABELS['helper.globalModel'],
+  'surfaces.ntfy.enabled': SHARED_SETTING_LABELS['surfaces.ntfy.enabled'],
+  'surfaces.ntfy.baseUrl': SHARED_SETTING_LABELS['surfaces.ntfy.baseUrl'],
+  'surfaces.ntfy.topic': SHARED_SETTING_LABELS['surfaces.ntfy.topic'],
+  'surfaces.ntfy.chatTopic': SHARED_SETTING_LABELS['surfaces.ntfy.chatTopic'],
+  'surfaces.ntfy.agentTopic': SHARED_SETTING_LABELS['surfaces.ntfy.agentTopic'],
   'surfaces.ntfy.remoteTopic': 'ntfy Runtime-Only Remote Topic',
-  'surfaces.ntfy.token': 'ntfy Token',
-  'surfaces.ntfy.defaultPriority': 'ntfy Default Priority',
+  'surfaces.ntfy.token': SHARED_SETTING_LABELS['surfaces.ntfy.token'],
+  'surfaces.ntfy.defaultPriority': SHARED_SETTING_LABELS['surfaces.ntfy.defaultPriority'],
   // Trigger family (stream watchers, condition checks, on-exit process
   // triggers). These live under the existing Watchers category because their
   // keys are `watchers.triggers.*` and the category is the key's first
@@ -200,19 +149,12 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'payments.notifyChannels': 'Notify Channels',
 };
 
-export function getSettingLabel(entry: SettingEntry): string {
-  return SETTING_LABELS[entry.setting.key] ?? entry.setting.key.replace(/^[^.]+\./, '');
-}
-
-export function describeUiRouting(value: string): string {
-  switch (value) {
-    case 'panel':
-      return 'render in the activity feed only';
-    case 'conversation':
-      return 'render inline in conversation';
-    case 'both':
-      return 'render in both conversation and the activity feed';
-    default:
-      return value;
-  }
-}
+export const { formatValue, valueColor, getSettingLabel, describeUiRouting } = createSettingsValueHelpers<SettingEntry>({
+  richValues: false,
+  featureLabels: false,
+  isSecretKey: isSecretConfigKey,
+  isSecretReference: isSecretReferenceValue,
+  labels: SETTING_LABELS,
+  panelDescription: 'render in the activity feed only',
+  bothDescription: 'render in both conversation and the activity feed',
+});

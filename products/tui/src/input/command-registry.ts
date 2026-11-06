@@ -1,16 +1,20 @@
-import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
+import type {
+  TerminalCommandRuntimeState,
+  TerminalCommandUiActions,
+  TerminalCommandShellUiOpeners,
+  TerminalCommandSessionServices,
+  TerminalCommandProviderServices,
+  TerminalCommandWorkspaceUiServices,
+  TerminalCommandPlatformConfigServices,
+  TerminalCommandExtensionRegistryServices,
+} from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
+
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+
 import type { ConversationManager } from '../core/conversation';
-import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { DeepReadonly, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { SelectionItem, SelectionResult, SelectionAction } from './selection-modal.ts';
-import type { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
+
 import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/sdk/platform/workspace';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import type { ViewTarget } from './views.ts';
@@ -28,35 +32,16 @@ import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+
 import type { UiPlatformServices } from '../runtime/ui-services.ts';
-import type {
-  CommandWorkspaceShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandPlatformShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandExtensionShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandOpsShellServices,
-  RemoteCommandService,
-  PlanRuntimeService,
-} from '@/runtime/index.ts';
+import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
+import type { CommandPlatformShellServices } from '@/runtime/index.ts';
+import type { CommandExtensionShellServices } from '@/runtime/index.ts';
+import type { CommandOpsShellServices, RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
 
-export type {
-  RemoteCommandService,
-  PlanRuntimeService,
-} from '@/runtime/index.ts';
+export type { RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
 
-export interface CommandRuntimeState {
-  model: string;
-  provider: string;
-  debugMode: boolean;
-  systemPrompt: string;
-  reasoningEffort: string;
-  sessionId: string;
+export interface CommandRuntimeState extends TerminalCommandRuntimeState {
   /**
    * Cumulative count of direct terminal writes the output guard intercepted
    * this session, surfaced by /debug. Optional so the SDK's MutableRuntimeState
@@ -71,22 +56,17 @@ export interface CommandRuntimeState {
  * use them constantly, and nesting them would add noise without clarifying
  * ownership.
  */
-export interface CommandUiActions {
-  renderRequest: () => void;
-  print: (text: string) => void;
-  exit: () => void;
+export interface CommandUiActions extends TerminalCommandUiActions<import('./model-picker.ts').ModelPickerTarget> {
   /** Open the current composer draft in the user's $EDITOR and load back the edited text. */
   openComposerEditor?: () => void;
   nativeConversationIntake?: NativeConversationIntakeActions;
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
-  submitInput?: (text: string, content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[], context?: ProductInputContext) => void;
-  submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[]) => void;
-  stopSpokenOutput?: () => void;
-  pasteFromClipboard?: () => {
-    pasted: boolean;
-    kind: 'image' | 'text' | 'none';
-    marker?: string;
-  };
+  submitInput?: (
+    text: string,
+    content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[],
+    context?: ProductInputContext,
+  ) => void;
+
   /**
    * Read-only view of pending `[TEXT: pN, M lines]` fold markers currently
    * sitting in the composer (registerPaste in handler-content-actions.ts),
@@ -98,10 +78,10 @@ export interface CommandUiActions {
   /** Reserved for direct owner-terminal dispatch; never a generic confirmation callback. */
   beginHostPairing?: (request: { readonly apply: boolean; readonly bootstrapShared: boolean; readonly name: string }) => Promise<void>;
   readonly invokedByModel?: boolean;
-  executeCommand?: (name: string, args: string[]) => Promise<boolean>;
+
   /** Arm the one-key jump to a spawned CI fix-session (the surface attaches on the jump key; the user never retypes an id). */
   armFixSessionAttach?: (fixSessionId: string) => void;
-  cancelGeneration?: () => void;
+
   /** Revoke only an async failed-turn recovery before replacing session identity/history. */
   cancelPendingRecovery?: () => boolean;
   /** Owned Gist upload reading; revoked by Escape/session changes/shutdown. */
@@ -139,22 +119,7 @@ export interface CommandUiActions {
   setKeepAwake?: (enabled: boolean) => Promise<import('../core/power-status.ts').PowerSurfaceState>;
   /** True while an LLM turn is actively streaming. Used to give Escape
    *  cancel-turn precedence over a focused modal's own escape handling. */
-  isGenerating?: () => boolean;
-  completeModelSelection?: (selection: {
-    model: { id: string; provider: string; displayName: string; registryKey: string };
-    effort: string;
-    contextCap?: number | null;
-    /** Which config target to write the selected model to. Defaults to 'main'. */
-    target?: import('./model-picker.ts').ModelPickerTarget;
-    /**
-     * True only when `effort` came from the picker's effort STEP, an explicit
-     * user choice, which is the only thing allowed to update the stored
-     * preference `provider.reasoningEffort`. The model-only and context-cap
-     * commit routes pass a level merely carried over from the previous model;
-     * storing that is how a one-time snap down used to become permanent.
-     */
-    effortChosenByUser?: boolean;
-  }) => void;
+
   /**
    * Commit an embedding-provider selection from the model picker's
    * 'embeddingProvider' mode (the 'embeddings' target). Deliberately separate
@@ -163,15 +128,13 @@ export interface CommandUiActions {
    * would require fabricating a fake model object.
    */
   completeEmbeddingProviderSelection?: (providerId: string) => void;
-  clearScreen?: () => void;
+
   /**
    * Begin one line of concealed (masked) composer input for a password-like
    * secret. The typed text is masked in the composer and kept out of input
    * history and the transcript; the plaintext reaches only request.onSubmit.
    */
-  beginConcealedInput?: (request: import('./concealed-input.ts').ConcealedInputRequest) => void;
-  activatePlan?: (planId: string, task: string) => void;
-  requestPermission?: PermissionRequestHandler;
+
   /**
    * Force a full-screen repaint on the next frame (reuses Compositor.resetDiff(),
    * the same call resize/bootstrap already use). Defense-in-depth for command
@@ -182,22 +145,12 @@ export interface CommandUiActions {
   requestFullRepaint?: () => void;
 }
 
-export interface CommandShellUiOpeners {
-  reloadSystemPrompt?: () => string;
+export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<import('./model-picker.ts').ModelPickerTarget> {
   openOnboardingWizard?: (modeOrOptions?: OnboardingWizardMode | OpenOnboardingWizardOptions) => void;
-  openModelPicker?: () => void;
-  openModelPickerWithTarget?: (target: import('./model-picker.ts').ModelPickerTarget) => boolean;
-  openProviderModelPickerWithTarget?: (target: import('./model-picker.ts').ModelPickerTarget) => boolean;
-  openProviderPicker?: () => void;
-  openContextInspector?: () => void;
-  openBookmarkModal?: () => void;
-  jumpToBookmark?: (key: string) => void;
-  scrollToLine?: (line: number) => void;
-  openHelpOverlay?: () => void;
+
   /** Toggle the transcript search overlay (same action as Ctrl+F), backs /find. */
   openTranscriptSearch?: () => void;
-  openSelection?: OpenSelection;
-  openSettingsModal?: (target?: string) => void;
+
   /**
    * Open a MIGRATE-TO-MODAL surface by name (purge skeleton, B
    * command runtimes call this instead of an older view opener once their view
@@ -205,12 +158,10 @@ export interface CommandShellUiOpeners {
    * same way openSettingsModal is.
    */
   openModal?: (name: string) => void;
-  openSessionPicker?: () => void;
+
   /** Resume a saved session through the runtime's native resume owner. */
   resumeSession?: (sessionId: string) => Promise<void>;
-  openProfilePicker?: () => void;
-  openShortcutsOverlay?: () => void;
-  getScrollTop?: () => number;
+
   /**
    * Open the fuzzy command palette, a searchable picker over every registered
    * slash command (generated live from the registry). Bound to Ctrl+K and the
@@ -253,7 +204,7 @@ export interface CommandShellUiOpeners {
    * Open an agent or a background process full screen (core/session-focus.ts).
    * False when it is not known here (the caller keeps its own fallback).
    */
-  openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
+
   /** The Usage modal (`tab: 'agents'` opens on the per-agent cost ledger). */
   openUsage?: (options?: { readonly tab?: 'overview' | 'turns' | 'agents' }) => void;
   /** The Changes modal over the repository (this session's files, not staged, staged or vs HEAD). */
@@ -271,10 +222,10 @@ export interface CommandShellUiOpeners {
     readonly question?: import('./changes-modal.ts').ChangesQuestionSpec;
   }) => Promise<boolean>;
   /** The notification history. */
-  openNotifications?: () => void;
+
   /** Open a file in $VISUAL / $EDITOR (at a line when the editor takes one). */
   openFileInEditor?: (path: string, line?: number) => void;
-  focusPrompt?: () => void;
+
   openOpsView?: () => void;
   openCockpitView?: () => void;
   openOrchestrationView?: () => void;
@@ -283,7 +234,7 @@ export interface CommandShellUiOpeners {
   openPolicyView?: () => void;
   openHooksView?: () => void;
   openCommunicationView?: () => void;
-  openMcpWorkspace?: () => void;
+
   openSecurityView?: () => void;
   openKnowledgeView?: () => void;
   openMemoryView?: () => void;
@@ -295,20 +246,15 @@ export interface CommandShellUiOpeners {
    * plaintext password reaches input history, the transcript, logs, or
    * recovery files. An empty username for add-user asks for it first.
    */
-  openLocalAuthMaskedEntry?: (
-    kind: 'add-user' | 'rotate-password',
-    username?: string,
-  ) => void;
+  openLocalAuthMaskedEntry?: (kind: 'add-user' | 'rotate-password', username?: string) => void;
 }
 
-export interface CommandSessionServices {
+export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly conversationManager: ConversationManager;
   readonly runtime: CommandRuntimeState;
-  readonly sessionManager?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
-  readonly sessionMemoryStore?: import('@goodvibes-jev/engine/sdk/platform/core').SessionMemoryStore;
-  readonly sessionLineageTracker?: import('@goodvibes-jev/engine/sdk/platform/core').SessionLineageTracker;
+
   readonly contractRunner?: import('@goodvibes-jev/engine/sdk/platform/contract').ContractRunner;
-  readonly changeTracker?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionChangeTracker;
+
   /**
    * Recompute the Orchestrator's session-wide usage totals from the
    * conversation's current message history. Call after a session resume
@@ -316,7 +262,7 @@ export interface CommandSessionServices {
    * token counter reflects the resumed session's real usage instead of a
    * fresh Orchestrator's zeroed default.
    */
-  readonly hydrateSessionUsage?: () => void;
+
   /** The orchestration engine's command-facing facade, see runtime/workstream-services.ts. */
   readonly contractOperator?: import('@goodvibes-jev/engine/sdk/platform/contract').ContractOperatorService;
   /** The repo source-tree code index, see runtime/code-index-services.ts. */
@@ -335,18 +281,13 @@ export interface CommandSessionServices {
   readonly getMainSessionTurnInjections?: () => readonly import('../renderer/turn-injection.ts').TurnInjectionEntry[];
 }
 
-export interface CommandProviderServices {
-  readonly providerRegistry: ProviderRegistry;
-  readonly providerOptimizer?: import('@goodvibes-jev/engine/sdk/platform/providers').ProviderOptimizer;
-  readonly favoritesStore?: import('@goodvibes-jev/engine/sdk/platform/providers').FavoritesStore;
-  readonly benchmarkStore?: import('@goodvibes-jev/engine/sdk/platform/providers').BenchmarkStore;
-}
+export interface CommandProviderServices extends TerminalCommandProviderServices {}
 
 /**
  * Compose locally-owned command helpers with the narrower shell bridge-owned
  * runtime surfaces exported from runtime/shell-command-services.ts.
  */
-export interface CommandWorkspaceUiServices {
+export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiServices {
   /**
    * The app's declare-once session-storage handle (runtime/services.ts). Every
    * command that reads or writes session state, resume, save, the liveness
@@ -356,32 +297,22 @@ export interface CommandWorkspaceUiServices {
    */
   surface?: SessionSurface;
   keybindingsManager?: KeybindingsManager;
-  fileUndoManager?: FileUndoManager;
+
   workspaceCheckpointManager?: WorkspaceCheckpointManager;
   /** In-process gateway catalog, the /review hunk-revert flow invokes checkpoints.revertHunk(Preview) over it. */
   gatewayMethods?: GatewayMethodCatalog;
   workspaceTrustManager?: import('@goodvibes-jev/engine/sdk/platform/runtime/operations').WorkspaceTrustManager;
   workspaceRegistrationManager?: import('@goodvibes-jev/engine/sdk/platform/runtime/operations').WorkspaceRegistrationManager;
-  profileManager?: import('@goodvibes-jev/engine/sdk/platform/profiles').ProfileManager;
-  bookmarkManager?: import('@goodvibes-jev/engine/sdk/platform/bookmarks').BookmarkManager;
-  projectPlanningService?: import('@goodvibes-jev/engine/sdk/platform/knowledge').ProjectPlanningService;
-  projectPlanningProjectId?: string;
-  workPlanStore?: import('@goodvibes-jev/engine/sdk/platform/workflow').WorkPlanStore;
 }
 
-export interface CommandWorkspaceServices
-  extends CommandWorkspaceUiServices,
-    CommandWorkspaceShellServices {}
+export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, CommandWorkspaceShellServices {}
 
-export interface CommandPlatformConfigServices {
-  readonly config: DeepReadonly<GoodVibesConfig>;
-  readonly configManager: ConfigManager;
+export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   /** Per-device pairing tokens, backs the /devices command family. */
   readonly pairingTokens?: import('@goodvibes-jev/engine/sdk/platform/pairing').PairingTokenManager;
   /** Capability gate runtime, feature states derive from domain settings keys; surfaces read live/pending state here. */
   readonly featureFlagManager?: FeatureFlagManager;
-  readonly voiceProviderRegistry?: VoiceProviderRegistry;
-  readonly voiceService?: VoiceService;
+
   /** Direct-command consumer (`/search`) alongside the existing agent-tool consumer. */
   readonly webSearchService?: import('@goodvibes-jev/engine/sdk/platform/web-search').WebSearchService;
   /** Direct-command consumer (`/image`), first production caller of `.generate()`. */
@@ -391,31 +322,22 @@ export interface CommandPlatformConfigServices {
   externalServices?: UiPlatformServices['externalServices'];
 }
 
-export interface CommandPlatformServices
-  extends CommandPlatformConfigServices,
-    CommandPlatformShellServices {}
+export interface CommandPlatformServices extends CommandPlatformConfigServices, CommandPlatformShellServices {}
 
-export interface CommandOpsServices
-  extends CommandOpsShellServices {}
+export interface CommandOpsServices extends CommandOpsShellServices {}
 
-export interface CommandExtensionRegistryServices {
-  readonly toolRegistry: ToolRegistry;
-  readonly mcpRegistry: McpRegistry;
+export interface CommandExtensionRegistryServices extends TerminalCommandExtensionRegistryServices {
   readonly evalRegistry?: import('@goodvibes-jev/engine/sdk/platform/observe').EvalRegistry;
 }
 
-export interface CommandExtensionServices
-  extends CommandExtensionRegistryServices,
-    CommandExtensionShellServices {}
+export interface CommandExtensionServices extends CommandExtensionRegistryServices, CommandExtensionShellServices {}
 
 /**
  * CommandContext - Passed to every slash command handler so commands can
  * interact with the shell-facing platform surface without treating every
  * service as one flat bag of unrelated properties.
  */
-export interface CommandContext
-  extends CommandUiActions,
-    CommandShellUiOpeners {
+export interface CommandContext extends CommandUiActions, CommandShellUiOpeners {
   readonly session: CommandSessionServices;
   readonly provider: CommandProviderServices;
   readonly workspace: CommandWorkspaceServices;
@@ -464,11 +386,22 @@ export interface CommandContext
  * sessions (continuity), quit (exit).
  */
 export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
-  'help', 'config', 'panel', 'model', 'recall', 'codebase',
-  'workstream', 'checkpoint', 'search', 'imagine', 'sessions', 'quit',
+  'help',
+  'config',
+  'panel',
+  'model',
+  'recall',
+  'codebase',
+  'workstream',
+  'checkpoint',
+  'search',
+  'imagine',
+  'sessions',
+  'quit',
 ]);
 
 export type SlashCommand = TerminalSlashCommand<CommandContext>;
-const platformCommands = createTerminalCommandRegistry<CommandContext>({commonNames: COMMON_COMMAND_NAMES});
+const platformCommands = createTerminalCommandRegistry<CommandContext>({ commonNames: COMMON_COMMAND_NAMES });
 export class CommandRegistry extends platformCommands.CommandRegistry {}
-export const { isDirectOwnerCommandContext, directOwnerWorkstreamInput, directOwnerRemoteInput, directOwnerPlanningInput } = platformCommands;
+export const { isDirectOwnerCommandContext, directOwnerWorkstreamInput, directOwnerRemoteInput, directOwnerPlanningInput } =
+  platformCommands;

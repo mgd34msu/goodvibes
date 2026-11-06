@@ -405,7 +405,7 @@
       "path": "input/command-registry.ts",
       "baselineTuiLines": 685,
       "baselineSimilarity": 0.5846,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "CommandRegistry",
         "SlashCommand",
@@ -414,7 +414,8 @@
         "directOwnerRemoteInput",
         "directOwnerPlanningInput",
         "OpenSelection"
-      ]
+      ],
+      "notes": "Platform registry owns parsing/dispatch/proof lifetimes; 61 common capability fields across eight interfaces now share platform contracts. Product contexts retain their distinct authority/capability vocabulary, narrowed model-picker targets and visibility catalogs."
     },
     {
       "path": "input/commands.ts",
@@ -1379,10 +1380,11 @@
       "path": "renderer/settings-modal-helpers.ts",
       "baselineTuiLines": 278,
       "baselineSimilarity": 0.4127,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "inferSubscriptionRouteReason"
-      ]
+      ],
+      "notes": "Shared secret masking, value/label/status formatting and 73 identical category/setting/documentation strings. Product policies retain rich object values, feature headers, descriptions and inline-versus-activity routing."
     },
     {
       "path": "renderer/settings-modal.ts",

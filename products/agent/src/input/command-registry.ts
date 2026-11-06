@@ -1,17 +1,22 @@
-import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
+import type {
+  TerminalCommandRuntimeState,
+  TerminalCommandUiActions,
+  TerminalCommandShellUiOpeners,
+  TerminalCommandSessionServices,
+  TerminalCommandProviderServices,
+  TerminalCommandWorkspaceUiServices,
+  TerminalCommandPlatformConfigServices,
+  TerminalCommandExtensionRegistryServices,
+} from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
+
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
-import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
+
 import type { ConversationManager } from '../core/conversation';
-import type { ConfigManager } from '../config/index.ts';
-import type { DeepReadonly, GoodVibesConfig } from '../config/index.ts';
-import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
+
 import type { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import type { SelectionItem, SelectionResult, SelectionAction } from './selection-modal.ts';
-import type { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
+
 import type { KeybindingsManager } from './keybindings.ts';
 import type { KnowledgeApi } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import type { HookApi } from '@goodvibes-jev/engine/sdk/platform/hooks';
@@ -23,61 +28,36 @@ import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
 import type { AgentPromptContextReceiptStore } from '../agent/prompt-context-receipts.ts';
 import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+
 import type { AgentMemoryDiagnostics, AgentVoiceSetupService } from '../runtime/services.ts';
 import type { MediaProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/media';
 import type { ArtifactStore } from '@goodvibes-jev/engine/sdk/platform/artifacts';
 import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
 import type { AgentExecutionLedger } from '../runtime/execution-ledger.ts';
 import type { ApprovalsView } from '../runtime/client/approvals-view.ts';
-import type {
-  CommandWorkspaceShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandPlatformShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandExtensionShellServices,
-} from '@/runtime/index.ts';
-import type {
-  CommandOpsShellServices,
-  RemoteCommandService,
-  PlanRuntimeService,
-} from '@/runtime/index.ts';
+import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
+import type { CommandPlatformShellServices } from '@/runtime/index.ts';
+import type { CommandExtensionShellServices } from '@/runtime/index.ts';
+import type { CommandOpsShellServices, RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
 
-export type {
-  RemoteCommandService,
-  PlanRuntimeService,
-} from '@/runtime/index.ts';
+export type { RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
 
-export interface CommandRuntimeState {
-  model: string;
-  provider: string;
-  debugMode: boolean;
-  systemPrompt: string;
-  reasoningEffort: string;
-  sessionId: string;
-}
+export interface CommandRuntimeState extends TerminalCommandRuntimeState {}
 
 /**
  * Top-level shell actions remain flat because commands and nearby shell routes
  * use them constantly, and nesting them would add noise without clarifying
  * ownership.
  */
-export interface CommandUiActions {
-  renderRequest: () => void;
-  print: (text: string) => void;
-  exit: () => void;
+export interface CommandUiActions extends TerminalCommandUiActions<import('./model-picker.ts').ModelPickerTarget> {
   nativeConversationIntake?: NativeConversationIntakeActions;
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
-  submitInput?: (text: string, content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[], context?: ProductInputContext) => void;
-  submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[]) => void;
-  stopSpokenOutput?: () => void;
-  pasteFromClipboard?: () => {
-    pasted: boolean;
-    kind: 'image' | 'text' | 'none';
-    marker?: string;
-  };
+  submitInput?: (
+    text: string,
+    content?: import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[],
+    context?: ProductInputContext,
+  ) => void;
+
   /**
    * Ask the composer for one line of MASKED entry (see input/concealed-input.ts).
    * The typed characters are never echoed, never added to input history, and
@@ -90,7 +70,7 @@ export interface CommandUiActions {
    * back to plaintext entry when this is absent rather than degrade, see
    * commands/payment-card-intake.ts.
    */
-  beginConcealedInput?: (request: import('./concealed-input.ts').ConcealedInputRequest) => void;
+
   /**
    * Ask the composer for one line of ORDINARY, echoed entry, the unmasked
    * sibling of beginConcealedInput, used by `/payments address` for the seven
@@ -100,44 +80,18 @@ export interface CommandUiActions {
   beginPlainInput?: (request: import('./plain-line-input.ts').PlainLineInputRequest) => void;
   /** Live terminal-owned pairing operation; never authority on its own. */
   beginSetupPairing?: (request: { readonly apply: boolean; readonly name: string }) => Promise<void>;
-  executeCommand?: (name: string, args: string[]) => Promise<boolean>;
-  cancelGeneration?: () => void;
+
   /** True while a turn is running (a local or hosted turn has the orchestrator thinking). */
-  isGenerating?: () => boolean;
-  completeModelSelection?: (selection: {
-    model: { id: string; provider: string; displayName: string; registryKey: string };
-    effort: string;
-    contextCap?: number | null;
-    /** Which config target to write the selected model to. Defaults to 'main'. */
-    target?: import('./model-picker.ts').ModelPickerTarget;
-    /**
-     * True only when `effort` came from the picker's effort STEP, an explicit
-     * user choice, which is the only thing allowed to update the stored
-     * preference `provider.reasoningEffort`. The model-only and context-cap
-     * commit routes pass a level merely carried over from the previous model;
-     * storing that is how a one-time snap down used to become permanent.
-     */
-    effortChosenByUser?: boolean;
-  }) => void;
-  clearScreen?: () => void;
-  activatePlan?: (planId: string, task: string) => void;
-  requestPermission?: PermissionRequestHandler;
 }
 
-export interface CommandShellUiOpeners {
-  reloadSystemPrompt?: () => string;
-  openModelPicker?: () => void;
-  openModelPickerWithTarget?: (target: import('./model-picker.ts').ModelPickerTarget) => boolean;
-  openProviderModelPickerWithTarget?: (target: import('./model-picker.ts').ModelPickerTarget) => boolean;
-  openProviderPicker?: () => void;
+export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<import('./model-picker.ts').ModelPickerTarget> {
   openReasoningEffortPicker?: () => {
     opened: boolean;
     model?: string;
     levels?: readonly string[];
     reason?: 'unsupported';
   };
-  openContextInspector?: () => void;
-  openBookmarkModal?: () => void;
+
   openProcessModal?: () => void;
   openConversationSearch?: (query?: string) => void;
   openPromptHistorySearch?: (query?: string) => void;
@@ -150,18 +104,9 @@ export interface CommandShellUiOpeners {
     label?: string;
     reason?: 'no_processes' | 'not_found';
   };
-  jumpToBookmark?: (key: string) => void;
-  scrollToLine?: (line: number) => void;
-  openHelpOverlay?: () => void;
-  openSelection?: OpenSelection;
-  openSettingsModal?: (target?: string) => void;
-  openSessionPicker?: () => void;
-  openProfilePicker?: () => void;
-  openShortcutsOverlay?: () => void;
-  getScrollTop?: () => number;
+
   openWorkspacePicker?: () => void;
-  focusPrompt?: () => void;
-  openMcpWorkspace?: () => void;
+
   openAgentWorkspace?: (categoryId?: string) => void;
   dismissAgentWorkspace?: () => boolean;
   openSecurityWorkspace?: () => void;
@@ -170,21 +115,17 @@ export interface CommandShellUiOpeners {
   /** Open the Activity modal (Ctrl+O, /activity). */
   openActivityModal?: () => void;
   /** Open the notification history (/notifications): every system notice in full. */
-  openNotifications?: () => void;
+
   /**
    * Open an agent or a background process full screen (core/session-focus.ts).
    * False when it is not known here (the caller keeps its own fallback).
    */
-  openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
 }
 
-export interface CommandSessionServices {
+export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly conversationManager: ConversationManager;
   readonly runtime: CommandRuntimeState;
-  readonly sessionManager?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
-  readonly sessionMemoryStore?: import('@goodvibes-jev/engine/sdk/platform/core').SessionMemoryStore;
-  readonly sessionLineageTracker?: import('@goodvibes-jev/engine/sdk/platform/core').SessionLineageTracker;
-  readonly changeTracker?: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionChangeTracker;
+
   /**
    * Writes the surface-scoped last-session pointer file. Bound once at
    * bootstrap to the runtime's SessionSurface (see
@@ -207,40 +148,23 @@ export interface CommandSessionServices {
    * Recompute the Orchestrator's usage totals and context occupancy from the
    * conversation's current messages (after /clear empties it, both read zero).
    */
-  readonly hydrateSessionUsage?: () => void;
 }
 
-export interface CommandProviderServices {
-  readonly providerRegistry: ProviderRegistry;
-  readonly providerOptimizer?: import('@goodvibes-jev/engine/sdk/platform/providers').ProviderOptimizer;
-  readonly favoritesStore?: import('@goodvibes-jev/engine/sdk/platform/providers').FavoritesStore;
-  readonly benchmarkStore?: import('@goodvibes-jev/engine/sdk/platform/providers').BenchmarkStore;
-}
+export interface CommandProviderServices extends TerminalCommandProviderServices {}
 
 /**
  * Compose locally-owned command helpers with the narrower runtime-owned
  * runtime surfaces exported from runtime/shell-command-services.ts.
  */
-export interface CommandWorkspaceUiServices {
+export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiServices {
   keybindingsManager?: KeybindingsManager;
-  fileUndoManager?: FileUndoManager;
+
   processManager?: ProcessManager;
-  profileManager?: import('@goodvibes-jev/engine/sdk/platform/profiles').ProfileManager;
-  bookmarkManager?: import('@goodvibes-jev/engine/sdk/platform/bookmarks').BookmarkManager;
-  projectPlanningService?: import('@goodvibes-jev/engine/sdk/platform/knowledge').ProjectPlanningService;
-  projectPlanningProjectId?: string;
-  workPlanStore?: import('@goodvibes-jev/engine/sdk/platform/workflow').WorkPlanStore;
 }
 
-export interface CommandWorkspaceServices
-  extends CommandWorkspaceUiServices,
-    CommandWorkspaceShellServices {}
+export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, CommandWorkspaceShellServices {}
 
-export interface CommandPlatformConfigServices {
-  readonly config: DeepReadonly<GoodVibesConfig>;
-  readonly configManager: ConfigManager;
-  readonly voiceProviderRegistry?: VoiceProviderRegistry;
-  readonly voiceService?: VoiceService;
+export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   readonly voiceSetup?: AgentVoiceSetupService;
   /** Live memory-governance snapshot source (/health memory); absent against an older host build. */
   readonly memoryGovernor?: AgentMemoryDiagnostics;
@@ -249,12 +173,9 @@ export interface CommandPlatformConfigServices {
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
 }
 
-export interface CommandPlatformServices
-  extends CommandPlatformConfigServices,
-    CommandPlatformShellServices {}
+export interface CommandPlatformServices extends CommandPlatformConfigServices, CommandPlatformShellServices {}
 
-export interface CommandOpsServices
-  extends CommandOpsShellServices {
+export interface CommandOpsServices extends CommandOpsShellServices {
   readonly executionLedger?: AgentExecutionLedger;
   /**
    * The approvals list's source: the daemon's record over `approvals.list`
@@ -266,14 +187,9 @@ export interface CommandOpsServices
   readonly approvalsView?: ApprovalsView;
 }
 
-export interface CommandExtensionRegistryServices {
-  readonly toolRegistry: ToolRegistry;
-  readonly mcpRegistry: McpRegistry;
-}
+export interface CommandExtensionRegistryServices extends TerminalCommandExtensionRegistryServices {}
 
-export interface CommandExtensionServices
-  extends CommandExtensionRegistryServices,
-    CommandExtensionShellServices {
+export interface CommandExtensionServices extends CommandExtensionRegistryServices, CommandExtensionShellServices {
   readonly agentKnowledgeService?: import('@goodvibes-jev/engine/sdk/platform/knowledge').KnowledgeService;
 }
 
@@ -287,15 +203,15 @@ export interface ConsolidationProposalsClient {
  * interact with the shell-facing platform surface without treating every
  * service as one flat bag of unrelated properties.
  */
-export interface CommandContext
-  extends CommandUiActions,
-    CommandShellUiOpeners {
+export interface CommandContext extends CommandUiActions, CommandShellUiOpeners {
   /** Restricts asynchronous command readings; never grants execution authority. */
-  readonly judgmentReadingOptions?: {
-    readonly signal?: AbortSignal | undefined;
-    readonly assertCurrent?: (() => void) | undefined;
-    readonly shouldStop?: (() => boolean) | undefined;
-  } | undefined;
+  readonly judgmentReadingOptions?:
+    | {
+        readonly signal?: AbortSignal | undefined;
+        readonly assertCurrent?: (() => void) | undefined;
+        readonly shouldStop?: (() => boolean) | undefined;
+      }
+    | undefined;
   nativeWorkLedger?: import('../runtime/native-work-ledger.ts').NativeWorkLedgerView;
   readonly session: CommandSessionServices;
   readonly provider: CommandProviderServices;

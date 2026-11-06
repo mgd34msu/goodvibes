@@ -2748,6 +2748,21 @@
       "bun": "./terminal-shell/src/session-workflow-commands.ts",
       "types": "./terminal-shell/dist/session-workflow-commands.d.ts",
       "import": "./terminal-shell/dist/session-workflow-commands.js"
+    },
+    "./terminal-shell/renderer/settings-value-helpers": {
+      "bun": "./terminal-shell/src/renderer/settings-value-helpers.ts",
+      "types": "./terminal-shell/dist/renderer/settings-value-helpers.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-value-helpers.js"
+    },
+    "./terminal-shell/renderer/settings-metadata": {
+      "bun": "./terminal-shell/src/renderer/settings-metadata.ts",
+      "types": "./terminal-shell/dist/renderer/settings-metadata.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-metadata.js"
+    },
+    "./terminal-shell/command-context-contracts": {
+      "bun": "./terminal-shell/src/command-context-contracts.ts",
+      "types": "./terminal-shell/dist/command-context-contracts.d.ts",
+      "import": "./terminal-shell/dist/command-context-contracts.js"
     }
   },
   "publishConfig": {

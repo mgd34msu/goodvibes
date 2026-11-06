@@ -1,27 +1,20 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { normalizeHelpTopic as normalizeTopic } from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import {
+  readProductPackageVersion,
+  renderDetailedCommandHelp,
+  COMMON_COMMAND_HELP,
+  type TerminalCommandHelp,
+} from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../version.ts';
 
-function readJsonVersion(path: string): string | null {
-  try {
-    if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { name?: unknown; version?: unknown };
-    // Only trust OUR package.json, a compiled single-file binary can resolve
-    // this path to a different package.json (a bundled dependency's) that
-    // reports a placeholder like "0.0.0". Fall through to the baked VERSION in
-    // that case rather than rendering a stray version in `--version`/banners.
-    if (parsed.name !== '@goodvibes-jev/tui') return null;
-    return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
-  } catch {
-    return null;
-  }
-}
+const readJsonVersion = (path: string) => readProductPackageVersion(path, '@goodvibes-jev/tui');
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  return readJsonVersion(join(here, '..', '..', 'package.json'))
-    ?? VERSION;
+  return readJsonVersion(join(here, '..', '..', 'package.json')) ?? VERSION;
 }
 
 export function renderGoodVibesVersion(binary = 'goodvibes'): string {
@@ -139,12 +132,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
   ].join('\n');
 }
 
-type CommandHelp = {
-  readonly usage: readonly string[];
-  readonly summary: string;
-  readonly subcommands?: readonly string[];
-  readonly examples?: readonly string[];
-};
+type CommandHelp = TerminalCommandHelp;
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
   tui: {
@@ -153,8 +141,13 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['', 'tui ~/work/project', '"review this repo"'],
   },
   run: {
-    usage: ['run [prompt] [--output text|json|stream-json]', 'exec [prompt]', 'run --intake-status|--intake-retry|--intake-resume|--intake-cancel'],
-    summary: 'Capture the exact original prompt through native daemon admission. Status is read-only; recovery reuses the saved input. Use -- before literal prompt tokens.',
+    usage: [
+      'run [prompt] [--output text|json|stream-json]',
+      'exec [prompt]',
+      'run --intake-status|--intake-retry|--intake-resume|--intake-cancel',
+    ],
+    summary:
+      'Capture the exact original prompt through native daemon admission. Status is read-only; recovery reuses the saved input. Use -- before literal prompt tokens.',
     examples: ['run "summarize the current project"', 'run --output json "list risks"', 'exec --output stream-json "fix lint"'],
   },
   onboarding: {
@@ -169,34 +162,36 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   doctor: {
     usage: ['doctor', 'doctor --json', 'doctor --strict', 'doctor explain <tool|command>', 'doctor routing', 'doctor hooks'],
-    summary: 'Print status plus setup warnings, or explain a platform decision: explain (why a tool/command would be allowed/asked/denied under the current mode), routing (which model/provider serves which role), hooks (registered hooks, their source, and validation status). Exits 0 when the install is usable (advisory findings render as notes); non-zero only for a must-fix finding. --strict also fails on advisory findings, for CI.',
-    examples: ['doctor', 'doctor --strict', 'doctor explain "rm -rf build"', 'doctor explain write ./src/app.ts', 'doctor routing', 'doctor hooks --json'],
+    summary:
+      'Print status plus setup warnings, or explain a platform decision: explain (why a tool/command would be allowed/asked/denied under the current mode), routing (which model/provider serves which role), hooks (registered hooks, their source, and validation status). Exits 0 when the install is usable (advisory findings render as notes); non-zero only for a must-fix finding. --strict also fails on advisory findings, for CI.',
+    examples: [
+      'doctor',
+      'doctor --strict',
+      'doctor explain "rm -rf build"',
+      'doctor explain write ./src/app.ts',
+      'doctor routing',
+      'doctor hooks --json',
+    ],
   },
-  providers: {
-    usage: ['providers [list]', 'providers current', 'providers inspect <provider>', 'providers use <provider> [modelRegistryKey]'],
-    summary: 'Inspect and change provider setup, auth posture, model counts, and setup class.',
-    examples: ['providers', 'providers inspect openai-subscriber', 'providers use openai openai:gpt-5.4'],
-  },
-  models: {
-    usage: ['models [provider]', 'models current', 'models use <registryKey>', 'models pin <registryKey>', 'models recent'],
-    summary: 'List, inspect, select, pin, and review model choices.',
-    examples: ['models current', 'models openai', 'models use openai:gpt-5.4'],
-  },
+  providers: COMMON_COMMAND_HELP['providers'],
+  models: COMMON_COMMAND_HELP['models'],
   auth: {
     usage: ['auth status', 'auth users', 'auth sessions', 'auth add-user <username>', 'auth clear-bootstrap'],
     summary: 'Inspect and manage local admin users, bootstrap auth, and local sessions.',
     examples: ['auth', 'auth add-user admin --password-stdin', 'auth clear-bootstrap'],
   },
   subscription: {
-    usage: ['subscription list', 'subscription providers', 'subscription inspect <provider>', 'subscription login <provider> start|finish', 'subscription logout <provider>'],
+    usage: [
+      'subscription list',
+      'subscription providers',
+      'subscription inspect <provider>',
+      'subscription login <provider> start|finish',
+      'subscription logout <provider>',
+    ],
     summary: 'Manage OAuth/subscription-backed provider sessions such as OpenAI subscription access.',
     examples: ['subscription providers', 'subscription login openai start --open', 'subscription inspect openai'],
   },
-  secrets: {
-    usage: ['secrets list', 'secrets providers', 'secrets test goodvibes://secrets/<source>/...', 'secrets set <KEY> <value>', 'secrets link <KEY> <ref>'],
-    summary: 'Manage GoodVibes secret records and secret references. Secret refs never embed secret values.',
-    examples: ['secrets providers', 'secrets test goodvibes://secrets/env/OPENAI_API_KEY', 'secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY'],
-  },
+  secrets: COMMON_COMMAND_HELP['secrets'],
   sessions: {
     usage: ['sessions list', 'sessions show <id|name>', 'sessions export <id|name> [path]', 'sessions resume <id|name>'],
     summary: 'List, inspect, export, or resume saved TUI sessions.',
@@ -208,7 +203,13 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['tasks list', 'tasks submit "check provider readiness"'],
   },
   surfaces: {
-    usage: ['surfaces [list]', 'surfaces check', 'surfaces show <surfaceId>', 'surfaces enable <web|listener|control-plane|surfaceId>', 'surfaces disable <surfaceId>'],
+    usage: [
+      'surfaces [list]',
+      'surfaces check',
+      'surfaces show <surfaceId>',
+      'surfaces enable <web|listener|control-plane|surfaceId>',
+      'surfaces disable <surfaceId>',
+    ],
     summary: 'Inspect and configure browser, control-plane, HTTP listener, and external integration surfaces.',
     examples: ['surfaces check', 'surfaces enable web', 'surfaces enable slack'],
   },
@@ -224,14 +225,11 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   'support-bundle': {
     usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path>'],
-    summary: 'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+    summary:
+      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
   },
-  pair: {
-    usage: ['pair', 'qrcode'],
-    summary: 'Print companion pairing connection details and a QR code.',
-    examples: ['pair', 'qrcode'],
-  },
+  pair: COMMON_COMMAND_HELP['pair'],
   web: {
     usage: ['web [--open]'],
     summary: 'Show the configured browser surface URL, bind address, and enablement state.',
@@ -242,14 +240,11 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: 'Inspect and manage the daemon service lifecycle, autostart, restart policy, PID, logs, and endpoint readiness.',
     examples: ['service status', 'service check --json', 'service install'],
   },
-  completion: {
-    usage: ['completion <bash|zsh|fish>'],
-    summary: 'Generate shell completion scripts.',
-    examples: ['completion bash', 'completion zsh'],
-  },
+  completion: COMMON_COMMAND_HELP['completion'],
   serve: {
     usage: ['serve'],
-    summary: 'Not served here: the daemon is its own program. Run `goodvibes-daemon` (or manage the installed service with `goodvibes service`).',
+    summary:
+      'Not served here: the daemon is its own program. Run `goodvibes-daemon` (or manage the installed service with `goodvibes service`).',
     examples: [],
   },
   remote: {
@@ -259,13 +254,26 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   hooks: {
     usage: ['hooks validate'],
-    summary: 'Validate the configured hooks.json against the hook loader schema; per-hook pass/fail with plain reasons, nonzero exit if any hook is invalid.',
+    summary:
+      'Validate the configured hooks.json against the hook loader schema; per-hook pass/fail with plain reasons, nonzero exit if any hook is invalid.',
     examples: ['hooks validate', 'hooks validate --json'],
   },
   plugin: {
-    usage: ['plugin init <name> [directory]', 'plugin validate <path>', 'plugin bundles browse <index-url-or-file>', 'plugin bundles install <ref> --sha256 <pin>', 'plugin bundles list'],
-    summary: 'Scaffold a minimal valid plugin (manifest.json + entry file), validate a plugin directory against the plugin loader checks, or browse/install/list SHA-256-pinned capability bundles from a governed marketplace index. Bundle installs are never unpinned; a missing or mismatched --sha256 is refused, not overridable.',
-    examples: ['plugin init my-plugin', 'plugin validate .goodvibes/plugins/my-plugin', 'plugin bundles browse ./marketplace-index.json', 'plugin bundles install ./bundle.json --sha256 <64-hex> --yes'],
+    usage: [
+      'plugin init <name> [directory]',
+      'plugin validate <path>',
+      'plugin bundles browse <index-url-or-file>',
+      'plugin bundles install <ref> --sha256 <pin>',
+      'plugin bundles list',
+    ],
+    summary:
+      'Scaffold a minimal valid plugin (manifest.json + entry file), validate a plugin directory against the plugin loader checks, or browse/install/list SHA-256-pinned capability bundles from a governed marketplace index. Bundle installs are never unpinned; a missing or mismatched --sha256 is refused, not overridable.',
+    examples: [
+      'plugin init my-plugin',
+      'plugin validate .goodvibes/plugins/my-plugin',
+      'plugin bundles browse ./marketplace-index.json',
+      'plugin bundles install ./bundle.json --sha256 <64-hex> --yes',
+    ],
   },
 };
 
@@ -295,39 +303,12 @@ const HELP_ALIASES: Record<string, string> = {
   plugins: 'plugin',
 };
 
-function normalizeHelpTopic(topic: string): string {
-  const normalized = topic.trim().toLowerCase();
-  return HELP_ALIASES[normalized] ?? normalized;
-}
+const normalizeHelpTopic = (topic: string) => normalizeTopic(topic, HELP_ALIASES);
 
 export function renderGoodVibesCommandHelp(topic: string, binary = 'goodvibes'): string {
   const normalized = normalizeHelpTopic(topic);
-  const help = COMMAND_HELP[normalized];
-  if (!help) {
-    return [
-      `No detailed help is available for "${topic}".`,
-      '',
-      renderGoodVibesHelp(binary),
-    ].join('\n');
-  }
-  return [
-    `GoodVibes ${normalized}`,
-    '',
-    help.summary,
-    '',
-    'Usage:',
-    ...help.usage.map((usage) => `  ${binary} ${usage}`),
-    ...(help.subcommands && help.subcommands.length > 0 ? [
-      '',
-      'Subcommands:',
-      ...help.subcommands.map((subcommand) => `  ${subcommand}`),
-    ] : []),
-    ...(help.examples && help.examples.length > 0 ? [
-      '',
-      'Examples:',
-      ...help.examples.map((example) => `  ${binary}${example ? ` ${example}` : ''}`),
-    ] : []),
-  ].join('\n');
+  const help = Object.hasOwn(COMMAND_HELP, normalized) ? COMMAND_HELP[normalized] : undefined;
+  return renderDetailedCommandHelp(topic, normalized, help, binary, 'GoodVibes', renderGoodVibesHelp);
 }
 
 export function renderGoodVibesDaemonHelp(binary = 'goodvibes-daemon'): string {
@@ -351,7 +332,7 @@ export function renderGoodVibesDaemonHelp(binary = 'goodvibes-daemon'): string {
     '                                 topic / chat / room within it, --title <text> sets a title, and',
     '                                 --list shows every channel with where it would send. A channel that',
     '                                 is off is refused rather than redirected to the default, and a',
-    '                                 failed send exits non-zero with the provider\'s own error.',
+    "                                 failed send exits non-zero with the provider's own error.",
     '  cluster <command>              Share inbound channel work with your other machines on this network.',
     '                                 status | create | join | key | nodes | forget <machine> | rotate [--now]',
     '                                 | leave | rename | groups',

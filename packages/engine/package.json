@@ -2878,6 +2878,16 @@
       "bun": "./terminal-shell/src/bootstrap-command-actions.ts",
       "types": "./terminal-shell/dist/bootstrap-command-actions.d.ts",
       "import": "./terminal-shell/dist/bootstrap-command-actions.js"
+    },
+    "./terminal-shell/renderer/help-browser": {
+      "bun": "./terminal-shell/src/renderer/help-browser.ts",
+      "types": "./terminal-shell/dist/renderer/help-browser.d.ts",
+      "import": "./terminal-shell/dist/renderer/help-browser.js"
+    },
+    "./terminal-shell/cli-help": {
+      "bun": "./terminal-shell/src/cli-help.ts",
+      "types": "./terminal-shell/dist/cli-help.d.ts",
+      "import": "./terminal-shell/dist/cli-help.js"
     }
   },
   "publishConfig": {

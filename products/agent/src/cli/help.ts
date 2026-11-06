@@ -1,24 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { normalizeHelpTopic as normalizeTopic } from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import {
+  readProductPackageVersion,
+  renderDetailedCommandHelp,
+  COMMON_COMMAND_HELP,
+  type TerminalCommandHelp,
+} from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
 import { detectInstallKind } from '../runtime/update-check.ts';
 
-function readJsonVersion(path: string): string | null {
-  try {
-    if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { version?: unknown };
-    return typeof parsed.version === 'string' ? parsed.version : null;
-  } catch {
-    return null;
-  }
-}
+const readJsonVersion = (path: string) => readProductPackageVersion(path, '@goodvibes-jev/agent');
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  return readJsonVersion(join(here, '..', '..', 'package.json'))
-    ?? VERSION;
+  return readJsonVersion(join(here, '..', '..', 'package.json')) ?? VERSION;
 }
 
 /**
@@ -84,8 +82,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  channel-profiles           Manage per-channel model/provider/permission-mode defaults',
     '  workspaces                 Manage which workspaces get automatic checkpoints',
     '  browser                    Drive a real browser from the shell (status|provision|open <url>|read <url>)',
-    '  relay                      Report the connected host\'s outbound relay configuration (status|pair)',
-    '  fleet                      Review and resolve this Agent\'s best-of-N attempt groups',
+    "  relay                      Report the connected host's outbound relay configuration (status|pair)",
+    "  fleet                      Review and resolve this Agent's best-of-N attempt groups",
     '  auth                       Inspect Agent auth posture and connection token state',
     '  compat                     Inspect connected-host compatibility and Agent Knowledge route readiness',
     '  knowledge                  Use isolated Agent Knowledge routes',
@@ -163,12 +161,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
   ].join('\n');
 }
 
-type CommandHelp = {
-  readonly usage: readonly string[];
-  readonly summary: string;
-  readonly subcommands?: readonly string[];
-  readonly examples?: readonly string[];
-};
+type CommandHelp = TerminalCommandHelp;
 
 export interface GoodVibesCommandHelpDescriptor {
   readonly command: string;
@@ -181,12 +174,24 @@ export interface GoodVibesCommandHelpDescriptor {
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
   run: {
-    usage: ['run [prompt] [--output text|json|stream-json]', 'exec [prompt]', 'run --intake-status|--intake-retry|--intake-resume|--intake-cancel'],
-    summary: 'Capture the exact original prompt through native daemon admission. Status is read-only; recovery reuses the saved input. Use -- before literal prompt tokens.',
+    usage: [
+      'run [prompt] [--output text|json|stream-json]',
+      'exec [prompt]',
+      'run --intake-status|--intake-retry|--intake-resume|--intake-cancel',
+    ],
+    summary:
+      'Capture the exact original prompt through native daemon admission. Status is read-only; recovery reuses the saved input. Use -- before literal prompt tokens.',
     examples: ['run "summarize the current project"', 'run --output json "list risks"', 'exec --output stream-json "check runtime status"'],
   },
   setup: {
-    usage: ['setup', 'setup status', 'setup pair [--name <device-name>]', 'setup pair [--name <device-name>] --apply', 'onboarding', 'onboarding status'],
+    usage: [
+      'setup',
+      'setup status',
+      'setup pair [--name <device-name>]',
+      'setup pair [--name <device-name>] --apply',
+      'onboarding',
+      'onboarding status',
+    ],
     summary: 'Open the Agent workspace, or inspect whether setup has already been applied for this user.',
     examples: ['setup', 'setup status', 'setup pair', 'setup pair --apply', 'onboarding status'],
   },
@@ -200,15 +205,36 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: 'Print status plus actionable setup warnings with cause, impact, and next action.',
     examples: ['doctor', 'doctor --json', '--runtime-url http://127.0.0.1:3421 doctor'],
   },
-  providers: {
-    usage: ['providers [list]', 'providers current', 'providers inspect <provider>', 'providers use <provider> [modelRegistryKey]'],
-    summary: 'Inspect and change provider setup, auth posture, model counts, and setup class.',
-    examples: ['providers', 'providers inspect openai-subscriber', 'providers use openai openai:gpt-5.4'],
-  },
+  providers: COMMON_COMMAND_HELP['providers'],
   profiles: {
-    usage: ['profiles list', 'profiles default', 'profiles use <name> --yes', 'profiles default clear --yes', 'profiles templates', 'profiles templates from-discovered <id> --yes', 'profiles create-from-discovered <name> --yes', 'profiles templates export <id> <path> --yes', 'profiles templates import <path> --yes', 'profiles show <name>', 'profiles create <name> [--template <id>] --yes', 'profiles delete <name> --yes', '--agent-profile <name>'],
-    summary: 'Create and inspect isolated Agent profile homes, with starter templates for household, research, travel, operations, personal productivity, and local imported starters. A profile changes Agent-local config, sessions, memory, personas, skills, routines, and setup paths without changing the connected GoodVibes host.',
-    examples: ['profiles templates', 'profiles create household --template household --yes', 'profiles use household --yes', 'profiles default', 'profiles create-from-discovered research-desk --yes', 'profiles templates from-discovered research-desk --yes', 'profiles templates export research ./research-starter.json --yes', 'profiles templates import ./research-starter.json --yes', '--agent-profile household status'],
+    usage: [
+      'profiles list',
+      'profiles default',
+      'profiles use <name> --yes',
+      'profiles default clear --yes',
+      'profiles templates',
+      'profiles templates from-discovered <id> --yes',
+      'profiles create-from-discovered <name> --yes',
+      'profiles templates export <id> <path> --yes',
+      'profiles templates import <path> --yes',
+      'profiles show <name>',
+      'profiles create <name> [--template <id>] --yes',
+      'profiles delete <name> --yes',
+      '--agent-profile <name>',
+    ],
+    summary:
+      'Create and inspect isolated Agent profile homes, with starter templates for household, research, travel, operations, personal productivity, and local imported starters. A profile changes Agent-local config, sessions, memory, personas, skills, routines, and setup paths without changing the connected GoodVibes host.',
+    examples: [
+      'profiles templates',
+      'profiles create household --template household --yes',
+      'profiles use household --yes',
+      'profiles default',
+      'profiles create-from-discovered research-desk --yes',
+      'profiles templates from-discovered research-desk --yes',
+      'profiles templates export research ./research-starter.json --yes',
+      'profiles templates import ./research-starter.json --yes',
+      '--agent-profile household status',
+    ],
   },
   personas: {
     usage: [
@@ -285,7 +311,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'memory handoff-inspect <path>',
       'memory vector [status|doctor|rebuild]',
     ],
-    summary: 'Manage Agent-owned durable memory. This uses the Agent memory store only; it never falls back to default knowledge or non-Agent knowledge segments.',
+    summary:
+      'Manage Agent-owned durable memory. This uses the Agent memory store only; it never falls back to default knowledge or non-Agent knowledge segments.',
     examples: [
       'memory list',
       'memory add fact "Prefers concise morning briefings" --scope project --tags preference',
@@ -309,7 +336,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'routines receipt <receipt-id>',
       'routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
     ],
-    summary: 'Inspect, create, and import Agent-local routines with setup readiness. The same routine workflow is available in the TUI through /routines and the Agent workspace. GoodVibes schedule promotion is explicit. Without --yes, promotion only prints the preview.',
+    summary:
+      'Inspect, create, and import Agent-local routines with setup readiness. The same routine workflow is available in the TUI through /routines and the Agent workspace. GoodVibes schedule promotion is explicit. Without --yes, promotion only prints the preview.',
     examples: [
       'routines list',
       'routines attention',
@@ -323,11 +351,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'routines promote weekly-review --every 7d --disabled',
     ],
   },
-  models: {
-    usage: ['models [provider]', 'models current', 'models use <registryKey>', 'models pin <registryKey>', 'models recent'],
-    summary: 'List, inspect, select, pin, and review model choices.',
-    examples: ['models current', 'models openai', 'models use openai:gpt-5.4'],
-  },
+  models: COMMON_COMMAND_HELP['models'],
   ci: {
     usage: [
       'ci status <repo> [--ref <ref>] [--pr <number>]',
@@ -336,7 +360,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'ci watches delete <watchId> --yes',
       'ci watches run <watchId>',
     ],
-    summary: 'Check per-job CI status on the connected host and manage standing CI watches. Status is always rendered per job (name, status, conclusion), never collapsed to a single rollup.',
+    summary:
+      'Check per-job CI status on the connected host and manage standing CI watches. Status is always rendered per job (name, status, conclusion), never collapsed to a single rollup.',
     examples: [
       'ci status my-org/my-repo --ref main',
       'ci status my-org/my-repo --pr 42',
@@ -355,7 +380,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'principals delete <id> --yes',
       'principals resolve --channel <channel> --value <value>',
     ],
-    summary: 'Manage the connected-host cross-channel principal identity registry, mapping channel-specific sender identities (a Slack user id, an email address, a phone number) onto one named principal. resolve reports known: false rather than asserting a match when no identity is mapped.',
+    summary:
+      'Manage the connected-host cross-channel principal identity registry, mapping channel-specific sender identities (a Slack user id, an email address, a phone number) onto one named principal. resolve reports known: false rather than asserting a match when no identity is mapped.',
     examples: [
       'principals list',
       'principals create --name "Mike Davis" --kind user --identity slack:U123,email:mike@example.com --yes',
@@ -374,7 +400,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'owner-profile forget --section <section> --text "<the line, exactly>" --yes',
       'owner-profile status',
     ],
-    summary: 'Read, trace, correct, and delete the owner profile the daemon keeps: one Markdown file holding your name, contact, location, commerce, preferences, people, places, work, and notes. read prints the whole document with the provenance suffix on every learned line; get prints one field; person prints one person by name and takes the words you used that pointed at them; provenance answers "where did you get that" for one field, including the values it superseded; set supersedes a field and keeps the old one; forget deletes a line and its kept history, and reports that a field was not there rather than reporting success; a prose line is named by its section and exact text, never by position, because you edit this file yourself and a position from an earlier read can point at a different line by now; status prints load state, path, counts, and any field whose value did not parse: never values.',
+    summary:
+      'Read, trace, correct, and delete the owner profile the daemon keeps: one Markdown file holding your name, contact, location, commerce, preferences, people, places, work, and notes. read prints the whole document with the provenance suffix on every learned line; get prints one field; person prints one person by name and takes the words you used that pointed at them; provenance answers "where did you get that" for one field, including the values it superseded; set supersedes a field and keeps the old one; forget deletes a line and its kept history, and reports that a field was not there rather than reporting success; a prose line is named by its section and exact text, never by position, because you edit this file yourself and a position from an earlier read can point at a different line by now; status prints load state, path, counts, and any field whose value did not parse: never values.',
     examples: [
       'owner-profile read',
       'owner-profile provenance commerce.shippingAddress',
@@ -400,12 +427,9 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
   },
   workspaces: {
-    usage: [
-      'workspaces list',
-      'workspaces register [path] [--label <label>] --yes',
-      'workspaces unregister [path] --yes',
-    ],
-    summary: 'Manage the registered-workspace list that gates automatic (turn-end/lifecycle) checkpoints. A workspace not in this list gets no automatic checkpoints; path defaults to the current working directory.',
+    usage: ['workspaces list', 'workspaces register [path] [--label <label>] --yes', 'workspaces unregister [path] --yes'],
+    summary:
+      'Manage the registered-workspace list that gates automatic (turn-end/lifecycle) checkpoints. A workspace not in this list gets no automatic checkpoints; path defaults to the current working directory.',
     examples: [
       'workspaces list',
       'workspaces register --yes',
@@ -414,30 +438,16 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
   },
   browser: {
-    usage: [
-      'browser status',
-      'browser provision [--repair]',
-      'browser open <url> [--visible]',
-      'browser read <url> [--visible]',
-    ],
-    summary: 'Drive a real browser from the shell, through the same tool the model calls. `status` reports whether the driver and browser are present and, when they are not, exactly what is missing and what to do; `provision` performs the one-act setup with every step visible; `open` and `read` prove the whole path on a real page without needing a model, a provider, or an API key.',
-    examples: [
-      'browser status',
-      'browser provision',
-      'browser open https://example.com',
-      'browser read https://example.com',
-    ],
+    usage: ['browser status', 'browser provision [--repair]', 'browser open <url> [--visible]', 'browser read <url> [--visible]'],
+    summary:
+      'Drive a real browser from the shell, through the same tool the model calls. `status` reports whether the driver and browser are present and, when they are not, exactly what is missing and what to do; `provision` performs the one-act setup with every step visible; `open` and `read` prove the whole path on a real page without needing a model, a provider, or an API key.',
+    examples: ['browser status', 'browser provision', 'browser open https://example.com', 'browser read https://example.com'],
   },
   relay: {
-    usage: [
-      'relay status',
-      'relay pair',
-    ],
-    summary: 'Report the connected GoodVibes host\'s imported relay.* configuration and the relay-connect feature flag. Agent hosts no daemon itself, so this is not a live check, and relay pair honestly refuses, pairing payloads are minted by whichever daemon holds the relay identity key.',
-    examples: [
-      'relay status',
-      'relay pair',
-    ],
+    usage: ['relay status', 'relay pair'],
+    summary:
+      "Report the connected GoodVibes host's imported relay.* configuration and the relay-connect feature flag. Agent hosts no daemon itself, so this is not a live check, and relay pair honestly refuses, pairing payloads are minted by whichever daemon holds the relay identity key.",
+    examples: ['relay status', 'relay pair'],
   },
   fleet: {
     usage: [
@@ -445,7 +455,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'fleet attempts pick <groupId> <winnerItemId> --yes',
       'fleet attempts judge <groupId>',
     ],
-    summary: 'Review and resolve this Agent\'s own best-of-N attempt groups (orchestration engine state, disk-persisted, not a connected-host call): siblings that ran in isolated worktrees and are held for a winner pick instead of auto-merging. judge runs the optional judge model and PROPOSES a winner (clearly labeled as a model proposal, never an auto-decision); pick is the confirm-gated action that actually merges the winner and cleans losing worktrees.',
+    summary:
+      "Review and resolve this Agent's own best-of-N attempt groups (orchestration engine state, disk-persisted, not a connected-host call): siblings that ran in isolated worktrees and are held for a winner pick instead of auto-merging. judge runs the optional judge model and PROPOSES a winner (clearly labeled as a model proposal, never an auto-decision); pick is the confirm-gated action that actually merges the winner and cleans losing worktrees.",
     examples: [
       'fleet attempts list',
       'fleet attempts list --workstream workstream-1',
@@ -509,21 +520,21 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   delegate: {
     usage: ['delegate [--review] <build/fix/review task>'],
     summary: 'Create one shared-session task request for GoodVibes TUI. Delegated review is requested with --review.',
-    examples: [
-      'delegate "fix the failing tests in this repo"',
-      'delegate --review "implement the settings screen and review it"',
-    ],
+    examples: ['delegate "fix the failing tests in this repo"', 'delegate --review "implement the settings screen and review it"'],
   },
   subscription: {
-    usage: ['subscription list', 'subscription providers', 'subscription inspect <provider>', 'subscription login <provider> start [--open]', 'subscription login <provider> finish <code-or-url>', 'subscription logout <provider>'],
+    usage: [
+      'subscription list',
+      'subscription providers',
+      'subscription inspect <provider>',
+      'subscription login <provider> start [--open]',
+      'subscription login <provider> finish <code-or-url>',
+      'subscription logout <provider>',
+    ],
     summary: 'Manage OAuth/subscription-backed provider sessions such as OpenAI subscription access.',
     examples: ['subscription providers', 'subscription login openai start --open', 'subscription inspect openai'],
   },
-  secrets: {
-    usage: ['secrets list', 'secrets providers', 'secrets test goodvibes://secrets/<source>/...', 'secrets set <KEY> <value>', 'secrets link <KEY> <ref>'],
-    summary: 'Manage GoodVibes secret records and secret references. Secret refs never embed secret values.',
-    examples: ['secrets providers', 'secrets test goodvibes://secrets/env/OPENAI_API_KEY', 'secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY'],
-  },
+  secrets: COMMON_COMMAND_HELP['secrets'],
   sessions: {
     usage: ['sessions list', 'sessions show <id|name>', 'sessions export <id|name> [path]', 'sessions resume <id|name>'],
     summary: 'List, inspect, export, or resume saved Agent terminal sessions.',
@@ -531,7 +542,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   tasks: {
     usage: ['tasks list', 'tasks show <taskId>'],
-    summary: 'Inspect connected-host task summaries. Agent blocks host-owned task submission; use run for one-shot work or delegate for explicit build/fix/review handoff.',
+    summary:
+      'Inspect connected-host task summaries. Agent blocks host-owned task submission; use run for one-shot work or delegate for explicit build/fix/review handoff.',
     examples: ['tasks list', 'tasks show task-123', 'run "check provider readiness"', 'delegate "fix the failing tests"'],
   },
   bundle: {
@@ -539,25 +551,14 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     summary: 'Export, inspect, or import setup/profile/trust/support bundle data.',
     examples: ['bundle export goodvibes-agent-bundle.json', 'bundle inspect goodvibes-agent-bundle.json'],
   },
-  pair: {
-    usage: ['pair', 'qrcode'],
-    summary: 'Print companion pairing connection details and a QR code.',
-    examples: ['pair', 'qrcode'],
-  },
+  pair: COMMON_COMMAND_HELP['pair'],
   import: {
     usage: ['import openclaw [path] [--apply]'],
-    summary: 'Migrate an OpenClaw workspace into the Agent registries. Dry-run is the default; it prints the personas, memory records, skills, and permission allowlist categories that would be created, plus any skipped files with reasons. Re-run with --apply to write through the persona registry, the canonical memory store, the skill registry, and the permission settings. Reads ~/.openclaw by default, or a supplied path.',
-    examples: [
-      'import openclaw',
-      'import openclaw ~/.openclaw',
-      'import openclaw ~/.openclaw --apply',
-    ],
+    summary:
+      'Migrate an OpenClaw workspace into the Agent registries. Dry-run is the default; it prints the personas, memory records, skills, and permission allowlist categories that would be created, plus any skipped files with reasons. Re-run with --apply to write through the persona registry, the canonical memory store, the skill registry, and the permission settings. Reads ~/.openclaw by default, or a supplied path.',
+    examples: ['import openclaw', 'import openclaw ~/.openclaw', 'import openclaw ~/.openclaw --apply'],
   },
-  completion: {
-    usage: ['completion <bash|zsh|fish>'],
-    summary: 'Generate shell completion scripts.',
-    examples: ['completion bash', 'completion zsh'],
-  },
+  completion: COMMON_COMMAND_HELP['completion'],
 };
 
 const HELP_ALIASES: Record<string, string> = {
@@ -598,18 +599,15 @@ export function listGoodVibesHelpTopics(): readonly string[] {
   return Object.keys(COMMAND_HELP).sort();
 }
 
-function normalizeHelpTopic(topic: string): string {
-  const normalized = topic.trim().toLowerCase();
-  return HELP_ALIASES[normalized] ?? normalized;
-}
+const normalizeHelpTopic = (topic: string) => normalizeTopic(topic, HELP_ALIASES);
 
 export function hasGoodVibesCommandHelp(topic: string): boolean {
-  return COMMAND_HELP[normalizeHelpTopic(topic)] !== undefined;
+  return Object.hasOwn(COMMAND_HELP, normalizeHelpTopic(topic));
 }
 
 export function describeGoodVibesCommandHelp(topic: string): GoodVibesCommandHelpDescriptor | null {
   const normalized = normalizeHelpTopic(topic);
-  const help = COMMAND_HELP[normalized];
+  const help = Object.hasOwn(COMMAND_HELP, normalized) ? COMMAND_HELP[normalized] : undefined;
   if (!help) return null;
   return {
     command: normalized,
@@ -626,30 +624,6 @@ export function describeGoodVibesCommandHelp(topic: string): GoodVibesCommandHel
 
 export function renderGoodVibesCommandHelp(topic: string, binary = 'goodvibes-agent'): string {
   const normalized = normalizeHelpTopic(topic);
-  const help = COMMAND_HELP[normalized];
-  if (!help) {
-    return [
-      `No detailed help is available for "${topic}".`,
-      '',
-      renderGoodVibesHelp(binary),
-    ].join('\n');
-  }
-  return [
-    `GoodVibes Agent ${normalized}`,
-    '',
-    help.summary,
-    '',
-    'Usage:',
-    ...help.usage.map((usage) => `  ${binary} ${usage}`),
-    ...(help.subcommands && help.subcommands.length > 0 ? [
-      '',
-      'Subcommands:',
-      ...help.subcommands.map((subcommand) => `  ${subcommand}`),
-    ] : []),
-    ...(help.examples && help.examples.length > 0 ? [
-      '',
-      'Examples:',
-      ...help.examples.map((example) => `  ${binary}${example ? ` ${example}` : ''}`),
-    ] : []),
-  ].join('\n');
+  const help = Object.hasOwn(COMMAND_HELP, normalized) ? COMMAND_HELP[normalized] : undefined;
+  return renderDetailedCommandHelp(topic, normalized, help, binary, 'GoodVibes Agent', renderGoodVibesHelp);
 }

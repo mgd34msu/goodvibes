@@ -8,6 +8,7 @@ import type { OccasionMutationOptions } from './operation.js';
 import { captureOccasionOperation, retainOccasionStateReceipts } from './operation.js';
 import { OccasionReadingWork, OccasionReadingHeldError } from './readings.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { AuthoritySurface } from '../security/untrusted-content.js';
 import type { ProfileSurface, ProfileWriteResult } from '../owner-profile/types.js';
 import { daysBetween, nextOccurrence, todayInZone, minutesOfDayInZone, type IsoDate } from './dates.js';
@@ -166,33 +167,36 @@ export class OccasionsService {
    * is about what an unprompted message pushes onto a channel.
    */
   async list(options: OccasionMutationOptions = {}): Promise<OccasionListResult> {
-    const work = this.reading(options);
-    await this.deps.state.prepareRead(options);
-    const today = this.today();
-    const policy = this.policy();
-    const { occasions, unparsed, conflicts } = await readOccasions(this.deps.profile, work);
-    const acknowledgements = await this.deps.state.acknowledgements();
-    const views: OccasionView[] = occasions.map((occasion) => {
-      const occurrence = nextOccurrence(occasion.date, occasion.recurrence, today);
-      const daysUntil = occurrence === null ? null : daysBetween(today, occurrence);
-      const lead = effectiveLead(occasion, policy);
-      const answer = occurrence === null
-        ? null
-        : acknowledgements.find(
-          (entry) => entry.occasionId === occasion.id && entry.occurrence === occurrence,
-        )?.answer ?? null;
-      return {
-        occasion,
-        nextOccurrence: occurrence,
-        daysUntil,
-        leadDays: lead,
-        inLeadWindow: daysUntil !== null && Number.isFinite(daysUntil) && daysUntil <= lead,
-        answer,
-        mirrored: occasion.mirrored,
-      };
+    return withConfiguredDecisionModelPolicy(async () => {
+      const work = this.reading(options);
+      await this.deps.state.prepareRead(options);
+      const today = this.today();
+      const policy = this.policy();
+      const { occasions, unparsed, conflicts } = await readOccasions(this.deps.profile, work);
+      const acknowledgements = await this.deps.state.acknowledgements();
+      const views: OccasionView[] = occasions.map((occasion) => {
+        const occurrence = nextOccurrence(occasion.date, occasion.recurrence, today);
+        const daysUntil = occurrence === null ? null : daysBetween(today, occurrence);
+        const lead = effectiveLead(occasion, policy);
+        const answer = occurrence === null
+          ? null
+          : acknowledgements.find(
+            (entry) => entry.occasionId === occasion.id && entry.occurrence === occurrence,
+          )?.answer ?? null;
+        return {
+          occasion,
+          nextOccurrence: occurrence,
+          daysUntil,
+          leadDays: lead,
+          inLeadWindow: daysUntil !== null && Number.isFinite(daysUntil) && daysUntil <= lead,
+          answer,
+          mirrored: occasion.mirrored,
+        };
+      });
+      work.assertCurrent();
+      return { today, timezone: this.timezone(), occasions: views, unparsed, conflicts,
+        ...(isClassicOperation() ? { provenance: 'classic' as const, subjectAssessment: 'not-evaluated' as const } : {}) };
     });
-    work.assertCurrent();
-    return { today, timezone: this.timezone(), occasions: views, unparsed, conflicts };
   }
 
   /** Every declared plan, and whether one has the owner away right now. */
@@ -278,7 +282,7 @@ export class OccasionsService {
     readonly answer: OccasionAnswer;
     readonly occurrence?: string | undefined;
   }, options: OccasionMutationOptions = {}): Promise<{ readonly ok: boolean; readonly reason: string | null; readonly interview: InterviewProgress | null }> {
-    return this.withAnswerOwnership(input.occasionId, options, owned => this.answerOwned(input, owned));
+    return withConfiguredDecisionModelPolicy(() => this.withAnswerOwnership(input.occasionId, options, owned => this.answerOwned(input, owned)));
   }
 
   /** A later response for this occasion retires earlier work, including an unfinished gift reading. */
@@ -385,6 +389,7 @@ export class OccasionsService {
     const existing = await this.deps.state.activeInterview(occasion.id, occurrence);
     work.assertCurrent();
     if (existing !== undefined) return existing;
+    requireDecisionFeature('planning a new gift interview from inferred profile interests');
     this.deps.state.assertGiftReadingAdmission(occasion.id);
     const policy = this.policy();
     const subject = occasion.person.trim().length > 0 ? occasion.person : occasion.title;
@@ -503,100 +508,105 @@ export class OccasionsService {
    * nudging off.
    */
   async sweep(options: OccasionMutationOptions = {}): Promise<SweepOutcome> {
-    const work = this.reading(options);
-    await this.deps.state.prepareRead(options);
-    const now = this.now();
-    const today = todayInZone(now, this.timezone());
-    const policy = this.policy();
-    let { occasions, conflicts } = readOccasionDeclarations(this.deps.profile);
-    const { plans } = readPlans(this.deps.profile);
+    return withConfiguredDecisionModelPolicy(async () => {
+      const work = this.reading(options);
+      await this.deps.state.prepareRead(options);
+      const now = this.now();
+      const today = todayInZone(now, this.timezone());
+      const policy = this.policy();
+      let { occasions, conflicts } = readOccasionDeclarations(this.deps.profile);
+      const { plans } = readPlans(this.deps.profile);
 
-    const housekeeping = await this.deps.state.sweep({
-      today,
-      now,
-      declaredOccasionIds: new Set(occasions.map((entry) => entry.id)),
-      giftHistoryYears: policy.giftHistoryYears,
-    }, work.assertCurrent);
+      const housekeeping = await this.deps.state.sweep({
+        today,
+        now,
+        declaredOccasionIds: new Set(occasions.map((entry) => entry.id)),
+        giftHistoryYears: policy.giftHistoryYears,
+      }, work.assertCurrent);
 
-    ({ occasions, conflicts } = await readOccasions(this.deps.profile, work));
-    const mirrored = policy.calendarMirror ? await this.runMirror(occasions, today, now, work) : 0;
-    let stateCurrent = this.deps.state.captureRead().assertCurrent;
-    work.retain(() => stateCurrent());
-    const published = () => { stateCurrent = this.deps.state.captureRead().assertCurrent; };
-    const decision = decideSweep({
-      now,
-      today,
-      minutesOfDay: minutesOfDayInZone(now, this.timezone()),
-      occasions,
-      conflicts,
-      plans,
-      acknowledgements: await this.deps.state.acknowledgements(),
-      openItems: await this.deps.state.openItems(),
-      interviews: await this.interviewsInFlight(),
-      policy,
-    });
+      ({ occasions, conflicts } = await readOccasions(this.deps.profile, work));
+      if (isClassicOperation()) return classicSweep(now, today, housekeeping, 0);
+      const mirrored = policy.calendarMirror ? await this.runMirror(occasions, today, now, work) : 0;
+      let stateCurrent = this.deps.state.captureRead().assertCurrent;
+      work.retain(() => stateCurrent());
+      const published = () => { stateCurrent = this.deps.state.captureRead().assertCurrent; };
+      const decision = decideSweep({
+        now,
+        today,
+        minutesOfDay: minutesOfDayInZone(now, this.timezone()),
+        occasions,
+        conflicts,
+        plans,
+        acknowledgements: await this.deps.state.acknowledgements(),
+        openItems: await this.deps.state.openItems(),
+        interviews: await this.interviewsInFlight(),
+        policy,
+      });
 
-    work.assertCurrent();
-    if (decision.hold !== null) {
+      work.assertCurrent();
+      if (decision.hold !== null) {
+        return {
+          ranAt: now,
+          today,
+          hold: decision.hold,
+          nudge: null,
+          conflictMessages: [],
+          resumedInterviews: [],
+          delivered: false,
+          deliveryChannel: '',
+          deliveryId: null,
+          deliveries: [],
+          mirrored,
+          housekeeping,
+        };
+      }
+
+
+      const preparedNudge = await decisionOrClassic(
+        () => decision.due.length === 0 ? Promise.resolve(null)
+          : prepareNudge(decision.due.map((entry) => subjectFor(entry.occasion, entry.daysUntil)), work),
+        () => null);
+      work.assertCurrent();
+      if (isClassicOperation()) return classicSweep(now, today, housekeeping, mirrored);
+      const nudge = preparedNudge === null ? null : { ...preparedNudge, id: `occasions-${now}`, raisedAt: now };
+      await this.deps.state.putOpenItems(decision.openItemWrites, work.assertCurrent, published);
+
+      const conflictMessages = decision.conflicts.map(
+        (conflict) => composeConflictMessage(conflict.title, conflict.dates),
+      );
+
+      const destinations = resolveNudgeDestinations(policy.nudgeChannel);
+      const deliveries = nudge === null
+        ? []
+        : await pushNudge(this.deps.deliverer, nudge, destinations, work.assertCurrent, options.withNudgeDelivery);
+      work.assertCurrent();
+      const landed = deliveries.filter((entry) => entry.delivered);
+      // Only a push that ACTUALLY landed on the agent stamps the items. A stamp
+      // written on an attempt would silence the pull for a nudge that never
+      // arrived anywhere, which is the one outcome this feature cannot have.
+      if (landed.some((entry) => nudgeDestinationSurface(entry.channel) === NUDGE_AGENT_SURFACE)) {
+        await this.deps.state.putOpenItems(
+          decision.openItemWrites.filter(item => item.kind === 'nudge').map(item => ({ ...item, agentPushedOn: today })),
+          work.assertCurrent, published,
+        );
+      }
+
+      work.assertCurrent();
       return {
         ranAt: now,
         today,
-        hold: decision.hold,
-        nudge: null,
-        conflictMessages: [],
-        resumedInterviews: [],
-        delivered: false,
-        deliveryChannel: '',
-        deliveryId: null,
-        deliveries: [],
+        hold: null,
+        nudge,
+        conflictMessages,
+        resumedInterviews: decision.resumeInterviews.map((entry) => entry.id),
+        delivered: landed.length > 0,
+        deliveryChannel: destinations.join(', '),
+        deliveryId: landed[0]?.deliveryId ?? null,
+        deliveries,
         mirrored,
         housekeeping,
       };
-    }
-
-
-    const preparedNudge = decision.due.length === 0
-      ? null
-      : await prepareNudge(decision.due.map((entry) => subjectFor(entry.occasion, entry.daysUntil)), work);
-    work.assertCurrent();
-    const nudge = preparedNudge === null ? null : { ...preparedNudge, id: `occasions-${now}`, raisedAt: now };
-    await this.deps.state.putOpenItems(decision.openItemWrites, work.assertCurrent, published);
-
-    const conflictMessages = decision.conflicts.map(
-      (conflict) => composeConflictMessage(conflict.title, conflict.dates),
-    );
-
-    const destinations = resolveNudgeDestinations(policy.nudgeChannel);
-    const deliveries = nudge === null
-      ? []
-      : await pushNudge(this.deps.deliverer, nudge, destinations, work.assertCurrent, options.withNudgeDelivery);
-    work.assertCurrent();
-    const landed = deliveries.filter((entry) => entry.delivered);
-    // Only a push that ACTUALLY landed on the agent stamps the items. A stamp
-    // written on an attempt would silence the pull for a nudge that never
-    // arrived anywhere, which is the one outcome this feature cannot have.
-    if (landed.some((entry) => nudgeDestinationSurface(entry.channel) === NUDGE_AGENT_SURFACE)) {
-      await this.deps.state.putOpenItems(
-        decision.openItemWrites.filter(item => item.kind === 'nudge').map(item => ({ ...item, agentPushedOn: today })),
-        work.assertCurrent, published,
-      );
-    }
-
-    work.assertCurrent();
-    return {
-      ranAt: now,
-      today,
-      hold: null,
-      nudge,
-      conflictMessages,
-      resumedInterviews: decision.resumeInterviews.map((entry) => entry.id),
-      delivered: landed.length > 0,
-      deliveryChannel: destinations.join(', '),
-      deliveryId: landed[0]?.deliveryId ?? null,
-      deliveries,
-      mirrored,
-      housekeeping,
-    };
+    });
   }
 
   /** Unfinished interviews, for the resume case. */
@@ -679,29 +689,31 @@ export class OccasionsService {
    * nudge.
    */
   async pending(options: OccasionMutationOptions = {}): Promise<PendingResult> {
-    const work = this.reading(options);
-    await this.deps.state.prepareRead(options);
-    await this.deps.state.disclose();
-    this.deps.state.assertPendingReadingAdmission();
-    work.assertCurrent();
-    work.retain(this.deps.state.captureRead().assertCurrent);
-    const policy = this.policy();
-    const { occasions, conflicts } = await readOccasions(this.deps.profile, work);
-    const now = this.now();
-    const composed = await preparePending({
-      today: this.today(),
-      leadDays: policy.leadDays,
-      occasions,
-      conflicts,
-      openItems: await this.deps.state.openItems(),
-      acknowledgements: await this.deps.state.acknowledgements(),
-      agentIsPushed: resolveNudgeDestinations(policy.nudgeChannel).some(
-        (destination) => nudgeDestinationSurface(destination) === NUDGE_AGENT_SURFACE,
-      ),
-    }, work);
-    const interviews = (await this.interviewsInFlight()).map(progressOf);
-    work.assertCurrent();
-    return { ...composed, nudge: composed.nudge === null ? null : { ...composed.nudge, id: `occasions-pending-${composed.today}`, raisedAt: now }, interviews };
+    return withConfiguredDecisionModelPolicy(async () => {
+      const work = this.reading(options);
+      await this.deps.state.prepareRead(options);
+      await this.deps.state.disclose();
+      this.deps.state.assertPendingReadingAdmission();
+      work.assertCurrent();
+      work.retain(this.deps.state.captureRead().assertCurrent);
+      const policy = this.policy();
+      const { occasions, conflicts } = await readOccasions(this.deps.profile, work);
+      const now = this.now();
+      const composed = await preparePending({
+        today: this.today(),
+        leadDays: policy.leadDays,
+        occasions,
+        conflicts,
+        openItems: await this.deps.state.openItems(),
+        acknowledgements: await this.deps.state.acknowledgements(),
+        agentIsPushed: resolveNudgeDestinations(policy.nudgeChannel).some(
+          (destination) => nudgeDestinationSurface(destination) === NUDGE_AGENT_SURFACE,
+        ),
+      }, work);
+      const interviews = (await this.interviewsInFlight()).map(progressOf);
+      work.assertCurrent();
+      return { ...composed, nudge: composed.nudge === null ? null : { ...composed.nudge, id: `occasions-pending-${composed.today}`, raisedAt: now }, interviews };
+    });
   }
 
   /**
@@ -765,6 +777,14 @@ export class OccasionsService {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function classicSweep(now: number, today: IsoDate, housekeeping: SweepOutcome['housekeeping'], mirrored: number): SweepOutcome {
+  return {
+    ranAt: now, today, provenance: 'classic', semanticAssessment: 'not-evaluated', hold: 'decision-models-disabled',
+    nudge: null, conflictMessages: [], resumedInterviews: [], delivered: false, deliveryChannel: '', deliveryId: null,
+    deliveries: [], mirrored, housekeeping,
+  };
+}
 
 function progressOf(interview: Interview): InterviewProgress {
   const step = nextStep(interview);

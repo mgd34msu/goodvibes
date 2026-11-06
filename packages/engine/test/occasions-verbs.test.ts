@@ -29,6 +29,9 @@ import { OccasionStateStore } from '../sdk/src/platform/occasions/state-store.ts
 import { OccasionsService } from '../sdk/src/platform/occasions/service.ts';
 import { OCCASIONS_DEFAULTS } from '../sdk/src/platform/occasions/policy.ts';
 import { resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.ts';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 
 // Profile writes ask the content-derivation reading whenever the process
 // ledger holds untrusted text; another test file's reads must not reach these.
@@ -313,4 +316,21 @@ describe('the verbs, invoked', () => {
     expect(result.plans[0]!.away).toBe(true);
     expect(result.awayNow).toBeNull();
   });
+});
+
+test('Classic actual occasion verbs return declared dates and explicit automatic-action hold with zero decision requests', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); const previous = installJudgmentPort(fake.port);
+  try {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const { catalog } = harness();
+      const list = await catalog.invoke('occasions.list', { ...ctx, body: {} }) as { provenance: string; subjectAssessment: string; occasions: { nextOccurrence: string }[] };
+      expect(list.provenance).toBe('classic'); expect(list.subjectAssessment).toBe('not-evaluated');
+      expect(list.occasions[0]?.nextOccurrence).toBe('2026-03-14');
+      const sweep = await catalog.invoke('occasions.sweep', { ...ctx, body: {} }) as { hold: string; delivered: boolean; mirrored: number };
+      expect(sweep).toMatchObject({ hold: 'decision-models-disabled', delivered: false, mirrored: 0 });
+      const pending = await catalog.invoke('occasions.pending', { ...ctx, body: {} }) as { provenance: string; semanticAssessment: string; nudge: unknown };
+      expect(pending).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated', nudge: null });
+      expect(fake.requests).toHaveLength(0);
+    });
+  } finally { installJudgmentPort(previous); }
 });

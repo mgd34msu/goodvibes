@@ -2,6 +2,7 @@
 import { occasionSubject, occasionEntry, OccasionReadingHeldError, OccasionReadingWork } from './readings.js';
 import { normalizeProfileKey } from '../owner-profile/fields.js';
 import type { Occasion, OccasionSubject } from './types.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /**
  * The words that mark a line as being about the owner himself.
@@ -49,11 +50,13 @@ export async function resolveOccasionSubject(
 ): Promise<OccasionSubject> {
   const source = work.snapshot({ occasion, declaredNames });
   if (source.occasion.selfDeclared) return 'owner';
-  const result = await work.wait(() => occasionSubject.run(work.port, occasionEntry({ title: source.occasion.title, person: source.occasion.person, declaredNames: source.declaredNames }), { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.subject' }));
-  const reading = result.readings.subject;
-  if (reading.outcome !== 'act' || !['owner', 'other', 'unknown'].includes(String(reading.choice))) throw new OccasionReadingHeldError();
-  result.recordAction('attributed occasion subject'); work.assertCurrent();
-  return reading.choice === 'owner' ? 'owner' : reading.choice === 'other' ? 'other' : 'unattributed';
+  return decisionOrClassic<OccasionSubject>(async () => {
+    const result = await work.wait(() => occasionSubject.run(work.port, occasionEntry({ title: source.occasion.title, person: source.occasion.person, declaredNames: source.declaredNames }), { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.subject' }));
+    const reading = result.readings.subject;
+    if (reading.outcome !== 'act' || !['owner', 'other', 'unknown'].includes(String(reading.choice))) throw new OccasionReadingHeldError();
+    result.recordAction('attributed occasion subject'); work.assertCurrent();
+    return reading.choice === 'owner' ? 'owner' : reading.choice === 'other' ? 'other' : 'unattributed';
+  }, () => { work.assertCurrent(); return 'unattributed'; });
 }
 
 /**

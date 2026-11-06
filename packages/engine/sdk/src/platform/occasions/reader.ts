@@ -21,6 +21,7 @@ import { renderOccasionDate, type IsoDate } from './dates.js';
 import { parseOccasionLine, parsePlanLine } from './grammar.js';
 import { OccasionReadingWork } from './readings.js';
 import { resolveOccasionSubject } from './subject.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type {
   Occasion,
   OccasionConflict,
@@ -62,6 +63,8 @@ export interface OccasionProfileSource {
 
 /** Everything the dates section holds, including what did not parse. */
 export interface OccasionReadResult {
+  readonly provenance?: 'classic';
+  readonly subjectAssessment?: 'not-evaluated';
   readonly occasions: readonly Occasion[];
   readonly unparsed: readonly UnparsedOccasionLine[];
   readonly conflicts: readonly OccasionConflict[];
@@ -127,21 +130,24 @@ export function readOccasionDeclarations(source: OccasionProfileSource): Occasio
 }
 
 /** Semantic attribution used by the live service; capture/removal only need structural declarations. */
-export async function readOccasions(source: OccasionProfileSource, work = new OccasionReadingWork()): Promise<OccasionReadResult> {
-  const lease = source.captureRead?.();
-  if (lease) work.retain(lease.assertCurrent);
-  const original = { lines: source.importantDates(), names: source.ownerNames?.() ?? [] };
-  const captured = work.snapshot(original);
-  const sourceKey = JSON.stringify(captured);
-  work.retain(() => { if (JSON.stringify({ lines: source.importantDates(), names: source.ownerNames?.() ?? [] }) !== sourceKey) throw new Error('Occasion source changed.'); });
-  const result = readOccasionDeclarations({ ...source, importantDates: () => captured.lines });
-  const occasions: Occasion[] = [];
-  for (const occasion of result.occasions) {
-    // Full lines were screened above. Closed-tier dates never enter model context.
-    const subject = await resolveOccasionSubject({ title: occasion.title, person: occasion.person, selfDeclared: occasion.selfDeclared }, captured.names, work);
-    occasions.push({ ...occasion, subject });
-  }
-  work.assertCurrent(); return { ...result, occasions };
+export async function readOccasions(source: OccasionProfileSource, supplied?: OccasionReadingWork): Promise<OccasionReadResult> {
+  return withConfiguredDecisionModelPolicy(async () => {
+    const work = supplied ?? new OccasionReadingWork();
+    const lease = source.captureRead?.();
+    if (lease) work.retain(lease.assertCurrent);
+    const original = { lines: source.importantDates(), names: source.ownerNames?.() ?? [] };
+    const captured = work.snapshot(original);
+    const sourceKey = JSON.stringify(captured);
+    work.retain(() => { if (JSON.stringify({ lines: source.importantDates(), names: source.ownerNames?.() ?? [] }) !== sourceKey) throw new Error('Occasion source changed.'); });
+    const result = readOccasionDeclarations({ ...source, importantDates: () => captured.lines });
+    const occasions: Occasion[] = [];
+    for (const occasion of result.occasions) {
+      // Full lines were screened above. Closed-tier dates never enter model context.
+      const subject = await resolveOccasionSubject({ title: occasion.title, person: occasion.person, selfDeclared: occasion.selfDeclared }, captured.names, work);
+      occasions.push({ ...occasion, subject });
+    }
+    work.assertCurrent(); return { ...result, occasions, ...(isClassicOperation() ? { provenance: 'classic' as const, subjectAssessment: 'not-evaluated' as const } : {}) };
+  });
 }
 
 /** Read every plan, in document order. */

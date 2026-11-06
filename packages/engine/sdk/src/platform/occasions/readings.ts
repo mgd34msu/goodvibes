@@ -1,7 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Occasion meaning is an observation, never delivery or closed-date authority. */
 import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 
@@ -44,20 +45,28 @@ export class OccasionReadingHeldError extends Error {
 /** Capture once before asynchronous source reads; retain through persistence and rendering. */
 export class OccasionReadingWork {
   private readonly owner: JudgmentPortCapture | undefined;
+  private readonly policy = decisionModelPolicyState().policy;
   private readonly checks: (() => void)[] = [];
   constructor(private readonly options: JudgmentReadingOptions = {}) {
     this.assertCurrent();
-    try { this.owner = captureJudgmentPort('engine.occasions', options); }
-    catch (error) { if (!(error instanceof JudgmentPortMissingError)) throw error; }
+    if (!isClassicOperation()) {
+      try { this.owner = captureJudgmentPort('engine.occasions', options); }
+      catch (error) {
+        if (!(error instanceof JudgmentPortMissingError)) throw error;
+        activateClassicFallback(error);
+      }
+    }
     this.assertCurrent();
   }
   retain(check: () => void): void { check(); this.checks.push(check); }
   readonly assertCurrent = (): void => {
     this.options.signal?.throwIfAborted();
+    const policy = decisionModelPolicyState();
+    if (policy.policy !== this.policy) throw new OccasionReadingHeldError();
     const checked: unknown = this.options.assertCurrent?.();
     if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
     for (const check of this.checks) check();
-    this.owner?.assertCurrent();
+    if (policy.operation !== 'classic') this.owner?.assertCurrent();
   };
   snapshot<T>(source: T): T {
     this.assertCurrent();
@@ -69,12 +78,13 @@ export class OccasionReadingWork {
   }
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
-    const result = await awaitPermission(work, this.owner?.signal ?? this.options.signal);
+    const result = await awaitPermission(work, this.signal).catch((error: unknown) => { this.assertCurrent(); throw error; });
     this.assertCurrent(); return result;
   }
-  get signal(): AbortSignal | undefined { return this.owner?.signal ?? this.options.signal; }
+  get signal(): AbortSignal | undefined { return isClassicOperation() ? this.options.signal : this.owner?.signal ?? this.options.signal; }
   get port(): JudgmentPort {
     this.assertCurrent();
+    requireDecisionFeature('semantic occasion attribution and gift planning');
     const owner = this.owner;
     if (!owner) throw new OccasionReadingHeldError();
     return { ...owner.port, ask: async request => {

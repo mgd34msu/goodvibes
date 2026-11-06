@@ -23,6 +23,7 @@ import { OccasionReadingWork } from './readings.js';
 import { composeConflictMessage, prepareNudge, subjectFor } from './nudge.js';
 import { storedAcknowledgementEvidence, storedOpenItemEvidence } from './stored-reading-evidence.js';
 import { daysBetween, type IsoDate } from './dates.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type {
   NudgeSubject,
   Occasion,
@@ -34,6 +35,10 @@ import type {
 
 /** Everything outstanding, for a surface that pulls rather than receives. */
 export interface PendingResult {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  /** Native pending items when no semantic nudge text was composed. */
+  readonly open?: readonly NudgeSubject[];
   readonly today: IsoDate;
   /** What is coming up and has NOT been acknowledged. */
   readonly nudge: OccasionNudge | null;
@@ -73,15 +78,20 @@ export interface PendingInput {
  * ten days, which is the opposite of what the pull is for. Same day: do not say
  * it twice in one conversation. Any other day: of course it is listed.
  */
-export async function composePending(input: PendingInput, work = new OccasionReadingWork()): Promise<PendingResult> {
-  input = work.snapshot(input);
-  const prepared = await preparePending(input, work);
-  work.assertCurrent();
-  return { ...prepared, nudge: prepared.nudge === null ? null : { ...prepared.nudge, id: `occasions-pending-${input.today}`, raisedAt: input.now } };
+export async function composePending(input: PendingInput, supplied?: OccasionReadingWork): Promise<PendingResult> {
+  return withConfiguredDecisionModelPolicy(async () => {
+    const work = supplied ?? new OccasionReadingWork();
+    input = work.snapshot(input);
+    const prepared = await preparePending(input, work);
+    work.assertCurrent();
+    return { ...prepared, nudge: prepared.nudge === null ? null : { ...prepared.nudge, id: `occasions-pending-${input.today}`, raisedAt: input.now } };
+  });
 }
 
+type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null };
+
 /** Internal service preparation keeps stored clocks local, retaining the original records. */
-export async function preparePending(input: Omit<PendingInput, 'now'>, work: OccasionReadingWork): Promise<Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null }> {
+export async function preparePending(input: Omit<PendingInput, 'now'>, work: OccasionReadingWork): Promise<PreparedPending> {
   const { openItems, acknowledgements, ...source } = input;
   const admitted = work.snapshot({
     ...source,
@@ -123,17 +133,19 @@ export async function preparePending(input: Omit<PendingInput, 'now'>, work: Occ
     admitted.openItems.filter((item) => item.kind === 'conflict').map((item) => item.occasionId),
   );
 
-  return {
+  const conflicts = admitted.conflicts
+    .filter((conflict) => openConflictIds.has(conflict.occasionId))
+    .map((conflict) => ({ occasionId: conflict.occasionId, message: composeConflictMessage(conflict.title, conflict.dates) }));
+  return decisionOrClassic<PreparedPending>(async () => ({
     today: admitted.today,
     nudge: open.length === 0
       ? null
       : await prepareNudge(open, work),
     acknowledged,
-    conflicts: admitted.conflicts
-      .filter((conflict) => openConflictIds.has(conflict.occasionId))
-      .map((conflict) => ({
-        occasionId: conflict.occasionId,
-        message: composeConflictMessage(conflict.title, conflict.dates),
-      })),
-  };
+    conflicts,
+  }), () => {
+    work.assertCurrent();
+    return { today: admitted.today, nudge: null, open, acknowledged, conflicts,
+      provenance: 'classic', semanticAssessment: 'not-evaluated' };
+  });
 }

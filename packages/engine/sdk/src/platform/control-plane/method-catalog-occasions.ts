@@ -186,6 +186,8 @@ export const OCCASION_SWEEP_REPORT_SCHEMA = objectSchema({
 
 export const OCCASIONS_LIST_INPUT_SCHEMA = EMPTY_OBJECT_SCHEMA;
 export const OCCASIONS_LIST_OUTPUT_SCHEMA = objectSchema({
+  provenance: { type: 'string', enum: ['classic'] },
+  subjectAssessment: { type: 'string', enum: ['not-evaluated'] },
   today: STRING_SCHEMA,
   timezone: STRING_SCHEMA,
   occasions: arraySchema(OCCASION_VIEW_SCHEMA),
@@ -261,6 +263,9 @@ export const OCCASIONS_INTERVIEW_OUTPUT_SCHEMA = objectSchema({
 
 export const OCCASIONS_PENDING_INPUT_SCHEMA = EMPTY_OBJECT_SCHEMA;
 export const OCCASIONS_PENDING_OUTPUT_SCHEMA = objectSchema({
+  provenance: { type: 'string', enum: ['classic'] },
+  semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
+  open: arraySchema(NUDGE_SUBJECT_SCHEMA),
   today: STRING_SCHEMA,
   nudge: { anyOf: [OCCASION_NUDGE_SCHEMA, { type: 'null' }] },
   conflicts: arraySchema(objectSchema({
@@ -288,6 +293,8 @@ export const NUDGE_DELIVERY_SCHEMA = objectSchema({
 
 export const OCCASIONS_SWEEP_INPUT_SCHEMA = objectSchema({ admission: { type: 'string', enum: ['autonomous'] } }, []);
 const OCCASIONS_COMPLETE_SWEEP_OUTPUT_SCHEMA = objectSchema({
+  provenance: { type: 'string', enum: ['classic'] },
+  semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
   ranAt: NUMBER_SCHEMA,
   today: STRING_SCHEMA,
   hold: NULLABLE_STRING_SCHEMA,

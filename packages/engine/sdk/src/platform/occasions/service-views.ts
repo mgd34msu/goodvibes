@@ -18,6 +18,8 @@ export interface OccasionView {
 
 /** What `occasions.list` answers. */
 export interface OccasionListResult {
+  readonly provenance?: 'classic';
+  readonly subjectAssessment?: 'not-evaluated';
   readonly today: IsoDate;
   readonly timezone: string;
   readonly occasions: readonly OccasionView[];
@@ -36,9 +38,11 @@ export interface PlanListResult {
 
 /** What one sweep did. */
 export interface SweepOutcome {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly ranAt: number;
   readonly today: IsoDate;
-  readonly hold: SweepHold;
+  readonly hold: SweepHold | 'decision-models-disabled';
   readonly nudge: OccasionNudge | null;
   readonly conflictMessages: readonly string[];
   readonly resumedInterviews: readonly string[];

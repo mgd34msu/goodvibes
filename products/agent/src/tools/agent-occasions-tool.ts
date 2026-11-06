@@ -481,7 +481,10 @@ async function handleSweep(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
     ]);
   }
   const lines = [`Ran one pass (today is ${response.today}).`];
-  if (response.hold === 'disabled') {
+  if (response.hold === 'decision-models-disabled') {
+    lines.push('  Classic ran native housekeeping. Automatic nudges, gift planning and new calendar mirrors require decision models.');
+    if (response.mirrored > 0) lines.push(`  ${response.mirrored} calendar mirror(s) completed before fallback; those effects were retained.`);
+  } else if (response.hold === 'disabled') {
     lines.push('  Occasions are turned off, so nothing was raised. Housekeeping still ran.');
   } else if (response.hold === 'quiet-hours') {
     lines.push('  It is outside his active hours, so nothing was raised. Nothing was dropped, it waits.');

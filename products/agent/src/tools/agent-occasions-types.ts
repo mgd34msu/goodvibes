@@ -228,6 +228,10 @@ export function narrowOccasionsPending(value: unknown): OccasionsPendingResponse
   if (typeof value.today !== 'string') return null;
   if (value.nudge !== null && !isRecord(value.nudge)) return null;
   if (!Array.isArray(value.conflicts) || !Array.isArray(value.interviews)) return null;
+  if (value.provenance !== undefined && value.provenance !== 'classic') return null;
+  if (value.semanticAssessment !== undefined && value.semanticAssessment !== 'not-evaluated') return null;
+  if (value.open !== undefined && (!Array.isArray(value.open) || value.open.some(item => !isRecord(item)
+    || typeof item.occasionId !== 'string' || typeof item.title !== 'string' || typeof item.person !== 'string'))) return null;
   return value as unknown as OccasionsPendingResponse;
 }
 

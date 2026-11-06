@@ -86,6 +86,7 @@ export async function handleList(deps: AgentOccasionsToolDeps): Promise<ToolOutc
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
 
   const lines: string[] = [`Your dates (today is ${response.today}, ${response.timezone}):`];
+  if (response.subjectAssessment === 'not-evaluated') lines.push('Classic lists the native declarations; person/owner attribution was not inferred.');
   if (response.occasions.length === 0) lines.push('  (none recorded)');
   for (const view of response.occasions) {
     const occasion = view.occasion;
@@ -123,6 +124,10 @@ export async function handlePending(deps: AgentOccasionsToolDeps): Promise<ToolO
 
   const lines: string[] = [];
   const nudge = response.nudge;
+  if (response.semanticAssessment === 'not-evaluated') {
+    lines.push('Classic lists recorded open items without composing a semantic nudge. Automatic reminders require decision models.');
+    for (const subject of response.open ?? []) lines.push(`  Open: ${subject.title} · occasionId ${subject.occasionId}${subject.person ? ` · for ${subject.person}` : ''}`);
+  }
   if (nudge !== null) {
     // Verbatim. The proximity is already a word rather than a count of days, and
     // there is no date in this payload to add even by accident.

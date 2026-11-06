@@ -119,7 +119,9 @@ function sweepSummary(result: OperatorMethodOutput<'occasions.sweep'>): string {
 
   const delivered = result.deliveries.filter((entry) => entry.delivered);
   const failed = result.deliveries.filter((entry) => !entry.delivered);
-  const status = result.hold !== null
+  const status = result.hold === 'decision-models-disabled'
+    ? 'Classic ran housekeeping. Automatic nudges and calendar mirroring require decision models.'
+    : result.hold !== null
     ? `Held: ${result.hold}.`
     : result.delivered
       ? `Delivered via ${delivered.map((entry) => entry.channel).join(', ')}.`
@@ -506,6 +508,8 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const occasionEntries: readonly OccasionListEntry[] = list.data?.occasions ?? [];
   const planEntries: readonly PlanEntry[] = plans.data?.plans ?? [];
   const nudge = pending.data?.nudge ?? null;
+  const classicOpen = pending.data?.open ?? [];
+  const classic = list.data?.provenance === 'classic' || pending.data?.provenance === 'classic';
   const pendingConflicts = pending.data?.conflicts ?? [];
   const listConflicts = list.data?.conflicts ?? [];
   const interviews: readonly InterviewState[] = pending.data?.interviews ?? [];
@@ -688,7 +692,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   }
 
   // ── List pane ────────────────────────────────────────────────────
-  const hasOpenItems = Boolean(nudge) || conflictCount > 0 || interviews.length > 0;
+  const hasOpenItems = Boolean(nudge) || classicOpen.length > 0 || conflictCount > 0 || interviews.length > 0;
   const nothingAtAll = occasionEntries.length === 0 && planEntries.length === 0 && !hasOpenItems && !plans.error && !pending.error;
 
   const listBody = (
@@ -704,6 +708,19 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       ) : null}
 
       {pending.error ? <LoadNote label="Open items" error={pending.error} onRetry={() => void pending.refetch()} /> : null}
+      {classic ? (
+        <div className="dv-notice dates-note" role="status">
+          Classic lists dates as declared. Subject attribution and reminder text are not assessed. Automatic nudges require decision models.
+        </div>
+      ) : null}
+      {classicOpen.length > 0 ? (
+        <RowGroup label="Recorded open items" count={classicOpen.length}>
+          {classicOpen.map((subject) => (
+            <Row key={subject.occasionId} title={subject.title} meta={subject.person}
+              onSelect={occasionEntries.some(entry => entry.occasion.id === subject.occasionId) ? () => openOccasion(subject.occasionId) : undefined} />
+          ))}
+        </RowGroup>
+      ) : null}
 
       {nudge ? (
         <div className="dates-nudge" data-testid="dates-nudge">

@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import { readGrantFailure } from './failure-readings.js';
 
@@ -15,6 +16,8 @@ export type GoogleGrantFailureCause =
   | 'unknown';
 
 export interface GoogleGrantDiagnosis {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly cause: GoogleGrantFailureCause;
   /** Plain words. Never a token, never a raw Google error alone. */
   readonly problem: string;
@@ -46,6 +49,15 @@ function normalize(account: string | null): string | null {
 
 /** Compare known account identities locally, then interpret Google's explanation. */
 export async function diagnoseInvalidGrant(original: GrantDiagnosisInput): Promise<GoogleGrantDiagnosis> {
+  return withConfiguredDecisionModelPolicy(async (): Promise<GoogleGrantDiagnosis> => {
+    const result = await diagnoseOwnedInvalidGrant(original);
+    if (!isClassicOperation()) return result;
+    return { ...result, provenance: 'classic', ...(result.cause === 'unknown'
+      ? { semanticAssessment: 'not-evaluated' as const, problem: result.problem + ' Classic operation did not interpret the error explanation.' } : {}) };
+  });
+}
+
+async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise<GoogleGrantDiagnosis> {
   const source = retainStrictJudgmentJson(original);
   const input = source.snapshot;
   const intended = normalize(input.intendedAccount);

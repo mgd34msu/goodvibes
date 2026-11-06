@@ -23,6 +23,7 @@
  */
 
 import { readApiFailure } from './failure-readings.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { redactSecretsFromMessage } from './oauth-loopback.js';
 import type { GoogleTokenManager } from './token-manager.js';
 import {
@@ -62,6 +63,8 @@ export interface GoogleApiFetchPort {
 
 /** A failure the caller can act on, with no secret material in it. */
 export interface GoogleApiFailure {
+  readonly provenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly ok: false;
   readonly status: number | null;
   /** Structured diagnosis, preserved so downstream reports do not reinterpret prose. */
@@ -402,7 +405,16 @@ export class GoogleApiClient {
     return { ok: true, value: parsed };
   }
 
-  private async describeHttpFailure(status: number, parsed: unknown): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason'>> {
+  private async describeHttpFailure(status: number, parsed: unknown): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason' | 'provenance' | 'semanticAssessment'>> {
+    return withConfiguredDecisionModelPolicy(async (): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason' | 'provenance' | 'semanticAssessment'>> => {
+      const result = await this.describeNativeHttpFailure(status, parsed);
+      if (!isClassicOperation()) return result;
+      return { ...result, provenance: 'classic', ...(result.reason === 'unclassified'
+        ? { semanticAssessment: 'not-evaluated' as const, problem: result.problem + ' Classic operation did not interpret the error explanation.' } : {}) };
+    });
+  }
+
+  private async describeNativeHttpFailure(status: number, parsed: unknown): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason'>> {
     if (status === 429) return { problem: 'Google is rate-limiting this account.', fix: 'Wait a minute and try again.' };
     let cause: 'missing-scopes' | 'api-disabled' | 'unknown' = 'unknown';
     if (status === 403) {

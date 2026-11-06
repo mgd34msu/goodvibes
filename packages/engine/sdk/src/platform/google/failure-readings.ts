@@ -3,6 +3,8 @@ import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import type { GrantDiagnosisInput } from './grant-diagnosis.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { googleCallerCurrent } from './decision-work.js';
 
 /** Diagnosis only offers a remedy; invalid-grant latching uses the OAuth code. */
 export const googleGrantFailure = defineBattery({
@@ -40,37 +42,51 @@ export const googleApiFailure = defineBattery({
   ],
 });
 
+/** Classic preserves the failed grant and reports no interpreted cause. */
 export async function readGrantFailure(input: GrantDiagnosisInput, options: JudgmentReadingOptions = {}) {
-  const source = retainStrictJudgmentJson(input);
-  assertJudgmentInput(source.snapshot);
-  if (JSON.stringify(source.snapshot).length > 160_000) throw new JudgmentInputError('unsupported-input');
-  const owner = captureJudgmentPort(googleGrantFailure.name, { ...options, prepareResultCapture: prepareJudgmentResult });
-  const current = () => { source.assertCurrent(); owner.assertCurrent(); };
-  const run = await googleGrantFailure.run(owner.port, source.snapshot as never, { site: googleGrantFailure.name, signal: owner.signal, beforeAttempt: current });
-  current();
-  const { revoked, clientMismatch, testingExpiry } = run.readings;
-  const established = (reading: typeof revoked) => reading.verdict === 'yes' && reading.outcome === 'act';
-  const cause = established(clientMismatch) && (established(revoked) || established(testingExpiry)) ? 'unknown'
-    : established(testingExpiry) ? 'testing-expiry' : established(revoked) ? 'revoked'
-      : established(clientMismatch) ? 'client-mismatch' : 'unknown';
-  run.recordAction('Explain the grant failure; reauthorization remains a separate action.');
-  current();
-  return cause;
+  return withConfiguredDecisionModelPolicy(async () => {
+    const source = retainStrictJudgmentJson(input);
+    const callerCurrent = googleCallerCurrent(options);
+    const nativeCurrent = () => { source.assertCurrent(); callerCurrent(); };
+    nativeCurrent(); assertJudgmentInput(source.snapshot);
+    if (JSON.stringify(source.snapshot).length > 160_000) throw new JudgmentInputError('unsupported-input');
+    return decisionOrClassic(async () => {
+      const owner = captureJudgmentPort(googleGrantFailure.name, { ...options, assertCurrent: nativeCurrent, prepareResultCapture: prepareJudgmentResult });
+      const current = () => { nativeCurrent(); owner.assertCurrent(); };
+      const run = await googleGrantFailure.run(owner.port, source.snapshot as never, { site: googleGrantFailure.name, signal: owner.signal, beforeAttempt: current });
+      current();
+      const { revoked, clientMismatch, testingExpiry } = run.readings;
+      const established = (reading: typeof revoked) => reading.verdict === 'yes' && reading.outcome === 'act';
+      const cause = established(clientMismatch) && (established(revoked) || established(testingExpiry)) ? 'unknown'
+        : established(testingExpiry) ? 'testing-expiry' : established(revoked) ? 'revoked'
+          : established(clientMismatch) ? 'client-mismatch' : 'unknown';
+      run.recordAction('Explain the grant failure; reauthorization remains a separate action.');
+      current();
+      return cause;
+    }, () => { nativeCurrent(); return 'unknown' as const; }, () => { nativeCurrent(); return true; });
+  });
 }
 
-export async function readApiFailure(input: unknown) {
-  const source = retainStrictJudgmentJson(input);
-  assertJudgmentInput(source.snapshot);
-  if (JSON.stringify(source.snapshot).length > 160_000) throw new JudgmentInputError('unsupported-input');
-  const owner = captureJudgmentPort(googleApiFailure.name, { prepareResultCapture: prepareJudgmentResult });
-  const current = () => { source.assertCurrent(); owner.assertCurrent(); };
-  const run = await googleApiFailure.run(owner.port, source.snapshot as never, { site: googleApiFailure.name, signal: owner.signal, beforeAttempt: current });
-  current();
-  const { missingScopes, apiDisabled } = run.readings;
-  const scopes = missingScopes.verdict === 'yes' && missingScopes.outcome === 'act';
-  const disabled = apiDisabled.verdict === 'yes' && apiDisabled.outcome === 'act';
-  const cause = scopes === disabled ? 'unknown' : scopes ? 'missing-scopes' : 'api-disabled';
-  run.recordAction('Explain the API refusal; changes to consent or services remain separate actions.');
-  current();
-  return cause;
+/** Native HTTP/ErrorInfo diagnosis lives in api-client; prose remains unassessed in Classic. */
+export async function readApiFailure(input: unknown, options: JudgmentReadingOptions = {}) {
+  return withConfiguredDecisionModelPolicy(async () => {
+    const source = retainStrictJudgmentJson(input);
+    const callerCurrent = googleCallerCurrent(options);
+    const nativeCurrent = () => { source.assertCurrent(); callerCurrent(); };
+    nativeCurrent(); assertJudgmentInput(source.snapshot);
+    if (JSON.stringify(source.snapshot).length > 160_000) throw new JudgmentInputError('unsupported-input');
+    return decisionOrClassic(async () => {
+      const owner = captureJudgmentPort(googleApiFailure.name, { ...options, assertCurrent: nativeCurrent, prepareResultCapture: prepareJudgmentResult });
+      const current = () => { nativeCurrent(); owner.assertCurrent(); };
+      const run = await googleApiFailure.run(owner.port, source.snapshot as never, { site: googleApiFailure.name, signal: owner.signal, beforeAttempt: current });
+      current();
+      const { missingScopes, apiDisabled } = run.readings;
+      const scopes = missingScopes.verdict === 'yes' && missingScopes.outcome === 'act';
+      const disabled = apiDisabled.verdict === 'yes' && apiDisabled.outcome === 'act';
+      const cause = scopes === disabled ? 'unknown' : scopes ? 'missing-scopes' : 'api-disabled';
+      run.recordAction('Explain the API refusal; changes to consent or services remain separate actions.');
+      current();
+      return cause;
+    }, () => { nativeCurrent(); return 'unknown' as const; }, () => { nativeCurrent(); return true; });
+  });
 }

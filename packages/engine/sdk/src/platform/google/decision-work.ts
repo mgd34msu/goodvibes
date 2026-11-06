@@ -9,11 +9,11 @@ const GOOGLE_AUTOMATION = 'automatic Google page interpretation or verification 
 export function googleCallerCurrent(options: JudgmentReadingOptions): () => void {
   const signal = options.signal, guard = options.assertCurrent;
   return () => {
-    signal?.throwIfAborted();
+    if (signal?.aborted) throw new JudgmentError('aborted', 'The Google operation was cancelled.');
     if (options.signal !== signal || options.assertCurrent !== guard) throw new Error('Google operation owner changed.');
     const checked: unknown = guard?.();
     if (checked !== undefined) { drainOwned(checked); throw new Error('Google operation ownership must be synchronous.'); }
-    signal?.throwIfAborted();
+    if (signal?.aborted) throw new JudgmentError('aborted', 'The Google operation was cancelled.');
   };
 }
 

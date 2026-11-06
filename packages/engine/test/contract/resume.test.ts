@@ -18,7 +18,8 @@ import type { Contract, ContractView } from '../../sdk/src/platform/contract/ind
 import { contractPath } from '../../sdk/src/platform/contract/index.js';
 import type { DecompositionRunner } from '../../sdk/src/platform/core/plan-decomposition.js';
 import { plannerOutput, type AnswerContext } from './plan-support.js';
-import { eventsOf, makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness, type HarnessOptions } from './runner-support.js';
+import { eventsOf, makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness, type HarnessOptions,
+} from './runner-support.js';
 import { answers, fixPlan, git, judgeOf, replyAnswers, terminal } from './steps-support.js';
 
 const roots: string[] = [];
@@ -47,7 +48,8 @@ const mustNotRun: AgentScript = () => {
 type Options = Omit<HarnessOptions, 'root'>;
 
 /** Runs a contract on a first runner until `until` holds of it, then stops that runner. Returns the repository and the contract id. */
-async function interrupt(options: Options, until: (contract: ContractView) => boolean, what: string, count = 1): Promise<{ readonly root: string; readonly ids: string[] }> {
+async function interrupt(options: Options, until: (contract: ContractView) => boolean, what: string, count = 1,
+): Promise<{ readonly root: string; readonly ids: string[] }> {
   const root = makeRepo();
   roots.push(root);
   const first = makeHarness({ ...options, root });
@@ -57,7 +59,8 @@ async function interrupt(options: Options, until: (contract: ContractView) => bo
     await waitFor(() => ids.every((id) => {
       const contract = first.store.get(id);
       return contract !== null && until(contract);
-    }), what, 10_000);
+    }), what, 10_000,
+    );
     // Checks in flight settle and the debounced writes land; stopping the runner writes anything still pending.
     await sleep(300);
   } finally {
@@ -101,13 +104,17 @@ async function ended(h: Harness, id: string): Promise<ContractView> {
 const running = (contract: ContractView) => contract.units[0]?.status === 'running' && (contract.units[0]?.checks.length ?? 0) >= 1;
 
 test('a denied worktree publication survives restart, revalidates and publishes without repeating completed work', async () => {
-  const root = makeRepo(); roots.push(root);
+  const root = makeRepo();
+  roots.push(root);
   writeFileSync(join(root, 'README.md'), '# Pre-existing owner edit\n');
   const head = git(root, 'rev-parse', 'HEAD').trim();
   const plan = oneUnitPlan(1);
-  const first = makeHarness({ root, plan, contract: { isolation: 'auto', autoCommit: false },
+  const first = makeHarness({
+    root,
+    plan,
+    contract: { isolation: 'auto', autoCommit: false },
     scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 7;\n' }, text: 'The parser result.' }] },
-    readAccessFilter: async () => !first.runner.list({ includeTerminal: true }).some(contract => contract.status === 'committing'),
+    readAccessFilter: async () => !first.runner.list({ includeTerminal: true }).some((contract) => contract.status === 'committing'),
   });
   harnesses.push(first);
   const { contract } = startContract(first);
@@ -118,8 +125,14 @@ test('a denied worktree publication survives restart, revalidates and publishes 
   await first.runner.join(contract.id);
   expect(JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract.status).toBe('committing');
   let resumedChecks = 0;
-  const second = restart(root, { plan, contract: { isolation: 'auto', autoCommit: false }, scripts: { u1: mustNotRun },
-    port: context => { if (judgeOf(context) === 'deliverable' && context.name === 'goal') resumedChecks++; return undefined; },
+  const second = restart(root, {
+    plan,
+    contract: { isolation: 'auto', autoCommit: false },
+    scripts: { u1: mustNotRun },
+    port: (context) => {
+      if (judgeOf(context) === 'deliverable' && context.name === 'goal') resumedChecks++;
+      return undefined;
+    },
   });
   await second.runner.resumeAll();
   const done = await ended(second, contract.id);
@@ -136,28 +149,59 @@ test('changed final-content policy rechecks retained work before resuming an uns
   const plan = oneUnitPlan(1);
   plan.groups[0]!.units[0]!.role = 'research';
   let fixing = false;
-  const { root, ids: [id] } = await interrupt({ plan, scripts: { u1: () => [{ text: 'The complete retained parser result.' }] },
-    planner: { run: async request => {
-      if (!request.systemPrompt.startsWith('You plan a repair')) return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
-      fixing = true;
-      return new Promise(resolve => request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), { once: true }));
-    } }, port: context => context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98)
-      : judgeOf(context) === 'deliverable' || context.name === 'unfinished' ? noulAnswer(0.98) : undefined,
-  }, contract => fixing && contract.status === 'fixing', 'the unstarted repair to retain its rejection');
-  let retained = '', rounds = 0;
-  editContract(root, id!, contract => {
+  const {
+    root,
+    ids: [id],
+  } = await interrupt(
+    {
+      plan,
+      scripts: { u1: () => [{ text: 'The complete retained parser result.' }] },
+      planner: {
+        run: async (request) => {
+          if (!request.systemPrompt.startsWith('You plan a repair'))
+            return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
+          fixing = true;
+          return new Promise((resolve) =>
+            request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), { once: true }),
+          );
+        },
+      },
+      port: (context) =>
+        context.name === 'role'
+          ? choiceAnswer(context.question, 'research', 0.98)
+          : judgeOf(context) === 'deliverable' || context.name === 'unfinished'
+            ? noulAnswer(0.98)
+            : undefined,
+    },
+    (contract) => fixing && contract.status === 'fixing',
+    'the unstarted repair to retain its rejection',
+  );
+  let retained = '',
+    rounds = 0;
+  editContract(root, id!, (contract) => {
     retained = JSON.stringify(contract.units);
     rounds = contract.fixRounds;
-    const index = contract.decisions.findLastIndex(decision => decision.targetId === `${id}.final-answer-review`);
+    const index = contract.decisions.findLastIndex((decision) => decision.targetId === `${id}.final-answer-review`);
     const decision = contract.decisions[index]!;
     const receipt = JSON.parse(decision.reason);
     receipt.policy.content.version -= 1;
     contract.decisions[index] = { ...decision, reason: JSON.stringify(receipt) };
   });
-  let reviews = 0, planners = 0;
-  const second = restart(root, { plan, scripts: { u1: mustNotRun },
-    planner: { run: async () => { planners++; throw new Error('The changed policy must recheck first'); } },
-    port: context => { if (context.name === 'unfinished') reviews++; return undefined; },
+  let reviews = 0,
+    planners = 0;
+  const second = restart(root, {
+    plan,
+    scripts: { u1: mustNotRun },
+    planner: {
+      run: async () => {
+        planners++;
+        throw new Error('The changed policy must recheck first');
+      },
+    },
+    port: (context) => {
+      if (context.name === 'unfinished') reviews++;
+      return undefined;
+    },
   });
   await second.runner.resumeAll();
   await waitFor(() => terminal(second, id!), 'fresh policy validation to complete');
@@ -172,91 +216,206 @@ test('changed final-content policy rechecks retained work before resuming an uns
   expect(done.checks[1]!.result).toBe('pass');
 });
 
-test.each(['changed-passes', 'changed-fails', 'unchanged'])('a retained final-check owner wait revalidates only after a policy change (%s)', async scenario => {
-  const plan = oneUnitPlan(1);
-  plan.groups[0]!.units[0]!.role = 'research';
-  const { root, ids: [id] } = await interrupt({ plan, contract: { maxFixRounds: 1, stallLimit: 1 }, scripts: { u1: () => [{ text: 'The retained complete result.' }] },
-    planner: { run: async request => !request.systemPrompt.startsWith('You plan a repair')
-      ? { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 }
-      : new Promise(resolve => request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), { once: true })) },
-    port: context => context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98)
-      : judgeOf(context) === 'deliverable' && context.name === 'goal' ? noulAnswer(0.98) : undefined,
-  }, contract => ['fixing', 'awaiting-owner'].includes(contract.status) && contract.checks.length === 1, 'the retained final-check rejection');
-  let units = '', oldQuestion = '';
-  editContract(root, id!, contract => {
-    contract.statusBeforeOwner = 'fixing'; contract.status = 'awaiting-owner';
-    contract.fixRounds = 1;
-    const completedRepair = { ...contract.groups[0]!, kind: 'fix' as const, repairs: { scope: 'deliverable' as const, targetId: id!, criterionIds: [] } };
-    contract.groups[0] = completedRepair;
-    contract.decisions.push({ id: `${id}.historical-repair`, at: Date.now(), action: 'fix-planned', targetId: id!,
-      reason: `round 1: group ${completedRepair.id} with 1 unit`, decisionIds: [] });
-    if (!contract.escalations.some(item => item.resolvedAt === undefined)) contract.escalations.push({ id: `${id}.e1`, at: Date.now(), scope: 'deliverable', targetId: id!, reason: 'stalled',
-      question: 'The original goal remains unresolved.', unmetCriterionIds: [], decisionIds: contract.checks.at(-1)!.decisionIds });
-    units = JSON.stringify(contract.units); oldQuestion = contract.escalations.find(item => item.resolvedAt === undefined)!.id;
-    if (scenario !== 'unchanged') {
-      const decision = contract.decisions.findLast(item => item.targetId === `${id}.final-answer-review`)!;
-      const receipt = JSON.parse(decision.reason); receipt.policy.fulfillment.version -= 1;
-      contract.decisions[contract.decisions.indexOf(decision)] = { ...decision, reason: JSON.stringify(receipt) };
+test.each(['changed-passes', 'changed-fails', 'unchanged'])(
+  'a retained final-check owner wait revalidates only after a policy change (%s)',
+  async (scenario) => {
+    const plan = oneUnitPlan(1);
+    plan.groups[0]!.units[0]!.role = 'research';
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      {
+        plan,
+        contract: { maxFixRounds: 1, stallLimit: 1 },
+        scripts: { u1: () => [{ text: 'The retained complete result.' }] },
+        planner: {
+          run: async (request) =>
+            !request.systemPrompt.startsWith('You plan a repair')
+              ? { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 }
+              : new Promise((resolve) =>
+                  request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), {
+                    once: true,
+                  }),
+                ),
+        },
+        port: (context) =>
+          context.name === 'role'
+            ? choiceAnswer(context.question, 'research', 0.98)
+            : judgeOf(context) === 'deliverable' && context.name === 'goal'
+              ? noulAnswer(0.98)
+              : undefined,
+      },
+      (contract) => ['fixing', 'awaiting-owner'].includes(contract.status) && contract.checks.length === 1,
+      'the retained final-check rejection',
+    );
+    let units = '',
+      oldQuestion = '';
+    editContract(root, id!, (contract) => {
+      contract.statusBeforeOwner = 'fixing';
+      contract.status = 'awaiting-owner';
+      contract.fixRounds = 1;
+      const completedRepair = {
+        ...contract.groups[0]!,
+        kind: 'fix' as const,
+        repairs: { scope: 'deliverable' as const, targetId: id!, criterionIds: [] },
+      };
+      contract.groups[0] = completedRepair;
+      contract.decisions.push({
+        id: `${id}.historical-repair`,
+        at: Date.now(),
+        action: 'fix-planned',
+        targetId: id!,
+        reason: `round 1: group ${completedRepair.id} with 1 unit`,
+        decisionIds: [],
+      });
+      if (!contract.escalations.some((item) => item.resolvedAt === undefined))
+        contract.escalations.push({
+          id: `${id}.e1`,
+          at: Date.now(),
+          scope: 'deliverable',
+          targetId: id!,
+          reason: 'stalled',
+          question: 'The original goal remains unresolved.',
+          unmetCriterionIds: [],
+          decisionIds: contract.checks.at(-1)!.decisionIds,
+        });
+      units = JSON.stringify(contract.units);
+      oldQuestion = contract.escalations.find((item) => item.resolvedAt === undefined)!.id;
+      if (scenario !== 'unchanged') {
+        const decision = contract.decisions.findLast((item) => item.targetId === `${id}.final-answer-review`)!;
+        const receipt = JSON.parse(decision.reason);
+        receipt.policy.fulfillment.version -= 1;
+        contract.decisions[contract.decisions.indexOf(decision)] = { ...decision, reason: JSON.stringify(receipt) };
+      }
+    });
+    let checks = 0;
+    const second = restart(root, {
+      plan,
+      contract: { maxFixRounds: 1, stallLimit: 1 },
+      scripts: { u1: mustNotRun },
+      port: (context) => {
+        if (context.name === 'route') return choiceAnswer(context.question, 'owner', 0.98);
+        if (judgeOf(context) === 'deliverable' && context.name === 'goal') {
+          checks++;
+          if (scenario === 'changed-fails') return noulAnswer(0.98);
+        }
+        return undefined;
+      },
+    });
+    await second.runner.resumeAll();
+    if (scenario === 'changed-passes') await waitFor(() => terminal(second, id!), 'new policy acceptance');
+    if (scenario === 'changed-fails')
+      await waitFor(
+        () => contractIn(second, id!).checks.length === 2 && contractIn(second, id!).status === 'awaiting-owner',
+        'fresh rejection',
+      );
+    const done = contractIn(second, id!),
+      old = done.escalations.find((item) => item.id === oldQuestion)!;
+    expect(JSON.stringify(done.units)).toBe(units);
+    expect(second.agentsOf('u1')).toEqual([]);
+    expect(old.reply).toBeUndefined();
+    expect(done.checks.length).toBe(scenario === 'unchanged' ? 1 : 2);
+    expect(checks).toBe(scenario === 'unchanged' ? 0 : scenario === 'changed-fails' ? 2 : 1);
+    if (scenario === 'unchanged') {
+      expect(old.resolvedAt).toBeUndefined();
+      expect(done.status).toBe('awaiting-owner');
+    } else {
+      expect(old.resolvedAt).toBeDefined();
+      expect(done.status).toBe(scenario === 'changed-passes' ? 'passed' : 'awaiting-owner');
     }
-  });
-  let checks = 0;
-  const second = restart(root, { plan, contract: { maxFixRounds: 1, stallLimit: 1 }, scripts: { u1: mustNotRun }, port: context => {
-    if (context.name === 'route') return choiceAnswer(context.question, 'owner', 0.98);
-    if (judgeOf(context) === 'deliverable' && context.name === 'goal') { checks++; if (scenario === 'changed-fails') return noulAnswer(0.98); }
-    return undefined;
-  } });
-  await second.runner.resumeAll();
-  if (scenario === 'changed-passes') await waitFor(() => terminal(second, id!), 'new policy acceptance');
-  if (scenario === 'changed-fails') await waitFor(() => contractIn(second, id!).checks.length === 2 && contractIn(second, id!).status === 'awaiting-owner', 'fresh rejection');
-  const done = contractIn(second, id!), old = done.escalations.find(item => item.id === oldQuestion)!;
-  expect(JSON.stringify(done.units)).toBe(units); expect(second.agentsOf('u1')).toEqual([]); expect(old.reply).toBeUndefined();
-  expect(done.checks.length).toBe(scenario === 'unchanged' ? 1 : 2);
-  expect(checks).toBe(scenario === 'unchanged' ? 0 : scenario === 'changed-fails' ? 2 : 1);
-  if (scenario === 'unchanged') { expect(old.resolvedAt).toBeUndefined(); expect(done.status).toBe('awaiting-owner'); }
-  else { expect(old.resolvedAt).toBeDefined(); expect(done.status).toBe(scenario === 'changed-passes' ? 'passed' : 'awaiting-owner'); }
-});
+  },
+);
 
-test.each(['interrupted', 'privacy-refused', 'verifier-refused'])('an %s final-answer repair resumes the same round with its rejected draft and findings', async condition => {
-  const plan = oneUnitPlan(1);
-  plan.groups[0]!.units[0]!.role = 'research';
-  let fixing = false;
-  const { root, ids: [id] } = await interrupt({ plan, scripts: { u1: () => [{ text: 'Original draft with an unsupported archive claim.' }] },
-    planner: { run: async request => {
-      if (!request.systemPrompt.startsWith('You plan a repair')) return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
-      fixing = true;
-      return new Promise(resolve => request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), { once: true }));
-    } },
-    port: context => context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98)
-      : judgeOf(context) === 'deliverable' || context.name === 'unsupported' ? noulAnswer(0.98) : undefined,
-  }, contract => fixing && contract.status === 'fixing', 'the final repair planner');
-  const privateHead = '-rw-r--r-- 1 4111111111111111 Oct 21 00:00 package-lock.json';
-  if (condition === 'privacy-refused') editContract(root, id!, contract => {
-    contract.status = 'failed'; contract.failureKind = 'planning'; contract.completedAt = Date.now();
-    contract.error = `the fix for deliverable ${contract.id} could not be planned: the planner agent failed: Refused before judgment: [REDACTED_TEXT]`;
-    contract.units[0]!.commandEvidence = [{ agentId: contract.units[0]!.agentIds[0]!, turn: 1, callIndex: 0,
-      callId: 'directory-listing', command: 'ls -l', success: true, head: privateHead }];
-    contract.units[0]!.readEvidence = [{ path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1,
-      contentKind: 'cited-source', returnedContent: '1 | # demo' }];
-    const acceptedIndex = contract.decisions.findIndex(decision => decision.action === 'plan-accepted');
-    contract.decisions[acceptedIndex] = { ...contract.decisions[acceptedIndex]!, at: 4222222222222 };
-  });
-  if (condition === 'verifier-refused') editContract(root, id!, contract => {
-    contract.status = 'failed'; contract.failureKind = 'judgment-unavailable'; contract.completedAt = Date.now();
-    contract.error = 'interrupted correction could not resume: Jev could not answer: invalid response';
-  });
-  let prompt = '';
-  let repairTask = '';
-  let plannerRuns = 0;
-  let requestFailures = 0;
-  const repair = fixPlan([{ serves: ['c1'] }, { serves: ['c1'], dependsOn: ['u1'] }]);
-  for (const unit of repair.groups[0]!.units) unit.role = 'research';
-  if (condition === 'privacy-refused') repair.groups[0]!.units[0]!.files.push(`.goodvibes/reviews/${id}/source-receipts.json`);
-  const second = restart(root, { plan, scripts: { u1: mustNotRun,
-    [`${id}.f1.u1`]: () => [{ text: 'Accepted scope reconciliation.' }],
-    [`${id}.f1.u2`]: record => { repairTask = record.task; return [{ text: '```json\n' + JSON.stringify({
-    version: 1, archetype: 'research', summary: 'Corrected the final answer.', result: 'Removed the unsupported wording.', finalAnswer: 'Corrected complete answer.',
-  }) + '\n```' }]; } },
-    planner: { run: async request => {
+test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
+  'an %s final-answer repair resumes the same round with its rejected draft and findings',
+  async (condition) => {
+    const plan = oneUnitPlan(1);
+    plan.groups[0]!.units[0]!.role = 'research';
+    let fixing = false;
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      {
+        plan,
+        scripts: { u1: () => [{ text: 'Original draft with an unsupported archive claim.' }] },
+        planner: {
+          run: async (request) => {
+            if (!request.systemPrompt.startsWith('You plan a repair'))
+              return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
+            fixing = true;
+            return new Promise((resolve) =>
+              request.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', output: '', elapsedMs: 0 }), { once: true }),
+            );
+          },
+        },
+        port: (context) =>
+          context.name === 'role'
+            ? choiceAnswer(context.question, 'research', 0.98)
+            : judgeOf(context) === 'deliverable' || context.name === 'unsupported'
+              ? noulAnswer(0.98)
+              : undefined,
+      },
+      (contract) => fixing && contract.status === 'fixing',
+      'the final repair planner',
+    );
+    const privateHead = '-rw-r--r-- 1 4111111111111111 Oct 21 00:00 package-lock.json';
+    if (condition === 'privacy-refused')
+      editContract(root, id!, (contract) => {
+        contract.status = 'failed';
+        contract.failureKind = 'planning';
+        contract.completedAt = Date.now();
+        contract.error = `the fix for deliverable ${contract.id} could not be planned: the planner agent failed: Refused before judgment: [REDACTED_TEXT]`;
+        contract.units[0]!.commandEvidence = [
+          {
+            agentId: contract.units[0]!.agentIds[0]!,
+            turn: 1,
+            callIndex: 0,
+            callId: 'directory-listing',
+            command: 'ls -l',
+            success: true,
+            head: privateHead,
+          },
+        ];
+        contract.units[0]!.readEvidence = [
+          { path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1, contentKind: 'cited-source', returnedContent: '1 | # demo' },
+        ];
+        const acceptedIndex = contract.decisions.findIndex((decision) => decision.action === 'plan-accepted');
+        contract.decisions[acceptedIndex] = { ...contract.decisions[acceptedIndex]!, at: 4222222222222 };
+      });
+    if (condition === 'verifier-refused')
+      editContract(root, id!, (contract) => {
+        contract.status = 'failed';
+        contract.failureKind = 'judgment-unavailable';
+        contract.completedAt = Date.now();
+        contract.error = 'interrupted correction could not resume: Jev could not answer: invalid response';
+      });
+    let prompt = '';
+    let repairTask = '';
+    let plannerRuns = 0;
+    let requestFailures = 0;
+    const repair = fixPlan([{ serves: ['c1'] }, { serves: ['c1'], dependsOn: ['u1'] }]);
+    for (const unit of repair.groups[0]!.units) unit.role = 'research';
+    if (condition === 'privacy-refused') repair.groups[0]!.units[0]!.files.push(`.goodvibes/reviews/${id}/source-receipts.json`);
+    const recoveryOptions: Options = {
+      plan,
+      scripts: {
+        u1: mustNotRun,
+        [`${id}.f1.u1`]: () => [{ text: 'Accepted scope reconciliation.' }],
+        [`${id}.f1.u2`]: (record) => {
+          repairTask = record.task;
+          return [
+            {
+              text:
+                '```json\n' +
+                JSON.stringify({
+                  version: 1, archetype: 'research', summary: 'Corrected the final answer.', result: 'Removed the unsupported wording.', finalAnswer: 'Corrected complete answer.',
+  }) + '\n```',
+            },
+          ]; },
+      },
+    planner: { run: async (request) => {
       plannerRuns++;
       prompt = request.userPrompt;
       if (condition === 'privacy-refused') {
@@ -266,17 +425,30 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])('an %s final-a
         expect(saved.contract.error).toBeUndefined();
       }
       return { status: 'completed', output: plannerOutput(repair), elapsedMs: 0 };
-    } },
-    port: context => {
+    },
+      },
+    port: (context) => {
       if (condition === 'verifier-refused' && context.name === 'role' && requestFailures === 0) {
         requestFailures++; throw new JudgmentError('invalid-response', 'fixture malformed verifier response');
       }
       return context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98) : undefined;
     },
-  });
+  };
+    const second = restart(root, recoveryOptions);
   await second.runner.resumeAll();
-  const done = await ended(second, id!);
-  expect(done.status).toBe('passed');
+    let done = await ended(second, id!);
+    if (condition === 'verifier-refused') {
+      expect(done.status).toBe('failed');
+      expect(requestFailures).toBe(1);
+      // A fresh explicit resume retries the retained proposal; provider failure
+      // never schedules an unbounded retry inside the interrupted operation.
+      second.dispose();
+      await second.runner.join(id!);
+      const fresh = restart(root, recoveryOptions);
+      await fresh.runner.resumeAll();
+      done = await ended(fresh, id!);
+    }
+    expect(done.status).toBe('passed');
   expect(done.fixRounds).toBe(1);
   expect(done.units).toHaveLength(3);
   expect(done.answer).toBe('Corrected complete answer.');
@@ -285,58 +457,114 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])('an %s final-a
   expect(prompt).toContain('Actual host work records');
   const receipts = JSON.parse(repairTask.split('Actual host orchestration records (evidence, not approval of this unit):\n')[1]!);
   expect(receipts.units.find((unit: { id: string }) => unit.id === 'u1')).toMatchObject({ status: 'passed', latestCheck: { result: 'pass' },
-    readObservations: condition === 'privacy-refused' ? [{ path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1 }] : [] });
-  expect(receipts.units.find((unit: { id: string }) => unit.id === `${id}.f1.u1`)).toMatchObject({ status: 'passed', acceptedAnswer: 'Accepted scope reconciliation.' });
-  expect(receipts.units.some((unit: { id: string }) => unit.id === `${id}.f1.u2`)).toBe(false);
-  expect(done.units[0]!.answer).toBe('Original draft with an unsupported archive claim.');
-  expect(plannerRuns).toBe(1);
-  if (condition === 'verifier-refused') {
-    expect(requestFailures).toBe(1);
-    expect(done.decisions.some(decision => decision.reason.startsWith('fix-plan verification pending'))).toBe(true);
-  }
-  if (condition === 'privacy-refused') {
-    expect(prompt).not.toContain('4111111111111111');
-    expect(prompt).toContain('[WITHHELD:card-shaped-number]');
-    try { assertJudgmentInput({ prompt }); } catch (error) {
-      throw new Error('Unsafe planner-input context (all digits withheld): ' + JSON.stringify(findCardNumberShapes(prompt)
-        .map(span => prompt.slice(Math.max(0, span.startIndex - 80), span.startIndex + span.length + 80).replace(/\d/g, '#'))), { cause: error });
+    readObservations: condition === 'privacy-refused' ? [{ path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1 }] : [],
+    });
+  expect(receipts.units.find((unit: { id: string }) => unit.id === `${id}.f1.u1`)).toMatchObject({
+      status: 'passed',
+      acceptedAnswer: 'Accepted scope reconciliation.',
+    });
+    expect(receipts.units.some((unit: { id: string }) => unit.id === `${id}.f1.u2`)).toBe(false);
+    expect(done.units[0]!.answer).toBe('Original draft with an unsupported archive claim.');
+    // A shared-directory proposal has no immutable result revision: an explicit
+    // process restart must regenerate it rather than reuse an unbound candidate.
+    expect(plannerRuns).toBe(condition === 'verifier-refused' ? 2 : 1);
+    if (condition === 'verifier-refused') {
+      expect(requestFailures).toBe(1);
+      expect(done.decisions.some((decision) => decision.action === 'planned' && decision.targetId === `${id}.f1.candidate`)).toBe(true);
     }
-    assertJudgmentInput({ task: repairTask });
-    expect(done.units[0]!.commandEvidence![0]!.head).toBe(privateHead);
-    expect(done.units[0]!.commandEvidence![0]!.command).toBe('ls -l');
-    expect(done.decisions.some(decision => decision.reason.startsWith('Recovered a historical repair-planner input refusal'))).toBe(true);
-    expect(receipts.privateArtifacts[0].path).toBe(`.goodvibes/reviews/${id}/source-receipts.json`);
-    expect(existsSync(join(root, receipts.privateArtifacts[0].path))).toBe(true);
-  }
-});
+    if (condition === 'privacy-refused') {
+      expect(prompt).not.toContain('4111111111111111');
+      expect(prompt).toContain('[WITHHELD:card-shaped-number]');
+      try {
+        assertJudgmentInput({ prompt });
+      } catch (error) {
+        throw new Error(
+          'Unsafe planner-input context (all digits withheld): ' +
+            JSON.stringify(
+              findCardNumberShapes(prompt).map((span) =>
+                prompt.slice(Math.max(0, span.startIndex - 80), span.startIndex + span.length + 80).replace(/\d/g, '#'),
+              ),
+            ),
+          { cause: error },
+        );
+      }
+      assertJudgmentInput({ task: repairTask });
+      expect(done.units[0]!.commandEvidence![0]!.head).toBe(privateHead);
+      expect(done.units[0]!.commandEvidence![0]!.command).toBe('ls -l');
+      expect(done.decisions.some((decision) => decision.reason.startsWith('Recovered a historical repair-planner input refusal'))).toBe(
+        true,
+      );
+      expect(receipts.privateArtifacts[0].path).toBe(`.goodvibes/reviews/${id}/source-receipts.json`);
+      expect(existsSync(join(root, receipts.privateArtifacts[0].path))).toBe(true);
+    }
+  },
+);
 
 test('an interrupted fix-plan request reuses its bound proposal and obtains a fresh check after restart', async () => {
-  const plan = oneUnitPlan(1); plan.groups[0]!.units[0]!.role = 'research';
-  const repair = fixPlan([{ serves: ['c1'] }]); repair.groups[0]!.units[0]!.role = 'research';
+  const plan = oneUnitPlan(1);
+  plan.groups[0]!.units[0]!.role = 'research';
+  const repair = fixPlan([{ serves: ['c1'] }]);
+  repair.groups[0]!.units[0]!.role = 'research';
   let plannerRuns = 0;
-  const { root, ids: [id] } = await interrupt({ plan, contract: { isolation: 'worktree' },
-    scripts: { u1: () => [{ text: 'Original answer.' }] },
-    planner: { run: async request => {
-      if (!request.systemPrompt.startsWith('You plan a repair')) return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
-      plannerRuns++;
-      return { status: 'completed', output: plannerOutput(repair), elapsedMs: 0 };
-    } },
-    port: context => {
+  const {
+    root,
+    ids: [id],
+  } = await interrupt(
+    {
+      plan,
+      contract: { isolation: 'worktree' },
+      scripts: { u1: () => [{ text: 'Original answer.' }] },
+      planner: {
+        run: async (request) => {
+          if (!request.systemPrompt.startsWith('You plan a repair'))
+            return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
+          plannerRuns++;
+          return { status: 'completed', output: plannerOutput(repair), elapsedMs: 0 };
+        },
+      },
+      port: (context) => {
+        if (context.name === 'role') {
+          if ((context.state['unit'] as { title: string }).title === 'Fix 1')
+            throw new JudgmentError('invalid-response', 'fixture protocol failure');
+          return choiceAnswer(context.question, 'research', 0.98);
+        }
+        return context.name === 'unsupported' ? noulAnswer(0.98) : undefined;
+      },
+    },
+    (contract) =>
+      contract.status === 'failed' &&
+      contract.decisions.some((decision) => decision.action === 'planned' && decision.targetId === `${contract.id}.f1.candidate`),
+    'the retained repair proposal after failed verification',
+  );
+  const stored = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
+  expect(JSON.parse(stored.contract.decisions.find((decision) => decision.targetId === `${id}.f1.candidate`)!.reason).output).toBe(
+    plannerOutput(repair),
+  );
+  let freshChecks = 0;
+  const h = restart(root, {
+    plan,
+    contract: { isolation: 'worktree' },
+    scripts: {
+      u1: mustNotRun,
+      [`${id}.f1.u1`]: () => [
+        {
+          text:
+            '```json\n' +
+            JSON.stringify({ version: 1, archetype: 'research', summary: 'Corrected answer', finalAnswer: 'Corrected complete answer.' }) +
+            '\n```',
+        },
+      ],
+    },
+    planner: {
+      run: async () => {
+        throw new Error('The retained proposal must be checked without another planner run');
+      },
+    },
+    port: (context) => {
       if (context.name === 'role') {
-        if ((context.state['unit'] as { title: string }).title === 'Fix 1') throw new JudgmentError('invalid-response', 'fixture protocol failure');
+        if ((context.state['unit'] as { title: string }).title === 'Fix 1') freshChecks++;
         return choiceAnswer(context.question, 'research', 0.98);
       }
-      return context.name === 'unsupported' ? noulAnswer(0.98) : undefined;
-    },
-  }, contract => contract.decisions.some(decision => decision.reason.startsWith('fix-plan verification pending')), 'the retained repair proposal');
-  const stored = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
-  expect(JSON.parse(stored.contract.decisions.find(decision => decision.targetId === `${id}.f1.candidate`)!.reason).output).toBe(plannerOutput(repair));
-  let freshChecks = 0;
-  const h = restart(root, { plan, contract: { isolation: 'worktree' }, scripts: { u1: mustNotRun,
-    [`${id}.f1.u1`]: () => [{ text: '```json\n' + JSON.stringify({ version: 1, archetype: 'research', summary: 'Corrected answer', finalAnswer: 'Corrected complete answer.' }) + '\n```' }],
-  }, planner: { run: async () => { throw new Error('The retained proposal must be checked without another planner run'); } },
-    port: context => {
-      if (context.name === 'role') { if ((context.state['unit'] as { title: string }).title === 'Fix 1') freshChecks++; return choiceAnswer(context.question, 'research', 0.98); }
       return undefined;
     },
   });
@@ -350,74 +578,138 @@ test('an interrupted fix-plan request reuses its bound proposal and obtains a fr
   expect(freshChecks).toBe(1);
 });
 
-test.each([false, true])('a rejected verifier request cannot cancel a sibling or pass unchecked work (persistent=%s)', async persistent => {
-  const root = makeRepo(); roots.push(root);
-  const plan = twoUnitPlan();
-  const firstUnit = plan.groups[0]!.units[0]!;
-  firstUnit.role = 'research';
-  plan.groups[0]!.units.push({ ...firstUnit, id: 'u3', files: ['src/independent.ts'], title: 'Independent review', criteria: [{ ...firstUnit.criteria[0]!, id: 'u3.c1' }] });
-  plan.groups[1]!.units[0]!.title = 'Integration fixture';
-  let failures = 0;
-  const h = makeHarness({ root, plan, contract: { isolation: 'worktree', maxParallelUnits: 2 }, scripts: {
-    u1: () => [{ text: 'First private report.' }, { text: 'Repaired private report.' }, { text: 'Bounded private report.' }],
-    u3: () => [{ text: 'Independent source assessment.' }],
-    u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
-  }, port: context => {
-    if (context.name === 'role') return choiceAnswer(context.question, (context.state['unit'] as { title?: string })?.title === 'Integration fixture' ? 'implement' : 'research', 0.98);
-    if (judgeOf(context) === 'unit' && String(context.state['output']).includes('private report') && context.name === 'goal' && (persistent || failures === 0)) {
-      failures++; throw new JudgmentError('rejected', 'fixture request rejection', { status: 400 });
+test.each([false, true])(
+  'a rejected verifier request cannot cancel a sibling or pass unchecked work (persistent=%s)',
+  async (persistent) => {
+    const root = makeRepo();
+    roots.push(root);
+    const plan = twoUnitPlan();
+    const firstUnit = plan.groups[0]!.units[0]!;
+    firstUnit.role = 'research';
+    plan.groups[0]!.units.push({
+      ...firstUnit,
+      id: 'u3',
+      files: ['src/independent.ts'],
+      title: 'Independent review',
+      criteria: [{ ...firstUnit.criteria[0]!, id: 'u3.c1' }],
+    });
+    plan.groups[1]!.units[0]!.title = 'Integration fixture';
+    let failures = 0;
+    const h = makeHarness({
+      root,
+      plan,
+      contract: { isolation: 'worktree', maxParallelUnits: 2 },
+      scripts: {
+        u1: () => [{ text: 'First private report.' }, { text: 'Repaired private report.' }, { text: 'Bounded private report.' }],
+        u3: () => [{ text: 'Independent source assessment.' }],
+        u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
+      },
+      port: (context) => {
+        if (context.name === 'role')
+          return choiceAnswer(
+            context.question,
+            (context.state['unit'] as { title?: string })?.title === 'Integration fixture' ? 'implement' : 'research',
+            0.98,
+          );
+        if (
+          judgeOf(context) === 'unit' &&
+          String(context.state['output']).includes('private report') &&
+          context.name === 'goal' &&
+          (persistent || failures === 0)
+        ) {
+          failures++;
+          throw new JudgmentError('rejected', 'fixture request rejection', { status: 400 });
+        }
+        return undefined;
+      },
+    });
+    harnesses.push(h);
+    mkdirSync(join(h.root, 'src'), { recursive: true });
+    writeFileSync(join(h.root, 'src/csv.ts'), 'export const parser = true;\n');
+    writeFileSync(join(h.root, 'src/independent.ts'), 'export const independent = true;\n');
+    const { contract } = startContract(h);
+    await waitFor(
+      () => unitIn(h, contract.id, 'u3')?.status === 'passed' && failures === 1 && unitIn(h, contract.id, 'u1')?.status === 'held',
+      'only verifier-failing unit to wait',
+    );
+    expect(unitIn(h, contract.id, 'u1').lastOutput).toBe('First private report.');
+    expect(contractIn(h, contract.id).decisions.some((decision) => decision.reason.includes('bounded report repair'))).toBe(false);
+    if (persistent) {
+      expect(contractIn(h, contract.id).status).toBe('running');
+      expect(unitIn(h, contract.id, 'u1').checks).toEqual([]);
+      expect(unitIn(h, contract.id, 'u1').criteria[0]!.status).toBe('unread');
+    } else {
+      await sleep(300);
+      h.dispose();
+      await h.runner.join(contract.id);
+      const resumed = restart(h.root, {
+        plan,
+        contract: { isolation: 'worktree', maxParallelUnits: 2 },
+        scripts: {
+          u1: mustNotRun,
+          u3: mustNotRun,
+          u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
+        },
+        port: (context) =>
+          context.name === 'role'
+            ? choiceAnswer(
+                context.question,
+                (context.state['unit'] as { title?: string })?.title === 'Integration fixture' ? 'implement' : 'research',
+                0.98,
+              )
+            : undefined,
+      });
+      await resumed.runner.resumeAll();
+      expect((await ended(resumed, contract.id)).status).toBe('passed');
+      expect(failures).toBe(1);
+      expect(unitIn(resumed, contract.id, 'u1').checks).toHaveLength(1);
+      expect(unitIn(resumed, contract.id, 'u1').lastOutput).toBe('First private report.');
+      expect(resumed.agentsOf('u1')).toEqual([]);
     }
-    return undefined;
-  } });
-  harnesses.push(h);
-  mkdirSync(join(h.root, 'src'), { recursive: true });
-  writeFileSync(join(h.root, 'src/csv.ts'), 'export const parser = true;\n');
-  writeFileSync(join(h.root, 'src/independent.ts'), 'export const independent = true;\n');
-  const { contract } = startContract(h);
-  await waitFor(() => unitIn(h, contract.id, 'u3')?.status === 'passed' && failures === 1 && unitIn(h, contract.id, 'u1')?.status === 'held', 'only verifier-failing unit to wait');
-  expect(unitIn(h, contract.id, 'u1').lastOutput).toBe('First private report.');
-  expect(contractIn(h, contract.id).decisions.some(decision => decision.reason.includes('bounded report repair'))).toBe(false);
-  if (persistent) {
-    expect(contractIn(h, contract.id).status).toBe('running');
-    expect(unitIn(h, contract.id, 'u1').checks).toEqual([]);
-    expect(unitIn(h, contract.id, 'u1').criteria[0]!.status).toBe('unread');
-  } else {
-    await sleep(300);
-    h.dispose();
-    await h.runner.join(contract.id);
-    const resumed = restart(h.root, { plan, contract: { isolation: 'worktree', maxParallelUnits: 2 }, scripts: {
-      u1: mustNotRun, u3: mustNotRun,
-      u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
-    }, port: context => context.name === 'role'
-      ? choiceAnswer(context.question, (context.state['unit'] as { title?: string })?.title === 'Integration fixture' ? 'implement' : 'research', 0.98)
-      : undefined });
-    await resumed.runner.resumeAll();
-    expect((await ended(resumed, contract.id)).status).toBe('passed');
-    expect(failures).toBe(1);
-    expect(unitIn(resumed, contract.id, 'u1').checks).toHaveLength(1);
-    expect(unitIn(resumed, contract.id, 'u1').lastOutput).toBe('First private report.');
-    expect(resumed.agentsOf('u1')).toEqual([]);
-  }
-  expect(eventsOf(h, 'CONTRACT_FAILED')).toEqual([]);
-  expect(unitIn(h, contract.id, 'u3').status).toBe('passed');
-});
+    expect(eventsOf(h, 'CONTRACT_FAILED')).toEqual([]);
+    expect(unitIn(h, contract.id, 'u3').status).toBe('passed');
+  },
+);
 
 test('read observations are persisted before a candidate or acceptance check exists', async () => {
-  const root = makeRepo(); roots.push(root);
+  const root = makeRepo();
+  roots.push(root);
   const plan = oneUnitPlan(1);
   plan.groups[0]!.units[0]!.role = 'research';
-  const first = makeHarness({ root, plan, contract: { midRunChecks: false }, scripts: { u1: () => [{ text: '', stop: { kind: 'hang' } }] },
-    port: context => context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98) : undefined });
+  const first = makeHarness({
+    root,
+    plan,
+    contract: { midRunChecks: false },
+    scripts: { u1: () => [{ text: '', stop: { kind: 'hang' } }] },
+    port: (context) => (context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98) : undefined),
+  });
   harnesses.push(first);
   const { contract } = startContract(first);
-  await waitFor(() => first.agentsOf('u1').some(id => first.manager.getStatus(id)?.status === 'running'), 'research worker');
+  await waitFor(() => first.agentsOf('u1').some((id) => first.manager.getStatus(id)?.status === 'running'), 'research worker');
   const record = first.manager.getStatus(first.agentsOf('u1')[0]!)!;
-  first.runner.hooks().onTurnEnd(record, { turn: 1, assistantText: 'Inspecting the source.',
-    toolCalls: [{ name: 'read', arguments: { files: [{ path: 'src/review.ts' }] } }],
-    results: [{ callId: 'read', success: true, output: JSON.stringify({ success: true, files: [{ path: 'src/review.ts', extract: 'lines', content: '1 | const a = 1;\n2 | const b = 2;' }] }) }] });
-  const commandTurn = { turn: 2, assistantText: 'Checked the archive.',
+  first.runner
+    .hooks()
+    .onTurnEnd(record, {
+      turn: 1,
+      assistantText: 'Inspecting the source.',
+      toolCalls: [{ name: 'read', arguments: { files: [{ path: 'src/review.ts' }] } }],
+      results: [
+        {
+          callId: 'read',
+          success: true,
+          output: JSON.stringify({
+            success: true,
+            files: [{ path: 'src/review.ts', extract: 'lines', content: '1 | const a = 1;\n2 | const b = 2;' }],
+          }),
+        },
+      ],
+    });
+  const commandTurn = {
+    turn: 2,
+    assistantText: 'Checked the archive.',
     toolCalls: [{ name: 'exec', arguments: { commands: [{ cmd: 'unzip -t review.zip' }] } }],
-    results: [{ callId: 'verify-archive', success: true, output: 'No errors detected.' }] };
+    results: [{ callId: 'verify-archive', success: true, output: 'No errors detected.' }],
+  };
   first.runner.hooks().onTurnEnd(record, commandTurn);
   first.runner.hooks().onTurnEnd(record, commandTurn);
   await waitFor(() => {
@@ -432,42 +724,92 @@ test('read observations are persisted before a candidate or acceptance check exi
   await first.runner.join(contract.id);
   const restored = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract;
   expect(restored.units[0].readEvidence[0].returnedRanges).toEqual(['1-2']);
-  expect(restored.units[0].commandEvidence).toEqual([{ agentId: record.id, turn: 2, callIndex: 0, callId: 'verify-archive', command: 'unzip -t review.zip', success: true, head: 'No errors detected.' }]);
+  expect(restored.units[0].commandEvidence).toEqual([
+    {
+      agentId: record.id,
+      turn: 2,
+      callIndex: 0,
+      callId: 'verify-archive',
+      command: 'unzip -t review.zip',
+      success: true,
+      head: 'No errors detected.',
+    },
+  ]);
 });
 
 test('a held read-only candidate and its observed source survive restart and receive a fresh check', async () => {
-  const root = makeRepo(); roots.push(root);
+  const root = makeRepo();
+  roots.push(root);
   const plan = oneUnitPlan(1);
   plan.groups[0]!.units[0]!.role = 'research';
   plan.groups[0]!.units[0]!.files = ['src/review.ts'];
   mkdirSync(join(root, 'src'), { recursive: true });
-  writeFileSync(join(root, 'src/review.ts'), 'export function clamp(value, min, max) {\n  return Math.min(max, Math.max(min, value));\n}\n');
-  const first = makeHarness({ root, plan, contract: { midRunChecks: false },
+  writeFileSync(
+    join(root, 'src/review.ts'),
+    'export function clamp(value, min, max) {\n  return Math.min(max, Math.max(min, value));\n}\n',
+  );
+  const first = makeHarness({
+    root,
+    plan,
+    contract: { midRunChecks: false },
     scripts: { u1: () => [{ text: '', stop: { kind: 'hang' } }] },
-    port: context => context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98)
-      : judgeOf(context) === 'unit' ? noulAnswer(0.98) : undefined });
+    port: (context) =>
+      context.name === 'role'
+        ? choiceAnswer(context.question, 'research', 0.98)
+        : judgeOf(context) === 'unit'
+          ? noulAnswer(0.98)
+          : undefined,
+  });
   harnesses.push(first);
   const { contract } = startContract(first);
-  await waitFor(() => first.agentsOf('u1').some(id => first.manager.getStatus(id)?.status === 'running'), 'the read-only worker to start');
+  await waitFor(
+    () => first.agentsOf('u1').some((id) => first.manager.getStatus(id)?.status === 'running'),
+    'the read-only worker to start',
+  );
   const record = first.manager.getStatus(first.agentsOf('u1')[0]!)!;
-  first.runner.hooks().onTurnEnd(record, { turn: 1, assistantText: '',
-    toolCalls: [{ name: 'read', arguments: { files: [{ path: 'src/review.ts' }] } }],
-    results: [{ callId: 'actual-read', success: true, output: JSON.stringify({ success: true, files: [{ path: 'src/review.ts', extract: 'content',
-      content: '    1 | export function clamp(value, min, max) {\n    2 |   return Math.min(max, Math.max(min, value));\n    3 | }' }] }) }] });
-  const candidate = 'Reviewed src/review.ts:1-3. For min <= max, the inner max enforces the lower bound and the outer min the upper bound; zero inside the interval stays zero. This is source analysis; no test execution or native approval is claimed.';
+  first.runner
+    .hooks()
+    .onTurnEnd(record, {
+      turn: 1,
+      assistantText: '',
+      toolCalls: [{ name: 'read', arguments: { files: [{ path: 'src/review.ts' }] } }],
+      results: [
+        {
+          callId: 'actual-read',
+          success: true,
+          output: JSON.stringify({
+            success: true,
+            files: [
+              {
+                path: 'src/review.ts',
+                extract: 'content',
+                content:
+                  '    1 | export function clamp(value, min, max) {\n    2 |   return Math.min(max, Math.max(min, value));\n    3 | }',
+              },
+            ],
+          }),
+        },
+      ],
+    });
+  const candidate =
+    'Reviewed src/review.ts:1-3. For min <= max, the inner max enforces the lower bound and the outer min the upper bound; zero inside the interval stays zero. This is source analysis; no test execution or native approval is claimed.';
   expect(await first.runner.hooks().holdCompletion(record, candidate)).toMatchObject({ kind: 'continue' });
   expect(unitIn(first, contract.id, 'u1').lastOutput).toBe(candidate);
   expect(unitIn(first, contract.id, 'u1').criteria[0]!.status).toBe('unmet');
   first.dispose();
   await first.runner.join(contract.id);
   const resumedStates: unknown[] = [];
-  const second = restart(root, { plan, scripts: { u1: mustNotRun }, port: context => {
-    if (context.name === 'role') return choiceAnswer(context.question, 'research', 0.98);
-    if (judgeOf(context) !== 'unit') return undefined;
-    resumedStates.push(context.state);
-    const evidence = context.state['evidence'] as { sourceReads?: { returnedRanges: string[] }[] };
-    return noulAnswer(context.state['output'] === candidate && evidence.sourceReads?.[0]?.returnedRanges.join() === '1-3' ? 0.02 : 0.98);
-  } });
+  const second = restart(root, {
+    plan,
+    scripts: { u1: mustNotRun },
+    port: (context) => {
+      if (context.name === 'role') return choiceAnswer(context.question, 'research', 0.98);
+      if (judgeOf(context) !== 'unit') return undefined;
+      resumedStates.push(context.state);
+      const evidence = context.state['evidence'] as { sourceReads?: { returnedRanges: string[] }[] };
+      return noulAnswer(context.state['output'] === candidate && evidence.sourceReads?.[0]?.returnedRanges.join() === '1-3' ? 0.02 : 0.98);
+    },
+  });
   await second.runner.resumeAll();
   expect((await ended(second, contract.id)).status).toBe('passed');
   expect(resumedStates.length).toBeGreaterThan(0);
@@ -477,19 +819,29 @@ test('a held read-only candidate and its observed source survive restart and rec
 
 describe('planning starts again', () => {
   test('resume restores the original owner and reports completion through that identity', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, c => c.status === 'planning', 'planning');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, (c) => c.status === 'planning', 'planning');
     const saved = JSON.parse(readFileSync(contractPath(root, id!), 'utf8')).contract as Contract;
     const ready = Promise.withResolvers<void>();
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: {
-      u1: () => [{ before: () => ready.promise, files: { 'src/csv.ts': 'parse\n' }, text: 'Parser written.' }],
-    } });
+    const h = restart(root, {
+      plan: oneUnitPlan(1),
+      scripts: {
+        u1: () => [{ before: () => ready.promise, files: { 'src/csv.ts': 'parse\n' }, text: 'Parser written.' }],
+      },
+    });
     const completed: string[] = [];
-    h.bus.onDomain('agents', ({ payload }) => { if (payload.type === 'AGENT_COMPLETED') completed.push(payload.agentId); });
+    h.bus.onDomain('agents', ({ payload }) => {
+      if (payload.type === 'AGENT_COMPLETED') completed.push(payload.agentId);
+    });
     await h.runner.resumeAll();
     const owner = h.manager.getStatus(saved.ownerAgentId)!;
     expect(owner).toMatchObject({ id: saved.ownerAgentId, contractId: id, contractRole: 'owner', status: 'running' });
     let settled = false;
-    const joined = h.manager.join(owner.id).then(() => { settled = true; });
+    const joined = h.manager.join(owner.id).then(() => {
+      settled = true;
+    });
     await sleep(0);
     expect(settled).toBe(false);
     ready.resolve();
@@ -498,18 +850,35 @@ describe('planning starts again', () => {
     expect(done.status).toBe('passed');
     expect(owner.status).toBe('completed');
     expect(owner.fullOutput).toBe(done.answer);
-    expect(completed.filter(agentId => agentId === owner.id)).toEqual([owner.id]);
+    expect(completed.filter((agentId) => agentId === owner.id)).toEqual([owner.id]);
   }, 30_000);
 
   test('a saved writing-unclear question resumes planning without an owner reply', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, contract => contract.status === 'planning', 'planning');
-    editContract(root, id!, contract => {
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} },
+      (contract) => contract.status === 'planning',
+      'planning',
+    );
+    editContract(root, id!, (contract) => {
       contract.status = 'awaiting-owner';
       contract.shape = { ...contract.shape!, forbids_writing: { verdict: 'uncertain', probability: 0.5, outcome: 'escalate' } };
-      contract.escalations.push({ id: `${contract.id}.e1`, at: Date.now(), scope: 'shape', targetId: contract.id,
-        reason: 'writing-unclear', question: 'May files change?', unmetCriterionIds: [] });
+      contract.escalations.push({
+        id: `${contract.id}.e1`,
+        at: Date.now(),
+        scope: 'shape',
+        targetId: contract.id,
+        reason: 'writing-unclear',
+        question: 'May files change?',
+        unmetCriterionIds: [],
+      });
     });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] } });
+    const h = restart(root, {
+      plan: oneUnitPlan(1),
+      scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] },
+    });
     const report = await h.runner.resumeAll();
     expect(report.resumed).toEqual([{ contractId: id!, step: 'plan' }]);
     const done = await ended(h, id!);
@@ -521,12 +890,22 @@ describe('planning starts again', () => {
   });
 
   test('a contract stopped while shaping is shaped again, planned and run', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, (contract) => contract.status === 'planning', 'planning');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} },
+      (contract) => contract.status === 'planning',
+      'planning',
+    );
     editContract(root, id!, (contract) => {
       contract.status = 'shaping';
       contract.shape = undefined;
     });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] } });
+    const h = restart(root, {
+      plan: oneUnitPlan(1),
+      scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] },
+    });
     const report = await h.runner.resumeAll();
     expect(report.resumed).toEqual([{ contractId: id!, step: 'shape' }]);
     const done = await ended(h, id!);
@@ -535,37 +914,60 @@ describe('planning starts again', () => {
     expect(done.decisions.some((decision) => decision.action === 'resumed' && decision.reason.includes('shaping starts again'))).toBe(true);
   }, 30_000);
 
-  test.each(['planning', 'checking-plan'] as const)('a contract stopped in %s plans again from the beginning, keeping its shape', async (status) => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, (contract) => contract.status === 'planning', 'planning');
-    editContract(root, id!, (contract) => {
-      contract.status = status;
-    });
-    let plannerRuns = 0;
-    const h = restart(root, {
-      plan: oneUnitPlan(1),
-      planner: {
-        run: async () => {
-          plannerRuns += 1;
-          return { status: 'completed', output: plannerOutput(oneUnitPlan(1)), elapsedMs: 1, agentId: 'planner-again' };
+  test.each(['planning', 'checking-plan'] as const)(
+    'a contract stopped in %s plans again from the beginning, keeping its shape',
+    async (status) => {
+      const {
+        root,
+        ids: [id],
+      } = await interrupt(
+        { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} },
+        (contract) => contract.status === 'planning',
+        'planning',
+      );
+      editContract(root, id!, (contract) => {
+        contract.status = status;
+      });
+      let plannerRuns = 0;
+      const h = restart(root, {
+        plan: oneUnitPlan(1),
+        planner: {
+          run: async () => {
+            plannerRuns += 1;
+            return { status: 'completed', output: plannerOutput(oneUnitPlan(1)), elapsedMs: 1, agentId: 'planner-again' };
+          },
         },
-      },
-      scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] },
-    });
-    const report = await h.runner.resumeAll();
-    expect(report.resumed).toEqual([{ contractId: id!, step: 'plan' }]);
-    const done = await ended(h, id!);
-    expect(done.status).toBe('passed');
-    expect(plannerRuns).toBe(1);
-    // The shape read before the restart stands: shaping is not asked again.
-    expect(eventsOf(h, 'CONTRACT_SHAPED')).toHaveLength(0);
-    expect(done.decisions.some((decision) => decision.action === 'resumed' && decision.reason === `resumed after a restart in ${status}: planning starts again from the beginning`)).toBe(true);
-  }, 30_000);
+        scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] },
+      });
+      const report = await h.runner.resumeAll();
+      expect(report.resumed).toEqual([{ contractId: id!, step: 'plan' }]);
+      const done = await ended(h, id!);
+      expect(done.status).toBe('passed');
+      expect(plannerRuns).toBe(1);
+      // The shape read before the restart stands: shaping is not asked again.
+      expect(eventsOf(h, 'CONTRACT_SHAPED')).toHaveLength(0);
+      expect(
+        done.decisions.some(
+          (decision) =>
+            decision.action === 'resumed' &&
+            decision.reason === `resumed after a restart in ${status}: planning starts again from the beginning`,
+        ),
+      ).toBe(true);
+    },
+    30_000,
+  );
 });
 
 describe('units resume at their step', () => {
   test('a unit whose agent was working gets a fresh agent with its brief and "Previous checks"', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 2;\n' }, text: 'Finished the parser.' }] } });
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const h = restart(root, {
+      plan: oneUnitPlan(1),
+      scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 2;\n' }, text: 'Finished the parser.' }] },
+    });
     const report = await h.runner.resumeAll();
     expect(report).toEqual({ resumed: [{ contractId: id!, step: 'run' }], queued: [], reaped: [], skipped: [] });
     const done = await ended(h, id!);
@@ -582,27 +984,37 @@ describe('units resume at their step', () => {
     expect(done.decisions.some((decision) => decision.action === 'resumed' && decision.targetId === 'u1')).toBe(true);
   }, 30_000);
 
-  test.each(['held', 'checking'] as const)('a %s unit is checked again with trigger resume and passes on the work its agent left, with no agent', async (status) => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
-    editContract(root, id!, (contract) => {
-      contract.units[0]!.status = status;
-      contract.units[0]!.lastOutput = 'Wrote the parser in src/csv.ts.';
-    });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
-    await h.runner.resumeAll();
-    const done = await ended(h, id!);
-    expect(done.status).toBe('passed');
-    expect(h.agentsOf('u1')).toEqual([]);
-    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED')).toEqual([]);
-    const resumeCheck = done.units[0]!.checks.at(-1)!;
-    expect(resumeCheck).toMatchObject({ trigger: 'resume', result: 'pass' });
-    // A check after a restart verifies the completion report the earlier agent left.
-    expect(resumeCheck.claims).toBeDefined();
-    expect(done.units[0]!.answer).toBe('Wrote the parser in src/csv.ts.');
-  }, 30_000);
+  test.each(['held', 'checking'] as const)(
+    'a %s unit is checked again with trigger resume and passes on the work its agent left, with no agent',
+    async (status) => {
+      const {
+        root,
+        ids: [id],
+      } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+      editContract(root, id!, (contract) => {
+        contract.units[0]!.status = status;
+        contract.units[0]!.lastOutput = 'Wrote the parser in src/csv.ts.';
+      });
+      const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
+      await h.runner.resumeAll();
+      const done = await ended(h, id!);
+      expect(done.status).toBe('passed');
+      expect(h.agentsOf('u1')).toEqual([]);
+      expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED')).toEqual([]);
+      const resumeCheck = done.units[0]!.checks.at(-1)!;
+      expect(resumeCheck).toMatchObject({ trigger: 'resume', result: 'pass' });
+      // A check after a restart verifies the completion report the earlier agent left.
+      expect(resumeCheck.claims).toBeDefined();
+      expect(done.units[0]!.answer).toBe('Wrote the parser in src/csv.ts.');
+    },
+    30_000,
+  );
 
   test('a resume check verifies the report stored on the unit, not the capped lastOutput', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     const report = { version: 1, archetype: 'engineer', summary: 'Wrote the parser.', filesCreated: ['src/csv.ts'], filesModified: [] };
     editContract(root, id!, (contract) => {
       contract.units[0]!.status = 'held';
@@ -619,11 +1031,19 @@ describe('units resume at their step', () => {
   }, 30_000);
 
   test('a completion check retains the complete report and last output', async () => {
-    const report = { version: 1, archetype: 'engineer', summary: `Wrote the parser. ${'detail '.repeat(4_000)}`, filesCreated: ['src/csv.ts'], filesModified: [], filesDeleted: [] };
+    const report = {
+      version: 1,
+      archetype: 'engineer',
+      summary: `Wrote the parser. ${'detail '.repeat(4_000)}`,
+      filesCreated: ['src/csv.ts'],
+      filesModified: [],
+      filesDeleted: [],
+    };
     const text = `Finished.\n\`\`\`json\n${JSON.stringify(report)}\n\`\`\``;
     const root = makeRepo();
     roots.push(root);
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text }] } });
+    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text }] },
+    });
     const id = startContract(h).contract.id;
     const done = await ended(h, id);
     expect(done.status).toBe('passed');
@@ -634,17 +1054,20 @@ describe('units resume at their step', () => {
   }, 30_000);
 
   test('a nudged unit is checked again; the nudge goes to a fresh agent, which fixes the work', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const { root, ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     editContract(root, id!, (contract) => {
       contract.units[0]!.status = 'nudged';
       contract.units[0]!.lastOutput = 'The parser is half done. [unmet]';
     });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 3;\n' }, text: 'Finished the parser.' }] } });
+    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 3;\n' }, text: 'Finished the parser.' }] },
+    });
     await h.runner.resumeAll();
     const done = await ended(h, id!);
     expect(done.status).toBe('passed');
     const u1 = done.units[0]!;
-    expect(u1.checks.slice(-2).map((check) => [check.trigger, check.result])).toEqual([['resume', 'nudge'], ['completion', 'pass']]);
+    expect(u1.checks.slice(-2).map((check) => [check.trigger, check.result])).toEqual([['resume', 'nudge'], ['completion', 'pass'],
+    ]);
     const spawned = eventsOf(h, 'CONTRACT_UNIT_SPAWNED');
     expect(spawned.map((event) => event.purpose)).toEqual(['resume']);
     // The fresh agent's first turn carries the nudge after the brief and previous checks.
@@ -653,8 +1076,9 @@ describe('units resume at their step', () => {
     expect(task).toContain(u1.nudges.at(-1)!.text);
   }, 30_000);
 
-  test('a unit waiting on its owner stays waiting with its escalation; the owner\'s approval passes it with no agent', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+  test("a unit waiting on its owner stays waiting with its escalation; the owner's approval passes it with no agent", async () => {
+    const { root, ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     editContract(root, id!, (contract) => {
       const u1 = contract.units[0]!;
       u1.status = 'awaiting-owner';
@@ -664,7 +1088,14 @@ describe('units resume at their step', () => {
       // cannot manufacture evidence for unshown work.
       contract.statusBeforeOwner = 'running';
       contract.status = 'awaiting-owner';
-      contract.escalations.push({ id: `${contract.id}.e1`, at: Date.now(), scope: 'unit', targetId: 'u1', reason: 'unsettled', question: 'Confirm the parser?', unmetCriterionIds: [] });
+      contract.escalations.push({ id: `${contract.id}.e1`,
+        at: Date.now(),
+        scope: 'unit',
+        targetId: 'u1',
+        reason: 'unsettled',
+        question: 'Confirm the parser?',
+        unmetCriterionIds: [],
+      });
     });
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun }, port: replyAnswers([{ reading: 'approve' }]) });
     const report = await h.runner.resumeAll();
@@ -683,17 +1114,21 @@ describe('units resume at their step', () => {
 
   test('a held unit survives device renumbering with a fresh check and no repeated worker', async () => {
     const options: Options = { plan: oneUnitPlan(1), contract: { isolation: 'worktree' }, scripts: { u1: writesThenHangs } };
-    const { root, ids: [id] } = await interrupt(options, running, 'u1 running after a check');
-    editContract(root, id!, contract => {
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(options, running, 'u1 running after a check');
+    editContract(root, id!, (contract) => {
       const snapshot = contract.inputSnapshot!;
       const device = snapshot.sourceIdentity.split(':')[0]!;
       const priorDevice = String(BigInt(device) + 100000n);
-      const replace = (value: string) => value.startsWith(`${device}:`) ? priorDevice + value.slice(device.length) : value;
+      const replace = (value: string) => (value.startsWith(`${device}:`) ? priorDevice + value.slice(device.length) : value);
       contract.inputSnapshot = {
-        ...snapshot, capturedAt: Date.now() - uptime() * 1000 - 60000,
+        ...snapshot,
+        capturedAt: Date.now() - uptime() * 1000 - 60000,
         sourceIdentity: replace(snapshot.sourceIdentity),
         gitIdentity: snapshot.gitIdentity.split('|').map(replace).join('|'),
-        files: snapshot.files.map(file => file.identity === undefined ? file : { ...file, identity: replace(file.identity) }),
+        files: snapshot.files.map((file) => (file.identity === undefined ? file : { ...file, identity: replace(file.identity) })),
       };
       contract.units[0]!.status = 'held';
       contract.units[0]!.lastOutput = 'Wrote the parser in src/csv.ts.';
@@ -709,7 +1144,10 @@ describe('units resume at their step', () => {
 
   test('worktree mode: a held unit passes its resume check, its item commits and merges with no agent, and the contract commits', async () => {
     const options: Options = { plan: oneUnitPlan(1), contract: { isolation: 'auto' }, scripts: { u1: writesThenHangs } };
-    const { root, ids: [id] } = await interrupt(options, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(options, running, 'u1 running after a check');
     editContract(root, id!, (contract) => {
       contract.units[0]!.status = 'held';
       contract.units[0]!.lastOutput = 'Wrote the parser in src/csv.ts.';
@@ -737,11 +1175,15 @@ describe('the deliverable steps run again', () => {
   }
 
   test('historical final-verifier request failures resume only verification and retain all accepted work', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the accepted parser');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the accepted parser');
     let retainedUnits = '';
-    editContract(root, id!, contract => {
+    editContract(root, id!, (contract) => {
       rewind(contract, 'judging');
-      contract.status = 'failed'; contract.failureKind = 'judgment-unavailable';
+      contract.status = 'failed';
+      contract.failureKind = 'judgment-unavailable';
       contract.error = 'the deliverable could not be judged: request rejected (HTTP 400)';
       contract.completedAt = Date.now();
       retainedUnits = JSON.stringify(contract.units.map(({ usage: _usage, ...unit }) => unit));
@@ -755,24 +1197,36 @@ describe('the deliverable steps run again', () => {
     expect(done.error).toBeUndefined();
     expect(JSON.stringify(done.units.map(({ usage: _usage, ...unit }) => unit))).toBe(retainedUnits);
     expect(done.checks.at(-1)!.trigger).toBe('resume');
-    expect(done.decisions.some(decision => decision.reason.startsWith('Recovered a historical final-verifier request failure'))).toBe(true);
+    expect(done.decisions.some((decision) => decision.reason.startsWith('Recovered a historical final-verifier request failure'))).toBe(
+      true,
+    );
   });
 
-  test.each(['actual-failure', 'already-published', 'unfinished-unit'])('a terminal %s is not migrated as pending final verification', async condition => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the accepted parser');
-    editContract(root, id!, contract => {
-      if (condition !== 'already-published') contract.commit = undefined;
-      contract.status = 'failed'; contract.failureKind = condition === 'actual-failure' ? 'other' : 'judgment-unavailable';
-      if (condition === 'unfinished-unit') contract.units[0]!.status = 'failed';
-    });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
-    const report = await h.runner.resumeAll();
-    expect(report.resumed).toEqual([]);
-    expect(h.runner.get(id!)!.status).toBe('failed');
-  });
+  test.each(['actual-failure', 'already-published', 'unfinished-unit'])(
+    'a terminal %s is not migrated as pending final verification',
+    async (condition) => {
+      const {
+        root,
+        ids: [id],
+      } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the accepted parser');
+      editContract(root, id!, (contract) => {
+        if (condition !== 'already-published') contract.commit = undefined;
+        contract.status = 'failed';
+        contract.failureKind = condition === 'actual-failure' ? 'other' : 'judgment-unavailable';
+        if (condition === 'unfinished-unit') contract.units[0]!.status = 'failed';
+      });
+      const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
+      const report = await h.runner.resumeAll();
+      expect(report.resumed).toEqual([]);
+      expect(h.runner.get(id!)!.status).toBe('failed');
+    },
+  );
 
   test('a contract stopped while judging is judged again with trigger resume, then commits', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the contract to pass');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the contract to pass');
     const checksBefore = (JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.checks.length;
     editContract(root, id!, (contract) => rewind(contract, 'judging'));
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
@@ -786,7 +1240,10 @@ describe('the deliverable steps run again', () => {
   }, 30_000);
 
   test('a contract stopped while committing revalidates the current deliverable before publication', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the contract to pass');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the contract to pass');
     editContract(root, id!, (contract) => rewind(contract, 'committing'));
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     const report = await h.runner.resumeAll();
@@ -795,15 +1252,26 @@ describe('the deliverable steps run again', () => {
     expect(done.status).toBe('passed');
     expect(done.checks.some((check) => check.trigger === 'resume')).toBe(true);
     expect(eventsOf(h, 'CONTRACT_COMMITTED')).toHaveLength(1);
-    expect(done.decisions.some((decision) => decision.action === 'resumed' && decision.reason.includes('the commit runs again'))).toBe(true);
+    expect(done.decisions.some((decision) => decision.action === 'resumed' && decision.reason.includes('the commit runs again'))).toBe(
+      true,
+    );
   }, 30_000);
 });
 
 describe('the active-contract cap', () => {
   test('contracts beyond the cap wait in the queue and resume from their step when a slot opens', async () => {
-    const { root, ids } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, (contract) => contract.status === 'planning', 'both planning', 2);
+    const { root, ids } = await interrupt(
+      { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} },
+      (contract) => contract.status === 'planning',
+      'both planning',
+      2,
+    );
     // Each contract's agent writes its own content, so the second has work of its own after the first committed.
-    const h = restart(root, { plan: oneUnitPlan(1), contract: { maxActiveContracts: 1 }, scripts: { u1: (record) => [{ files: { 'src/csv.ts': `parse ${record.id}\n` }, text: 'Wrote the parser.' }] } });
+    const h = restart(root, {
+      plan: oneUnitPlan(1),
+      contract: { maxActiveContracts: 1 },
+      scripts: { u1: (record) => [{ files: { 'src/csv.ts': `parse ${record.id}\n` }, text: 'Wrote the parser.' }] },
+    });
     const report = await h.runner.resumeAll();
     expect(report.resumed).toHaveLength(1);
     expect(report.resumed[0]!.step).toBe('plan');
@@ -828,16 +1296,23 @@ describe('zombies', () => {
     expect(contract.error).toContain(reasonPart);
     expect(contract.decisions.some((decision) => decision.action === 'reaped')).toBe(true);
     expect(eventsOf(h, 'CONTRACT_STATUS_CHANGED').some((event) => event.contractId === id && event.to === 'failed')).toBe(true);
-    expect(eventsOf(h, 'CONTRACT_FAILED')).toEqual([expect.objectContaining({ contractId: id, failureKind: 'zombie', membersSettled: true })]);
+    expect(eventsOf(h, 'CONTRACT_FAILED')).toEqual([
+      expect.objectContaining({ contractId: id, failureKind: 'zombie', membersSettled: true }),
+    ]);
     expect(h.agentsOf('u1')).toEqual([]);
   }
 
   test('a running group with no workstream snapshot is reaped as a zombie, naming the group', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     rmSync(join(root, '.goodvibes', 'orchestration', id!, 'g1.json'));
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     const report = await h.runner.resumeAll();
-    expect(report.reaped).toEqual([{ contractId: id!, reason: `contract ${id!} could not resume: group g1 is running but has no loadable workstream snapshot` }]);
+    expect(report.reaped).toEqual([
+      { contractId: id!, reason: `contract ${id!} could not resume: group g1 is running but has no loadable workstream snapshot` },
+    ]);
     expectReaped(h, id!, 'group g1 is running but has no loadable workstream snapshot');
     // The failed tree is written, so the next start does not reap it again.
     await sleep(100);
@@ -845,7 +1320,10 @@ describe('zombies', () => {
   }, 30_000);
 
   test('a corrupt workstream snapshot is quarantined and the contract reaped', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     const snapshot = join(root, '.goodvibes', 'orchestration', id!, 'g1.json');
     writeFileSync(snapshot, '{ not a snapshot');
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
@@ -855,7 +1333,14 @@ describe('zombies', () => {
   }, 30_000);
 
   test('worktree mode: a missing contract worktree reaps the contract, naming the path', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), contract: { isolation: 'auto' }, scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      { plan: oneUnitPlan(1), contract: { isolation: 'auto' }, scripts: { u1: writesThenHangs } },
+      running,
+      'u1 running after a check',
+    );
     const worktree = (JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.worktreePath!;
     rmSync(worktree, { recursive: true, force: true });
     const h = restart(root, { plan: oneUnitPlan(1), contract: { isolation: 'auto' }, scripts: { u1: mustNotRun } });
@@ -864,7 +1349,14 @@ describe('zombies', () => {
   }, 30_000);
 
   test('a terminal contract is held for viewing and never resumed or reaped', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'x\n' }, text: 'Wrote the parser.' }] } }, (contract) => contract.status === 'passed', 'the contract to pass');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'x\n' }, text: 'Wrote the parser.' }] } },
+      (contract) => contract.status === 'passed',
+      'the contract to pass',
+    );
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     const report = await h.runner.resumeAll();
     expect(report).toEqual({ resumed: [], queued: [], reaped: [], skipped: [] });
@@ -875,39 +1367,68 @@ describe('zombies', () => {
 describe('a later group and the whole plan', () => {
   test('a resumed integrator receives current plan and accepted peer receipts without repeating the review', async () => {
     const plan = twoUnitPlan();
-    const { root, ids: [id] } = await interrupt({ plan, scripts: {
-      u1: () => [{ files: { 'src/csv.ts': 'export const parse = 5;\n' }, text: 'Finished the parser.' }],
-      u2: () => [{ text: '', stop: { kind: 'hang' } }],
-    } }, contract => contract.units[0]?.status === 'passed' && contract.units[1]?.status === 'running', 'integration running after accepted research');
-    let resumedTask = '';
-    const h = restart(root, { plan, scripts: {
-      u1: mustNotRun,
-      u2: record => {
-        resumedTask = record.task;
-        return [{ files: { 'src/convert.ts': 'import { parse } from "./csv";\n' }, text: 'Wired convert.' }];
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(
+      {
+        plan,
+        scripts: {
+          u1: () => [{ files: { 'src/csv.ts': 'export const parse = 5;\n' }, text: 'Finished the parser.' }],
+          u2: () => [{ text: '', stop: { kind: 'hang' } }],
+        },
       },
-    } });
+      (contract) => contract.units[0]?.status === 'passed' && contract.units[1]?.status === 'running',
+      'integration running after accepted research',
+    );
+    let resumedTask = '';
+    const h = restart(root, {
+      plan,
+      scripts: {
+        u1: mustNotRun,
+        u2: (record) => {
+          resumedTask = record.task;
+          return [{ files: { 'src/convert.ts': 'import { parse } from "./csv";\n' }, text: 'Wired convert.' }];
+        },
+      },
+    });
     await h.runner.resumeAll();
     const done = await ended(h, id!);
     expect(done.status).toBe('passed');
     const marker = 'Actual host orchestration records (evidence, not approval of this unit):\n';
     expect(resumedTask).toContain(marker);
     const host = JSON.parse(resumedTask.split(marker)[1]!.split('\n')[0]!);
-    const accepted = done.decisions.filter(decision => decision.action === 'plan-accepted' && decision.targetId === id);
+    const accepted = done.decisions.filter((decision) => decision.action === 'plan-accepted' && decision.targetId === id);
     expect(accepted).toHaveLength(1);
     expect(host.contractId).toBe(id);
-    expect(host.planChecks).toEqual(accepted.map(({ at, reason, decisionIds }) => ({ at: new Date(at).toISOString(), reason, decisionIds })));
-    expect(host.units).toEqual([{ id: 'u1', goal: 'Parse CSV', status: 'passed', dependsOn: [],
-      criteria: [{ id: 'u1.c1', text: 'src/csv.ts parses CSV', serves: ['c1'], verdict: 'met' }], latestCheck: {
-      id: done.units[0]!.checks.at(-1)!.id, result: 'pass', decisionIds: done.units[0]!.checks.at(-1)!.decisionIds,
-      evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest,
-    }, acceptedAnswerDigest: hashState(done.units[0]!.answer ?? ''),
-      acceptedAnswerSource: { storage: 'native-contract-store', contractId: done.id, unitId: 'u1', field: 'answer' } }]);
-    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED').map(event => [event.unitId, event.purpose])).toEqual([['u2', 'resume']]);
+    expect(host.planChecks).toEqual(
+      accepted.map(({ at, reason, decisionIds }) => ({ at: new Date(at).toISOString(), reason, decisionIds })),
+    );
+    expect(host.units).toEqual([
+      {
+        id: 'u1',
+        goal: 'Parse CSV',
+        status: 'passed',
+        dependsOn: [],
+        criteria: [{ id: 'u1.c1', text: 'src/csv.ts parses CSV', serves: ['c1'], verdict: 'met' }],
+        latestCheck: {
+          id: done.units[0]!.checks.at(-1)!.id,
+          result: 'pass',
+          decisionIds: done.units[0]!.checks.at(-1)!.decisionIds,
+          evidenceDigest: done.units[0]!.checks.at(-1)!.evidenceDigest,
+        },
+        acceptedAnswerDigest: hashState(done.units[0]!.answer ?? ''),
+        acceptedAnswerSource: { storage: 'native-contract-store', contractId: done.id, unitId: 'u1', field: 'answer' },
+      },
+    ]);
+    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED').map((event) => [event.unitId, event.purpose])).toEqual([['u2', 'resume']]);
   }, 30_000);
 
   test('a two-group contract stopped while g1 ran resumes g1 and then runs g2', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: twoUnitPlan(), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: twoUnitPlan(), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     const h = restart(root, {
       plan: twoUnitPlan(),
       scripts: {
@@ -919,7 +1440,10 @@ describe('a later group and the whole plan', () => {
     const done = await ended(h, id!);
     expect(done.status).toBe('passed');
     expect(done.groups.map((group) => group.status)).toEqual(['passed', 'passed']);
-    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED').map((event) => [event.unitId, event.purpose])).toEqual([['u1', 'resume'], ['u2', 'unit']]);
+    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED').map((event) => [event.unitId, event.purpose])).toEqual([
+      ['u1', 'resume'],
+      ['u2', 'unit'],
+    ]);
   }, 30_000);
 });
 
@@ -929,14 +1453,26 @@ describe('session mode', () => {
   }
   const waitingForTurn = (contract: ContractView) => contract.sessionMode === true && contract.units[0]?.status === 'running';
 
-  test('a nudge that waited for the session\'s next turn waits again after the restart', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), port: answers(noDelegation), scripts: {} }, waitingForTurn, 'the session-mode unit');
+  test("a nudge that waited for the session's next turn waits again after the restart", async () => {
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), port: answers(noDelegation), scripts: {} }, waitingForTurn, 'the session-mode unit');
     editContract(root, id!, (contract) => {
       const u1 = contract.units[0]!;
       u1.status = 'nudged';
       u1.activeAgentId = 'turn-1';
       u1.agentIds.push('turn-1');
-      u1.nudges.push({ id: 'u1.n1', checkId: 'u1.k1', at: Date.now(), kinds: ['unmet'], criterionIds: ['u1.c1'], text: 'Not met: parse quoted fields.', delivery: 'bus', agentId: 'turn-1' });
+      u1.nudges.push({
+        id: 'u1.n1',
+        checkId: 'u1.k1',
+        at: Date.now(),
+        kinds: ['unmet'],
+        criterionIds: ['u1.c1'],
+        text: 'Not met: parse quoted fields.',
+        delivery: 'bus',
+        agentId: 'turn-1',
+      });
     });
     const h = restart(root, { plan: oneUnitPlan(1), port: answers(noDelegation), scripts: { u1: mustNotRun } });
     await h.runner.resumeAll();
@@ -947,7 +1483,10 @@ describe('session mode', () => {
   }, 30_000);
 
   test('a held session-mode unit is checked again with trigger resume and passes; no sub-agent is spawned', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), port: answers(noDelegation), scripts: {} }, waitingForTurn, 'the session-mode unit');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), port: answers(noDelegation), scripts: {} }, waitingForTurn, 'the session-mode unit');
     // The session's turn wrote the parser before the restart.
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'src', 'csv.ts'), 'export const parse = 6;\n');
@@ -968,9 +1507,14 @@ describe('session mode', () => {
 
 describe('the unit in the resumed tree', () => {
   test('the contract file of a running contract records what the restart needs', async () => {
-    const { root, ids: [id] } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
     // The engine's snapshot of the unit's item was written when the runner stopped: it is the resume point.
-    const snapshot = JSON.parse(readFileSync(join(root, '.goodvibes', 'orchestration', id!, 'g1.json'), 'utf-8')) as { workstream: { items: { id: string; state: string }[] } };
+    const snapshot = JSON.parse(readFileSync(join(root, '.goodvibes', 'orchestration', id!, 'g1.json'), 'utf-8')) as {
+      workstream: { items: { id: string; state: string }[] };
+    };
     expect(snapshot.workstream.items.find((item) => item.id === 'u1')?.state).toBe('in-phase');
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'y\n' }, text: 'Finished.' }] } });
     await h.runner.resumeAll();

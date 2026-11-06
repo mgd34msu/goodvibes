@@ -7940,6 +7940,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "attempt": {
               "attempt": 0,
               "endpointIndex": 0,
+              "dispatched": false,
               "endpointKind": "hosted",
               "requestedModel": "sample",
               "latencyMs": 0,
@@ -9117,6 +9118,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "attempt": {
                   "attempt": 0,
                   "endpointIndex": 0,
+                  "dispatched": false,
                   "endpointKind": "hosted",
                   "requestedModel": "sample",
                   "latencyMs": 0,
@@ -10311,6 +10313,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "attempt": {
                 "attempt": 0,
                 "endpointIndex": 0,
+                "dispatched": false,
                 "endpointKind": "hosted",
                 "requestedModel": "sample",
                 "latencyMs": 0,

@@ -187,8 +187,10 @@ export interface CliCatalog<TCommand extends string, TField extends string, TFla
     readonly createDefaultFlags: () => TFlags;
     readonly defaultCommand: TCommand;
     readonly globalFlags: readonly CommandFlagSpec<TField>[];
+    readonly postFlag?: ((flags: TFlags, spec: CommandFlagSpec<TField>) => TFlags) | undefined;
     readonly postProcess?: ((result: EngineParseResult<TCommand, TFlags>) => EngineParseResult<TCommand, TFlags>) | undefined;
     readonly rejectedFlags?: Readonly<Record<string, RejectedFlagSpec>> | undefined;
+    readonly unknownOptionError?: ((name: string) => string) | undefined;
     readonly unmatchedFirstToken: 'reject' | 'passthrough';
     readonly unresolvedCommandSentinel?: TCommand | undefined;
 }
@@ -247,6 +249,7 @@ export type ColorCapability = 'none' | 'basic16' | 'ansi256' | 'truecolor';
 
 // @public (undocumented)
 export interface CommandFlagSpec<TField extends string> {
+    readonly allowInlineValue?: boolean | undefined;
     readonly bareValue?: string | true | undefined;
     readonly constValue?: CliFlagValue | undefined;
     readonly enumDefault?: string | undefined;
@@ -292,6 +295,11 @@ export function createArchivableFleetRegistry(deps: ProcessRegistryDeps): Archiv
 //
 // @public (undocumented)
 export function createBottomBarLine(width: number, style: BottomBarStyle): Line;
+
+// @public
+export function createCliFlagParser<Flags>(parse: (argv: readonly string[], binary: string) => {
+    readonly flags: Flags;
+}): (argv: readonly string[], binary?: string) => Flags;
 
 // @public
 export function createFleetServices(deps: FleetServicesDeps): {

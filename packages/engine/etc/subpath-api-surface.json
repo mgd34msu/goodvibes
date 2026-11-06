@@ -52413,6 +52413,11 @@
       "text": "export declare function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient;"
     },
     {
+      "name": "createFleetUnionRowsPoller",
+      "kind": "function",
+      "text": "export declare function createFleetUnionRowsPoller(options: DaemonFleetRowsPollerOptions): DaemonFleetRowsPoller & { mergedRows(local: readonly ProcessNode[]): DaemonFleetRows | null; }; ;; via ProcessNode = export interface ProcessNode { readonly id: string; readonly kind: ProcessKind; readonly parentId?: string | undefined; readonly label: string; readonly task?: string | undefined; readonly state: ProcessState; readonly startedAt?: number | undefined; readonly completedAt?: number | undefined; readonly elapsedMs: number; readonly usage?: ProcessUsage | undefined; readonly model?: string | undefined; readonly provider?: string | undefined; readonly costUsd?: number | null | undefined; readonly costState: ProcessCostState; readonly costSource?: ProcessCostSource | undefined; readonly pricingAsOf?: string | undefined; readonly currentActivity?: ProcessActivity | undefined; readonly capabilities: ProcessCapabilities; readonly needsAttention?: ProcessAttention | undefined; readonly sessionRef?: ProcessSessionRef | undefined; readonly headline?: ProcessHeadline | undefined; readonly stall?: ProcessStallTell | undefined; readonly attemptGroup?: ProcessAttemptGroup | undefined; readonly check?: ProcessCheckSummary | undefined; readonly observed?: ProcessObserved | undefined; readonly raw?: unknown; }"
+    },
+    {
       "name": "createSpineAdoptionSync",
       "kind": "function",
       "text": "export declare function createSpineAdoptionSync(options: SpineAdoptionOptions): (signal: SpineAdoptionSignal, sharedDaemonToken: string) => void;"
@@ -60670,6 +60675,11 @@
       "text": "export declare function buildPersistedSessionContext(messages: readonly ConversationMessageSnapshot[], titleSource?: ConversationTitleSource, hints?: SessionContinuityHints): Promise<PersistedSessionContext>; ;; via ConversationMessageSnapshot = export type ConversationMessageSnapshot = { role: 'user'; content: string | ContentPart[]; cancelled?: boolean; } | AssistantMessage | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined; } | { role: 'tool'; callId: string; content: string; toolName?: string; outcome?: 'ok' | 'error' | 'cancelled'; }; ;; ConversationTitleSource = export type ConversationTitleSource = 'system' | 'user'; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
+      "name": "buildPersistedSessionContextFromFacts",
+      "kind": "function",
+      "text": "export declare function buildPersistedSessionContextFromFacts(messages: readonly ConversationMessageSnapshot[], titleSource: ConversationTitleSource | undefined, hints: SessionContinuityHints & { readonly pendingApprovals: number; }): PersistedSessionContext; ;; via ConversationMessageSnapshot = export type ConversationMessageSnapshot = { role: 'user'; content: string | ContentPart[]; cancelled?: boolean; } | AssistantMessage | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined; } | { role: 'tool'; callId: string; content: string; toolName?: string; outcome?: 'ok' | 'error' | 'cancelled'; }; ;; ConversationTitleSource = export type ConversationTitleSource = 'system' | 'user';"
+    },
+    {
       "name": "buildReachabilityNotices",
       "kind": "function",
       "text": "export declare function buildReachabilityNotices(input: ReachabilityNoticeInput): ReachabilityNotice[];"
@@ -60683,6 +60693,11 @@
       "name": "buildRemoteShellCommand",
       "kind": "function",
       "text": "export declare function buildRemoteShellCommand(command: string, args?: string[]): string;"
+    },
+    {
+      "name": "buildReturnContextFromFacts",
+      "kind": "function",
+      "text": "export declare function buildReturnContextFromFacts(messages: readonly ConversationMessageSnapshot[], hints: SessionContinuityHints & { readonly pendingApprovals: number; }): SessionReturnContextSummary; ;; via ConversationMessageSnapshot = export type ConversationMessageSnapshot = { role: 'user'; content: string | ContentPart[]; cancelled?: boolean; } | AssistantMessage | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined; } | { role: 'tool'; callId: string; content: string; toolName?: string; outcome?: 'ok' | 'error' | 'cancelled'; };"
     },
     {
       "name": "buildTurnNotification",

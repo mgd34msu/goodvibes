@@ -5445,6 +5445,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "attempt": {
               "attempt": 0,
               "endpointIndex": 0,
+              "dispatched": false,
               "endpointKind": "hosted",
               "requestedModel": "sample",
               "latencyMs": 0,
@@ -6624,6 +6625,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "attempt": {
                   "attempt": 0,
                   "endpointIndex": 0,
+                  "dispatched": false,
                   "endpointKind": "hosted",
                   "requestedModel": "sample",
                   "latencyMs": 0,
@@ -7819,6 +7821,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "attempt": {
                 "attempt": 0,
                 "endpointIndex": 0,
+                "dispatched": false,
                 "endpointKind": "hosted",
                 "requestedModel": "sample",
                 "latencyMs": 0,

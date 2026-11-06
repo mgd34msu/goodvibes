@@ -1919,6 +1919,9 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "dispatched": {
+                    "type": "boolean"
+                  },
                   "endpointKind": {
                     "type": "string",
                     "enum": [

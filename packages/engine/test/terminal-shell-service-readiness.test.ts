@@ -30,3 +30,29 @@ test('service inspection failure remains operational instead of becoming a healt
   } as unknown as Pick<ServiceRegistry, 'getAll' | 'inspect'>;
   await expect(collectServiceReadiness(registry, ': ')).rejects.toBe(failure);
 });
+
+test('failed health inspections retain sibling credential reads until they settle', async () => {
+  const sibling = Promise.withResolvers<null>();
+  const failure = new Error('inspection unavailable');
+  let finished = false;
+  const registry = {
+    getAll: () => ({ failing: {}, sibling: {} }),
+    inspect(name: string) {
+      if (name === 'failing') throw failure;
+      return sibling.promise;
+    },
+  } as unknown as Pick<ServiceRegistry, 'getAll' | 'inspect'>;
+  const pending = collectServiceReadiness(registry, ': ').then(
+    () => {
+      throw new Error('Expected inspection failure');
+    },
+    (error) => {
+      finished = true;
+      return error;
+    },
+  );
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  expect(finished).toBe(false);
+  sibling.resolve(null);
+  expect(await pending).toBe(failure);
+});

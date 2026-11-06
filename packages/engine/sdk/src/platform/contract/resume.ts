@@ -183,7 +183,9 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         && contract.escalations.every(item => item.resolvedAt !== undefined);
       const pendingFixVerification = acceptedWork && contract.failureKind === 'judgment-unavailable' && contract.fixRounds > 0
         && !hasScheduledFix(contract, contract.id, contract.fixRounds)
-        && contract.error?.startsWith('interrupted correction could not resume:') === true;
+        && (contract.error?.startsWith('interrupted correction could not resume:') === true
+          || contract.decisions.some(decision => decision.action === 'planned'
+            && decision.targetId === `${contract.id}.f${contract.fixRounds}.candidate`));
       const pendingVerification = acceptedWork && contract.failureKind === 'judgment-unavailable' && !pendingFixVerification;
       const pendingRepair = acceptedWork && contract.failureKind === 'planning' && contract.fixRounds > 0
         && !hasScheduledFix(contract, contract.id, contract.fixRounds)

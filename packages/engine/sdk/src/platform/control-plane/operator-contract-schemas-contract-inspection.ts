@@ -66,6 +66,7 @@ export const CONTRACT_NATIVE_WAITING_SCHEMA = objectSchema({
     attempt: objectSchema({
       attempt: COUNTER,
       endpointIndex: COUNTER,
+      dispatched: BOOLEAN_SCHEMA,
       endpointKind: enumSchema(['hosted', 'local']),
       requestedModel: STRING_SCHEMA,
       latencyMs: NUMBER_SCHEMA,

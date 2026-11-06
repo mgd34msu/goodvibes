@@ -1,12 +1,13 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
 import { createProtectedSourceOwner } from '../sdk/src/platform/security/source-screening/owner.js';
-import type { ProtectedSourceOwnerOptions, ResearchReferenceScreeningReceipt, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt } from '../sdk/src/platform/security/source-screening/types.js';
+import type { ProtectedSourceOwnerOptions, ResearchReferenceScreeningReceipt, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt,
+} from '../sdk/src/platform/security/source-screening/types.js';
 import type { ResearchReferenceOperation } from '../sdk/src/platform/security/source-screening/types.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 function answer(value = 0, model = 'jev-1.13.0') {
   return Response.json({ model, answers: { credential: { type: 'noul', noul: value } }, usage: { input_tokens: 5, output_tokens: 1 } });
 }
@@ -14,21 +15,25 @@ function fixture(options: {
   judge?: (body: Record<string, unknown>, count: number) => Response | Promise<Response>;
   authority?: () => void;
   onRetry?: ProtectedSourceOwnerOptions['onRetry'];
-} = {}) {
+} = {},
+) {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-    const body = await request.json() as Record<string, unknown>;
+    const body = (await request.json()) as Record<string, unknown>;
     const path = new URL(request.url).pathname;
     calls.push({ path, body });
     if (path !== '/v1/systemone') return new Response('Unexpected proposal route', { status: 400 });
     return options.judge ? options.judge(body, calls.length) : answer();
-  } });
+  },
+  });
   const lifetime = new AbortController();
   const config: ProtectedSourceOwnerOptions = {
     authority: { ownerId: 'synthetic-reference-owner', revision: '1', retention: 'ephemeral-no-log', signal: lifetime.signal,
-      assertCurrent: options.authority ?? (() => {}) },
+      assertCurrent: options.authority ?? (() => {}),
+    },
     proposal: { endpoint: `http://127.0.0.1:${server.port}`, model: 'unused-local-proposal-fixture' },
-    judgment: { endpoint: `http://127.0.0.1:${server.port}`, model: 'jev-1.13.0' }, timeoutMs: 1_000,
+    judgment: { endpoint: `http://127.0.0.1:${server.port}`, model: 'jev-1.13.0' },
+    timeoutMs: 1_000,
     ...(options.onRetry ? { onRetry: options.onRetry } : {}),
   };
   const owner = createProtectedSourceOwner(config);
@@ -50,12 +55,18 @@ test('reference operation fences reject executable metadata and async guards bef
   const f = fixture();
   const handle = f.owner.captureResearchReference('https://example.test/document?id=synthetic-value');
   let traps = 0;
-  const getter = Object.defineProperty({}, 'assertCurrent', { get() { traps++; return () => {}; } });
-  const proxy = new Proxy({}, { ownKeys() { traps++; return []; }, getPrototypeOf() { traps++; return Object.prototype; } });
-  const signal = new Proxy(new AbortController().signal, { getPrototypeOf() { traps++; return AbortSignal.prototype; } });
-  const guard = new Proxy(() => {}, { apply() { traps++; } });
+  const getter = Object.defineProperty({}, 'assertCurrent', { get() { traps++; return () => {}; },
+  });
+  const proxy = new Proxy({}, { ownKeys() { traps++; return []; }, getPrototypeOf() { traps++; return Object.prototype; },
+    },
+  );
+  const signal = new Proxy(new AbortController().signal, { getPrototypeOf() { traps++; return AbortSignal.prototype; },
+  });
+  const guard = new Proxy(() => {}, { apply() { traps++; },
+  });
   for (const operation of [getter, proxy, { signal }, { assertCurrent: guard }, { extra: true }]) {
-    expect(await f.owner.screenResearchReference(handle, operation as ResearchReferenceOperation)).toEqual({ status: 'held', reason: 'malformed' });
+    expect(await f.owner.screenResearchReference(handle, operation as ResearchReferenceOperation)).toEqual({ status: 'held', reason: 'malformed',
+    });
   }
   expect(await f.owner.screenResearchReference(handle, { assertCurrent: async () => {} })).toEqual({ status: 'held', reason: 'stale' });
   expect(traps).toBe(0);
@@ -70,8 +81,8 @@ test('name-only Jev preserves the exact benign reference, duplicate fields, quer
   const f = fixture();
   const url = 'HTTPS://EXAMPLE.TEST:443/document%2fid?id=sentinel-one&id=sentinel-two&q=ordinary+words#section-2';
   expect(await f.project(url)).toEqual([url]);
-  expect(f.calls.map(call => call.path)).toEqual(['/v1/systemone', '/v1/systemone']);
-  expect(f.calls.map(call => call.body.state)).toEqual([{ parameter: 'id' }, { parameter: 'q' }]);
+  expect(f.calls.map((call) => call.path)).toEqual(['/v1/systemone', '/v1/systemone']);
+  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'id' }, { parameter: 'q' }]);
   const transmitted = JSON.stringify(f.calls);
   for (const withheld of ['EXAMPLE.TEST', 'document%2fid', 'sentinel-one', 'sentinel-two', 'ordinary+words', 'section-2']) {
     expect(transmitted).not.toContain(withheld);
@@ -87,11 +98,11 @@ test('a credential role withholds the whole reference rather than changing its i
 });
 
 test('names are decoded once by URLSearchParams while original resource bytes stay unchanged', async () => {
-  const f = fixture({ judge: body => answer((body.state as { parameter: string }).parameter === 'auth' ? 1 : 0) });
+  const f = fixture({ judge: (body) => answer((body.state as { parameter: string }).parameter === 'auth' ? 1 : 0) });
   expect(await f.project('https://example.test/document?%61uth=synthetic-sentinel')).toEqual(['[source URL withheld]']);
   const benign = 'https://example.test/search?q=ordinary words&%71=more%20words&max_tokens=42#anchor';
   expect(await f.project(benign)).toEqual([benign]);
-  expect(f.calls.map(call => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'q' }, { parameter: 'max_tokens' }]);
+  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'q' }, { parameter: 'max_tokens' }]);
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-sentinel');
 });
 
@@ -104,7 +115,7 @@ test.each([
   'https://name@example.test/document?pat=synthetic-sentinel',
   'ftp://example.test/document?pat=synthetic-sentinel',
   'not a URL',
-])('a complete declared malformed reference is omitted without any model request: %j', async url => {
+])('a complete declared malformed reference is omitted without any model request: %j', async (url) => {
   const f = fixture(); expect(await f.project(url)).toEqual(['[source URL withheld]']); expect(f.calls).toHaveLength(0);
 });
 
@@ -141,7 +152,8 @@ test('unsettled parameter roles survive source release, changed values and chang
 
 test('concurrent distinct references never sample the same in-flight name twice', async () => {
   const started = deferred<void>(), finish = deferred<void>();
-  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); } });
+  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); },
+  });
   const first = f.owner.captureResearchReference('https://example.test/a?id=first');
   const second = f.owner.captureResearchReference('https://example.test/b?id=second');
   const pending = f.owner.screenResearchReference(first); await started.promise;
@@ -166,30 +178,36 @@ test('forged, foreign, released and revoked reference receipts release no origin
 
 test('reference route mutation cannot redirect an in-flight name-only attempt', async () => {
   const started = deferred<void>(), finish = deferred<void>();
-  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); } });
+  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); },
+  });
   const source = f.owner.captureResearchReference('https://example.test/?id=synthetic-sentinel');
   const pending = f.owner.screenResearchReference(source); expect(f.owner.screenResearchReference(source)).toBe(pending); await started.promise;
   (f.config.judgment as { endpoint: string }).endpoint = 'https://forbidden.example';
   finish.resolve(); const result = await pending; expect(result.status).toBe('settled');
-  if (result.status === 'settled') expect(f.owner.projectResearchReference(result.receipt)).toEqual({ status: 'preserved', url: 'https://example.test/?id=synthetic-sentinel' });
+  if (result.status === 'settled') expect(f.owner.projectResearchReference(result.receipt)).toEqual({ status: 'preserved', url: 'https://example.test/?id=synthetic-sentinel',
+    });
   expect(f.calls).toHaveLength(1); expect(JSON.stringify(f.calls)).not.toContain('synthetic-sentinel');
 });
 
 test('revocation during a reference reading releases no text or settled cache receipt', async () => {
   let current = true;
-  const f = fixture({ authority: () => { if (!current) throw new Error('synthetic-private-reason'); }, judge: () => { current = false; return answer(); } });
+  const f = fixture({ authority: () => { if (!current) throw new Error('synthetic-private-reason'); }, judge: () => { current = false; return answer(); },
+  });
   const source = f.owner.captureResearchReference('https://example.test/?id=synthetic-sentinel');
   expect(await f.owner.screenResearchReference(source)).toEqual({ status: 'held', reason: 'stale' });
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-sentinel');
 });
 
-test('canonical transient retries send the identical name-only state and value-free progress', async () => {
+test('an explicit retry after a protected decision outage sends identical name-only state', async () => {
   const progress: unknown[] = [];
-  const f = fixture({ onRetry: event => { progress.push(event); }, judge: (_body, count) => count === 1
-    ? new Response('synthetic private service echo', { status: 503 }) : answer(1) });
+  const f = fixture({ onRetry: (event) => { progress.push(event); }, judge: (_body, count) => (count === 1
+    ? new Response('synthetic private service echo', { status: 503 }) : answer(1)),
+  });
+  const handle = f.owner.captureResearchReference('https://example.test/path?auth=synthetic-sentinel#anchor');
+  expect(await f.owner.screenResearchReference(handle)).toEqual({ status: 'held', reason: 'route-unavailable' });
   expect(await f.project('https://example.test/path?auth=synthetic-sentinel#anchor')).toEqual(['[source URL withheld]']);
-  expect(f.calls.map(call => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'auth' }]);
-  expect(progress).toHaveLength(1);
+  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'auth' }]);
+  expect(progress).toHaveLength(0);
   expect(JSON.stringify([f.calls, progress])).not.toContain('synthetic-sentinel');
 }, 10_000);
 
@@ -211,15 +229,23 @@ test('reference bounds fail before requests and share the original-handle capaci
 });
 
 test('query-role handles and receipts cannot satisfy the generic display-preview boundary, even after unsafe casts', async () => {
-  const f = fixture({ judge: body => 'parameter' in (body.state as object) ? answer() : Response.json({ model: 'jev-1.13.0',
-    answers: screeningAnswers(body, { complete: 1, precise: 1 }) }) });
+  const f = fixture({
+    judge: (body) =>
+      'parameter' in (body.state as object)
+        ? answer()
+        : Response.json({ model: 'jev-1.13.0', answers: screeningAnswers(body, { complete: 1, precise: 1 }) }),
+  });
   const reference = f.owner.captureResearchReference('https://example.test/#section');
   expect(await f.owner.screen(reference as unknown as ProtectedSource)).toEqual({ status: 'held', reason: 'stale' });
   const result = await f.owner.screenResearchReference(reference);
-  expect(result.status).toBe('settled'); if (result.status !== 'settled') return;
+  expect(result.status).toBe('settled');
+  if (result.status !== 'settled') return;
   expect(() => f.owner.project(result.receipt as unknown as SourceScreeningReceipt)).toThrow();
   const source = f.owner.capture(['Ordinary source.']);
-  expect(await f.owner.screenResearchReference(source as unknown as ProtectedResearchReference)).toEqual({ status: 'held', reason: 'stale' });
+  expect(await f.owner.screenResearchReference(source as unknown as ProtectedResearchReference)).toEqual({
+    status: 'held',
+    reason: 'stale',
+  });
   // A forged empty object never supplies the missing other-mode receipt.
   expect(() => f.owner.projectResearchReference({} as ResearchReferenceScreeningReceipt)).toThrow();
   expect(f.calls).toHaveLength(0);
@@ -231,16 +257,29 @@ test('query-role projection makes no claim about fragments or server-specific qu
   const serverSpecific = 'https://example.test/?id=123;auth=synthetic-server-field';
   expect(await f.project(fragment)).toEqual([fragment]);
   expect(await f.project(serverSpecific)).toEqual([serverSpecific]);
-  expect(f.calls.map(call => call.body.state)).toEqual([{ parameter: 'id' }]);
+  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'id' }]);
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-');
 });
 
 test('non-string inputs are refused without invoking coercion or proxy traps', () => {
-  const f = fixture(); let reads = 0;
-  const input = new Proxy({}, { get() { reads++; throw new Error('synthetic-private-error'); },
-    getPrototypeOf() { reads++; throw new Error('synthetic-private-error'); } });
+  const f = fixture();
+  let reads = 0;
+  const input = new Proxy(
+    {},
+    {
+      get() {
+        reads++;
+        throw new Error('synthetic-private-error');
+      },
+      getPrototypeOf() {
+        reads++;
+        throw new Error('synthetic-private-error');
+      },
+    },
+  );
   expect(() => f.owner.captureResearchReference(input as string)).toThrow();
-  expect(reads).toBe(0); expect(f.calls).toHaveLength(0);
+  expect(reads).toBe(0);
+  expect(f.calls).toHaveLength(0);
 });
 
 test('name-role capacity never evicts an earlier outcome or sends overflowing names', async () => {
@@ -254,13 +293,15 @@ test('name-role capacity never evicts an earlier outcome or sends overflowing na
   expect(await f.owner.screenResearchReference(overflow)).toEqual({ status: 'held', reason: 'capacity' });
   expect(await f.owner.screenResearchReference(overflow)).toEqual({ status: 'held', reason: 'capacity' });
   await f.owner.release(overflow);
-  expect(await f.project('https://other.example.test/?field0=changed#anchor')).toEqual(['https://other.example.test/?field0=changed#anchor']);
+  expect(await f.project('https://other.example.test/?field0=changed#anchor')).toEqual(['https://other.example.test/?field0=changed#anchor',
+  ]);
   expect(f.calls).toHaveLength(1_024);
 }, 30_000);
 
 test('reference cancellation retires the request before release completes and permits no late projection', async () => {
   const started = deferred<void>(), finish = deferred<void>();
-  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); } });
+  const f = fixture({ judge: async () => { started.resolve(); await finish.promise; return answer(); },
+  });
   const source = f.owner.captureResearchReference('https://example.test/?auth=synthetic-sentinel');
   const pending = f.owner.screenResearchReference(source); await started.promise;
   await f.owner.release(source);

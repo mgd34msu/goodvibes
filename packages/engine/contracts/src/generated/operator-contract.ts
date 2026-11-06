@@ -32476,6 +32476,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "minimum": 0,
                             "maximum": 9007199254740991
                           },
+                          "dispatched": {
+                            "type": "boolean"
+                          },
                           "endpointKind": {
                             "type": "string",
                             "enum": [
@@ -39968,6 +39971,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "type": "integer",
                                   "minimum": 0,
                                   "maximum": 9007199254740991
+                                },
+                                "dispatched": {
+                                  "type": "boolean"
                                 },
                                 "endpointKind": {
                                   "type": "string",
@@ -47565,6 +47571,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "dispatched": {
+                                "type": "boolean"
                               },
                               "endpointKind": {
                                 "type": "string",

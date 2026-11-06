@@ -1,3 +1,4 @@
+import { drainSnapshotReads } from './onboarding-snapshot-reads.js';
 import type { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
 /** Shared deterministic health findings; products supply labels and repair authority. */
 export async function collectServiceReadiness(
@@ -5,7 +6,7 @@ export async function collectServiceReadiness(
   separator: string,
 ): Promise<{ readonly configured: number; readonly issues: string[] }> {
   const keys = Object.keys(registry.getAll());
-  const inspections = await Promise.all(keys.map((key) => registry.inspect(key)));
+  const inspections = await drainSnapshotReads(keys.map(async (key) => registry.inspect(key)));
   const issues = inspections
     .filter((inspection) => inspection !== null)
     .flatMap((inspection) => {

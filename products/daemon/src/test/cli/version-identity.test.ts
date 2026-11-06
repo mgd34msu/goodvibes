@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,9 +18,15 @@ async function fixtureVersion(name: string, version: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'daemon-version-identity-'));
   fixtures.push(directory);
   await mkdir(join(directory, 'src'));
+  await mkdir(join(directory, 'node_modules', '@goodvibes-jev'), { recursive: true });
+  await symlink(
+    fileURLToPath(new URL('../../../../../packages/engine', import.meta.url)),
+    join(directory, 'node_modules', '@goodvibes-jev', 'engine'),
+    'dir',
+  );
   await copyFile(source, join(directory, 'src', 'version.ts'));
   await writeFile(join(directory, 'package.json'), JSON.stringify({ name, version, type: 'module' }));
-  const loaded = await import(pathToFileURL(join(directory, 'src', 'version.ts')).href) as { VERSION: string };
+  const loaded = (await import(pathToFileURL(join(directory, 'src', 'version.ts')).href)) as { VERSION: string };
   return loaded.VERSION;
 }
 

@@ -2688,6 +2688,21 @@
       "bun": "./terminal-shell/src/searchable-modal-route.ts",
       "types": "./terminal-shell/dist/searchable-modal-route.d.ts",
       "import": "./terminal-shell/dist/searchable-modal-route.js"
+    },
+    "./terminal-shell/renderer/conversation-overlays": {
+      "bun": "./terminal-shell/src/renderer/conversation-overlays.ts",
+      "types": "./terminal-shell/dist/renderer/conversation-overlays.d.ts",
+      "import": "./terminal-shell/dist/renderer/conversation-overlays.js"
+    },
+    "./terminal-shell/onboarding-workflow-types": {
+      "bun": "./terminal-shell/src/onboarding-workflow-types.ts",
+      "types": "./terminal-shell/dist/onboarding-workflow-types.d.ts",
+      "import": "./terminal-shell/dist/onboarding-workflow-types.js"
+    },
+    "./terminal-shell/renderer/settings-layout": {
+      "bun": "./terminal-shell/src/renderer/settings-layout.ts",
+      "types": "./terminal-shell/dist/renderer/settings-layout.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-layout.js"
     }
   },
   "publishConfig": {

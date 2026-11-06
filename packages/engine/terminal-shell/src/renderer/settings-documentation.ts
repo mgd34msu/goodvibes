@@ -1,7 +1,7 @@
 import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { activeTokens } from './theme.js';
 import { clipText, tailText, wrapLines } from './surface-kit.js';
-interface DocLine {
+export interface DocLine {
   readonly text: string;
   readonly fg: string;
   readonly bold?: boolean | undefined;

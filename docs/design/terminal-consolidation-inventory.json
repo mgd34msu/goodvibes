@@ -1183,7 +1183,8 @@
       "path": "renderer/conversation-overlays.ts",
       "baselineTuiLines": 157,
       "baselineSimilarity": 0.7461,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns row overlay ordering and modal stack/surface/permission/toast composition. Products declare modal catalogs, onboarding screen replacement, scoped toast sources and original search-row mutation policy."
     },
     {
       "path": "renderer/conversation-surface.ts",
@@ -1783,7 +1784,8 @@
       "path": "runtime/onboarding/index.ts",
       "baselineTuiLines": 8,
       "baselineSimilarity": 0.875,
-      "status": "pending-convergence"
+      "status": "product-export-surface",
+      "notes": "Reviewed barrel only: exports product-specific onboarding modules. It contains no implementation to hoist; platform-backed modules retain product-relative imports."
     },
     {
       "path": "runtime/onboarding/markers.ts",
@@ -1822,7 +1824,7 @@
       "path": "runtime/onboarding/types.ts",
       "baselineTuiLines": 465,
       "baselineSimilarity": 0.8032,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "OnboardingMode",
         "OnboardingAcknowledgementTarget",
@@ -1848,7 +1850,8 @@
         "OnboardingAcknowledgementState",
         "OnboardingReopenEditAcknowledgementState",
         "OnboardingConfigSnapshot"
-      ]
+      ],
+      "notes": "Common snapshot/account/capability/operation/request/result/helper schemas are platform generics. Products bind their config vocabulary, operation scope, host capabilities and Agent-only local behavior operations."
     },
     {
       "path": "runtime/onboarding/verify.ts",

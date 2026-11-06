@@ -1,3 +1,18 @@
+import type {
+  TerminalOnboardingProviderAccountsSnapshot,
+  TerminalOnboardingSnapshotState,
+  TerminalOnboardingCapabilityItem,
+  TerminalOnboardingStepDerivationState,
+  TerminalOnboardingApplyOperation,
+  TerminalOnboardingApplyRequest,
+  TerminalOnboardingAppliedOperation,
+  TerminalOnboardingSkippedOperation,
+  TerminalOnboardingApplyError,
+  TerminalOnboardingApplyResult,
+  TerminalOnboardingSurfaceReadHelper,
+  TerminalOnboardingProviderAccountReadHelper,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-workflow-types';
+import type { TerminalOnboardingProviderAccount } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-collector';
 import type { TerminalOnboardingConfigSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
 import type {
   OnboardingNetworkMode,
@@ -108,31 +123,9 @@ export interface OnboardingLegacyDaemonSnapshot {
   readonly trackedServiceName?: string;
 }
 
-export interface OnboardingProviderAccountRecord {
-  readonly providerId: string;
-  readonly configured: boolean;
-  readonly active: boolean;
-  readonly oauthReady: boolean;
-  readonly pendingLogin: boolean;
-  readonly availableRoutes: readonly string[];
-  readonly activeRoute: string;
-  readonly authFreshness: string;
-  /**
-   * The secrets-store key this provider reads its API key from, its declared
-   * auth env var, read from the live provider's registration-time auth state.
-   * Present only for providers that accept an API key; absent for keyless /
-   * subscription-only providers. Used to offer provider-agnostic key entry in
-   * onboarding, and as the storage key when the entered value is saved.
-   */
-  readonly apiKeyEnvVar?: string;
-}
+export type OnboardingProviderAccountRecord = TerminalOnboardingProviderAccount;
 
-export interface OnboardingProviderAccountsSnapshot {
-  readonly capturedAt: number;
-  readonly configuredCount: number;
-  readonly issueCount: number;
-  readonly providers: readonly OnboardingProviderAccountRecord[];
-}
+export type OnboardingProviderAccountsSnapshot = TerminalOnboardingProviderAccountsSnapshot<OnboardingProviderAccountRecord>;
 
 export type OnboardingSnapshotCollectionIssueArea =
   | 'services'
@@ -151,21 +144,13 @@ export interface OnboardingSnapshotCollectionIssue {
   readonly message: string;
 }
 
-export interface OnboardingSnapshotState {
-  readonly capturedAt: number;
-  readonly config: OnboardingConfigSnapshot;
-  readonly providerRouting: OnboardingProviderRoutingSnapshot;
-  readonly runtimeDefaults: OnboardingRuntimeDefaultsSnapshot;
-  readonly acknowledgements: OnboardingAcknowledgementSnapshot;
-  readonly services: OnboardingServicesSnapshot;
-  readonly subscriptions: OnboardingSubscriptionsSnapshot;
-  readonly secrets: OnboardingSecretsSnapshot;
-  readonly auth: OnboardingAuthSnapshot;
+export interface OnboardingSnapshotState extends TerminalOnboardingSnapshotState<
+  OnboardingConfigSnapshot,
+  OnboardingSnapshotCollectionIssueArea,
+  OnboardingProviderAccountRecord
+> {
   readonly bindSettings: OnboardingBindSettingsSnapshot;
-  readonly surfaces: OnboardingSurfacesSnapshot;
-  readonly providerAccounts: OnboardingProviderAccountsSnapshot | null;
   readonly legacyDaemon: OnboardingLegacyDaemonSnapshot;
-  readonly collectionIssues: readonly OnboardingSnapshotCollectionIssue[];
 }
 
 export type OnboardingStep1CapabilityId =
@@ -176,12 +161,7 @@ export type OnboardingStep1CapabilityId =
   | 'external-integrations'
   | 'cloudflare-batch';
 
-export interface OnboardingStep1CapabilityItem {
-  readonly id: OnboardingStep1CapabilityId;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly detail: string;
-}
+export type OnboardingStep1CapabilityItem = TerminalOnboardingCapabilityItem<OnboardingStep1CapabilityId>;
 
 export interface OnboardingStep1CapabilityFlags {
   readonly providers: boolean;
@@ -195,72 +175,19 @@ export interface OnboardingStep1CapabilityFlags {
   readonly cloudflare: boolean;
 }
 
-export interface OnboardingStepDerivationState {
-  readonly step1Capabilities: readonly OnboardingStep1CapabilityItem[];
-  readonly step1_5NetworkMode: OnboardingNetworkMode;
-  readonly reopenEditAcknowledgements: OnboardingReopenEditAcknowledgementState;
-}
+export type OnboardingStepDerivationState = TerminalOnboardingStepDerivationState<OnboardingStep1CapabilityId>;
 
-export type OnboardingApplyOperation =
-  | {
-      readonly kind: 'set-config';
-      readonly key: ConfigKey;
-      readonly value: unknown;
-      readonly scope?: 'global' | 'project';
-    }
-  | {
-      readonly kind: 'set-secret';
-      readonly key: string;
-      readonly value: string;
-      /**
-       * Which secret tier the value is filed in. 'daemon' is the tier the
-       * daemon reads with every surface closed, see
-       * config/secret-config.ts#defaultSecretBackedScope.
-       */
-      readonly scope?: 'project' | 'user' | 'daemon';
-      readonly medium: 'secure' | 'plaintext';
-    }
-  | {
-      readonly kind: 'ensure-auth-user';
-      readonly username: string;
-      readonly password: string;
-      readonly roles?: readonly string[];
-      readonly createSession?: boolean;
-      readonly retireBootstrapCredential?: boolean;
-    }
-  | {
-      readonly kind: 'acknowledge';
-      readonly target: OnboardingAcknowledgementTarget;
-      readonly acknowledged: boolean;
-    };
+export type OnboardingApplyOperation = TerminalOnboardingApplyOperation<ConfigKey, 'project' | 'user' | 'daemon'>;
 
-export interface OnboardingApplyRequest {
-  readonly mode: OnboardingMode;
-  readonly source: string;
-  readonly operations: readonly OnboardingApplyOperation[];
-}
+export type OnboardingApplyRequest = TerminalOnboardingApplyRequest<OnboardingApplyOperation>;
 
-export interface OnboardingAppliedOperation {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly summary: string;
-}
+export type OnboardingAppliedOperation = TerminalOnboardingAppliedOperation<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingSkippedOperation {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly reason: string;
-}
+export type OnboardingSkippedOperation = TerminalOnboardingSkippedOperation<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingApplyError {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly message: string;
-}
+export type OnboardingApplyError = TerminalOnboardingApplyError<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingApplyResult {
-  readonly ok: boolean;
-  readonly applied: readonly OnboardingAppliedOperation[];
-  readonly skipped: readonly OnboardingSkippedOperation[];
-  readonly errors: readonly OnboardingApplyError[];
-}
+export type OnboardingApplyResult = TerminalOnboardingApplyResult<OnboardingApplyOperation['kind']>;
 
 export interface WizardProgressPayload {
   readonly version: 1;
@@ -282,13 +209,9 @@ export interface WizardProgressState {
   readonly parseError?: string;
 }
 
-export interface OnboardingSurfaceReadHelper {
-  list(): readonly OnboardingSurfaceRecord[] | Promise<readonly OnboardingSurfaceRecord[]>;
-}
+export type OnboardingSurfaceReadHelper = TerminalOnboardingSurfaceReadHelper;
 
-export interface OnboardingProviderAccountReadHelper {
-  loadSnapshot(): Promise<OnboardingProviderAccountsSnapshot>;
-}
+export type OnboardingProviderAccountReadHelper = TerminalOnboardingProviderAccountReadHelper<OnboardingProviderAccountRecord>;
 
 export interface OnboardingLegacyDaemonReadHelper {
   detect(): OnboardingLegacyDaemonSnapshot | Promise<OnboardingLegacyDaemonSnapshot>;

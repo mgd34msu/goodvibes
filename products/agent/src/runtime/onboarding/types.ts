@@ -1,3 +1,18 @@
+import type {
+  TerminalOnboardingProviderAccountsSnapshot,
+  TerminalOnboardingSnapshotState,
+  TerminalOnboardingCapabilityItem,
+  TerminalOnboardingStepDerivationState,
+  TerminalOnboardingApplyOperation,
+  TerminalOnboardingApplyRequest,
+  TerminalOnboardingAppliedOperation,
+  TerminalOnboardingSkippedOperation,
+  TerminalOnboardingApplyError,
+  TerminalOnboardingApplyResult,
+  TerminalOnboardingSurfaceReadHelper,
+  TerminalOnboardingProviderAccountReadHelper,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-workflow-types';
+import type { TerminalOnboardingProviderAccount } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-collector';
 import type { TerminalOnboardingConfigSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-snapshot-reads';
 import type {
   OnboardingNetworkMode,
@@ -64,23 +79,9 @@ export type OnboardingConfigSnapshot = TerminalOnboardingConfigSnapshot<
   'display' | 'provider' | 'behavior' | 'storage' | 'permissions' | 'helper' | 'tools' | 'surfaces'
 >;
 
-export interface OnboardingProviderAccountRecord {
-  readonly providerId: string;
-  readonly configured: boolean;
-  readonly active: boolean;
-  readonly oauthReady: boolean;
-  readonly pendingLogin: boolean;
-  readonly availableRoutes: readonly string[];
-  readonly activeRoute: string;
-  readonly authFreshness: string;
-}
+export type OnboardingProviderAccountRecord = Omit<TerminalOnboardingProviderAccount, 'apiKeyEnvVar'>;
 
-export interface OnboardingProviderAccountsSnapshot {
-  readonly capturedAt: number;
-  readonly configuredCount: number;
-  readonly issueCount: number;
-  readonly providers: readonly OnboardingProviderAccountRecord[];
-}
+export type OnboardingProviderAccountsSnapshot = TerminalOnboardingProviderAccountsSnapshot<OnboardingProviderAccountRecord>;
 
 export type OnboardingSnapshotCollectionIssueArea =
   | 'host'
@@ -98,20 +99,12 @@ export interface OnboardingSnapshotCollectionIssue {
   readonly message: string;
 }
 
-export interface OnboardingSnapshotState {
-  readonly capturedAt: number;
-  readonly config: OnboardingConfigSnapshot;
-  readonly providerRouting: OnboardingProviderRoutingSnapshot;
-  readonly runtimeDefaults: OnboardingRuntimeDefaultsSnapshot;
-  readonly acknowledgements: OnboardingAcknowledgementSnapshot;
-  readonly services: OnboardingServicesSnapshot;
-  readonly subscriptions: OnboardingSubscriptionsSnapshot;
-  readonly secrets: OnboardingSecretsSnapshot;
-  readonly auth: OnboardingAuthSnapshot;
-  readonly surfaces: OnboardingSurfacesSnapshot;
-  readonly providerAccounts: OnboardingProviderAccountsSnapshot | null;
+export interface OnboardingSnapshotState extends TerminalOnboardingSnapshotState<
+  OnboardingConfigSnapshot,
+  OnboardingSnapshotCollectionIssueArea,
+  OnboardingProviderAccountRecord
+> {
   readonly localBehaviorDiscovery: AgentBehaviorDiscoverySnapshot;
-  readonly collectionIssues: readonly OnboardingSnapshotCollectionIssue[];
 }
 
 export type OnboardingStep1CapabilityId =
@@ -123,12 +116,7 @@ export type OnboardingStep1CapabilityId =
   | 'automation-review'
   | 'tui-delegation';
 
-export interface OnboardingStep1CapabilityItem {
-  readonly id: OnboardingStep1CapabilityId;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly detail: string;
-}
+export type OnboardingStep1CapabilityItem = TerminalOnboardingCapabilityItem<OnboardingStep1CapabilityId>;
 
 export interface OnboardingStep1CapabilityFlags {
   readonly providerAccess: boolean;
@@ -141,39 +129,10 @@ export interface OnboardingStep1CapabilityFlags {
   readonly tuiDelegation: boolean;
 }
 
-export interface OnboardingStepDerivationState {
-  readonly step1Capabilities: readonly OnboardingStep1CapabilityItem[];
-  readonly step1_5NetworkMode: OnboardingNetworkMode;
-  readonly reopenEditAcknowledgements: OnboardingReopenEditAcknowledgementState;
-}
+export type OnboardingStepDerivationState = TerminalOnboardingStepDerivationState<OnboardingStep1CapabilityId>;
 
 export type OnboardingApplyOperation =
-  | {
-      readonly kind: 'set-config';
-      readonly key: ConfigKey | LegacyFeatureConfigKey;
-      readonly value: unknown;
-      readonly scope?: 'global' | 'project';
-    }
-  | {
-      readonly kind: 'set-secret';
-      readonly key: string;
-      readonly value: string;
-      readonly scope?: 'project' | 'user';
-      readonly medium: 'secure' | 'plaintext';
-    }
-  | {
-      readonly kind: 'ensure-auth-user';
-      readonly username: string;
-      readonly password: string;
-      readonly roles?: readonly string[];
-      readonly createSession?: boolean;
-      readonly retireBootstrapCredential?: boolean;
-    }
-  | {
-      readonly kind: 'acknowledge';
-      readonly target: OnboardingAcknowledgementTarget;
-      readonly acknowledged: boolean;
-    }
+  | TerminalOnboardingApplyOperation<ConfigKey | LegacyFeatureConfigKey, 'project' | 'user'>
   | {
       readonly kind: 'create-agent-profile';
       readonly name: string;
@@ -211,41 +170,19 @@ export type OnboardingApplyOperation =
       readonly enabled?: boolean;
     };
 
-export interface OnboardingApplyRequest {
-  readonly mode: OnboardingMode;
-  readonly source: string;
-  readonly operations: readonly OnboardingApplyOperation[];
-}
+export type OnboardingApplyRequest = TerminalOnboardingApplyRequest<OnboardingApplyOperation>;
 
-export interface OnboardingAppliedOperation {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly summary: string;
-}
+export type OnboardingAppliedOperation = TerminalOnboardingAppliedOperation<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingSkippedOperation {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly reason: string;
-}
+export type OnboardingSkippedOperation = TerminalOnboardingSkippedOperation<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingApplyError {
-  readonly kind: OnboardingApplyOperation['kind'];
-  readonly message: string;
-}
+export type OnboardingApplyError = TerminalOnboardingApplyError<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingApplyResult {
-  readonly ok: boolean;
-  readonly applied: readonly OnboardingAppliedOperation[];
-  readonly skipped: readonly OnboardingSkippedOperation[];
-  readonly errors: readonly OnboardingApplyError[];
-}
+export type OnboardingApplyResult = TerminalOnboardingApplyResult<OnboardingApplyOperation['kind']>;
 
-export interface OnboardingSurfaceReadHelper {
-  list(): readonly OnboardingSurfaceRecord[] | Promise<readonly OnboardingSurfaceRecord[]>;
-}
+export type OnboardingSurfaceReadHelper = TerminalOnboardingSurfaceReadHelper;
 
-export interface OnboardingProviderAccountReadHelper {
-  loadSnapshot(): Promise<OnboardingProviderAccountsSnapshot>;
-}
+export type OnboardingProviderAccountReadHelper = TerminalOnboardingProviderAccountReadHelper<OnboardingProviderAccountRecord>;
 
 export type OnboardingShellPaths = Pick<ShellPathService, 'homeDirectory' | 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 

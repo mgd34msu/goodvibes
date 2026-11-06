@@ -1,3 +1,8 @@
+import {
+  applyConversationOverlayRows,
+  composeConversationLayers,
+  type ModalEntry,
+} from '@goodvibes-jev/engine/terminal-shell/renderer/conversation-overlays';
 import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandRegistry } from '../input/command-registry.ts';
@@ -20,9 +25,9 @@ import { renderHelpOverlay, renderShortcutsOverlay } from './help-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
-import { overlayViewportBottom } from './conversation-layout.ts';
+import './conversation-layout.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
-import { renderToasts } from './surface-kit-parts.ts';
+import './surface-kit-parts.ts';
 import { getSharedToastCenter } from './toast-center.ts';
 
 export interface ConversationOverlayContext {
@@ -37,11 +42,23 @@ export interface ConversationOverlayContext {
 
 /** True while a modal covers the screen, so the composer-anchored popups stay hidden. */
 export function modalOpen(input: InputHandler): boolean {
-  return input.modelPicker.active || input.settingsModal.active || input.mcpWorkspace.active
-    || input.agentWorkspace.active || input.sessionPickerModal.active || input.profilePickerModal.active
-    || input.bookmarkModal.active || input.selectionModal.active || input.contextInspectorModal.active
-    || input.processModal.active || input.liveTailModal.active || input.blockActionsMenu.active
-    || input.helpOverlayActive || input.shortcutsOverlayActive || input.surfaceModals.active;
+  return (
+    input.modelPicker.active ||
+    input.settingsModal.active ||
+    input.mcpWorkspace.active ||
+    input.agentWorkspace.active ||
+    input.sessionPickerModal.active ||
+    input.profilePickerModal.active ||
+    input.bookmarkModal.active ||
+    input.selectionModal.active ||
+    input.contextInspectorModal.active ||
+    input.processModal.active ||
+    input.liveTailModal.active ||
+    input.blockActionsMenu.active ||
+    input.helpOverlayActive ||
+    input.shortcutsOverlayActive ||
+    input.surfaceModals.active
+  );
 }
 
 /**
@@ -50,36 +67,20 @@ export function modalOpen(input: InputHandler): boolean {
  * typing) and the search bars. Every modal is a layer instead, see
  * buildConversationLayers.
  */
-export function applyConversationOverlays(
-  viewport: Line[],
-  context: ConversationOverlayContext,
-): Line[] {
-  const { input, conversationWidth, viewportHeight } = context;
-  let next = viewport;
-  const bottomDockInset = 1 + (input.searchManager.active || input.historySearch.active ? 1 : 0);
-  const covered = modalOpen(input);
+export function applyConversationOverlays(viewport: Line[], context: ConversationOverlayContext): Line[] {
+  const { input, conversationWidth: width, viewportHeight: height } = context;
+  return applyConversationOverlayRows(viewport, {
+    width,
+    height,
+    covered: modalOpen(input),
+    mutateSearchRows: false,
 
-  if (!covered && input.filePicker.active) {
-    const lines = renderFilePickerOverlay(input.filePicker, conversationWidth, viewportHeight);
-    next = overlayViewportBottom(next, lines, conversationWidth, viewportHeight, bottomDockInset);
-  }
-
-  if (input.searchManager.active) {
-    next = [...next, ...renderSearchOverlay(input.searchManager, conversationWidth)];
-  }
-
-  if (input.historySearch.active) {
-    next = [...next, ...renderHistorySearchOverlay(input.historySearch, conversationWidth)];
-  }
-
-  if (!covered && input.commandMode && input.autocomplete?.isActive) {
-    const lines = renderAutocompleteOverlay(input.autocomplete, conversationWidth, viewportHeight);
-    if (lines.length > 0) {
-      next = overlayViewportBottom(next, lines, conversationWidth, viewportHeight, bottomDockInset);
-    }
-  }
-
-  return next;
+    filePicker: input.filePicker.active ? () => renderFilePickerOverlay(input.filePicker, width, height) : undefined,
+    search: input.searchManager.active ? () => renderSearchOverlay(input.searchManager, width) : undefined,
+    historySearch: input.historySearch.active ? () => renderHistorySearchOverlay(input.historySearch, width) : undefined,
+    autocomplete:
+      input.commandMode && input.autocomplete?.isActive ? () => renderAutocompleteOverlay(input.autocomplete!, width, height) : undefined,
+  });
 }
 
 export interface ConversationLayerContext {
@@ -109,8 +110,6 @@ export function renderAgentWorkspaceLayer(workspace: InputHandler['agentWorkspac
   return renderAgentWorkspace(workspace, width, height);
 }
 
-type ModalEntry = readonly [name: string, active: boolean, render: () => SurfaceLayer | null];
-
 /**
  * Modal surfaces drawn with the surface kit, as layers the compositor stamps
  * over the dimmed screen (surface-compose.ts). When one modal opens another
@@ -129,34 +128,43 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     ['sessionPicker', input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],
     ['profilePicker', input.profilePickerModal.active, () => renderProfilePickerModal(input.profilePickerModal, w, h)],
     ['bookmark', input.bookmarkModal.active, () => renderBookmarkModal(input.bookmarkModal, w, h)],
-    ['contextInspector', input.contextInspectorModal.active,
-      () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal)],
+    [
+      'contextInspector',
+      input.contextInspectorModal.active,
+      () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal),
+    ],
     ['process', input.processModal.active, () => renderProcessModal(input.processModal, w, h)],
     ['liveTail', input.liveTailModal.active, () => renderLiveTailModal(input.liveTailModal, w, h)],
     ['blockActions', input.blockActionsMenu.active, () => renderBlockActionsMenu(input.blockActionsMenu, w, h)],
     ['selection', input.selectionModal.active, () => renderSelectionModalOverlay(input.selectionModal, w, h)],
-    ['help', input.helpOverlayActive,
-      () => renderHelpOverlay(w, h, context.keybindingsManager, context.commandRegistry.getVisible(), input.helpScrollOffset, input.overlayFilters.help)],
-    ['shortcuts', input.shortcutsOverlayActive,
-      () => renderShortcutsOverlay(w, h, context.keybindingsManager, input.shortcutsScrollOffset, input.overlayFilters.shortcuts)],
+    [
+      'help',
+      input.helpOverlayActive,
+      () =>
+        renderHelpOverlay(
+          w,
+          h,
+          context.keybindingsManager,
+          context.commandRegistry.getVisible(),
+          input.helpScrollOffset,
+          input.overlayFilters.help,
+        ),
+    ],
+    [
+      'shortcuts',
+      input.shortcutsOverlayActive,
+      () => renderShortcutsOverlay(w, h, context.keybindingsManager, input.shortcutsScrollOffset, input.overlayFilters.shortcuts),
+    ],
   ];
-  const active = entries.filter(([, isActive]) => isActive);
-  // Opened order first (the modal stack), then any active modal the stack does not name.
-  const rank = (name: string): number => {
-    const index = input.modalStack.indexOf(name);
-    return index >= 0 ? index : input.modalStack.length + entries.findIndex(([n]) => n === name);
-  };
-  active.sort((a, b) => rank(a[0]) - rank(b[0]));
-  const layers: SurfaceLayer[] = [];
-  for (const [, , render] of active) {
-    const layer = render();
-    if (layer) layers.push(layer);
-  }
-  // Kit modals (the activity modal, ...) stack on top of everything.
-  layers.push(...input.surfaceModals.render(w, h));
-  if (context.permission) layers.push(context.permission);
-  // Toasts sit above everything and are never dimmed, between the header and the footer.
-  const toasts = renderToasts(w, h, getSharedToastCenter().visible(), { top: context.headerRows ?? 1, bottom: h - (context.footerRows ?? 2) });
-  if (toasts) layers.push(toasts);
-  return layers;
+  return composeConversationLayers({
+    entries,
+    modalStack: input.modalStack,
+    width: w,
+    height: h,
+    renderSurfaceModals: () => input.surfaceModals.render(w, h),
+    permission: context.permission,
+    headerRows: context.headerRows,
+    footerRows: context.footerRows,
+    toasts: () => getSharedToastCenter().visible(),
+  });
 }

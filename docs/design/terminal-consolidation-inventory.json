@@ -627,7 +627,7 @@
       "path": "input/feed-context-factory.ts",
       "baselineTuiLines": 263,
       "baselineSimilarity": 0.8663,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/file-picker.ts",

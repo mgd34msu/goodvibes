@@ -8,10 +8,9 @@ export const { SECRET_CONFIG_KEYS, isSecretConfigKey } = createSecretConfigKeyRe
   'calendar.google.clientSecretRef' as ConfigKey,
   'calendar.microsoft.clientSecretRef' as ConfigKey,
 ]);
-export const persistSecretBackedConfigValue = createSecretBackedConfigWriter(async (configKey, rawValue, update, explicitScope) => {
+export const persistSecretBackedConfigValue = createSecretBackedConfigWriter(async (configKey, rawValue, update) => {
   // Explicit scopes deliberately select local storage. Otherwise a connected
   // daemon owns its credential/config pair and a refusal must propagate.
-  if (explicitScope !== undefined) return false;
   if (isSecretReferenceValue(update.configValue) && update.secretValue === undefined) {
     return await routeDaemonOwnedConfigWrite(configKey, update.configValue) === 'daemon';
   }

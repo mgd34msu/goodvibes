@@ -153,7 +153,7 @@ export interface DaemonCredentialWriter {
     set(configKey: string, value: string): Promise<unknown>;
     clear(configKey: string): Promise<void>;
 }
-export type SecretBackedConfigRoute = (configKey: ConfigKey, rawValue: string, update: SecretBackedConfigUpdate, explicitScope: SecretScope | undefined) => Promise<boolean>;
+export type SecretBackedConfigRoute = (configKey: ConfigKey, rawValue: string, update: SecretBackedConfigUpdate) => Promise<boolean>;
 /** Preserve connected-owner routing without letting a local fallback swallow a refusal. */
 export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute | undefined) {
     return async function persistSecretBackedConfigValue(configManager: SecretBackedConfigManager, secretsManager: SecretBackedSecretStore | null | undefined, configKey: ConfigKey, rawValue: string, options: {
@@ -161,7 +161,7 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
         readonly daemonWriter?: DaemonCredentialWriter | null | undefined;
     } = {}): Promise<string> {
         const update = buildSecretBackedConfigUpdate(configKey, rawValue);
-        if (route && await route(configKey, rawValue, update, options.scope))
+        if (route && options.scope === undefined && await route(configKey, rawValue, update))
             return update.configValue;
         const scope = options.scope ?? defaultSecretBackedScope(configKey);
         // A daemon-scoped credential is the daemon's to store, and the daemon does

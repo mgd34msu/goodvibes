@@ -2213,6 +2213,11 @@
       "bun": "./terminal-shell/src/session-views.ts",
       "types": "./terminal-shell/dist/session-views.d.ts",
       "import": "./terminal-shell/dist/session-views.js"
+    },
+    "./terminal-shell/input-feed-context": {
+      "bun": "./terminal-shell/src/input-feed-context.ts",
+      "types": "./terminal-shell/dist/input-feed-context.d.ts",
+      "import": "./terminal-shell/dist/input-feed-context.js"
     }
   },
   "publishConfig": {

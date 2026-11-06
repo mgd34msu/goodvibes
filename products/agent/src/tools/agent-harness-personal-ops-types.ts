@@ -191,7 +191,8 @@ export interface PersonalOpsIntakeCandidate {
   readonly label: string;
   readonly laneId: PersonalOpsLaneId;
   readonly status: PersonalOpsWorkflowStatus;
-  readonly confidence: 'high' | 'medium' | 'low';
+  readonly confidence: 'high' | 'medium' | 'low' | 'not-evaluated';
+  readonly provenance?: 'classic';
   readonly why: string;
   readonly modelRoute: string;
   readonly inspectRoutes: readonly string[];
@@ -225,6 +226,7 @@ export interface PersonalOpsExecutionStep {
 }
 
 export type PersonalOpsLaneResolution =
+  | { readonly status: 'selection_required'; readonly reason: 'exact_lane_identity_required'; readonly input: string; readonly candidates: readonly Record<string, unknown>[]; readonly provenance: 'classic' }
   | { readonly status: 'deferred'; readonly reason: 'uncertain_lane_reading'; readonly judgments: readonly Ranked[] }
   | { readonly status: 'found'; readonly lane: Record<string, unknown> }
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Record<string, unknown>[] }

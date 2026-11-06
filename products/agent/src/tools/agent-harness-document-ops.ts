@@ -686,7 +686,7 @@ export async function describeDocumentOpsLane(context: CommandContext, args: Age
     { ...options, requirePreservedSource: true, assertCurrent });
   assertCurrent();
   const matches = selected.matches;
-  if (matches.length === 1 && matches[0]!.judgment.reading.verdict === 'yes' && matches[0]!.judgment.reading.outcome === 'act') return { status: 'found', lane: { ...describeLane(matches[0]!.entry, true), judgment: matches[0]!.judgment } };
+  if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') return { status: 'found', lane: { ...describeLane(matches[0]!.entry, true), judgment: matches[0]!.judgment } };
   if (matches.length > 0) {
     return {
       status: 'ambiguous',

@@ -94,6 +94,20 @@ also handles explicitly labelled security-code and expiry shapes locally; bare
 short numbers are not semantically classified. Findings retain only positions,
 kinds and Classic provenance, never the matched secret text.
 
+Classic catalog search uses literal token overlap and stable source ordering.
+These scores describe local retrieval, not confidence or Jev readings. Selecting
+an operation requires an explicit catalog identity; a fuzzy match remains a
+suggestion. The source owner's privacy checks, cancellation and original-data
+currentness guards still precede publication or subsequent execution.
+
+Private-source screening keeps its explicit source-specific route and retention
+grant. It never forwards raw source to the global failover chain merely because
+that private route failed. Preferred may fall back to local literal screening
+after a verified private decision-service outage; malformed responses, privacy
+failures, revoked authority and actual semantic refusals remain held. Classic
+screening receipts attest only the local checks. Query-bearing research links
+remain omitted when their parameter roles cannot be assessed.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

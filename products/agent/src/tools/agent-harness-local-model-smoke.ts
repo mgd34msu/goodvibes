@@ -117,7 +117,7 @@ async function localModelSmokeTargets(
       id: target.id, description: localSmokeTargetSearchText(target), evidence: target,
     }), 'agent.local-model-smoke.endpoint', { ...options, requirePreservedSource: true });
     const searched = ranked.matches.map(match => match.entry);
-    if (searched.length === 1 && ranked.matches[0]?.judgment.reading.verdict === 'yes' && ranked.matches[0].judgment.reading.outcome === 'act') return { targets: searched, candidateTotal: 1 };
+    if (searched.length === 1 && ranked.matches[0]?.judgment?.reading.verdict === 'yes' && ranked.matches[0].judgment?.reading.outcome === 'act') return { targets: searched, candidateTotal: 1 };
     if (searched.length === 1) return { unresolved: {
       status: 'reading-held', input: lookup, candidates: searched,
       note: 'No endpoint was probed because its suitability for this request is unsettled.',

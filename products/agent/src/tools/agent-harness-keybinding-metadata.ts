@@ -284,7 +284,7 @@ async function resolveHarnessKeybinding(sources: ReturnType<typeof captureKeybin
   const { matches } = await rankKeybindings(sources, lookup.input, options);
   sources.assertCurrent();
   const single = matches.length === 1 ? matches[0] : undefined;
-  if (single?.judgment?.reading.verdict === 'yes' && single.judgment.reading.outcome === 'act') return { status: 'found', action: single.entry.action, lookup: { ...lookup, resolvedBy: 'search' }, judgment: single.judgment };
+  if (single?.judgment?.reading.verdict === 'yes' && single.judgment?.reading.outcome === 'act') return { status: 'found', action: single.entry.action, lookup: { ...lookup, resolvedBy: 'search' }, judgment: single.judgment };
   if (matches.length > 0) return { status: 'ambiguous', input: lookup.input, candidates: matches.map(({ entry, judgment }) => ({ ...bindingCandidate(manager, entry), judgment })).slice(0, 8) };
   return null;
 }

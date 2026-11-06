@@ -6,6 +6,7 @@ export * as shell from './shell.js';
 export * as state from './state.js';
 export * as transport from './transport.js';
 export * as ui from './ui.js';
+export { rankClassicCatalog, selectClassicCatalog, type ClassicCatalogDescription, type ClassicCatalogMatch } from './classic-catalog.js';
 export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionModelPolicy, withDecisionModelPolicy,
   withConfiguredDecisionModelPolicy,
   decisionOrClassic, isClassicOperation, activateClassicFallback, requireDecisionFeature, DecisionModelPolicyChangedError,

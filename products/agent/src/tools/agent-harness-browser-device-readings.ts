@@ -70,5 +70,5 @@ export async function browserDeviceCatalogMatches<T>(entries: readonly T[], quer
   const result = await rankHarnessCatalog(caller.args.entries, caller.args.query, describe, site, { ...caller.options, requirePreservedSource: true });
   caller.assertCurrent();
   if (result.judgments.some(({ reading }) => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new ToolInputProjectionError('held');
-  return result.matches.filter(({ judgment }) => judgment.reading.outcome === 'act' && judgment.reading.verdict === 'yes').map(({ entry }) => entry);
+  return result.matches.filter(({ judgment }) => judgment?.reading.outcome === 'act' && judgment?.reading.verdict === 'yes').map(({ entry }) => entry);
 }

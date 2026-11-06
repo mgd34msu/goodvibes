@@ -5,6 +5,7 @@ import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engi
 import { registryCatalogGroupFit, registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation, selectClassicCatalog } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 function requireSynchronousRestriction(result: unknown): void {
   if (result === undefined) return;
@@ -56,12 +57,21 @@ export function captureCatalogReadRequest<T>(input: T, options: CatalogRankingOp
 
 /** Capture both native stages before an outer source owner or restriction can run. */
 export function captureHarnessCatalogSelectionSource(site: string): () => void {
+  if (isClassicOperation()) return () => { isClassicOperation(); };
   const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
   const getDefinition = gateJudgmentRegistry.get;
   const assertGroup = captureCatalogMethods(registryCatalogGroupFit, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'rerank']);
   const assertSelection = captureCatalogMethods(registrySelect, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'select']);
-  const installation = captureJudgmentPort(site).consumeObservation();
+  let installation: ReturnType<ReturnType<typeof captureJudgmentPort>['consumeObservation']>;
+  try { installation = captureJudgmentPort(site).consumeObservation(); }
+  catch (error) {
+    if (!activateClassicFallback(error)) throw error;
+    return () => { isClassicOperation(); };
+  }
   const assertCurrent = () => {
+    // A Preferred outage retires the unused decision backend, not the native
+    // catalog/source restrictions retained by the caller.
+    if (isClassicOperation()) return;
     assertRegistry(); assertGroup(); assertSelection(); installation.assertCurrent();
     if (getDefinition.call(gateJudgmentRegistry, registryCatalogGroupFit.name) !== registryCatalogGroupFit
       || getDefinition.call(gateJudgmentRegistry, registrySelect.name) !== registrySelect) throw new ToolInputProjectionError('held');
@@ -74,6 +84,16 @@ export function captureHarnessCatalogSelectionSource(site: string): () => void {
 export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly description: string },
   options: CatalogRankingOptions = {}, site = 'agent.catalog.group', contextEvidence?: unknown): Promise<T | null> {
+  return decisionOrClassic(() => selectDecisionHarnessCatalogGroup(entries, query, describe, options, site, contextEvidence),
+    () => classicCatalogSelection(entries, query, entry => {
+      const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
+      const description = describe(entry).description;
+      return { id: typeof id === 'string' ? id : description, description };
+    }, options, site, contextEvidence));
+}
+
+async function selectDecisionHarnessCatalogGroup<T>(entries: readonly T[], query: string,
+  describe: (entry: T) => { readonly description: string }, options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
   const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
   const source = captureCatalogSnapshot(entries);
   const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
@@ -82,6 +102,7 @@ export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query:
   const installation = entries.length
     ? captureJudgmentPort(site, { signal: request.options.signal }).consumeObservation() : undefined;
   const assertBackend = () => {
+    if (isClassicOperation()) { request.options.signal?.throwIfAborted(); return; }
     assertRegistry(); assertDefinition(); installation?.assertCurrent();
     if (getDefinition.call(gateJudgmentRegistry, registryCatalogGroupFit.name) !== registryCatalogGroupFit) throw new ToolInputProjectionError('held');
   };
@@ -93,6 +114,11 @@ export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query:
     row => ({ id: String(row.index), description: describe(row.entry).description, evidence: { record: row.entry } }), site,
     { ...request.options, requirePreservedSource: true }, registryCatalogGroupFit.name, request.input.context);
   request.assertCurrent();
+  if (ranked.provenance === 'classic') return classicCatalogSelection(entries, query, entry => {
+    const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
+    const description = describe(entry).description;
+    return { id: typeof id === 'string' ? id : description, description };
+  }, options, site, contextEvidence);
   if (ranked.judgments.length !== entries.length || new Set(ranked.judgments.map(reading => reading.id)).size !== entries.length) throw new ToolInputProjectionError('held');
   const matches: T[] = [];
   for (const judgment of ranked.judgments) {
@@ -110,6 +136,33 @@ export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query:
 export async function selectHarnessCatalog<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
   options: CatalogRankingOptions = {}, site = 'agent.catalog.select', contextEvidence?: unknown): Promise<T | null> {
+  return decisionOrClassic(() => selectDecisionHarnessCatalog(entries, query, describe, options, site, contextEvidence),
+    () => classicCatalogSelection(entries, query, describe, options, site, contextEvidence));
+}
+
+async function classicCatalogSelection<T>(entries: readonly T[], query: string,
+  describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
+  options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
+  const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
+  const source = captureCatalogSnapshot(entries);
+  const assertSource = () => source.assertCurrent(entries);
+  request.retain(assertSource, `${site}:classic-source`);
+  request.assertCurrent();
+  const catalog = source.captured.map((entry, index) => ({ index, ...describe(entry) }));
+  return withModelReadingSource({ ...request.input, catalog, records: source.captured }, {
+    signal: request.options.signal, sourceOwner: request.options.sourceOwner,
+    assertCurrent: request.assertCurrent, retainCurrent: request.retain,
+  }, async (captured, reading) => {
+    reading.assertCurrent?.();
+    const selected = selectClassicCatalog(captured.catalog, captured.query, item => item);
+    reading.assertCurrent?.();
+    return selected === null ? null : entries[selected.index] ?? null;
+  });
+}
+
+async function selectDecisionHarnessCatalog<T>(entries: readonly T[], query: string,
+  describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
+  options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
   const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
   const source = captureCatalogSnapshot(entries);
   const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
@@ -121,6 +174,7 @@ export async function selectHarnessCatalog<T>(entries: readonly T[], query: stri
   const installation = entries.length
     ? captureJudgmentPort(site, { signal: request.options.signal }).consumeObservation() : undefined;
   const assertBackend = () => {
+    if (isClassicOperation()) { request.options.signal?.throwIfAborted(); return; }
     assertRegistry(); assertDefinition(); installation?.assertCurrent();
     if (getDefinition.call(gateJudgmentRegistry, registrySelect.name) !== registrySelect) throw new ToolInputProjectionError('held');
   };

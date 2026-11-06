@@ -5,6 +5,7 @@ import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSourc
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import type { Ranked, Rerank } from '@goodvibes-jev/judgment';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { decisionOrClassic, isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 const ownDescriptors = Object.getOwnPropertyDescriptors;
@@ -393,7 +394,13 @@ export function prepareHarnessCatalog<T>(entries: readonly T[], describe: (entry
   return captured;
 }
 
-/** Product data is locally screened in full before the canonical public engine reader. */
+export interface HarnessCatalogRanking<T> {
+  readonly provenance?: 'classic';
+  readonly matches: readonly { readonly entry: T; readonly judgment: Ranked | undefined; readonly id?: string; readonly score?: number; readonly provenance?: 'classic' }[];
+  readonly judgments: readonly Ranked[];
+}
+
+/** Product data is locally screened in full before a semantic reader or local Classic lookup. */
 export async function rankHarnessCatalog<T>(
   entries: readonly T[],
   query: string,
@@ -402,6 +409,32 @@ export async function rankHarnessCatalog<T>(
   options: CatalogRankingOptions = {},
   decisionName = 'engine.tools.registry-rank',
   contextEvidence?: unknown,
+): Promise<HarnessCatalogRanking<T>> {
+  return decisionOrClassic(() => rankDecisionHarnessCatalog(entries, query, describe, site, options, decisionName, contextEvidence), async () => {
+    const source = captureCatalogSnapshot(entries);
+    const context = contextEvidence === undefined ? undefined : captureCatalogSnapshot(contextEvidence);
+    const assertSource = () => { source.assertCurrent(entries); context?.assertCurrent(contextEvidence); };
+    const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertSource(); };
+    current();
+    options.retainCurrent?.(assertSource, `${site}:classic-source`);
+    const catalog = source.captured.map(entry => captureCatalogData(describe(entry)));
+    if (new Set(catalog.map(entry => entry.id)).size !== catalog.length) throw new ToolInputProjectionError('held');
+    return withModelReadingSource({ query, catalog, records: source.captured, ...(context ? { context: context.captured } : {}) }, {
+      signal: options.signal, sourceOwner: options.sourceOwner, assertCurrent: current, retainCurrent: options.retainCurrent,
+    }, async (captured, reading) => {
+      reading.assertCurrent?.();
+      const matches = rankClassicCatalog(captured.catalog.map((description, index) => ({ description, index })), captured.query,
+        row => row.description).map(match => ({ entry: source.captured[match.entry.index]!, id: match.entry.description.id, judgment: undefined,
+          score: match.score, provenance: 'classic' as const }));
+      reading.assertCurrent?.();
+      return { provenance: 'classic' as const, matches, judgments: [] };
+    });
+  });
+}
+
+async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: string,
+  describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown }, site: string,
+  options: CatalogRankingOptions, decisionName: string, contextEvidence?: unknown,
 ): Promise<{ readonly matches: readonly { readonly entry: T; readonly judgment: Ranked }[]; readonly judgments: readonly Ranked[] }> {
   const contextSource = contextEvidence === undefined ? undefined : captureCatalogSnapshot(contextEvidence);
   const assertContext = () => { contextSource?.assertCurrent(contextEvidence); };
@@ -551,6 +584,7 @@ async function consumeProtectedCatalog<T>(entries: readonly T[], ids: readonly s
   const readingPort = installation.port, recorder = readingPort.recorder;
   let assertInstallation = installation.assertCurrent;
   const assertBackend = () => {
+    if (isClassicOperation()) { options.signal?.throwIfAborted(); return; }
     backend.assertCurrent();
     assertInstallation();
     if (judgmentPort(site) !== port || gateJudgmentRegistry.get(decisionName) !== decision) throw new ToolInputProjectionError('held');

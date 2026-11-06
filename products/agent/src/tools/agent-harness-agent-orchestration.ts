@@ -1507,7 +1507,7 @@ export async function describeAgentOrchestrationAgent(context: CommandContext, a
   const assertQueryCurrent = selected.assertProtectedCurrent ?? assertCurrent;
   assertQueryCurrent();
   const matches = selected.matches;
-  if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment.reading.outcome === 'act') {
+  if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') {
     const result = await protectOrchestrationOutput({ status: 'found', agent: { ...(args.includeParameters !== false ? matches[0]!.entry.full : matches[0]!.entry.summary), judgment: matches[0]!.judgment } }, { ...options, assertCurrent: assertQueryCurrent }, orchestrationWorkspaceDisplays.get(sources));
     assertQueryCurrent();
     if (result.status !== 'found') throw new ToolInputProjectionError('held');

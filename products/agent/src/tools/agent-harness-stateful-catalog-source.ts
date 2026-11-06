@@ -87,7 +87,7 @@ export async function rankStatefulCatalog<T>(entries: readonly T[], query: strin
     { ...options, requirePreservedSource: true }, 'engine.tools.registry-rank', contextSource?.captured);
   assertSource(); assertContext(); options.assertCurrent?.(); assertSource(); assertContext();
   return ranked.matches.map(match => {
-    if (match.judgment.reading.outcome !== 'act' || match.judgment.reading.verdict !== 'yes') throw new ToolInputProjectionError('held');
+    if (ranked.provenance !== 'classic' && (match.judgment?.reading.outcome !== 'act' || match.judgment?.reading.verdict !== 'yes')) throw new ToolInputProjectionError('held');
     const row = entries[match.entry.index];
     if (row === undefined) throw new ToolInputProjectionError('held');
     return row;

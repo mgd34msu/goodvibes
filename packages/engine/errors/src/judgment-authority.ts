@@ -1,5 +1,6 @@
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentPortMissingError, judgmentPortInstallation } from './judgment-port.js';
+import { DecisionModelsDisabledError } from './decision-policy.js';
 
 /** A composition-owned observation. It is never execution permission. */
 export interface JudgmentAuthorityFrame {
@@ -96,7 +97,7 @@ async function interrupt<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 export function captureJudgmentPort(site: string, options: JudgmentReadingOptions = {}): JudgmentPortCapture {
   try { return capture(site, options); }
   catch (error) {
-    if (error instanceof JudgmentPortMissingError) throw error;
+    if (error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
     throw new JudgmentAuthorityRetiredError();
   }
 }

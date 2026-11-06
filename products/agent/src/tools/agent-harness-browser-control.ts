@@ -381,7 +381,7 @@ async function selectBrowserControlWorkflow(posture: BrowserControlPosture, inpu
     id: workflow.id, description: workflowSearchText(workflow), evidence: workflow,
   }), 'agent.browser-control.workflow', { ...options, requirePreservedSource: true });
   const selected = ranked.matches[0];
-  if (selected && (selected.judgment.reading.outcome !== 'act' || selected.judgment.reading.verdict !== 'yes')) throw new ToolInputProjectionError('held');
+  if (selected && (selected.judgment?.reading.outcome !== 'act' || selected.judgment?.reading.verdict !== 'yes')) throw new ToolInputProjectionError('held');
   return selected?.entry;
 }
 

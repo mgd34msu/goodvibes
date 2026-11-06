@@ -451,7 +451,7 @@ export async function personalOpsIntakeSummary(context: CommandContext, args: Ag
   const limit = readLimit(args.limit, includeParameters ? 8 : 4);
   const ranking = await buildPersonalOpsIntakeCandidates(request, lanes, includeParameters, options);
   const candidates = ranking.candidates.slice(0, limit);
-  const preferred = candidates.find((candidate) => candidate.judgment?.reading.verdict === 'yes' && candidate.judgment.reading.outcome === 'act');
+  const preferred = candidates.find((candidate) => candidate.judgment?.reading.verdict === 'yes' && candidate.judgment?.reading.outcome === 'act');
   return {
     status: preferred ? 'ready' : 'deferred',
     request: previewHarnessText(request, includeParameters ? 220 : 120),
@@ -681,11 +681,15 @@ export async function describePersonalOpsLane(context: CommandContext, args: Age
   const exact = lanes.find((lane) => lane.id === normalized);
   if (exact) return { status: 'found', lane: describeLane(exact, true) };
   const ranking = await rankHarnessCatalog(lanes, input, (lane) => ({ id: lane.id, description: searchText(lane) }), 'agent.personal-ops.lane', options);
-  if (ranking.matches.length > 0 && !ranking.matches.some(({ judgment }) => judgment.reading.verdict === 'yes' && judgment.reading.outcome === 'act')) {
+  if (ranking.provenance === 'classic' && ranking.matches.length) return {
+    status: 'selection_required', reason: 'exact_lane_identity_required', provenance: 'classic', input,
+    candidates: ranking.matches.map(({ entry }) => ({ laneId: entry.id, label: entry.label, status: entry.status })),
+  };
+  if (ranking.matches.length > 0 && !ranking.matches.some(({ judgment }) => judgment?.reading.verdict === 'yes' && judgment?.reading.outcome === 'act')) {
     return { status: 'deferred', reason: 'uncertain_lane_reading', judgments: ranking.judgments };
   }
   const matches = ranking.matches.map(({ entry }) => entry);
-  if (matches.length === 1 && ranking.matches[0]!.judgment.reading.verdict === 'yes' && ranking.matches[0]!.judgment.reading.outcome === 'act') {
+  if (matches.length === 1 && ranking.matches[0]!.judgment?.reading.verdict === 'yes' && ranking.matches[0]!.judgment?.reading.outcome === 'act') {
     return { status: 'found', lane: { ...describeLane(matches[0]!, true), judgment: ranking.matches[0]!.judgment } };
   }
   if (matches.length > 1) {

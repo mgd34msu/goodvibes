@@ -1,8 +1,8 @@
 import { assertScreeningOperation, captureScreeningOperation as captureOperation } from './operation.js';
 import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
-import { isClassicOperation } from '../../runtime/decision-policy.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createSystemOnePort, DEFAULT_MODEL, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { captureScreeningSource, isMalformedScreeningProposal, proposeScreeningSpans, type ScreeningSource, type ScreeningSpan } from './proposal.js';
@@ -69,7 +69,7 @@ function project(source: ScreeningSource, spans: readonly ScreeningSpan[]): read
 
 /**
  * Explicit trusted-host composition only. Local and hosted retention grants are
- * distinct. No settings/env discovery, fallback, persistent source, or raw log.
+ * distinct. No settings/env route discovery, persistent source, or raw log.
  */
 export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions): ProtectedSourceOwner {
   if (isClassicOperation()) return createClassicProtectedSourceOwner(options.authority);
@@ -87,7 +87,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const judgment = Object.freeze(isHosted ? { endpoint: 'https://api.typesafe.ai', model: 'jev-latest' }
     : { endpoint: captureLoopbackEndpoint(options.judgment.endpoint), model: options.judgment.model ?? DEFAULT_MODEL });
   if (!reference(proposal.model) || !reference(judgment.model)) return invalid();
-  const timeoutMs = options.timeoutMs ?? 0;
+  const timeoutMs = options.timeoutMs ?? 30_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2_147_483_647
     || (options.onRetry !== undefined && typeof options.onRetry !== 'function')) return invalid();
   const lifetime = new AbortController();
@@ -132,21 +132,27 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const run = async (source: OwnedSource, operation?: ResearchReferenceOperation): Promise<Result> => {
     const requestSignal = AbortSignal.any([signal, source.lifetime.signal, ...(operation?.signal ? [operation.signal] : [])]);
     const policy = decisionModelPolicyState();
+    let policySelectedClassic = false;
     const assertCurrent = () => {
       operationCurrent(source, operation);
       const now = decisionModelPolicyState();
+      if (now.policy === policy.policy && now.operation === 'classic' && policy.operation === 'decision') {
+        policySelectedClassic = true; throw new DecisionModelsDisabledError('private source screening');
+      }
       if (now.policy !== policy.policy || now.operation !== policy.operation || now.revision !== policy.revision) return invalid();
+    };
+    const classicResult = (): Result => {
+      operationCurrent(source, operation);
+      const parts = classicScreeningParts(source.source, source.reference);
+      operationCurrent(source, operation);
+      const receipt = Object.freeze({ provenance: 'classic' }) as Receipt;
+      projections.set(receipt, { source, parts });
+      return source.result = Object.freeze({ status: 'settled', receipt });
     };
     let transport: ReturnType<typeof createScreeningTransport> | undefined;
     try {
       assertCurrent();
-      if (isClassicOperation()) {
-        const parts = classicScreeningParts(source.source, source.reference);
-        assertCurrent();
-        const receipt = Object.freeze({ provenance: 'classic' }) as Receipt;
-        projections.set(receipt, { source, parts });
-        return source.result = Object.freeze({ status: 'settled', receipt });
-      }
+      if (isClassicOperation()) return classicResult();
       transport = createScreeningTransport({ ...(credentials ? { kind: 'hosted', credentials } : {
         endpoints: [`${proposal.endpoint}/v1/chat/completions`, `${judgment.endpoint}/v1/systemone`] }),
         signal: requestSignal, assertCurrent, timeoutMs });
@@ -175,11 +181,19 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       return source.result = Object.freeze({ status: 'settled', receipt });
     } catch (error) {
       if (requestSignal.aborted) return held('cancelled');
-      try { assertCurrent(); } catch { return held('stale'); }
+      try { operationCurrent(source, operation); decisionModelPolicyState(); } catch { return held('stale'); }
       if (isMalformedScreeningProposal(error)) return held('malformed');
       let protectedInput = false;
       try { protectedInput = error instanceof JudgmentInputError; } catch { /* Do not inspect hostile rejections. */ }
-      return held(protectedInput ? 'protected-input' : 'route-unavailable');
+      if (protectedInput) return held('protected-input');
+      if (error instanceof JudgmentError && error.kind === 'invalid-response') return held('malformed');
+      const unavailable = error instanceof JudgmentError && error.kind === 'unavailable'
+        && (error.status !== undefined && (error.status === 408 || error.status === 429 || error.status >= 500)
+          || transport?.availabilityFailed() === true);
+      if (!unsettled.has(source.source.revision) && (policySelectedClassic && isClassicOperation() || unavailable && activateClassicFallback(error))) {
+        try { return classicResult(); } catch (failure) { return held(failure instanceof JudgmentInputError ? 'protected-input' : 'stale'); }
+      }
+      return held('route-unavailable');
     } finally { await transport?.close(); }
   };
   const screen = (source: OwnedSource, operation?: ResearchReferenceOperation): Promise<Result> => {
@@ -191,7 +205,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     // Reserve future refusal slots before admitting any asynchronous work.
     if (unsettled.size + screening.size >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
     screening.add(source.source.revision);
-    const pending = own(Promise.resolve().then(() => run(source, operation)));
+    const pending = own(Promise.resolve().then(() => withConfiguredDecisionModelPolicy(() => run(source, operation))));
     source.pending = pending;
     source.pendingOperation = operation;
     const finished = () => { screening.delete(source.source.revision); if (source.pending === pending) { delete source.pending; delete source.pendingOperation; } };

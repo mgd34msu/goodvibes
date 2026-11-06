@@ -10,7 +10,7 @@ export const HOSTED_SOURCE_SCREENING_ROUTES = Object.freeze({
 });
 
 const RESPONSE_LIMIT = 256 * 1024;
-const DEFAULT_TIMEOUT_MS = 0;
+const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
 const diagnostics = new WeakSet<object>();
@@ -108,6 +108,8 @@ type ScreeningTransportOptions = ScreeningTransportOperation & (
 );
 
 interface ScreeningTransport {
+  /** True only for a physical availability failure, never routing, source or body-boundary violations. */
+  availabilityFailed(): boolean;
   /** Check current admission/authority and direct routing before a logical retry. */
   assertUsable(): void;
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
@@ -135,6 +137,8 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
   const active = new Set<Promise<Response>>();
   let closed = false;
   let closing: Promise<void> | undefined;
+  let unavailable = false;
+  let boundaryFailed = false;
   const stop = () => lifetime.abort(cancelled());
   sourceSignal.addEventListener('abort', stop, { once: true });
   if (sourceSignal.aborted) stop();
@@ -155,6 +159,7 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
   }
 
   return {
+    availabilityFailed() { return unavailable && !boundaryFailed; },
     assertUsable() { check(); requireDirectRoute(hosted ? 'hosted' : 'local'); },
     async fetch(input, init) {
       check();
@@ -172,14 +177,19 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
           const apiKey = request.url === HOSTED_SOURCE_SCREENING_ROUTES.proposal ? hosted.abacusApiKey : hosted.typesafeApiKey;
           request = new Request(request, { headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` } });
         }
-      } catch { throw invalidRequest(); }
+      } catch { boundaryFailed = true; throw invalidRequest(); }
       check();
       const controller = new AbortController();
-      const abort = () => controller.abort(cancelled());
+      const abort = () => {
+        // A canonical target deadline can abort its private request while the
+        // source/caller remains live. Source cancellation never enables fallback.
+        if (!sourceSignal.aborted && !lifetime.signal.aborted) unavailable = true;
+        controller.abort(cancelled());
+      };
       lifetime.signal.addEventListener('abort', abort, { once: true });
       request.signal.addEventListener('abort', abort, { once: true });
       if (lifetime.signal.aborted || request.signal.aborted) abort();
-      const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(timedOut()), timeoutMs) : undefined;
+      const timer = timeoutMs > 0 ? setTimeout(() => { unavailable = true; controller.abort(timedOut()); }, timeoutMs) : undefined;
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       let cancellation: Promise<void> | undefined;
       let bodyFinished = false;
@@ -238,7 +248,11 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
           if (controller.signal.aborted) throw controller.signal.reason;
           // Preserve only diagnostics constructed in this boundary, never an
           // upstream Error (whose message/cause can contain source material).
-          if (error !== null && (typeof error === 'object' || typeof error === 'function') && diagnostics.has(error)) throw error;
+          if (error !== null && (typeof error === 'object' || typeof error === 'function') && diagnostics.has(error)) {
+            boundaryFailed = true; throw error;
+          }
+          if (directClient.isDirectScreeningUnavailable(error)) unavailable = true;
+          else boundaryFailed = true;
           throw failed();
         } finally {
           cancelBody();

@@ -1,6 +1,16 @@
 import { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
+import { types as nodeTypes } from 'node:util';
 import type { Dispatcher } from 'undici/index.js';
+
+/** Private classification only; no upstream message, address or source body escapes. */
+export function isDirectScreeningUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || nodeTypes.isProxy(error) || !nodeTypes.isNativeError(error)) return false;
+  const field = Object.getOwnPropertyDescriptor(error, 'code');
+  return !!field && 'value' in field && typeof field.value === 'string'
+    && ['ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT',
+      'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'].includes(field.value);
+}
 
 function requestStream(request: Request): { body: Readable | null; close(): Promise<void> } {
   const reader = request.body?.getReader();

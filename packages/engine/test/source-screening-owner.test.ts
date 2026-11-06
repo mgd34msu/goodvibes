@@ -11,6 +11,8 @@ import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.js';
 import { digestSender } from '../sdk/src/platform/intake/text-normalization.js';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 const cleanups: Array<() => Promise<void>> = [];
@@ -179,6 +181,52 @@ test('an unavailable protected local decision halts and an explicit retry retain
   expect(retries).toBe(0); expect(f.calls.filter((call) => call.path === '/v1/systemone')).toHaveLength(2);
 }, 10_000);
 
+test('Preferred private screening falls back locally after its authorized decision route is exhausted', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = fixture({ judge: () => new Response('', { status: 503 }) });
+    const first = await projected(f.owner, ['Ordinary build notes.']);
+    expect(first.parts).toEqual(['Ordinary build notes.']);
+    expect(first.receipt).toMatchObject({ provenance: 'classic' });
+    expect(decisionModelPolicyState()).toMatchObject({ policy: 'Preferred', operation: 'classic', reason: 'unavailable' });
+    const sends = f.calls.length;
+    const second = await projected(f.owner, ['Another ordinary build note.']);
+    expect(second.receipt).toMatchObject({ provenance: 'classic' });
+    expect(f.calls).toHaveLength(sends);
+    expect(f.calls.map(call => call.path)).toEqual(['/v1/chat/completions', '/v1/systemone']);
+  });
+});
+
+test('Preferred private screening cannot replace a semantic refusal with local approval', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = fixture({ judge: body => reading(body, 0, 1) });
+    const source = f.owner.capture(['Ordinary build notes.']);
+    expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(decisionModelPolicyState().operation).toBe('decision');
+    expect(f.calls).toHaveLength(2);
+  });
+});
+
+test('Preferred malformed private decision responses remain held without Classic fallback', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const f = fixture({ judge: () => Response.json({ answers: 'malformed' }) });
+    expect(await f.owner.screen(f.owner.capture(['Ordinary build notes.']))).toEqual({ status: 'held', reason: 'malformed' });
+    expect(decisionModelPolicyState().operation).toBe('decision');
+  });
+});
+
+test('Classic private screening makes no proposal or decision requests from owner creation onward', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = fixture();
+    const result = await projected(f.owner, ['Ordinary build notes.']);
+    expect(result.parts).toEqual(['Ordinary build notes.']);
+    expect(result.receipt).toMatchObject({ provenance: 'classic' });
+    expect(f.calls).toHaveLength(0);
+    expect(() => f.owner.capture(['password=synthetic-private-value'])).toThrow();
+    expect(f.calls).toHaveLength(0);
+  });
+});
+
 test('cancellation interrupts a pending protected decision even when its provider ignores cancellation', async () => {
   const entered = deferred<void>(),
     held = deferred<Response>();
@@ -197,10 +245,10 @@ test('cancellation interrupts a pending protected decision even when its provide
   }
 }, 10_000);
 
-test('different model response is operational unavailability, never a semantic result', async () => {
+test('different model response is malformed and never a semantic result', async () => {
   const f = fixture({ judge: (body, count) => reading(body, 1, 1, count === 1 ? 'jev-9.0.0' : 'jev-1.13.0') });
   const source = f.owner.capture(['Ordinary text.']);
-  expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'route-unavailable' });
+  expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'malformed' });
   expect((await f.owner.screen(source)).status).toBe('settled');
 });
 

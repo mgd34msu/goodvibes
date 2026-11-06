@@ -400,7 +400,7 @@ export async function listWorkspaceActions(
   const categories = AGENT_WORKSPACE_CATEGORIES.filter(category => !categoryId || category.id === categoryId);
   const source = query ? await withModelReadingSource({ query, args, categories: AGENT_WORKSPACE_CATEGORIES },
     request.options, async (_captured, reading) => {
-      const matches: { readonly entry: typeof entries[number]; readonly probability: number; readonly order: number }[] = [];
+      const matches: { readonly entry: typeof entries[number]; readonly rankScore: number; readonly order: number }[] = [];
       const nativeOrder = new Map<AgentWorkspaceAction, number>(entries.map((entry, index) => [entry.action, index]));
       for (const category of categories) {
         reading.assertCurrent?.();
@@ -409,15 +409,15 @@ export async function listWorkspaceActions(
           'agent.workspace.actions', { ...reading, requirePreservedSource: true }, 'engine.tools.registry-rank', { category, args });
         reading.assertCurrent?.();
         for (const match of ranked.matches) {
-          if (match.judgment.reading.outcome !== 'act' || match.judgment.reading.verdict !== 'yes') throw new ToolInputProjectionError('held');
+          if (ranked.provenance !== 'classic' && (match.judgment?.reading.outcome !== 'act' || match.judgment?.reading.verdict !== 'yes')) throw new ToolInputProjectionError('held');
           const action = category.actions[match.entry.index];
           const order = action && nativeOrder.get(action);
           if (!action || order === undefined) throw new ToolInputProjectionError('held');
-          matches.push({ entry: originalWorkspaceEntry(entries, action), probability: match.judgment.probability, order });
+          matches.push({ entry: originalWorkspaceEntry(entries, action), rankScore: match.judgment?.probability ?? match.score ?? 0, order });
         }
       }
       reading.assertCurrent?.();
-      return matches.sort((left, right) => right.probability - left.probability || left.order - right.order).map(match => match.entry);
+      return matches.sort((left, right) => right.rankScore - left.rankScore || left.order - right.order).map(match => match.entry);
     }) : entries;
   request.assertCurrent();
   return source

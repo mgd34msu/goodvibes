@@ -655,7 +655,7 @@ export async function resolveRunRecord(
   const ranking = await rankHarnessCatalog(catalog, lookup, ({ lane, record }) => ({
     id: `${lane.id}:${record.id}`, description: liveRecordSearchText(record),
   }), 'agent.personal-ops.record', rankingOptions);
-  if (ranking.matches.length > 0 && !ranking.matches.some(({ judgment }) => judgment.reading.verdict === 'yes' && judgment.reading.outcome === 'act')) {
+  if (ranking.provenance !== 'classic' && ranking.matches.length > 0 && !ranking.matches.some(({ judgment }) => judgment?.reading.verdict === 'yes' && judgment?.reading.outcome === 'act')) {
     return { status: 'deferred', reason: 'uncertain_record_reading', judgments: ranking.judgments };
   }
   const matches = ranking.matches.map(({ entry }) => entry);

@@ -639,7 +639,7 @@ export async function describeExecutionHistoryItem(context: CommandContext, args
     : await matchingRecords(all, lookup.input, { ...options, assertCurrent });
   assertCurrent();
   const searched = selected.matches;
-  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment.reading.outcome === 'act') return { status: 'found', record: { ...await describe(searched[0]!.entry, 'search'), judgment: searched[0]!.judgment } };
+  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment?.reading.outcome === 'act') return { status: 'found', record: { ...await describe(searched[0]!.entry, 'search'), judgment: searched[0]!.judgment } };
   if (searched.length > 0) {
     return {
       status: 'ambiguous',

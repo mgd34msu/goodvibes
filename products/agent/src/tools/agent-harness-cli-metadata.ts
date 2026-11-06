@@ -225,7 +225,7 @@ export async function describeHarnessCliCommand(args: AgentHarnessCliArgs, optio
     const selected = await rankCliCommands(sources, input.input, options);
     const matches = selected.matches;
     sources.assertCurrent();
-    if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment.reading.outcome === 'act') {
+    if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') {
       return {
         ...matches[0]!.entry.descriptor,
         judgment: matches[0]!.judgment,

@@ -128,9 +128,10 @@ export async function rankResearchRecords<T>(entries: readonly T[], query: strin
     options.assertCurrent?.(); const description = describe(entry); ids.push(description.id); options.assertCurrent?.(); return description;
   }, site, { ...options, requirePreservedSource: true }, decisionName);
   options.assertCurrent?.();
-  if (result.judgments.some(judgment => judgment.reading.outcome !== 'act' || judgment.reading.verdict === 'uncertain')) throw new ToolInputProjectionError('held');
+  if (result.judgments.some(judgment => judgment?.reading.outcome !== 'act' || judgment?.reading.verdict === 'uncertain')) throw new ToolInputProjectionError('held');
   const selected = result.matches.map(match => {
-    const index = ids.indexOf(match.judgment.id), original = entries[index];
+    const id = match.judgment?.id ?? match.id;
+    const index = id === undefined ? -1 : ids.indexOf(id), original = entries[index];
     if (index < 0 || original === undefined) throw new ToolInputProjectionError('held');
     return original;
   });

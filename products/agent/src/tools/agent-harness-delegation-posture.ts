@@ -478,7 +478,7 @@ export async function describeHarnessDelegationRoute(context: CommandContext, ar
     : await matchingDelegationRoutes(sources, lookup.input, { ...options, assertCurrent });
   assertCurrent();
   const searched = selected.matches;
-  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment.reading.outcome === 'act') return { status: 'found', route: { ...searched[0]!.entry.full, judgment: searched[0]!.judgment, lookup: { ...lookup, resolvedBy: 'search' } } };
+  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment?.reading.outcome === 'act') return { status: 'found', route: { ...searched[0]!.entry.full, judgment: searched[0]!.judgment, lookup: { ...lookup, resolvedBy: 'search' } } };
   if (searched.length > 0) {
     return {
       status: 'ambiguous',

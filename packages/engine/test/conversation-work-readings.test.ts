@@ -274,3 +274,34 @@ test('a retired channel source cannot activate Preferred fallback on a late avai
     });
   } finally { h.store.dispose(); }
 });
+
+
+test('Preferred proposal-reply exhaustion keeps the pending proposal and forwards the original chat once', async () => {
+  const h = harness(), proposal = h.proposal(); let asks = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+  try {
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const result = await tryResolveWorkProposalReplyFromChannel(h.input, h.replyDeps);
+      expect(result).toEqual({ consumed: false, reason: 'decision-model-required' });
+      expect(h.store.listPending().map(record => record.id)).toEqual([proposal.id]); expect(h.spawns).toEqual([]);
+      await gateSurfaceSpawn(h.deps, { surface: h.input.surface, text: h.input.text ?? '' }, { mode: 'spawn', task: h.input.text ?? '' });
+      expect(h.spawns).toHaveLength(1); expect(h.spawns[0]).toMatchObject({ task: h.input.text, outsideContract: true });
+      expect(h.store.listPending().map(record => record.id)).toEqual([proposal.id]);
+      expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' }); expect(asks).toBe(1);
+    });
+  } finally { h.store.dispose(); }
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+  test(`proposal reply ${kind} retains the pending record without Classic fallback`, async () => {
+    const h = harness(), proposal = h.proposal();
+    installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await expect(tryResolveWorkProposalReplyFromChannel(h.input, h.replyDeps)).rejects.toThrow();
+        expect(h.store.listPending().map(record => record.id)).toEqual([proposal.id]); expect(h.spawns).toEqual([]);
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    } finally { h.store.dispose(); }
+  });
+}

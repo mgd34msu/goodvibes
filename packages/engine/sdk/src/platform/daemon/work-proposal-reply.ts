@@ -1,5 +1,5 @@
 import { workProposalReply } from './batteries/conversation-gate.js';
-import { isClassicOperation } from '../runtime/decision-policy.js';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
@@ -75,6 +75,12 @@ export async function tryResolveWorkProposalReplyFromChannel(
   input: ChannelIngressPolicyInput,
   deps: WorkProposalReplyDeps,
 ): Promise<WorkProposalReplyOutcome> {
+  return withConfiguredDecisionModelPolicy(() => resolveOwnedProposalReply(input, deps));
+}
+
+async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps: WorkProposalReplyDeps): Promise<WorkProposalReplyOutcome> {
+  deps.readingOptions?.signal?.throwIfAborted();
+  assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   const store = deps.proposals;
   if (!store) return { consumed: false };
@@ -100,8 +106,11 @@ export async function tryResolveWorkProposalReplyFromChannel(
   assertCurrent();
   const proposal = snapshotJudgmentInput({ task: target.task, summary: target.summary }) as { task: string; summary: string };
   const text = snapshotJudgmentInput(input.text ?? '') as string;
-  const result = await workProposalReply.read(daemonReadingPort('daemon.work-proposal-reply', assertCurrent, options.signal), proposal, text, { ...options, beforeAttempt: assertCurrent });
+  const result = await decisionOrClassic<Awaited<ReturnType<typeof workProposalReply.read>> | null>(
+    () => workProposalReply.read(daemonReadingPort('daemon.work-proposal-reply', assertCurrent, options.signal), proposal, text, { ...options, beforeAttempt: assertCurrent }),
+    () => { assertCurrent(); return null; }, () => { assertCurrent(); return true; });
   assertCurrent();
+  if (result === null) return { consumed: false, reason: 'decision-model-required' };
   if (result.reading.outcome !== 'act') {
     result.recordAction('held: work proposal reply unsettled');
     return { consumed: true, action: 'unsettled' };
@@ -112,6 +121,7 @@ export async function tryResolveWorkProposalReplyFromChannel(
     ...(answer === 'steer' ? { note: text } : {}) };
   result.recordAction(answer);
   assertCurrent();
+  if (reply.decision === 'affirmative') requireDecisionFeature('accepting an autonomous work proposal; continue through an ordinary Classic conversation instead');
 
   const resolved = store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
   if (!resolved) {

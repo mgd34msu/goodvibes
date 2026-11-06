@@ -1,5 +1,8 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import {
   withDecisionLog, type DecisionEntry, type DecisionId, type DecisionLog,
   type DecisionNote, type JudgmentPort, type NewDecisionEntry,
@@ -309,4 +312,43 @@ test('both planning batteries are registered and their synthetic fixture replay 
     const checks = await battery.checkFixtures(port);
     expect(checks.every((check) => check.correct)).toBe(true);
   }
+});
+
+
+test('Classic suggestions retain manual composition without model metadata or invented topic readings', async () => {
+  let asks = 0, metadata = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed model'); },
+    get recorder(): never { metadata++; throw new Error('Classic borrowed recorder'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const source = question({ recommendedAnswer: 'Exact stored recommendation' }), result = await read(source);
+    expect(result).toMatchObject({ operationProvenance: 'classic', semanticAssessment: 'not-evaluated', topics: null,
+      recommendationSpecific: null, recommendation: null, actions: [], decisionIds: [] });
+    expect(ids(build(source, 'My explicit answer', result))).toEqual(['ask-narrower', 'custom']);
+    expect(build(source, 'My explicit answer', result).at(-1)).toMatchObject({ answer: 'My explicit answer', disabled: false });
+    expect(asks).toBe(0); expect(metadata).toBe(0);
+  });
+});
+
+test('Preferred suggestion exhaustion keeps completed genuine topic readings and omits the unread recommendation', async () => {
+  harness({ scope: 0.99, approval: 0.01 });
+  const recorded = judgmentPort('test.planning-partial-fallback');
+  installJudgmentPort({ ...recorded, async ask(request) {
+    if (request.context?.battery === planningRecommendationSpecific.name) throw new JudgmentError('unavailable', 'fixture exhausted');
+    return recorded.ask(request);
+  } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const result = await read(question({ recommendedAnswer: 'Unassessed recommendation' }));
+    expect(result).toMatchObject({ operationProvenance: 'classic', semanticAssessment: 'partial', recommendation: null, recommendationSpecific: null });
+    expect(result.topics?.scope.verdict).toBe('yes'); expect(result.topics?.approval.verdict).toBe('no');
+    expect(result.decisionIds).toEqual(['decision-1']); expect(ids(result.actions)).toContain('scope-focused-first-pass');
+    expect(ids(result.actions)).not.toContain('approve-execution'); expect(ids(result.actions)).not.toContain('recommended');
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`suggestion ${kind} never activates Preferred fallback`, async () => {
+  installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await expect(read(question())).rejects.toThrow(); expect(decisionModelPolicyState().operation).toBe('decision');
+  });
 });

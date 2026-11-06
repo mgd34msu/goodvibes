@@ -37,6 +37,7 @@ export type {
   ProjectPlanningQuestion,
   ProjectPlanningQuestionStatus,
   ProjectPlanningReadiness,
+  ProjectPlanningReadinessAssessment,
   ProjectPlanningSpaceInput,
   ProjectPlanningState,
   ProjectPlanningStateResult,

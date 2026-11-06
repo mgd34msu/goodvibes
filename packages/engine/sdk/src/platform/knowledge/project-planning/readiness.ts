@@ -1,5 +1,6 @@
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import type { JsonValue } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { JudgmentError, drainOwned, type JsonValue } from '@goodvibes-jev/judgment';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { planningGoalSpecified } from './batteries/readiness.js';
 import type {
@@ -7,6 +8,7 @@ import type {
   ProjectPlanningGap,
   ProjectPlanningQuestion,
   ProjectPlanningReadiness,
+  ProjectPlanningReadinessAssessment,
   ProjectPlanningState,
 } from './types.js';
 
@@ -29,12 +31,16 @@ export async function prepareProjectPlanningReadiness(
   input: ProjectPlanningState,
   options: JudgmentReadingOptions = {},
 ): Promise<PreparedPlanningReadiness> {
+  return withConfiguredDecisionModelPolicy(() => prepareRawPlanningReadiness(input, options));
+}
+
+async function prepareRawPlanningReadiness(input: ProjectPlanningState, options: JudgmentReadingOptions): Promise<PreparedPlanningReadiness> {
   const signal = options.signal, callerCurrent = options.assertCurrent;
   const check = () => { signal?.throwIfAborted(); callerCurrent?.(); };
   check();
   // Admit the complete state before projection, including unknown metadata.
   const state = snapshotJudgmentInput(input) as ProjectPlanningState;
-  if (!state.goal.trim()) return { evaluation: composeReadiness(state, 'unavailable'), assertCurrent: check };
+  if (!state.goal.trim()) return { evaluation: composeReadiness(state, isClassicOperation() ? 'not-evaluated' : 'unavailable'), assertCurrent: check };
   const reading = await readPlanningSemanticFacts(planningSemanticFacts(state), options);
   reading.assertCurrent();
   return { evaluation: composeReadiness(state, reading.semantic), assertCurrent: reading.assertCurrent };
@@ -51,40 +57,60 @@ export function planningSemanticFacts(state: ProjectPlanningState): Record<strin
   })) as Record<string, JsonValue>;
 }
 
-/** Independently admit every supplied fact before acquiring the semantic port. */
-export async function readPlanningSemanticFacts(input: Record<string, JsonValue>, options: JudgmentReadingOptions = {}) {
+export type PlanningSemanticReadiness = 'specified' | 'ambiguous' | 'unavailable' | 'not-evaluated';
+interface PreparedPlanningSemanticFacts {
+  readonly semantic: PlanningSemanticReadiness;
+  readonly assertCurrent: () => void;
+}
+
+/** Independently admit every supplied fact; only the pure interpretation may fall back. */
+export async function readPlanningSemanticFacts(input: Record<string, JsonValue>, options: JudgmentReadingOptions = {}): Promise<PreparedPlanningSemanticFacts> {
+  return withConfiguredDecisionModelPolicy(() => readOwnedPlanningSemanticFacts(input, options));
+}
+async function readOwnedPlanningSemanticFacts(input: Record<string, JsonValue>, options: JudgmentReadingOptions): Promise<PreparedPlanningSemanticFacts> {
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const check = () => { signal?.throwIfAborted(); callerCurrent?.(); };
+  let retired = false;
+  const check = () => {
+    if (signal?.aborted) throw new JudgmentError('aborted', 'Planning readiness was cancelled');
+    if (retired) throw new JudgmentAuthorityRetiredError();
+    try {
+      isClassicOperation();
+      if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new JudgmentAuthorityRetiredError();
+      const result: unknown = callerCurrent?.();
+      if (result !== undefined) { drainOwned(result); throw new JudgmentAuthorityRetiredError(); }
+    } catch { retired = true; throw new JudgmentAuthorityRetiredError(); }
+    if (signal?.aborted) throw new JudgmentError('aborted', 'Planning readiness was cancelled');
+  };
   check();
   const facts = snapshotJudgmentInput(input) as Record<string, JsonValue>;
-  let authority: ReturnType<typeof captureJudgmentPort>;
-  try { authority = captureJudgmentPort(SITE, { signal, assertCurrent: check }); }
-  catch (error) {
-    if (!(error instanceof JudgmentPortMissingError)) throw error;
+  let authority: ReturnType<typeof captureJudgmentPort> | undefined;
+  const current = () => {
     check();
-    return { semantic: 'unavailable' as const, assertCurrent: check };
-  }
-  let semantic: 'specified' | 'ambiguous' | 'unavailable' = 'unavailable';
+    if (authority?.signal.aborted) throw new JudgmentAuthorityRetiredError();
+    if (!isClassicOperation()) authority?.assertCurrent();
+    check();
+  };
   try {
-    const run = await planningGoalSpecified.run(authority.port, facts, { site: SITE, signal: authority.signal });
-    authority.assertCurrent();
-    const reading = run.readings.specified;
-    if (reading.outcome === 'act') semantic = reading.verdict === 'yes' ? 'specified' : 'ambiguous';
-    run.recordAction(`readiness:${semantic}`);
-    authority.assertCurrent();
+    return await decisionOrClassic<PreparedPlanningSemanticFacts>(async () => {
+      authority = captureJudgmentPort(SITE, { signal, assertCurrent: check });
+      const run = await planningGoalSpecified.run(authority.port, facts, { site: SITE, signal: authority.signal, beforeAttempt: current });
+      current();
+      const reading = run.readings.specified;
+      const semantic = reading.outcome === 'act' ? reading.verdict === 'yes' ? 'specified' as const : 'ambiguous' as const : 'unavailable' as const;
+      run.recordAction(`readiness:${semantic}`); current();
+      return { semantic, assertCurrent: current };
+    }, () => { current(); return { semantic: 'not-evaluated', assertCurrent: current }; }, () => { current(); return true; });
   } catch (error) {
-    authority.assertCurrent();
-    // A failed reading remains unavailable; it cannot become a language verdict.
-    if (error instanceof JudgmentInputError) throw error;
-    semantic = 'unavailable';
+    current();
+    if (error instanceof JudgmentInputError || error instanceof JudgmentAuthorityRetiredError || error instanceof JudgmentError && error.kind === 'aborted') throw error;
+    // Genuine refusals and malformed replies remain blocking, never a Classic fallback.
+    return { semantic: 'unavailable', assertCurrent: current };
   }
-  authority.assertCurrent();
-  return { semantic, assertCurrent: authority.assertCurrent };
 }
 
 const SITE = 'knowledge.planning.goal-specified';
 
-export function composeReadiness(state: ProjectPlanningState, semantic: 'specified' | 'ambiguous' | 'unavailable'): ProjectPlanningEvaluation {
+export function composeReadiness(state: ProjectPlanningState, semantic: PlanningSemanticReadiness): ProjectPlanningEvaluation {
   const gaps: ProjectPlanningGap[] = [];
   const goal = state.goal.trim();
   if (!goal) {
@@ -181,16 +207,22 @@ export function composeReadiness(state: ProjectPlanningState, semantic: 'specifi
     });
   }
   const readiness = readinessFromGaps(gaps);
+  const readinessAssessment: ProjectPlanningReadinessAssessment = {
+    basis: semantic === 'not-evaluated' ? 'native-structure-and-owner-approval' : 'semantic-and-native', semanticAssessment: semantic,
+  };
   return {
     ok: true,
     projectId: state.projectId,
     knowledgeSpaceId: state.knowledgeSpaceId,
     readiness,
+    readinessAssessment,
+    ...(semantic === 'not-evaluated' ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     gaps,
     ...(gaps[0]?.question ? { nextQuestion: gaps[0].question } : {}),
     state: {
       ...state,
       readiness,
+      readinessAssessment,
     },
   };
 }

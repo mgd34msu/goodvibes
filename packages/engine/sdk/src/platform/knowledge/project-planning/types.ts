@@ -279,7 +279,14 @@ export interface ProjectPlanningAgentAssignment {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** An evaluation basis, never execution authority or a substitute for the owner's approval. */
+export interface ProjectPlanningReadinessAssessment {
+  readonly basis: 'native-structure-and-owner-approval' | 'semantic-and-native';
+  readonly semanticAssessment: 'specified' | 'ambiguous' | 'unavailable' | 'not-evaluated';
+}
+
 export interface ProjectPlanningState {
+  readonly readinessAssessment?: ProjectPlanningReadinessAssessment;
   readonly id: string;
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
@@ -314,6 +321,9 @@ export interface ProjectPlanningGap {
 }
 
 export interface ProjectPlanningEvaluation {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  readonly readinessAssessment?: ProjectPlanningReadinessAssessment;
   readonly ok: true;
   readonly projectId: string;
   readonly knowledgeSpaceId: string;

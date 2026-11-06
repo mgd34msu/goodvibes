@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 export class WorkPlanTaskExistsError extends Error {
   constructor(taskId: string) { super(`Work plan task already exists: ${taskId}`); this.name = 'WorkPlanTaskExistsError'; }
 }
@@ -289,6 +290,10 @@ export class ProjectPlanningService {
 
   /** Explicit operator action, bound to one captured source generation. */
   async applyStateAction(input: ProjectPlanningStateActionInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningStateActionResult> {
+    return withConfiguredDecisionModelPolicy(() => this.applyStateActionOwned(input, options));
+  }
+
+  private async applyStateActionOwned(input: ProjectPlanningStateActionInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningStateActionResult> {
     // Capture before the first await. Later caller mutations cannot change the
     // selected source, expected generation, or requested operator action.
     options = { signal: options.signal, assertCurrent: options.assertCurrent };
@@ -389,6 +394,10 @@ export class ProjectPlanningService {
   }
 
   async upsertState(input: ProjectPlanningStateUpsertInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningStateResult> {
+    return withConfiguredDecisionModelPolicy(() => this.upsertStateOwned(input, options));
+  }
+
+  private async upsertStateOwned(input: ProjectPlanningStateUpsertInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningStateResult> {
     options = { signal: options.signal, assertCurrent: options.assertCurrent };
     const captured = snapshotJudgmentInput(input) as ProjectPlanningStateUpsertInput;
     options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -405,6 +414,10 @@ export class ProjectPlanningService {
   }
 
   async evaluate(input: ProjectPlanningEvaluateInput = {}, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningEvaluation> {
+    return withConfiguredDecisionModelPolicy(() => this.evaluateOwned(input, options));
+  }
+
+  private async evaluateOwned(input: ProjectPlanningEvaluateInput = {}, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningEvaluation> {
     const captured = snapshotJudgmentInput(input) as ProjectPlanningEvaluateInput;
     const signal = options.signal, callerCurrent = options.assertCurrent;
     const check = () => { signal?.throwIfAborted(); callerCurrent?.(); };
@@ -429,6 +442,10 @@ export class ProjectPlanningService {
    * reject. State and derived work-plan changes share one publication boundary.
    */
   async answerQuestion(input: ProjectPlanningAnswerInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningAnswerResult> {
+    return withConfiguredDecisionModelPolicy(() => this.answerQuestionOwned(input, options));
+  }
+
+  private async answerQuestionOwned(input: ProjectPlanningAnswerInput, options: JudgmentReadingOptions = {}): Promise<ProjectPlanningAnswerResult> {
     options = { signal: options.signal, assertCurrent: options.assertCurrent };
     input = snapshotJudgmentInput(input) as ProjectPlanningAnswerInput;
     // Capture identity before awaiting; the action captures its own structured input.
@@ -1317,7 +1334,7 @@ async function prepareOwnedPlanningReadiness(input: ProjectPlanningState, option
   check();
   const canonical = snapshotJudgmentInput(planningClockRepresentation(input, 'state', 'encode'));
   const state = planningClockRepresentation(canonical, 'state', 'decode') as ProjectPlanningState;
-  if (!state.goal.trim()) return { evaluation: composeReadiness(state, 'unavailable'), assertCurrent: check };
+  if (!state.goal.trim()) return { evaluation: composeReadiness(state, isClassicOperation() ? 'not-evaluated' : 'unavailable'), assertCurrent: check };
   const reading = await readPlanningSemanticFacts(planningSemanticFacts(state), { signal, assertCurrent: check });
   reading.assertCurrent();
   return { evaluation: composeReadiness(state, reading.semantic), assertCurrent: reading.assertCurrent };

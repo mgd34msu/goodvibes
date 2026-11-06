@@ -1,3 +1,6 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -570,4 +573,73 @@ test('historical v8 missing a durable table refuses v9 upgrade without silent re
     expect(persisted.exec('PRAGMA user_version')[0]?.values).toEqual([[8]]);
     expect(persisted.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_ledgers'")).toEqual([]);
   } finally { persisted.close(); }
+});
+
+
+test('Classic plan editing, questions, owner approval and restart use native readiness with zero requests', async () => {
+  const f = await fixture(); let asks = 0, metadata = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed model metadata'); },
+    get recorder(): never { metadata++; throw new Error('Classic borrowed recorder'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const initial = await f.service.upsertState(input({ executionApproved: false, openQuestions: [{ id: 'clarify', prompt: 'Which file is in scope?' }] }));
+    expect(initial.state).toMatchObject({ readiness: 'needs-user-input', executionApproved: false,
+      readinessAssessment: { basis: 'native-structure-and-owner-approval', semanticAssessment: 'not-evaluated' } });
+    const originalTask = (await f.service.getWorkPlanSnapshot(input())).tasks[0];
+    const answered = await f.service.answerQuestion({ projectId: input().projectId, questionId: 'clarify', answer: 'Only retry.ts.' });
+    expect(answered).toMatchObject({ answered: true, evaluation: { readiness: 'needs-user-input', operationProvenance: 'classic' } });
+    expect(answered.evaluation?.gaps.map(gap => gap.kind)).toEqual(['unapproved-execution']);
+    const approved = await f.service.applyStateAction({ projectId: input().projectId, expected: { kind: 'current' }, action: { kind: 'approve' } });
+    expect(approved).toMatchObject({ applied: true, state: { readiness: 'executable', executionApproved: true }, evaluation: { semanticAssessment: 'not-evaluated' } });
+    expect((await f.service.getWorkPlanSnapshot(input())).tasks[0]?.taskId).toBe(originalTask?.taskId);
+    expect((await f.service.getWorkPlanSnapshot(input())).tasks[0]?.createdAt).toBe(originalTask?.createdAt);
+    const nextStore = new KnowledgeStore({ dbPath: f.path }), nextService = new ProjectPlanningService(nextStore);
+    const reloaded = await nextService.getState({ projectId: input().projectId });
+    expect(reloaded.state).toMatchObject({ readiness: 'executable', executionApproved: true, readinessAssessment: { semanticAssessment: 'not-evaluated' } });
+    await nextStore.close(); expect(asks).toBe(0); expect(metadata).toBe(0);
+  });
+});
+
+for (const [name, state, expected] of [
+  ['goal', { goal: '' }, 'missing-goal'],
+  ['scope', { scope: '', constraints: [] }, 'missing-scope'],
+  ['tasks', { tasks: [] }, 'missing-tasks'],
+  ['verification', { tasks: [{ id: 'task', title: 'Make explicit change', verification: [] }], verificationGates: [] }, 'missing-verification'],
+  ['approval', { executionApproved: false }, 'unapproved-execution'],
+] as const) test(`Classic still requires native ${name}`, async () => {
+  const f = await fixture();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const result = await f.service.evaluate(input(state));
+    expect(result.readiness).toBe('needs-user-input'); expect(result.gaps.map(gap => gap.kind)).toContain(expected);
+    expect(result.semanticAssessment).toBe('not-evaluated');
+  });
+});
+
+test('Preferred planning exhaustion changes only the interpretation phase and publishes each task once', async () => {
+  const f = await fixture(); let asks = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const result = await f.service.upsertState(input());
+    expect(result.state).toMatchObject({ readiness: 'executable', readinessAssessment: { semanticAssessment: 'not-evaluated' } });
+    expect((await f.service.getWorkPlanSnapshot(input())).tasks).toHaveLength(1);
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' }); expect(asks).toBe(1);
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'unrecorded'] as const) test(`planning ${kind} stays blocked without Preferred fallback`, async () => {
+  const f = await fixture(); installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const evaluation = await f.service.evaluate(input());
+    expect(evaluation.readiness).toBe('needs-user-input'); expect(evaluation.gaps.map(gap => gap.kind)).toContain('readiness-unavailable');
+    expect(decisionModelPolicyState().operation).toBe('decision');
+  });
+});
+
+test('Classic planning preserves full-source privacy and cancellation guards before publication', async () => {
+  const f = await fixture(), before = fileSnapshot(f.path), abort = new AbortController(); abort.abort();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(f.service.upsertState(input({ metadata: { password: 'SYNTHETIC_NOT_A_REAL_SECRET' } }))).rejects.toBeInstanceOf(JudgmentInputError);
+    await expect(f.service.upsertState(input(), { signal: abort.signal })).rejects.toThrow();
+    await expect(f.service.upsertState(input(), { assertCurrent() { throw new Error('Native planning source retired'); } })).rejects.toThrow();
+    expect(fileSnapshot(f.path)).toEqual(before);
+  });
 });

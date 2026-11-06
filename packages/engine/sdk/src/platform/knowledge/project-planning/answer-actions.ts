@@ -1,5 +1,6 @@
-import type { JsonValue, YesNoReading } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import type { JsonValue, JudgmentPort, YesNoReading } from '@goodvibes-jev/judgment';
+import { judgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import type { ProjectPlanningQuestion } from './types.js';
@@ -19,11 +20,13 @@ export type ProjectPlanningAnswerQuestion = Readonly<Pick<ProjectPlanningQuestio
   'id' | 'prompt' | 'whyItMatters' | 'recommendedAnswer' | 'consequence' | 'status'>>;
 
 export interface ProjectPlanningAnswerActionsReading {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly question: ProjectPlanningAnswerQuestion;
   /** Semantic suggestions only. The pure composer adds manual answer actions. */
   readonly actions: readonly ProjectPlanningAnswerAction[];
   readonly recommendation: string | null;
-  readonly topics: Readonly<Record<'scope' | 'tasks' | 'verification' | 'approval', YesNoReading>>;
+  readonly topics: Readonly<Record<'scope' | 'tasks' | 'verification' | 'approval', YesNoReading>> | null;
   readonly recommendationSpecific: YesNoReading | null;
   readonly decisionIds: readonly string[];
 }
@@ -67,8 +70,28 @@ export async function readProjectPlanningAnswerActions(
   input: ProjectPlanningQuestion,
   options: ProjectPlanningAnswerReadOptions = {},
 ): Promise<ProjectPlanningAnswerActionsReading> {
+  return withConfiguredDecisionModelPolicy(() => readOwnedProjectPlanningAnswerActions(input, options));
+}
+
+async function readOwnedProjectPlanningAnswerActions(input: ProjectPlanningQuestion, options: ProjectPlanningAnswerReadOptions): Promise<ProjectPlanningAnswerActionsReading> {
   const signal = options.signal;
-  signal?.throwIfAborted();
+  const nativeCurrent = () => { signal?.throwIfAborted(); isClassicOperation(); };
+  let binding: { readonly port: JudgmentPort; readonly model: string } | undefined;
+  const current = () => {
+    nativeCurrent();
+    if (binding && !isClassicOperation()
+      && (judgmentPort(TOPIC_SITE) !== binding.port || binding.port.model !== binding.model)) throw new JudgmentAuthorityRetiredError();
+    nativeCurrent();
+  };
+  const semanticPort = () => {
+    current();
+    if (!binding) {
+      const port = judgmentPort(TOPIC_SITE);
+      try { binding = { port, model: port.model }; } catch { throw new JudgmentAuthorityRetiredError(); }
+    }
+    current(); return binding.port;
+  };
+  current();
   const question = questionFrom(snapshotJudgmentInput(input));
   const facts: Record<string, JsonValue> = { id: 'question_0', prompt: question.prompt };
   for (const field of ['whyItMatters', 'recommendedAnswer', 'consequence'] as const) {
@@ -76,34 +99,39 @@ export async function readProjectPlanningAnswerActions(
     if (value !== undefined) facts[field] = value;
   }
   const state = { question: facts };
-  const callOptions = signal === undefined ? {} : { signal };
-  const port = judgmentPort(TOPIC_SITE);
-  const topics = await executePolicyCheck(() => planningAnswerTopic.run(port, state, { site: TOPIC_SITE, ...callOptions }), signal);
-  signal?.throwIfAborted();
-  const recommendation = question.recommendedAnswer?.trim()
-    ? await executePolicyCheck(() => planningRecommendationSpecific.run(port, state, { site: RECOMMENDATION_SITE, ...callOptions }), signal)
+  const callOptions = { ...(signal === undefined ? {} : { signal }), beforeAttempt: current };
+  const topics = await decisionOrClassic<Awaited<ReturnType<typeof planningAnswerTopic.run>> | null>(
+    () => executePolicyCheck(() => planningAnswerTopic.run(semanticPort(), state, { site: TOPIC_SITE, ...callOptions }), signal),
+    () => { current(); return null; }, () => { current(); return true; });
+  current();
+  const recommendation = topics && question.recommendedAnswer?.trim()
+    ? await decisionOrClassic<Awaited<ReturnType<typeof planningRecommendationSpecific.run>> | null>(
+      () => executePolicyCheck(() => planningRecommendationSpecific.run(semanticPort(), state, { site: RECOMMENDATION_SITE, ...callOptions }), signal),
+      () => { current(); return null; }, () => { current(); return true; })
     : null;
   signal?.throwIfAborted();
   const specific = recommendation?.readings.specific ?? null;
   const retained = specific !== null && supported(specific) ? question.recommendedAnswer! : null;
   const actions = suggestedActions({
-    scope: supported(topics.readings.scope), tasks: supported(topics.readings.tasks),
-    verification: supported(topics.readings.verification), approval: supported(topics.readings.approval),
+    scope: topics !== null && supported(topics.readings.scope), tasks: topics !== null && supported(topics.readings.tasks),
+    verification: topics !== null && supported(topics.readings.verification), approval: topics !== null && supported(topics.readings.approval),
   }, retained);
   // Action labels contain only the fixed suggestion IDs, never caller text.
   const action = actions.length === 0 ? 'suggestions:withheld' : `suggestions:offer:${actions.map((entry) => entry.id).join(',')}`;
   signal?.throwIfAborted();
-  topics.recordAction(action);
+  if (!isClassicOperation()) topics?.recordAction(action);
   signal?.throwIfAborted();
-  recommendation?.recordAction(retained === null ? 'recommendation:withheld' : 'recommendation:offer');
+  if (!isClassicOperation()) recommendation?.recordAction(retained === null ? 'recommendation:withheld' : 'recommendation:offer');
   signal?.throwIfAborted();
+  current();
   return Object.freeze({
     question,
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: topics ? 'partial' as const : 'not-evaluated' as const } : {}),
     actions: Object.freeze(actions.map((entry) => Object.freeze(entry))),
     recommendation: retained,
-    topics: Object.freeze({ ...topics.readings }),
+    topics: topics === null ? null : Object.freeze({ ...topics.readings }),
     recommendationSpecific: specific === null ? null : Object.freeze({ ...specific }),
-    decisionIds: Object.freeze([topics.result.decisionId, recommendation?.result.decisionId].filter((id): id is string => id !== undefined)),
+    decisionIds: Object.freeze([topics?.result.decisionId, recommendation?.result.decisionId].filter((id): id is string => id !== undefined)),
   });
 }
 

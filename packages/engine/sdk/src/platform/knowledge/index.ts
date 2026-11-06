@@ -163,6 +163,7 @@ export type {
   ProjectPlanningAnswerReadOptions,
   ProjectPlanningQuestionStatus,
   ProjectPlanningReadiness,
+  ProjectPlanningReadinessAssessment,
   ProjectPlanningServiceOptions,
   ProjectPlanningSpaceInput,
   ProjectPlanningState,

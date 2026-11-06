@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import type { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
 import { KnowledgeNodeActivationHeldError as Held } from '../sdk/src/platform/knowledge/activation/types.js';
@@ -70,7 +70,7 @@ describe('atomic Home Graph import', () => {
       const { store, dbPath, run, reopen } = await fixture();
       const before = state(store), bytes = readFileSync(dbPath);
       if (mode === 'uncertain') reading(0.5);
-      if (mode === 'unavailable') { const fake = reading(); installJudgmentPort({ ...fake.port, ask: async () => { throw new Error('fixture unavailable'); } }); }
+      if (mode === 'unavailable') { const fake = reading(); installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'fixture unavailable'); } }); }
       await held(run(), mode);
       expect(state(store)).toEqual(before); expect(readFileSync(dbPath)).toEqual(bytes);
       expect(state(await reopen())).toEqual(before);

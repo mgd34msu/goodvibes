@@ -483,6 +483,8 @@ export async function decomposeGoal(
     const elapsedMs = outcome.kind === 'fallback' ? outcome.elapsedMs : undefined;
     const proposal: PlanProposal = {
       ...base,
+      ...(gate.provenance === undefined ? {} : { provenance: gate.provenance }),
+      ...(gate.provenance === 'classic' ? { rationale: 'Classic retains the complete goal as one owner-reviewable item; no semantic decomposition or risk certification was performed.' } : {}),
       decomposedBy: 'heuristic',
       ...(fallbackReason ? { fallbackReason } : {}),
       ...(usage ? { agentUsage: usage } : {}),
@@ -538,6 +540,7 @@ export async function decomposeGoal(
     const costUsd = lastUsage ? deps.estimateCostUsd?.(lastUsage) : undefined;
     const decorated: PlanProposal = {
       ...proposal,
+      ...(gate.provenance === undefined ? {} : { provenance: gate.provenance }),
       decomposedBy: 'agent',
       elapsedMs: totalElapsedMs,
       ...(lastUsage ? { agentUsage: lastUsage } : {}),

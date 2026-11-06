@@ -60,6 +60,7 @@ import { requestRisk } from '../routing/batteries/request.js';
 import { requestState } from '../routing/request-reading.js';
 import type { RemoteSupervisor } from '../runtime/remote/supervisor.js';
 import type { RuntimeStore } from '../runtime/store/index.js';
+import { decisionOrClassic, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export interface WorkstreamServicesDeps {
   readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'>;
@@ -134,7 +135,7 @@ interface PlannerInputSources {
  *    would be, on four levels. The planner takes a 0-1 score, so the reading's
  *    probability-weighted position on those levels (`normalized`) is used as
  *    is; an unsure reading spreads across levels and lands between them.
- *    A missing judgment port throws, so the draft is not proposed.
+ *    Classic records null (unassessed), never a made-up low-risk score.
  *  - latencyBudgetMs: no wall-clock budget exists for a workstream. A draft
  *    is reviewed and approved before anything runs, and there is no latency
  *    setting in config, so the budget is unbounded.
@@ -146,13 +147,16 @@ interface PlannerInputSources {
  *    (contract.maxActiveContracts, FIFO), with no queue cap to refuse it.
  */
 async function buildPlannerInputs(task: string, sources: PlannerInputSources): Promise<PlannerInputs> {
-  const run = await requestRisk.run(
-    judgmentPort(TASK_RISK_SITE),
-    requestState({ purpose: 'planner', brief: task }),
-    { site: TASK_RISK_SITE },
-  );
-  const riskScore = run.readings.risk.normalized;
-  run.recordAction(`planner riskScore ${riskScore.toFixed(2)}`);
+  const riskScore = await decisionOrClassic<number | null>(async () => {
+    const run = await requestRisk.run(
+      judgmentPort(TASK_RISK_SITE),
+      requestState({ purpose: 'planner', brief: task }),
+      { site: TASK_RISK_SITE },
+    );
+    const score = run.readings.risk.normalized;
+    run.recordAction(`planner riskScore ${score.toFixed(2)}`);
+    return score;
+  }, () => null);
   return {
     riskScore,
     latencyBudgetMs: Number.POSITIVE_INFINITY,
@@ -214,6 +218,7 @@ function toProvenance(result: DecomposeGoalResult): WorkstreamDraftProvenance {
           : 'fallback';
   return {
     kind,
+    ...(p.provenance === 'classic' ? { policy: 'classic' as const } : {}),
     itemCount: p.workItems.length,
     ...(p.agentCostUsd !== undefined ? { agentCostUsd: p.agentCostUsd } : {}),
     ...(p.agentUsage ? { agentTokens: p.agentUsage.totalTokens } : {}),
@@ -288,15 +293,17 @@ function createWorkstreamCommandService(
    * derived by `buildSpec` (see below).
    */
   async function decompose(task: string): Promise<DecomposeGoalResult> {
-    const runner = createAgentManagerDecompositionRunner({ agentManager });
-    return decomposeGoal(
-      { goal: task, workingDir: projectRoot, constraints: {} },
-      adaptivePlanner,
-      await buildPlannerInputs(task, plannerSources),
-      readDecompositionConfig(configManager),
-      runner,
-      { estimateCostUsd: makeCostEstimator(configManager) },
-    );
+    return withConfiguredDecisionModelPolicy(async () => {
+      const runner = createAgentManagerDecompositionRunner({ agentManager });
+      return decomposeGoal(
+        { goal: task, workingDir: projectRoot, constraints: {} },
+        adaptivePlanner,
+        await buildPlannerInputs(task, plannerSources),
+        readDecompositionConfig(configManager),
+        runner,
+        { estimateCostUsd: makeCostEstimator(configManager) },
+      );
+    });
   }
 
   /**
@@ -369,6 +376,7 @@ function createWorkstreamCommandService(
    * is an ask: the item's task starts the contract.
    */
   function startDraftContract(draft: WorkstreamDraft): ReturnType<ContractRunner['start']> {
+    requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
     const spec = draft.spec;
     const launch = {
       sessionId: typeof sessionId === 'function' ? sessionId() : sessionId,
@@ -412,6 +420,7 @@ function createWorkstreamCommandService(
       draft.task = task;
       draft.spec = { ...buildSpec(task, result.proposal), isolation: nextIsolation };
       draft.proposal = result.proposal;
+      draft.gate = result.gate;
       draft.provenance = toProvenance(result);
       draft.approved = false;
       store.save(draft);

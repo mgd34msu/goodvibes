@@ -70,8 +70,8 @@ export type StrategyReasonCode =
 
 /** Inputs used by the scorer to rank strategy candidates. */
 export interface PlannerInputs {
-  /** 0-1 risk score: 0 = safe, 1 = highly uncertain / destructive */
-  riskScore: number;
+  /** 0-1 risk score; null means no risk assessment was taken. */
+  riskScore: number | null;
 
   /**
    * Available wall-clock budget in milliseconds.
@@ -107,6 +107,7 @@ export interface StrategyCandidate {
  * logic lives here.
  */
 export interface DecompositionGate {
+  readonly provenance?: 'classic';
   decompose: boolean;
   strategy: ExecutionStrategy;
   reasonCode: StrategyReasonCode;
@@ -324,6 +325,7 @@ export class AdaptivePlanner {
       decompose: decision.selected !== 'single',
       strategy: decision.selected,
       reasonCode: decision.reasonCode,
+      ...(decision.provenance === undefined ? {} : { provenance: decision.provenance }),
     };
   }
 
@@ -453,7 +455,7 @@ export class AdaptivePlanner {
    */
   private _validateInputs(inputs: PlannerInputs): PlannerInputs {
     const out = { ...inputs };
-    if (isNaN(out.riskScore) || out.riskScore < 0 || out.riskScore > 1) {
+    if (out.riskScore !== null && (isNaN(out.riskScore) || out.riskScore < 0 || out.riskScore > 1)) {
       logger.debug('[AdaptivePlanner] riskScore out of range, clamping', { riskScore: out.riskScore });
       out.riskScore = isNaN(out.riskScore) ? 0 : Math.max(0, Math.min(1, out.riskScore));
     }
@@ -489,7 +491,7 @@ export class AdaptivePlanner {
     lines.push(
       '',
       'Inputs:',
-      `  riskScore:         ${inputs.riskScore.toFixed(2)}`,
+      `  riskScore:         ${inputs.riskScore === null ? 'not assessed' : inputs.riskScore.toFixed(2)}`,
       `  latencyBudgetMs:   ${inputs.latencyBudgetMs === Infinity ? '∞' : inputs.latencyBudgetMs}`,
       `  isMultiStep:       ${inputs.isMultiStep}`,
       `  remoteAvailable:   ${inputs.remoteAvailable}`,

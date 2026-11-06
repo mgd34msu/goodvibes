@@ -102,6 +102,7 @@ export interface DecompositionAgentUsage {
 }
 
 export interface PlanProposal {
+  readonly provenance?: 'classic';
   id: string;
   task: string;
   strategy: ExecutionStrategy;

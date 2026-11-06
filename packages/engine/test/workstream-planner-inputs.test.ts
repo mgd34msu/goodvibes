@@ -10,9 +10,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Question } from '@goodvibes-jev/judgment';
+import { JudgmentError, type Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { AdaptivePlanner } from '../sdk/src/platform/core/index.ts';
 import type { PhaseRunnerAgentManagerLike } from '../sdk/src/platform/orchestration/index.ts';
 import { createWorkstreamServices } from '../sdk/src/platform/orchestration/workstream-services.ts';
@@ -53,9 +54,9 @@ function withConnection(store: RuntimeStore, connection: AcpConnection): void {
   }));
 }
 
-function makeServices(options: { decomposition: 'heuristic' | 'agent'; store?: RuntimeStore }) {
-  const projectRoot = makeProjectTempDir('gv-workstream-planner-inputs');
-  tempDirs.push(projectRoot);
+function makeServices(options: { decomposition: 'heuristic' | 'agent'; store?: RuntimeStore; projectRoot?: string }) {
+  const projectRoot = options.projectRoot ?? makeProjectTempDir('gv-workstream-planner-inputs');
+  if (options.projectRoot === undefined) tempDirs.push(projectRoot);
   mkdirSync(join(projectRoot, 'src'), { recursive: true });
   const spawned: string[] = [];
   const agentManager: PhaseRunnerAgentManagerLike = {
@@ -86,7 +87,7 @@ function makeServices(options: { decomposition: 'heuristic' | 'agent'; store?: R
     remoteSupervisor: new RemoteSupervisor(new RemoteRunnerRegistry({ getStatus: () => null, list: () => [] })),
     runtimeStore: options.store ?? createRuntimeStore(),
   });
-  return { ...services, planner, spawned };
+  return { ...services, planner, spawned, projectRoot };
 }
 
 describe('workstream draft planner inputs', () => {
@@ -159,3 +160,63 @@ describe('workstream draft planner inputs', () => {
   });
 });
 
+
+for (const policy of ['Classic - Off', 'Preferred'] as const) {
+  test(`${policy} drafts, edits, persists and reloads a complete goal without invented semantic risk`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted decision chain'); });
+    installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => policy, async () => {
+      const h = makeServices({ decomposition: 'agent' });
+      try {
+        const draft = await h.workstreamCommands.proposeDraft('Inspect the exact source and propose the owner-requested change.');
+        expect(draft.gate).toMatchObject({ decompose: false, reasonCode: 'CLASSIC_SINGLE', provenance: 'classic' });
+        expect(draft.provenance.policy).toBe('classic'); expect(draft.proposal.provenance).toBe('classic');
+        expect(draft.spec.items).toHaveLength(1); expect(draft.spec.items[0]!.task).toBe(draft.task);
+        expect(h.planner.getLatest()?.inputs.riskScore).toBeNull();
+        expect(h.planner.explain()).toContain('not assessed');
+        expect(h.spawned).toEqual([]);
+        const attempted = fake.requests.length;
+        const edited = await h.workstreamCommands.editDraft(draft.id, 'Only change the explicitly selected file.');
+        expect(edited?.spec.items[0]!.task).toBe('Only change the explicitly selected file.');
+        expect(edited?.provenance.policy).toBe('classic');
+        expect(h.workstreamCommands.approveDraft(draft.id)?.approved).toBe(true);
+        expect(() => h.workstreamCommands.launchDraft(draft.id)).toThrow(DecisionModelsDisabledError);
+        expect(h.workstreamCommands.getDraft(draft.id)?.approved).toBe(true);
+        expect(fake.requests).toHaveLength(attempted);
+        expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
+        const restarted = makeServices({ decomposition: 'agent', projectRoot: h.projectRoot });
+        try {
+          expect(restarted.workstreamCommands.getDraft(draft.id)).toMatchObject({
+            approved: true, task: 'Only change the explicitly selected file.',
+            provenance: { policy: 'classic' }, gate: { provenance: 'classic' },
+          });
+          expect(() => restarted.workstreamCommands.launchDraft(draft.id)).toThrow(DecisionModelsDisabledError);
+          expect(restarted.spawned).toEqual([]); expect(fake.requests).toHaveLength(attempted);
+        } finally { restarted.orchestrationEngine.dispose(); }
+      } finally { h.orchestrationEngine.dispose(); }
+    });
+  });
+}
+
+test('Preferred missing runtime can author an unassessed draft but terminal risk failures do not switch policies', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const h = makeServices({ decomposition: 'agent' });
+    try {
+      const draft = await h.workstreamCommands.proposeDraft('Retain this complete owner goal.');
+      expect(draft.provenance.policy).toBe('classic'); expect(decisionModelPolicyState().operation).toBe('classic');
+      expect(h.planner.getLatest()?.inputs.riskScore).toBeNull(); expect(h.spawned).toEqual([]);
+    } finally { h.orchestrationEngine.dispose(); }
+  });
+  for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); });
+    installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const h = makeServices({ decomposition: 'agent' });
+      try {
+        await expect(h.workstreamCommands.proposeDraft('A refused or malformed risk is not availability.')).rejects.toThrow();
+        expect(h.workstreamCommands.listDrafts()).toEqual([]); expect(h.spawned).toEqual([]);
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      } finally { h.orchestrationEngine.dispose(); }
+    });
+  }
+});

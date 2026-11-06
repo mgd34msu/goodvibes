@@ -19,6 +19,7 @@ import type { PlanProposal } from '../core/plan-proposal.js';
  * if so, why).
  */
 export interface WorkstreamDraftProvenance {
+  readonly policy?: 'classic';
   readonly kind: 'agent' | 'heuristic-configured' | 'gate-declined' | 'fallback';
   readonly itemCount: number;
   readonly agentCostUsd?: number | undefined;
@@ -32,7 +33,7 @@ export interface WorkstreamDraft {
   readonly id: string;
   task: string;
   spec: CreateWorkstreamInput;
-  readonly gate: DecompositionGate;
+  gate: DecompositionGate;
   /** The engine-agnostic decomposition proposal (model- or heuristic-produced). */
   proposal: PlanProposal;
   /** How that proposal came to be, for honest rendering. */

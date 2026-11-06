@@ -1,22 +1,17 @@
-import { formatJsonOrText, readJsonFile, getNestedValue, containsRedactedValue, inspectBundle as inspect } from '@goodvibes-jev/engine/terminal-shell/support-bundle-inspection';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
-import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { RuntimeServices } from '../runtime/services.ts';
 import { withRuntimeServices } from './management-utils.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/sdk/platform/config';
 import { SecretsManager } from '../config/secrets.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
+
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from '../providers/provider-classification.ts';
 import { buildCliServicePosture } from './service-posture.ts';
-import { REDACTED_VALUE, prepareConfigRedaction, redactSerializedSecrets, retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 
 function readAuthPosture(runtime: CliCommandRuntime) {
   const shellPaths = createShellPathService({
@@ -35,155 +30,42 @@ function readAuthPosture(runtime: CliCommandRuntime) {
     operatorTokenPresent: existsSync(operatorTokenPath),
   };
 }
-
-async function buildProviderReadiness(services: RuntimeServices) {
-  const snapshots = await listProviderRuntimeSnapshots(services.providerRegistry, { modelFamilyEnrichment: 'none' });
-  return await Promise.all(snapshots.map(async (snapshot) => ({
-    provider: snapshot.providerId,
-    active: snapshot.active,
-    configured: snapshot.runtime.auth?.configured ?? true,
-    configuredVia: snapshot.runtime.auth?.mode ?? 'unknown',
-    models: snapshot.modelCount,
-    setup: await classifyProviderSetup(snapshot, { site: 'tui.support-bundle.setup' }),
-  })));
-}
-
-export async function handleBundleCommand(runtime: CliCommandRuntime, options: JudgmentReadingOptions = {}): Promise<CliCommandOutput> {
-  const [sub = 'inspect', ...rest] = runtime.cli.commandArgs;
-  const shellPaths = createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  });
-
-  if (sub === 'inspect') {
-    const path = rest[0];
-    if (!path) return { output: 'Usage: goodvibes support-bundle inspect <path>', exitCode: 2 };
-    const sourcePath = shellPaths.resolveWorkspacePath(path);
-    const parsed = readJsonFile(sourcePath);
-    if (!parsed.ok) return { output: `Invalid bundle JSON: ${parsed.error}`, exitCode: 1 };
-    const summary = inspect(sourcePath, parsed.value, CONFIG_SCHEMA);
-    return {
-      output: formatJsonOrText(runtime, summary, [
-        'GoodVibes support bundle',
-        `  type: ${summary.type}`,
-        `  version: ${summary.version}`,
-        `  path: ${summary.path}`,
-        `  capturedAt: ${summary.capturedAt === null ? 'n/a' : new Date(summary.capturedAt).toISOString()}`,
-        `  configKeys: ${summary.configKeys}`,
-        `  redactedConfigKeys: ${summary.redactedConfigPaths.length}`,
-        `  diagnostics: ${summary.hasDiagnostics ? 'present' : 'missing'}`,
-      ].join('\n')),
-      exitCode: 0,
-    };
-  }
-
-  if (sub === 'export') {
-    const outputPath = rest[0] ?? 'goodvibes-bundle.json';
-    const secrets = new SecretsManager({
-      projectRoot: runtime.workingDirectory,
-      globalHome: runtime.homeDirectory,
-      configManager: runtime.configManager,
-    });
-    const configManager = runtime.configManager;
-    const retainedConfig = retainCliConfig(configManager);
-    const rawConfig = retainedConfig.raw;
-    const workingDirectory = runtime.workingDirectory, homeDirectory = runtime.homeDirectory;
-    const signal = options.signal, callerCurrent = options.assertCurrent;
-    const sourceCurrent = () => {
-      signal?.throwIfAborted();
-      if (options.signal !== signal || options.assertCurrent !== callerCurrent || runtime.configManager !== configManager
-        || runtime.workingDirectory !== workingDirectory || runtime.homeDirectory !== homeDirectory) throw new Error('Support bundle input changed before export.');
-      try { retainedConfig.assertCurrent(); }
-      catch { throw new Error('Support bundle input changed before export.'); }
-    };
-    const assertCurrent = () => {
-      sourceCurrent();
-      const result: unknown = callerCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Error('Support bundle ownership must be synchronous.'); }
-      sourceCurrent();
-    };
-    assertCurrent();
-    return await withRuntimeServices(runtime, async (services) => {
-      assertCurrent();
-      const owner = captureJudgmentPort('terminal-shell.support-bundle.export', { ...options, assertCurrent });
-      owner.assertCurrent();
-      const providers = await buildProviderReadiness(services);
-      owner.assertCurrent();
-      const reading = { ...options, signal: owner.signal, assertCurrent: owner.assertCurrent };
-      const redactedConfig = await prepareConfigRedaction(rawConfig, reading);
-      const service = await buildCliServicePosture(runtime, { ...reading, logTailBytes: 8192 });
-      const bundle = {
-        version: 2,
-        type: 'goodvibes.support',
-        capturedAt: Date.now(),
-        package: {
-          name: '@goodvibes-jev/tui',
-          version: getPackageVersion(),
-        },
-        roots: {
-          workingDirectory: runtime.workingDirectory,
-          homeDirectory: runtime.homeDirectory,
-        },
-        config: redactedConfig.value,
-        redaction: {
-          sentinel: REDACTED_VALUE,
-          redactedConfigPaths: redactedConfig.redactedPaths,
-        },
-        diagnostics: {
-          service,
-          auth: readAuthPosture(runtime),
-          providers,
-        },
-        secrets: await secrets.inspect(),
-        onboarding: {
-          userMarker: existsSync(getOnboardingCheckMarkerPath(shellPaths, 'user')),
-          projectMarker: existsSync(getOnboardingCheckMarkerPath(shellPaths, 'project')),
-        },
-      };
-      const targetPath = shellPaths.resolveWorkspacePath(outputPath);
-      const serialized = await redactSerializedSecrets(JSON.stringify(bundle, null, 2), redactedConfig.sensitiveValues, reading);
-      redactedConfig.assertCurrent();
-      owner.assertCurrent();
-      mkdirSync(dirname(targetPath), { recursive: true });
-      redactedConfig.assertCurrent();
-      owner.assertCurrent();
-      writeFileSync(targetPath, serialized + '\n', 'utf-8');
-      return {
-        output: formatJsonOrText(runtime, {
-          path: targetPath,
-          redactedConfigPaths: redactedConfig.redactedPaths,
-          serviceIssues: service.issues,
-        }, `Support bundle exported: ${targetPath}\n  redactedConfigKeys: ${redactedConfig.redactedPaths.length}\n  serviceIssues: ${service.issues.length}`),
-        exitCode: 0,
-      };
-    }, { catalog: { contextWindowEnrichment: 'none' } });
-  }
-
-  if (sub === 'import') {
-    const path = rest[0];
-    if (!path) return { output: 'Usage: goodvibes support-bundle import <path>', exitCode: 2 };
-    const sourcePath = shellPaths.resolveWorkspacePath(path);
-    const parsed = readJsonFile(sourcePath);
-    if (!parsed.ok) return { output: `Invalid bundle JSON: ${parsed.error}`, exitCode: 1 };
-    const config = parsed.value['config'];
-    if (!config || typeof config !== 'object') return { output: 'Bundle has no config object to import.', exitCode: 1 };
-    let count = 0;
-    let skippedRedacted = 0;
-    for (const setting of CONFIG_SCHEMA) {
-      const value = getNestedValue(config, setting.key);
-      if (value === undefined) continue;
-      if (containsRedactedValue(value)) {
-        skippedRedacted++;
-        continue;
-      }
-      runtime.configManager.setDynamic(setting.key as ConfigKey, value as never);
-      count++;
-    }
-    return {
-      output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied.${skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : ''}`,
-      exitCode: 0,
-    };
-  }
-
-  return { output: 'Usage: goodvibes support-bundle export [path]|inspect <path>|import <path>', exitCode: 2 };
-}
+export const handleBundleCommand = createSupportBundleCommand<
+  CliCommandRuntime,
+  RuntimeServices,
+  Awaited<ReturnType<typeof buildCliServicePosture>>
+>(
+  {
+    schema: CONFIG_SCHEMA,
+    createSecrets: (runtime) =>
+      new SecretsManager({
+        projectRoot: runtime.workingDirectory,
+        globalHome: runtime.homeDirectory,
+        configManager: runtime.configManager,
+      }),
+    withServices: withRuntimeServices,
+    providerRegistry: (services) => services.providerRegistry,
+    classifyProvider: classifyProviderSetup,
+    servicePosture: buildCliServicePosture,
+    authPosture: readAuthPosture,
+    packageVersion: getPackageVersion,
+    onboardingMarkerPath: getOnboardingCheckMarkerPath,
+    applySetting(runtime, key, value) {
+      runtime.configManager.setDynamic(key, value as never);
+    },
+  },
+  {
+    site: 'terminal-shell.support-bundle.export',
+    providerSite: 'tui.support-bundle.setup',
+    packageName: '@goodvibes-jev/tui',
+    bundleType: 'goodvibes.support',
+    title: 'GoodVibes support bundle',
+    commandBase: () => 'goodvibes support-bundle',
+    defaultFilename: 'goodvibes-bundle.json',
+    detachConfig: false,
+    time: (timestamp) => new Date(timestamp).toISOString(),
+    invalidJsonSeparator: ': ',
+    exportLabel: 'Support bundle exported',
+    issuesKey: 'serviceIssues',
+  },
+);

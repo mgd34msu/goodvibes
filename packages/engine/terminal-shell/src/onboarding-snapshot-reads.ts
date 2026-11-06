@@ -36,7 +36,7 @@ export function createOnboardingSnapshotReadHelpers<Area extends string>(policy:
     };
     issues: readonly SnapshotReadIssue<Area>[];
   }> {
-    let configs: ReturnType<OnboardingSnapshotDependencies['services']['getAll']>;
+    let configs: ReturnType<ServiceInspectionQuery['getAll']>;
     try {
       assertCurrent();
       configs = services.getAll();

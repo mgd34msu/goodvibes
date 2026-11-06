@@ -1,29 +1,20 @@
-import { formatJsonOrText, readJsonFile, getNestedValue, containsRedactedValue, inspectBundle as inspect } from '@goodvibes-jev/engine/terminal-shell/support-bundle-inspection';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync } from 'node:fs';
+import 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
-import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { RuntimeServices } from '../runtime/services.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '../config/index.ts';
 import { SecretsManager } from '../config/secrets.ts';
 import { withRuntimeServices, type CliCommandRuntime } from './management.ts';
-import type { CliCommandOutput } from './types.ts';
+
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
 import { buildCliServicePosture } from './service-posture.ts';
-import { REDACTED_VALUE, prepareConfigRedaction, redactSerializedSecrets, retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function readAuthPosture(runtime: CliCommandRuntime) {
   const shellPaths = createShellPathService({
@@ -42,156 +33,42 @@ function readAuthPosture(runtime: CliCommandRuntime) {
     operatorTokenPresent: operatorToken.present && Boolean(operatorToken.token),
   };
 }
-
-async function buildProviderReadiness(services: RuntimeServices) {
-  const snapshots = await listProviderRuntimeSnapshots(services.providerRegistry, { modelFamilyEnrichment: 'none' });
-  return Promise.all(snapshots.map(async (snapshot) => ({
-    provider: snapshot.providerId,
-    active: snapshot.active,
-    configured: snapshot.runtime.auth?.configured ?? true,
-    configuredVia: snapshot.runtime.auth?.mode ?? 'unknown',
-    models: snapshot.modelCount,
-    setup: await classifyProviderSetup(snapshot, { site: 'agent.support-bundle.setup' }),
-  })));
-}
-
-export async function handleBundleCommand(runtime: CliCommandRuntime, options: JudgmentReadingOptions = {}): Promise<CliCommandOutput> {
-  const [sub = 'inspect', ...rest] = runtime.cli.commandArgs;
-  const shellPaths = createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  });
-
-  if (sub === 'inspect') {
-    const path = rest[0];
-    if (!path) return { output: `Usage: ${runtime.cli.binary} bundle inspect <path>`, exitCode: 2 };
-    const sourcePath = shellPaths.resolveWorkspacePath(path);
-    const parsed = readJsonFile(sourcePath);
-    if (!parsed.ok) return { output: `Invalid bundle JSON ${parsed.error}`, exitCode: 1 };
-    const summary = inspect(sourcePath, parsed.value, CONFIG_SCHEMA);
-    return {
-      output: formatJsonOrText(runtime, summary, [
-        'GoodVibes Agent support bundle',
-        `  type: ${summary.type}`,
-        `  version: ${summary.version}`,
-        `  path: ${summary.path}`,
-        `  capturedAt: ${summary.capturedAt === null ? 'n/a' : appendTemporalLabel(new Date(summary.capturedAt).toISOString(), summary.capturedAt)}`,
-        `  configKeys: ${summary.configKeys}`,
-        `  redactedConfigKeys: ${summary.redactedConfigPaths.length}`,
-        `  diagnostics: ${summary.hasDiagnostics ? 'present' : 'missing'}`,
-      ].join('\n')),
-      exitCode: 0,
-    };
-  }
-
-  if (sub === 'export') {
-    const outputPath = rest[0] ?? 'goodvibes-agent-bundle.json';
-    const secrets = new SecretsManager({
-      projectRoot: runtime.workingDirectory,
-      globalHome: runtime.homeDirectory,
-      configManager: runtime.configManager,
-    });
-    const configManager = runtime.configManager;
-    const retainedConfig = retainCliConfig(configManager);
-    const rawConfig = captureOwnedJson(retainedConfig.raw);
-    const workingDirectory = runtime.workingDirectory;
-    const homeDirectory = runtime.homeDirectory;
-    const signal = options.signal;
-    const callerCurrent = options.assertCurrent;
-    const sourceCurrent = () => {
-      signal?.throwIfAborted();
-      if (options.signal !== signal || options.assertCurrent !== callerCurrent || runtime.configManager !== configManager
-        || runtime.workingDirectory !== workingDirectory || runtime.homeDirectory !== homeDirectory) throw new Error('Support bundle input changed before export.');
-      try { retainedConfig.assertCurrent(); }
-      catch { throw new Error('Support bundle input changed before export.'); }
-    };
-    const assertCurrent = () => {
-      sourceCurrent();
-      const result: unknown = callerCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Error('Support bundle ownership must be synchronous.'); }
-      sourceCurrent();
-    };
-    assertCurrent();
-    return await withRuntimeServices(runtime, async (services) => {
-      assertCurrent();
-      const owner = captureJudgmentPort('agent.cli.bundle-export', { ...options, assertCurrent });
-      const reading = { ...options, signal: owner.signal, assertCurrent: owner.assertCurrent };
-      const providerReadiness = await buildProviderReadiness(services);
-      assertCurrent();
-      const redactedConfig = await prepareConfigRedaction(rawConfig, reading);
-      const service = await buildCliServicePosture(runtime, { ...reading, logTailBytes: 8192 });
-      const bundle = {
-        version: 2,
-        type: 'goodvibes-agent.support',
-        capturedAt: Date.now(),
-        package: {
-          name: '@goodvibes-jev/agent',
-          version: getPackageVersion(),
-        },
-        roots: {
-          workingDirectory: runtime.workingDirectory,
-          homeDirectory: runtime.homeDirectory,
-        },
-        config: redactedConfig.value,
-        redaction: {
-          sentinel: REDACTED_VALUE,
-          redactedConfigPaths: redactedConfig.redactedPaths,
-        },
-        diagnostics: {
-          service,
-          auth: readAuthPosture(runtime),
-          providers: providerReadiness,
-        },
-        secrets: await secrets.inspect(),
-        onboarding: {
-          userMarker: existsSync(getOnboardingCheckMarkerPath(shellPaths, 'user')),
-          projectMarker: existsSync(getOnboardingCheckMarkerPath(shellPaths, 'project')),
-        },
-      };
-      const targetPath = shellPaths.resolveWorkspacePath(outputPath);
-      const serialized = await redactSerializedSecrets(JSON.stringify(bundle, null, 2), redactedConfig.sensitiveValues, reading);
-      redactedConfig.assertCurrent();
-      owner.assertCurrent();
-      mkdirSync(dirname(targetPath), { recursive: true });
-      redactedConfig.assertCurrent();
-      owner.assertCurrent();
-      writeFileSync(targetPath, serialized + '\n', 'utf-8');
-      return {
-        output: formatJsonOrText(runtime, {
-          path: targetPath,
-          redactedConfigPaths: redactedConfig.redactedPaths,
-          hostIntegrationIssues: service.issues,
-        }, `Bundle exported: ${targetPath}\n  redactedConfigKeys: ${redactedConfig.redactedPaths.length}\n  hostIntegrationIssues: ${service.issues.length}`),
-        exitCode: 0,
-      };
-    }, { catalog: { contextWindowEnrichment: 'none' } });
-  }
-
-  if (sub === 'import') {
-    const path = rest[0];
-    if (!path) return { output: `Usage: ${runtime.cli.binary} bundle import <path>`, exitCode: 2 };
-    const sourcePath = shellPaths.resolveWorkspacePath(path);
-    const parsed = readJsonFile(sourcePath);
-    if (!parsed.ok) return { output: `Invalid bundle JSON ${parsed.error}`, exitCode: 1 };
-    const config = parsed.value['config'];
-    if (!config || typeof config !== 'object') return { output: 'Bundle has no config object to import.', exitCode: 1 };
-    let count = 0;
-    let skippedRedacted = 0;
-    for (const setting of CONFIG_SCHEMA) {
-      const value = getNestedValue(config, setting.key);
-      if (value === undefined) continue;
-      if (containsRedactedValue(value)) {
-        skippedRedacted++;
-        continue;
-      }
-      runtime.configManager.setDynamic(setting.key, value);
-      count++;
-    }
-    return {
-      output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied.${skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : ''}`,
-      exitCode: 0,
-    };
-  }
-
-  return { output: `Usage: ${runtime.cli.binary} bundle export [path]|inspect <path>|import <path>`, exitCode: 2 };
-}
+export const handleBundleCommand = createSupportBundleCommand<
+  CliCommandRuntime,
+  RuntimeServices,
+  Awaited<ReturnType<typeof buildCliServicePosture>>
+>(
+  {
+    schema: CONFIG_SCHEMA,
+    createSecrets: (runtime) =>
+      new SecretsManager({
+        projectRoot: runtime.workingDirectory,
+        globalHome: runtime.homeDirectory,
+        configManager: runtime.configManager,
+      }),
+    withServices: withRuntimeServices,
+    providerRegistry: (services) => services.providerRegistry,
+    classifyProvider: classifyProviderSetup,
+    servicePosture: buildCliServicePosture,
+    authPosture: readAuthPosture,
+    packageVersion: getPackageVersion,
+    onboardingMarkerPath: getOnboardingCheckMarkerPath,
+    applySetting(runtime, key, value) {
+      runtime.configManager.setDynamic(key, value);
+    },
+  },
+  {
+    site: 'agent.cli.bundle-export',
+    providerSite: 'agent.support-bundle.setup',
+    packageName: '@goodvibes-jev/agent',
+    bundleType: 'goodvibes-agent.support',
+    title: 'GoodVibes Agent support bundle',
+    commandBase: (runtime) => runtime.cli.binary + ' bundle',
+    defaultFilename: 'goodvibes-agent-bundle.json',
+    detachConfig: true,
+    time: (timestamp) => appendTemporalLabel(new Date(timestamp).toISOString(), timestamp),
+    invalidJsonSeparator: ' ',
+    exportLabel: 'Bundle exported',
+    issuesKey: 'hostIntegrationIssues',
+  },
+);

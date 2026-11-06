@@ -2558,6 +2558,21 @@
       "bun": "./terminal-shell/src/command-service-access.ts",
       "types": "./terminal-shell/dist/command-service-access.d.ts",
       "import": "./terminal-shell/dist/command-service-access.js"
+    },
+    "./terminal-shell/support-bundle-command": {
+      "bun": "./terminal-shell/src/support-bundle-command.ts",
+      "types": "./terminal-shell/dist/support-bundle-command.d.ts",
+      "import": "./terminal-shell/dist/support-bundle-command.js"
+    },
+    "./terminal-shell/onboarding-snapshot-collector": {
+      "bun": "./terminal-shell/src/onboarding-snapshot-collector.ts",
+      "types": "./terminal-shell/dist/onboarding-snapshot-collector.d.ts",
+      "import": "./terminal-shell/dist/onboarding-snapshot-collector.js"
+    },
+    "./terminal-shell/setup-review": {
+      "bun": "./terminal-shell/src/setup-review.ts",
+      "types": "./terminal-shell/dist/setup-review.d.ts",
+      "import": "./terminal-shell/dist/setup-review.js"
     }
   },
   "publishConfig": {

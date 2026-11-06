@@ -69,7 +69,7 @@
       "path": "cli/bundle-command.ts",
       "baselineTuiLines": 235,
       "baselineSimilarity": 0.8184,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "BundleInspectSummary",
         "formatJsonOrText",
@@ -501,7 +501,7 @@
       "path": "input/commands/local-setup-review.ts",
       "baselineTuiLines": 168,
       "baselineSimilarity": 0.6351,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/mcp-runtime.ts",
@@ -1788,7 +1788,7 @@
       "path": "runtime/onboarding/snapshot.ts",
       "baselineTuiLines": 432,
       "baselineSimilarity": 0.8695,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "sortUnique",
         "buildProviderRoutingSnapshot",
@@ -1802,7 +1802,8 @@
         "loadOptionalSnapshot",
         "drainSnapshotReads",
         "buildConfigSnapshot"
-      ]
+      ],
+      "platformModule": "terminal-shell/onboarding-snapshot-collector"
     },
     {
       "path": "runtime/onboarding/state.ts",

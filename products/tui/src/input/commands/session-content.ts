@@ -1,3 +1,4 @@
+import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { createSessionSaveCommand, restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import { unlinkSync } from 'node:fs';
@@ -127,83 +128,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register(contentCommands.retryCommand);
 
-  registry.register({
-    name: 'sessions',
-    description: 'List saved sessions',
-    usage: '[resume <id|name>]',
-    argsHint: '[resume <id|name>]',
-    async handler(_args, ctx) {
-      // Splash's "resume last session" hint and users' muscle memory both say
-      // `/sessions resume <id>` (plural, matching this command's own name),
-      // but subcommands like `resume` are only implemented on the singular
-      // `/session` command. Forward instead of silently listing and dropping
-      // the subcommand+id on the floor.
-      if (_args.length > 0) {
-        await sessionCommand.handler(_args, ctx);
-        return;
-      }
-      const sessionManager = requireSessionManager(ctx);
-      // Excludes subagent-shaped transcripts (see session-picker-filter.ts),
-      // an unfiltered list here drowns real user sessions in spawned-agent
-      // noise. A direct `/sessions resume agent-xxxxxxxx` still reaches them.
-      const sessions = filterUserFacingSessions(sessionManager.list());
-      if (ctx.openSelection) {
-        const deleteAction = new Map([['d', 'delete' as const]]);
-        const items: SelectionItem[] =
-          sessions.length === 0
-            ? [{ id: '_empty', label: 'No saved sessions', detail: 'Use /save [name] to save' }]
-            : sessions.map((s) => ({ id: s.name, label: s.name, detail: s.title || '(untitled)', actions: '[d] delete' }));
-        ctx.openSelection('Sessions', items, { allowSearch: true, customActions: deleteAction }, (result) => {
-          if (!result) return;
-          if (result.action === 'delete') {
-            const sessionInfo = sessions.find((s) => s.name === result.item.id);
-            if (!sessionInfo) return;
-            const remove = (): void => {
-              try {
-                unlinkSync(sessionInfo.filePath);
-                ctx.print(`Session deleted: ${result.item.id}`);
-              } catch (e) {
-                ctx.print(`Failed to delete session: ${summarizeError(e)}`);
-              }
-              ctx.renderRequest();
-            };
-            // Deleting is permanent, so it asks first where a confirm dialog exists.
-            if (!ctx.confirm) {
-              remove();
-              return;
-            }
-            void ctx
-              .confirm({
-                title: 'Delete session?',
-                body: `This removes "${sessionInfo.name}" and its ${sessionInfo.messageCount} message${sessionInfo.messageCount === 1 ? '' : 's'} from this project.\nIt cannot be undone.`,
-                confirmLabel: 'Delete',
-                tone: 'danger',
-              })
-              .then((confirmed) => {
-                if (confirmed) remove();
-                else ctx.renderRequest();
-              });
-          } else {
-            try {
-              const { meta, messages } = sessionManager.load(result.item.id);
-              restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
-              ctx.renderRequest();
-              ctx.print(`Session loaded: ${result.item.id} (${messages.length} messages)`);
-            } catch (e) {
-              ctx.print(`Failed to load session: ${summarizeError(e)}`);
-            }
-          }
-        });
-        return;
-      }
-      const lines = ['Saved sessions:', ''];
-      for (const s of sessions)
-        lines.push(
-          `  ${s.name.padEnd(30)} ${(s.title || '(untitled)').padEnd(24)} ${new Date(s.timestamp).toLocaleString()}  (${s.messageCount} msgs)`,
-        );
-      ctx.print(lines.join('\n'));
-    },
-  });
+  registry.register(sessionsCommand);
 
   registry.register({
     name: 'template',
@@ -412,4 +337,55 @@ const saveCommand = createSessionSaveCommand<CommandContext>({
   saved: (rawName, { filePath, sanitizedName }, records) =>
     `Session saved: ${rawName}${sanitizedName !== rawName ? ` (saved as "${sanitizedName}")` : ''}${records > 0 ? ` [${records} agent records]` : ''}\n  → ${filePath}`,
   failed: (error) => 'Failed to save session: ' + summarizeError(error),
+});
+
+const sessionsCommand = createSessionListCommand<CommandContext>({
+  manager: requireSessionManager,
+  forward: (args, ctx) => sessionCommand.handler(args, ctx),
+  filter: filterUserFacingSessions,
+  emptyDetail: 'Use /save [name] to save',
+  actions: '[d] delete',
+  options: { allowSearch: true, customActions: new Map([['d', 'delete' as const]]) },
+  selected: (ctx, sessionManager, sessions, result) => {
+    if (!result) return;
+    if (result.action === 'delete') {
+      const sessionInfo = sessions.find((s) => s.name === result.item.id);
+      if (!sessionInfo) return;
+      const remove = (): void => {
+        try {
+          unlinkSync(sessionInfo.filePath);
+          ctx.print(`Session deleted: ${result.item.id}`);
+        } catch (e) {
+          ctx.print(`Failed to delete session: ${summarizeError(e)}`);
+        }
+        ctx.renderRequest();
+      };
+      // Deleting is permanent, so it asks first where a confirm dialog exists.
+      if (!ctx.confirm) {
+        remove();
+        return;
+      }
+      void ctx
+        .confirm({
+          title: 'Delete session?',
+          body: `This removes "${sessionInfo.name}" and its ${sessionInfo.messageCount} message${sessionInfo.messageCount === 1 ? '' : 's'} from this project.\nIt cannot be undone.`,
+          confirmLabel: 'Delete',
+          tone: 'danger',
+        })
+        .then((confirmed) => {
+          if (confirmed) remove();
+          else ctx.renderRequest();
+        });
+    } else {
+      try {
+        const { meta, messages } = sessionManager.load(result.item.id);
+        restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
+        ctx.renderRequest();
+        ctx.print(`Session loaded: ${result.item.id} (${messages.length} messages)`);
+      } catch (e) {
+        ctx.print(`Failed to load session: ${summarizeError(e)}`);
+      }
+    }
+  },
+  heading: 'Saved sessions:',
 });

@@ -1,9 +1,9 @@
+import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { createSessionSaveCommand, restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import 'node:fs';
 import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import type { SelectionItem } from '../selection-modal.ts';
 
 import { extractText } from '@goodvibes-jev/engine/sdk/platform/export';
 import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
@@ -117,50 +117,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register(contentCommands.retryCommand);
 
-  registry.register({
-    name: 'sessions',
-    description: 'List saved sessions',
-    usage: '[resume <id|name>]',
-    argsHint: '[resume <id|name>]',
-    async handler(_args, ctx) {
-      // Matches the TUI's /sessions (worst-class collision #5): this
-      // was `hidden: true` here, invisible in help/autocomplete, even
-      // though it is a fully working command identical in behavior to the
-      // TUI's visible one. Also forward args to /session (the TUI's fix for
-      // the `/sessions resume <id>` muscle-memory case), instead of silently
-      // listing and dropping the subcommand+id on the floor.
-      if (_args.length > 0) {
-        await sessionCommand.handler(_args, ctx);
-        return;
-      }
-      const sessionManager = requireSessionManager(ctx);
-      const sessions = sessionManager.list();
-      if (ctx.openSelection) {
-        const items: SelectionItem[] =
-          sessions.length === 0
-            ? [{ id: '_empty', label: 'No saved sessions', detail: 'Open Agent Workspace -> Conversation -> Save current session' }]
-            : sessions.map((s) => ({ id: s.name, label: s.name, detail: s.title || '(untitled)', actions: 'Enter to load' }));
-        ctx.openSelection('Sessions', items, { allowSearch: true }, (result) => {
-          if (!result) return;
-          try {
-            const { meta, messages } = sessionManager.load(result.item.id);
-            restoreConversationContent(ctx.session.conversationManager, readConversationMessageSnapshots(messages), meta.title);
-            ctx.renderRequest();
-            ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${messages.length}`].join('\n'));
-          } catch (e) {
-            ctx.print(formatSessionFailure('load session', e));
-          }
-        });
-        return;
-      }
-      const lines = ['Saved sessions', ''];
-      for (const s of sessions)
-        lines.push(
-          `  ${s.name.padEnd(30)} ${(s.title || '(untitled)').padEnd(24)} ${new Date(s.timestamp).toLocaleString()}  (${s.messageCount} msgs)`,
-        );
-      ctx.print(lines.join('\n'));
-    },
-  });
+  registry.register(sessionsCommand);
 }
 
 import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
@@ -196,4 +153,25 @@ const saveCommand = createSessionSaveCommand<CommandContext>({
       `  path ${filePath}`,
     ].join('\n'),
   failed: (error) => formatSessionFailure('save session', error),
+});
+
+const sessionsCommand = createSessionListCommand<CommandContext>({
+  manager: requireSessionManager,
+  forward: (args, ctx) => sessionCommand.handler(args, ctx),
+  filter: (sessions) => sessions,
+  emptyDetail: 'Open Agent Workspace -> Conversation -> Save current session',
+  actions: 'Enter to load',
+  options: { allowSearch: true },
+  selected: (ctx, sessionManager, _sessions, result) => {
+    if (!result) return;
+    try {
+      const { meta, messages } = sessionManager.load(result.item.id);
+      restoreConversationContent(ctx.session.conversationManager, readConversationMessageSnapshots(messages), meta.title);
+      ctx.renderRequest();
+      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${messages.length}`].join('\n'));
+    } catch (e) {
+      ctx.print(formatSessionFailure('load session', e));
+    }
+  },
+  heading: 'Saved sessions',
 });

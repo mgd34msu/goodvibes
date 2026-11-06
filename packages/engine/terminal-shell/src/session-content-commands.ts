@@ -176,3 +176,61 @@ export function restoreConversationContent<Message>(
   if (title) conversation.title = title;
   conversation.rebuildHistory();
 }
+
+export function createSessionListCommand<
+  Context extends ContentContext & {
+    readonly openSelection?: import('./selection-modal.js').OpenSelection | undefined;
+  },
+>(policy: {
+  readonly manager: (context: Context) => import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager;
+  readonly forward: (args: string[], context: Context) => void | Promise<void>;
+  readonly filter: (
+    sessions: ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>,
+  ) => ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>;
+  readonly emptyDetail: string;
+  readonly actions: string;
+  readonly options: Parameters<import('./selection-modal.js').OpenSelection>[2];
+  readonly selected: (
+    context: Context,
+    manager: import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager,
+    sessions: ReturnType<import('@goodvibes-jev/engine/sdk/platform/sessions').SessionManager['list']>,
+    result: import('./selection-modal.js').SelectionResult,
+  ) => void;
+  readonly heading: string;
+}): TerminalSlashCommand<Context> {
+  return {
+    name: 'sessions',
+    description: 'List saved sessions',
+    usage: '[resume <id|name>]',
+    argsHint: '[resume <id|name>]',
+    async handler(args, ctx) {
+      if (args.length) {
+        await policy.forward(args, ctx);
+        return;
+      }
+      const manager = policy.manager(ctx);
+      const sessions = policy.filter(manager.list());
+      if (ctx.openSelection) {
+        const items =
+          sessions.length === 0
+            ? [{ id: '_empty', label: 'No saved sessions', detail: policy.emptyDetail }]
+            : sessions.map((session) => ({
+                id: session.name,
+                label: session.name,
+                detail: session.title || '(untitled)',
+                actions: policy.actions,
+              }));
+        ctx.openSelection('Sessions', items, policy.options, (result) => {
+          if (result && result.item.id !== '_empty') policy.selected(ctx, manager, sessions, result);
+        });
+        return;
+      }
+      const lines = [policy.heading, ''];
+      for (const session of sessions)
+        lines.push(
+          `  ${session.name.padEnd(30)} ${(session.title || '(untitled)').padEnd(24)} ${new Date(session.timestamp).toLocaleString()}  (${session.messageCount} msgs)`,
+        );
+      ctx.print(lines.join('\n'));
+    },
+  };
+}

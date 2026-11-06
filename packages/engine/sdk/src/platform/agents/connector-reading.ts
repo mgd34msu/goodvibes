@@ -1,4 +1,5 @@
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { defineBattery, oneOf, yesNo, STAKES_BANDS, mapLimit, toJson } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { JudgmentHeldError, requireActingReading } from '../types/judgment-held.js';
@@ -17,19 +18,28 @@ export const connectorCapability = defineBattery({
   ],
 });
 export async function readConnectorCapabilities(declarations: readonly object[], signal?: AbortSignal) {
-  assertJudgmentInput(declarations);
-  const states = declarations.map(tool => ({ tool: toJson(tool) }));
-  if (states.some(state => JSON.stringify(state).length > 160_000)) throw new JudgmentInputError('unsupported-input');
-  if (!states.length) return [];
-  const port = judgmentPort(connectorCapability.name), model = port.model;
-  const current = () => { signal?.throwIfAborted(); if (judgmentPort(connectorCapability.name) !== port || port.model !== model) throw new JudgmentHeldError(); };
-  return mapLimit(states, 4, async state => {
-    const run = await connectorCapability.run(port, state, { site: connectorCapability.name, beforeAttempt: current, ...(signal ? { signal } : {}) });
-    current();
-    const inbox = requireActingReading(run.readings.inbox).verdict === 'yes';
-    const calendar = requireActingReading(run.readings.calendar).verdict === 'yes';
-    const effect = requireActingReading(run.readings.effect).choice;
-    run.recordAction('Describe connector capabilities; execution still requires current readiness and authorization.');
-    return { inbox, calendar, effect };
+  return withConfiguredDecisionModelPolicy(async () => {
+    signal?.throwIfAborted();
+    assertJudgmentInput(declarations);
+    const states = declarations.map(tool => ({ tool: toJson(tool) }));
+    if (states.some(state => JSON.stringify(state).length > 160_000)) throw new JudgmentInputError('unsupported-input');
+    if (!states.length) return [];
+    requireDecisionFeature('automatic semantic connector classification; use explicitly declared connector tools');
+    return decisionOrClassic(async () => {
+      const port = judgmentPort(connectorCapability.name), model = port.model;
+      const current = () => { signal?.throwIfAborted(); if (judgmentPort(connectorCapability.name) !== port || port.model !== model) throw new JudgmentHeldError(); };
+      return mapLimit(states, 4, async state => {
+        const run = await connectorCapability.run(port, state, { site: connectorCapability.name, beforeAttempt: current, ...(signal ? { signal } : {}) });
+        current();
+        const inbox = requireActingReading(run.readings.inbox).verdict === 'yes';
+        const calendar = requireActingReading(run.readings.calendar).verdict === 'yes';
+        const effect = requireActingReading(run.readings.effect).choice;
+        run.recordAction('Describe connector capabilities; execution still requires current readiness and authorization.');
+        return { inbox, calendar, effect };
+      });
+    }, () => {
+      signal?.throwIfAborted();
+      throw new DecisionModelsDisabledError('automatic semantic connector classification; use explicitly declared connector tools');
+    });
   });
 }

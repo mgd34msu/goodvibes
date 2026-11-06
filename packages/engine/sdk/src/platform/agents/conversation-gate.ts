@@ -1,4 +1,5 @@
 import { readConversationIntent, readProposalReply } from './conversation-reading.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 /**
  * Conversation-first spawn gate configuration and display helpers.
  * Semantic decisions live in daemon/batteries/conversation-gate.ts.
@@ -203,19 +204,27 @@ export function summarizeWorkRequest(text: string, maxLength = 90): string {
   return collapsed.length <= maxLength ? collapsed : `${collapsed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 export async function classifyInboundIntent(rawText: string | undefined, signal?: AbortSignal): Promise<InboundIntent> {
+  signal?.throwIfAborted();
   const text = rawText ?? '';
   if (!text.trim()) return { kind: 'conversation', reason: 'empty-message' };
-  const kind = await readConversationIntent(text, signal);
-  return kind === 'work' ? { kind, reason: 'settled-jev-reading', summary: summarizeWorkRequest(text) }
-    : { kind, reason: 'settled-jev-reading' };
+  return decisionOrClassic<InboundIntent>(async () => {
+    const kind = await readConversationIntent(text, signal);
+    signal?.throwIfAborted();
+    return kind === 'work' ? { kind, reason: 'settled-jev-reading', summary: summarizeWorkRequest(text) }
+      : { kind, reason: 'settled-jev-reading' };
+  }, () => { signal?.throwIfAborted(); return { kind: 'conversation', reason: 'classic-conversation-default' }; });
 }
 export type WorkProposalReply =
   | { readonly decision: 'affirmative'; readonly note?: string | undefined }
   | { readonly decision: 'negative'; readonly note?: string | undefined };
 export async function parseWorkProposalReply(rawText: string | undefined, proposal = '', signal?: AbortSignal): Promise<WorkProposalReply | null> {
+  signal?.throwIfAborted();
   if (!rawText?.trim()) return null;
-  const decision = await readProposalReply(rawText, proposal, signal);
-  return decision === 'unrelated' ? null : { decision, note: rawText };
+  return decisionOrClassic<WorkProposalReply | null>(async () => {
+    const decision = await readProposalReply(rawText, proposal, signal);
+    signal?.throwIfAborted();
+    return decision === 'unrelated' ? null : { decision, note: rawText };
+  }, () => { signal?.throwIfAborted(); return null; });
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +242,9 @@ export function renderWorkProposalMessage(input: {
   const minutes = Math.max(1, Math.round(input.expiresInMs / 60_000));
   return [
     `Start work on: ${input.summary}`,
-    `Reply "yes" to start, "no" to skip (expires in ${minutes}m).`,
+    isClassicOperation()
+      ? `Classic does not interpret conversational approval for stored proposals. Start the work explicitly in your active session (expires in ${minutes}m).`
+      : `Reply "yes" to start, "no" to skip (expires in ${minutes}m).`,
   ].join('\n');
 }
 

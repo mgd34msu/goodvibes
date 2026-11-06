@@ -2,6 +2,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 
 export const inboundIntent = defineBattery({
   name: 'engine.agents.inbound-intent', version: 1, accuracyFloor: 0.95,
@@ -34,6 +35,7 @@ export const proposalReply = defineBattery({
   ],
 });
 export async function readConversationIntent(message: string, signal?: AbortSignal) {
+  signal?.throwIfAborted(); requireDecisionFeature('semantic conversation intent classification');
   const state = { message }; assertJudgmentInput(state);
   if (JSON.stringify(state).length > 160_000) throw new JudgmentInputError('unsupported-input');
   const port = judgmentPort(inboundIntent.name), model = port.model;
@@ -44,6 +46,7 @@ export async function readConversationIntent(message: string, signal?: AbortSign
   return reading.choice;
 }
 export async function readProposalReply(message: string, proposal: string, signal?: AbortSignal) {
+  signal?.throwIfAborted(); requireDecisionFeature('interpreting a natural-language reply to a stored work proposal');
   const state = { message, proposal }; assertJudgmentInput(state);
   if (JSON.stringify(state).length > 160_000) throw new JudgmentInputError('unsupported-input');
   const port = judgmentPort(proposalReply.name), model = port.model;

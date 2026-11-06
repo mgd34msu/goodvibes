@@ -661,11 +661,14 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     const command = readCommand(args);
     if (!command) throw new Error('Background process start requires command.');
     return withBackgroundPrivilegeCheck(command, options, async (privileged, assertPrivilegeCurrent) => {
-      if (privileged) {
+      if (privileged !== false) {
         return {
           status: 'blocked',
           capability: 'sudo',
-          reason: 'Background sudo prompts are not exposed by Agent because they can hang or hide privilege escalation.',
+          reason: privileged === null
+            ? 'Privilege requirements were not assessed in Classic. Use foreground execution with owner approval for this command.'
+            : 'Background sudo prompts are not exposed by Agent because they can hang or hide privilege escalation.',
+          ...(privileged === null ? { provenance: 'classic', privilegeAssessment: 'not-evaluated' } : {}),
           guidance: (await capabilities(context, options)).sudo,
         };
       }

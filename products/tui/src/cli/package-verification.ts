@@ -1,3 +1,4 @@
+import { packageBinIssues, packageBinTargets } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
@@ -78,7 +79,7 @@ export function verifyPackageCliInstall(root: string): PackageCliVerificationRep
   const workspace = workspaceDistribution
     ? { binaryCandidates: workspaceBinaryCandidates(root), selectedBinary: resolveWorkspaceBinary(root) ?? null }
     : undefined;
-  const bin = pkg.bin && typeof pkg.bin === 'object' ? (pkg.bin as Record<string, string | undefined>) : {};
+  const bin = packageBinTargets(pkg);
   const bins = REQUIRED_BIN_COMMANDS.map((command) => verifyBin(root, command, bin[command]));
   const pack = npmPackDryRun(root);
   const { tarball, issues: tarballIssues } = inspectTarballContents(
@@ -94,10 +95,7 @@ export function verifyPackageCliInstall(root: string): PackageCliVerificationRep
   }
 
   for (const item of bins) {
-    if (!item.target) issues.push(`package.json bin is missing ${item.command}.`);
-    if (!item.exists) issues.push(`bin target does not exist: ${item.command} -> ${item.target}`);
-    if (!item.executable) issues.push(`bin target is not executable: ${item.command} -> ${item.target}`);
-    if (!item.usesBunShebang) issues.push(`bin target does not use Bun shebang: ${item.command} -> ${item.target}`);
+    issues.push(...packageBinIssues(item));
     if (!workspaceDistribution) {
       if (!item.hasLocalPlatformBuildFallback) issues.push(`bin target lacks local platform dist fallback: ${item.command}`);
       if (!item.hasLocalBuildFallback) issues.push(`bin target lacks local dist fallback: ${item.command}`);

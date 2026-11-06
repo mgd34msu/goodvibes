@@ -1,3 +1,5 @@
+import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
 import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
@@ -14,7 +16,7 @@ import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
-import { getNumericAdjustmentMeta, modelPickerLaunchForKey, parseNumberEditBuffer, roundToPrecision } from './settings-modal-behavior.ts';
+import { modelPickerLaunchForKey, parseNumberEditBuffer } from './settings-modal-behavior.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
@@ -331,15 +333,11 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   getSelectedMcp(): McpEntry | null {
-    if (this.currentCategory !== 'mcp') return null;
-    if (this.mcpEntries.length === 0) return null;
-    return this.mcpEntries[Math.max(0, Math.min(this.mcpEntries.length - 1, this.selectedIndex))] ?? null;
+    return selectedSettingsCategoryEntry(this.currentCategory, 'mcp', this.mcpEntries, this.selectedIndex);
   }
 
   getSelectedSubscription(): SubscriptionEntry | null {
-    if (this.currentCategory !== 'subscriptions') return null;
-    if (this.subscriptionEntries.length === 0) return null;
-    return this.subscriptionEntries[Math.max(0, Math.min(this.subscriptionEntries.length - 1, this.selectedIndex))] ?? null;
+    return selectedSettingsCategoryEntry(this.currentCategory, 'subscriptions', this.subscriptionEntries, this.selectedIndex);
   }
 
   get currentCategory(): SettingsCategory {
@@ -451,9 +449,8 @@ export class SettingsModal extends TerminalSettingsModalState<
       const entry = this.getSelectedMcp();
       if (!entry || !this.mcpRegistry) return;
       const modes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
-      const currentIndex = Math.max(0, modes.indexOf(entry.trustMode));
-      const nextIndex = direction === 'right' ? (currentIndex + 1) % modes.length : (currentIndex - 1 + modes.length) % modes.length;
-      this.mcpRegistry.setServerTrustMode(entry.name, modes[nextIndex]!);
+      const nextMode = cycleSettingChoice(modes, entry.trustMode, direction);
+      if (nextMode !== undefined) this.mcpRegistry.setServerTrustMode(entry.name, nextMode);
       this._loadMcpEntries();
       this.mcpAllowAllConfirmationTarget = null;
       return;
@@ -464,31 +461,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (!entry || !this.configManager) return;
     const { setting } = entry;
 
-    if (setting.type === 'boolean') {
-      this._setValue(setting.key, direction === 'right');
-      return;
-    }
-
-    if (setting.type === 'enum' && setting.enumValues && setting.enumValues.length > 0) {
-      const currentIndex = Math.max(0, setting.enumValues.indexOf(String(entry.currentValue)));
-      const nextIndex =
-        direction === 'right'
-          ? (currentIndex + 1) % setting.enumValues.length
-          : (currentIndex - 1 + setting.enumValues.length) % setting.enumValues.length;
-      this._setValue(setting.key, setting.enumValues[nextIndex]!);
-      return;
-    }
-
-    if (setting.type === 'number') {
-      const currentNumber = Number(entry.currentValue ?? 0);
-      if (!Number.isFinite(currentNumber)) return;
-      const adjustment = getNumericAdjustmentMeta(setting);
-      const delta = adjustment.step * step;
-      const rounded = roundToPrecision(currentNumber + (direction === 'right' ? delta : -delta), adjustment.precision);
-      const nextValue = Math.min(adjustment.max ?? rounded, Math.max(adjustment.min ?? rounded, rounded));
-      if (setting.validate && !setting.validate(nextValue)) return;
-      this._setValue(setting.key, nextValue);
-    }
+    const adjustment = adjustedSettingValue(setting, entry.currentValue, direction, step);
+    if (adjustment) this._setValue(setting.key, adjustment.value);
   }
 
   /**

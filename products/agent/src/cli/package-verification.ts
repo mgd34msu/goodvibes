@@ -1,3 +1,4 @@
+import { packageBinIssues, packageBinTargets } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
@@ -311,10 +312,7 @@ function verifyPackageBinIssues(root: string, pkg: Record<string, unknown>): rea
   const bin = readStringRecord(pkg.bin);
   for (const command of REQUIRED_BIN_COMMANDS) {
     const item = verifyBin(root, command, bin[command]);
-    if (!item.target) issues.push(`package.json bin is missing ${item.command}.`);
-    if (!item.exists) issues.push(`bin target does not exist: ${item.command} -> ${item.target}`);
-    if (!item.executable) issues.push(`bin target is not executable: ${item.command} -> ${item.target}`);
-    if (!item.usesBunShebang) issues.push(`bin target does not use Bun shebang: ${item.command} -> ${item.target}`);
+    issues.push(...packageBinIssues(item));
     if (!item.hasSourceEntrypoint) issues.push(`bin target does not load the packaged Agent runtime: ${item.command}`);
   }
   return issues;
@@ -469,7 +467,7 @@ export function verifyPackageCliInstall(
 ): PackageCliVerificationReport {
   const pkg = readPackageJson(root);
   assertStandaloneReleaseAllowed(pkg, 'package install verification');
-  const bin = pkg.bin && typeof pkg.bin === 'object' ? (pkg.bin as Record<string, string | undefined>) : {};
+  const bin = packageBinTargets(pkg);
   const bins = REQUIRED_BIN_COMMANDS.map((command) => verifyBin(root, command, bin[command]));
   const pack = registryPackDryRun(root, runCommand);
   const requiredPaths = requiredTarballPaths(root);

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
@@ -247,4 +247,46 @@ export function writeVerificationReportFiles<Report>(report: Report, outputDir: 
   mkdirSync(outputDir, { recursive: true });
   writeFileSync(join(outputDir, 'live-verification.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
   writeFileSync(join(outputDir, 'live-verification.md'), markdown(report), 'utf8');
+}
+
+/** Read-only verifier discovery. Product-specific environment precedence is supplied explicitly. */
+export function readVerificationHostToken(
+  homeDir: string,
+  envKeys: readonly string[],
+  readJson: (path: string) => unknown,
+): string | undefined {
+  for (const key of envKeys) if (process.env[key]) return process.env[key];
+  const tokenPath = join(homeDir, 'daemon', 'operator-tokens.json');
+  if (!existsSync(tokenPath)) return undefined;
+  try {
+    const data = readJson(tokenPath);
+    if (data && typeof data === 'object' && 'token' in data && typeof data.token === 'string') return data.token;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+export function resolveVerificationHostUrl(
+  homeDir: string,
+  explicit: string | undefined,
+  envKeys: readonly string[],
+  readJson: (path: string) => unknown,
+): string {
+  if (explicit) return explicit.replace(/\/+$/, '');
+  for (const key of envKeys) {
+    const value = process.env[key];
+    if (value) return value.replace(/\/+$/, '');
+  }
+  const settingsPath = join(homeDir, 'tui', 'settings.json');
+  let port = 3421;
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = readJson(settingsPath);
+      const value = (settings as { controlPlane?: { port?: unknown } })?.controlPlane?.port;
+      if (typeof value === 'number' && Number.isFinite(value)) port = value;
+    } catch {
+      /* Discovery reports host state even when legacy settings are unreadable. */
+    }
+  }
+  return `http://127.0.0.1:${port}`;
 }

@@ -57,3 +57,15 @@ export interface PackageInspectionReport<Bin> {
   };
   readonly issues: readonly string[];
 }
+
+export function packageBinIssues(item: PackageBinVerification<string>): string[] {
+  const issues: string[] = [];
+  if (!item.target) issues.push(`package.json bin is missing ${item.command}.`);
+  if (!item.exists) issues.push(`bin target does not exist: ${item.command} -> ${item.target}`);
+  if (!item.executable) issues.push(`bin target is not executable: ${item.command} -> ${item.target}`);
+  if (!item.usesBunShebang) issues.push(`bin target does not use Bun shebang: ${item.command} -> ${item.target}`);
+  return issues;
+}
+export function packageBinTargets(pkg: Record<string, unknown>): Record<string, string | undefined> {
+  return pkg.bin && typeof pkg.bin === 'object' ? (pkg.bin as Record<string, string | undefined>) : {};
+}

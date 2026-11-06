@@ -65,3 +65,13 @@ export function selectSettingsTarget<Category extends string>(
     }
   }
 }
+
+export function selectedSettingsCategoryEntry<Entry>(
+  category: string,
+  expected: string,
+  entries: readonly Entry[],
+  index: number,
+): Entry | null {
+  if (category !== expected || entries.length === 0) return null;
+  return entries[Math.max(0, Math.min(entries.length - 1, index))] ?? null;
+}

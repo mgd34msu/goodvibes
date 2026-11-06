@@ -1,3 +1,4 @@
+import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 /**
  * settings-modal-adjustment, pure adjustment helpers for SettingsModal.
  *
@@ -14,7 +15,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, McpEntry, SettingEntry } from './settings-modal-types.ts';
 import { buildMcpEntries } from './settings-modal-data.ts';
-import { getNumericAdjustmentMeta, roundToPrecision } from './settings-modal-behavior.ts';
+import './settings-modal-behavior.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
 
 // ---------------------------------------------------------------------------
@@ -36,11 +37,7 @@ export interface AdjustSelectedContext {
   setMcpAllowAllConfirmationTarget(value: string | null): void;
 }
 
-export function adjustSelected(
-  ctx: AdjustSelectedContext,
-  direction: 'left' | 'right',
-  step = 1,
-): void {
+export function adjustSelected(ctx: AdjustSelectedContext, direction: 'left' | 'right', step = 1): void {
   if (ctx.editingMode) return;
 
   // Feature-unit headers are the real config rows for their enablement keys
@@ -51,11 +48,8 @@ export function adjustSelected(
     const entry = ctx.getSelectedMcp();
     if (!entry || !ctx.mcpRegistry) return;
     const modes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
-    const currentIndex = Math.max(0, modes.indexOf(entry.trustMode));
-    const nextIndex = direction === 'right'
-      ? (currentIndex + 1) % modes.length
-      : (currentIndex - 1 + modes.length) % modes.length;
-    ctx.mcpRegistry.setServerTrustMode(entry.name, modes[nextIndex]!);
+    const nextMode = cycleSettingChoice(modes, entry.trustMode, direction);
+    if (nextMode !== undefined) ctx.mcpRegistry.setServerTrustMode(entry.name, nextMode);
     ctx.setMcpEntries(buildMcpEntries(ctx.mcpRegistry));
     ctx.setMcpAllowAllConfirmationTarget(null);
     return;
@@ -70,31 +64,6 @@ export function adjustSelected(
   if (entry.metadataUnavailable) return;
   const { setting } = entry;
 
-  if (setting.type === 'boolean') {
-    ctx.setValue(setting.key as ConfigKey, direction === 'right');
-    return;
-  }
-
-  if (setting.type === 'enum' && setting.enumValues && setting.enumValues.length > 0) {
-    const currentIndex = Math.max(0, setting.enumValues.indexOf(String(entry.currentValue)));
-    const nextIndex = direction === 'right'
-      ? (currentIndex + 1) % setting.enumValues.length
-      : (currentIndex - 1 + setting.enumValues.length) % setting.enumValues.length;
-    ctx.setValue(setting.key as ConfigKey, setting.enumValues[nextIndex]!);
-    return;
-  }
-
-  if (setting.type === 'number') {
-    const currentNumber = Number(entry.currentValue ?? 0);
-    if (!Number.isFinite(currentNumber)) return;
-    const adjustment = getNumericAdjustmentMeta(setting);
-    const delta = adjustment.step * step;
-    const rounded = roundToPrecision(currentNumber + (direction === 'right' ? delta : -delta), adjustment.precision);
-    const nextValue = Math.min(
-      adjustment.max ?? rounded,
-      Math.max(adjustment.min ?? rounded, rounded),
-    );
-    if (setting.validate && !setting.validate(nextValue)) return;
-    ctx.setValue(setting.key as ConfigKey, nextValue);
-  }
+  const adjustment = adjustedSettingValue(setting, entry.currentValue, direction, step);
+  if (adjustment) ctx.setValue(setting.key as ConfigKey, adjustment.value);
 }

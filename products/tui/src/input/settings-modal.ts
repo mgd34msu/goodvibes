@@ -1,3 +1,4 @@
+import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import type {
   SettingsModalChange as PlatformSettingsModalChange,
   SettingsModalChangeResult as PlatformSettingsModalChangeResult,
@@ -440,15 +441,11 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   getSelectedMcp(): McpEntry | null {
-    if (this.currentCategory !== 'mcp') return null;
-    if (this.mcpEntries.length === 0) return null;
-    return this.mcpEntries[Math.max(0, Math.min(this.mcpEntries.length - 1, this.selectedIndex))] ?? null;
+    return selectedSettingsCategoryEntry(this.currentCategory, 'mcp', this.mcpEntries, this.selectedIndex);
   }
 
   getSelectedSubscription(): SubscriptionEntry | null {
-    if (this.currentCategory !== 'subscriptions') return null;
-    if (this.subscriptionEntries.length === 0) return null;
-    return this.subscriptionEntries[Math.max(0, Math.min(this.subscriptionEntries.length - 1, this.selectedIndex))] ?? null;
+    return selectedSettingsCategoryEntry(this.currentCategory, 'subscriptions', this.subscriptionEntries, this.selectedIndex);
   }
 
   get currentCategory(): SettingsCategory {

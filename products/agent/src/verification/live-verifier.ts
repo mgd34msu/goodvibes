@@ -1,3 +1,4 @@
+import { readVerificationHostToken, resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
   createVerificationPrimitives,
@@ -187,38 +188,16 @@ function compact(text: string, maxLength = 900): string {
 }
 
 function readConnectedHostToken(homeDir: string): string | undefined {
-  if (process.env.GOODVIBES_CONNECTED_HOST_TOKEN) return process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
-  if (process.env.GOODVIBES_DAEMON_TOKEN) return process.env.GOODVIBES_DAEMON_TOKEN;
-  const tokenPath = join(homeDir, 'daemon', 'operator-tokens.json');
-  if (!existsSync(tokenPath)) return undefined;
-  try {
-    const data = readJsonFile(tokenPath);
-    if (data && typeof data === 'object' && typeof (data as { token?: unknown }).token === 'string') {
-      return (data as { token: string }).token;
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
+  return readVerificationHostToken(homeDir, ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'], readJsonFile);
 }
 
 function resolveConnectedHostBaseUrl(homeDir: string, explicit?: string): string {
-  if (explicit) return explicit.replace(/\/+$/, '');
-  if (process.env.GOODVIBES_CONNECTED_HOST_URL) return process.env.GOODVIBES_CONNECTED_HOST_URL.replace(/\/+$/, '');
-  if (process.env.GOODVIBES_AGENT_RUNTIME_URL) return process.env.GOODVIBES_AGENT_RUNTIME_URL.replace(/\/+$/, '');
-  if (process.env.GOODVIBES_DAEMON_URL) return process.env.GOODVIBES_DAEMON_URL.replace(/\/+$/, '');
-  const settingsPath = join(homeDir, 'tui', 'settings.json');
-  let port = 3421;
-  if (existsSync(settingsPath)) {
-    try {
-      const settings = readJsonFile(settingsPath);
-      const configuredPort = (settings as { controlPlane?: { port?: unknown } })?.controlPlane?.port;
-      if (typeof configuredPort === 'number' && Number.isFinite(configuredPort)) port = configuredPort;
-    } catch {
-      // Keep the default; this verifier should report connected-host state, not fail before checks run.
-    }
-  }
-  return `http://127.0.0.1:${port}`;
+  return resolveVerificationHostUrl(
+    homeDir,
+    explicit,
+    ['GOODVIBES_CONNECTED_HOST_URL', 'GOODVIBES_AGENT_RUNTIME_URL', 'GOODVIBES_DAEMON_URL'],
+    readJsonFile,
+  );
 }
 
 function commandHomeDirectory(homeDir: string): string {

@@ -1,3 +1,5 @@
+import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
+import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
 export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
 /**
@@ -12,31 +14,15 @@ export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engin
  * behavior). See docs/testing-and-validation.md.
  */
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { assertStandaloneReleaseAllowed } from '../../scripts/standalone-release-policy.ts';
 
-export interface PackageCliBinVerification {
-  readonly command: 'goodvibes-agent';
-  readonly target: string;
-  readonly exists: boolean;
-  readonly executable: boolean;
-  readonly usesBunShebang: boolean;
+export interface PackageCliBinVerification extends PackageBinVerification<'goodvibes-agent'> {
   readonly hasSourceEntrypoint: boolean;
 }
 
-export interface PackageCliVerificationReport {
-  readonly packageName: string;
-  readonly version: string;
-  readonly bins: readonly PackageCliBinVerification[];
-  readonly tarball: {
-    readonly entryCount: number;
-    readonly unpackedSize: number;
-    readonly requiredPathsPresent: readonly string[];
-    readonly forbiddenPaths: readonly string[];
-  };
-  readonly issues: readonly string[];
-}
+export interface PackageCliVerificationReport extends PackageInspectionReport<PackageCliBinVerification> {}
 
 const REQUIRED_BIN_COMMANDS = ['goodvibes-agent'] as const;
 /**
@@ -82,7 +68,15 @@ const REQUIRED_PACKAGE_FILE_EXCLUSIONS = [
   '!src/cli/package-verification.ts',
   '!src/verification',
 ] as const;
-const FORBIDDEN_TARBALL_PREFIXES = ['.github/', 'src/test/', 'src/.test/', 'src/verification/', 'src/daemon/', '.goodvibes/', 'vendor/'] as const;
+const FORBIDDEN_TARBALL_PREFIXES = [
+  '.github/',
+  'src/test/',
+  'src/.test/',
+  'src/verification/',
+  'src/daemon/',
+  '.goodvibes/',
+  'vendor/',
+] as const;
 const FORBIDDEN_TARBALL_DOCS = [
   ['docs/cloud', 'flare-batch.md'].join(''),
   ['docs/home', 'assistant-surface.md'].join(''),
@@ -99,10 +93,7 @@ const FORBIDDEN_TARBALL_FILES = new Set([
   'src/renderer/git-status.ts',
   'src/renderer/process-summary.ts',
 ]);
-const BASE_PACKAGE_FACING_TEXT_PATHS = [
-  'README.md',
-  'CHANGELOG.md',
-] as const;
+const BASE_PACKAGE_FACING_TEXT_PATHS = ['README.md', 'CHANGELOG.md'] as const;
 const PACKAGE_FACING_FORBIDDEN_TEXT = [
   ['/api/', 'knowledge'].join(''),
   ['/api/home', 'assistant'].join(''),
@@ -155,10 +146,9 @@ const EXACT_SEMVER_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+$/;
  * Legacy registry package names remain restricted to Agent. Public monorepo
  * engine package/export names are valid references and are not legacy packages.
  */
-const ALLOWED_PACKAGE_FACING_PACKAGE_NAMES = new Set([
-  '@goodvibes-jev/agent',
-]);
-const NON_BUN_INSTALL_COMMAND_PATTERN = /(?:^|[\s`])(?:npm\s+(?:install|i|exec)|npx|pnpm\s+(?:add|dlx|exec)|yarn\s+(?:add|global\s+add|dlx|exec))\b.*(?:@goodvibes-jev\/agent|goodvibes-agent)/i;
+const ALLOWED_PACKAGE_FACING_PACKAGE_NAMES = new Set(['@goodvibes-jev/agent']);
+const NON_BUN_INSTALL_COMMAND_PATTERN =
+  /(?:^|[\s`])(?:npm\s+(?:install|i|exec)|npx|pnpm\s+(?:add|dlx|exec)|yarn\s+(?:add|global\s+add|dlx|exec))\b.*(?:@goodvibes-jev\/agent|goodvibes-agent)/i;
 const RELEASE_NOTES_STAMP_PATTERN = /^GoodVibes Agent ([0-9]+\.[0-9]+\.[0-9]+)\s+(?:-|\u2014)\s+([0-9]{4}-[0-9]{2}-[0-9]{2})$/;
 
 /**
@@ -198,11 +188,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function readPackageJson(root: string): Record<string, unknown> {
-  const parsed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as unknown;
-  if (!isRecord(parsed)) throw new Error('package.json must contain a JSON object.');
-  return parsed;
-}
+const readPackageJson = readPackageManifest;
 
 function readStringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -249,8 +235,7 @@ const ALLOWED_PACKAGE_DOC_FILENAMES = [
 export function packageDocPaths(root: string): readonly string[] {
   const docsPath = join(root, 'docs');
   if (!existsSync(docsPath)) return [];
-  return ALLOWED_PACKAGE_DOC_FILENAMES
-    .map((entry) => `docs/${entry}`)
+  return ALLOWED_PACKAGE_DOC_FILENAMES.map((entry) => `docs/${entry}`)
     .filter((docPath) => existsSync(join(root, docPath)))
     .sort();
 }
@@ -260,7 +245,10 @@ export function requiredTarballPaths(root: string): readonly string[] {
 }
 
 function normalizedPackageFileEntry(entry: string): string {
-  return normalize(entry).replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
+  return normalize(entry)
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/+$/, '');
 }
 
 function packageManifestPositiveEntryCoversPath(entry: string, path: string): boolean {
@@ -276,11 +264,9 @@ function packageManifestPositiveEntryCoversPath(entry: string, path: string): bo
 }
 
 function existingForbiddenPackagePathsCoveredByManifest(root: string, files: readonly string[]): readonly string[] {
-  const forbiddenCandidates = [
-    ...FORBIDDEN_TARBALL_PREFIXES,
-    ...FORBIDDEN_TARBALL_DOCS,
-    ...FORBIDDEN_TARBALL_FILES,
-  ].map(normalizedPackageFileEntry);
+  const forbiddenCandidates = [...FORBIDDEN_TARBALL_PREFIXES, ...FORBIDDEN_TARBALL_DOCS, ...FORBIDDEN_TARBALL_FILES].map(
+    normalizedPackageFileEntry,
+  );
   return [...new Set(forbiddenCandidates)]
     .filter((path) => existsSync(join(root, path)))
     .filter((path) => files.some((entry) => packageManifestPositiveEntryCoversPath(entry, path)))
@@ -315,21 +301,9 @@ function verifyPackageFilesManifest(root: string, files: readonly string[]): rea
   return issues;
 }
 
-function hasExecutableBit(path: string): boolean {
-  return existsSync(path) && (statSync(path).mode & 0o111) !== 0;
-}
-
-function verifyBin(root: string, command: typeof REQUIRED_BIN_COMMANDS[number], target: string | undefined): PackageCliBinVerification {
-  const binPath = target ? join(root, target) : '';
-  const source = target && existsSync(binPath) ? readFileSync(binPath, 'utf-8') : '';
-  return {
-    command,
-    target: target ?? '',
-    exists: Boolean(target) && existsSync(binPath),
-    executable: Boolean(target) && hasExecutableBit(binPath),
-    usesBunShebang: source.startsWith('#!/usr/bin/env bun'),
-    hasSourceEntrypoint: source.includes('dist') && source.includes('package') && source.includes('main.js'),
-  };
+function verifyBin(root: string, command: (typeof REQUIRED_BIN_COMMANDS)[number], target: string | undefined): PackageCliBinVerification {
+  const { bin, source } = inspectPackageBin(root, command, target);
+  return { ...bin, hasSourceEntrypoint: source.includes('dist') && source.includes('package') && source.includes('main.js') };
 }
 
 function verifyPackageBinIssues(root: string, pkg: Record<string, unknown>): readonly string[] {
@@ -371,11 +345,12 @@ export function verifyReleaseMetadata(root: string): readonly string[] {
 
 export function releaseNotesTextIssues(content: string, packageVersion: string): readonly string[] {
   const issues: string[] = [];
-  const stampLine = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .at(-1) ?? '';
+  const stampLine =
+    content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .at(-1) ?? '';
   const stamp = RELEASE_NOTES_STAMP_PATTERN.exec(stampLine);
   if (stamp === null) {
     issues.push(`release notes must end with a line naming the release, like "GoodVibes Agent ${packageVersion} - YYYY-MM-DD".`);
@@ -394,7 +369,9 @@ export function releaseNotesTextIssues(content: string, packageVersion: string):
 function readTopChangelogVersion(root: string): string | null {
   const changelogPath = join(root, 'CHANGELOG.md');
   if (!existsSync(changelogPath)) return null;
-  const heading = readFileSync(changelogPath, 'utf-8').split(/\r?\n/).find((line) => line.startsWith('## '));
+  const heading = readFileSync(changelogPath, 'utf-8')
+    .split(/\r?\n/)
+    .find((line) => line.startsWith('## '));
   const match = heading ? /^##\s+\[?([0-9]+\.[0-9]+\.[0-9]+)\]?\s+-\s+[0-9]{4}-[0-9]{2}-[0-9]{2}\s*$/.exec(heading) : null;
   return match ? match[1]! : null;
 }
@@ -408,7 +385,8 @@ export function verifyReleaseStamps(root: string): readonly string[] {
   const issues: string[] = [];
   const version = readStringValue(readPackageJson(root).version);
   const changelogVersion = readTopChangelogVersion(root);
-  if (changelogVersion !== version) issues.push(`CHANGELOG.md top release ${changelogVersion ?? '(none)'} does not match package.json ${version}.`);
+  if (changelogVersion !== version)
+    issues.push(`CHANGELOG.md top release ${changelogVersion ?? '(none)'} does not match package.json ${version}.`);
   const versionTs = existsSync(join(root, 'src', 'version.ts')) ? readFileSync(join(root, 'src', 'version.ts'), 'utf-8') : '';
   const fallback = /let _version = '([^']*)'/.exec(versionTs)?.[1];
   if (fallback !== version) issues.push(`src/version.ts fallback ${fallback ?? '(missing)'} does not match package.json ${version}.`);
@@ -485,33 +463,26 @@ function registryPackDryRun(root: string, runCommand: PackageInstallCommandRunne
   return parseNpmPackJson(raw);
 }
 
-export function verifyPackageCliInstall(root: string, runCommand: PackageInstallCommandRunner = runPackageInstallCommand): PackageCliVerificationReport {
+export function verifyPackageCliInstall(
+  root: string,
+  runCommand: PackageInstallCommandRunner = runPackageInstallCommand,
+): PackageCliVerificationReport {
   const pkg = readPackageJson(root);
   assertStandaloneReleaseAllowed(pkg, 'package install verification');
-  const bin = pkg.bin && typeof pkg.bin === 'object' ? pkg.bin as Record<string, string | undefined> : {};
+  const bin = pkg.bin && typeof pkg.bin === 'object' ? (pkg.bin as Record<string, string | undefined>) : {};
   const bins = REQUIRED_BIN_COMMANDS.map((command) => verifyBin(root, command, bin[command]));
   const pack = registryPackDryRun(root, runCommand);
   const requiredPaths = requiredTarballPaths(root);
-  const requiredPathsPresent = requiredPaths.filter((path) => pack.files.includes(path));
-  const forbiddenPaths = pack.files.filter(isForbiddenPackageTarballPath);
+  const { tarball, issues: tarballIssues } = inspectTarballContents(pack, requiredPaths, isForbiddenPackageTarballPath, 'registry tarball');
   const issues: string[] = [];
-  for (const path of requiredPaths) {
-    if (!pack.files.includes(path)) issues.push(`registry tarball missing required path: ${path}`);
-  }
-  for (const path of forbiddenPaths) {
-    issues.push(`registry tarball includes forbidden path: ${path}`);
-  }
+  issues.push(...tarballIssues);
+
   issues.push(...verifyReleaseMetadata(root));
   return {
     packageName: String(pkg.name ?? ''),
     version: String(pkg.version ?? ''),
     bins,
-    tarball: {
-      entryCount: pack.entryCount,
-      unpackedSize: pack.unpackedSize,
-      requiredPathsPresent,
-      forbiddenPaths,
-    },
+    tarball,
     issues,
   };
 }

@@ -1,4 +1,10 @@
-import { createVerificationPrimitives, renderVerificationTables, type LiveVerificationStatus, type LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import {
+  createVerificationPrimitives,
+  renderVerificationTables,
+  type LiveVerificationStatus,
+  type LiveVerificationCheck,
+} from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
   compact,
@@ -6,7 +12,7 @@ const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificati
   missingBearer: 'No connected-host bearer token was available.',
   validateJsonOnNonZero: true,
 });
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { findAgentKnowledgeScopeContamination } from '../cli/agent-knowledge-runtime.ts';
 import { normalizeAgentKnowledgeJsonText } from '../agent/knowledge-scope-alias.ts';
@@ -592,7 +598,5 @@ export function renderLiveVerificationReportMarkdown(report: LiveVerificationRep
 }
 
 export function writeLiveVerificationReportFiles(report: LiveVerificationReport, outputDir: string): void {
-  mkdirSync(outputDir, { recursive: true });
-  writeFileSync(join(outputDir, 'live-verification.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  writeFileSync(join(outputDir, 'live-verification.md'), renderLiveVerificationReportMarkdown(report), 'utf8');
+  writeVerificationReportFiles(report, outputDir, renderLiveVerificationReportMarkdown);
 }

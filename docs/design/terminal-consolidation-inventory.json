@@ -168,7 +168,7 @@
       "path": "cli/package-verification.ts",
       "baselineTuiLines": 231,
       "baselineSimilarity": 0.3971,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "NpmPackDryRunResult",
         "NpmPackJsonEntry",
@@ -177,7 +177,8 @@
         "looksLikePackEntry",
         "selectPackEntry",
         "parseNpmPackJson"
-      ]
+      ],
+      "notes": "Platform owns manifest object parsing, executable/shebang capture, shared bin/report contracts, npm-pack JSON parsing and required/forbidden tarball inspection. Product adapters retain TUI private workspace build candidates and retained published fallback checks versus Agent standalone release gate, runtime wrapper, metadata/doc/privacy rules and intentional build-before-pack ordering."
     },
     {
       "path": "cli/provider-auth-routes.ts",
@@ -2080,7 +2081,7 @@
       "path": "verification/live-verifier.ts",
       "baselineTuiLines": 421,
       "baselineSimilarity": 0.5479,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "runCommand",
         "commandCheck",
@@ -2090,7 +2091,8 @@
         "validateDaemonHealth",
         "LiveVerificationCheck",
         "LiveVerificationStatus"
-      ]
+      ],
+      "notes": "Platform owns child-process/fetch checks, counts/tables and report-file writing. Product specifications retain their actual host routes and scenarios, TUI daemon/home audit versus Agent private-host redaction and isolated-Knowledge contamination checks. No verifier was executed during implementation."
     },
     {
       "path": "version.ts",

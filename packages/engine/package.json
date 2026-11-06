@@ -2958,6 +2958,11 @@
       "bun": "./terminal-shell/src/experience-commands.ts",
       "types": "./terminal-shell/dist/experience-commands.d.ts",
       "import": "./terminal-shell/dist/experience-commands.js"
+    },
+    "./terminal-shell/package-inspection": {
+      "bun": "./terminal-shell/src/package-inspection.ts",
+      "types": "./terminal-shell/dist/package-inspection.d.ts",
+      "import": "./terminal-shell/dist/package-inspection.js"
     }
   },
   "publishConfig": {

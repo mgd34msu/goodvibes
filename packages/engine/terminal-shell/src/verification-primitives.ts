@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
 export interface LiveVerificationCheck {
@@ -238,4 +240,11 @@ export function validateDaemonHealth(status: number, body: string): Pick<LiveVer
   } catch {
     return { status: 'warn', summary: '/api/health returned 200 but was not parseable JSON.' };
   }
+}
+
+/** The caller supplies the prepared report and its product-specific heading. */
+export function writeVerificationReportFiles<Report>(report: Report, outputDir: string, markdown: (report: Report) => string): void {
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(join(outputDir, 'live-verification.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
+  writeFileSync(join(outputDir, 'live-verification.md'), markdown(report), 'utf8');
 }

@@ -1,4 +1,11 @@
-import { createVerificationPrimitives, renderVerificationTables, validateDaemonHealth, type LiveVerificationStatus, type LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
+import {
+  createVerificationPrimitives,
+  renderVerificationTables,
+  validateDaemonHealth,
+  type LiveVerificationStatus,
+  type LiveVerificationCheck,
+} from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
   compact,
@@ -6,7 +13,7 @@ const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificati
   missingBearer: 'No daemon bearer token was available.',
   validateJsonOnNonZero: false,
 });
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { auditGoodVibesHome } from '../config/goodvibes-home-audit.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -251,7 +258,5 @@ export function renderLiveVerificationReportMarkdown(report: LiveVerificationRep
 }
 
 export function writeLiveVerificationReportFiles(report: LiveVerificationReport, outputDir: string): void {
-  mkdirSync(outputDir, { recursive: true });
-  writeFileSync(join(outputDir, 'live-verification.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  writeFileSync(join(outputDir, 'live-verification.md'), renderLiveVerificationReportMarkdown(report), 'utf8');
+  writeVerificationReportFiles(report, outputDir, renderLiveVerificationReportMarkdown);
 }

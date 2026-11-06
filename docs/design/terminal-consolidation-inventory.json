@@ -2023,7 +2023,8 @@
       "path": "shell/blocking-input.ts",
       "baselineTuiLines": 305,
       "baselineSimilarity": 0.2125,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared explicit permission-key resolution with product denial/escape policy. TUI preserves input debounce, hunk selection, typed replies and remember-tier submenu; Agent preserves deny-aborts, escape denial, recovery and repair prompts. Advanced product interactions are different workflows."
     },
     {
       "path": "shell/service-settings-sync.ts",

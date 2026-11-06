@@ -1,3 +1,4 @@
+import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { ConversationManager } from '../core/conversation';
 import type { PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import type { SessionSnapshot } from '@/runtime/index.ts';
@@ -40,9 +41,7 @@ export type BlockingInputHandlerResult = {
   // shell to carry back and reassign.
 };
 
-export function handleBlockingShellInput(
-  options: BlockingInputHandlerOptions,
-): BlockingInputHandlerResult {
+export function handleBlockingShellInput(options: BlockingInputHandlerOptions): BlockingInputHandlerResult {
   const {
     data,
     pendingPermission,
@@ -58,26 +57,16 @@ export function handleBlockingShellInput(
 
   if (pendingPermission) {
     const req = pendingPermission;
-    const key = data.toLowerCase().trim();
-
-    if (key === 'y') {
-      req.resolve(true, false);
-      render();
+    if (
+      handleSimplePermissionInput(data, {
+        escapeDenies: true,
+        abortOnDeny: true,
+        resolve: (approved, remember) => req.resolve(approved, remember),
+        abort: abortTurn,
+        render,
+      })
+    )
       return { handled: true, pendingPermission: null, recoveryPending };
-    }
-
-    if (key === 'a') {
-      req.resolve(true, true);
-      render();
-      return { handled: true, pendingPermission: null, recoveryPending };
-    }
-
-    if (key === 'n' || data === '\x1b' || data === '\x03') {
-      req.resolve(false, false);
-      abortTurn();
-      render();
-      return { handled: true, pendingPermission: null, recoveryPending };
-    }
 
     render();
     return { handled: true, pendingPermission, recoveryPending };

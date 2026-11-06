@@ -3073,6 +3073,11 @@
       "bun": "./terminal-shell/src/startup-lifecycle.ts",
       "types": "./terminal-shell/dist/startup-lifecycle.d.ts",
       "import": "./terminal-shell/dist/startup-lifecycle.js"
+    },
+    "./terminal-shell/blocking-permission-input": {
+      "bun": "./terminal-shell/src/blocking-permission-input.ts",
+      "types": "./terminal-shell/dist/blocking-permission-input.d.ts",
+      "import": "./terminal-shell/dist/blocking-permission-input.js"
     }
   },
   "publishConfig": {

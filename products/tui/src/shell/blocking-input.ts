@@ -1,9 +1,15 @@
+import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import { applyHunkKey, buildModifiedEditArgs, type HunkSelectionState } from '../permissions/hunk-selection.ts';
 import { permissionButtons } from '../permissions/prompt-card.ts';
 
 export type PendingPermissionState = PermissionRequest & {
-  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>, extras?: { rememberTier?: RememberTier; reason?: string }) => void;
+  resolve: (
+    approved: boolean,
+    remember?: boolean,
+    modifiedArgs?: Record<string, unknown>,
+    extras?: { rememberTier?: RememberTier; reason?: string },
+  ) => void;
   /** Present only when isHunkSelectable(request) was true when the prompt was opened. */
   hunkState?: HunkSelectionState;
   /** True once the user pressed `d` to expand a condensed low-risk card. (2b.) */
@@ -71,15 +77,8 @@ export type BlockingInputHandlerResult = {
   pendingPermission: PendingPermissionState | null;
 };
 
-export function handleBlockingShellInput(
-  options: BlockingInputHandlerOptions,
-): BlockingInputHandlerResult {
-  const {
-    data,
-    pendingPermission,
-    abortTurn,
-    render,
-  } = options;
+export function handleBlockingShellInput(options: BlockingInputHandlerOptions): BlockingInputHandlerResult {
+  const { data, pendingPermission, abortTurn, render } = options;
 
   if (pendingPermission) {
     const req = pendingPermission;
@@ -91,7 +90,6 @@ export function handleBlockingShellInput(
       render();
       return { handled: true, pendingPermission: null };
     }
-
 
     // Input debounce: swallow any key that arrives within the settle window
     // after the prompt appeared, so type-ahead text from before the user saw
@@ -244,19 +242,19 @@ export function handleBlockingShellInput(
     }
 
     const key = data.toLowerCase().trim();
-
-    if (key === 'y') {
-      req.resolve(true, false);
-      render();
+    if (
+      handleSimplePermissionInput(data, {
+        escapeDenies: false,
+        abortOnDeny: false,
+        resolve: (approved, remember) => {
+          if (remember) req.resolve(approved, true, undefined, { rememberTier: 'session' });
+          else req.resolve(approved, false);
+        },
+        abort: abortTurn,
+        render,
+      })
+    )
       return { handled: true, pendingPermission: null };
-    }
-
-    if (key === 'a') {
-      // Legacy always-this-session choice, the 'session' remember tier.
-      req.resolve(true, true, undefined, { rememberTier: 'session' });
-      render();
-      return { handled: true, pendingPermission: null };
-    }
 
     // Numbered remember tiers ([1]..[N], most specific first) from the SDK's
     // rememberOptions: approve AND remember at that tier. A generalizing tier
@@ -270,15 +268,6 @@ export function handleBlockingShellInput(
       }
       render();
       return { handled: true, pendingPermission };
-    }
-
-    if (key === 'n') {
-      // Plain deny, feedback to the model (the SDK renders an honest "user
-      // declined" result), never a turn abort. Ctrl+C above is the hard stop;
-      // Esc drops focus (handled above) rather than denying.
-      req.resolve(false, false);
-      render();
-      return { handled: true, pendingPermission: null };
     }
 
     if (key === 'd') {

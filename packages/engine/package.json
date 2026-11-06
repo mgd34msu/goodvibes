@@ -2713,6 +2713,21 @@
       "bun": "./terminal-shell/src/audio/voice-capture-composition.ts",
       "types": "./terminal-shell/dist/audio/voice-capture-composition.d.ts",
       "import": "./terminal-shell/dist/audio/voice-capture-composition.js"
+    },
+    "./terminal-shell/notify-runtime-commands": {
+      "bun": "./terminal-shell/src/notify-runtime-commands.ts",
+      "types": "./terminal-shell/dist/notify-runtime-commands.d.ts",
+      "import": "./terminal-shell/dist/notify-runtime-commands.js"
+    },
+    "./terminal-shell/tts-runtime-commands": {
+      "bun": "./terminal-shell/src/tts-runtime-commands.ts",
+      "types": "./terminal-shell/dist/tts-runtime-commands.d.ts",
+      "import": "./terminal-shell/dist/tts-runtime-commands.js"
+    },
+    "./terminal-shell/handler-content-bindings": {
+      "bun": "./terminal-shell/src/handler-content-bindings.ts",
+      "types": "./terminal-shell/dist/handler-content-bindings.d.ts",
+      "import": "./terminal-shell/dist/handler-content-bindings.js"
     }
   },
   "publishConfig": {

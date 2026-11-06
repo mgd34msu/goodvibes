@@ -524,7 +524,8 @@
       "path": "input/commands/notify-runtime.ts",
       "baselineTuiLines": 92,
       "baselineSimilarity": 0.569,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared webhook command mechanics retain Agent confirmation, URL masking/reveal and send capability; TUI notification-history opener remains local."
     },
     {
       "path": "input/commands/onboarding-runtime.ts",
@@ -614,7 +615,7 @@
       "path": "input/commands/runtime-services.ts",
       "baselineTuiLines": 396,
       "baselineSimilarity": 0.7344,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "requireSession",
         "requireProvider",
@@ -664,7 +665,8 @@
         "requireShellPaths",
         "requirePluginPathOptions",
         "requireEcosystemCatalogPaths"
-      ]
+      ],
+      "notes": "44 bound service accessors and path roots share platform factories. Reviewed remaining functions are distinct compaction policies and product-only capabilities; Agent Knowledge retains its exclusive segment and no-fallback rule."
     },
     {
       "path": "input/commands/schedule-runtime.ts",
@@ -740,7 +742,8 @@
       "path": "input/commands/tts-runtime.ts",
       "baselineTuiLines": 55,
       "baselineSimilarity": 0.5882,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared stop/submit/availability commands with TUI-only persistent always-speak controls and product visibility/copy."
     },
     {
       "path": "input/commands/update-runtime.ts",
@@ -816,10 +819,11 @@
       "path": "input/handler-interactions.ts",
       "baselineTuiLines": 306,
       "baselineSimilarity": 0.7386,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "registerPasteForHost"
-      ]
+      ],
+      "notes": "Shared composer clipboard/marker/block/copy/Ctrl-C bindings and atomic escape-result writeback. Product ports retain block anchor choice, missing-reader notice, Ctrl-C timeout ownership, TUI diff apply/onboarding and Agent rerun."
     },
     {
       "path": "input/handler-modal-routes.ts",

@@ -5,6 +5,12 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/too
 import type { JudgmentPort, NamedDecision } from '@goodvibes-jev/judgment/decisions';
 import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 
+const nativeThrowIfAborted = AbortSignal.prototype.throwIfAborted;
+const nativeApply = Reflect.apply;
+function assertNativeCancellation(signal: AbortSignal | undefined): void {
+  if (signal) nativeApply(nativeThrowIfAborted, signal, []);
+}
+
 interface CanonicalDefinition extends NamedDecision {
   readonly items: unknown;
 }
@@ -28,7 +34,7 @@ export async function withCanonicalReading<T>(site: string, definitions: readonl
     });
     const assertDefinitionCurrent = () => { registrySlots(); for (const guard of guards) guard(); };
     options.retainCurrent?.(assertDefinitionCurrent, `${site}.definition`);
-    const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertDefinitionCurrent(); };
+    const assertCurrent = () => { assertNativeCancellation(options.signal); options.assertCurrent?.(); assertDefinitionCurrent(); };
     assertCurrent();
     const semantic = async () => {
       const authority = captureJudgmentPort(site, { signal: options.signal, assertCurrent, prepareResultCapture: prepareJudgmentResult });
@@ -39,7 +45,7 @@ export async function withCanonicalReading<T>(site: string, definitions: readonl
       } finally {
         const restriction = authority.consumeObservation();
         const retained = () => {
-          assertDefinitionCurrent(); options.signal?.throwIfAborted(); authority.signal.throwIfAborted();
+          assertDefinitionCurrent(); assertNativeCancellation(options.signal); assertNativeCancellation(authority.signal);
           if (!isClassicOperation()) restriction.assertCurrent();
         };
         options.retainCurrent?.(retained, site); retained();

@@ -2888,6 +2888,16 @@
       "bun": "./terminal-shell/src/cli-help.ts",
       "types": "./terminal-shell/dist/cli-help.d.ts",
       "import": "./terminal-shell/dist/cli-help.js"
+    },
+    "./terminal-shell/model-picker-targets": {
+      "bun": "./terminal-shell/src/model-picker-targets.ts",
+      "types": "./terminal-shell/dist/model-picker-targets.d.ts",
+      "import": "./terminal-shell/dist/model-picker-targets.js"
+    },
+    "./terminal-shell/shell-ui-openers": {
+      "bun": "./terminal-shell/src/shell-ui-openers.ts",
+      "types": "./terminal-shell/dist/shell-ui-openers.d.ts",
+      "import": "./terminal-shell/dist/shell-ui-openers.js"
     }
   },
   "publishConfig": {

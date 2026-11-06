@@ -1,11 +1,23 @@
-import { buildConfiguredViaMap, resolveSecretProviderIds as readSecretProviders } from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
+import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
+import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
+import {
+  buildConfiguredViaMap,
+  resolveSecretProviderIds as readSecretProviders,
+} from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '../config/index.ts';
-import { getProviderIdFromModel } from '../config/provider-model.ts';
+import '../config/provider-model.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { describeServingEffort, effortPresentationForModel, publishActiveEffortOptions, requestedEffortLevel, servingEffortForLevel, toEffortModel } from '../providers/reasoning-effort-surface.ts';
+import {
+  describeServingEffort,
+  effortPresentationForModel,
+  publishActiveEffortOptions,
+  requestedEffortLevel,
+  servingEffortForLevel,
+  toEffortModel,
+} from '../providers/reasoning-effort-surface.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
@@ -17,7 +29,12 @@ import { openModelPickerNow, type ModelPickerOpenDeps } from '../input/model-pic
 import { buildLocalFitRecommendations, buildSignInRow, LOCAL_REC_PROVIDER } from '../input/model-picker-local-fit.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
-import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
+import {
+  applyThemeModeSettingChange,
+  applyThemeNameSettingChange,
+  THEME_MODE_CONFIG_KEY,
+  THEME_NAME_CONFIG_KEY,
+} from '../renderer/theme-mode-config.ts';
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -44,12 +61,10 @@ type WireShellUiOpenersOptions = {
  * The preResolvedSecretKeys set is pre-fetched async before the sync picker render cycle.
  */
 
-
 /**
  * Build a configuredViaMap for the given provider list.
  * Pass preResolvedSecretKeys (from an async SecretsManager batch) to surface the 'secrets' tier.
  */
-
 
 export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   const {
@@ -76,74 +91,19 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
    * Returns a set of provider IDs (not env var names) that are secrets-backed.
    * Falls back to empty set if secretsManager is not provided.
    */
-  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> { return readSecretProviders(getConfiguredProviderIds, secretsManager); }
+  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> {
+    return readSecretProviders(getConfiguredProviderIds, secretsManager);
+  }
 
-  const getCurrentModelForPickerTarget = (): string => {
-    const selectedTarget = input.modelPicker.getSelectedTargetInfo();
-    const target = selectedTarget?.target ?? input.modelPicker.target;
-    if (target === 'helper') return String(configManager.get('helper.globalModel') || runtime.model);
-    if (target === 'tool') return String(configManager.get('tools.llmModel') || runtime.model);
-    if (target === 'tts') return String(configManager.get('tts.llmModel') || runtime.model);
-    return runtime.model;
-  };
+  const getCurrentModelForPickerTarget = () =>
+    selectedModelPickerRoute(configManager, runtime, input.modelPicker.getSelectedTargetInfo()?.target ?? input.modelPicker.target).model;
 
-  const getCurrentProviderForPickerTarget = (): string => {
-    const selectedTarget = input.modelPicker.getSelectedTargetInfo();
-    const target = selectedTarget?.target ?? input.modelPicker.target;
-    if (target === 'helper') return String(configManager.get('helper.globalProvider') || runtime.provider);
-    if (target === 'tool') return String(configManager.get('tools.llmProvider') || runtime.provider);
-    if (target === 'tts') return String(configManager.get('tts.llmProvider') || runtime.provider);
-    return runtime.provider;
-  };
+  const getCurrentProviderForPickerTarget = () =>
+    selectedModelPickerRoute(configManager, runtime, input.modelPicker.getSelectedTargetInfo()?.target ?? input.modelPicker.target)
+      .provider;
 
   const buildModelPickerTargets = (): ModelPickerTargetInfo[] => {
-    const mainProvider = getProviderIdFromModel(configManager.get('provider.model') || runtime.provider).trim();
-    const mainModel = String(configManager.get('provider.model') || runtime.model || '').trim();
-    const helperProvider = String(configManager.get('helper.globalProvider') ?? '').trim();
-    const helperModel = String(configManager.get('helper.globalModel') ?? '').trim();
-    const toolProvider = String(configManager.get('tools.llmProvider') ?? '').trim();
-    const toolModel = String(configManager.get('tools.llmModel') ?? '').trim();
-    const ttsProvider = String(configManager.get('tts.llmProvider') ?? '').trim();
-    const ttsModel = String(configManager.get('tts.llmModel') ?? '').trim();
-
-    return [
-      {
-        target: 'main',
-        label: 'Main Chat',
-        description: 'Default provider and model for normal chat turns in this TUI session.',
-        provider: mainProvider,
-        model: mainModel,
-        enabled: true,
-        inherited: false,
-      },
-      {
-        target: 'helper',
-        label: 'Helper Model',
-        description: 'Optional helper route used for supporting work. Empty provider/model values inherit Main Chat.',
-        provider: helperProvider || mainProvider,
-        model: helperModel || mainModel,
-        enabled: Boolean(configManager.get('helper.enabled')),
-        inherited: helperProvider.length === 0 && helperModel.length === 0,
-      },
-      {
-        target: 'tool',
-        label: 'Tool LLM',
-        description: 'Optional LLM route for tool-specific reasoning. Selecting a model enables the tool LLM route.',
-        provider: toolProvider || mainProvider,
-        model: toolModel || mainModel,
-        enabled: Boolean(configManager.get('tools.llmEnabled')),
-        inherited: toolProvider.length === 0 && toolModel.length === 0,
-      },
-      {
-        target: 'tts',
-        label: 'TTS LLM',
-        description: 'Optional LLM override for /tts response generation. Empty values use the current chat model.',
-        provider: ttsProvider || mainProvider,
-        model: ttsModel || mainModel,
-        enabled: true,
-        inherited: ttsProvider.length === 0 && ttsModel.length === 0,
-      },
-    ];
+    return buildConversationModelPickerTargets(configManager, runtime);
   };
 
   // The picker opens at once on the cached catalog; the credential-source
@@ -153,7 +113,9 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   // and the best-fit recommendation is preselected.
   const pickerModels = (): ModelDefinition[] => {
     const catalogModels = providerRegistry.getSelectableModels();
-    return getConfiguredProviderIds().length === 0 ? [...buildLocalFitRecommendations(), buildSignInRow(), ...catalogModels] : catalogModels;
+    return getConfiguredProviderIds().length === 0
+      ? [...buildLocalFitRecommendations(), buildSignInRow(), ...catalogModels]
+      : catalogModels;
   };
   const pickerOpenDeps: ModelPickerOpenDeps = {
     picker: input.modelPicker,
@@ -167,24 +129,38 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     },
     currentProviderId: getCurrentProviderForPickerTarget,
     configuredProviderIds: () => new Set(getConfiguredProviderIds()),
-    buildConfiguredVia: (ids, configured, secretIds) => buildConfiguredViaMap(ids.filter((p) => p !== LOCAL_REC_PROVIDER), new Set(configured), subscriptionManager, secretIds),
+    buildConfiguredVia: (ids, configured, secretIds) =>
+      buildConfiguredViaMap(
+        ids.filter((p) => p !== LOCAL_REC_PROVIDER),
+        new Set(configured),
+        subscriptionManager,
+        secretIds,
+      ),
     buildTargets: buildModelPickerTargets,
     resolveSecretProviderIds,
     // Picker-open re-check: re-verify each provider's live model list (TTL-respecting) so the open picker reflects models a provider started or stopped serving.
-    refreshLiveModels: async () => ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
+    refreshLiveModels: async () =>
+      ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
     prefetch: async () => {
       input.modelPicker.pinnedIds = new Set(await getPinned());
       await input.modelPicker.loadRecentModels();
     },
-    onError: (error) => { commandContext.print?.(`Model picker could not load everything: ${error instanceof Error ? error.message : String(error)}`); render(); },
+    onError: (error) => {
+      commandContext.print?.(`Model picker could not load everything: ${error instanceof Error ? error.message : String(error)}`);
+      render();
+    },
   };
 
-  commandContext.openModelPicker = () => { void openModelPickerNow(pickerOpenDeps, 'models'); };
+  commandContext.openModelPicker = () => {
+    void openModelPickerNow(pickerOpenDeps, 'models');
+  };
 
   commandContext.openModelPickerWithTarget = (target) => input.openModelPickerWithTarget(target);
   commandContext.openProviderModelPickerWithTarget = (target) => input.openProviderModelPickerWithTarget(target);
 
-  commandContext.openProviderPicker = () => { void openModelPickerNow(pickerOpenDeps, 'providers'); };
+  commandContext.openProviderPicker = () => {
+    void openModelPickerNow(pickerOpenDeps, 'providers');
+  };
 
   commandContext.openReasoningEffortPicker = () => {
     const currentModel = providerRegistry.getCurrentModel();
@@ -206,10 +182,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     // A requested level the model caps below is not in the list at all, and
     // preselecting a missing id lands on the lowest level rather than on what
     // is actually running.
-    const current = (requested ? servingEffortForLevel(requested, model).effective : undefined)
-      ?? requested
-      ?? presentation.choices[0]?.level
-      ?? '';
+    const current =
+      (requested ? servingEffortForLevel(requested, model).effective : undefined) ?? requested ?? presentation.choices[0]?.level ?? '';
     input.openSelection(
       'Reasoning Effort',
       presentation.choices.map((choice) => ({
@@ -226,10 +200,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
         configManager.set('provider.reasoningEffort', level);
         const serving = servingEffortForLevel(level, model);
         runtime.reasoningEffort = serving.effective ?? '';
-        commandContext.print([
-          'Reasoning effort set',
-          `  level ${describeServingEffort(serving, model)}`,
-        ].join('\n'));
+        commandContext.print(['Reasoning effort set', `  level ${describeServingEffort(serving, model)}`].join('\n'));
         render();
       },
     );
@@ -240,21 +211,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     };
   };
 
-  commandContext.openSelection = (title, items, opts, callback) => {
-    input.openSelection(title, items, opts, callback);
-  };
-
-  commandContext.openContextInspector = () => {
-    input.modalOpened('contextInspector');
-    input.contextInspectorModal.open();
-    render();
-  };
-
-  commandContext.openBookmarkModal = () => {
-    input.modalOpened('bookmark');
-    input.bookmarkModal.open();
-    render();
-  };
+  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render, renderHelpToggle: false }));
 
   commandContext.openProcessModal = () => {
     input.modalOpened('process');
@@ -270,12 +227,12 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     }
 
     const normalizedTarget = target?.trim().toLowerCase() ?? '';
-    const entry = normalizedTarget.length > 0
-      ? entries.find((candidate) => (
-        candidate.id.toLowerCase() === normalizedTarget
-        || candidate.label.toLowerCase().includes(normalizedTarget)
-      ))
-      : input.processModal.getSelected() ?? entries[0];
+    const entry =
+      normalizedTarget.length > 0
+        ? entries.find(
+            (candidate) => candidate.id.toLowerCase() === normalizedTarget || candidate.label.toLowerCase().includes(normalizedTarget),
+          )
+        : (input.processModal.getSelected() ?? entries[0]);
 
     if (!entry) {
       return { opened: false, reason: 'not_found' };
@@ -361,27 +318,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     return true;
   };
 
-  commandContext.openHelpOverlay = () => {
-    if (!input.helpOverlayActive) input.modalOpened('help');
-    input.helpOverlayActive = !input.helpOverlayActive;
-    input.helpScrollOffset = 0;
-    input.overlayFilters.help.clear();
-  };
-
-  commandContext.openShortcutsOverlay = () => {
-    if (!input.shortcutsOverlayActive) input.modalOpened('shortcuts');
-    input.shortcutsOverlayActive = !input.shortcutsOverlayActive;
-    input.shortcutsScrollOffset = 0;
-    input.overlayFilters.shortcuts.clear();
-    render();
-  };
-
-  commandContext.openProfilePicker = () => {
-    input.modalOpened('profilePicker');
-    input.profilePickerModal.open();
-    render();
-  };
-
   commandContext.openSettingsModal = (target?: string) => {
     input.modalOpened('settings');
     input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
@@ -405,18 +341,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
         // services.ts forwards the toggle to an adopted daemon over the wire
         // when one is reachable, both fire from the config change itself,
         // not from this settings-modal callback.
-        return syncServiceSettingToPlatform(
-          { configManager, workingDirectory, homeDirectory },
-          change,
-        );
+        return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
       },
     });
     input.settingsModal.selectTarget(target);
-    render();
-  };
-
-  commandContext.openMcpWorkspace = () => {
-    input.openMcpWorkspace(commandContext);
     render();
   };
 
@@ -427,21 +355,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   commandContext.dismissAgentWorkspace = () => input.dismissAgentWorkspace();
 
-  commandContext.openSessionPicker = () => {
-    input.modalOpened('sessionPicker');
-    input.sessionPickerModal.open();
-    render();
-  };
-
   commandContext.openWorkspacePicker = () => {
     conversation.setSplashSuppressed(false);
     input.openAgentWorkspace(commandContext, 'home');
     conversation.rebuildHistory();
-    render();
-  };
-
-  commandContext.focusPrompt = () => {
-    input.indicatorFocused = false;
     render();
   };
 

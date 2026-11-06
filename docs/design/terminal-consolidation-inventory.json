@@ -2019,8 +2019,12 @@
       "platformFunctions": [
         "deriveConfiguredVia",
         "buildConfiguredViaMap",
-        "resolveSecretProviderIds"
-      ]
+        "resolveSecretProviderIds",
+        "buildConversationModelPickerTargets",
+        "selectedModelPickerRoute",
+        "createCommonShellUiOpeners"
+      ],
+      "notes": "Partial: shared model-target derivation/route resolution and selection/context/bookmark/profile/session/help/shortcuts/MCP/focus transitions. Remaining picker-open dependency setup and settings-modal lifecycle are still being converged; TUI trust/palette/config surfaces and Agent effort/process/composer affordances retain product policy."
     },
     {
       "path": "shell/voice-capture-shell.ts",

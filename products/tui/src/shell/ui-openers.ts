@@ -1,7 +1,12 @@
-import { buildConfiguredViaMap, resolveSecretProviderIds as readSecretProviders } from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
+import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
+import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
+import {
+  buildConfiguredViaMap,
+  resolveSecretProviderIds as readSecretProviders,
+} from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { openModelPickerNow, type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/sdk/platform/providers';
+import '@goodvibes-jev/engine/sdk/platform/providers';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ShellViews } from '../views/builtin-views.ts';
@@ -78,9 +83,7 @@ let commandCategoryMapCache: Map<string, string> | null = null;
  */
 function getCommandCategoryMap(): Map<string, string> {
   if (!commandCategoryMapCache) {
-    commandCategoryMapCache = new Map(
-      categorizeBuiltinCommands().map((entry) => [entry.command.name, entry.category]),
-    );
+    commandCategoryMapCache = new Map(categorizeBuiltinCommands().map((entry) => [entry.command.name, entry.category]));
   }
   return commandCategoryMapCache;
 }
@@ -91,12 +94,10 @@ function getCommandCategoryMap(): Map<string, string> {
  * The preResolvedSecretKeys set is pre-fetched async before the sync picker render cycle.
  */
 
-
 /**
  * Build a configuredViaMap for the given provider list.
  * Pass preResolvedSecretKeys (from an async SecretsManager batch) to surface the 'secrets' tier.
  */
-
 
 export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   const {
@@ -130,7 +131,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   trustPromptRef.requestTrustDecision = () =>
     new Promise((resolve) => {
       const { title, items } = buildFirstOpenItems();
-      if (!commandContext.openSelection) { resolve('restricted'); return; } // no selection surface (should not happen live)
+      if (!commandContext.openSelection) {
+        resolve('restricted');
+        return;
+      } // no selection surface (should not happen live)
       commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose' }, (result) => {
         const level = decodeFirstOpenChoice(result?.item.id ?? null);
         resolve(level);
@@ -144,27 +148,19 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
    * Returns a set of provider IDs (not env var names) that are secrets-backed.
    * Falls back to empty set if secretsManager is not provided.
    */
-  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> { return readSecretProviders(getConfiguredProviderIds, secretsManager); }
+  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> {
+    return readSecretProviders(getConfiguredProviderIds, secretsManager);
+  }
 
-  const getCurrentModelForPickerTarget = (): string => {
-    const selectedTarget = input.modelPicker.getSelectedTargetInfo();
-    const target = selectedTarget?.target ?? input.modelPicker.target;
-    if (target === 'helper') return String(configManager.get('helper.globalModel') || runtime.model);
-    if (target === 'tool') return String(configManager.get('tools.llmModel') || runtime.model);
-    if (target === 'tts') return String(configManager.get('tts.llmModel') || runtime.model);
-    if (target === 'embeddings') return memoryEmbeddingRegistry.getDefaultProviderId();
-    return runtime.model;
-  };
+  const getCurrentModelForPickerTarget = () =>
+    selectedModelPickerRoute(configManager, runtime, input.modelPicker.getSelectedTargetInfo()?.target ?? input.modelPicker.target, () =>
+      memoryEmbeddingRegistry.getDefaultProviderId(),
+    ).model;
 
-  const getCurrentProviderForPickerTarget = (): string => {
-    const selectedTarget = input.modelPicker.getSelectedTargetInfo();
-    const target = selectedTarget?.target ?? input.modelPicker.target;
-    if (target === 'helper') return String(configManager.get('helper.globalProvider') || runtime.provider);
-    if (target === 'tool') return String(configManager.get('tools.llmProvider') || runtime.provider);
-    if (target === 'tts') return String(configManager.get('tts.llmProvider') || runtime.provider);
-    if (target === 'embeddings') return memoryEmbeddingRegistry.getDefaultProviderId();
-    return runtime.provider;
-  };
+  const getCurrentProviderForPickerTarget = () =>
+    selectedModelPickerRoute(configManager, runtime, input.modelPicker.getSelectedTargetInfo()?.target ?? input.modelPicker.target, () =>
+      memoryEmbeddingRegistry.getDefaultProviderId(),
+    ).provider;
 
   /**
    * Fetch the embedding-provider status list once per picker-open and shape
@@ -185,14 +181,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   }
 
   const buildModelPickerTargets = (embeddingEntries: EmbeddingProviderPickerEntry[]): ModelPickerTargetInfo[] => {
-    const mainProvider = getProviderIdFromModel(configManager.get('provider.model') || runtime.provider).trim();
-    const mainModel = String(configManager.get('provider.model') || runtime.model || '').trim();
-    const helperProvider = String(configManager.get('helper.globalProvider') ?? '').trim();
-    const helperModel = String(configManager.get('helper.globalModel') ?? '').trim();
-    const toolProvider = String(configManager.get('tools.llmProvider') ?? '').trim();
-    const toolModel = String(configManager.get('tools.llmModel') ?? '').trim();
-    const ttsProvider = String(configManager.get('tts.llmProvider') ?? '').trim();
-    const ttsModel = String(configManager.get('tts.llmModel') ?? '').trim();
     const embeddingProviderId = memoryEmbeddingRegistry.getDefaultProviderId();
     const embeddingEntry = embeddingEntries.find((entry) => entry.id === embeddingProviderId);
     const embeddingNote = embeddingEntry
@@ -200,42 +188,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       : `${embeddingProviderId} · unregistered`;
 
     return [
-      {
-        target: 'main',
-        label: 'Main Chat',
-        description: 'Default provider and model for normal chat turns in this TUI session.',
-        provider: mainProvider,
-        model: mainModel,
-        enabled: true,
-        inherited: false,
-      },
-      {
-        target: 'helper',
-        label: 'Helper Model',
-        description: 'Optional helper route used for supporting work. Empty provider/model values inherit Main Chat.',
-        provider: helperProvider || mainProvider,
-        model: helperModel || mainModel,
-        enabled: Boolean(configManager.get('helper.enabled')),
-        inherited: helperProvider.length === 0 && helperModel.length === 0,
-      },
-      {
-        target: 'tool',
-        label: 'Tool LLM',
-        description: 'Optional LLM route for tool-specific reasoning. Selecting a model enables the tool LLM route.',
-        provider: toolProvider || mainProvider,
-        model: toolModel || mainModel,
-        enabled: Boolean(configManager.get('tools.llmEnabled')),
-        inherited: toolProvider.length === 0 && toolModel.length === 0,
-      },
-      {
-        target: 'tts',
-        label: 'TTS LLM',
-        description: 'Optional LLM override for /tts response generation. Empty values use the current chat model.',
-        provider: ttsProvider || mainProvider,
-        model: ttsModel || mainModel,
-        enabled: true,
-        inherited: ttsProvider.length === 0 && ttsModel.length === 0,
-      },
+      ...buildConversationModelPickerTargets(configManager, runtime),
       {
         target: 'embeddings',
         label: 'Embeddings',
@@ -264,24 +217,33 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     currentModelId: getCurrentModelForPickerTarget,
     currentProviderId: getCurrentProviderForPickerTarget,
     configuredProviderIds: () => new Set(getConfiguredProviderIds()),
-    buildConfiguredVia: (ids, configured, secretIds) => buildConfiguredViaMap([...ids], new Set(configured), subscriptionManager, secretIds),
+    buildConfiguredVia: (ids, configured, secretIds) =>
+      buildConfiguredViaMap([...ids], new Set(configured), subscriptionManager, secretIds),
     buildTargets: buildModelPickerTargets,
     resolveSecretProviderIds,
     resolveEmbeddingProviders: resolveEmbeddingProviderEntries,
-    refreshLiveModels: async () => ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
+    refreshLiveModels: async () =>
+      ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
     prefetch: async () => {
       input.modelPicker.pinnedIds = new Set(await getPinned());
       await input.modelPicker.loadRecentModels();
     },
-    onError: (error) => { commandContext.print?.(`Model picker could not load everything: ${summarizeError(error)}`); render(); },
+    onError: (error) => {
+      commandContext.print?.(`Model picker could not load everything: ${summarizeError(error)}`);
+      render();
+    },
   };
 
-  commandContext.openModelPicker = () => { void openModelPickerNow(pickerOpenDeps, 'models'); };
+  commandContext.openModelPicker = () => {
+    void openModelPickerNow(pickerOpenDeps, 'models');
+  };
 
   commandContext.openModelPickerWithTarget = (target) => input.openModelPickerWithTarget(target);
   commandContext.openProviderModelPickerWithTarget = (target) => input.openProviderModelPickerWithTarget(target);
 
-  commandContext.openProviderPicker = () => { void openModelPickerNow(pickerOpenDeps, 'providers'); };
+  commandContext.openProviderPicker = () => {
+    void openModelPickerNow(pickerOpenDeps, 'providers');
+  };
 
   commandContext.completeEmbeddingProviderSelection = (providerId: string) => {
     try {
@@ -292,32 +254,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  commandContext.openSelection = (title, items, opts, callback) => {
-    input.openSelection(title, items, opts, callback);
-  };
+  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render, renderHelpToggle: true }));
 
   commandContext.openOnboardingWizard = (modeOrOptions) => {
     input.openOnboardingWizard(modeOrOptions);
-  };
-
-  commandContext.openContextInspector = () => {
-    input.modalOpened('contextInspector');
-    input.contextInspectorModal.open();
-    render();
-  };
-
-  commandContext.openBookmarkModal = () => {
-    input.modalOpened('bookmark');
-    input.bookmarkModal.open();
-    render();
-  };
-
-  commandContext.openHelpOverlay = () => {
-    if (!input.helpOverlayActive) input.modalOpened('help');
-    input.helpOverlayActive = !input.helpOverlayActive;
-    input.helpScrollOffset = 0;
-    input.overlayFilters.help.clear();
-    render();
   };
 
   // Mirrors the Ctrl+F chord's own toggle exactly (handler-shortcuts.ts's
@@ -329,20 +269,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  commandContext.openShortcutsOverlay = () => {
-    if (!input.shortcutsOverlayActive) input.modalOpened('shortcuts');
-    input.shortcutsOverlayActive = !input.shortcutsOverlayActive;
-    input.shortcutsScrollOffset = 0;
-    input.overlayFilters.shortcuts.clear();
-    render();
-  };
-
-  commandContext.openProfilePicker = () => {
-    input.modalOpened('profilePicker');
-    input.profilePickerModal.open();
-    render();
-  };
-
   commandContext.openSettingsModal = (target?: string) => {
     input.modalOpened('settings');
     input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
@@ -350,15 +276,15 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       // empty by construction, so those rows read 'unreachable' rather than
       // inventing a settled state nothing established. Retargeting that probe
       // at the daemon is the remaining half of this seam.
-      ...(commandContext.workspace?.gatewayMethods
-        ? { gatewayMethods: commandContext.workspace.gatewayMethods }
-        : {}),
+      ...(commandContext.workspace?.gatewayMethods ? { gatewayMethods: commandContext.workspace.gatewayMethods } : {}),
       // A daemon-scoped credential goes to the daemon, which writes the secret,
       // verifies it reads back, and only then points the config key at it.
       ...(daemonCredentials ? { daemonCredentials } : {}),
       // A daemon-owned setting is applied by the daemon, so it is written there.
       ...(daemonConfig ? { daemonConfig } : {}),
-      reportError: (message: string) => { commandContext.print?.(message); },
+      reportError: (message: string) => {
+        commandContext.print?.(message);
+      },
       requestRender: render,
       onSettingApplied: (change) => {
         // forced dark/light applies immediately (rebuild palettes + full
@@ -378,12 +304,9 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           }
           return { message: 'Theme mode: auto (probes terminal on next startup)' };
         }
-        const builtinSetting = configManager.getSchema().find(setting => setting.key === change.key);
+        const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
         if (!builtinSetting) return;
-        return syncServiceSettingToPlatform(
-          { configManager, workingDirectory, homeDirectory },
-          { ...change, key: builtinSetting.key },
-        );
+        return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: builtinSetting.key });
       },
     });
     input.settingsModal.selectTarget(target);
@@ -430,17 +353,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  commandContext.openMcpWorkspace = () => {
-    input.openMcpWorkspace(commandContext);
-    render();
-  };
-
-  commandContext.openSessionPicker = () => {
-    input.modalOpened('sessionPicker');
-    input.sessionPickerModal.open();
-    render();
-  };
-
   // Registry-driven surfaces built inside command handlers (/help) group by
   // the same categories as the palette and the generated reference.
   commandContext.getCommandCategories = () => getCommandCategoryMap();
@@ -461,18 +373,34 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     const top = input.surfaceModals.top();
     if (top instanceof CommandPalette) return;
     const commands = registry.getAll();
-    const bindings = commands.map(command => ({ handler: command.handler, name: command.name, description: command.description, argsHint: command.argsHint, usage: command.usage, aliases: JSON.stringify(command.aliases) }));
+    const bindings = commands.map((command) => ({
+      handler: command.handler,
+      name: command.name,
+      description: command.description,
+      argsHint: command.argsHint,
+      usage: command.usage,
+      aliases: JSON.stringify(command.aliases),
+    }));
     const palette = new CommandPalette({
       entries: buildPaletteEntries(commands, getCommandCategoryMap()),
       onChanged: render,
       assertCurrent: () => {
         const current = registry.getAll();
-        if (current.length !== commands.length || current.some((command, index) => {
-          const binding = bindings[index]!;
-          return command !== commands[index] || command.handler !== binding.handler || command.name !== binding.name
-            || command.description !== binding.description || command.argsHint !== binding.argsHint || command.usage !== binding.usage
-            || JSON.stringify(command.aliases) !== binding.aliases;
-        })) {
+        if (
+          current.length !== commands.length ||
+          current.some((command, index) => {
+            const binding = bindings[index]!;
+            return (
+              command !== commands[index] ||
+              command.handler !== binding.handler ||
+              command.name !== binding.name ||
+              command.description !== binding.description ||
+              command.argsHint !== binding.argsHint ||
+              command.usage !== binding.usage ||
+              JSON.stringify(command.aliases) !== binding.aliases
+            );
+          })
+        ) {
           throw new Error('Command registry changed.');
         }
       },
@@ -495,11 +423,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       },
     });
     input.surfaceModals.push(palette);
-    render();
-  };
-
-  commandContext.focusPrompt = () => {
-    input.indicatorFocused = false;
     render();
   };
 

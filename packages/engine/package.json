@@ -2083,6 +2083,26 @@
       "bun": "./terminal-shell/src/onboarding-markers.ts",
       "types": "./terminal-shell/dist/onboarding-markers.d.ts",
       "import": "./terminal-shell/dist/onboarding-markers.js"
+    },
+    "./terminal-shell/input-content": {
+      "bun": "./terminal-shell/src/input-content.ts",
+      "types": "./terminal-shell/dist/input-content.d.ts",
+      "import": "./terminal-shell/dist/input-content.js"
+    },
+    "./terminal-shell/overlay-input-routes": {
+      "bun": "./terminal-shell/src/overlay-input-routes.ts",
+      "types": "./terminal-shell/dist/overlay-input-routes.d.ts",
+      "import": "./terminal-shell/dist/overlay-input-routes.js"
+    },
+    "./terminal-shell/modal-state": {
+      "bun": "./terminal-shell/src/modal-state.ts",
+      "types": "./terminal-shell/dist/modal-state.d.ts",
+      "import": "./terminal-shell/dist/modal-state.js"
+    },
+    "./terminal-shell/modal-stack": {
+      "bun": "./terminal-shell/src/modal-stack.ts",
+      "types": "./terminal-shell/dist/modal-stack.d.ts",
+      "import": "./terminal-shell/dist/modal-stack.js"
     }
   },
   "publishConfig": {

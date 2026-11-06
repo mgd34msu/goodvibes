@@ -642,7 +642,26 @@
       "path": "input/handler-content-actions.ts",
       "baselineTuiLines": 554,
       "baselineSimilarity": 0.6648,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "MARKER_REGEX",
+        "IMAGE_PREFIXES",
+        "BINARY_IMAGE_MAGIC",
+        "IMAGE_EXTENSIONS",
+        "formatFileSize",
+        "mediaTypeFromExt",
+        "PasteRegistryState",
+        "ClipboardPasteKind",
+        "ClipboardPasteResult",
+        "ClipboardPasteSource",
+        "registerPaste",
+        "expandTextPastes",
+        "expandPrompt",
+        "cleanupMarkerRegistry",
+        "findMarkerAtPos",
+        "handleClipboardPaste",
+        "handleCtrlC"
+      ]
     },
     {
       "path": "input/handler-feed-routes.ts",
@@ -676,7 +695,7 @@
       "path": "input/handler-modal-stack.ts",
       "baselineTuiLines": 337,
       "baselineSimilarity": 0.9469,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/handler-modal-token-routes.ts",
@@ -716,7 +735,7 @@
       "path": "input/handler-ui-state.ts",
       "baselineTuiLines": 393,
       "baselineSimilarity": 0.8313,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/handler-work-tree-route.ts",

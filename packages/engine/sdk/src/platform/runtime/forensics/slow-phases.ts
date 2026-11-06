@@ -8,6 +8,7 @@ import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { forensicsSlowPhase } from './batteries/slow-phase.js';
 import type { OwnedJudgmentOptions } from '../owned-judgment-work.js';
 import type { PhaseTimingEntry } from './types.js';
+import { requireDecisionFeature } from '../decision-policy.js';
 
 export async function readSlowPhases(
   domain: 'turn' | 'task',
@@ -15,6 +16,7 @@ export async function readSlowPhases(
   site: string,
   options: OwnedJudgmentOptions = {},
 ): Promise<string[]> {
+  requireDecisionFeature('semantic assessment of unusually slow runtime phases; native phase timings remain available');
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
   const timed = phaseTimings.filter((entry) => entry.durationMs !== undefined);

@@ -48,6 +48,7 @@ import type { StrategyInput, StrategyOutput, CompactionStrategy } from './types.
 import { compactionViews } from './judged-views.js';
 import { compactionFidelity } from './batteries/compaction-fidelity.js';
 import { compactionRetention } from './batteries/compaction-retention.js';
+import { requireDecisionFeature } from '../decision-policy.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -227,6 +228,7 @@ export async function computeQualityScore(
   output: StrategyOutput,
   options: QualityScoreOptions = {},
 ): Promise<CompactionQualityScore> {
+  requireDecisionFeature('semantic compaction retention and fidelity scoring; native Classic compaction does not claim a quality grade');
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
   // Compression ratio: fraction of tokens removed

@@ -112,6 +112,9 @@ export interface ForensicsJumpLink {
  * Generated automatically on terminal failure states.
  */
 export interface FailureReport {
+  readonly operationProvenance?: 'classic';
+  /** Empty slowPhases does not claim that no phase was slow when not evaluated. */
+  readonly slowPhaseAssessment?: 'semantic' | 'not-needed' | 'not-evaluated';
   /** Unique report identifier (short hex, derived from trace ID). */
   readonly id: string;
   /** Full trace ID of the originating event envelope. */

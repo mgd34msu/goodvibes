@@ -13,6 +13,7 @@
 import { categoryForCode, failureReading, failureState, judgmentPort, type FailureEvidence } from '@goodvibes-jev/engine/errors';
 import { defineBattery, fanOut, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment';
 import { summarizeError } from '../utils/error-display.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 export type ErrorClass = 'auth' | 'rate-limit' | 'context-overflow' | 'network' | 'generic';
 
@@ -82,6 +83,8 @@ function structuralClass(evidence: FailureEvidence, causeCode: string | undefine
 }
 
 export interface UserErrorReading {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   readonly kind: ErrorClass;
   /** Whether the error says a subscription session has ended; only asked about an error whose wording was read. */
   readonly sessionEnded: boolean;
@@ -91,6 +94,12 @@ export interface UserErrorReading {
 export async function readUserErrorClass(err: unknown, site = 'routing.user-error'): Promise<UserErrorReading> {
   const { evidence, causeCode } = userErrorEvidence(err);
   const fixed = structuralClass(evidence, causeCode);
+  return decisionOrClassic(() => readDecisionUserErrorClass(evidence, fixed, site), () => ({
+    kind: fixed ?? 'generic', sessionEnded: false, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+  }));
+}
+
+async function readDecisionUserErrorClass(evidence: FailureEvidence, fixed: ErrorClass | undefined, site: string): Promise<UserErrorReading> {
   if (evidence.message.trim().length === 0) return { kind: fixed ?? 'generic', sessionEnded: false };
   if (fixed !== undefined && fixed !== 'auth') return { kind: fixed, sessionEnded: false };
   const run = await fanOut(judgmentPort(site), failureState(evidence), { failure: failureReading, user: userErrorReading }, { site, label: 'routing.user-error' });
@@ -110,6 +119,10 @@ export async function readUserErrorClass(err: unknown, site = 'routing.user-erro
 export function describeUserError(err: unknown, reading: UserErrorReading): UserFacingError {
   switch (reading.kind) {
     case 'auth':
+      if (reading.operationProvenance === 'classic') return {
+        kind: 'auth', message: 'Authentication failed: the provider rejected the credentials or sign-in session.',
+        action: 'Run /login to re-authenticate or check your API key.',
+      };
       // A subscription-session death is not an API-key problem, and telling a
       // subscriber to "check your API key" reads as "your subscription isn't
       // there". Keep the meaning distinct.

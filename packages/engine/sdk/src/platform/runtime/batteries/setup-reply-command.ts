@@ -14,6 +14,7 @@
  */
 import { defineBattery, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { requireDecisionFeature } from '../decision-policy.js';
 
 export const setupReplyCommand = defineBattery({
   name: 'engine.runtime.setup-reply-command',
@@ -80,6 +81,7 @@ export const setupReplyCommand = defineBattery({
  * decision log.
  */
 export async function replyInstructsTyping(text: string, site: string): Promise<boolean> {
+  requireDecisionFeature('semantic assessment of setup reply instructions');
   const run = await setupReplyCommand.run(judgmentPort(site), { reply: text }, { site });
   const reading: YesNoReading = run.readings.instructs;
   return reading.verdict === 'yes' && reading.outcome === 'act';

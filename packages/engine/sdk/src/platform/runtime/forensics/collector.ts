@@ -30,6 +30,7 @@ import type {
 } from './types.js';
 import { classifyFailure, summariseFailure } from './classifier.js';
 import { readSlowPhases } from './slow-phases.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import type { ForensicsRegistry } from './registry.js';
 import { emitForensicsReportCreated } from '../emitters/forensics.js';
 
@@ -602,7 +603,7 @@ export class ForensicsCollector {
       errorMessage,
       turnId: tracker.turnId,
       phaseTimings: tracker.phaseTimings,
-      slowPhases: await readSlowPhases('turn', tracker.phaseTimings, 'runtime.forensics.turn-slow-phases', work.options('runtime.forensics.turn-slow-phases')),
+      ...await this._assessSlowPhases('turn', tracker.phaseTimings, work),
       phaseLedger: tracker.phaseLedger,
       causalChain: tracker.causalChain,
       cascadeEvents: tracker.cascadeEvents,
@@ -660,7 +661,7 @@ export class ForensicsCollector {
       taskId: tracker.taskId,
       agentId: tracker.agentId,
       phaseTimings: tracker.phaseTimings,
-      slowPhases: await readSlowPhases('task', tracker.phaseTimings, 'runtime.forensics.task-slow-phases', work.options('runtime.forensics.task-slow-phases')),
+      ...await this._assessSlowPhases('task', tracker.phaseTimings, work),
       phaseLedger: tracker.phaseLedger,
       causalChain: tracker.causalChain,
       cascadeEvents: tracker.cascadeEvents,
@@ -672,6 +673,19 @@ export class ForensicsCollector {
     this._publishReport(report, { taskId: tracker.taskId }, work);
   }
 
+  private async _assessSlowPhases(domain: 'turn' | 'task', timings: readonly PhaseTimingEntry[], work: OwnedJudgmentWork) {
+    const site = `runtime.forensics.${domain}-slow-phases`;
+    const assessment = await decisionOrClassic<{ slowPhases: string[]; slowPhaseAssessment: 'semantic' | 'not-needed' | 'not-evaluated' }>(async () => ({
+      slowPhases: await readSlowPhases(domain, timings, site, work.options(site)),
+      slowPhaseAssessment: timings.some(timing => timing.durationMs !== undefined) ? 'semantic' : 'not-needed',
+    }), () => {
+      work.assertCurrent();
+      return { slowPhases: [] as string[], slowPhaseAssessment: 'not-evaluated' as const };
+    }, () => { work.assertCurrent(); return true; });
+    work.assertCurrent();
+    return { ...assessment, ...(isClassicOperation() ? { operationProvenance: 'classic' as const } : {}) };
+  }
+
   private _trackReport(
     report: (work: OwnedJudgmentWork) => Promise<void>,
     tracker: { sessionId: string; traceId: string },
@@ -679,7 +693,7 @@ export class ForensicsCollector {
   ): void {
     if (this._lifetime.signal.aborted) return;
     const work = new OwnedJudgmentWork({ signal: this._lifetime.signal });
-    const pending = work.wait(() => report(work)).catch((error: unknown) => {
+    const pending = withConfiguredDecisionModelPolicy(() => work.wait(() => report(work))).catch((error: unknown) => {
       if (work.current) this._logUnclassified(error, tracker, context);
     }).finally(() => { this._pending.delete(pending); work.retire(); });
     this._pending.add(pending);

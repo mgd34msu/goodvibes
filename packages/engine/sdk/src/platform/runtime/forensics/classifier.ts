@@ -19,6 +19,7 @@
 import { readFailure, captureJudgmentPort, type FailureCategory } from '@goodvibes-jev/engine/errors';
 import type { OwnedJudgmentOptions } from '../owned-judgment-work.js';
 import type { FailureClass } from './types.js';
+import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 
 /** Decision site for the error-message rung. */
 export const FORENSICS_CLASSIFIER_SITE = 'runtime.forensics.classifier';
@@ -103,15 +104,20 @@ export async function classifyFailure(input: ClassifierInput, options?: OwnedJud
 
   // What the error message says: a turn deadline or a failed LLM call
   if (input.errorMessage) {
-    const supplied = options?.port;
-    const capture = options && !supplied ? captureJudgmentPort(FORENSICS_CLASSIFIER_SITE, options) : undefined;
-    const port = supplied ?? capture?.port;
-    const signal = options?.signal ?? capture?.signal;
-    const { category } = await readFailure({ message: input.errorMessage }, FORENSICS_CLASSIFIER_SITE,
-      port ? { port, ...(signal ? { signal } : {}) } : undefined);
-    capture?.assertCurrent();
-    options?.assertCurrent?.();
-    options?.signal?.throwIfAborted();
+    const message = input.errorMessage;
+    const current = () => { options?.signal?.throwIfAborted(); options?.assertCurrent?.(); };
+    const category = await decisionOrClassic(async () => {
+      const supplied = options?.port;
+      const capture = options && !supplied ? captureJudgmentPort(FORENSICS_CLASSIFIER_SITE, options) : undefined;
+      const port = supplied ?? capture?.port;
+      const signal = options?.signal ?? capture?.signal;
+      const result = await readFailure({ message }, FORENSICS_CLASSIFIER_SITE,
+        port ? { port, ...(signal ? { signal } : {}) } : undefined);
+      if (!isClassicOperation()) capture?.assertCurrent();
+      current();
+      return result.category;
+    }, () => { current(); return 'unknown' as const; }, () => { current(); return true; });
+    current();
     const read = CLASS_FOR_CATEGORY[category];
     if (read !== undefined) return read;
   }

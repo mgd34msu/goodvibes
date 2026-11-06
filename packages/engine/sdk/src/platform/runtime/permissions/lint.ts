@@ -2,10 +2,13 @@ import { mapLimit } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { policyBreadth } from '../../gate/batteries/policy-breadth.js';
 import type { PermissionsConfig, PolicyRule } from './types.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 
 export type PolicyLintSeverity = 'info' | 'warn' | 'error';
 
 export interface PolicyLintFinding {
+  operationProvenance?: 'classic';
+  semanticAssessment?: 'not-evaluated';
   severity: PolicyLintSeverity;
   ruleId?: string | undefined;
   message: string;
@@ -25,24 +28,35 @@ const BREADTH_SITE = 'engine.gate.policy-lint';
  * unless the reading is a no that acts, so a doubtful one is shown to the
  * owner. A JudgmentError propagates.
  */
-async function isBroadPattern(kind: 'path' | 'host', pattern: string, effect: string): Promise<boolean> {
-  const item = kind === 'path' ? 'broad_path' : 'broad_host';
-  const run = await policyBreadth.run(judgmentPort(BREADTH_SITE), { kind, pattern, effect }, { site: BREADTH_SITE, only: [item] });
-  const reading = run.readings[item]!;
-  const broad = !(reading.verdict === 'no' && reading.outcome === 'act');
-  run.recordAction(broad ? 'flagged' : 'scoped');
-  return broad;
+async function isBroadPattern(kind: 'path' | 'host', pattern: string, effect: string): Promise<boolean | undefined> {
+  return decisionOrClassic<boolean | undefined>(async () => {
+    const item = kind === 'path' ? 'broad_path' : 'broad_host';
+    const run = await policyBreadth.run(judgmentPort(BREADTH_SITE), { kind, pattern, effect }, { site: BREADTH_SITE, only: [item] });
+    const reading = run.readings[item]!;
+    const broad = !(reading.verdict === 'no' && reading.outcome === 'act');
+    run.recordAction(broad ? 'flagged' : 'scoped');
+    return broad;
+  }, () => undefined);
 }
 
-async function anyBroad(kind: 'path' | 'host', patterns: readonly string[], effect: string): Promise<boolean> {
-  return (await mapLimit(patterns, BREADTH_CONCURRENCY, (pattern) => isBroadPattern(kind, pattern, effect))).some(Boolean);
+async function anyBroad(kind: 'path' | 'host', patterns: readonly string[], effect: string): Promise<boolean | undefined> {
+  const readings = await mapLimit(patterns, BREADTH_CONCURRENCY, (pattern) => isBroadPattern(kind, pattern, effect));
+  if (readings.some(value => value === true)) return true;
+  return readings.includes(undefined) ? undefined : false;
+}
+
+function unassessedBreadth(rule: PolicyRule): PolicyLintFinding {
+  return { severity: 'info', ruleId: rule.id, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+    message: `Rule '${rule.id}' was checked structurally. Pattern breadth was not evaluated in Classic; native permission rules and owner approvals still apply.` };
 }
 
 async function lintRule(rule: PolicyRule): Promise<PolicyLintFinding[]> {
   const findings: PolicyLintFinding[] = [];
 
   if (rule.type === 'path-scope') {
-    if (await anyBroad('path', rule.pathPatterns, rule.effect)) {
+    const broad = await anyBroad('path', rule.pathPatterns, rule.effect);
+    if (broad === undefined) findings.push(unassessedBreadth(rule));
+    if (broad === true) {
       findings.push({
         severity: rule.effect === 'allow' ? 'error' : 'warn',
         ruleId: rule.id,
@@ -52,7 +66,9 @@ async function lintRule(rule: PolicyRule): Promise<PolicyLintFinding[]> {
   }
 
   if (rule.type === 'network-scope') {
-    if (await anyBroad('host', rule.hostPatterns, rule.effect)) {
+    const broad = await anyBroad('host', rule.hostPatterns, rule.effect);
+    if (broad === undefined) findings.push(unassessedBreadth(rule));
+    if (broad === true) {
       findings.push({
         severity: rule.effect === 'allow' ? 'error' : 'warn',
         ruleId: rule.id,
@@ -85,6 +101,10 @@ async function lintRule(rule: PolicyRule): Promise<PolicyLintFinding[]> {
 }
 
 export async function lintPolicyConfig(config: PermissionsConfig): Promise<PolicyLintFinding[]> {
+  return withConfiguredDecisionModelPolicy(() => lintConfiguredPolicy(config));
+}
+
+async function lintConfiguredPolicy(config: PermissionsConfig): Promise<PolicyLintFinding[]> {
   const findings: PolicyLintFinding[] = [];
   const rules = config.rules ?? [];
   const seenIds = new Set<string>();

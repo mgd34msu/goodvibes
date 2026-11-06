@@ -426,7 +426,7 @@ jobs:
             runner: macos-15-intel
           - target: darwin-arm64
             platform: darwin
-            runner: macos-14
+            runner: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -496,7 +496,7 @@ jobs:
             runner: macos-15-intel
           - target: darwin-arm64
             platform: darwin
-            runner: macos-14
+            runner: macos-15
     steps:
       - name: Require canonical build and every native producer
         env:

@@ -2908,6 +2908,11 @@
       "bun": "./terminal-shell/src/input-handler-state.ts",
       "types": "./terminal-shell/dist/input-handler-state.d.ts",
       "import": "./terminal-shell/dist/input-handler-state.js"
+    },
+    "./terminal-shell/auth-review-command": {
+      "bun": "./terminal-shell/src/auth-review-command.ts",
+      "types": "./terminal-shell/dist/auth-review-command.d.ts",
+      "import": "./terminal-shell/dist/auth-review-command.js"
     }
   },
   "publishConfig": {

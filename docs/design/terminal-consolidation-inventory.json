@@ -574,7 +574,8 @@
       "path": "input/commands/platform-access-runtime.ts",
       "baselineTuiLines": 327,
       "baselineSimilarity": 0.3468,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns provider auth review/show/repair dispatch and snapshot capture, and auth bundle metadata/export/inspection/confirmation lifecycle. Product adapters retain exact reporting, TUI local/service login and install workflows versus Agent explicit external-host refusal and confirmed exports; private credential authority is unchanged."
     },
     {
       "path": "input/commands/product-runtime.ts",

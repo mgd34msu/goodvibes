@@ -1,3 +1,5 @@
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { rankClassicCatalog } from '../runtime/classic-catalog.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { assertKnowledgeExtractionInput } from './extraction-policy.js';
@@ -12,7 +14,7 @@ import { KnowledgeRecordAdmissionHeldError } from './store-record-snapshot.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 import { projectAnswerFactClaim } from './semantic/answer-claim-projection.js';
-import { prepareAnswerSourceExcerptBatches, type LocalAnswerExcerptSpan } from './semantic/answer-excerpts/prepare.js';
+import { localKnowledgeSourceSpans, prepareAnswerSourceExcerptBatches, type LocalAnswerExcerptSpan } from './semantic/answer-excerpts/prepare.js';
 import { KnowledgeAnswerExcerptHeldError } from './semantic/answer-excerpts/types.js';
 import { captureAnswerReadingPorts } from './semantic/answer-reading-ports.js';
 import { withAnswerVerificationBudget } from './semantic/answer-verification/budget.js';
@@ -34,13 +36,17 @@ export interface PublicKnowledgeSelectedRow {
   readonly id: string;
   readonly source?: KnowledgeSourceRecord | undefined;
   readonly node?: KnowledgeNodeRecord | undefined;
-  readonly probability: number;
+  readonly probability?: number;
+  /** Literal token overlap, never semantic probability. */
+  readonly localScore?: number;
+  readonly provenance?: 'classic';
   /** Complete semantic node content supplied to relevance, without store keys. */
   readonly nodeText?: string | undefined;
   /** Complete selected source fields, with exact local offsets; empty is settled. */
   readonly spans?: readonly LocalAnswerExcerptSpan[] | undefined;
 }
 export interface PublicKnowledgeSelection {
+  readonly provenance?: 'classic';
   readonly accepted: readonly PublicKnowledgeSelectedRow[];
   readonly assertCurrent: () => void;
   readonly relatedLabels: (kind: 'source' | 'node', id: string) => readonly string[];
@@ -157,6 +163,11 @@ function publicNodeMeaning(store: KnowledgeStore, node: KnowledgeNodeRecord, nod
 export async function readPublicKnowledgeSelection(store: KnowledgeStore, input: PublicKnowledgeSelectionInput,
   options: Pick<KnowledgeScopeSelectionOptions, 'signal' | 'assertCurrent' | 'shouldStop'> = {},
 ): Promise<PublicKnowledgeSelection> {
+  return withConfiguredDecisionModelPolicy(() => readPublicKnowledgeUnderPolicy(store, input, options));
+}
+async function readPublicKnowledgeUnderPolicy(store: KnowledgeStore, input: PublicKnowledgeSelectionInput,
+  options: Pick<KnowledgeScopeSelectionOptions, 'signal' | 'assertCurrent' | 'shouldStop'>,
+): Promise<PublicKnowledgeSelection> {
   const assertPreparationFrame = (assertion: () => undefined): void => {
     try { store.assertRecordSnapshotFrame(assertion); }
     catch (error) {
@@ -200,7 +211,7 @@ export async function readPublicKnowledgeSelection(store: KnowledgeStore, input:
         catch (error) { if (error instanceof JudgmentInputError || error instanceof Held) throw error; throw new Held('stale'); }
       };
       assertCurrent();
-      return { accepted: Object.freeze([]), assertCurrent, relatedLabels() { assertCurrent(); return Object.freeze([]); } };
+      return { ...(isClassicOperation() ? { provenance: 'classic' as const } : {}), accepted: Object.freeze([]), assertCurrent, relatedLabels() { assertCurrent(); return Object.freeze([]); } };
     }
     return await withAnswerVerificationBudget(async (signal, deadlineAt) => {
       const baseGuard = capturedGuard(store);
@@ -209,8 +220,13 @@ export async function readPublicKnowledgeSelection(store: KnowledgeStore, input:
       const assertRequestCurrent = () => {
         if (knowledgeRecordVersion(requestData(input)) !== operationRequestVersion) throw new Held('stale');
       };
-      const checkPorts = captureAnswerReadingPorts(['engine.knowledge.answer-evidence-relevance',
+      let classicRetrieval = isClassicOperation();
+      const capturedPorts = classicRetrieval ? undefined : captureAnswerReadingPorts(['engine.knowledge.answer-evidence-relevance',
         ...(request.mode === 'packet' ? ['engine.knowledge.answer-excerpt-selection'] : [])]);
+      const checkPorts = () => {
+        if (isClassicOperation()) classicRetrieval = true;
+        if (!classicRetrieval) capturedPorts?.();
+      };
       const checkInitialization = () => { assertPreparationFrame(() => {
         if (signal.aborted) throw new Held('aborted');
         baseGuard.assertCurrent(); checkPorts(); checkCaller();
@@ -361,25 +377,42 @@ export async function readPublicKnowledgeSelection(store: KnowledgeStore, input:
         related.set(`${row.kind}:${row.id}`, Object.freeze([...new Set(labels)].slice(0, 8)));
       }
       check();
-      const plan = await prepareAnswerEvidenceRelevanceBatches({ query, candidates }, {
-        signal, timeoutMs: Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : 0, assertCurrent: check,
-      });
-      check();
-      const byReference = new Map(candidates.map((candidate, index) => [candidate.reference, rows[index]!]));
-      const accepted = plan.accepted.map((reading) => ({ ...byReference.get(reading.reference)!, probability: reading.probability }))
-        .sort((left, right) => right.probability - left.probability || left.id.localeCompare(right.id));
+      let relevanceRejected = false;
+      const accepted = await decisionOrClassic<PublicKnowledgeSelectedRow[]>(async () => {
+        const plan = await prepareAnswerEvidenceRelevanceBatches({ query, candidates }, {
+          signal, timeoutMs: Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : 0, assertCurrent: check,
+          observeVerdict(verdict) { if (verdict === 'no') relevanceRejected = true; },
+        });
+        check();
+        const byReference = new Map(candidates.map((candidate, index) => [candidate.reference, rows[index]!]));
+        return plan.accepted.map((reading) => ({ ...byReference.get(reading.reference)!, probability: reading.probability }))
+          .sort((left, right) => right.probability - left.probability || left.id.localeCompare(right.id));
+      }, () => {
+        check();
+        return rankClassicCatalog(candidates, request.query, candidate => ({ id: candidate.title, description: candidate.text }))
+          .map(match => ({ ...rows[match.index]!, localScore: match.score, provenance: 'classic' as const }));
+      }, () => !relevanceRejected);
       let spans = new Map<string, readonly LocalAnswerExcerptSpan[]>();
       if (request.mode === 'packet' && accepted.some((row) => row.source)) {
-        const excerpts = prepareAnswerSourceExcerptBatches(store, query, accepted.flatMap((row) => row.source
-          ? [{ source: row.source, context: 'Select exact evidence for the original task and its work scope.' }] : []), guard, signal);
-        excerpts.start(); check();
-        spans = await excerpts.read(new Set(accepted.filter((row) => row.source).map((row) => row.id)));
-        excerpts.assertCurrent(); check();
+        let excerptRejected = false;
+        spans = await decisionOrClassic(async () => {
+          const excerpts = prepareAnswerSourceExcerptBatches(store, query, accepted.flatMap((row) => row.source
+            ? [{ source: row.source, context: 'Select exact evidence for the original task and its work scope.' }] : []), guard, signal, verdict => { if (verdict === 'no') excerptRejected = true; });
+          excerpts.start(); check();
+          const selected = await excerpts.read(new Set(accepted.filter((row) => row.source).map((row) => row.id)));
+          excerpts.assertCurrent(); check();
+          return selected;
+        }, () => {
+          check();
+          // Retain genuine relevance exclusions if the later excerpt reader failed.
+          return new Map(accepted.flatMap(row => row.source ? [[row.id,
+            localKnowledgeSourceSpans(row.source, guard.extraction(row.id))] as const] : []));
+        }, () => !excerptRejected);
       }
       const result = Object.freeze(accepted.map((row) => Object.freeze({ ...row,
         ...(request.mode === 'packet' && row.source ? { spans: spans.get(row.id) ?? Object.freeze([]) } : {}) })));
       check();
-      return { accepted: result, assertCurrent,
+      return { ...(classicRetrieval ? { provenance: 'classic' as const } : {}), accepted: result, assertCurrent,
         relatedLabels(kind: 'source' | 'node', id: string) { assertCurrent(); return related.get(`${kind}:${id}`) ?? Object.freeze([]); } };
     // The caller owns cancellation; corpus size does not invent a deadline.
     }, 0, externalSignal);

@@ -1,3 +1,4 @@
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { getNextAutomationOccurrence, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeJobMode, KnowledgeJobRecord, KnowledgeJobRunRecord, KnowledgeScheduleRecord } from './types.js';
@@ -5,6 +6,14 @@ import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueu
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+
+/** Local health checks and rendering do not infer new semantic facts. */
+function classicJob(kind: KnowledgeJobRecord['kind']): boolean {
+  return kind === 'lint' || kind === 'rebuild-projections';
+}
+function assertJobPolicy(job: KnowledgeJobRecord): void {
+  if (!classicJob(job.kind)) requireDecisionFeature(`knowledge job: ${job.title}`);
+}
 
 export interface KnowledgeSchedulingContext {
   readonly store: KnowledgeStore;
@@ -72,6 +81,7 @@ export class KnowledgeScheduleService {
   }): Promise<KnowledgeScheduleRecord> {
     const job = this.getJob(input.jobId);
     if (!job) throw new Error(`Unknown knowledge job: ${input.jobId}`);
+    if (input.enabled ?? true) assertJobPolicy(job);
     const nextRunAt = (input.enabled ?? true)
       ? getNextAutomationOccurrence(input.schedule, Date.now(), input.id ?? input.jobId)
       : undefined;
@@ -99,6 +109,8 @@ export class KnowledgeScheduleService {
   async setScheduleEnabled(id: string, enabled: boolean): Promise<KnowledgeScheduleRecord | null> {
     const schedule = this.context.store.getSchedule(id);
     if (!schedule) return null;
+    const job = this.getJob(schedule.jobId);
+    if (enabled && job) assertJobPolicy(job);
     const updated = await this.context.store.upsertSchedule({
       id: schedule.id,
       jobId: schedule.jobId,
@@ -125,8 +137,17 @@ export class KnowledgeScheduleService {
       readonly limit?: number | undefined;
     } = {},
   ): Promise<KnowledgeJobRunRecord> {
+    return withConfiguredDecisionModelPolicy(() => this.runOwnedJob(id, input));
+  }
+
+  private async runOwnedJob(id: string, input: {
+    readonly mode?: KnowledgeJobMode | undefined;
+    readonly sourceIds?: readonly string[] | undefined;
+    readonly limit?: number | undefined;
+  }): Promise<KnowledgeJobRunRecord> {
     const job = this.getJob(id);
     if (!job) throw new Error(`Unknown knowledge job: ${id}`);
+    assertJobPolicy(job);
     const mode = input.mode ?? job.defaultMode;
     const run = await this.context.store.upsertJobRun({
       jobId: job.id,
@@ -247,7 +268,10 @@ export class KnowledgeScheduleService {
     const schedule = this.context.store.getSchedule(scheduleId);
     if (!schedule?.enabled) return;
     const now = Date.now();
-    await this.runJob(schedule.jobId, { mode: 'background' });
+    const job = this.getJob(schedule.jobId);
+    // Preserve the saved cadence while semantic jobs are paused by Classic.
+    // No run receipt or queued work claims that an omitted job executed.
+    if (!isClassicOperation() || (job && classicJob(job.kind))) await this.runJob(schedule.jobId, { mode: 'background' });
     await this.context.store.upsertSchedule({
       id: schedule.id,
       jobId: schedule.jobId,
@@ -280,6 +304,7 @@ export class KnowledgeScheduleService {
       mode: run.mode,
     }));
     try {
+      assertJobPolicy(job);
       const result = await this.context.runJobByKind(job.kind, input);
       const completedAt = Date.now();
       run = await this.context.store.upsertJobRun({

@@ -18,6 +18,7 @@ import type { KnowledgeStore } from './store.js';
 import type { KnowledgeEdgeRecord, KnowledgeExtractionRecord, KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 import { KnowledgeWebGapRepairHeldError } from './semantic/web-gap-repair/types.js';
 import { captureStrictRepairJson, prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export class KnowledgeScopeSelectionHeldError extends Error {
   override readonly name = 'KnowledgeScopeSelectionHeldError';
@@ -38,6 +39,7 @@ export interface KnowledgeScopeSelectionOptions {
 }
 
 export interface KnowledgeScopeSelection {
+  readonly provenance?: 'classic';
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly nodes: readonly KnowledgeNodeRecord[];
   readonly issues: readonly KnowledgeIssueRecord[];
@@ -108,6 +110,9 @@ export async function prepareKnowledgeScopeSelection(
   scope: KnowledgeSpaceScopeInput = {},
   options: KnowledgeScopeSelectionOptions = {},
 ): Promise<KnowledgeScopeSelection> {
+  return withConfiguredDecisionModelPolicy(() => prepareKnowledgeScopeUnderPolicy(store, scope, options));
+}
+async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: KnowledgeSpaceScopeInput, options: KnowledgeScopeSelectionOptions): Promise<KnowledgeScopeSelection> {
   const signal = options.signal, callerCurrent = options.assertCurrent, preparedCurrent = options.assertPreparedInputCurrent, shouldStop = options.shouldStop;
   const bounds = () => captureStrictRepairJson({ kinds: options.kinds, sourceIds: options.sourceIds, nodeIds: options.nodeIds, issueIds: options.issueIds });
   const boundSnapshot = bounds(), boundsVersion = knowledgeRecordVersion(boundSnapshot);
@@ -116,6 +121,7 @@ export async function prepareKnowledgeScopeSelection(
   const scopeSnapshot = captureStrictRepairJson(scope);
   const scopeVersion = knowledgeRecordVersion(scopeSnapshot);
   let authority: JudgmentPortCapture | undefined;
+  let classicSelection = isClassicOperation();
   const observed: (() => void)[] = [];
   const fail = (error: unknown): never => {
     if (error instanceof JudgmentInputError || error instanceof KnowledgeScopeSelectionHeldError) throw error;
@@ -150,7 +156,7 @@ export async function prepareKnowledgeScopeSelection(
     assertOriginalIdentity();
   };
   const assertAuthorityCurrent = () => {
-    if (authority) authority.assertCurrent(); else assertInputIdentity();
+    if (authority && !classicSelection && !isClassicOperation()) authority.assertCurrent(); else assertInputIdentity();
   };
   const assertInputCurrent = () => {
     store.assertRecordSnapshotFrame(() => {
@@ -349,6 +355,7 @@ export async function prepareKnowledgeScopeSelection(
   });
   for (const value of boundedRecords) captureStrictRepairJson(value.record);
   const accepted = new Set<string>();
+  const declined = new Set<string>();
   const candidates = boundedRecords.filter(value => membership(value, scopeSnapshot));
   const candidateKeys = new Set(candidates.map(keyFor));
   type EdgeEndpoints = { readonly fromKind: string; readonly fromId: string; readonly toKind: string; readonly toId: string };
@@ -457,25 +464,39 @@ export async function prepareKnowledgeScopeSelection(
   try {
     assertCurrent();
     if (jobs.length) {
-      authority = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal, assertCurrent: assertInputIdentity, prepareResultCapture: prepareRepairJudgmentResult });
-      let resultModel: string | undefined;
-      await mapLimit(jobs, 4, async job => {
-        let captured: ReturnType<typeof captureJudgmentPort> | undefined;
-        store.assertRecordSnapshotFrame(() => {
-          captured = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal,
-            assertCurrent: () => { assertRecordCurrent(job.key); },
-            prepareResultCapture: prepareRepairJudgmentResult });
-        });
-        if (!captured) throw new KnowledgeScopeSelectionHeldError('stale');
-        if (captured.identity !== authority?.identity) throw new KnowledgeScopeSelectionHeldError('stale');
-        const run = await knowledgeScopeSelection.run(captured.port, job.state, { signal: captured.signal, site: knowledgeScopeSelection.name });
-        captured.assertCurrent();
-        if (resultModel !== undefined && resultModel !== run.result.model) throw new KnowledgeScopeSelectionHeldError('stale');
-        resultModel = run.result.model;
-        if (run.readings.included.outcome !== 'act' || run.readings.included.verdict === 'uncertain') throw new KnowledgeScopeSelectionHeldError('uncertain');
-        if (run.readings.included.verdict === 'yes') accepted.add(job.key);
-        run.recordAction(`scope content ${run.readings.included.verdict}; explicit namespace and effect authority unchanged`);
-        captured.assertCurrent();
+      await decisionOrClassic(async () => {
+        authority = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal, assertCurrent: assertInputIdentity, prepareResultCapture: prepareRepairJudgmentResult });
+        let resultModel: string | undefined;
+        await mapLimit(jobs, 4, job => decisionOrClassic(async () => {
+          let captured: ReturnType<typeof captureJudgmentPort> | undefined;
+          store.assertRecordSnapshotFrame(() => {
+            captured = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal,
+              assertCurrent: () => { assertRecordCurrent(job.key); },
+              prepareResultCapture: prepareRepairJudgmentResult });
+          });
+          if (!captured) throw new KnowledgeScopeSelectionHeldError('stale');
+          if (captured.identity !== authority?.identity) throw new KnowledgeScopeSelectionHeldError('stale');
+          const run = await knowledgeScopeSelection.run(captured.port, job.state, { signal: captured.signal, site: knowledgeScopeSelection.name });
+          captured.assertCurrent();
+          if (resultModel !== undefined && resultModel !== run.result.model) throw new KnowledgeScopeSelectionHeldError('stale');
+          resultModel = run.result.model;
+          if (run.readings.included.outcome !== 'act' || run.readings.included.verdict === 'uncertain') throw new KnowledgeScopeSelectionHeldError('uncertain');
+          if (run.readings.included.verdict === 'yes') accepted.add(job.key);
+          else declined.add(job.key);
+          run.recordAction(`scope content ${run.readings.included.verdict}; explicit namespace and effect authority unchanged`);
+          captured.assertCurrent();
+        }, () => {
+          classicSelection = true;
+          assertRecordCurrent(job.key);
+          if (!declined.has(job.key)) accepted.add(job.key);
+        }));
+      }, () => {
+        classicSelection = true;
+        assertCurrent();
+        for (const job of jobs) {
+          assertRecordCurrent(job.key);
+          if (!declined.has(job.key)) accepted.add(job.key);
+        }
       });
     }
     assertCurrent();
@@ -552,6 +573,7 @@ export async function prepareKnowledgeScopeSelection(
     current(); return current;
   };
   return Object.freeze({
+    ...(classicSelection ? { provenance: 'classic' as const } : {}),
     sources: Object.freeze(sources.filter(record => accepted.has(`source:${record.id}`))),
     nodes: Object.freeze(nodes.filter(record => accepted.has(`node:${record.id}`))),
     issues: Object.freeze(issues.filter(record => accepted.has(`issue:${record.id}`))),

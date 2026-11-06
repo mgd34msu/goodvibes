@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { noul } from '@goodvibes-jev/judgment';
 import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../sdk/src/platform/runtime/judgment-services.ts';
 
@@ -103,5 +105,76 @@ describe('judgment settings reload captures one configuration per call', () => {
       expect(next.calls).toEqual([{ key: 'Bearer synthetic-new-key', model: 'jev-2.0.0' }]);
       expect(initial.answers.allowed).toEqual({ type: 'noul', noul: 0.01 });
     } finally { abort.abort(); await first.catch(() => {}); old.stop(); next.stop(); }
+  });
+});
+
+
+describe('configured transport owns Preferred exhaustion', () => {
+  function unavailableEndpoint(status: number) {
+    let calls = 0;
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+      calls++;
+      return status === 200 ? Response.json({ model: 'jev-1.13.0', answers: { allowed: { type: 'noul', noul: 'malformed' } } })
+        : new Response('', { status });
+    } });
+    return { url: `http://127.0.0.1:${server.port}`, calls: () => calls, stop: () => server.stop(true) };
+  }
+
+  test('a feature translating the exhausted error cannot lose the operation fallback', async () => {
+    const primary = unavailableEndpoint(503), secondary = unavailableEndpoint(503);
+    const { settings, source } = fixture('env');
+    settings['judgment.endpoint'] = primary.url;
+    settings['judgment.fallbacks'] = [{ endpoint: secondary.url, model: 'jev-1.13.0', keySource: 'none', keyName: '' }];
+    const port = createSettingsJudgmentPort(source), controller = new AbortController();
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        let kind: unknown;
+        try { await port.ask({ ...request, signal: controller.signal }); }
+        catch (error) { kind = error instanceof Error && 'kind' in error ? error.kind : undefined; }
+        expect(kind).toBe('unavailable');
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+        await expect(port.ask({ ...request, signal: controller.signal })).rejects.toMatchObject({ code: 'decision-models-disabled' });
+        expect(primary.calls()).toBe(1); expect(secondary.calls()).toBe(1);
+      });
+    } finally { controller.abort(); primary.stop(); secondary.stop(); }
+  });
+
+  test('a malformed answer followed by an unavailable fallback is not availability exhaustion', async () => {
+    const primary = unavailableEndpoint(200), secondary = unavailableEndpoint(503);
+    const { settings, source } = fixture('env');
+    settings['judgment.endpoint'] = primary.url;
+    settings['judgment.fallbacks'] = [{ endpoint: secondary.url, model: 'jev-1.13.0', keySource: 'none', keyName: '' }];
+    const port = createSettingsJudgmentPort(source), controller = new AbortController();
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await expect(port.ask({ ...request, signal: controller.signal })).rejects.toMatchObject({ kind: 'invalid-response' });
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    } finally { controller.abort(); primary.stop(); secondary.stop(); }
+  });
+
+  test('a genuine negative reading remains a decision result', async () => {
+    const target = endpoint(); const { settings, source } = fixture('env'); settings['judgment.endpoint'] = target.url;
+    const port = createSettingsJudgmentPort(source), controller = new AbortController();
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        const result = await port.ask({ ...request, signal: controller.signal });
+        expect(result.answers.allowed).toEqual({ type: 'noul', noul: 0.01 });
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    } finally { controller.abort(); target.stop(); }
+  });
+
+  test('Classic prevents even credential acquisition and the first wire attempt', async () => {
+    const target = endpoint(); const { settings, source } = fixture(); settings['judgment.endpoint'] = target.url;
+    let credentialReads = 0;
+    const port = createSettingsJudgmentPort({ ...source, secrets: { async get() { credentialReads++; return null; } } });
+    const controller = new AbortController();
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        await expect(port.ask({ ...request, signal: controller.signal })).rejects.toMatchObject({ code: 'decision-models-disabled' });
+      });
+      expect(credentialReads).toBe(0); expect(target.calls).toHaveLength(0);
+    } finally { controller.abort(); target.stop(); }
   });
 });

@@ -1,4 +1,4 @@
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { snapshotNodeInput } from '../../activation/projection.js';
 import { knowledgeSourceJudgmentUris } from '../../source-structural-references.js';
@@ -53,6 +53,15 @@ function documents(source: KnowledgeSourceRecord, extraction: KnowledgeExtractio
   return result;
 }
 
+/** Classic quotes complete local fields, with exact offsets and no semantic selection claim. */
+export function localKnowledgeSourceSpans(source: KnowledgeSourceRecord,
+  extraction: KnowledgeExtractionRecord | null | undefined): readonly LocalAnswerExcerptSpan[] {
+  return Object.freeze(documents(source, extraction).map(document => Object.freeze({
+    sourceId: source.id, ...(extraction ? { extractionId: extraction.id } : {}),
+    field: document.field, start: 0, end: document.text.length, text: document.text,
+  })));
+}
+
 /** Bind projected exact fields back to local records without sending their IDs. */
 export function prepareAnswerSourceExcerpts(store: KnowledgeStore, query: string,
   entries: readonly { readonly source: KnowledgeSourceRecord; readonly context: string }[], guard: SemanticWriteGuard, signal?: AbortSignal,
@@ -63,6 +72,7 @@ export function prepareAnswerSourceExcerpts(store: KnowledgeStore, query: string
 function prepareSourceExcerpts(store: KnowledgeStore, query: string,
   entries: readonly { readonly source: KnowledgeSourceRecord; readonly context: string }[], guard: SemanticWriteGuard, signal?: AbortSignal,
   observeModel?: (model: string, requestedModel: string) => void,
+  observeVerdict?: (verdict: 'yes' | 'no') => void,
 ) {
   const rows = entries.map(({ source, context }, index) => {
     const original = guard.source(source.id, source);
@@ -84,11 +94,11 @@ function prepareSourceExcerpts(store: KnowledgeStore, query: string,
     catch { throw new Held(signal?.aborted ? 'aborted' : 'stale'); }
     if (configured) {
       let current: JudgmentPort;
-      try { current = judgmentPort('engine.knowledge.answer-excerpt-selection'); } catch { throw new Held('stale'); }
+      try { current = judgmentPort('engine.knowledge.answer-excerpt-selection'); } catch (error) { if (error instanceof DecisionModelsDisabledError) throw error; throw new Held('stale'); }
       if (current !== configured || configured.model !== model) throw new Held('stale');
     }
   };
-  const prepared = prepareAnswerExcerptReadings(rows.map((row) => row.input), { signal, assertCurrent, observeModel });
+  const prepared = prepareAnswerExcerptReadings(rows.map((row) => row.input), { signal, assertCurrent, observeModel, observeVerdict });
   return {
     /** Capture provider configuration only after the caller's complete preflight. */
     start() {
@@ -120,6 +130,7 @@ function prepareSourceExcerpts(store: KnowledgeStore, query: string,
  */
 export function prepareAnswerSourceExcerptBatches(store: KnowledgeStore, query: string,
   entries: readonly { readonly source: KnowledgeSourceRecord; readonly context: string }[], guard: SemanticWriteGuard, signal?: AbortSignal,
+  observeVerdict?: (verdict: 'yes' | 'no') => void,
 ) {
   let model: string | undefined, requestedModel: string | undefined;
   const observeModel = (actual: string, requested: string) => {
@@ -128,7 +139,7 @@ export function prepareAnswerSourceExcerptBatches(store: KnowledgeStore, query: 
   };
   // Synchronous all-source preparation protects rejected and later sources too.
   const prepared = entries.map((entry) => ({ sourceId: entry.source.id,
-    reader: prepareSourceExcerpts(store, query, [entry], guard, signal, observeModel) }));
+    reader: prepareSourceExcerpts(store, query, [entry], guard, signal, observeModel, observeVerdict) }));
   const assertCurrent = () => {
     assertExcerptReadSetFrame(store, signal, () => {
       if (signal?.aborted) throw new Held('aborted');

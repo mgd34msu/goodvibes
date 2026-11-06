@@ -525,6 +525,8 @@ export interface KnowledgeStatus {
 }
 
 export interface KnowledgeSearchResult {
+  readonly provenance?: 'classic';
+  readonly scoreSource?: 'literal-overlap';
   readonly kind: 'source' | 'node';
   readonly id: string;
   readonly score: number;
@@ -534,6 +536,7 @@ export interface KnowledgeSearchResult {
 }
 
 export interface KnowledgePacketItem {
+  readonly provenance?: 'classic';
   readonly kind: 'source' | 'node';
   readonly id: string;
   readonly title: string;

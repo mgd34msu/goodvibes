@@ -1,5 +1,5 @@
 import { composeJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
-import { configureDecisionModelPolicy, isClassicOperation } from './decision-policy.js';
+import { activateClassicFallback, configureDecisionModelPolicy, isClassicOperation } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
@@ -153,7 +153,7 @@ async function activeSettings(source: JudgmentSettingsSource, signal?: AbortSign
  * the shared transport's retries; an edit never redirects an in-flight key or
  * payload to a new endpoint. The System One client is rebuilt only when the
  * config changes. A missing key fails the call (and the decision log records
- * the failure); nothing decides without Jev.
+ * the failure); Preferred may then select Classic in the owning operation; Classic never opens the port.
  */
 export function createSettingsJudgmentPort(source: JudgmentSettingsSource): JudgmentPort {
   let current: { config: JudgmentConfig; port: JudgmentPort } | undefined;
@@ -171,11 +171,20 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       signal.throwIfAborted();
       if (current === undefined || !sameConfig(current.config, config)) current = { config, port: createSystemOnePort(config) };
       const beforeAttempt = request.beforeAttempt;
-      return current.port.ask({ ...request, signal, beforeAttempt() {
-        signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
-        beforeAttempt?.();
-        signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
-      } });
+      try {
+        return await current.port.ask({ ...request, signal, beforeAttempt() {
+          signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
+          beforeAttempt?.();
+          signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
+        } });
+      }
+      catch (error) {
+        // The transport has exhausted its configured chain before reporting
+        // unavailable. Preserve that fact even if an optional feature later
+        // translates the error into its own held/unavailable result.
+        activateClassicFallback(error);
+        throw error;
+      }
     },
   };
 }

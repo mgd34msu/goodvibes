@@ -1,5 +1,6 @@
+import { activateClassicFallback } from '../../../runtime/decision-policy.js';
 import { createHash } from 'node:crypto';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../verification/projection.js';
@@ -71,6 +72,7 @@ function validatedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort 
 export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceRelevanceInput, options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
+  readonly observeVerdict?: ((verdict: 'yes' | 'no') => void) | undefined;
 } = {}): Promise<AnswerEvidenceRelevancePlan> {
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotAnswerEvidenceRelevanceInput(input);
@@ -79,13 +81,13 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   const controller = new AbortController();
-  let stoppedError: Held | undefined, rejectStopped: (error: Held) => void = () => {};
+  let stoppedError: unknown, stoppedOnce = false, rejectStopped: (error: unknown) => void = () => {};
   const stopped = new Promise<never>((_resolve, reject) => { rejectStopped = reject; });
-  const stop = (error: Held) => { stoppedError ??= error; controller.abort(); rejectStopped(stoppedError); };
+  const stop = (error: unknown) => { if (!stoppedOnce) { stoppedOnce = true; stoppedError = error; } controller.abort(); rejectStopped(stoppedError); };
   const abort = () => stop(new Held('aborted'));
   options.signal?.addEventListener('abort', abort, { once: true });
   const timer = timeoutMs === undefined || timeoutMs === 0 ? undefined : setTimeout(() => stop(new Held('budget')), timeoutMs);
-  const check = () => { if (stoppedError) throw stoppedError; if (options.signal?.aborted) throw new Held('aborted'); options.assertCurrent?.(); };
+  const check = () => { if (stoppedOnce) throw stoppedError; if (options.signal?.aborted) throw new Held('aborted'); options.assertCurrent?.(); };
   const run = async () => {
     check(); const configuredPort = judgmentPort('engine.knowledge.answer-evidence-relevance');
     const configuredModel = configuredPort.model;
@@ -106,10 +108,12 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
           model = read.result.model; requestedModel = read.result.requestedModel;
           const useful = read.readings.useful;
           if (useful.outcome !== 'act' || useful.verdict === 'uncertain') throw new Held('unsettled');
+          options.observeVerdict?.(useful.verdict);
+          check(); checkConfiguration();
           readings[index] = { reference: candidate.reference, probability: useful.probability, verdict: useful.verdict, outcome: 'act',
             ...(read.result.decisionId ? { decisionId: read.result.decisionId } : {}) };
           read.recordAction(`settled evidence relevance ${useful.verdict}; serving and write authority are separate`);
-        } catch (error) { const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+        } catch (error) { const failure = error instanceof Held || error instanceof DecisionModelsDisabledError || activateClassicFallback(error) ? error : new Held('unavailable'); stop(failure); throw failure; }
       }
     }));
     check(); checkConfiguration();
@@ -120,6 +124,6 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
     });
   };
   try { return await Promise.race([run(), stopped]); }
-  catch (error) { controller.abort(); throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
+  catch (error) { controller.abort(); if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error; throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
   finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }

@@ -1,4 +1,5 @@
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback } from '../../../runtime/decision-policy.js';
+import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../verification/projection.js';
@@ -58,6 +59,7 @@ function checkedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort {
 export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput[], options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
+  readonly observeVerdict?: ((verdict: 'yes' | 'no') => void) | undefined;
   readonly observeModel?: ((model: string, requestedModel: string) => void) | undefined;
 } = {}) {
   if (options.signal?.aborted) throw new Held('aborted');
@@ -93,7 +95,7 @@ export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput
     options.assertCurrent?.();
     if (configured) {
       let current: JudgmentPort;
-      try { current = judgmentPort('engine.knowledge.answer-excerpt-selection'); } catch { throw new Held('stale'); }
+      try { current = judgmentPort('engine.knowledge.answer-excerpt-selection'); } catch (error) { if (error instanceof DecisionModelsDisabledError) throw error; throw new Held('stale'); }
       if (current !== configured || configured.model !== configuredModel) throw new Held('stale');
     }
   };
@@ -103,13 +105,13 @@ export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput
     assertCurrent();
     if (!selectedJobs.length) return freezeSupport(snapshots.map((input) => ({ reference: input.reference, spans: [] })));
     const controller = new AbortController();
-    let stoppedError: Held | undefined, rejectStopped: (error: Held) => void = () => {};
+    let stoppedError: unknown, stoppedOnce = false, rejectStopped: (error: unknown) => void = () => {};
     const stopped = new Promise<never>((_resolve, reject) => { rejectStopped = reject; });
-    const stop = (error: Held) => { stoppedError ??= error; controller.abort(); rejectStopped(stoppedError); };
+    const stop = (error: unknown) => { if (!stoppedOnce) { stoppedOnce = true; stoppedError = error; } controller.abort(); rejectStopped(stoppedError); };
     const abort = () => stop(new Held('aborted'));
     options.signal?.addEventListener('abort', abort, { once: true });
     const timer = timeoutMs === undefined || timeoutMs === 0 ? undefined : setTimeout(() => stop(new Held('budget')), timeoutMs);
-    const check = () => { if (stoppedError) throw stoppedError; assertCurrent(); };
+    const check = () => { if (stoppedOnce) throw stoppedError; assertCurrent(); };
     const run = async () => {
       check(); configured = judgmentPort('engine.knowledge.answer-excerpt-selection'); configuredModel = configured.model;
       const port = checkedPort(configured, check);
@@ -126,9 +128,11 @@ export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput
             const reading = result.readings.excerptUseful;
             if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new Held('unsettled');
             options.observeModel?.(model, requestedModel);
+            options.observeVerdict?.(reading.verdict);
+            check();
             selected[index] = reading.verdict === 'yes';
             result.recordAction(`settled exact excerpt ${reading.verdict}; source ranking and write authority are separate`);
-          } catch (error) { const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+          } catch (error) { const failure = error instanceof Held || error instanceof DecisionModelsDisabledError || activateClassicFallback(error) ? error : new Held('unavailable'); stop(failure); throw failure; }
         }
       }));
       check();
@@ -136,7 +140,7 @@ export function prepareAnswerExcerptReadings(inputs: readonly AnswerExcerptInput
         spans: selectedJobs.filter((job, index) => job.inputIndex === inputIndex && selected[index]).flatMap((job) => job.candidate.spans) })));
     };
     try { return await Promise.race([run(), stopped]); }
-    catch (error) { controller.abort(); throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
+    catch (error) { controller.abort(); if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error; throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
     finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
   };
   return { read, assertCurrent };

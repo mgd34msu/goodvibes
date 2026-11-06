@@ -32,19 +32,21 @@ type ScopeOptions = Pick<KnowledgeScopeSelectionOptions, 'signal' | 'assertCurre
 type PacketOptions = { readonly detail?: KnowledgePacketDetail; readonly budgetLimit?: number } & KnowledgeSpaceScopeInput & ScopeOptions;
 const RELEVANCE_REASON = 'Selected by the shared semantic relevance reading; legacy retrieval points were not computed';
 
-/** A first lookup awaits a real reading, without a synchronous cold-cache or lexical fallback. */
+/** Await policy-owned retrieval; Classic ranks literal overlap without semantic confidence. */
 export async function searchKnowledge(context: KnowledgePacketContext, query: string, limit = 10,
   scope: KnowledgeSpaceScopeInput = {}, options: ScopeOptions = {}): Promise<KnowledgeSearchResult[]> {
   const selection = await readPublicKnowledgeSelection(context.store, { query, scope, mode: 'search' }, options);
   selection.assertCurrent();
   const results = selection.accepted.slice(0, Math.max(1, limit)).map((entry): KnowledgeSearchResult => ({
-    kind: entry.kind, id: entry.id, score: 0, reason: RELEVANCE_REASON,
+    kind: entry.kind, id: entry.id, score: entry.localScore ?? 0,
+    reason: entry.provenance === 'classic' ? 'Classic literal token overlap; semantic relevance was not assessed' : RELEVANCE_REASON,
+    ...(entry.provenance ? { provenance: entry.provenance, scoreSource: 'literal-overlap' as const } : {}),
     ...(entry.source ? { source: entry.source } : {}), ...(entry.node ? { node: entry.node } : {}),
   }));
   for (const result of results.slice(0, 6)) {
     selection.assertCurrent();
     context.deferUsage({ targetKind: result.kind, targetId: result.id, usageKind: 'search-hit', task: query,
-      score: result.score, metadata: { reason: result.reason } });
+      score: result.score, metadata: { reason: result.reason, ...(result.provenance ? { provenance: result.provenance } : {}) } });
   }
   return results;
 }
@@ -156,7 +158,9 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
       title: row.source ? row.source.title ?? row.source.canonicalUri ?? row.source.sourceUri ?? row.source.id : row.node!.title,
       ...(summary !== undefined ? { summary } : {}),
       ...(row.source ? { uri: row.source.canonicalUri ?? row.source.sourceUri } : {}),
-      reason: RELEVANCE_REASON, score: 0, estimatedTokens: 0, related, evidence,
+      reason: selection.provenance === 'classic' ? 'Classic local retrieval; fields are quoted without semantic excerpt verification' : RELEVANCE_REASON,
+      score: row.localScore ?? 0, estimatedTokens: 0, related, evidence,
+      ...(selection.provenance ? { provenance: selection.provenance } : {}),
       metadata: row.source ? { sourceType: row.source.sourceType, status: row.source.status,
         extractionFormat: context.store.getExtractionBySourceId(row.id)?.format, usageCount: usageCounts.get(`source:${row.id}`) ?? 0 }
         : { kind: row.node!.kind, status: row.node!.status, usageCount: usageCounts.get(`node:${row.id}`) ?? 0 },
@@ -174,13 +178,13 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
   }
   const totalCandidates = candidates.length, droppedCount = totalCandidates - items.length;
   const packet: KnowledgePacket = freezeSupport({ task, writeScope: [...captured.request.writeScope], generatedAt: Date.now(),
-    detail, strategy: 'semantic-ranked exact-span packet', budgetLimit, estimatedTokens, items,
+    detail, strategy: selection.provenance === 'classic' ? 'Classic local retrieval with complete quoted fields' : 'semantic-ranked exact-span packet', budgetLimit, estimatedTokens, items,
     totalCandidates, droppedCount, truncated: droppedCount > 0, droppedForBudget, budgetExhausted: droppedForBudget > 0 });
   assertCurrent();
   for (const item of items) {
     assertCurrent();
-    context.deferUsage({ targetKind: item.kind, targetId: item.id, usageKind: 'packet-item', task, score: 0,
-      metadata: { detail, writeScope: [...packet.writeScope] } });
+    context.deferUsage({ targetKind: item.kind, targetId: item.id, usageKind: 'packet-item', task, score: item.score,
+      metadata: { detail, writeScope: [...packet.writeScope], ...(item.provenance ? { provenance: item.provenance } : {}) } });
   }
   assertCurrent();
   context.emitIfReady((bus, ctx) => emitKnowledgePacketBuilt(bus, ctx, { task, itemCount: items.length, estimatedTokens, detail }));

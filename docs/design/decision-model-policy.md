@@ -200,3 +200,20 @@ Classic end-to-end tests must observe zero decision-model requests, including
 completion and error handling. Call-site inventory and capability dispositions,
 settings, generated contracts and release notes must be current before delivery.
 Code is committed and pushed to main before CI repair; release uses a fresh tag.
+
+Classic knowledge listing uses the requested native namespace and retains the
+original source, extraction, topology, cancellation and caller-currentness
+checks. Local search ranks literal token overlap, labels that score source and
+omits semantic probabilities. Explicit knowledge packets quote complete local
+fields with exact offsets and identify Classic provenance; they do not claim
+semantic excerpt verification. A Preferred outage cannot revive a record already
+excluded by scope reading or silently clear a settled relevance/excerpt negative.
+
+Semantic knowledge enrichment, independently verified answers, self-improvement
+and semantic reindexing report their limitation before starting those operations.
+Manual semantic job starts are refused before queuing or creating a run record.
+Existing semantic schedules keep their saved cadence while Classic pauses their
+execution; local lint and projection rendering remain available. Automatic
+semantic enrichment is omitted during Classic. Knowledge ingestion and Home
+Graph callers remain under implementation review; this document does not certify
+end-to-end qualification.

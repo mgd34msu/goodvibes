@@ -29,6 +29,7 @@ import {
   selfImprovementRunKey,
 } from './background-scheduler.js';
 import { isGeneratedKnowledgeSource } from '../generated-projections.js';
+import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 
 export interface KnowledgeSemanticServiceOptions {
   readonly llm?: KnowledgeSemanticLlm | null | undefined;
@@ -113,6 +114,7 @@ export class KnowledgeSemanticService {
     sourceId: string,
     input: EnrichKnowledgeSourceOptions = {},
   ): Promise<KnowledgeSemanticEnrichmentResult | null> {
+    requireDecisionFeature('semantic knowledge enrichment');
     await this.store.init();
     const source = this.store.getSource(sourceId);
     if (!source) return null;
@@ -123,6 +125,7 @@ export class KnowledgeSemanticService {
     sources: readonly KnowledgeSourceRecord[],
     input: EnrichKnowledgeSourceOptions & { readonly limit?: number } = {},
   ): Promise<readonly KnowledgeSemanticEnrichmentResult[]> {
+    requireDecisionFeature('semantic knowledge enrichment');
     const results: KnowledgeSemanticEnrichmentResult[] = [];
     const selected = sources.slice(0, Math.max(1, input.limit ?? sources.length));
     for (const [index, source] of selected.entries()) {
@@ -149,6 +152,7 @@ export class KnowledgeSemanticService {
     readonly errors: readonly { readonly sourceId: string; readonly error: string }[];
     readonly selfImprovement: KnowledgeSemanticSelfImproveResult;
   }> {
+    requireDecisionFeature('semantic knowledge reindexing');
     // Critical-tier admission: reindex is one of the expensive verbs the
     // governor refuses honestly under memory pressure.
     const admission = this.options.admitExpensiveWork?.('knowledge semantic reindex');
@@ -212,6 +216,7 @@ export class KnowledgeSemanticService {
   }
 
   async answer(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
+    requireDecisionFeature('verified semantic knowledge answers; use local knowledge search during Classic');
     await this.store.init();
     let answer = await answerKnowledgeQuery({
       store: this.store,
@@ -315,6 +320,7 @@ export class KnowledgeSemanticService {
     readonly maxRunMs?: number | undefined;
     readonly limit?: number | undefined;
   }): Promise<KnowledgeSemanticSelfImproveResult> {
+    requireDecisionFeature('automatic semantic answer-gap repair');
     assertAnswerVerificationActive(input.signal);
     const gaps = input.answer.answer.gaps.filter((gap) => readString(readRecord(gap.metadata).gapKind) === 'answer');
     if (!this.options.gapRepairer || gaps.length === 0) return emptySelfImproveResult();
@@ -362,6 +368,7 @@ export class KnowledgeSemanticService {
    * the five guards. Public so out-of-package producers (home-graph) use it.
    */
   queueBackgroundSelfImprove(input: KnowledgeSemanticSelfImproveInput, delayMs = 0): void {
+    if (isClassicOperation()) return;
     this.backgroundScheduler.queue(input, delayMs);
   }
 
@@ -369,6 +376,7 @@ export class KnowledgeSemanticService {
     input: KnowledgeSemanticSelfImproveInput = {},
     runOptions: { readonly stopWhenPaused?: boolean } = {},
   ): Promise<KnowledgeSemanticSelfImproveResult> {
+    requireDecisionFeature('automatic semantic knowledge improvement');
     await this.store.init();
     if (input.deferRepair !== true) {
       const runKey = selfImprovementRunKey(input);
@@ -392,11 +400,12 @@ export class KnowledgeSemanticService {
 
   /** Public pause probe so producers (home-graph ask/ingest tails) can defer their own background work. */
   isBackgroundWorkPaused(): boolean {
-    return this.options.isBackgroundPaused?.() === true;
+    return isClassicOperation() || this.options.isBackgroundPaused?.() === true;
   }
 
   /** Public admission probe (MemoryGovernor critical tier) for producers' own expensive tails. */
   admitBackgroundWork(label: string): { allowed: boolean; reason?: string | undefined } {
+    if (isClassicOperation()) return { allowed: false, reason: 'Classic does not run automatic semantic knowledge work.' };
     return this.options.admitExpensiveWork?.(label) ?? { allowed: true };
   }
 

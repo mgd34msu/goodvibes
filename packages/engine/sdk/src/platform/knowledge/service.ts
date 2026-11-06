@@ -1,3 +1,4 @@
+import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { randomUUID } from 'node:crypto';
@@ -172,6 +173,7 @@ export class KnowledgeService {
       emitIfReady: this.emitIfReady.bind(this),
       syncReviewedMemory: this.syncReviewedMemory.bind(this),
       semanticEnrichSource: async (sourceId: string, knowledgeSpaceId?: string) => {
+        if (isClassicOperation()) return;
         await this.semanticService.enrichSource(sourceId, { knowledgeSpaceId });
         // Self-improvement rides the governed background scheduler (floor,
         // coalescing, zero-gap backoff, governor pause), a per-ingest direct
@@ -770,6 +772,7 @@ export class KnowledgeService {
   }
 
   async reindex(): Promise<{ status: KnowledgeStatus; issues: readonly KnowledgeIssueRecord[] }> {
+    requireDecisionFeature('knowledge reindexing with semantic extraction and compilation');
     await this.store.init();
     for (const source of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
       if (isGeneratedKnowledgeSource(source)) continue;

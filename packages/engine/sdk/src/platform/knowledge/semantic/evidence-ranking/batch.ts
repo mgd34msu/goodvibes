@@ -1,5 +1,6 @@
+import { activateClassicFallback } from '../../../runtime/decision-policy.js';
 import { createHash } from 'node:crypto';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { JudgmentInputError } from '../../../gate/judgment-input.js';
 import { withAnswerVerificationBudget } from '../answer-verification/budget.js';
 import { KnowledgeAnswerQualityHeldError } from '../answer-verification/types.js';
@@ -70,6 +71,7 @@ export async function prepareAnswerEvidenceRelevanceBatches(input: AnswerEvidenc
   readonly signal?: AbortSignal | undefined;
   readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
+  readonly observeVerdict?: ((verdict: 'yes' | 'no') => void) | undefined;
 } = {}): Promise<AnswerEvidenceRelevancePlan> {
   try {
     return await withAnswerVerificationBudget(async (signal, deadlineAt) => {
@@ -90,7 +92,7 @@ export async function prepareAnswerEvidenceRelevanceBatches(input: AnswerEvidenc
       let model: string | undefined, requestedModel: string | undefined;
       for (const batch of prepared.batches) {
         check();
-        const plan = await prepareAnswerEvidenceRelevance(batch, { signal, timeoutMs: Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : 0, assertCurrent: check });
+        const plan = await prepareAnswerEvidenceRelevance(batch, { signal, timeoutMs: Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : 0, assertCurrent: check, observeVerdict: options.observeVerdict });
         check();
         if ((model !== undefined && model !== plan.model) || (requestedModel !== undefined && requestedModel !== plan.requestedModel)) throw new Held('stale');
         model = plan.model; requestedModel = plan.requestedModel;
@@ -102,6 +104,7 @@ export async function prepareAnswerEvidenceRelevanceBatches(input: AnswerEvidenc
       return freezeSupport({ inputHash: prepared.inputHash, model, requestedModel, accepted, rejected });
     }, options.timeoutMs ?? LIMITS.defaultTimeoutMs, options.signal);
   } catch (error) {
+    if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
     if (error instanceof Held || error instanceof JudgmentInputError) throw error;
     if (error instanceof KnowledgeAnswerQualityHeldError && (error.reason === 'budget' || error.reason === 'aborted')) throw new Held(error.reason);
     throw new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable');

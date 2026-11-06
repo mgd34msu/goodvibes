@@ -132,7 +132,7 @@
       "path": "cli/native-headless.ts",
       "baselineTuiLines": 172,
       "baselineSimilarity": 0.9586,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "cli/package-verification.ts",
@@ -1406,7 +1406,7 @@
       "path": "runtime/native-conversation-intake-host.ts",
       "baselineTuiLines": 39,
       "baselineSimilarity": 0.5263,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/native-conversation-intake-journal.ts",
@@ -1448,7 +1448,7 @@
       "path": "runtime/native-work-submission-host.ts",
       "baselineTuiLines": 38,
       "baselineSimilarity": 0.4337,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/native-work-submission-journal.ts",

@@ -2038,6 +2038,26 @@
       "bun": "./terminal-shell/src/term-caps.ts",
       "types": "./terminal-shell/dist/term-caps.d.ts",
       "import": "./terminal-shell/dist/term-caps.js"
+    },
+    "./terminal-shell/native-paired-principal": {
+      "bun": "./terminal-shell/src/native/native-paired-principal.ts",
+      "types": "./terminal-shell/dist/native/native-paired-principal.d.ts",
+      "import": "./terminal-shell/dist/native/native-paired-principal.js"
+    },
+    "./terminal-shell/native-work-submission-host": {
+      "bun": "./terminal-shell/src/native/native-work-submission-host.ts",
+      "types": "./terminal-shell/dist/native/native-work-submission-host.d.ts",
+      "import": "./terminal-shell/dist/native/native-work-submission-host.js"
+    },
+    "./terminal-shell/native-intake-host": {
+      "bun": "./terminal-shell/src/native/native-conversation-intake-host.ts",
+      "types": "./terminal-shell/dist/native/native-conversation-intake-host.d.ts",
+      "import": "./terminal-shell/dist/native/native-conversation-intake-host.js"
+    },
+    "./terminal-shell/native-headless": {
+      "bun": "./terminal-shell/src/native/native-headless.ts",
+      "types": "./terminal-shell/dist/native/native-headless.d.ts",
+      "import": "./terminal-shell/dist/native/native-headless.js"
     }
   },
   "publishConfig": {

@@ -131,7 +131,7 @@ export class MemoryRegistry {
     return this.store.linksFor(id, options);
   }
 
-  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null }, options?: MemoryOperationOptions): MemoryRecord | null {
+  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = captureMemoryOperation(options);
     const record = this.store.update(id, patch, operation);
     if (record) this.notify(operation);

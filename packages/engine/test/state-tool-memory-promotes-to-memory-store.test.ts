@@ -12,7 +12,7 @@
  * flat-file write is unaffected (and still works with no registry wired).
  */
 import { describe, expect, test, afterEach, beforeEach } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStateTool } from '../sdk/src/platform/tools/state/index.js';
@@ -32,6 +32,9 @@ import { memoryReadingsPort } from './_helpers/memory-readings.ts';
 import { toolReadingsPort, type ToolReadingTable } from './_helpers/tool-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 // Memory search and knowledge ranking read through the judgment port, and so
 // does the class a new mirrored record is filed under
@@ -67,6 +70,7 @@ async function makeHarness(opts: { withRegistry: boolean }): Promise<{
   tool: ReturnType<typeof createStateTool>;
   memoryRegistry: MemoryRegistry;
   memoryDir: string;
+  memoryStore: MemoryStore;
 }> {
   const root = mkdtempSync(join(tmpdir(), 'gv-state-memory-promote-'));
   tmpRoots.push(root);
@@ -88,7 +92,7 @@ async function makeHarness(opts: { withRegistry: boolean }): Promise<{
     workingDir: root,
     ...(opts.withRegistry ? { memoryRegistry } : {}),
   });
-  return { tool, memoryRegistry, memoryDir };
+  return { tool, memoryRegistry, memoryDir, memoryStore };
 }
 
 describe('state tool: mode=memory set mirrors into the retrievable memory store', () => {
@@ -224,5 +228,85 @@ describe('state tool: mode=memory set mirrors into the retrievable memory store'
     expect(result.success).toBe(true);
     expect(result.output).toContain('"retrievable":false');
     expect(existsSync(join(memoryDir, 'legacy_pref.json'))).toBe(true);
+  });
+});
+
+for (const policy of ['Classic - Off', 'Preferred'] as const) {
+  test(`${policy} memory set/get/update retains raw content and pending-class provenance without reusing a prior review`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => policy, async () => {
+      const h = await makeHarness({ withRegistry: true });
+      try {
+        const first = await h.tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'owner_note', memoryValue: 'The exact owner supplied note.' });
+        expect(first.success).toBe(true);
+        expect(JSON.parse(first.output!)).toMatchObject({ provenance: 'classic', classification: 'pending', retrievable: true });
+        const record = h.memoryRegistry.getAll()[0]!;
+        expect(record.tags).toContain('classic-memory'); expect(record.tags).toContain('classification-pending');
+        expect(record.reviewState).toBe('fresh');
+        h.memoryRegistry.review(record.id, { state: 'reviewed', confidence: 99, reviewedBy: 'synthetic-owner' });
+        const attempted = fake.requests.length;
+        const second = await h.tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'owner_note', memoryValue: 'The complete replacement note.' });
+        expect(second.success).toBe(true);
+        const records = h.memoryRegistry.getAll(); expect(records).toHaveLength(1);
+        expect(records[0]!.id).toBe(record.id); expect(records[0]!.detail).toBe('The complete replacement note.');
+        expect(records[0]!.reviewState).toBe('fresh'); expect(records[0]!.confidence).toBe(60);
+        expect(records[0]!.reviewedAt).toBeUndefined(); expect(records[0]!.reviewedBy).toBeUndefined();
+        expect(records[0]!.tags).toContain('classification-pending');
+        const read = await h.tool.execute({ mode: 'memory', memoryAction: 'get', memoryKey: 'owner_note' });
+        expect(JSON.parse(read.output!).value).toBe('The complete replacement note.');
+        expect(readFileSync(join(h.memoryDir, 'owner_note.json'), 'utf8')).toBe('The complete replacement note.');
+        expect(fake.requests).toHaveLength(attempted);
+        expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
+        // These are native fresh-record defaults, not a model confidence score.
+        const dbPath = h.memoryStore.dbPath; expect(dbPath).not.toBeNull(); h.memoryStore.close();
+        const reopened = new MemoryStore(dbPath!, { embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager: new ConfigManager({ configDir: join(h.memoryDir, 'config') }) }), enableVectorIndex: false });
+        await reopened.init();
+        try {
+          expect(reopened.get(record.id)).toMatchObject({ detail: 'The complete replacement note.', reviewState: 'fresh', confidence: 60 });
+          expect(reopened.get(record.id)?.reviewedBy).toBeUndefined();
+          expect(reopened.get(record.id)?.tags).toContain('classic-memory');
+        } finally { reopened.close(); }
+      } finally { h.memoryStore.close(); }
+    });
+  });
+}
+
+test('Classic source privacy keeps protected values out of the retrievable mirror', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const h = await makeHarness({ withRegistry: true });
+    try {
+      const result = await h.tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'local_only', memoryValue: 'apiKey=synthetic-private-secret' });
+      expect(result.success).toBe(true); expect(JSON.parse(result.output!).retrievable).toBe(false);
+      expect(h.memoryRegistry.getAll()).toEqual([]); expect(fake.requests).toHaveLength(0);
+    } finally { h.memoryStore.close(); }
+  });
+});
+
+test('Classic cancellation and native owner revocation stop memory writes before filesystem or indexed publication', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const h = await makeHarness({ withRegistry: true });
+    try {
+      const controller = new AbortController(); controller.abort();
+      const input = { mode: 'memory', memoryAction: 'set', memoryKey: 'cancelled', memoryValue: 'Original content.' };
+      expect((await h.tool.execute(input, { signal: controller.signal })).success).toBe(false);
+      expect((await h.tool.execute(input, { assertCurrent: () => { throw new Error('Retired memory owner'); } })).success).toBe(false);
+      expect(existsSync(join(h.memoryDir, 'cancelled.json'))).toBe(false);
+      expect(h.memoryRegistry.getAll()).toEqual([]); expect(fake.requests).toHaveLength(0);
+    } finally { h.memoryStore.close(); }
+  });
+});
+
+test('Preferred cancellation during a failed class reading cannot activate Classic or persist the value', async () => {
+  const controller = new AbortController();
+  const fake = fakePort(() => { controller.abort(); throw new JudgmentError('unavailable', 'Synthetic availability failure concurrent with cancellation'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const h = await makeHarness({ withRegistry: true });
+    try {
+      const result = await h.tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'cancelled', memoryValue: 'Original content.' }, { signal: controller.signal });
+      expect(result.success).toBe(false); expect(decisionModelPolicyState().operation).toBe('decision');
+      expect(existsSync(join(h.memoryDir, 'cancelled.json'))).toBe(false); expect(h.memoryRegistry.getAll()).toEqual([]);
+    } finally { h.memoryStore.close(); }
   });
 });

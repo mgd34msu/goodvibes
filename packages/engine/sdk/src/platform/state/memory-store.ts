@@ -39,6 +39,9 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Native score for a fresh record, independent of any model judgment. */
+const FRESH_MEMORY_CONFIDENCE = 60;
+
 export type MemoryClass =
   | 'decision'
   | 'constraint'
@@ -381,7 +384,7 @@ export class MemoryStore {
       tags: opts.tags ?? [],
       provenance: opts.provenance ?? [],
       reviewState: opts.review?.state ?? 'fresh',
-      confidence: clampConfidence(opts.review?.confidence ?? 60),
+      confidence: clampConfidence(opts.review?.confidence ?? FRESH_MEMORY_CONFIDENCE),
       reviewedAt: opts.review?.reviewedAt,
       reviewedBy: opts.review?.reviewedBy,
       staleReason: opts.review?.staleReason,
@@ -851,6 +854,8 @@ export class MemoryStore {
     tags?: string[];
     validFrom?: number | null;
     validUntil?: number | null;
+    /** Replacing unverified source content must not inherit the old review. */
+    resetReview?: true;
   }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
@@ -870,16 +875,19 @@ export class MemoryStore {
     const newTags    = patch.tags    ?? existing.tags;
     const newValidFrom  = patch.validFrom  === undefined ? existing.validFrom  : (patch.validFrom  ?? undefined);
     const newValidUntil = patch.validUntil === undefined ? existing.validUntil : (patch.validUntil ?? undefined);
+    const resetReview = patch.resetReview === true;
 
     this.runMutation(
       `UPDATE memory_records
          SET cls = ?, scope = ?, summary = ?, detail = ?, tags = ?, valid_from = ?, valid_until = ?, updated_at = ?
+         ${resetReview ? ", review_state = 'fresh', confidence = " + FRESH_MEMORY_CONFIDENCE + ', reviewed_at = NULL, reviewed_by = NULL, stale_reason = NULL' : ''}
          WHERE id = ?`,
       [newClass, newScope, newSummary, newDetail ?? null, JSON.stringify(newTags), newValidFrom ?? null, newValidUntil ?? null, now, id],
       operation,
     );
 
-    const updated = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now };
+    const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
+      ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
     this.vectorIndex?.upsert(updated, operation);
     this.persist(operation);
     assertMemoryOperationCurrent(operation);
@@ -1068,7 +1076,7 @@ export class MemoryStore {
       tags: opts.tags ?? [],
       provenance: opts.provenance ?? [],
       reviewState: opts.review?.state ?? 'fresh',
-      confidence: clampConfidence(opts.review?.confidence ?? 60),
+      confidence: clampConfidence(opts.review?.confidence ?? FRESH_MEMORY_CONFIDENCE),
       reviewedAt: opts.review?.reviewedAt,
       reviewedBy: opts.review?.reviewedBy,
       staleReason: opts.review?.staleReason,

@@ -8,7 +8,10 @@ import { HookDispatcher } from '../../hooks/dispatcher.js';
 import { TelemetryDB } from '../../state/telemetry.js';
 import type { TelemetryFilter } from '../../state/telemetry.js';
 import { logger } from '../../utils/logger.js';
-import type { Tool, ToolDefinition } from '../../types/tools.js';
+import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { STATE_TOOL_SCHEMA } from './schema.js';
 import type { StateInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
@@ -124,39 +127,51 @@ export function createStateTool(
 
   async function execute(
     args: Record<string, unknown>,
+    executionOptions?: ToolExecuteOptions,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
-    _telemetry.toolCalls++;
-    try {
-      if (typeof args.mode !== 'string') {
-        _telemetry.errors++;
-        return { success: false, error: 'Missing or invalid "mode" field (string required)' };
-      }
-      const input = args as unknown as StateInput;
-      const { mode } = input;
-
-      switch (mode) {
-        case 'get':   return runGet(input, kvState, workingDir, daemonHomeDir);
-        case 'set':   return runSet(input, kvState, workingDir, daemonHomeDir, swapManager);
-        case 'list':  return runList(input, kvState);
-        case 'clear': return runClear(input, kvState);
-        case 'budget': return runBudget(kvState, projectIndex);
-        case 'context': return runContext(kvState, projectIndex);
-        case 'memory': return runMemory(input, memoryDir, memoryRegistry);
-        case 'telemetry': return runTelemetry();
-        case 'hooks': return runHooks(input, hookDispatcher);
-        case 'mode': return runMode(input, modeManager);
-        case 'analytics': return runAnalytics(input, telemetryDB);
-        default: {
+    return withConfiguredDecisionModelPolicy(async () => {
+      _telemetry.toolCalls++;
+      try {
+        const signal = executionOptions?.signal, owner = executionOptions?.assertCurrent;
+        const current = () => {
+          signal?.throwIfAborted();
+          if (executionOptions?.signal !== signal || executionOptions?.assertCurrent !== owner) throw new Error('State tool owner changed.');
+          const result: unknown = owner?.(args);
+          if (result !== undefined) { drainOwned(result); throw new Error('State tool owner must be synchronous.'); }
+          signal?.throwIfAborted();
+        };
+        current();
+        if (typeof args.mode !== 'string') {
           _telemetry.errors++;
-          return { success: false, error: `Unknown mode: ${String(mode)}` };
+          return { success: false, error: 'Missing or invalid "mode" field (string required)' };
         }
+        const input = args as unknown as StateInput;
+        const { mode } = input;
+
+        switch (mode) {
+          case 'get':   return runGet(input, kvState, workingDir, daemonHomeDir);
+          case 'set':   return runSet(input, kvState, workingDir, daemonHomeDir, swapManager);
+          case 'list':  return runList(input, kvState);
+          case 'clear': return runClear(input, kvState);
+          case 'budget': return runBudget(kvState, projectIndex);
+          case 'context': return runContext(kvState, projectIndex);
+          case 'memory': return runMemory(input, memoryDir, memoryRegistry, { signal, assertCurrent: current });
+          case 'telemetry': return runTelemetry();
+          case 'hooks': return runHooks(input, hookDispatcher);
+          case 'mode': return runMode(input, modeManager);
+          case 'analytics': return runAnalytics(input, telemetryDB);
+          default: {
+            _telemetry.errors++;
+            return { success: false, error: `Unknown mode: ${String(mode)}` };
+          }
+        }
+      } catch (err) {
+        _telemetry.errors++;
+        const message = summarizeError(err);
+        logger.error('state tool: unexpected error', { error: message });
+        return { success: false, error: `Unexpected error: ${message}` };
       }
-    } catch (err) {
-      _telemetry.errors++;
-      const message = summarizeError(err);
-      logger.error('state tool: unexpected error', { error: message });
-      return { success: false, error: `Unexpected error: ${message}` };
-    }
+    });
   }
 
   function runTelemetry(): { success: boolean; output?: string; error?: string } {
@@ -659,6 +674,7 @@ async function runMemory(
   input: StateInput,
   memoryDir: string,
   memoryRegistry?: MemoryRegistry | undefined,
+  options: JudgmentReadingOptions = {},
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const action = input.memoryAction ?? 'list';
   const view = action === 'get' ? (input.view ?? 'full') : (input.view ?? 'summary');
@@ -758,8 +774,10 @@ async function runMemory(
     }
     try {
       // The mirror is planned first: a new record's class is read before anything is written.
-      const plan = await planMemoryMirror(memoryRegistry, safeKey, value);
+      const plan = await planMemoryMirror(memoryRegistry, safeKey, value, options);
       plan?.assertCurrent();
+      options.signal?.throwIfAborted(); options.assertCurrent?.();
+      const classic = isClassicOperation();
       mkdirSync(memoryDir, { recursive: true });
       const filePath = join(memoryDir, `${safeKey}.json`);
       // Write as-is; allow caller to pass JSON string or plain text
@@ -770,7 +788,8 @@ async function runMemory(
       const indexed = await mirrorMemoryRecord(memoryRegistry, safeKey, value, plan);
       return {
         success: true,
-        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: value.length, retrievable: indexed }),
+        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: value.length, retrievable: indexed,
+          classification: plan?.classification ?? 'not-indexed', ...(classic ? { provenance: 'classic' } : {}) }),
       };
     } catch (err) {
       return {

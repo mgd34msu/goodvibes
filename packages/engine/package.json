@@ -3123,6 +3123,11 @@
       "bun": "./terminal-shell/src/prompt-parts.ts",
       "types": "./terminal-shell/dist/prompt-parts.d.ts",
       "import": "./terminal-shell/dist/prompt-parts.js"
+    },
+    "./terminal-shell/host-service-status": {
+      "bun": "./terminal-shell/src/host-service-status.ts",
+      "types": "./terminal-shell/dist/host-service-status.d.ts",
+      "import": "./terminal-shell/dist/host-service-status.js"
     }
   },
   "publishConfig": {

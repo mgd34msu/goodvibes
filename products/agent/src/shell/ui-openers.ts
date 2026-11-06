@@ -1,3 +1,4 @@
+import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
@@ -28,7 +29,7 @@ import type { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/con
 import type { SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { ModelPickerTargetInfo } from '../input/model-picker.ts';
-import { openModelPickerNow, type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
+import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
 import { buildLocalFitRecommendations, buildSignInRow, LOCAL_REC_PROVIDER } from '../input/model-picker-local-fit.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
@@ -152,16 +153,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     },
   };
 
-  commandContext.openModelPicker = () => {
-    void openModelPickerNow(pickerOpenDeps, 'models');
-  };
-
-  commandContext.openModelPickerWithTarget = (target) => input.openModelPickerWithTarget(target);
-  commandContext.openProviderModelPickerWithTarget = (target) => input.openProviderModelPickerWithTarget(target);
-
-  commandContext.openProviderPicker = () => {
-    void openModelPickerNow(pickerOpenDeps, 'providers');
-  };
+  Object.assign(commandContext, createModelPickerCommandOpeners(pickerOpenDeps, input));
 
   commandContext.openReasoningEffortPicker = () => {
     const currentModel = providerRegistry.getCurrentModel();

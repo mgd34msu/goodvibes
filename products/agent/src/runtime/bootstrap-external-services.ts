@@ -1,3 +1,9 @@
+import { createPendingHostServices } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+import {
+  pendingHostServiceStatus,
+  hostServiceIsActive,
+  hostServiceIsBlocked,
+} from '@goodvibes-jev/engine/terminal-shell/host-service-status';
 /**
  * Connected-host (daemon + HTTP listener) discovery for GoodVibes Agent.
  *
@@ -50,27 +56,16 @@ function formatHostServiceBaseUrl(host: string, port: number): string {
 
 // Pending status shown before the deferred probe completes, honest
 // 'unavailable', never a guessed 'external'.
-function createPendingServiceStatus(
-  configManager: HostServicesConfig,
-  service: 'daemon' | 'httpListener',
-): HostServiceStatus {
-  const host = String(configManager.get(service === 'daemon' ? 'controlPlane.host' : 'httpListener.host') ?? '127.0.0.1');
-  const port = Number(configManager.get(service === 'daemon' ? 'controlPlane.port' : 'httpListener.port') ?? (service === 'daemon' ? 3421 : 3422));
-  return {
-    mode: 'unavailable',
-    host,
-    port,
-    baseUrl: formatHostServiceBaseUrl(host, port),
+function createPendingServiceStatus(configManager: HostServicesConfig, service: 'daemon' | 'httpListener'): HostServiceStatus {
+  return pendingHostServiceStatus(configManager, service, {
+    url: formatHostServiceBaseUrl,
     reason: 'Connected-host discovery has not completed yet',
-  };
+  });
 }
-
-const hostServiceIsActive = (status: HostServiceStatus): boolean => status.mode === 'embedded' || status.mode === 'external';
 
 // 'blocked' (occupied by an unverified process) and 'incompatible' (a
 // GoodVibes daemon on a wire-version band this Agent build refuses to adopt)
 // both mean the configured port is held and unusable by this instance.
-const hostServiceIsBlocked = (status: HostServiceStatus): boolean => status.mode === 'blocked' || status.mode === 'incompatible';
 
 export interface AgentExternalServicesController {
   /** The most recently resolved (or pending) connected-host status. */
@@ -143,14 +138,7 @@ export function wireAgentExternalServices(options: {
     };
   };
 
-  let externalServices: ExternalServicesHandle = {
-    daemonServer: null,
-    httpListener: null,
-    daemonStatus: createPendingServiceStatus(configManager, 'daemon'),
-    httpListenerStatus: createPendingServiceStatus(configManager, 'httpListener'),
-    listRecentControlPlaneEvents: () => [],
-    async stop(): Promise<void> {},
-  };
+  let externalServices: ExternalServicesHandle = createPendingHostServices((name) => createPendingServiceStatus(configManager, name));
   let externalServicesPromise: Promise<ExternalServicesHandle> | null = null;
 
   // Deliberately NOT passing the daemon facade's `updateArtifact` identity
@@ -174,15 +162,16 @@ export function wireAgentExternalServices(options: {
   const maybeStartInstalledConnectedHost = async (): Promise<void> => {
     const seams = options.connectedHostAutostart ?? {};
     try {
-      const probeReachability = seams.probeReachability
-        ?? (() => services.sessionSpineClient.probeReachability());
+      const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
       const outcome = await autostartInstalledDaemon({
         daemonMode: externalServices.daemonStatus.mode,
-        control: seams.control ?? createDaemonServiceControl({
-          configManager: services.configManager,
-          workingDirectory: services.workingDirectory,
-          homeDirectory: services.homeDirectory,
-        }),
+        control:
+          seams.control ??
+          createDaemonServiceControl({
+            configManager: services.configManager,
+            workingDirectory: services.workingDirectory,
+            homeDirectory: services.homeDirectory,
+          }),
         isReachable: async () => (await probeReachability()) === 'online',
         waitTimeoutMs: seams.waitTimeoutMs,
         pollIntervalMs: seams.pollIntervalMs,
@@ -197,13 +186,17 @@ export function wireAgentExternalServices(options: {
           const suffix = adopted
             ? ''
             : `, but adopting it still failed: ${externalServices.daemonStatus.reason ?? externalServices.daemonStatus.mode}`;
-          systemMessageRouter.low(outcome.action === 'started'
-            ? `[Startup] Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}.`
-            : `[Startup] Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}.`);
+          systemMessageRouter.low(
+            outcome.action === 'started'
+              ? `[Startup] Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}.`
+              : `[Startup] Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}.`,
+          );
           break;
         }
         case 'start-failed': {
-          systemMessageRouter.high(`[Startup] Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start`);
+          systemMessageRouter.high(
+            `[Startup] Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start`,
+          );
           break;
         }
         case 'not-installed':
@@ -231,7 +224,9 @@ export function wireAgentExternalServices(options: {
       await externalServices.stop();
       externalServicesPromise = startAgentExternalServices();
       externalServices = await externalServicesPromise;
-      systemMessageRouter.high('[Startup] GoodVibes Agent re-probed the connected GoodVibes host and adopted its current status; this route never starts or restarts the host itself.');
+      systemMessageRouter.high(
+        '[Startup] GoodVibes Agent re-probed the connected GoodVibes host and adopted its current status; this route never starts or restarts the host itself.',
+      );
       requestRender();
       return inspectAgentDependencies();
     },

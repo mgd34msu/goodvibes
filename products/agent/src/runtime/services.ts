@@ -1,3 +1,4 @@
+import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
 import { StepUpService } from '@goodvibes-jev/engine/sdk/daemon';
@@ -986,12 +987,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const researchScreeningLifetime = new AbortController();
   const researchReportSourceOwner = createAgentResearchSourceOwner(configManager, secretsManager, researchScreeningLifetime.signal);
   disposalScope.registry.add('research screening owner', () => researchReportSourceOwner.close());
-  disposalScope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
-  disposalScope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
-  // Cancellation starts at each leaf's original position. These older entries
-  // drain its retained promise before storage or the client floor can close.
-  disposalScope.registry.add('conversation rewind drain', () => conversationRewindClosing);
-  disposalScope.registry.add('home graph drain', () => homeGraphClosing);
+  registerTerminalKnowledgeCleanup(disposalScope.registry, {
+    closeAgentStore: () => agentKnowledgeStore.close(),
+    closeHomeGraphStore: () => homeGraphKnowledgeStore.close(),
+    rewindDrain: () => conversationRewindClosing,
+    homeGraphDrain: () => homeGraphClosing,
+  });
 
   const daemonConfigClient: DaemonConfigClient = createDaemonConfigClient(daemonVerbs);
   const daemonCredentialsClient: DaemonCredentialsClient = createDaemonCredentialsClient(daemonVerbs);

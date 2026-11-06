@@ -76,3 +76,19 @@ export function announceTerminalSessionStarted(
   );
   emitSessionReady(bus, { sessionId, traceId: `${sessionId}:session-ready`, source: 'bootstrap' }, { sessionId });
 }
+
+/** Leaf cleanup registrations preserve order and resolve async drain handles only at teardown. */
+export function registerTerminalKnowledgeCleanup(
+  registry: { add(label: string, cleanup: () => void | Promise<void>): void },
+  ports: {
+    readonly closeAgentStore: () => void | Promise<void>;
+    readonly closeHomeGraphStore: () => void | Promise<void>;
+    readonly rewindDrain: () => void | Promise<void>;
+    readonly homeGraphDrain: () => void | Promise<void>;
+  },
+): void {
+  registry.add('agent knowledge store', ports.closeAgentStore);
+  registry.add('home graph knowledge store', ports.closeHomeGraphStore);
+  registry.add('conversation rewind drain', ports.rewindDrain);
+  registry.add('home graph drain', ports.homeGraphDrain);
+}

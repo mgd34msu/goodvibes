@@ -1,3 +1,9 @@
+import { pendingHostServiceStatus, formatHostServiceBaseUrl } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+export {
+  formatHostServiceBaseUrl,
+  hostServiceIsActive,
+  hostServiceIsBlocked,
+} from '@goodvibes-jev/engine/terminal-shell/host-service-status';
 /**
  * host-service-status.ts, reading a background service's posture.
  *
@@ -12,41 +18,24 @@ import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 
 /** Which of the two background services a question is about. */
-export type HostServiceName = 'daemon' | 'httpListener';
+import type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
+export type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
 
 /**
  * The URL a configured host/port is actually reachable at. A wildcard bind is
  * not an address anything can connect to, so `0.0.0.0` and `::` resolve to the
  * loopback address of their family; a bare IPv6 literal is bracketed.
  */
-export function formatHostServiceBaseUrl(host: string, port: number): string {
-  const normalized = host.trim().toLowerCase();
-  const probeHost = normalized === '0.0.0.0'
-    ? '127.0.0.1'
-    : normalized === '::' || normalized === '[::]'
-      ? '::1'
-      : host;
-  const urlHost = probeHost.includes(':') && !probeHost.startsWith('[') ? `[${probeHost}]` : probeHost;
-  return `http://${urlHost}:${port}`;
-}
 
 /**
  * What to report about a service before the discovery probe has answered:
  * where it WOULD be, and the honest reason nothing is known about it yet.
  */
-export function createPendingServiceStatus(
-  configManager: Pick<ConfigManager, 'get'>,
-  service: HostServiceName,
-): HostServiceStatus {
-  const host = String(configManager.get(service === 'daemon' ? 'controlPlane.host' : 'httpListener.host') ?? '127.0.0.1');
-  const port = Number(configManager.get(service === 'daemon' ? 'controlPlane.port' : 'httpListener.port') ?? (service === 'daemon' ? 3421 : 3422));
-  return {
-    mode: 'unavailable',
-    host,
-    port,
-    baseUrl: formatHostServiceBaseUrl(host, port),
+export function createPendingServiceStatus(configManager: Pick<ConfigManager, 'get'>, service: HostServiceName): HostServiceStatus {
+  return pendingHostServiceStatus(configManager, service, {
+    url: formatHostServiceBaseUrl,
     reason: 'Background service startup has not completed yet',
-  };
+  });
 }
 
 /**
@@ -56,9 +45,6 @@ export function createPendingServiceStatus(
  * product's daemon status can never carry that mode (adoptOnly is hardcoded on
  * every host-services call this app makes).
  */
-export function hostServiceIsActive(status: HostServiceStatus): boolean {
-  return status.mode === 'embedded' || status.mode === 'external';
-}
 
 /**
  * The configured port is held and unusable by this terminal, either by an
@@ -66,6 +52,3 @@ export function hostServiceIsActive(status: HostServiceStatus): boolean {
  * adopt ('incompatible': a wire-version mismatch, or a daemon below this
  * build's own floor).
  */
-export function hostServiceIsBlocked(status: HostServiceStatus): boolean {
-  return status.mode === 'blocked' || status.mode === 'incompatible';
-}

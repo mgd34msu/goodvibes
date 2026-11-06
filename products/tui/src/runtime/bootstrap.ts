@@ -1,3 +1,4 @@
+import { createPendingHostServices } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
 import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
 import {
   createPluginCommandAdapter,
@@ -464,14 +465,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     }
   };
 
-  let externalServices: ExternalServicesHandle = {
-    daemonServer: null,
-    httpListener: null,
-    daemonStatus: createPendingServiceStatus(configManager, 'daemon'),
-    httpListenerStatus: createPendingServiceStatus(configManager, 'httpListener'),
-    listRecentControlPlaneEvents: () => [],
-    async stop(): Promise<void> {},
-  };
+  let externalServices: ExternalServicesHandle = createPendingHostServices((name) => createPendingServiceStatus(configManager, name));
   let externalServicesPromise: Promise<ExternalServicesHandle> | null = null;
   const platformExternalServices = uiServices.platform as typeof uiServices.platform & {
     externalServices: NonNullable<typeof uiServices.platform.externalServices>;

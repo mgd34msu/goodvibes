@@ -1,3 +1,4 @@
+import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 /**
@@ -260,12 +261,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   void clientSandboxRegistry;
   disposalScope.registry.add('client runtime services', () => client.close());
   disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
-  disposalScope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
-  disposalScope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
-  // Start cancellation in the original leaf order, then drain both tails
-  // before closing storage or the older client floor.
-  disposalScope.registry.add('conversation rewind drain', () => conversationRewindClosing);
-  disposalScope.registry.add('home graph drain', () => homeGraphClosing);
+  registerTerminalKnowledgeCleanup(disposalScope.registry, {
+    closeAgentStore: () => agentKnowledgeStore.close(),
+    closeHomeGraphStore: () => homeGraphKnowledgeStore.close(),
+    rewindDrain: () => conversationRewindClosing,
+    homeGraphDrain: () => homeGraphClosing,
+  });
   const contractOperator = createContractOperatorService({ runner: contractRunner, workingDirectory });
   const contractIntake = createContractIntake({ runner: contractRunner, projectRoot: workingDirectory });
 

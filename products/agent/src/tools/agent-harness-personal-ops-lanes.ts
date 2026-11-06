@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -136,7 +137,11 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
   };
 }
 
-export async function buildLanes(
+export function buildLanes(...args: Parameters<typeof ownedBuildLanes>): ReturnType<typeof ownedBuildLanes> {
+  return withConfiguredDecisionModelPolicy(() => ownedBuildLanes(...args));
+}
+
+async function ownedBuildLanes(
   context: CommandContext,
   options: CatalogRankingOptions & {
     readonly toolsByServer?: ReadonlyMap<string, readonly McpToolRecord[]>;

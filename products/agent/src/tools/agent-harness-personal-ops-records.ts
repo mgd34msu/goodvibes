@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -87,6 +88,7 @@ export function describeLiveRecord(record: PersonalOpsLiveRecord, includeParamet
     id: record.id,
     label: record.label,
     status: record.status,
+    ...(record.operationProvenance ? { operationProvenance: record.operationProvenance, semanticAssessment: record.semanticAssessment } : {}),
     summary: previewHarnessText(record.summary, includeParameters ? 240 : 96),
     userRoute: previewHarnessText(record.userRoute, includeParameters ? 140 : 96),
     modelRoute: previewHarnessText(record.modelRoute, includeParameters ? 140 : 96),
@@ -117,6 +119,8 @@ export function describeConnectorSignal(signal: PersonalOpsConnectorSignal, incl
     summary: previewHarnessText(signal.summary, includeParameters ? 180 : 96),
     modelRoute: previewHarnessText(signal.modelRoute, includeParameters ? 140 : 96),
     toolCount: signal.toolCount,
+    ...(signal.operationProvenance ? { operationProvenance: signal.operationProvenance, semanticAssessment: signal.semanticAssessment } : {}),
+    ...(signal.unassessedTools ? { unassessedTools: signal.unassessedTools } : {}),
     ...(signal.capabilityTags.length > 0 ? { capabilityTags: signal.capabilityTags } : {}),
     ...(includeParameters && signal.readTools && signal.readTools.length > 0 ? { readTools: signal.readTools } : {}),
     ...(includeParameters && signal.writeTools && signal.writeTools.length > 0 ? { writeTools: signal.writeTools } : {}),
@@ -414,7 +418,11 @@ function effectReceiptCapability(laneId: PersonalOpsEffectReceiptLaneId): string
   return 'reminder-effect-receipt';
 }
 
-export async function savedProviderEffectReceiptRecords(
+export function savedProviderEffectReceiptRecords(...args: Parameters<typeof ownedSavedProviderEffectReceiptRecords>): ReturnType<typeof ownedSavedProviderEffectReceiptRecords> {
+  return withConfiguredDecisionModelPolicy(() => ownedSavedProviderEffectReceiptRecords(...args));
+}
+
+async function ownedSavedProviderEffectReceiptRecords(
   context: CommandContext,
   laneId: PersonalOpsEffectReceiptLaneId,
   options: CatalogRankingOptions = {},
@@ -448,8 +456,10 @@ export async function savedProviderEffectReceiptRecords(
       id: `provider-effect-receipt:${artifact.id}`,
       label: `${laneLabel} effect receipt: ${operationLabel}`,
       status,
+      ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
       summary: [
-        `Confirmed ${lowerLaneLabel} provider-effect receipt ${receiptId} reports ${operation} ${status}.`,
+        status === 'unassessed' ? `Stored ${lowerLaneLabel} provider-effect receipt ${receiptId}; its outcome has not been semantically assessed.`
+          : `Confirmed ${lowerLaneLabel} provider-effect receipt ${receiptId} reports ${operation} ${status}.`,
         providerId ? `Provider ${providerId}.` : '',
         subjectId ? `Subject ${previewHarnessText(subjectId, 96)}.` : '',
         `Redaction ${redaction}.`,

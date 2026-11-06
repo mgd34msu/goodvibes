@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { readPersonalOpsBoolean } from './agent-harness-personal-ops-readings.ts';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { assertPersonalOpsDataCurrent, capturePersonalOpsData, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
@@ -207,8 +208,11 @@ async function normalizeInboxRecord(source: ProviderReadModelSource, raw: unknow
   const providerId = firstString(record, ['providerId', 'provider', 'accountId', 'service', 'mailbox']) || 'provider';
   const threadId = firstString(record, ['threadId', 'conversationId', 'messageThreadId', 'id', 'messageId', 'uid', 'providerRecordId']) || `${index + 1}`;
   const subject = firstString(record, ['subject', 'title', 'summary', 'name']) || `Inbox thread ${index + 1}`;
-  const status = firstString(record, ['status', 'state', 'reviewState'])
-    || (await readPersonalOpsBoolean({ parameter: 'needsReply', value: record.needsReply, record }, options) === true ? 'needs-reply' : await readPersonalOpsBoolean({ parameter: 'unread', value: record.unread, record }, options) === true ? 'unread' : 'current');
+  const declaredStatus = firstString(record, ['status', 'state', 'reviewState']);
+  const needsReply = declaredStatus ? null : await readPersonalOpsBoolean({ parameter: 'needsReply', value: record.needsReply, record }, options);
+  const unread = declaredStatus || needsReply === true ? null : await readPersonalOpsBoolean({ parameter: 'unread', value: record.unread, record }, options);
+  const status = declaredStatus || (needsReply === true ? 'needs-reply' : unread === true ? 'unread'
+    : isClassicOperation() && (needsReply === null || unread === null) ? 'unassessed' : 'current');
   const sender = firstString(record, ['from', 'sender', 'author', 'participant']);
   const receivedAt = readIso(record.receivedAt ?? record.updatedAt ?? record.timestamp ?? record.date);
   const labels = readStringArray(record.labels ?? record.tags ?? record.mailboxLabels).slice(0, 6);
@@ -229,6 +233,7 @@ async function normalizeInboxRecord(source: ProviderReadModelSource, raw: unknow
     id: `provider-thread:${safeRecordIdPart(source.path)}:${safeRecordIdPart(threadId)}`,
     label: `Fresh thread: ${previewHarnessText(subject, 96)}`,
     status: previewHarnessText(status, 48),
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     summary: [
       `Provider ${previewHarnessText(providerId, 64)} published current inbox thread ${previewHarnessText(threadId, 80)} from ${source.path}.`,
       sender ? `From ${previewHarnessText(sender, 80)}.` : '',
@@ -266,10 +271,10 @@ async function normalizeCalendarRecord(source: ProviderReadModelSource, raw: unk
   const title = firstString(record, ['title', 'summary', 'subject', 'name']) || `Calendar event ${index + 1}`;
   const start = readIso(record.start ?? record.startAt ?? record.startTime ?? record.when);
   const end = readIso(record.end ?? record.endAt ?? record.endTime);
-  const conflictCount = Array.isArray(record.conflicts) ? record.conflicts.length : await readPersonalOpsBoolean({ parameter: 'conflict', value: record.conflict ?? record.hasConflict, record }, options) === true ? 1 : 0;
-  const status = conflictCount > 0
-    ? 'conflict'
-    : firstString(record, ['status', 'state', 'reviewState']) || 'current';
+  const conflict = Array.isArray(record.conflicts) ? null : await readPersonalOpsBoolean({ parameter: 'conflict', value: record.conflict ?? record.hasConflict, record }, options);
+  const conflictCount = Array.isArray(record.conflicts) ? record.conflicts.length : conflict === true ? 1 : conflict === false || !isClassicOperation() ? 0 : null;
+  const hasConflict = conflictCount !== null && conflictCount > 0;
+  const status = hasConflict ? 'conflict' : firstString(record, ['status', 'state', 'reviewState']) || (conflictCount === null ? 'unassessed' : 'current');
   const location = firstString(record, ['location', 'room', 'venue']);
   const attendeeCount = Array.isArray(record.attendees) ? record.attendees.length : null;
   const snippet = firstString(record, ['snippet', 'preview', 'notes', 'descriptionSummary']);
@@ -289,19 +294,20 @@ async function normalizeCalendarRecord(source: ProviderReadModelSource, raw: unk
     id: `provider-event:${safeRecordIdPart(source.path)}:${safeRecordIdPart(eventId)}`,
     label: `Fresh event: ${previewHarnessText(title, 96)}`,
     status: previewHarnessText(status, 48),
+    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     summary: [
       `Provider ${previewHarnessText(providerId, 64)} published current calendar event ${previewHarnessText(eventId, 80)} from ${source.path}.`,
       calendarId ? `Calendar ${previewHarnessText(calendarId, 64)}.` : '',
       start || end ? `Window ${[start, end].filter(Boolean).join(' -> ')}.` : '',
       location ? `Location ${previewHarnessText(location, 80)}.` : '',
       attendeeCount !== null ? `${attendeeCount} attendee(s).` : '',
-      conflictCount > 0 ? `${conflictCount} conflict signal(s).` : '',
+      hasConflict ? `${conflictCount} conflict signal(s).` : conflictCount === null ? 'Conflict meaning unassessed in Classic operation.' : '',
       snippet ? `Preview ${previewHarnessText(snippet, 160)}.` : '',
       followUpRoutes.some((route) => route.effect === 'confirmed-effect') ? 'Published provider effects are separated into confirmed follow-up routes.' : 'No provider mutation route is published for this event.',
     ].filter(Boolean).join(' '),
     userRoute: 'Agent Workspace -> Personal Ops -> Review queue',
     modelRoute: readRoute || `personal_ops action:"lane" laneId:"calendar" query:"${safeRecordIdPart(eventId)}" includeParameters:true`,
-    tags: ['provider-backed', 'fresh-provider', 'calendar-event', providerId, status, conflictCount > 0 ? 'conflict' : '', calendarId].filter(Boolean),
+    tags: ['provider-backed', 'fresh-provider', 'calendar-event', providerId, status, hasConflict ? 'conflict' : '', calendarId].filter(Boolean),
     effect: 'read-only',
     capability: 'calendar-provider-event',
     confirmationRequired: false,
@@ -320,7 +326,11 @@ async function normalizeCalendarRecord(source: ProviderReadModelSource, raw: unk
   };
 }
 
-export async function providerBackedQueueRecords(context: CommandContext, laneId: ProviderBackedLaneId, options: CatalogRankingOptions = {}): Promise<readonly PersonalOpsLiveRecord[]> {
+export function providerBackedQueueRecords(...args: Parameters<typeof acquireProviderBackedQueueRecords>): ReturnType<typeof acquireProviderBackedQueueRecords> {
+  return withConfiguredDecisionModelPolicy(() => acquireProviderBackedQueueRecords(...args));
+}
+
+async function acquireProviderBackedQueueRecords(context: CommandContext, laneId: ProviderBackedLaneId, options: CatalogRankingOptions = {}): Promise<readonly PersonalOpsLiveRecord[]> {
   const records: PersonalOpsLiveRecord[] = [];
   const seen = new Set<string>();
   for (const source of providerReadModelSources(context, laneId)) {

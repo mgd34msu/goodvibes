@@ -58,6 +58,9 @@ export interface PersonalOpsLane {
 }
 
 export interface PersonalOpsConnectorSignal {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
+  readonly unassessedTools?: readonly { readonly name: string; readonly qualifiedName: string; readonly description: string; readonly schemaRoute: string }[];
   readonly id: string;
   readonly kind: 'mcp-server';
   readonly label: string;
@@ -83,6 +86,8 @@ export interface PersonalOpsConnectorTool {
 }
 
 export interface PersonalOpsLiveRecord {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly label: string;
   readonly status: string;

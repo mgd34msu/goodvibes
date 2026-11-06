@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness-personal-ops-style-draft.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -179,7 +180,11 @@ function autonomyBriefingStep(): Record<string, unknown> {
   };
 }
 
-export async function personalOpsBriefingSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export function personalOpsBriefingSummary(...args: Parameters<typeof ownedPersonalOpsBriefingSummary>): ReturnType<typeof ownedPersonalOpsBriefingSummary> {
+  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsBriefingSummary(...args));
+}
+
+async function ownedPersonalOpsBriefingSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
   const request = readString(args.query) || readString(args.target) || 'daily personal operations';
   const tools = await mcpToolRecords(context, options);
@@ -252,7 +257,11 @@ export async function personalOpsBriefingSummary(context: CommandContext, args: 
   };
 }
 
-export async function personalOpsSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export function personalOpsSummary(...args: Parameters<typeof ownedPersonalOpsSummary>): ReturnType<typeof ownedPersonalOpsSummary> {
+  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsSummary(...args));
+}
+
+async function ownedPersonalOpsSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
   const tools = await mcpToolRecords(context, options);
   const schemasByQualifiedName = await mcpToolSchemas(context, tools, options);
@@ -356,7 +365,11 @@ function queueSearchText(item: { readonly lane: PersonalOpsLane; readonly record
   ].join('\n').toLowerCase();
 }
 
-export async function personalOpsQueueSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export function personalOpsQueueSummary(...args: Parameters<typeof ownedPersonalOpsQueueSummary>): ReturnType<typeof ownedPersonalOpsQueueSummary> {
+  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsQueueSummary(...args));
+}
+
+async function ownedPersonalOpsQueueSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted();
   args = snapshotJudgmentInput(args) as AgentHarnessPersonalOpsArgs;
   const includeParameters = args.includeParameters === true;
@@ -424,7 +437,11 @@ export async function personalOpsQueueSummary(context: CommandContext, args: Age
   };
 }
 
-export async function personalOpsIntakeSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export function personalOpsIntakeSummary(...args: Parameters<typeof ownedPersonalOpsIntakeSummary>): ReturnType<typeof ownedPersonalOpsIntakeSummary> {
+  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsIntakeSummary(...args));
+}
+
+async function ownedPersonalOpsIntakeSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted();
   args = snapshotJudgmentInput(args) as AgentHarnessPersonalOpsArgs;
   const request = readString(args.query) || readString(args.target);
@@ -464,7 +481,11 @@ export async function personalOpsIntakeSummary(context: CommandContext, args: Ag
   };
 }
 
-export async function runPersonalOpsRead(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}, invocationArgs: Record<string, unknown> = {}, executionOptions?: Parameters<Tool['execute']>[1]): Promise<PersonalOpsReadRunResult> {
+export function runPersonalOpsRead(...args: Parameters<typeof ownedRunPersonalOpsRead>): ReturnType<typeof ownedRunPersonalOpsRead> {
+  return withConfiguredDecisionModelPolicy(() => ownedRunPersonalOpsRead(...args));
+}
+
+async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}, invocationArgs: Record<string, unknown> = {}, executionOptions?: Parameters<Tool['execute']>[1]): Promise<PersonalOpsReadRunResult> {
   const assertOptions = captureCatalogMethods(options, ['sourceOwner', 'signal', 'assertCurrent', 'retainCurrent']);
   const contextGuards = [captureCatalogMethods(context, ['clients', 'extensions', 'session'])];
   if (context.clients) contextGuards.push(captureCatalogMethods(context.clients, ['mcpApi']));
@@ -659,7 +680,11 @@ export async function runPersonalOpsRead(context: CommandContext, args: AgentHar
   }
 }
 
-export async function describePersonalOpsLane(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<PersonalOpsLaneResolution> {
+export function describePersonalOpsLane(...args: Parameters<typeof ownedDescribePersonalOpsLane>): ReturnType<typeof ownedDescribePersonalOpsLane> {
+  return withConfiguredDecisionModelPolicy(() => ownedDescribePersonalOpsLane(...args));
+}
+
+async function ownedDescribePersonalOpsLane(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<PersonalOpsLaneResolution> {
   options.signal?.throwIfAborted();
   args = snapshotJudgmentInput(args) as AgentHarnessPersonalOpsArgs;
   const laneId = readString(args.laneId);

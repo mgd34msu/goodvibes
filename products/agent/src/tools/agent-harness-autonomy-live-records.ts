@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
@@ -229,7 +230,11 @@ export function autonomyLiveNativeFacts(context: CommandContext): AutonomyLiveNa
 }
 
 /** Protect every original source field before sorting, previews, tails or record limits. */
-export async function captureAutonomyLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<AutonomyLiveRecordBundle> {
+export function captureAutonomyLiveRecords(...args: Parameters<typeof ownedCaptureAutonomyLiveRecords>): ReturnType<typeof ownedCaptureAutonomyLiveRecords> {
+  return withConfiguredDecisionModelPolicy(() => ownedCaptureAutonomyLiveRecords(...args));
+}
+
+async function ownedCaptureAutonomyLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<AutonomyLiveRecordBundle> {
   const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal;
   const source = captureLiveSources(context, true);

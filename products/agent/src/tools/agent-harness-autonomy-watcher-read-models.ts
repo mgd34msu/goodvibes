@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -537,7 +538,11 @@ function normalizeProviderSource(entry: CollectedWatcherRecord, index: number, s
   };
 }
 
-export async function watcherReadModelLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<readonly AutonomyQueueLiveRecord[]> {
+export function watcherReadModelLiveRecords(...args: Parameters<typeof ownedWatcherReadModelLiveRecords>): ReturnType<typeof ownedWatcherReadModelLiveRecords> {
+  return withConfiguredDecisionModelPolicy(() => ownedWatcherReadModelLiveRecords(...args));
+}
+
+async function ownedWatcherReadModelLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<readonly AutonomyQueueLiveRecord[]> {
   const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const assertCaller = () => {

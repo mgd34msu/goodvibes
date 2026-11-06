@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { readPersonalOpsResultField } from './agent-harness-personal-ops-readings.ts';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -221,7 +222,9 @@ export async function boundedPersonalOpsResult(value: unknown, includeParameters
     characters: text.length,
     truncated: text.length > max,
     preview: text.length <= max ? text : `${text.slice(0, max).trimEnd()}...`,
-    redaction: 'The complete result is protected through canonical field and text readings before the display preview is bounded.',
+    redaction: isClassicOperation() ? 'The complete result is protected by native credential and source rules before the display preview is bounded; semantic meanings are unassessed.'
+      : 'The complete result is protected through canonical field and text readings before the display preview is bounded.',
+    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
   };
 }
 
@@ -277,7 +280,8 @@ export async function reviewCardFromObject(
     summary: previewHarnessText(summary, includeParameters ? 420 : 180),
     sourceRecordId: sourceRecord.id,
     sourceTool: sourceRecord.qualifiedName,
-    confidence: 'normalized',
+    confidence: isClassicOperation() ? 'native-fields' : 'normalized',
+    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
     followUpBoundary: calendar
       ? 'Calendar create, edit, delete, RSVP, and reschedule actions require a separate confirmed route.'
       : 'Reply, send, label, archive, move, and delete actions require a separate confirmed route.',
@@ -285,7 +289,11 @@ export async function reviewCardFromObject(
   };
 }
 
-export async function personalOpsReadReviewRecords(
+export function personalOpsReadReviewRecords(...args: Parameters<typeof ownedPersonalOpsReadReviewRecords>): ReturnType<typeof ownedPersonalOpsReadReviewRecords> {
+  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsReadReviewRecords(...args));
+}
+
+async function ownedPersonalOpsReadReviewRecords(
   lane: PersonalOpsLane,
   sourceRecord: PersonalOpsLiveRecord,
   result: unknown,
@@ -312,6 +320,7 @@ export async function personalOpsReadReviewRecords(
     sourceRecordId: sourceRecord.id,
     sourceTool: sourceRecord.qualifiedName,
     confidence: 'raw-preview',
+    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
     followUpBoundary: 'Use this preview to summarize locally; any provider mutation requires a separate confirmed route.',
   }];
 }

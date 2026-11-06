@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { capturePersonalOpsSnapshot } from './agent-harness-personal-ops-source.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
@@ -390,7 +391,11 @@ export function toolsByServer(tools: readonly McpToolRecord[]): ReadonlyMap<stri
   return grouped;
 }
 
-export async function connectorSignalsMatching(
+export function connectorSignalsMatching(context: CommandContext, options: Parameters<typeof acquireConnectorSignalsMatching>[1]): Promise<readonly PersonalOpsConnectorSignal[]> {
+  return withConfiguredDecisionModelPolicy(() => acquireConnectorSignalsMatching(context, options));
+}
+
+async function acquireConnectorSignalsMatching(
   context: CommandContext,
   options: CatalogRankingOptions & {
     readonly lane: 'inbox' | 'calendar';
@@ -419,11 +424,17 @@ export async function connectorSignalsMatching(
   for (const { server, tools } of matches) {
     assertCurrent();
     const classified: PersonalOpsConnectorTool[] = [];
+    const unassessedTools: NonNullable<PersonalOpsConnectorSignal['unassessedTools']>[number][] = [];
+    const startedClassic = isClassicOperation();
     for (const tool of tools) {
       const contract = { server: tool.serverName, tool: tool.toolName, description: tool.description ?? '', inputSchema: tool.schema?.inputSchema ?? null };
       const reading = await readPersonalOpsTool(contract, currentOptions);
       assertCurrent();
-      if (!reading || reading.lane !== options.lane) continue;
+      if (!reading || reading.lane !== options.lane) {
+        if (isClassicOperation()) unassessedTools.push({ name: tool.toolName, qualifiedName: qualifiedToolName(tool), description: tool.description ?? '',
+          schemaRoute: `mcp schema qualifiedName:"${qualifiedToolName(tool)}"` });
+        continue;
+      }
       const summary = await summarizeInputSchema(qualifiedToolName(tool), contract, reading.lane, reading.effect, currentOptions);
       assertCurrent();
       classified.push({ name: tool.toolName, qualifiedName: qualifiedToolName(tool), ...(tool.description ? { description: tool.description } : {}),
@@ -431,10 +442,12 @@ export async function connectorSignalsMatching(
         ...(summary ?? {}),
       });
     }
-    const ready = server.connected && server.schemaFreshness === 'fresh' && server.trustMode !== 'blocked';
+    const ready = server.connected && server.schemaFreshness === 'fresh' && server.trustMode !== 'blocked' && (!isClassicOperation() || classified.length > 0);
     const capabilityTags = [...new Set(classified.map(tool => tool.capability))].sort();
     signals.push({ id: `mcp:${server.name}`, kind: 'mcp-server', label: server.name, status: ready ? 'ready' : 'attention',
-      summary: `${server.connected ? 'connected' : 'disconnected'} ${server.trustMode} ${server.schemaFreshness}; ${tools.length} tool(s); ${capabilityTags.join(', ')}`,
+      summary: `${server.connected ? 'connected' : 'disconnected'} ${server.trustMode} ${server.schemaFreshness}; ${tools.length} tool(s); ${capabilityTags.join(', ')}${unassessedTools.length ? '; capability and effect meanings unassessed in Classic; inspect the published schema and invoke an exact tool through its normal authorization' : ''}`,
+      ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: startedClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
+      ...(unassessedTools.length ? { unassessedTools } : {}),
       modelRoute: `agent_harness mode:"mcp_server" mcpServerId:"${server.name}"`, toolCount: tools.length, capabilityTags,
       readTools: classified.filter(tool => tool.effect === 'read-only').sort((left, right) => left.name.localeCompare(right.name)),
       writeTools: classified.filter(tool => tool.effect === 'confirmed-effect').sort((left, right) => left.name.localeCompare(right.name)),

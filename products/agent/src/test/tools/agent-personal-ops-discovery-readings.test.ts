@@ -1,3 +1,6 @@
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -135,5 +138,62 @@ describe('PersonalOps canonical discovery and complete source ownership', () => 
     const records = [{ heading: 'Synthetic item' }];
     expect(await candidateResultItems({ a: { b: { c: { d: { e: { opaque: records } } } } } }, options())).toEqual(records);
     expect(fake.requests).toHaveLength(6);
+  });
+});
+
+
+describe('Classic Personal Ops native facts and discovery', () => {
+  test('native lane matches and provider display fields work without decision or source-screening requests', async () => {
+    const privacy = researchScreeningFixture(); const current = { sourceOwner: privacy.owner };
+    const fake = fakePort(() => { throw new Error('Classic must not ask'); }); installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const entry = { id: 'inbox.native', description: 'Explicit inbox catalog registration', invokable: false };
+      expect(await personalOpsLaneMembers([entry], 'inbox', item => ({ ...item, evidence: item }), current)).toEqual([entry]);
+      expect(partitionInvokableMethods([entry])).toEqual({ available: [], unavailable: ['inbox.native'] });
+      expect(await readPersonalOpsTool(contract(), current)).toBeNull();
+      expect(await readPersonalOpsSampleField({ contract: contract(), field: 'preview', lane: 'inbox', effect: 'confirmed-effect', inputSchema: {} }, current)).toBe('<preview>');
+      expect(await readPersonalOpsBoolean({ parameter: 'unread', value: 'publisher says unread', record: {} }, current)).toBeNull();
+      expect(await readPersonalOpsBoolean({ parameter: 'unread', value: 'true', record: {} }, current)).toBe(true);
+      expect(await readPersonalOpsReceiptStatus({ metadata: { status: 'failed' } }, current)).toBe('failed');
+      expect(await readPersonalOpsReceiptStatus({ metadata: { status: 'it was delivered' } }, current)).toBe('unassessed');
+      expect(await readPersonalOpsReceiptStatus({ status: 'succeeded', metadata: { status: 'failed' } }, current)).toBe('unassessed');
+      const item = { messageId: 'message-one', subject: 'Native subject', from: 'Synthetic sender', body: 'Native message text' };
+      expect(await stringField(item, 'email message subject', current)).toBe('Native subject');
+      expect(await candidateResultItems({ data: { messages: [item] } }, current)).toEqual([item]);
+      expect(await readPersonalOpsResultField({ heading: 'Ambiguous heading' }, 'email message subject', current)).toBeNull();
+      expect(fake.requests).toHaveLength(0); expect(privacy.calls).toEqual([]);
+    });
+  });
+
+  test('Preferred native receipt fallback is restricted to actual availability exhaustion', async () => {
+    let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      expect(await readPersonalOpsReceiptStatus({ metadata: { status: 'failed' } }, options())).toBe('failed');
+      expect(await readPersonalOpsReceiptStatus({ metadata: { status: 'unfamiliar prose' } }, options())).toBe('unassessed');
+      expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' }); expect(asks).toBe(1);
+    });
+  });
+
+  for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+    test(`Personal Ops ${kind} never activates Preferred fallback`, async () => {
+      installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await expect(readPersonalOpsReceiptStatus({ metadata: { status: 'failed' } }, options())).rejects.toThrow();
+        expect(decisionModelPolicyState().operation).toBe('decision');
+      });
+    });
+  }
+
+  test('Classic keeps full native source lifetime and cancellation restrictions', async () => {
+    const source = { metadata: { status: 'failed', detail: 'Complete source detail' } }, guards: Array<() => void> = [];
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      expect(await readPersonalOpsReceiptStatus(source, { ...options(), retainCurrent: guard => { guards.push(guard); } })).toBe('failed');
+      for (const guard of guards) guard();
+      source.metadata.detail = 'Changed original source';
+      expect(() => guards.forEach(guard => guard())).toThrow();
+      const cancel = new AbortController(); cancel.abort();
+      await expect(readPersonalOpsReceiptStatus(source, { ...options(), signal: cancel.signal })).rejects.toThrow();
+    });
   });
 });

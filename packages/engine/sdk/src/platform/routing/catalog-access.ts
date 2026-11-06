@@ -11,6 +11,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { catalogProviderAccess, type ProviderAccess } from './batteries/catalog.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 export type { ProviderAccess };
 
@@ -78,6 +79,9 @@ export class ProviderAccessReadings {
 
   /** Reads every provider whose facts have not been read; returns each provider's access (undefined when unsettled). */
   async readAll(providers: readonly ProviderFacts[], site = 'providers.model-catalog.provider-access'): Promise<ReadonlyMap<string, ProviderAccess | undefined>> {
+    return decisionOrClassic(() => this.readDecisionAccess(providers, site), () => new Map(providers.map(provider => [provider.id, undefined])));
+  }
+  private async readDecisionAccess(providers: readonly ProviderFacts[], site: string): Promise<ReadonlyMap<string, ProviderAccess | undefined>> {
     const pending = providers.filter((facts) => this.#entries.get(facts.id)?.fingerprint !== accessFingerprint(facts));
     await mapLimit(pending, ACCESS_READ_CONCURRENCY, async (facts) => {
       const run = await catalogProviderAccess.run(judgmentPort(site), providerFactsState(facts), { site });

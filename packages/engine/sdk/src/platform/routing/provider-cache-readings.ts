@@ -9,6 +9,7 @@ import { cacheMinimum, copilotClaudeModel } from './batteries/provider-cache.js'
 import { ReadingMemo } from './provider-readings.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 const holds = (reading: YesNoReading): boolean => requireActingReading(reading).verdict === 'yes';
 
@@ -16,6 +17,12 @@ const claudeMemo = new ReadingMemo<boolean>(256);
 
 /** Whether a Copilot model id names an Anthropic Claude model; only settled readings choose a transport. */
 export function readsAsCopilotClaudeModel(modelId: string, site: string): Promise<boolean> {
+  // The adapter checks actual /models endpoint/vendor declarations first.
+  // Classic's remaining compatibility rule uses Copilot's explicit Claude ID
+  // prefix; it never fabricates a model-family reading or confidence.
+  return decisionOrClassic(() => readDecisionCopilotClaudeModel(modelId, site), () => modelId.toLowerCase().startsWith('claude-'));
+}
+function readDecisionCopilotClaudeModel(modelId: string, site: string): Promise<boolean> {
   assertJudgmentInput({ model_id: modelId });
   return claudeMemo.get(modelId, async () => {
     const run = await copilotClaudeModel.run(judgmentPort(site), { model_id: modelId }, { site });
@@ -29,6 +36,9 @@ const cacheMinimumMemo = new ReadingMemo<boolean>(128);
 
 /** Whether a failed cache creation says the content is below the cache minimum; uncertainty is not cached as false. */
 export function readsAsBelowCacheMinimum(errorText: string, site: string): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionBelowCacheMinimum(errorText, site), () => false);
+}
+function readDecisionBelowCacheMinimum(errorText: string, site: string): Promise<boolean> {
   const state = { error: errorText };
   assertJudgmentInput(state);
   return cacheMinimumMemo.get(state.error, async () => {

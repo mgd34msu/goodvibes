@@ -16,6 +16,10 @@ import { readBundleRisk } from '../sdk/src/platform/runtime/settings/control-pla
 import { readCommandNeeds, decideSandboxedExec } from '../sdk/src/platform/runtime/permissions/sandbox-policy.js';
 import { createSandboxEscalationApprovalHandler } from '../sdk/src/platform/runtime/permissions/sandbox-escalation.js';
 import { readProcessOutput } from '../terminal-shell/src/process-output-reading.js';
+import { readTierPromptSupplement } from '../sdk/src/platform/providers/tier-prompts.js';
+import { ProviderAccessReadings } from '../sdk/src/platform/routing/catalog-access.js';
+import { readsAsBelowCacheMinimum, readsAsCopilotClaudeModel } from '../sdk/src/platform/routing/provider-cache-readings.js';
+import { readCommandDiscovery } from '../sdk/src/platform/routing/command-discovery.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });
@@ -25,6 +29,29 @@ function outage() {
   restore = () => { installJudgmentPort(previous); };
   return fake.requests;
 }
+
+test('Classic prompt composition, provider catalog refresh and command suggestions avoid metadata readings', async () => {
+  const requests = outage();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    let tiersRead = 0;
+    const supplement = await readTierPromptSupplement({ registryKey: 'synthetic:model', id: 'model', name: 'Synthetic model', provider: 'synthetic' }, {
+      async read() { tiersRead++; throw new Error('No metadata reading expected'); },
+    }, 'test.classic.prompt', { audience: 'conversation' });
+    expect(supplement).toContain('required parameters');
+    expect(supplement).not.toContain('no human watching');
+    expect(tiersRead).toBe(0);
+    const access = await new ProviderAccessReadings().readAll([{ id: 'synthetic', name: 'Synthetic provider', envVars: [], sampleModels: ['model'] }]);
+    expect(access.has('synthetic')).toBe(true); expect(access.get('synthetic')).toBeUndefined();
+    expect(await readsAsCopilotClaudeModel('claude-synthetic', 'test.classic.copilot')).toBe(true);
+    expect(await readsAsCopilotClaudeModel('other-model', 'test.classic.copilot')).toBe(false);
+    expect(await readsAsBelowCacheMinimum('Unclassified cache failure.', 'test.classic.cache')).toBe(false);
+    const commands = [{ id: 'inspect', title: 'Inspect source', description: 'Inspect a source file', aliases: ['look'], keywords: ['source'] }];
+    const discovery = await readCommandDiscovery({ query: 'source', commands });
+    expect(discovery).toMatchObject({ ids: ['inspect'], provenance: 'classic' });
+    discovery.assertCurrent();
+  });
+  expect(requests).toHaveLength(0);
+});
 
 test('Classic provider setup, ordinary streaming and error handling require no decision requests', async () => {
   const requests = outage();

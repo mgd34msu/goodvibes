@@ -12,6 +12,7 @@ import type { ModelTier } from './registry.js';
 import type { ModelFacts, ModelTierStore } from '../routing/model-tiers.js';
 import { GUIDANCE_TIER_WHEN_UNSETTLED } from '../routing/policy.js';
 import type { RouteTier } from '../routing/tiers.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 export type { ModelTier };
 
 /** The guidance level each capability tier gets: the smallest models the most. */
@@ -70,6 +71,15 @@ export async function readTierPromptSupplement(
   site = 'providers.tier-prompts',
   options: TierPromptSupplementOptions & { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<string> {
+  return decisionOrClassic(() => readDecisionTierPromptSupplement(model, tiers, site, options), () => {
+    assertTierPromptActive(options.signal);
+    // Fixed tool guidance carries no claim about this model's capability.
+    // In particular it contains no unattended semantic-completion contract.
+    return STANDARD_SUPPLEMENT;
+  });
+}
+async function readDecisionTierPromptSupplement(model: ModelFacts, tiers: Pick<ModelTierStore, 'read'>, site: string,
+  options: TierPromptSupplementOptions & { readonly signal?: AbortSignal | undefined }): Promise<string> {
   // The store may serve a cached/shared reading without observing this caller's
   // signal. Check on both sides so a cancelled prompt cannot consume a late tier.
   assertTierPromptActive(options.signal);

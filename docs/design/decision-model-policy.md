@@ -181,6 +181,15 @@ checks follow that same policy without eagerly acquiring an unused model port.
 If a hosted conversation fails after completing work, Classic reports the failed
 input for inspection/resume and does not automatically replay the whole turn.
 
+Conversation prompt composition uses fixed generic tool reminders in Classic;
+it does not ask a model to classify the answering model's capability tier. Model
+catalog refresh preserves published prices/limits while leaving interpreted
+provider billing access unknown. Copilot's declared endpoint/vendor facts remain
+authoritative; its Classic compatibility rule uses the explicit Claude ID prefix
+only when those facts are absent. Failed optional prompt caching falls back to
+an uncached answer without interpreting failure prose. Command suggestions use
+local declared titles, aliases and keywords, without executing a suggestion.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

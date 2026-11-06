@@ -2,6 +2,9 @@ import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { rankClassicCatalog } from '../runtime/classic-catalog.js';
 
 export interface CommandDiscoveryEntry {
   readonly id: string;
@@ -15,6 +18,7 @@ export interface CommandDiscoveryRequest {
   readonly commands: readonly CommandDiscoveryEntry[];
 }
 export interface CommandDiscoveryReading {
+  readonly provenance?: 'classic';
   readonly ids: readonly string[];
   /** Recheck before displaying a suggestion or using its command reference. */
   readonly assertCurrent: () => void;
@@ -37,6 +41,24 @@ export const commandDiscovery = defineSelector({
 
 /** The selector batches all commands in each wire request, with no lexical prefilter. */
 export async function readCommandDiscovery(input: CommandDiscoveryRequest, options: JudgmentReadingOptions = {}): Promise<CommandDiscoveryReading> {
+  return decisionOrClassic(() => readDecisionCommandDiscovery(input, options), () => {
+    const source = retainStrictJudgmentJson(input);
+    const signal = options.signal, callerCurrent = options.assertCurrent;
+    const current = () => {
+      signal?.throwIfAborted(); source.assertCurrent();
+      if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Command discovery owner changed.');
+      const restriction: unknown = callerCurrent?.();
+      if (restriction !== undefined) { drainOwned(restriction); throw new Error('Command discovery guard must be synchronous.'); }
+      signal?.throwIfAborted(); source.assertCurrent();
+    };
+    current();
+    const ids = rankClassicCatalog(source.snapshot.commands, source.snapshot.query, command => ({ id: command.id,
+      description: [command.title, command.description, ...command.aliases, ...command.keywords].join('\n') })).slice(0, 5).map(match => match.entry.id);
+    current();
+    return { ids, provenance: 'classic' as const, assertCurrent: current };
+  });
+}
+async function readDecisionCommandDiscovery(input: CommandDiscoveryRequest, options: JudgmentReadingOptions): Promise<CommandDiscoveryReading> {
   const source = retainStrictJudgmentJson(input);
   assertJudgmentInput(source.snapshot);
   if (JSON.stringify(source.snapshot).length > 160_000) throw new JudgmentInputError('unsupported-input');

@@ -64,7 +64,10 @@ describe('the real daemon surface control caller', () => {
       await h.context.performSurfaceControlCommand(command!);
       expect(h.effects).toEqual(['cancel:run-1']);
       expect(() => h.context.performSurfaceControlCommand(command!)).toThrow();
-      expect(await h.context.parseSurfaceControlCommand('Explain the text "/cancel run-1"')).toBeNull();
+      const ordinary = 'Explain the text "/cancel run-1"';
+      await h.authorize(ordinary);
+      expect(await h.context.parseSurfaceControlCommand(ordinary)).toBeNull();
+      await h.authorize('/cancel missing-run');
       expect(await h.context.parseSurfaceControlCommand('/cancel missing-run')).toBeNull();
       expect(requests).toEqual([]);
     });

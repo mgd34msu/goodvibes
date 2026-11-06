@@ -123,8 +123,10 @@ describe('who may answer over a channel', () => {
   test('the shared ingress hook consumes an answer so it never becomes a chat turn', async () => {
     const inbox = new PaymentReplyInbox();
     const wait = inbox.waitForAnswer({ kind: 'approval', deadlineMs: soon(), channels: ['telegram'], notice: APPROVAL_NOTICE });
+    const admitted = decision();
     const helper = new DaemonSurfaceActionHelper({
-      channelPolicy: { preflightIngress: async () => decision(), evaluateIngress: async () => decision() },
+      channelPolicy: { preflightIngress: async () => admitted, evaluateIngress: async () => admitted,
+        getPolicy: () => admitted.policy, listPolicies: () => [admitted.policy] },
       configManager: { get: () => undefined, getCategory: () => undefined },
       routeBindings: { getBinding: () => undefined },
       paymentReplies: inbox,

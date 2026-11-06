@@ -20,6 +20,19 @@ import { ChannelProviderRuntimeManager } from '../sdk/src/platform/channels/prov
 import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
 import { RuntimeEventBus } from '../sdk/src/platform/runtime/events/index.js';
 import { emitTurnCompleted, emitTurnSubmitted } from '../sdk/src/platform/runtime/emitters/index.js';
+import type { ChannelPolicyRecord } from '../sdk/src/platform/channels/types.js';
+
+/** Stable published policy, including the owner views used by retained guards. */
+function allowedNtfyPolicy() {
+  const policy: ChannelPolicyRecord = { surface: 'ntfy', enabled: true, requireMention: false,
+    allowDirectMessages: true, allowGroupMessages: true, allowThreadMessages: true,
+    dmPolicy: 'inherit', groupPolicy: 'inherit', allowTextCommandsWithoutMention: false,
+    allowlistUserIds: [], allowlistChannelIds: [], allowlistGroupIds: [], allowedCommands: [],
+    groupPolicies: [], updatedAt: 1, metadata: {} };
+  return { getPolicy: () => policy, listPolicies: () => [policy],
+    preflightIngress: async () => ({ allowed: true, reason: 'fixture', policy }),
+    evaluateIngress: async () => ({ allowed: true, reason: 'fixture', policy }) };
+}
 
 describe('NtfyIntegration.subscribeJsonStream()', () => {
   test('streams newline-delimited JSON with auth and exits cleanly on abort', async () => {
@@ -317,7 +330,7 @@ describe('ntfy topic routing', () => {
           findPreferredSession: async () => ({ id: 'shared-tui-session' }),
           appendCompanionMessage: async () => ({}),
         },
-        channelPolicy: { preflightIngress: async () => ({ allowed: true }), evaluateIngress: async () => ({ allowed: true }) },
+        channelPolicy: allowedNtfyPolicy(),
         controlPlaneGateway: { publishEvent: () => {} },
         runtimeBus,
         companionChatManager: null,
@@ -407,7 +420,7 @@ describe('ntfy topic routing', () => {
           findPreferredSession: async () => ({ id: 'shared-tui-session' }),
           appendCompanionMessage: async () => ({}),
         },
-        channelPolicy: { preflightIngress: async () => ({ allowed: true }), evaluateIngress: async () => ({ allowed: true }) },
+        channelPolicy: allowedNtfyPolicy(),
         controlPlaneGateway: { publishEvent: () => {} },
         runtimeBus,
         companionChatManager: null,
@@ -591,7 +604,7 @@ describe('ntfy topic routing', () => {
           findPreferredSession: async () => null,
           appendCompanionMessage: async () => ({}),
         },
-        channelPolicy: { preflightIngress: async () => ({ allowed: true }), evaluateIngress: async () => ({ allowed: true }) },
+        channelPolicy: allowedNtfyPolicy(),
         controlPlaneGateway: { publishEvent: () => {} },
         runtimeBus: new RuntimeEventBus(),
         companionChatManager,

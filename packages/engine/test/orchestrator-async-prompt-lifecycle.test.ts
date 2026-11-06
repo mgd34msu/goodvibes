@@ -54,7 +54,7 @@ function fixture(getSystemPrompt: NonNullable<OrchestratorOptions['getSystemProm
     reconcileObservedContextWindow: () => {}, resolveModelPricing: () => UNKNOWN_MODEL_PRICING,
   } as unknown as ProviderRegistry;
   const configManager = {
-    get: (key: string) => key === 'behavior.autoCompactThreshold' ? 0 : false,
+    get: (key: string) => key === 'judgment.policy' ? undefined : key === 'behavior.autoCompactThreshold' ? 0 : false,
     getCategory: () => ({}), getWorkingDirectory: () => process.cwd(),
   } as unknown as ConfigManager;
   const toolRegistry = new ToolRegistry();

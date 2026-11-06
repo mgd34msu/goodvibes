@@ -197,6 +197,7 @@ function buildHarness(options: HarnessOptions = {}) {
         return { allowed: true, reason: 'allowed', policy: policyRecord };
       },
       getPolicy: () => policyRecord,
+      listPolicies: () => [policyRecord],
     },
     // Event-emission coverage is separate from this persisted-store fixture.
     controlPlaneGateway: { publishEvent: () => undefined },

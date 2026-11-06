@@ -785,6 +785,10 @@ export class Orchestrator {
     nativeTurn?: NativeConversationTurnAdmission,
     resume?: string,
   ): Promise<void> {
+    // Ordinary owner input begins a new exposure window even if configuration
+    // cannot be read. Native deliveries acquire this boundary only after their
+    // retained permit has been validated; recovery continues the existing turn.
+    if (!nativeTurn && !resume) startTurnForOwnerInput(options?.origin);
     const execute = async () => {
       try {
         if (nativeTurn) {
@@ -831,7 +835,7 @@ export class Orchestrator {
     // this runtime can resolve a model for it, a boundary that depends on
     // unrelated resolution succeeding silently stops moving when it fails.
     // Reasoning and classification: security/turn-boundary.ts.
-    if (!resume) startTurnForOwnerInput(options?.origin);
+    if (nativeTurn && !resume) startTurnForOwnerInput(options?.origin);
 
     const turnStartTime = Date.now();
     const configManager = requireConfigManager(this.coreServices);

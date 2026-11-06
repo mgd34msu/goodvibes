@@ -1,15 +1,15 @@
-import { createTranscriptReviewFormatter } from '@goodvibes-jev/engine/terminal-shell/transcript-review';
-const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(' ', ', ');
-import { parseTranscriptKind } from '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
+import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
+import '@goodvibes-jev/engine/terminal-shell/transcript-review';
+
+import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { captureTranscriptSource, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
-import { randomBytes } from 'node:crypto';
+import { captureTranscriptSource, transcriptReadingCanceled } from './transcript-reading.ts';
+import 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { CommandContext } from '../command-registry.ts';
-import { type SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
 
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
@@ -18,7 +18,7 @@ import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/
 import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/sdk/platform/core';
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
 
@@ -180,395 +180,6 @@ function conversationMessageContentText(message: ConversationMessageSnapshot): s
     .join('\n');
 }
 
-export async function handleSessionWorkflowCommand(args: string[], ctx: CommandContext): Promise<boolean> {
-  const sm = requireSessionManager(ctx);
-  const sub = args[0];
-  if (['resume', 'save', 'fork'].includes(sub ?? '') && ctx.isGenerating?.()) {
-    ctx.print('A turn is still running. Stop it with Esc or let it finish before changing sessions.');
-    return true;
-  }
-
-  if (!sub) {
-    const id = ctx.session.runtime.sessionId;
-    const msgCount = ctx.session.conversationManager.getMessageCount();
-    const title = ctx.session.conversationManager.title || '(untitled)';
-    const meta = sm.getMeta(id);
-    const started = meta ? new Date(meta.timestamp).toLocaleString() : 'this session';
-    ctx.print(
-      [
-        'Current session',
-        `  id ${id}`,
-        `  name ${title}`,
-        `  started ${started}`,
-        `  messages ${msgCount}`,
-        `  model ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
-      ].join('\n'),
-    );
-    return true;
-  }
-
-  if (sub === 'list') {
-    const sessions = sm.list();
-    if (sessions.length === 0) {
-      ctx.print('No saved sessions. Use /session save [name] to save the current session.');
-      return true;
-    }
-    const lines = ['Sessions (most recent first)', ''];
-    for (const session of sessions) {
-      const date = new Date(session.timestamp).toLocaleString();
-      const name = session.title || session.name;
-      const model = session.model ? ` [${session.model}]` : '';
-      const active = session.name === ctx.session.runtime.sessionId ? ' ●' : '  ';
-      lines.push(`${active} ${session.name.padEnd(28)} ${name.slice(0, 22).padEnd(22)} ${date}  ${session.messageCount} msgs${model}`);
-      if (session.returnContext?.activeTasks || session.returnContext?.blockedTasks || session.returnContext?.pendingApprovals) {
-        const posture = [
-          session.returnContext.activeTasks ? `active ${session.returnContext.activeTasks}` : null,
-          session.returnContext.blockedTasks ? `blocked ${session.returnContext.blockedTasks}` : null,
-          session.returnContext.pendingApprovals ? `approvals ${session.returnContext.pendingApprovals}` : null,
-        ]
-          .filter(Boolean)
-          .join('  ');
-        if (posture) lines.push(`     posture ${posture}`);
-      }
-    }
-    ctx.print(lines.join('\n'));
-    return true;
-  }
-
-  if (sub === 'rename') {
-    const newName = args.slice(1).join(' ').trim();
-    if (!newName) {
-      ctx.print('Usage: /session rename <new-name>');
-      return true;
-    }
-    try {
-      const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
-      if (!existingMeta) {
-        sm.save(ctx.session.runtime.sessionId, ctx.session.conversationManager.getMessageSnapshot(), {
-          title: ctx.session.conversationManager.title || '',
-          model: ctx.session.runtime.model,
-          provider: ctx.session.runtime.provider,
-          timestamp: Date.now(),
-          titleSource: ctx.session.conversationManager.getTitleSource(),
-          // Backfilling a save so /session rename has a file to rename is still
-          // user-directed (the user typed /session rename), stamp 'user' so
-          // retention never reclaims it. See saveSource's doc comment on SessionMeta.
-          saveSource: 'user',
-        });
-      }
-      sm.rename(ctx.session.runtime.sessionId, newName);
-      ctx.session.conversationManager.title = newName;
-      ctx.print(['Session renamed', `  name ${newName}`].join('\n'));
-      ctx.renderRequest();
-    } catch (e) {
-      ctx.print(formatSessionFailure('rename session', e));
-    }
-    return true;
-  }
-
-  if (sub === 'resume') {
-    const target = args.slice(1).join(' ').trim();
-    if (!target) {
-      ctx.print('Usage: /session resume <session-id-or-name>');
-      return true;
-    }
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found ${target}\nUse /session list to see available sessions.`);
-      return true;
-    }
-    try {
-      const { meta, messages } = sm.load(found.name);
-      const providerApi = requireProviderApi(ctx);
-      const sourceSessionId = ctx.session.runtime.sessionId;
-      let model = meta.model;
-      let provider = meta.provider;
-      if (model) {
-        try {
-          const selected = await providerApi.selectModel(model);
-          model = selected.registryKey;
-          provider = selected.providerId;
-        } catch {
-          /* The saved model may no longer exist locally. */
-        }
-      }
-      if (ctx.isGenerating?.() || ctx.session.runtime.sessionId !== sourceSessionId) {
-        throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
-      }
-      const restoredAnchorCount = restoreLoadedSession(
-        found.name,
-        { meta, messages },
-        {
-          conversation: ctx.session.conversationManager,
-          runtime: ctx.session.runtime,
-          restoreTurnAnchors: ctx.session.restoreTurnAnchors,
-          surface: ctx.session.surface,
-        },
-      );
-      if (model) ctx.session.runtime.model = model;
-      if (provider) ctx.session.runtime.provider = provider;
-      ctx.session.writeLastSessionPointer?.(found.name);
-      ctx.renderRequest();
-      ctx.print(
-        [
-          'Resumed session',
-          `  id ${found.name}`,
-          `  name ${meta.title || '(untitled)'}`,
-          `  messages ${messages.length}`,
-          `  model ${meta.model || ctx.session.runtime.model}`,
-          ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
-        ].join('\n'),
-      );
-      const returnContextMode = getReturnContextMode(ctx.platform.configManager);
-      if (returnContextMode !== 'off' && meta.returnContext) {
-        for (const line of formatReturnContextForDisplay(meta.returnContext)) {
-          ctx.print(`  ${line}`);
-        }
-        if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
-          ctx.print(
-            '  Remote re-entry. Handle remote build-host recovery outside Agent; delegate explicit build/fix/review recovery from Agent.',
-          );
-        }
-        if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
-          ctx.print(
-            '  Worktree re-entry. Open GoodVibes TUI in the target workspace; delegate explicit build/fix/review recovery from Agent.',
-          );
-        }
-        if (returnContextMode === 'assisted') {
-          const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
-          void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
-            if (!assisted.assistedNarrative) return;
-            ctx.print(`  Assist ${assisted.assistedNarrative}`);
-            ctx.renderRequest();
-          });
-        }
-      }
-    } catch (e) {
-      ctx.print(formatSessionFailure('resume session', e));
-    }
-    return true;
-  }
-
-  if (sub === 'fork') {
-    const sourceSessionId = ctx.session.runtime.sessionId;
-    const newId = `user-${randomBytes(4).toString('hex')}`;
-    const messages = ctx.session.conversationManager.getMessageSnapshot();
-    const currentTitle = ctx.session.conversationManager.title;
-    const forkName = args[1] ? args.slice(1).join(' ').trim() : `fork-of-${sourceSessionId.slice(0, 8)}`;
-    const meta: SessionMeta = {
-      title: forkName,
-      model: ctx.session.runtime.model,
-      provider: ctx.session.runtime.provider,
-      timestamp: Date.now(),
-      titleSource: ctx.session.conversationManager.getTitleSource(),
-      // /session fork is user-directed, stamp 'user' so retention never
-      // reclaims the forked file. See saveSource's doc comment on SessionMeta.
-      saveSource: 'user',
-    };
-    try {
-      sm.save(newId, messages, meta);
-      copySessionSidecars(sourceSessionId, newId, ctx.session.conversationManager, ctx.session.surface);
-      ctx.session.runtime.sessionId = newId;
-      // Fork re-homes the live session onto the new id, write the
-      // last-session pointer through the surface-bound closure, same as
-      // /session resume, so the next launch resumes the fork, not the source.
-      ctx.session.writeLastSessionPointer?.(newId);
-      ctx.session.conversationManager.title = forkName;
-      ctx.renderRequest();
-      ctx.print(
-        [
-          'Session forked',
-          `  id ${newId}`,
-          `  name ${forkName}`,
-          `  from ${currentTitle || sourceSessionId}`,
-          `  messages ${messages.length}`,
-        ].join('\n'),
-      );
-    } catch (e) {
-      ctx.print(formatSessionFailure('fork session', e));
-    }
-    return true;
-  }
-
-  if (sub === 'save') {
-    const messages = ctx.session.conversationManager.getMessageSnapshot();
-    const rawName = args[1] ? args.slice(1).join(' ').trim() : ctx.session.conversationManager.title || ctx.session.runtime.sessionId;
-    const meta: SessionMeta = {
-      title: ctx.session.conversationManager.title,
-      model: ctx.session.runtime.model,
-      provider: ctx.session.runtime.provider,
-      timestamp: Date.now(),
-      titleSource: ctx.session.conversationManager.getTitleSource(),
-      // /session save is user-directed, stamp 'user' so retention never
-      // reclaims it. See saveSource's doc comment on SessionMeta.
-      saveSource: 'user',
-    };
-    try {
-      const { filePath, sanitizedName } = sm.save(rawName, messages, meta);
-      copySessionSidecars(ctx.session.runtime.sessionId, sanitizedName, ctx.session.conversationManager, ctx.session.surface);
-      ctx.session.runtime.sessionId = sanitizedName;
-      ctx.print(
-        [
-          'Session saved',
-          `  name ${rawName}`,
-          ...(sanitizedName !== rawName ? [`  saved as ${sanitizedName}`] : []),
-          `  path ${filePath}`,
-        ].join('\n'),
-      );
-    } catch (e) {
-      ctx.print(formatSessionFailure('save session', e));
-    }
-    return true;
-  }
-
-  if (sub === 'info') {
-    const target = args[1] || ctx.session.runtime.sessionId;
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found ${target}`);
-      return true;
-    }
-    const date = new Date(found.timestamp).toLocaleString();
-    ctx.print(
-      [
-        `Session ${found.name}`,
-        `  title ${found.title || '(untitled)'}`,
-        `  model ${found.model || '(unknown)'}`,
-        `  provider ${found.provider || '(unknown)'}`,
-        `  date ${date}`,
-        `  messages ${found.messageCount}`,
-        `  file ${found.filePath}`,
-        ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
-      ].join('\n'),
-    );
-    return true;
-  }
-
-  if (sub === 'export') {
-    const target = args[1];
-    if (!target) {
-      ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
-      return true;
-    }
-    const format = (args[2] || 'markdown').toLowerCase();
-    const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
-    const sessions = sm.list();
-    const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
-    if (!found && target !== '.') {
-      try {
-        const { meta, messages } = sm.load(sessionId);
-        await printSessionExport(ctx, sessionId, meta.title, readConversationMessageSnapshots(messages), format, args);
-      } catch (error) {
-        if (transcriptReadingCanceled(error) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
-        ctx.print(`Session not found ${sessionId}`);
-      }
-      return true;
-    }
-    const loadName = found ? found.name : sessionId;
-    try {
-      const { meta, messages } = sm.load(loadName);
-      await printSessionExport(ctx, loadName, meta.title, readConversationMessageSnapshots(messages), format, args, found?.filePath);
-    } catch (e) {
-      if (transcriptReadingCanceled(e) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
-      ctx.print(formatSessionFailure('export session', e));
-    }
-    return true;
-  }
-
-  if (sub === 'search') {
-    const query = args.slice(1).join(' ').trim();
-    if (!query) {
-      ctx.print('Usage: /session search <keyword>');
-      return true;
-    }
-    const results = sm.search(query);
-    if (results.length === 0) {
-      ctx.print(`No sessions found matching "${query}"`);
-      return true;
-    }
-    const lines = [`Search results for "${query}" (${results.length} session${results.length !== 1 ? 's' : ''})\n`];
-    for (const result of results) {
-      const date = new Date(result.session.timestamp).toLocaleString();
-      lines.push(
-        `  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`,
-      );
-      for (const snippet of result.snippets) {
-        lines.push(`    > ${snippet}`);
-      }
-      lines.push('');
-    }
-    ctx.print(lines.join('\n'));
-    return true;
-  }
-
-  if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-    const kind = parseTranscriptKind(args[1]);
-    const source = captureTranscriptSource(ctx);
-    try {
-      const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);
-      source.assertPublishable();
-      ctx.print(lines.join('\n'));
-    } catch (error) {
-      try {
-        source.assertPublishable();
-      } catch {
-        return true;
-      }
-      if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
-    }
-    return true;
-  }
-
-  if (sub === 'delete') {
-    const parsed = stripYesFlag(args);
-    const target = parsed.rest[1];
-    if (!target) {
-      ctx.print('Usage: /session delete <session-id> --yes');
-      return true;
-    }
-    if (!parsed.yes) {
-      requireYesFlag(ctx, `delete saved session ${target}`, '/session delete <session-id> --yes');
-      return true;
-    }
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found ${target}`);
-      return true;
-    }
-    if (found.name === ctx.session.runtime.sessionId) {
-      ctx.print(`Cannot delete the active session (${found.name}).\nSwitch to another session first with /session resume <id>.`);
-      return true;
-    }
-    try {
-      sm.delete(found.name);
-      ctx.print(['Session deleted', `  id ${found.name}`, ...(found.title ? [`  title ${found.title}`] : [])].join('\n'));
-    } catch (e) {
-      ctx.print(formatSessionFailure('delete session', e));
-    }
-    return true;
-  }
-
-  return false;
-}
-
 // NOTE (core-verb pass): this file used to also export
 // registerSessionWorkflowCommands(), a second top-level `/session` (alias
 // `sess`) registration with its own usage text. It was NEVER called from
@@ -583,3 +194,182 @@ export async function handleSessionWorkflowCommand(args: string[], ctx: CommandC
 // orphan, worst-class collision #4) and
 // src/test/input/session-single-registration.test.ts for the regression
 // guard.
+
+export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+  headingSuffix: '',
+  detailSeparator: ' ',
+  postureSeparator: ' ',
+  confirmDelete: true,
+  reviewSeparator: ' ',
+  reviewDetailSeparator: ', ',
+  field(view, key, value) {
+    const labels: Readonly<Record<string, string>> =
+      view === 'current'
+        ? { id: '  id ', name: '  name ', started: '  started ', messages: '  messages ', model: '  model ' }
+        : {
+            heading: 'Session ',
+            title: '  title ',
+            model: '  model ',
+            provider: '  provider ',
+            date: '  date ',
+            messages: '  messages ',
+            file: '  file ',
+          };
+    return (labels[key] ?? '') + value;
+  },
+  renamed: (name) => 'Session renamed\n  name ' + name,
+  deleted: (name, title) => ['Session deleted', '  id ' + name, ...(title ? ['  title ' + title] : [])].join('\n'),
+  failed: (action, error) => formatSessionFailure(action + ' session', error),
+  captureSession: (ctx) => ({
+    messages: ctx.session.conversationManager.getMessageSnapshot(),
+    metadata: { titleSource: ctx.session.conversationManager.getTitleSource() },
+  }),
+  copySidecars: (ctx, source, destination) =>
+    copySessionSidecars(source, destination, ctx.session.conversationManager, ctx.session.surface),
+  beforeSwitch: () => {},
+  afterSwitch: (ctx, operation, destination) => {
+    if (operation === 'fork') ctx.session.writeLastSessionPointer?.(destination);
+  },
+  saved: (name, sanitized, path) =>
+    ['Session saved', '  name ' + name, ...(sanitized !== name ? ['  saved as ' + sanitized] : []), '  path ' + path].join('\n'),
+  forked: (id, name, source, title, count) =>
+    ['Session forked', '  id ' + id, '  name ' + name, '  from ' + (title || source), '  messages ' + count].join('\n'),
+  prepareRename(ctx, sm) {
+    const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
+    if (!existingMeta) {
+      sm.save(ctx.session.runtime.sessionId, ctx.session.conversationManager.getMessageSnapshot(), {
+        title: ctx.session.conversationManager.title || '',
+        model: ctx.session.runtime.model,
+        provider: ctx.session.runtime.provider,
+        timestamp: Date.now(),
+        titleSource: ctx.session.conversationManager.getTitleSource(),
+        // Backfilling a save so /session rename has a file to rename is still
+        // user-directed (the user typed /session rename), stamp 'user' so
+        // retention never reclaims it. See saveSource's doc comment on SessionMeta.
+        saveSource: 'user',
+      });
+    }
+  },
+  async productCommand(args, ctx, sm, sub) {
+    if (sub === 'resume') {
+      const target = args.slice(1).join(' ').trim();
+      if (!target) {
+        ctx.print('Usage: /session resume <session-id-or-name>');
+        return true;
+      }
+      const sessions = sm.list();
+      const candidates = findSessionCandidates(sessions, target);
+      if (candidates.length > 1) {
+        ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
+        return true;
+      }
+      const found = candidates[0];
+      if (!found) {
+        ctx.print(`Session not found ${target}\nUse /session list to see available sessions.`);
+        return true;
+      }
+      try {
+        const { meta, messages } = sm.load(found.name);
+        const providerApi = requireProviderApi(ctx);
+        const sourceSessionId = ctx.session.runtime.sessionId;
+        let model = meta.model;
+        let provider = meta.provider;
+        if (model) {
+          try {
+            const selected = await providerApi.selectModel(model);
+            model = selected.registryKey;
+            provider = selected.providerId;
+          } catch {
+            /* The saved model may no longer exist locally. */
+          }
+        }
+        if (ctx.isGenerating?.() || ctx.session.runtime.sessionId !== sourceSessionId) {
+          throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
+        }
+        const restoredAnchorCount = restoreLoadedSession(
+          found.name,
+          { meta, messages },
+          {
+            conversation: ctx.session.conversationManager,
+            runtime: ctx.session.runtime,
+            restoreTurnAnchors: ctx.session.restoreTurnAnchors,
+            surface: ctx.session.surface,
+          },
+        );
+        if (model) ctx.session.runtime.model = model;
+        if (provider) ctx.session.runtime.provider = provider;
+        ctx.session.writeLastSessionPointer?.(found.name);
+        ctx.renderRequest();
+        ctx.print(
+          [
+            'Resumed session',
+            `  id ${found.name}`,
+            `  name ${meta.title || '(untitled)'}`,
+            `  messages ${messages.length}`,
+            `  model ${meta.model || ctx.session.runtime.model}`,
+            ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
+          ].join('\n'),
+        );
+        const returnContextMode = getReturnContextMode(ctx.platform.configManager);
+        if (returnContextMode !== 'off' && meta.returnContext) {
+          for (const line of formatReturnContextForDisplay(meta.returnContext)) {
+            ctx.print(`  ${line}`);
+          }
+          if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
+            ctx.print(
+              '  Remote re-entry. Handle remote build-host recovery outside Agent; delegate explicit build/fix/review recovery from Agent.',
+            );
+          }
+          if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
+            ctx.print(
+              '  Worktree re-entry. Open GoodVibes TUI in the target workspace; delegate explicit build/fix/review recovery from Agent.',
+            );
+          }
+          if (returnContextMode === 'assisted') {
+            const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
+            void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
+              if (!assisted.assistedNarrative) return;
+              ctx.print(`  Assist ${assisted.assistedNarrative}`);
+              ctx.renderRequest();
+            });
+          }
+        }
+      } catch (e) {
+        ctx.print(formatSessionFailure('resume session', e));
+      }
+      return true;
+    }
+
+    if (sub === 'export') {
+      const target = args[1];
+      if (!target) {
+        ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
+        return true;
+      }
+      const format = (args[2] || 'markdown').toLowerCase();
+      const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
+      const sessions = sm.list();
+      const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
+      if (!found && target !== '.') {
+        try {
+          const { meta, messages } = sm.load(sessionId);
+          await printSessionExport(ctx, sessionId, meta.title, readConversationMessageSnapshots(messages), format, args);
+        } catch (error) {
+          if (transcriptReadingCanceled(error) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
+          ctx.print(`Session not found ${sessionId}`);
+        }
+        return true;
+      }
+      const loadName = found ? found.name : sessionId;
+      try {
+        const { meta, messages } = sm.load(loadName);
+        await printSessionExport(ctx, loadName, meta.title, readConversationMessageSnapshots(messages), format, args, found?.filePath);
+      } catch (e) {
+        if (transcriptReadingCanceled(e) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
+        ctx.print(formatSessionFailure('export session', e));
+      }
+      return true;
+    }
+    return false;
+  },
+});

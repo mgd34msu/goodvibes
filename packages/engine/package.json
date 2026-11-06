@@ -2743,6 +2743,11 @@
       "bun": "./terminal-shell/src/transcript-review.ts",
       "types": "./terminal-shell/dist/transcript-review.d.ts",
       "import": "./terminal-shell/dist/transcript-review.js"
+    },
+    "./terminal-shell/session-workflow-commands": {
+      "bun": "./terminal-shell/src/session-workflow-commands.ts",
+      "types": "./terminal-shell/dist/session-workflow-commands.d.ts",
+      "import": "./terminal-shell/dist/session-workflow-commands.js"
     }
   },
   "publishConfig": {

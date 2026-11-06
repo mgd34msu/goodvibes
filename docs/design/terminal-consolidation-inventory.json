@@ -688,8 +688,10 @@
       "status": "pending-convergence",
       "platformFunctions": [
         "parseTranscriptKind",
-        "transcript-review"
-      ]
+        "transcript-review",
+        "session-workflow-commands: current/list/rename/info/search/review/delete/save/fork"
+      ],
+      "notes": "Shared session mechanics now cover listing, metadata, rename, search, transcript review, confirmed deletion and save/fork metadata/sidecar/switch ordering. Remaining resume and export adapters retain product journal/liveness policies and Agent owned/redacted export boundary; continue auditing those paths."
     },
     {
       "path": "input/commands/session.ts",

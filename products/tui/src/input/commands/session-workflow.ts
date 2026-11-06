@@ -1,14 +1,14 @@
-import { createTranscriptReviewFormatter } from '@goodvibes-jev/engine/terminal-shell/transcript-review';
-const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(': ', ': ');
-import { parseTranscriptKind } from '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
+import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
+import '@goodvibes-jev/engine/terminal-shell/transcript-review';
+
+import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { captureTranscriptSource, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.ts';
-import { randomBytes } from 'node:crypto';
+import './transcript-reading.ts';
+import 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { CommandContext } from '../command-registry.ts';
-import { type SessionMeta } from '@goodvibes-jev/engine/sdk/platform/sessions';
 
 import type { ConversationTitleSource } from '../../core/conversation';
 import type { SessionReturnContextSummary } from '@/runtime/index.ts';
@@ -87,388 +87,6 @@ function printSessionExport(
   ctx.print(lines.join('\n'));
 }
 
-export async function handleSessionWorkflowCommand(args: string[], ctx: CommandContext): Promise<boolean> {
-  const sm = requireSessionManager(ctx);
-  const sub = args[0];
-  if (['resume', 'save', 'fork'].includes(sub ?? '') && ctx.isGenerating?.()) {
-    ctx.print('A turn is still running. Stop it with Esc or let it finish before changing sessions.');
-    return true;
-  }
-
-  if (!sub) {
-    const id = ctx.session.runtime.sessionId;
-    const msgCount = ctx.session.conversationManager.getMessageCount();
-    const title = ctx.session.conversationManager.title || '(untitled)';
-    const meta = sm.getMeta(id);
-    const started = meta ? new Date(meta.timestamp).toLocaleString() : 'this session';
-    ctx.print(
-      [
-        'Current session',
-        `  ID:       ${id}`,
-        `  Name:     ${title}`,
-        `  Started:  ${started}`,
-        `  Messages: ${msgCount}`,
-        `  Model:    ${ctx.session.runtime.model} (${ctx.session.runtime.provider})`,
-      ].join('\n'),
-    );
-    return true;
-  }
-
-  if (sub === 'list') {
-    const sessions = sm.list();
-    if (sessions.length === 0) {
-      ctx.print('No saved sessions. Use /session save [name] to save the current session.');
-      return true;
-    }
-    const lines = ['Sessions (most recent first):', ''];
-    for (const session of sessions) {
-      const date = new Date(session.timestamp).toLocaleString();
-      const name = session.title || session.name;
-      const model = session.model ? ` [${session.model}]` : '';
-      const active = session.name === ctx.session.runtime.sessionId ? ' ●' : '  ';
-      lines.push(`${active} ${session.name.padEnd(28)} ${name.slice(0, 22).padEnd(22)} ${date}  ${session.messageCount} msgs${model}`);
-      if (session.returnContext?.activeTasks || session.returnContext?.blockedTasks || session.returnContext?.pendingApprovals) {
-        const posture = [
-          session.returnContext.activeTasks ? `active=${session.returnContext.activeTasks}` : null,
-          session.returnContext.blockedTasks ? `blocked=${session.returnContext.blockedTasks}` : null,
-          session.returnContext.pendingApprovals ? `approvals=${session.returnContext.pendingApprovals}` : null,
-        ]
-          .filter(Boolean)
-          .join('  ');
-        if (posture) lines.push(`     posture: ${posture}`);
-      }
-    }
-    ctx.print(lines.join('\n'));
-    return true;
-  }
-
-  if (sub === 'rename') {
-    const newName = args.slice(1).join(' ').trim();
-    if (!newName) {
-      ctx.print('Usage: /session rename <new-name>');
-      return true;
-    }
-    try {
-      const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
-      if (!existingMeta) {
-        const exportData = ctx.session.conversationManager.toJSON() as { messages: object[]; timestamp?: number };
-        sm.save(ctx.session.runtime.sessionId, exportData.messages ?? [], {
-          title: ctx.session.conversationManager.title || '',
-          model: ctx.session.runtime.model,
-          provider: ctx.session.runtime.provider,
-          timestamp: Date.now(),
-          // Naming a session is an act of curation, so the file this
-          // materializes for rename to act on is a user save, not machinery,
-          // the retention sweep must not expire something the user named.
-          saveSource: 'user',
-        });
-      }
-      sm.rename(ctx.session.runtime.sessionId, newName);
-      ctx.session.conversationManager.title = newName;
-      ctx.print(`Session renamed to: ${newName}`);
-      ctx.renderRequest();
-    } catch (e) {
-      ctx.print(`Failed to rename: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  if (sub === 'resume') {
-    // '--force' bypasses the multi-instance liveness confirm below, never a
-    // session-id/name token itself (session ids never start with '--').
-    const rawArgs = args.slice(1);
-    const force = rawArgs.includes('--force');
-    const target = rawArgs
-      .filter((a) => a !== '--force')
-      .join(' ')
-      .trim();
-    if (!target) {
-      ctx.print('Usage: /session resume <session-id-or-name> [--force]');
-      return true;
-    }
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found: ${target}\nUse /session list to see available sessions.`);
-      return true;
-    }
-
-    // Multi-instance safety: warn (and require --force) when this session
-    // looks open in another still-running terminal right now, resuming it
-    // here would fork its live state out from under that other instance.
-    // Best-effort: a missing/stale marker (or this process's OWN marker,
-    // e.g. re-resuming the session already active here) never blocks anything.
-    const liveness = checkSessionLiveness(requireSurface(ctx), found.name);
-    if (liveness.live && liveness.pid !== process.pid && !force) {
-      ctx.print(
-        `Session appears open in another terminal (pid ${liveness.pid}): resuming will fork its live state.\n` +
-          `Re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
-      );
-      return true;
-    }
-
-    try {
-      const providerApi = requireProviderApi(ctx);
-      ctx.cancelPendingRecovery?.();
-      const outcome = await resumeSessionCore(found.name, {
-        sessionManager: sm,
-        conversation: ctx.session.conversationManager,
-        runtime: ctx.session.runtime,
-        surface: requireSurface(ctx),
-        selectModel: (model) => providerApi.selectModel(model),
-        hydrateSessionUsage: ctx.session.hydrateSessionUsage,
-        canResume: () => !ctx.isGenerating?.(),
-      });
-      const { meta, journalReplay, restoredAnchorCount, resumedMessageCount } = outcome;
-
-      ctx.renderRequest();
-      ctx.print(
-        `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${meta.model || ctx.session.runtime.model}`,
-      );
-      if (restoredAnchorCount > 0) {
-        ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);
-      }
-      if (journalReplay.replayed > 0) {
-        ctx.print(`  [Recovery] Replayed ${journalReplay.replayed} journal record(s): restored turns since last snapshot.`);
-      }
-      if (journalReplay.hadCorruptTail && journalReplay.replayed === 0) {
-        ctx.print('  [Recovery] Journal tail was corrupt or unrecognised (quarantined). Proceeding with snapshot only.');
-      } else if (journalReplay.hadCorruptTail) {
-        ctx.print('  [Recovery] Journal tail was partially corrupt (quarantined). Replay stopped at last good record.');
-      }
-      const returnContextMode = getReturnContextMode(ctx.platform.configManager);
-      if (returnContextMode !== 'off' && meta.returnContext) {
-        // The SDK's session loader already dropped any legacy open-view list from a
-        // session saved by an older TUI, so the loaded return context is shown as-is.
-        for (const line of formatReturnContextForDisplay(meta.returnContext)) {
-          ctx.print(`  ${line}`);
-        }
-        if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
-          ctx.print(`  Remote re-entry: /remote recover ${meta.returnContext.remoteRunners![0]}`);
-        }
-        if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
-          ctx.print(`  Worktree re-entry: /worktree review`);
-        }
-        if (returnContextMode === 'assisted') {
-          const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
-          void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
-            if (!assisted.assistedNarrative) return;
-            ctx.print(`  Assist: ${assisted.assistedNarrative}`);
-            ctx.renderRequest();
-          });
-        }
-      }
-    } catch (e) {
-      ctx.print(`Failed to resume session: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  if (sub === 'fork') {
-    const newId = `user-${randomBytes(4).toString('hex')}`;
-    const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
-    const messages = exportData.messages ?? [];
-    const currentTitle = ctx.session.conversationManager.title;
-    const forkName = args[1] ? args.slice(1).join(' ').trim() : `fork-of-${ctx.session.runtime.sessionId.slice(0, 8)}`;
-    const meta: SessionMeta = {
-      title: forkName,
-      model: ctx.session.runtime.model,
-      provider: ctx.session.runtime.provider,
-      timestamp: Date.now(),
-      titleSource: exportData.titleSource,
-      // Same shape a session file is read back in: a legacy open-view list
-      // (from an older session file) is never written again.
-      returnContext: loadedReturnContext(exportData.returnContext),
-      // The operator asked for this fork by name; it is not turn machinery.
-      saveSource: 'user',
-    };
-    try {
-      sm.save(newId, messages, meta);
-      copySessionSidecars(ctx, newId);
-      ctx.cancelPendingRecovery?.();
-      ctx.session.runtime.sessionId = newId;
-      ctx.session.conversationManager.title = forkName;
-      ctx.renderRequest();
-      ctx.print(
-        `Session forked:\n  New ID: ${newId}\n  Name:   ${forkName}\n  From:   ${currentTitle || ctx.session.runtime.sessionId}\n  Messages: ${messages.length}`,
-      );
-    } catch (e) {
-      ctx.print(`Failed to fork session: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  if (sub === 'save') {
-    const exportData = ctx.session.conversationManager.toJSON() as SessionExportData;
-    const messages = exportData.messages ?? [];
-    const rawName = args[1] ? args.slice(1).join(' ').trim() : ctx.session.conversationManager.title || ctx.session.runtime.sessionId;
-    const meta: SessionMeta = {
-      title: ctx.session.conversationManager.title,
-      model: ctx.session.runtime.model,
-      provider: ctx.session.runtime.provider,
-      timestamp: Date.now(),
-      titleSource: exportData.titleSource,
-      // Same shape a session file is read back in: a legacy open-view list
-      // (from an older session file) is never written again.
-      returnContext: loadedReturnContext(exportData.returnContext),
-      // The one unambiguous "keep this" act in the app. Marked so the
-      // session-conversations retention sweep never expires it, unlike the
-      // automatic per-turn snapshot (turn-event-wiring.ts, saveSource 'auto').
-      saveSource: 'user',
-    };
-    try {
-      const { filePath, sanitizedName } = sm.save(rawName, messages, meta);
-      copySessionSidecars(ctx, sanitizedName);
-      if (sanitizedName !== ctx.session.runtime.sessionId) ctx.cancelPendingRecovery?.();
-      ctx.session.runtime.sessionId = sanitizedName;
-      const nameNote = sanitizedName !== rawName ? ` (saved as "${sanitizedName}")` : '';
-      ctx.print(`Session saved: ${rawName}${nameNote}\n  → ${filePath}`);
-    } catch (e) {
-      ctx.print(`Failed to save session: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  if (sub === 'info') {
-    const target = args[1] || ctx.session.runtime.sessionId;
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found: ${target}`);
-      return true;
-    }
-    const date = new Date(found.timestamp).toLocaleString();
-    ctx.print(
-      [
-        `Session: ${found.name}`,
-        `  Title:    ${found.title || '(untitled)'}`,
-        `  Model:    ${found.model || '(unknown)'}`,
-        `  Provider: ${found.provider || '(unknown)'}`,
-        `  Date:     ${date}`,
-        `  Messages: ${found.messageCount}`,
-        `  File:     ${found.filePath}`,
-        ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
-      ].join('\n'),
-    );
-    return true;
-  }
-
-  if (sub === 'export') {
-    const target = args[1];
-    if (!target) {
-      ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
-      return true;
-    }
-    const format = (args[2] || 'markdown').toLowerCase();
-    const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
-    const sessions = sm.list();
-    const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
-    if (!found && target !== '.') {
-      try {
-        const { meta, messages } = sm.load(sessionId);
-        printSessionExport(ctx, sessionId, meta.title, messages as Array<Record<string, unknown>>, format);
-      } catch {
-        ctx.print(`Session not found: ${sessionId}`);
-      }
-      return true;
-    }
-    const loadName = found ? found.name : sessionId;
-    try {
-      const { meta, messages } = sm.load(loadName);
-      printSessionExport(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format);
-    } catch (e) {
-      ctx.print(`Failed to export session: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  if (sub === 'search') {
-    const query = args.slice(1).join(' ').trim();
-    if (!query) {
-      ctx.print('Usage: /session search <keyword>');
-      return true;
-    }
-    const results = sm.search(query);
-    if (results.length === 0) {
-      ctx.print(`No sessions found matching: "${query}"`);
-      return true;
-    }
-    const lines = [`Search results for "${query}" (${results.length} session${results.length !== 1 ? 's' : ''}):\n`];
-    for (const result of results) {
-      const date = new Date(result.session.timestamp).toLocaleString();
-      lines.push(
-        `  ${result.session.name}  ${result.session.title || '(untitled)'}  ${date}  (${result.matchCount} match${result.matchCount !== 1 ? 'es' : ''})`,
-      );
-      for (const snippet of result.snippets) {
-        lines.push(`    > ${snippet}`);
-      }
-      lines.push('');
-    }
-    ctx.print(lines.join('\n'));
-    return true;
-  }
-
-  if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-    const kind = parseTranscriptKind(args[1]);
-    const source = captureTranscriptSource(ctx);
-    try {
-      const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);
-      source.assertPublishable();
-      ctx.print(lines.join('\n'));
-    } catch (error) {
-      try {
-        source.assertPublishable();
-      } catch {
-        return true;
-      }
-      if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
-    }
-    return true;
-  }
-
-  if (sub === 'delete') {
-    const target = args[1];
-    if (!target) {
-      ctx.print('Usage: /session delete <session-id>');
-      return true;
-    }
-    const sessions = sm.list();
-    const candidates = findSessionCandidates(sessions, target);
-    if (candidates.length > 1) {
-      ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-      return true;
-    }
-    const found = candidates[0];
-    if (!found) {
-      ctx.print(`Session not found: ${target}`);
-      return true;
-    }
-    if (found.name === ctx.session.runtime.sessionId) {
-      ctx.print(`Cannot delete the active session (${found.name}).\nSwitch to another session first with /session resume <id>.`);
-      return true;
-    }
-    try {
-      sm.delete(found.name);
-      ctx.print(`Session deleted: ${found.name}${found.title ? ` (${found.title})` : ''}`);
-    } catch (e) {
-      ctx.print(`Failed to delete session: ${summarizeError(e)}`);
-    }
-    return true;
-  }
-
-  return false;
-}
-
 // session-mgmt / smgmt was removed in TASK-032.
 // All session lifecycle operations are now first-class subcommands of /session.
 // Use /session list, /session resume, /session save, etc.
@@ -482,3 +100,189 @@ interface SessionExportData {
   readonly titleSource?: ConversationTitleSource;
   readonly returnContext?: SessionReturnContextSummary;
 }
+
+export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+  headingSuffix: ':',
+  detailSeparator: ': ',
+  postureSeparator: '=',
+  confirmDelete: false,
+  reviewSeparator: ': ',
+  reviewDetailSeparator: ': ',
+  field(view, key, value) {
+    const labels: Readonly<Record<string, string>> =
+      view === 'current'
+        ? { id: '  ID:       ', name: '  Name:     ', started: '  Started:  ', messages: '  Messages: ', model: '  Model:    ' }
+        : {
+            heading: 'Session: ',
+            title: '  Title:    ',
+            model: '  Model:    ',
+            provider: '  Provider: ',
+            date: '  Date:     ',
+            messages: '  Messages: ',
+            file: '  File:     ',
+          };
+    return (labels[key] ?? '') + value;
+  },
+  renamed: (name) => 'Session renamed to: ' + name,
+  deleted: (name, title) => 'Session deleted: ' + name + (title ? ' (' + title + ')' : ''),
+  failed: (action, error) => 'Failed to ' + (action === 'rename' ? 'rename' : action + ' session') + ': ' + summarizeError(error),
+  captureSession(ctx) {
+    const snapshot = ctx.session.conversationManager.toJSON() as SessionExportData;
+    return {
+      messages: snapshot.messages ?? [],
+      metadata: { titleSource: snapshot.titleSource, returnContext: loadedReturnContext(snapshot.returnContext) },
+    };
+  },
+  copySidecars: (ctx, _source, destination) => copySessionSidecars(ctx, destination),
+  beforeSwitch: (ctx, operation, source, destination) => {
+    if (operation === 'fork' || source !== destination) ctx.cancelPendingRecovery?.();
+  },
+  afterSwitch: () => {},
+  saved: (name, sanitized, path) =>
+    'Session saved: ' + name + (sanitized !== name ? ' (saved as "' + sanitized + '")' : '') + '\n  → ' + path,
+  forked: (id, name, source, title, count) =>
+    'Session forked:\n  New ID: ' + id + '\n  Name:   ' + name + '\n  From:   ' + (title || source) + '\n  Messages: ' + count,
+  prepareRename(ctx, sm) {
+    const existingMeta = sm.getMeta(ctx.session.runtime.sessionId);
+    if (!existingMeta) {
+      const exportData = ctx.session.conversationManager.toJSON() as { messages: object[]; timestamp?: number };
+      sm.save(ctx.session.runtime.sessionId, exportData.messages ?? [], {
+        title: ctx.session.conversationManager.title || '',
+        model: ctx.session.runtime.model,
+        provider: ctx.session.runtime.provider,
+        timestamp: Date.now(),
+        // Naming a session is an act of curation, so the file this
+        // materializes for rename to act on is a user save, not machinery,
+        // the retention sweep must not expire something the user named.
+        saveSource: 'user',
+      });
+    }
+  },
+  async productCommand(args, ctx, sm, sub) {
+    if (sub === 'resume') {
+      // '--force' bypasses the multi-instance liveness confirm below, never a
+      // session-id/name token itself (session ids never start with '--').
+      const rawArgs = args.slice(1);
+      const force = rawArgs.includes('--force');
+      const target = rawArgs
+        .filter((a) => a !== '--force')
+        .join(' ')
+        .trim();
+      if (!target) {
+        ctx.print('Usage: /session resume <session-id-or-name> [--force]');
+        return true;
+      }
+      const sessions = sm.list();
+      const candidates = findSessionCandidates(sessions, target);
+      if (candidates.length > 1) {
+        ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
+        return true;
+      }
+      const found = candidates[0];
+      if (!found) {
+        ctx.print(`Session not found: ${target}\nUse /session list to see available sessions.`);
+        return true;
+      }
+
+      // Multi-instance safety: warn (and require --force) when this session
+      // looks open in another still-running terminal right now, resuming it
+      // here would fork its live state out from under that other instance.
+      // Best-effort: a missing/stale marker (or this process's OWN marker,
+      // e.g. re-resuming the session already active here) never blocks anything.
+      const liveness = checkSessionLiveness(requireSurface(ctx), found.name);
+      if (liveness.live && liveness.pid !== process.pid && !force) {
+        ctx.print(
+          `Session appears open in another terminal (pid ${liveness.pid}): resuming will fork its live state.\n` +
+            `Re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
+        );
+        return true;
+      }
+
+      try {
+        const providerApi = requireProviderApi(ctx);
+        ctx.cancelPendingRecovery?.();
+        const outcome = await resumeSessionCore(found.name, {
+          sessionManager: sm,
+          conversation: ctx.session.conversationManager,
+          runtime: ctx.session.runtime,
+          surface: requireSurface(ctx),
+          selectModel: (model) => providerApi.selectModel(model),
+          hydrateSessionUsage: ctx.session.hydrateSessionUsage,
+          canResume: () => !ctx.isGenerating?.(),
+        });
+        const { meta, journalReplay, restoredAnchorCount, resumedMessageCount } = outcome;
+
+        ctx.renderRequest();
+        ctx.print(
+          `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${meta.model || ctx.session.runtime.model}`,
+        );
+        if (restoredAnchorCount > 0) {
+          ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);
+        }
+        if (journalReplay.replayed > 0) {
+          ctx.print(`  [Recovery] Replayed ${journalReplay.replayed} journal record(s): restored turns since last snapshot.`);
+        }
+        if (journalReplay.hadCorruptTail && journalReplay.replayed === 0) {
+          ctx.print('  [Recovery] Journal tail was corrupt or unrecognised (quarantined). Proceeding with snapshot only.');
+        } else if (journalReplay.hadCorruptTail) {
+          ctx.print('  [Recovery] Journal tail was partially corrupt (quarantined). Replay stopped at last good record.');
+        }
+        const returnContextMode = getReturnContextMode(ctx.platform.configManager);
+        if (returnContextMode !== 'off' && meta.returnContext) {
+          // The SDK's session loader already dropped any legacy open-view list from a
+          // session saved by an older TUI, so the loaded return context is shown as-is.
+          for (const line of formatReturnContextForDisplay(meta.returnContext)) {
+            ctx.print(`  ${line}`);
+          }
+          if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
+            ctx.print(`  Remote re-entry: /remote recover ${meta.returnContext.remoteRunners![0]}`);
+          }
+          if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
+            ctx.print(`  Worktree re-entry: /worktree review`);
+          }
+          if (returnContextMode === 'assisted') {
+            const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
+            void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
+              if (!assisted.assistedNarrative) return;
+              ctx.print(`  Assist: ${assisted.assistedNarrative}`);
+              ctx.renderRequest();
+            });
+          }
+        }
+      } catch (e) {
+        ctx.print(`Failed to resume session: ${summarizeError(e)}`);
+      }
+      return true;
+    }
+
+    if (sub === 'export') {
+      const target = args[1];
+      if (!target) {
+        ctx.print('Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.');
+        return true;
+      }
+      const format = (args[2] || 'markdown').toLowerCase();
+      const sessionId = target === '.' ? ctx.session.runtime.sessionId : target;
+      const sessions = sm.list();
+      const found = sessions.find((session) => session.name === sessionId || session.name.startsWith(sessionId));
+      if (!found && target !== '.') {
+        try {
+          const { meta, messages } = sm.load(sessionId);
+          printSessionExport(ctx, sessionId, meta.title, messages as Array<Record<string, unknown>>, format);
+        } catch {
+          ctx.print(`Session not found: ${sessionId}`);
+        }
+        return true;
+      }
+      const loadName = found ? found.name : sessionId;
+      try {
+        const { meta, messages } = sm.load(loadName);
+        printSessionExport(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format);
+      } catch (e) {
+        ctx.print(`Failed to export session: ${summarizeError(e)}`);
+      }
+      return true;
+    }
+    return false;
+  },
+});

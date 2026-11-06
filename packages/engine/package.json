@@ -2198,6 +2198,21 @@
       "bun": "./terminal-shell/src/model-picker-provider-filter.ts",
       "types": "./terminal-shell/dist/model-picker-provider-filter.d.ts",
       "import": "./terminal-shell/dist/model-picker-provider-filter.js"
+    },
+    "./terminal-shell/renderer/header-line": {
+      "bun": "./terminal-shell/src/renderer/header-line.ts",
+      "types": "./terminal-shell/dist/renderer/header-line.d.ts",
+      "import": "./terminal-shell/dist/renderer/header-line.js"
+    },
+    "./terminal-shell/shell-footer-view": {
+      "bun": "./terminal-shell/src/shell-footer-view.ts",
+      "types": "./terminal-shell/dist/shell-footer-view.d.ts",
+      "import": "./terminal-shell/dist/shell-footer-view.js"
+    },
+    "./terminal-shell/session-views": {
+      "bun": "./terminal-shell/src/session-views.ts",
+      "types": "./terminal-shell/dist/session-views.d.ts",
+      "import": "./terminal-shell/dist/session-views.js"
     }
   },
   "publishConfig": {

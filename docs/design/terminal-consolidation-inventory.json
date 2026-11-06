@@ -1048,7 +1048,7 @@
       "path": "renderer/header-line.ts",
       "baselineTuiLines": 172,
       "baselineSimilarity": 0.6358,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/help-overlay.ts",
@@ -1204,7 +1204,10 @@
       "path": "renderer/shell-surface.ts",
       "baselineTuiLines": 352,
       "baselineSimilarity": 0.6344,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "ShellFooterView"
+      ]
     },
     {
       "path": "renderer/shortcuts-overlay.ts",
@@ -1681,7 +1684,7 @@
       "path": "shell/session-views.ts",
       "baselineTuiLines": 644,
       "baselineSimilarity": 0.9053,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "shell/transcript-scroll.ts",

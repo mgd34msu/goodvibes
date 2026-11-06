@@ -54,24 +54,8 @@ const WORK_TREE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['esc', 'back to typing'], ['↑↓', 'move between beads'], ['←→', 'fold / unfold'], ['enter', 'open'], ['y', 'copy'],
 ];
 
-/** What an agent or process view changes under the transcript. */
-export interface ShellFooterView {
-  /** The composer bar: the agent's lane color, or the process color. */
-  readonly barColor: string;
-  readonly placeholder?: string;
-  /** The composer takes no input; this says why. */
-  readonly disabledReason?: string;
-  /** The view's keys on the status line (esc back to main, ctrl+x stop, …). */
-  readonly keys: ReadonlyArray<readonly [string, string]>;
-  /** After the keys: main kept in sight (◐ main · working). */
-  readonly trail?: { readonly text: string; readonly fg: string } | null;
-  /** A notice in place of the keys (press ctrl+x again to stop). */
-  readonly notice?: { readonly text: string; readonly tone: 'error' | 'info' } | null;
-  /** The process view shows no context bar or cost. */
-  readonly noContext?: boolean;
-  /** The cost this view states instead of the session's (an agent's own, when priced). */
-  readonly cost?: string | null;
-}
+import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
+export type { ShellFooterView };
 
 export interface ShellFooterBuildOptions {
   readonly width: number;

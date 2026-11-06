@@ -94,12 +94,29 @@ function scene(opts: { processStatus?: string; processDone?: boolean } = {}) {
     now: () => NOW,
     pollMs: 0,
   });
-  return { views, proc, renders: () => renders };
+  return { views, proc, transcripts, renders: () => renders };
 }
 
 const text = (lines: readonly import('@goodvibes-jev/engine/sdk/platform/types').Line[]): string[] => lines.map((l) => lineToString(l).replace(/\s+$/, ''));
 
 describe('live run 5: a Contract owner view shows its chain', () => {
+  test('a completed agent view repaints a same-length transcript correction', () => {
+    const { views, transcripts } = scene();
+    try {
+      views.open({ kind: 'agent', id: 'ca572da6' });
+      const before = text(views.frame(120)!.body(40)).join('\n');
+      expect(before).toContain('I read both files and changed nothing.');
+      const messages = transcripts.ca572da6!;
+      const previous = messages.at(-1)!;
+      const replacement = 'The corrected answer is now visible.'.padEnd(previous.content.length);
+      expect(replacement.length).toBe(previous.content.length);
+      messages[messages.length - 1] = { role: 'assistant', content: replacement };
+      const after = text(views.frame(120)!.body(40)).join('\n');
+      expect(after).toContain('The corrected answer is now visible.');
+      expect(after).not.toContain('I read both files and changed nothing.');
+    } finally { views.dispose(); }
+  });
+
   test('the owner is named "Contract" on its chip, not by its template', () => {
     const { views } = scene();
     const chips = lineToString(views.chips(120)!);

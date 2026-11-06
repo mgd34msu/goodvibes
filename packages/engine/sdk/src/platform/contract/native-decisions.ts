@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
@@ -85,6 +86,7 @@ function readLifetime(contract: Contract, owner: NativeContractServices, signal?
 }
 /** Routing uses the same owner signal and before-attempt guard as every other native read. */
 export async function nativeContractRoute(selector: ContractRouteSelector, contract: Contract, services: NativeContractServices | undefined, request: Parameters<ContractRouteSelector>[0], signal?: AbortSignal) {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   if (contract.nativeSource === undefined) return selector({ ...request, signal });
   autonomousSourceEvidence(nativeContractSourceForAdmission(contract));
   const scope = readLifetime(contract, ownedServices(services), signal);
@@ -173,6 +175,7 @@ export function nativeContractActionSource(contract: Contract, services: NativeC
 
 /** Decorates the single shared transport; owns no retry loop and cannot turn an outage into a decision. */
 export function nativeContractPort(contract: Contract, services: NativeContractServices | undefined, port: JudgmentPort, signal?: AbortSignal): JudgmentPort {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   if (contract.nativeSource === undefined) return port;
   const owner = ownedServices(services);
   return {
@@ -230,6 +233,7 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
 
 /** Reconstructs current bindings after a real external change. No stored receipt is replayed on resume. */
 export async function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const owner = ownedServices(services);
   const state = nativeDecisionState(contract);
   const key = `${input.stage}:${input.targetId}`;

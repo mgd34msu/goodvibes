@@ -358,6 +358,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const unit = item.contractUnitId === undefined ? undefined : run?.unit(item.contractUnitId);
       const cancelled: ContractPreSpawn = { kind: 'settled', outcome: 'cancelled' };
       if (run === undefined || unit === undefined || run.terminal || signal.aborted) return Promise.resolve(cancelled);
+      requireDecisionFeature('autonomous contract worker execution');
       const runtime = run.runtime(unit);
       const decided = runtime.preSpawn;
       if (decided === null) {
@@ -583,7 +584,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     await execution;
   }
 
-  function launchDurable(run: ContractRun): Promise<void> {
+  async function launchDurable(run: ContractRun): Promise<void> {
+    requireDecisionFeature('autonomous contract planning and acceptance');
     return withCurrentDurableExecution(run, () => {
       void run.work.run(() => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
       return Promise.resolve();
@@ -906,6 +908,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   async function activate(run: ContractRun): Promise<void> {
     const { contract } = run;
     try {
+      run.abort.signal.throwIfAborted();
+      requireDecisionFeature('autonomous contract planning and acceptance');
       await prepareInput(run);
       if (run.terminal) return;
       const shaped = await shapeContract(contract, plannerDeps(run), { signal: run.abort.signal });
@@ -923,6 +927,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   /** Plans a shaped contract from the beginning (a restart stopped its planning), then runs the accepted plan. */
   async function replan(run: ContractRun): Promise<void> {
     try {
+      run.abort.signal.throwIfAborted();
+      requireDecisionFeature('autonomous contract planning and acceptance');
       await prepareInput(run);
       if (run.terminal) return;
       const planned = await planContract(run.contract, plannerDeps(run), { proposedUnits: run.proposedUnits, signal: run.abort.signal });
@@ -962,6 +968,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   /** After planning, or an owner reply that settled the shape or the plan: plan on, or start the accepted plan. */
   async function continuePlanning(run: ContractRun, outcome: ShapeOutcome | PlanningOutcome): Promise<void> {
     const { contract } = run;
+    if (outcome.kind === 'shaped' || outcome.kind === 'accepted') requireDecisionFeature('autonomous contract execution');
     if (outcome.kind === 'shaped') {
       settleSessionMode(run);
       const planned = await planContract(contract, plannerDeps(run), { proposedUnits: run.proposedUnits, signal: run.abort.signal });
@@ -983,6 +990,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   /** A session-mode contract runs: its one unit waits for the session's next turn. */
   function startSession(run: ContractRun): void {
+    requireDecisionFeature('autonomous contract session acceptance');
     const { contract } = run;
     contract.baseline ??= takeBaseline(contract.projectRoot);
     run.moveContract('running');

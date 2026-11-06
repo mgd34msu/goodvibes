@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { selectSourceCitationEvidence } from './source-citation-selection.js';
@@ -226,6 +227,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
   }
 
   async function checkUnit(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     const runtime = run.runtime(unit);
     runtime.verificationRetryCancel?.();
     const config = run.env.config();

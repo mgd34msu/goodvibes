@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 /**
  * Resume and zombie reaping (docs/design/contract-runner.md section 7.2), with
  * the fake judgment port, a scripted fake executor and a temporary git
@@ -1522,3 +1524,25 @@ describe('the unit in the resumed tree', () => {
     expect(unitIn(h, id!, 'u1').status).toBe('passed');
   }, 30_000);
 });
+
+
+for (const savedStatus of ['planning', 'committing', 'awaiting-owner'] as const) {
+  test(`Classic startup holds a saved ${savedStatus} contract without writes, model requests or owner adoption`, async () => {
+    const { root, ids } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, contract => contract.status === 'planning', 'retained planning checkpoint');
+    const id = ids[0]; if (!id) throw new Error('Missing saved contract');
+    editContract(root, id, contract => { contract.status = savedStatus; });
+    const path = contractPath(root, id), original = readFileSync(path, 'utf-8');
+    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } }); let asks = 0;
+    const previous = installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic restart must not ask'); } });
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        const owners = h.manager.list().length;
+        const report = await h.runner.resumeAll();
+        expect(report).toMatchObject({ resumed: [], queued: [], reaped: [], skipped: [id], heldForPolicy: [{ contractId: id, reason: 'decision-model-required' }] });
+        expect(h.store.get(id)?.status).toBe(savedStatus);
+        expect(readFileSync(path, 'utf-8')).toBe(original);
+        expect(h.manager.list()).toHaveLength(owners); expect(h.agentsOf('u1')).toEqual([]); expect(asks).toBe(0);
+      });
+    } finally { installJudgmentPort(previous); }
+  }, 20_000);
+}

@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * Owner escalations (docs/design/contract-runner.md section 6.3): the question
  * put to the owner, built in code, and the owner's free-text reply, read with
@@ -470,6 +471,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function reply(run: ContractRun, escalationId: string, text: string): Promise<OwnerReplyOutcome> {
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native contracts do not read owner approval replies');
     const escalation = run.contract.escalations.find((candidate) => candidate.id === escalationId);
     if (escalation === undefined || escalation.resolvedAt !== undefined) throw new Error(`contract ${run.id} has no open escalation ${escalationId}`);
@@ -537,6 +539,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void> {
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native attempts require a fresh Jev decision');
     for (const escalation of open(run)) {
       if (escalation.reason === 'attempts-undecided' && escalation.targetId === unitId) escalation.resolvedAt = run.env.now();

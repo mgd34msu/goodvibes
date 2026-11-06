@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * Best-of-N by candidate selection (docs/design/contract-runner.md section
  * 6.2). Replaces the provider-backed attempt judge that parsed a model's
@@ -177,6 +178,7 @@ export function readBestOfN(
   candidates: readonly Candidate[],
   options: { readonly usage: JudgmentUsage; readonly native?: { contract: Contract; services: NativeContractServices | undefined } | undefined; readonly signal?: AbortSignal | undefined; readonly selector?: Selector | undefined },
 ): Promise<Selection> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const selector = options.selector ?? bestOfN;
   const port = meteredPort(options.native === undefined ? judgmentPort(BEST_OF_N_SITE) : nativeContractPort(options.native.contract, options.native.services, judgmentPort(BEST_OF_N_SITE), options.signal), options.usage);
   return selector.select(port, context, candidates, { site: BEST_OF_N_SITE, ...(options.signal === undefined ? {} : { signal: options.signal }) });
@@ -311,6 +313,7 @@ export async function acceptAttempt(run: ContractRun, unitId: string, attemptId:
  * contract), naming why each attempt failed.
  */
 export async function selectAttempts(run: ContractRun, engineGroupId: string, deps: AttemptSelectionDeps): Promise<void> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const engine = run.engine;
   if (engine === null || run.terminal) return;
   const workstream = engine.listWorkstreams().find((candidate) => candidate.items.some((item) => item.attemptGroupId === engineGroupId));

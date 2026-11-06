@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
 import { agentBriefFidelity } from '../agents/brief-fidelity.js';
 import { hasDerivedAcceptanceChecks } from './owned-source.js';
@@ -338,6 +339,7 @@ async function checkRepairContinuation(port: JudgmentPort, plan: ContractPlan, a
  * and dispositions. Call it only on a plan whose code checks passed.
  */
 export async function runPlanChecks(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions = {}): Promise<PlanVerdict> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const owner = planCheckOwner(options, { plan, ask, shape });
   const port = owner.port;
   const derived = hasDerivedAcceptanceChecks(options.originalSource);
@@ -378,6 +380,7 @@ export async function runUnitShapeChecks(
   plan: ContractPlan,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly problems: readonly PlanProblem[]; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const owner = planCheckOwner(options, { plan });
   const units = await checkUnits(owner.port, plan, options);
   owner.assertCurrent();
@@ -395,6 +398,7 @@ export async function readCriterionDispositions(
   shape: RequestShape,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly dispositions: ReadonlyMap<string, CriterionDispositionRuling>; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const owner = planCheckOwner(options, { plan, ask, shape });
   const shapes = await readCriterionShapes(owner.port, plan, ask, shape, options);
   owner.assertCurrent();

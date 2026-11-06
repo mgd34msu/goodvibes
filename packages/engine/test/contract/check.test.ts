@@ -1,3 +1,7 @@
+import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { readBestOfN } from '../../sdk/src/platform/contract/best-of-n.ts';
+import { nativeContractPort } from '../../sdk/src/platform/contract/native-decisions.ts';
 /**
  * One unit check (contract/check.ts) through the fake judgment port: every
  * row of the outcome table (design 4.6), the readings-to-verdicts mapping at
@@ -528,3 +532,17 @@ function recordedCheck(id: string, trigger: UnitCheck['trigger'], result: UnitCh
     evidenceDigest: 'x',
   };
 }
+
+
+test('Classic semantic contract helpers reject before touching a caller-supplied model or changing checks', async () => {
+  let borrowed = 0;
+  const port = { get model(): never { borrowed++; throw new Error('Model metadata borrowed'); }, async ask(): Promise<never> { borrowed++; throw new Error('Classic must not ask'); } };
+  const unit = twoCriterionUnit(), before = JSON.stringify(unit), contract = makeContract();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(runUnitCheck({ contract, unit, trigger: 'completion', evidence: evidence(), settings: SETTINGS, now: 1, checkPort: port }))
+      .rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(() => readBestOfN({}, [], { usage: { calls: 0, inputTokens: 0, outputTokens: 0 } })).toThrow(DecisionModelsDisabledError);
+    expect(() => nativeContractPort(contract, undefined, port)).toThrow(DecisionModelsDisabledError);
+    expect(JSON.stringify(unit)).toBe(before); expect(borrowed).toBe(0);
+  });
+});

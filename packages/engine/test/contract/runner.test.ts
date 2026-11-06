@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.ts';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /**
  * The contract runner end to end (docs/design/contract-runner.md sections 2.2,
  * 4.2, 4.7, 4.9, 4.10, 6.1, 6.5 and 7.3), with the fake judgment port, a
@@ -580,5 +582,15 @@ describe('persistence', () => {
     expect(display.inputSnapshot).toBeUndefined();
     expect(display.units).toEqual(full.units);
     expect(h.runner.list({ includeTerminal: true })[0]!.inputSnapshot).toEqual(full.inputSnapshot);
+  });
+});
+
+
+test('Classic contract start reports its semantic limitation before spawning an owner or creating a record', async () => {
+  const h = use(makeHarness({ plan: oneUnitPlan(), scripts: {} }));
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const ownerCount = h.manager.list().length, stored = h.store.listStoredIds();
+    expect(() => startContract(h)).toThrow(DecisionModelsDisabledError);
+    expect(h.manager.list()).toHaveLength(ownerCount); expect(h.store.listStoredIds()).toEqual(stored);
   });
 });

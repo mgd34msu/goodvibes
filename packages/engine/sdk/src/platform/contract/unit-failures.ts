@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * What a unit agent's terminal events mean to its contract
  * (docs/design/contract-runner.md sections 4.2, 4.9, 4.10 and 6.5).
@@ -150,6 +151,7 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     let readingIds: readonly string[];
     try {
       const signal = AbortSignal.any([run.abort.signal, runtime.abort.signal]);
+      signal.throwIfAborted(); requireDecisionFeature('autonomous contract transport retries; retained work remains inspectable');
       const reading = await readFailure({ message }, TRANSPORT_RETRY_SITE, run.contract.nativeSource === undefined ? undefined : {
         port: nativeContractPort(run.contract, run.env.native, judgmentPort(TRANSPORT_RETRY_SITE), signal), signal,
       });

@@ -26,6 +26,7 @@
  * checks the resumed units get are ordinary unit checks (check.ts).
  */
 import { assertContractInputObjects, assertContractInputView, assertContractExecutionView, restoreContractInputDevice } from './input-snapshot.js';
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 import { existsSync } from 'node:fs';
 import { hasScheduledFix } from './fix-identity.js';
@@ -53,8 +54,10 @@ export interface ResumeReport {
   readonly queued: readonly string[];
   /** Zombies, failed with `failureKind: 'zombie'`. */
   readonly reaped: readonly { readonly contractId: string; readonly reason: string }[];
-  /** Contracts this runner already runs; left as they are. */
+  /** Contracts already running here or held by the active policy; left as they are. */
   readonly skipped: readonly string[];
+  /** Saved work remains untouched; autonomous continuation needs decision models. */
+  readonly heldForPolicy?: readonly { readonly contractId: string; readonly reason: 'decision-model-required' }[];
 }
 
 /** Statuses whose work runs on the contract's engine and in its worktree. */
@@ -159,10 +162,14 @@ export interface ContractResume {
 
 export function createContractResume(deps: ContractResumeDeps): ContractResume {
   async function resumeAll(): Promise<ResumeReport> {
+    return withConfiguredDecisionModelPolicy(resumeOwned);
+  }
+  async function resumeOwned(): Promise<ResumeReport> {
     const resumed: { contractId: string; step: ResumeStep }[] = [];
     const queued: string[] = [];
     const reaped: { contractId: string; reason: string }[] = [];
     const skipped: string[] = [];
+    const heldForPolicy: { contractId: string; reason: 'decision-model-required' }[] = [];
     const pending: ContractRun[] = [];
     for (const contractId of deps.store.listStoredIds()) {
       if (deps.isLive(contractId)) {
@@ -171,6 +178,13 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       }
       const contract = deps.store.load(contractId);
       if (contract === null) continue;
+      if (isClassicOperation()) {
+        deps.store.hold(contract);
+        if (!isTerminalContractStatus(contract.status)) {
+          skipped.push(contractId); heldForPolicy.push({ contractId, reason: 'decision-model-required' });
+        }
+        continue;
+      }
       if ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined)) { deps.store.hold(contract); skipped.push(contractId); continue; }
       // Native authority is never reconstructed from disk. Only resumeDurable may adopt this binding.
       if (contract.durableAdmission !== undefined) { deps.store.hold(contract); skipped.push(contractId); continue; }
@@ -254,7 +268,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       else void run.work.run(() => continueResumed(run));
     }
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });
-    return { resumed, queued, reaped, skipped };
+    return { resumed, queued, reaped, skipped, ...(heldForPolicy.length ? { heldForPolicy } : {}) };
   }
 
   function prepareResume(run: ContractRun): void {
@@ -304,6 +318,11 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
   }
 
   async function continueResumed(run: ContractRun): Promise<void> {
+    return withConfiguredDecisionModelPolicy(() => continueOwnedResumed(run));
+  }
+  async function continueOwnedResumed(run: ContractRun): Promise<void> {
+    run.abort.signal.throwIfAborted();
+    requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary Classic tools');
     const { contract } = run;
     const step = resumeStepOf(contract);
     const from = resumeStatus(contract);

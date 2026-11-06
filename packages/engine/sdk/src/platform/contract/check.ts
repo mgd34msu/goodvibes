@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * One check of a unit (docs/design/contract-runner.md sections 4.4 to 4.6):
  * evidence in, Jev readings, an outcome out.
@@ -240,6 +241,7 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
  * `judgment-unavailable`; there is no other path.
  */
 export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const { unit, settings } = input;
   let evidence = input.evidence.gates === undefined ? input.evidence : { ...input.evidence, gates: refreshGateResults(input.evidence.gates) };
   const usage = emptyJudgmentUsage();
@@ -473,6 +475,7 @@ export async function readUnmetSeverities(input: {
   readonly criterionIds: readonly string[];
   readonly signal?: AbortSignal | undefined;
 }): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const usage = emptyJudgmentUsage();
   const port = meteredPort(input.native === undefined ? judgmentPort(CHECK_SITES.severity) : nativeContractPort(input.native.contract, input.native.services, judgmentPort(CHECK_SITES.severity), input.signal), usage);
   const criteria = input.unit.criteria.filter((criterion) => input.criterionIds.includes(criterion.id));

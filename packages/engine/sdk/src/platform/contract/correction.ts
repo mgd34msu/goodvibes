@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { bindContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { nativeContractActionSource } from './native-decisions.js';
@@ -709,6 +710,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
 /** Fails an invalid correction step; temporary reading failures recover at their exact call sites. */
 export async function guarded(run: ContractRun, what: string, step: () => Promise<void>): Promise<void> {
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   try {
     await step();
   } catch (error) {

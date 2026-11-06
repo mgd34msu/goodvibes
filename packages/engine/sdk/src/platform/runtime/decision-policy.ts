@@ -10,7 +10,14 @@ export type { DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-j
 export { DECISION_MODEL_POLICIES, parseDecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 
 export class DecisionModelPolicyChangedError extends Error {
-  constructor() { super('Decision-model policy changed. Start a fresh operation with the current policy.'); this.name = 'DecisionModelPolicyChangedError'; }
+  constructor() {
+    super('Decision-model policy changed. Start a fresh operation with the current policy.');
+    this.name = 'DecisionModelPolicyChangedError';
+    hostState.revocations.add(this);
+  }
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return typeof value === 'object' && value !== null && hostState.revocations.has(value);
+  }
 }
 
 interface PolicyScope {
@@ -23,8 +30,30 @@ interface PolicyScope {
     readonly refusals: Set<string>;
   };
 }
-const scopes = new AsyncLocalStorage<PolicyScope>();
-const configurations: { readonly read: () => unknown; active: boolean }[] = [];
+interface PolicyHostState {
+  readonly schemaVersion: 1;
+  readonly scopes: AsyncLocalStorage<PolicyScope>;
+  readonly configurations: { readonly read: () => unknown; active: boolean }[];
+  readonly revocations: WeakSet<object>;
+}
+// Source and published entrypoints may coexist in an embedding process. They
+// must share operation ownership, configuration lifetime and refusal memory;
+// installing a second observer cannot erase the first entrypoint's scope.
+const hostStateKey = Symbol.for('goodvibes-jev.engine.decision-policy.host.v1');
+function sharedPolicyHostState(): PolicyHostState {
+  const existing = Object.getOwnPropertyDescriptor(globalThis, hostStateKey);
+  if (existing) {
+    if (!('value' in existing) || (existing.value as PolicyHostState | undefined)?.schemaVersion !== 1)
+      throw new Error('Decision-model policy host state is unavailable.');
+    return existing.value as PolicyHostState;
+  }
+  const created: PolicyHostState = Object.freeze({ schemaVersion: 1,
+    scopes: new AsyncLocalStorage<PolicyScope>(), configurations: [], revocations: new WeakSet<object>() });
+  Object.defineProperty(globalThis, hostStateKey, { value: created });
+  return created;
+}
+const hostState = sharedPolicyHostState();
+const { scopes, configurations } = hostState;
 const configured = (): unknown => configurations.findLast(source => source.active)?.read();
 
 /** A composition owns the default; retiring it cannot replace a newer composition. */

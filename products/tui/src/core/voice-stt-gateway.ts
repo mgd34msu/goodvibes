@@ -31,8 +31,7 @@ export type VoiceSttGateway = SpeechTranscriptionGateway<[options?: { readonly s
  * Why transcription is unavailable, surfaced verbatim so a capture path prints
  * the daemon's reason instead of inventing one.
  */
-export type VoiceSttGatewayResolution = SpeechTranscriptionResolution<VoiceSttGateway>; readonly gateway: VoiceSttGateway }
-  | { readonly available: false; readonly reason: string };
+export type VoiceSttGatewayResolution = SpeechTranscriptionResolution<VoiceSttGateway>;
 
 export interface VoiceSttGatewayDeps {
   readonly configManager: ConfigManager;

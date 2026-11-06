@@ -27,18 +27,26 @@ import type { SpeechTranscriptionGateway, SpeechTranscriptionResolution } from '
  */
 
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/sdk';
-import { recordVoiceDiagnostic, transcribeThroughBestRoute, SttRoutesExhaustedError, type SttRouteCandidate, type VoiceProviderRegistry, type VoiceService } from '@goodvibes-jev/engine/sdk/platform/voice';
+import {
+  recordVoiceDiagnostic,
+  transcribeThroughBestRoute,
+  SttRoutesExhaustedError,
+  type SttRouteCandidate,
+  type VoiceProviderRegistry,
+  type VoiceService,
+} from '@goodvibes-jev/engine/sdk/platform/voice';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 
 /** The narrow verb surface a capture consumer needs. */
-export interface VoiceSttGateway extends SpeechTranscriptionGateway { lastRouteExplanation(): string | null; }
+export interface VoiceSttGateway extends SpeechTranscriptionGateway {
+  lastRouteExplanation(): string | null;
+}
 
 /**
  * Why transcription is unavailable, surfaced so a capture path prints a real
  * reason instead of inventing one.
  */
-export type VoiceSttGatewayResolution = SpeechTranscriptionResolution<VoiceSttGateway>; readonly gateway: VoiceSttGateway }
-  | { readonly available: false; readonly reason: string };
+export type VoiceSttGatewayResolution = SpeechTranscriptionResolution<VoiceSttGateway>;
 
 /** What the daemon's `voice.stt` verb answers with. */
 interface DaemonSttResult {
@@ -81,41 +89,43 @@ export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewa
   if (!inProcessAvailable && !hostReachable) {
     return {
       available: false,
-      reason: 'no speech-to-text is available here: this process has no provider registered, and there is no '
-        + 'connected host to send the audio to. The managed voice runtime provisions one.',
+      reason:
+        'no speech-to-text is available here: this process has no provider registered, and there is no ' +
+        'connected host to send the audio to. The managed voice runtime provisions one.',
     };
   }
 
-  const connectedHost: SttRouteCandidate | null = hostReachable && deps.daemonVerbs
-    ? {
-      route: 'connected-host',
-      provider: 'the host\'s configured speech-to-text provider',
-      configSource: 'the connected host\'s own settings',
-      transcribe: async (audio) => {
-        const result = await deps.daemonVerbs!.invoke<DaemonSttResult>('voice.stt', {
-          audio: { ...audio, metadata: {} },
-        });
-        const text = result?.text;
-        if (typeof text !== 'string') throw new Error('the host answered without any transcribed text');
-        return text;
-      },
-    }
-    : null;
+  const connectedHost: SttRouteCandidate | null =
+    hostReachable && deps.daemonVerbs
+      ? {
+          route: 'connected-host',
+          provider: "the host's configured speech-to-text provider",
+          configSource: "the connected host's own settings",
+          transcribe: async (audio) => {
+            const result = await deps.daemonVerbs!.invoke<DaemonSttResult>('voice.stt', {
+              audio: { ...audio, metadata: {} },
+            });
+            const text = result?.text;
+            if (typeof text !== 'string') throw new Error('the host answered without any transcribed text');
+            return text;
+          },
+        }
+      : null;
 
   const inProcess: SttRouteCandidate | null = inProcessAvailable
     ? {
-      route: 'in-process',
-      provider: provider?.id ?? 'local',
-      configSource: 'this process\'s own voice.local.* settings',
-      transcribe: async (audio) => {
-        // `metadata` is required on the service's artifact and absent from the
-        // capture layer's, which is deliberate: the SDK's artifact carries only
-        // what the encoder knows. Empty is what the verb sends for a caller that
-        // supplied none.
-        const result = await deps.voiceService.transcribe(undefined, { audio: { ...audio, metadata: {} } });
-        return result.text;
-      },
-    }
+        route: 'in-process',
+        provider: provider?.id ?? 'local',
+        configSource: "this process's own voice.local.* settings",
+        transcribe: async (audio) => {
+          // `metadata` is required on the service's artifact and absent from the
+          // capture layer's, which is deliberate: the SDK's artifact carries only
+          // what the encoder knows. Empty is what the verb sends for a caller that
+          // supplied none.
+          const result = await deps.voiceService.transcribe(undefined, { audio: { ...audio, metadata: {} } });
+          return result.text;
+        },
+      }
     : null;
 
   let lastExplanation: string | null = null;
@@ -131,7 +141,11 @@ export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewa
             connectedHost,
             inProcess,
             ...(deps.managedVoiceRoot !== undefined
-              ? { recordDiagnostic: (entry) => { recordVoiceDiagnostic(deps.managedVoiceRoot!, entry); } }
+              ? {
+                  recordDiagnostic: (entry) => {
+                    recordVoiceDiagnostic(deps.managedVoiceRoot!, entry);
+                  },
+                }
               : {}),
           },
         );

@@ -1,3 +1,5 @@
+import type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+export type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 import type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 export type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope, OnboardingCheckMarkerSource, OnboardingAcknowledgementRuntimeState, OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingCheckMarkersState, WriteOnboardingCheckMarkerOptions } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -174,15 +176,7 @@ export interface OnboardingRuntimeDefaultsSnapshot {
   readonly secretStoragePolicy: GoodVibesConfig['storage']['secretPolicy'];
 }
 
-export interface OnboardingAcknowledgementSnapshot {
-  readonly scope: OnboardingStateScope;
-  readonly exists: boolean;
-  readonly updatedAt: number | null;
-  readonly source: string | null;
-  readonly mode?: OnboardingMode;
-  readonly workspaceRoot?: string;
-  readonly accepted: Partial<Record<OnboardingAcknowledgementTarget, boolean>>;
-}
+
 
 export type OnboardingSnapshotCollectionIssueArea =
   | 'services'

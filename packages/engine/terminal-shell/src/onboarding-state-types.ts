@@ -40,3 +40,12 @@ export interface WriteOnboardingCheckMarkerOptions {
     readonly mode?: OnboardingMode | undefined;
     readonly workspaceRoot?: string | undefined;
 }
+export interface OnboardingAcknowledgementSnapshot {
+    readonly scope: OnboardingStateScope;
+    readonly exists: boolean;
+    readonly updatedAt: number | null;
+    readonly source: string | null;
+    readonly mode?: OnboardingMode | undefined;
+    readonly workspaceRoot?: string | undefined;
+    readonly accepted: Partial<Record<OnboardingAcknowledgementTarget, boolean>>;
+}

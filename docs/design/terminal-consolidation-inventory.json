@@ -1419,7 +1419,7 @@
       "path": "runtime/index.ts",
       "baselineTuiLines": 674,
       "baselineSimilarity": 0.8156,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "runtime/native-conversation-execution.ts",
@@ -1539,7 +1539,16 @@
       "path": "runtime/onboarding/snapshot.ts",
       "baselineTuiLines": 432,
       "baselineSimilarity": 0.8695,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "sortUnique",
+        "buildProviderRoutingSnapshot",
+        "buildRuntimeDefaultsSnapshot",
+        "buildConfiguredSurfaceKinds",
+        "sortSurfaceRecords",
+        "buildFallbackAuthSnapshot",
+        "buildAcknowledgementSnapshot"
+      ]
     },
     {
       "path": "runtime/onboarding/state.ts",
@@ -1561,7 +1570,8 @@
         "OnboardingCheckMarkerPayload",
         "OnboardingCheckMarkerState",
         "OnboardingCheckMarkersState",
-        "WriteOnboardingCheckMarkerOptions"
+        "WriteOnboardingCheckMarkerOptions",
+        "OnboardingAcknowledgementSnapshot"
       ]
     },
     {

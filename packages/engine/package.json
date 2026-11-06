@@ -2158,6 +2158,16 @@
       "bun": "./terminal-shell/src/fresh-conversation.ts",
       "types": "./terminal-shell/dist/fresh-conversation.d.ts",
       "import": "./terminal-shell/dist/fresh-conversation.js"
+    },
+    "./sdk/platform/runtime/inspection": {
+      "bun": "./sdk/src/platform/runtime/inspection.ts",
+      "types": "./sdk/dist/platform/runtime/inspection.d.ts",
+      "import": "./sdk/dist/platform/runtime/inspection.js"
+    },
+    "./terminal-shell/onboarding-read-facts": {
+      "bun": "./terminal-shell/src/onboarding-read-facts.ts",
+      "types": "./terminal-shell/dist/onboarding-read-facts.d.ts",
+      "import": "./terminal-shell/dist/onboarding-read-facts.js"
     }
   },
   "publishConfig": {

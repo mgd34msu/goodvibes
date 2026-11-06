@@ -1,14 +1,11 @@
+import { sortUnique, buildProviderRoutingSnapshot, buildRuntimeDefaultsSnapshot, buildConfiguredSurfaceKinds, sortSurfaceRecords, buildFallbackAuthSnapshot, buildAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-read-facts';
 import type { SecretStorageReview } from '../../config/secrets.ts';
 import { getProviderIdFromModel } from '../../config/provider-model.ts';
-import type { LocalAuthSnapshot } from '@goodvibes-jev/engine/sdk/platform/security';
 import { summarizeAgentBehaviorDiscovery } from '../../agent/behavior-discovery-summary.ts';
 import { readOnboardingRuntimeState } from './state.ts';
 import { captureNativeReadRestrictions } from '../read-restrictions.ts';
 import type {
-  OnboardingAcknowledgementSnapshot,
   OnboardingConfigSnapshot,
-  OnboardingProviderRoutingSnapshot,
-  OnboardingRuntimeDefaultsSnapshot,
   OnboardingServiceState,
   OnboardingSnapshotCollectionIssue,
   OnboardingSnapshotCollectionIssueArea,
@@ -32,10 +29,6 @@ async function drainSnapshotReads<T extends readonly unknown[]>(reads: T): Promi
   catch (error) { await drained; throw error; }
 }
 
-function sortUnique(values: readonly string[]): string[] {
-  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
-}
-
 function buildConfigSnapshot(
   config: OnboardingSnapshotDependencies['config'],
 ): OnboardingConfigSnapshot {
@@ -52,36 +45,6 @@ function buildConfigSnapshot(
       llmModel: config.get('tools.llmModel'),
     },
     surfaces: config.getCategory('surfaces'),
-  };
-}
-
-function buildProviderRoutingSnapshot(
-  config: OnboardingConfigSnapshot,
-): OnboardingProviderRoutingSnapshot {
-  return {
-    primaryProviderId: getProviderIdFromModel(config.provider.model),
-    primaryModelId: config.provider.model,
-    primaryReasoningEffort: config.provider.reasoningEffort,
-    embeddingProviderId: config.provider.embeddingProvider,
-    systemPromptFile: config.provider.systemPromptFile,
-    helperEnabled: config.helper.enabled,
-    helperProviderId: config.helper.globalProvider,
-    helperModelId: config.helper.globalModel,
-    toolLlmEnabled: config.tools.llmEnabled,
-    toolProviderId: config.tools.llmProvider,
-    toolModelId: config.tools.llmModel,
-  };
-}
-
-function buildRuntimeDefaultsSnapshot(
-  config: OnboardingConfigSnapshot,
-): OnboardingRuntimeDefaultsSnapshot {
-  return {
-    providerReasoningEffort: config.provider.reasoningEffort,
-    permissionsMode: config.permissions.mode,
-    behavior: config.behavior,
-    display: config.display,
-    secretStoragePolicy: config.storage.secretPolicy,
   };
 }
 
@@ -200,46 +163,6 @@ function buildFallbackSecretReview(
   };
 }
 
-function buildFallbackAuthSnapshot(): LocalAuthSnapshot {
-  return {
-    userStorePath: '',
-    bootstrapCredentialPath: '',
-    persisted: false,
-    bootstrapCredentialPresent: false,
-    userCount: 0,
-    sessionCount: 0,
-    users: [],
-    sessions: [],
-  };
-}
-
-function buildConfiguredSurfaceKinds(
-  surfaces: OnboardingConfigSnapshot['surfaces'],
-): string[] {
-  const enabledKinds: string[] = [];
-
-  for (const [kind, value] of Object.entries(surfaces)) {
-    if (!value || typeof value !== 'object') continue;
-    if ('enabled' in value && value.enabled === true) enabledKinds.push(kind);
-  }
-
-  return enabledKinds.sort((left, right) => left.localeCompare(right));
-}
-
-function sortSurfaceRecords(
-  records: readonly OnboardingSurfaceRecord[],
-): OnboardingSurfaceRecord[] {
-  return [...records].sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    if (kindOrder !== 0) return kindOrder;
-
-    const labelOrder = left.label.localeCompare(right.label);
-    if (labelOrder !== 0) return labelOrder;
-
-    return left.id.localeCompare(right.id);
-  });
-}
-
 async function loadOptionalSnapshot<T>(
   area: OnboardingSnapshotCollectionIssueArea,
   loader: (() => Promise<T>) | undefined,
@@ -266,57 +189,6 @@ async function loadOptionalSnapshot<T>(
   }
 }
 
-function buildAcknowledgementSnapshot(
-  deps: OnboardingSnapshotDependencies,
-): {
-  snapshot: OnboardingAcknowledgementSnapshot;
-  issue: OnboardingSnapshotCollectionIssue | null;
-} {
-  const scope = deps.acknowledgementScope ?? 'project';
-  if (!deps.shellPaths) {
-    return {
-      snapshot: {
-        scope,
-        exists: false,
-        updatedAt: null,
-        source: null,
-        accepted: {},
-      },
-      issue: null,
-    };
-  }
-
-  const state = readOnboardingRuntimeState(deps.shellPaths, scope);
-  if (state.parseError) {
-    return {
-      snapshot: {
-        scope,
-        exists: true,
-        updatedAt: null,
-        source: null,
-        accepted: {},
-      },
-      issue: {
-        area: 'acknowledgements',
-        message: state.parseError,
-      },
-    };
-  }
-
-  return {
-    snapshot: {
-      scope,
-      exists: state.exists,
-      updatedAt: state.payload?.updatedAt ?? null,
-      source: state.payload?.source ?? null,
-      ...(state.payload?.mode ? { mode: state.payload.mode } : {}),
-      ...(state.payload?.workspaceRoot ? { workspaceRoot: state.payload.workspaceRoot } : {}),
-      accepted: state.payload?.acknowledgements ?? {},
-    },
-    issue: null,
-  };
-}
-
 export async function collectOnboardingSnapshot(
   deps: OnboardingSnapshotDependencies,
   options: OnboardingSnapshotReadOptions = {},
@@ -331,9 +203,9 @@ export async function collectOnboardingSnapshot(
   };
   const capturedAt = deps.clock?.() ?? Date.now();
   const config = buildConfigSnapshot(deps.config);
-  const providerRouting = buildProviderRoutingSnapshot(config);
+  const providerRouting = buildProviderRoutingSnapshot(config, getProviderIdFromModel);
   const runtimeDefaults = buildRuntimeDefaultsSnapshot(config);
-  const acknowledgementResult = buildAcknowledgementSnapshot(deps);
+  const acknowledgementResult = buildAcknowledgementSnapshot(deps, readOnboardingRuntimeState);
 
   const [
     subscriptionsActiveResult,

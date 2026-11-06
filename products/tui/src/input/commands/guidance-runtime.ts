@@ -1,42 +1,12 @@
+import { createWelcomeCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/sdk/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireReadModels, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 
 export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'welcome',
-    aliases: ['guide'],
-    description: 'Open the product entry point for the onboarding wizard, security, marketplace, remote, and operator workflows',
-    usage: '[open|print]',
-    handler(args, ctx) {
-      const sub = args[0] ?? 'open';
-      if (sub === 'open' || sub === 'panel') {
-        if (ctx.openOnboardingWizard) {
-          ctx.openOnboardingWizard({ mode: 'edit' });
-          return;
-        }
-        ctx.print('Use /onboarding to open the setup wizard.');
-        return;
-      }
-      if (sub === 'print') {
-        ctx.print([
-          'Welcome To GoodVibes',
-          '  /onboarding         - open the onboarding wizard with current settings preloaded',
-          '  /setup onboarding   - open the same onboarding wizard from setup workflows',
-          '  /health review      - unified startup, service, and sandbox posture',
-          '  /sandbox review     - inspect VM isolation posture',
-          '  /marketplace open   - browse curated plugins, skills, hook packs, and policy packs',
-          '  /remote setup       - review bridge, tunnel, env, and bootstrap flows',
-          '  /security           - review trust posture, policy pressure, and incidents',
-          '  /cockpit            - unified operator control room',
-        ].join('\n'));
-        return;
-      }
-      ctx.print('Usage: /welcome [open|print]');
-    },
-  });
+  registry.register(welcomeCommand);
 
   registry.register({
     name: 'guidance',
@@ -83,22 +53,52 @@ export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void
         sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
         session: session.session,
       });
-      const contextual = evaluateContextualGuidance(ctx.platform.configManager, {
-        pendingApproval: session.pendingApproval,
-        denialCount: session.denialCount,
-        authRequiredMcpCount: mcp.servers.filter((server) => server.status === 'auth_required').length,
-        degradedProviderCount: health.providerProblems.length,
-        intelligenceUnavailable: intelligence.diagnosticsStatus === 'unavailable' && intelligence.symbolSearchStatus === 'unavailable',
-        recommendations: marketplace.recommendations,
-      }, maintenance, guidanceOptions);
+      const contextual = evaluateContextualGuidance(
+        ctx.platform.configManager,
+        {
+          pendingApproval: session.pendingApproval,
+          denialCount: session.denialCount,
+          authRequiredMcpCount: mcp.servers.filter((server) => server.status === 'auth_required').length,
+          degradedProviderCount: health.providerProblems.length,
+          intelligenceUnavailable: intelligence.diagnosticsStatus === 'unavailable' && intelligence.symbolSearchStatus === 'unavailable',
+          recommendations: marketplace.recommendations,
+        },
+        maintenance,
+        guidanceOptions,
+      );
 
-      ctx.print([
-        `Guidance Review (${getGuidanceMode(ctx.platform.configManager)})`,
-        '',
-        ...formatGuidanceItems(contextual),
-        '',
-        ...formatSessionMaintenanceLines(maintenance, maintenance.guidanceMode === 'guided' ? 'guided' : 'minimal'),
-      ].join('\n'));
+      ctx.print(
+        [
+          `Guidance Review (${getGuidanceMode(ctx.platform.configManager)})`,
+          '',
+          ...formatGuidanceItems(contextual),
+          '',
+          ...formatSessionMaintenanceLines(maintenance, maintenance.guidanceMode === 'guided' ? 'guided' : 'minimal'),
+        ].join('\n'),
+      );
     },
   });
 }
+
+const welcomeCommand = createWelcomeCommand<CommandContext>({
+  description: 'Open the product entry point for the onboarding wizard, security, marketplace, remote, and operator workflows',
+  open(ctx) {
+    if (ctx.openOnboardingWizard) {
+      ctx.openOnboardingWizard({ mode: 'edit' });
+      return;
+    }
+    ctx.print('Use /onboarding to open the setup wizard.');
+    return;
+  },
+  lines: [
+    'Welcome To GoodVibes',
+    '  /onboarding         - open the onboarding wizard with current settings preloaded',
+    '  /setup onboarding   - open the same onboarding wizard from setup workflows',
+    '  /health review      - unified startup, service, and sandbox posture',
+    '  /sandbox review     - inspect VM isolation posture',
+    '  /marketplace open   - browse curated plugins, skills, hook packs, and policy packs',
+    '  /remote setup       - review bridge, tunnel, env, and bootstrap flows',
+    '  /security           - review trust posture, policy pressure, and incidents',
+    '  /cockpit            - unified operator control room',
+  ],
+});

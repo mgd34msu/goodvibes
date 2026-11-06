@@ -249,7 +249,7 @@ const contextInspectionCommand = createContextInspectionCommand<CommandContext>(
         : message.content
             .filter((part) => part.type === 'text')
             .map((part) => part.text ?? '')
-            .join('\n');
+            .join('');
     return Math.ceil(text.length / 4);
   },
   total: (_messages, estimates) => estimates.reduce((sum, value) => sum + value, 0),

@@ -446,7 +446,8 @@
       "path": "input/commands/config.ts",
       "baselineTuiLines": 142,
       "baselineSimilarity": 0.1615,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns config workspace dispatch. Agent provides only opening; TUI explicitly adds its existing local set path, host-boolean writer, daemon secret reference writer and live-theme effects. The shared dispatcher cannot invent a set capability."
     },
     {
       "path": "input/commands/context-window.ts",
@@ -480,7 +481,8 @@
       "path": "input/commands/guidance-runtime.ts",
       "baselineTuiLines": 104,
       "baselineSimilarity": 0.3121,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns welcome open/print dispatch and command metadata. Product adapters retain onboarding versus Agent workspace entry and their actual command catalog; TUI contextual maintenance guidance already delegates to SDK policy."
     },
     {
       "path": "input/commands/health-runtime.ts",

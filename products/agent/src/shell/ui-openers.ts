@@ -1,3 +1,4 @@
+import { buildConfiguredViaMap, resolveSecretProviderIds as readSecretProviders } from '@goodvibes-jev/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '../config/index.ts';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
 import type { ConversationManager } from '../core/conversation';
@@ -42,44 +43,13 @@ type WireShellUiOpenersOptions = {
  * Tier order mirrors SDK provider-routes.ts: env → secrets → subscription → undefined.
  * The preResolvedSecretKeys set is pre-fetched async before the sync picker render cycle.
  */
-function deriveConfiguredVia(
-  providerId: string,
-  configuredIds: Set<string>,
-  subscriptionManager: SubscriptionManager,
-  preResolvedSecretKeys?: ReadonlySet<string>,
-): 'env' | 'secrets' | 'subscription' | 'anonymous' | undefined {
-  if (!configuredIds.has(providerId)) return undefined;
 
-  // Tier 1: subscription check (most specific, subscription overrides env for this provider)
-  const subs = subscriptionManager.list();
-  if (subs.some((s) => s.provider === providerId)) return 'subscription';
-
-  // Tier 2: env-var present (process.env check; anonymous providers don't appear in configuredIds)
-  // We don't have BUILTIN_PROVIDER_ENV_KEYS here; if env was used the configuredIds path covers it.
-  // The presence in configuredIds and no subscription → either env or secrets.
-  // Tier 3: secrets-manager backed (pre-resolved async batch)
-  if (preResolvedSecretKeys && preResolvedSecretKeys.has(providerId)) return 'secrets';
-
-  return 'env';
-}
 
 /**
  * Build a configuredViaMap for the given provider list.
  * Pass preResolvedSecretKeys (from an async SecretsManager batch) to surface the 'secrets' tier.
  */
-function buildConfiguredViaMap(
-  providers: string[],
-  configuredIds: Set<string>,
-  subscriptionManager: SubscriptionManager,
-  preResolvedSecretKeys?: ReadonlySet<string>,
-): Map<string, 'env' | 'secrets' | 'subscription' | 'anonymous'> {
-  const map = new Map<string, 'env' | 'secrets' | 'subscription' | 'anonymous'>();
-  for (const p of providers) {
-    const via = deriveConfiguredVia(p, configuredIds, subscriptionManager, preResolvedSecretKeys);
-    if (via !== undefined) map.set(p, via);
-  }
-  return map;
-}
+
 
 export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   const {
@@ -106,18 +76,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
    * Returns a set of provider IDs (not env var names) that are secrets-backed.
    * Falls back to empty set if secretsManager is not provided.
    */
-  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> {
-    if (!secretsManager) return new Set<string>();
-    const configuredIds = new Set(getConfiguredProviderIds());
-    // We use provider ID as the lookup key since we don't have BUILTIN_PROVIDER_ENV_KEYS here.
-    const results = await Promise.all(
-      [...configuredIds].map(async (providerId) => {
-        const val = await secretsManager.get(providerId).catch(() => null);
-        return val !== null ? providerId : null;
-      }),
-    );
-    return new Set(results.filter((v): v is string => v !== null));
-  }
+  async function resolveSecretProviderIds(): Promise<ReadonlySet<string>> { return readSecretProviders(getConfiguredProviderIds, secretsManager); }
 
   const getCurrentModelForPickerTarget = (): string => {
     const selectedTarget = input.modelPicker.getSelectedTargetInfo();

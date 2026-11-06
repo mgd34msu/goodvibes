@@ -1,3 +1,4 @@
+import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
 import { dirname, resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -138,31 +139,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     name: 'bookmarks',
     aliases: ['bm'],
     description: 'List bookmarked blocks',
-    handler(_args, ctx) {
-      if (ctx.openBookmarkModal) {
-        ctx.openBookmarkModal();
-        return;
-      }
-      const bm = requireBookmarkManager(ctx);
-      const entries = bm.list();
-      if (ctx.openSelection) {
-        const deleteAction = new Map([['d', 'delete' as const]]);
-        const items: SelectionItem[] = entries.length === 0
-          ? [{ id: '_empty', label: 'No bookmarks', detail: 'Use Ctrl+B to bookmark' }]
-          : entries.map(entry => ({ id: entry.key, label: entry.label, detail: new Date(entry.timestamp).toLocaleTimeString(), actions: '[d] delete' }));
-        ctx.openSelection('Bookmarks', items, { allowSearch: true, customActions: deleteAction }, (result) => {
-          if (!result) return;
-          if (result.action === 'delete') {
-            bm.toggle(result.item.id);
-            ctx.print(`Bookmark removed: ${result.item.id}`);
-          } else {
-            ctx.jumpToBookmark?.(result.item.id);
-          }
-        });
-        return;
-      }
-      ctx.print(['Bookmarks:', '', ...entries.map(entry => `  ${entry.key.padEnd(32)} ${entry.label}  (${new Date(entry.timestamp).toLocaleTimeString()})`)].join('\n'));
-    },
+    handler(_args, ctx) { handleBookmarks(ctx, () => requireBookmarkManager(ctx)); },
   });
 
   registry.register({

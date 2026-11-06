@@ -1,3 +1,4 @@
+import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/sdk/platform/routing';
 /**
@@ -528,33 +529,17 @@ export async function bootstrapRuntime(
     requestRender,
   });
 
-  deferredStartup.schedule({
-    label: 'plugins',
-    run: async () => {
-      await pluginManager.init({
-        runtimeBus,
-        commandRegistry: pluginCommandRegistry,
-        providerRegistry,
-        toolRegistry,
-        gatewayMethods: services.gatewayMethods,
-        channelRegistry: services.channelPlugins,
-        channelDeliveryRouter: services.deliveryManager.getDeliveryRouter(),
-        memoryEmbeddingRegistry: services.memoryEmbeddingRegistry,
-        voiceProviderRegistry: services.voiceProviders,
-        mediaProviderRegistry: services.mediaProviders,
-        webSearchProviderRegistry: services.webSearchProviders,
-        getPluginConfig: (name) => pluginManager.getPluginConfig(name),
-        isEnabled: (name) => pluginManager.isEnabled(name),
-      });
-      requestRender();
-    },
-    onError: (error) => {
-      const message = summarizeError(error);
-      logger.error('Deferred plugin startup failed', { error: message });
-      systemMessageRouter.high(`[Startup] Plugin initialization failed: ${message}`);
-      requestRender();
-    },
-  });
+  deferredStartup.schedule(createPluginStartupTask(pluginManager, () => ({ runtimeBus,
+commandRegistry: pluginCommandRegistry,
+providerRegistry,
+toolRegistry,
+gatewayMethods: services.gatewayMethods,
+channelRegistry: services.channelPlugins,
+channelDeliveryRouter: services.deliveryManager.getDeliveryRouter(),
+memoryEmbeddingRegistry: services.memoryEmbeddingRegistry,
+voiceProviderRegistry: services.voiceProviders,
+mediaProviderRegistry: services.mediaProviders,
+webSearchProviderRegistry: services.webSearchProviders }), requestRender, message => systemMessageRouter.high(message)));
   // Probe the daemon spine OFF the interactive path. On a reachable daemon,
   // fold the agent's own per-cwd legacy session store into it (once; marked
   // migrated). Waits for connected-host discovery (which may have just started

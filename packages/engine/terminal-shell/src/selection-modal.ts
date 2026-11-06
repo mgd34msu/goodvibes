@@ -184,3 +184,18 @@ export class SelectionModal {
     return { match: false, score: 0 };
   }
 }
+
+/** Shared modal opener; products retain the composition that presents it. */
+export type OpenSelection = (
+    title: string,
+    items: SelectionItem[],
+    opts: {
+      preSelectId?: string | undefined;
+      allowSearch?: boolean | undefined;
+      customActions?: Map<string, SelectionAction>;
+      primaryVerbLabel?: string | undefined;
+      /** Live preview: called whenever the highlighted row changes. */
+      onHighlight?: (item: SelectionItem | null) => void;
+    } | undefined,
+    callback: (result: SelectionResult | null) => void,
+  ) => void;

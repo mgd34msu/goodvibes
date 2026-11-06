@@ -404,7 +404,8 @@
         "isDirectOwnerCommandContext",
         "directOwnerWorkstreamInput",
         "directOwnerRemoteInput",
-        "directOwnerPlanningInput"
+        "directOwnerPlanningInput",
+        "OpenSelection"
       ]
     },
     {
@@ -483,7 +484,10 @@
       "path": "input/commands/local-runtime.ts",
       "baselineTuiLines": 468,
       "baselineSimilarity": 0.6507,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "handleBookmarks"
+      ]
     },
     {
       "path": "input/commands/local-setup-review.ts",
@@ -983,7 +987,8 @@
       "path": "input/tts-settings-actions.ts",
       "baselineTuiLines": 120,
       "baselineSimilarity": 0.7841,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "note": "Platform owns TTS provider/voice selection and dependent voice reset; TUI supplies its local-provisioning affordance and products retain error presentation."
     },
     {
       "path": "main.ts",
@@ -1469,7 +1474,10 @@
       "path": "runtime/bootstrap.ts",
       "baselineTuiLines": 767,
       "baselineSimilarity": 0.471,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "createPluginStartupTask"
+      ]
     },
     {
       "path": "runtime/client/fleet-union.ts",
@@ -1610,7 +1618,23 @@
       "path": "runtime/onboarding/apply.ts",
       "baselineTuiLines": 614,
       "baselineSimilarity": 0.5491,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "isPlainObject",
+        "readJsonObject",
+        "writeJsonObject",
+        "setNestedValue",
+        "restoreFile",
+        "snapshotFileRollback",
+        "runRollbacks",
+        "validateSecretOperation",
+        "applySecretOperation",
+        "buildSecretRollbackAction",
+        "validateAcknowledgementOperation",
+        "applyAcknowledgementOperation",
+        "getNow",
+        "verifyOnboardingWithRollback"
+      ]
     },
     {
       "path": "runtime/onboarding/derivation.ts",
@@ -1806,7 +1830,12 @@
       "path": "shell/ui-openers.ts",
       "baselineTuiLines": 549,
       "baselineSimilarity": 0.5288,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "deriveConfiguredVia",
+        "buildConfiguredViaMap",
+        "resolveSecretProviderIds"
+      ]
     },
     {
       "path": "shell/voice-capture-shell.ts",

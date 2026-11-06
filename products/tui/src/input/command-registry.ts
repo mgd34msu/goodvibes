@@ -1,3 +1,4 @@
+import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -195,19 +196,7 @@ export interface CommandShellUiOpeners {
   openHelpOverlay?: () => void;
   /** Toggle the transcript search overlay (same action as Ctrl+F), backs /find. */
   openTranscriptSearch?: () => void;
-  openSelection?: (
-    title: string,
-    items: SelectionItem[],
-    opts: {
-      preSelectId?: string;
-      allowSearch?: boolean;
-      customActions?: Map<string, SelectionAction>;
-      primaryVerbLabel?: string;
-      /** Live preview: called whenever the highlighted row changes. */
-      onHighlight?: (item: SelectionItem | null) => void;
-    } | undefined,
-    callback: (result: SelectionResult | null) => void,
-  ) => void;
+  openSelection?: OpenSelection;
   openSettingsModal?: (target?: string) => void;
   /**
    * Open a MIGRATE-TO-MODAL surface by name (purge skeleton, B

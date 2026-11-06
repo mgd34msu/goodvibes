@@ -1,3 +1,4 @@
+import { createOnboardingApplyPrimitives, getNow, verifyOnboardingWithRollback } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { isSecretRefInput } from '@goodvibes-jev/engine/sdk/platform/config';
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../config/index.ts';
@@ -34,9 +35,7 @@ import type {
 } from './types.ts';
 import { isPlainObject, readJsonObject, restoreFile, runRollbacks, setNestedValue, snapshotFileRollback, writeJsonObject, type RollbackAction } from './apply-file-helpers.ts';
 
-function getNow(deps: Pick<OnboardingApplyDependencies, 'clock'>): number {
-  return deps.clock?.() ?? Date.now();
-}
+
 
 function isGoodVibesSecretReferenceValue(value: string): boolean {
   const normalized = value.trim();
@@ -105,18 +104,7 @@ function validateConfigValue(operation: Extract<OnboardingApplyOperation, { kind
   }
 }
 
-function validateSecretOperation(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-secret' }>,
-): void {
-  if (!deps.secrets) throw new Error('Secret persistence is unavailable.');
-  if (operation.key.trim().length === 0) throw new Error('Secret key is required.');
-  if (operation.value.length === 0) throw new Error(`Secret value for ${operation.key} is required.`);
-  if (!operation.medium) throw new Error(`Secret storage medium for ${operation.key} is required.`);
-  if (isMalformedGoodVibesSecretReferenceValue(operation.value)) {
-    throw new Error(`Secret value for ${operation.key} only accepts goodvibes://secrets/... secret references.`);
-  }
-}
+
 
 function validateAuthOperation(
   _deps: OnboardingApplyDependencies,
@@ -125,19 +113,7 @@ function validateAuthOperation(
   throw new Error('Runtime auth user/session administration is external to GoodVibes Agent onboarding.');
 }
 
-function validateAcknowledgementOperation(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'acknowledge' }>,
-): void {
-  if (typeof operation.acknowledged !== 'boolean') {
-    throw new Error(`${operation.target} acknowledgement must be boolean.`);
-  }
 
-  const state = readOnboardingRuntimeState(deps.shellPaths, deps.acknowledgementScope ?? 'project');
-  if (state.parseError) {
-    throw new Error(`Existing onboarding acknowledgement state could not be parsed: ${state.parseError}`);
-  }
-}
 
 function validateCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
@@ -280,39 +256,9 @@ function applyConfigOperation(
   };
 }
 
-async function applySecretOperation(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-secret' }>,
-): Promise<OnboardingAppliedOperation> {
-  validateSecretOperation(deps, operation);
-  await deps.secrets!.set(operation.key, operation.value, {
-    scope: operation.scope ?? 'project',
-    ...(operation.medium ? { medium: operation.medium } : {}),
-  });
 
-  return {
-    kind: operation.kind,
-    summary: `Stored ${operation.key} through the configured secret manager.`,
-  };
-}
 
-async function buildSecretRollbackAction(
-  deps: OnboardingApplyDependencies,
-  operation: Extract<OnboardingApplyOperation, { kind: 'set-secret' }>,
-): Promise<RollbackAction> {
-  validateSecretOperation(deps, operation);
-  const scope = operation.scope ?? 'project';
-  const review = await deps.secrets!.inspect();
-  const locations = review.locations.filter((entry) => entry.source.startsWith(`${scope}-`));
-  if (locations.length === 0) throw new Error(`Secret storage locations for ${scope} scope are unavailable.`);
-  const snapshots = locations.map((location) => ({
-    path: location.path,
-    previous: existsSync(location.path) ? readFileSync(location.path, 'utf-8') : null,
-  }));
-  return () => {
-    for (const snapshot of snapshots) restoreFile(snapshot.path, snapshot.previous);
-  };
-}
+
 
 async function buildRollbackAction(
   deps: OnboardingApplyDependencies,
@@ -395,25 +341,7 @@ async function buildRollbackAction(
   throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
 }
 
-function applyAcknowledgementOperation(
-  deps: OnboardingApplyDependencies,
-  request: OnboardingApplyRequest,
-  operation: Extract<OnboardingApplyOperation, { kind: 'acknowledge' }>,
-): OnboardingAppliedOperation {
-  writeOnboardingAcknowledgementState(deps.shellPaths, {
-    scope: deps.acknowledgementScope ?? 'project',
-    target: operation.target,
-    acknowledged: operation.acknowledged,
-    updatedAt: getNow(deps),
-    source: request.source,
-    mode: request.mode,
-  });
 
-  return {
-    kind: operation.kind,
-    summary: `${operation.target} acknowledgement set to ${operation.acknowledged ? 'accepted' : 'pending'}.`,
-  };
-}
 
 function applyCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
@@ -747,22 +675,7 @@ export async function applyOnboardingRequest(
     return true;
   };
 
-  const verifyOrRollback = async (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => {
-    const verification = await verifyOnboardingRequest(deps, { ...request, operations });
-    const failures = verification.items.filter((item) => item.status !== 'pass');
-    if (failures.length === 0) return true;
-
-    const rollbackErrors = await runRollbacks(rollbacks);
-    applied.length = 0;
-    errors.push(...failures.map((item, index) => ({
-      kind: getVerificationFailureKind(item.id),
-      message: [
-        `verify ${item.id}: ${item.message}`,
-        ...(index === 0 ? rollbackErrors.map((rollbackError) => `rollback: ${rollbackError}`) : []),
-      ].join('; '),
-    })));
-    return false;
-  };
+  const verifyOrRollback = (operations: readonly OnboardingApplyOperation[]): Promise<boolean> => verifyOnboardingWithRollback(() => verifyOnboardingRequest(deps, { ...request, operations }), () => runRollbacks(rollbacks), applied, errors, getVerificationFailureKind);
 
   if (!await applyOperations(orderedOperations)) {
     return { ok: false, applied, skipped, errors };
@@ -779,3 +692,5 @@ export async function applyOnboardingRequest(
     errors,
   };
 }
+
+const { validateSecretOperation, applySecretOperation, buildSecretRollbackAction, validateAcknowledgementOperation, applyAcknowledgementOperation } = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);

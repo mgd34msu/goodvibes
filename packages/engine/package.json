@@ -2388,6 +2388,36 @@
       "bun": "./terminal-shell/src/card-field-prompts.ts",
       "types": "./terminal-shell/dist/card-field-prompts.d.ts",
       "import": "./terminal-shell/dist/card-field-prompts.js"
+    },
+    "./terminal-shell/bookmark-command": {
+      "bun": "./terminal-shell/src/bookmark-command.ts",
+      "types": "./terminal-shell/dist/bookmark-command.d.ts",
+      "import": "./terminal-shell/dist/bookmark-command.js"
+    },
+    "./terminal-shell/plugin-startup": {
+      "bun": "./terminal-shell/src/plugin-startup.ts",
+      "types": "./terminal-shell/dist/plugin-startup.d.ts",
+      "import": "./terminal-shell/dist/plugin-startup.js"
+    },
+    "./terminal-shell/tts-settings-actions": {
+      "bun": "./terminal-shell/src/tts-settings-actions.ts",
+      "types": "./terminal-shell/dist/tts-settings-actions.d.ts",
+      "import": "./terminal-shell/dist/tts-settings-actions.js"
+    },
+    "./terminal-shell/onboarding-file-helpers": {
+      "bun": "./terminal-shell/src/onboarding-file-helpers.ts",
+      "types": "./terminal-shell/dist/onboarding-file-helpers.d.ts",
+      "import": "./terminal-shell/dist/onboarding-file-helpers.js"
+    },
+    "./terminal-shell/onboarding-apply-primitives": {
+      "bun": "./terminal-shell/src/onboarding-apply-primitives.ts",
+      "types": "./terminal-shell/dist/onboarding-apply-primitives.d.ts",
+      "import": "./terminal-shell/dist/onboarding-apply-primitives.js"
+    },
+    "./terminal-shell/model-picker-auth-facts": {
+      "bun": "./terminal-shell/src/model-picker-auth-facts.ts",
+      "types": "./terminal-shell/dist/model-picker-auth-facts.d.ts",
+      "import": "./terminal-shell/dist/model-picker-auth-facts.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort, captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -61,6 +62,7 @@ function snapshotInputs(inputs: readonly RepairSourceAuthorityInput[]) {
 }
 /** One operation owns configuration, cancellation and the complete-pass cache. */
 export function createRepairSourceAuthorityReader(options: RepairSourceAuthorityOptions = {}) {
+  requireSemanticKnowledge();
   const { signal, assertCurrent: ownerCurrent } = options, configuredTimeout = options.timeoutMs;
   const timeoutMs = configuredTimeout ?? LIMITS.defaultTimeoutMs;
   const cache = new Map<string, Omit<RepairSourceAuthorityReading, 'reference'>>();
@@ -83,6 +85,7 @@ export function createRepairSourceAuthorityReader(options: RepairSourceAuthority
     assertOriginalIdentity();
   };
   const assertCurrent = () => {
+    requireSemanticKnowledge();
     if (failed) throw failed;
     try {
       if (signal?.aborted) throw new Held('aborted');
@@ -116,6 +119,7 @@ export function createRepairSourceAuthorityReader(options: RepairSourceAuthority
     const port: JudgmentPort = {
       model: configuredModel!, ...(captured.recorder === undefined ? {} : { recorder: captured.recorder }),
       async ask(request) {
+        requireSemanticKnowledge();
         check(); const result = await captured.ask({ ...request, model: configuredModel! }); check();
         if (!record(result) || !record(result.answers)) throw new Held('malformed');
         const { model, requestedModel, decisionId } = result;
@@ -162,6 +166,7 @@ export function createRepairSourceAuthorityReader(options: RepairSourceAuthority
     assertCurrent,
     preflight(inputs: readonly RepairSourceAuthorityInput[]): void { snapshotInputs(inputs); },
     async read(inputs: readonly RepairSourceAuthorityInput[]): Promise<readonly RepairSourceAuthorityReading[]> {
+      requireSemanticKnowledge();
       let snapshots: ReturnType<typeof snapshotInputs>;
       try {
         snapshots = snapshotInputs(inputs); assertCurrent();

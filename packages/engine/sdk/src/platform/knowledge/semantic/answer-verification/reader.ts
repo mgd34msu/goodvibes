@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JudgmentPort, type YesNoReading, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
@@ -53,6 +54,7 @@ function snapshotInput(input: AnswerVerificationInput): AnswerVerificationInput 
 }
 function validatedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = await port.ask(request);
     if (!result?.answers || (result.decisionId !== undefined && (typeof result.decisionId !== 'string' || !result.decisionId.trim()))) throw new Held('malformed');
     try { checkAnswers(request.questions, result.answers); }
@@ -64,6 +66,7 @@ function validatedPort(port: JudgmentPort): JudgmentPort {
 export async function verifyKnowledgeAnswer(input: AnswerVerificationInput,
   options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
 ): Promise<VerifiedAnswerSelection> {
+  requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotInput(input);
   if (!snapshot.evidence.some((row) => row.text.trim())) return freezeSupport({ confidence: 0, quality: { status: 'no-evidence', decisionIds: [] } });

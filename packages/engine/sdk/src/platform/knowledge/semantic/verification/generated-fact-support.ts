@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { knowledgeClockIso } from '../../store-record-representation.js';
 import { createSupportReferenceLabels } from './structural-references.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -48,6 +49,7 @@ function requestPlans(input: ProjectedSupportInput): RequestPlan[] {
 /** Validate custom ports too: a malformed noul may otherwise accidentally reach an act band. */
 function checkedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = await port.ask(request);
     if (!result || !result.answers || (result.decisionId !== undefined && (typeof result.decisionId !== 'string' || !result.decisionId.trim()))) throw new Held('malformed');
     for (const key of Object.keys(request.questions)) {
@@ -80,6 +82,7 @@ function receipt(request: RequestPlan, probability: number, decisionId?: string)
  * storage writes; the caller must revalidate its exact read-set at write time.
  */
 export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions = {}): Promise<readonly GeneratedFactSupportPlan[]> {
+  requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   if (!Array.isArray(inputs) || inputs.length > LIMITS.inputs) throw new Held('budget');
   if (Object.getPrototypeOf(inputs) !== Array.prototype || Object.values(Object.getOwnPropertyDescriptors(inputs)).some((item) => item.get || item.set)) throw new Held('malformed');

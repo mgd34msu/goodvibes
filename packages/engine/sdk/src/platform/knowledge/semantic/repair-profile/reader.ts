@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
@@ -54,6 +55,7 @@ function snapshotInputs(inputs: readonly RepairProfileReadingInput[]) {
 }
 function checkedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = { ...await port.ask(request) };
     if (!result?.answers || typeof result.model !== 'string' || !result.model.trim()
       || result.requestedModel !== port.model
@@ -73,6 +75,7 @@ function checkedPort(port: JudgmentPort): JudgmentPort {
 export async function prepareRepairProfileSelections(inputs: readonly RepairProfileReadingInput[], options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined;
 } = {}): Promise<readonly (readonly RepairProfileSelection[])[]> {
+  requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   const original = retainStrictJudgmentJson(inputs, () => new JudgmentInputError('unsupported-input'));
   const snapshots = snapshotInputs(original.snapshot);

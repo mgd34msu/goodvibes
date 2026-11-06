@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
@@ -12,6 +13,7 @@ import { repairProfileRequirement } from './battery.js';
 
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 export async function prepareRepairProfileRequirement(input: { readonly query: string; readonly subjects: readonly RepairProfileSubject[] }, options: RepairFactScoringOptions = {}) {
+  requireSemanticKnowledge();
   const { signal, assertCurrent: ownerCurrent, timeoutMs: configuredTimeout } = options;
   assertJudgmentInput(input);
   const originals = retainOwnedJson(input, nodeTypes.isProxy), state = toJson(input);
@@ -57,6 +59,7 @@ export async function prepareRepairProfileRequirement(input: { readonly query: s
       catch (error) { throw error instanceof Held ? error : new Held('stale'); }
     };
     const port: JudgmentPort = { model: configuredModel, ...(authority.port.recorder === undefined ? {} : { recorder: authority.port.recorder }), async ask(request) {
+      requireSemanticKnowledge();
       assertCurrent(); const original = await authority.port.ask({ ...request, model: configuredModel }); assertCurrent();
       const result = admission.capture(original);
       const answer = result.answers.fullProfileRequired;

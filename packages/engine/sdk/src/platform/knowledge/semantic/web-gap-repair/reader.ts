@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { admitRepairJson, prepareRepairJudgmentResult } from './admission.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { toJson, type Candidate, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -8,12 +9,14 @@ import { freezeSupport } from '../verification/projection.js';
 import { KnowledgeWebGapRepairHeldError as Held, WEB_GAP_REPAIR_LIMITS as LIMITS } from './types.js';
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
 export function createWebGapReadings(options: { readonly signal: AbortSignal; readonly assertCurrent: () => void }) {
+  requireSemanticKnowledge();
   const captures = new Map<string, JudgmentPortCapture>();
   const models = new Map<string, string>();
   let failure: Error | undefined, requests = 0, bytes = 0;
   const failed = (error: unknown): Error => error instanceof Held || error instanceof JudgmentInputError ? error
     : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : error instanceof JudgmentAuthorityRetiredError ? 'stale' : 'unavailable');
   const assertCurrent = () => {
+    requireSemanticKnowledge();
     if (failure) throw failure;
     if (options.signal.aborted) throw new Held('aborted');
     options.assertCurrent();
@@ -33,6 +36,7 @@ export function createWebGapReadings(options: { readonly signal: AbortSignal; re
     const owned = captured.port, model = owned.model;
     if (!model.trim()) throw new Held('malformed');
     return { model, ...(owned.recorder ? { recorder: owned.recorder } : {}), async ask(request) {
+      requireSemanticKnowledge();
       assertCurrent();
       bytes += new TextEncoder().encode(JSON.stringify({ state: request.state, questions: request.questions })).byteLength + 1024;
       if (++requests > LIMITS.requests || bytes > LIMITS.bytes) throw new Held('budget');

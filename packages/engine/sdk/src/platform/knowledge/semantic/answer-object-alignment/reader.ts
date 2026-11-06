@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { createHash } from 'node:crypto';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -43,6 +44,7 @@ function jsonState(value: object): Record<string, JsonValue> {
 }
 function validatedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = await port.ask(request);
     if (!result?.answers || typeof result.model !== 'string' || !result.model.trim()
       || typeof result.requestedModel !== 'string' || !result.requestedModel.trim()
@@ -64,6 +66,7 @@ export async function readAnswerObjectAlignment(input: AnswerObjectAlignmentInpu
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 } = {}): Promise<AnswerObjectAlignmentPlan> {
+  requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotAnswerObjectInput(input);
   const inputHash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');

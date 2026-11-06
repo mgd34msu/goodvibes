@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson } from '@goodvibes-jev/judgment';
@@ -44,6 +45,7 @@ function snapshotInput(input: SelfImprovementAssessmentInput) {
 /** A single operation owns the native source frame, installation and exact requested schema. */
 export async function readSelfImprovementAssessment(kind: 'context' | 'coverage', input: SelfImprovementAssessmentInput,
   options: SelfImprovementAssessmentOptions = {}): Promise<SelfImprovementAssessment> {
+  requireSemanticKnowledge();
   if (kind !== 'context' && kind !== 'coverage') throw new Held('malformed');
   const { signal, assertCurrent: ownerCurrent, timeoutMs: configuredTimeout } = options;
   const snapshot = snapshotInput(input);

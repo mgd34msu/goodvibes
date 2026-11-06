@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort, captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
@@ -72,6 +73,7 @@ function snapshotInputs(inputs: readonly RepairSubjectSelectionInput[]) {
 
 /** One caller operation owns this reader. Nothing is cached across operations. */
 export function createRepairSubjectSelectionReader(options: RepairSubjectSelectionOptions = {}) {
+  requireSemanticKnowledge();
   const battery = repairSubjectSelection;
   const SITE = battery.name;
   const ownerCurrent = options.assertCurrent;
@@ -98,6 +100,7 @@ export function createRepairSubjectSelectionReader(options: RepairSubjectSelecti
     assertOriginalIdentity();
   };
   const assertCurrent = () => {
+    requireSemanticKnowledge();
     if (failed) throw failed;
     try {
       if (signal?.aborted) throw new Held('aborted');
@@ -137,6 +140,7 @@ export function createRepairSubjectSelectionReader(options: RepairSubjectSelecti
     const port: JudgmentPort = {
       model: configuredModel!, ...(captured.recorder === undefined ? {} : { recorder: captured.recorder }),
       async ask(request) {
+        requireSemanticKnowledge();
         check();
         const result = await captured.ask({ ...request, model: configuredModel! });
         check();
@@ -184,6 +188,7 @@ export function createRepairSubjectSelectionReader(options: RepairSubjectSelecti
     assertCurrent,
     preflight(inputs: readonly RepairSubjectSelectionInput[]): void { snapshotInputs(inputs); },
     async read(inputs: readonly RepairSubjectSelectionInput[]): Promise<readonly RepairSubjectSelectionReading[]> {
+      requireSemanticKnowledge();
       // Snapshot immediately, even when another batch is still in flight.
       let snapshots: ReturnType<typeof snapshotInputs>;
       try {
@@ -206,5 +211,6 @@ export function createRepairSubjectSelectionReader(options: RepairSubjectSelecti
 }
 
 export async function prepareRepairSubjectSelection(inputs: readonly RepairSubjectSelectionInput[], options: RepairSubjectSelectionOptions = {}): Promise<readonly RepairSubjectSelectionReading[]> {
+  requireSemanticKnowledge();
   return createRepairSubjectSelectionReader(options).read(inputs);
 }

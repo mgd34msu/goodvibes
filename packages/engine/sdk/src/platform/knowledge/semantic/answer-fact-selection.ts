@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../decision-policy.js';
 import { assertAnswerVerificationActive } from './answer-verification/budget.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
@@ -11,6 +12,7 @@ export class KnowledgeFactSelectionHeldError extends Error {
 }
 
 export async function filterFactsForQuery(query: string, facts: readonly KnowledgeNodeRecord[], signal?: AbortSignal): Promise<KnowledgeNodeRecord[]> {
+  requireSemanticKnowledge();
   assertAnswerVerificationActive(signal);
   const byId = new Map(facts.filter((fact) => fact.status === 'active').map((fact) => [fact.id, fact]));
   const shortlist = [...byId.values()];
@@ -36,6 +38,7 @@ export async function filterFactsForQuery(query: string, facts: readonly Knowled
 }
 
 export async function hasFeatureIntentForQuery(query: string, signal?: AbortSignal): Promise<boolean> {
+  requireSemanticKnowledge();
   assertAnswerVerificationActive(signal);
   assertJudgmentInput({ query });
   const port = judgmentPort('engine.knowledge.answer-query-intent'), model = port.model;

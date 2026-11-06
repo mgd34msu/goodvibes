@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../decision-policy.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { extractedSentenceKind, readKnowledgeBattery } from './repair-decisions.js';
@@ -83,6 +84,7 @@ export async function enrichKnowledgeSource(
   source: KnowledgeSourceRecord,
   options: EnrichKnowledgeSourceOptions = {},
 ): Promise<PersistedSemanticExtraction> {
+  requireSemanticKnowledge();
   const spaceId = resolveEnrichmentSpaceId(source, options.knowledgeSpaceId);
   const generationGuard = createSemanticWriteGuard(context.store, options.signal, options.shouldStop);
   generationGuard.watch(`source:${source.id}`, () => context.store.getSource(source.id), source);

@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../decision-policy.js';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, toJson, type Battery, type BatteryItems } from '@goodvibes-jev/judgment';
@@ -7,6 +8,7 @@ import { freezeSupport } from './verification/projection.js';
 
 /** A detached, complete projection. No implicit deadline overrides the port's retry lifecycle. */
 export async function readKnowledgeBattery<I extends BatteryItems>(battery: Battery<I>, state: object, signal?: AbortSignal, options: JudgmentReadingOptions = {}) {
+  requireSemanticKnowledge();
   assertJudgmentInput(state);
   const original = retainStrictJudgmentJson(state);
   const snapshot = freezeSupport(toJson(original.snapshot));

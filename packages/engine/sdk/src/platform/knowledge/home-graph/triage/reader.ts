@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JudgmentPort, type YesNoReading, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
@@ -43,6 +44,7 @@ function jsonState(value: object): Record<string, JsonValue> {
 }
 function validatedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = await port.ask(request);
     if (!result?.answers || typeof result.model !== 'string' || !result.model
       || typeof result.requestedModel !== 'string' || !result.requestedModel
@@ -63,6 +65,7 @@ export async function prepareHomeGraphTriageReadings(inputs: readonly TriageRead
   /** Owner policy may be stricter; it can never weaken the registered high-stakes band. */
   readonly minConfidence?: number | undefined;
 } = {}): Promise<readonly TriageReadingPlan[]> {
+  requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshots = checkedInput(inputs);
   if (!snapshots.length) return Object.freeze([]);

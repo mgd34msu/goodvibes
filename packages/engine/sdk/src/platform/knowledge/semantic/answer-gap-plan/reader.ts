@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { snapshotJudgmentInput } from '../../../gate/judgment-input.js';
@@ -32,6 +33,7 @@ export function snapshotAnswerGapInput(input: AnswerGapInput): AnswerGapInput {
 }
 function checkedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
+    requireSemanticKnowledge();
     const result = { ...await port.ask(request) };
     if (!result.answers || typeof result.model !== 'string' || !result.model.trim() || typeof result.requestedModel !== 'string'
       || !result.requestedModel.trim() || (result.decisionId !== undefined && (typeof result.decisionId !== 'string' || !result.decisionId.trim()))) throw new Held('malformed');
@@ -48,6 +50,7 @@ function checkedPort(port: JudgmentPort): JudgmentPort {
 export function prepareAnswerGapReadings(input: AnswerGapInput, options: {
   readonly signal?: AbortSignal | undefined; readonly deadlineAt: number; readonly assertCurrent: () => void;
 }) {
+  requireSemanticKnowledge();
   const { signal, deadlineAt, assertCurrent: callerCurrent } = options;
   const snapshot = snapshotAnswerGapInput(input), inputHash = supportHash(snapshot);
   const json = (value: object) => {

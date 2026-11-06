@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
@@ -30,6 +31,7 @@ function checkedScore(answer: unknown) {
 
 /** The complete fact batch settles before any score is exposed or persistence can begin. */
 export async function prepareRepairFactScoring(inputs: readonly RepairFactScoringInput[], options: RepairFactScoringOptions = {}) {
+  requireSemanticKnowledge();
   const { signal, assertCurrent: ownerCurrent, timeoutMs: configuredTimeout } = options;
   const timeoutMs = configuredTimeout ?? LIMITS.defaultTimeoutMs;
   // Reuse the canonical full fact/evidence privacy and lossless schema boundary.
@@ -83,6 +85,7 @@ export async function prepareRepairFactScoring(inputs: readonly RepairFactScorin
     };
     const port: JudgmentPort = { model: configuredModel, ...(authority.port.recorder === undefined ? {} : { recorder: authority.port.recorder }),
       async ask(request) {
+        requireSemanticKnowledge();
         assertCurrent(); const original = await authority.port.ask({ ...request, model: configuredModel }); assertCurrent();
         const result = admission.capture(original);
         if (!record(result) || !record(result.answers) || typeof result.model !== 'string' || !result.model.trim()

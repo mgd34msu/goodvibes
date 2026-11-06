@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
@@ -21,6 +22,7 @@ function optionalText(value: unknown): boolean { return value === undefined || t
 
 /** One original source and one reading, retained through the caller's publication. */
 export function prepareKnowledgeExtractionValueReading(input: KnowledgeExtractionValueInput, options: KnowledgeExtractionValueOptions) {
+  requireSemanticKnowledge();
   if (!record(options) || nodeTypes.isProxy(options)) throw new Held('malformed');
   const optionPrototype: unknown = Object.getPrototypeOf(options);
   if (optionPrototype !== Object.prototype && optionPrototype !== null) throw new Held('malformed');

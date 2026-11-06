@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../decision-policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeNodeRecord, KnowledgeEdgeRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
@@ -102,6 +103,7 @@ function claimFor(fact: KnowledgeNodeRecord): RepairFactUsefulnessInput['fact'] 
 
 /** Operation-scoped shared factuality + page usefulness. No record is changed by this reader. */
 export function createKnowledgeFactQualityReader(store: KnowledgeStore, options: KnowledgeFactQualityOptions) {
+  requireSemanticKnowledge();
   const signal = options.signal;
   const guard = options.guard ?? createSemanticWriteGuard(store, options.signal);
   const repair = createRepairFactUsefulnessReader({ signal: options.signal });
@@ -124,6 +126,7 @@ export function createKnowledgeFactQualityReader(store: KnowledgeStore, options:
     capture(() => store.getNode(subject.id), subject);
   }
   function assertCurrent() {
+    requireSemanticKnowledge();
     if (options.signal !== signal) throw new Held('stale');
     if (signal?.aborted) throw new Held('aborted');
     if (policy() !== originalPolicy) throw new Held('stale');

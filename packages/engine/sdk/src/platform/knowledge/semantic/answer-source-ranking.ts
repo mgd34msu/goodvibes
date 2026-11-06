@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../decision-policy.js';
 import { hasAnswerExcerptSelection } from './answer-excerpts/provenance.js';
 import { knowledgeSourceJudgmentUris } from '../source-structural-references.js';
 import { assertAnswerVerificationActive } from './answer-verification/budget.js';
@@ -27,6 +28,7 @@ export async function readAnswerSourceRanking(
   query: string,
   signal?: AbortSignal,
 ): Promise<Array<{ source: KnowledgeSourceRecord; probability: number }>> {
+  requireSemanticKnowledge();
   assertAnswerVerificationActive(signal);
   const sources = uniqueSources(evidence.flatMap((item) => item.source ? [item.source] : []))
     .filter((source) => source.status !== 'failed' && source.status !== 'stale');
@@ -64,6 +66,7 @@ export async function readAnswerSourceRanking(
 }
 
 export async function rankAnswerSources(evidence: readonly AnswerSourceRankingEvidence[], facts: readonly KnowledgeNodeRecord[], query: string, signal?: AbortSignal): Promise<KnowledgeSourceRecord[]> {
+  requireSemanticKnowledge();
   return (await readAnswerSourceRanking(evidence, facts, query, signal)).map((item) => item.source);
 }
 

@@ -1,3 +1,4 @@
+import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { judgmentPort, captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -91,9 +92,11 @@ function snapshotInputs(inputs: readonly RepairFactUsefulnessInput[], page = fal
 
 /** One caller operation owns this reader. Nothing is cached across operations. */
 export function createRepairFactUsefulnessReader(options: RepairFactUsefulnessOptions = {}) {
+  requireSemanticKnowledge();
   return createFactUsefulnessReader(options, false);
 }
 export function createKnowledgePageFactUsefulnessReader(options: RepairFactUsefulnessOptions = {}) {
+  requireSemanticKnowledge();
   return createFactUsefulnessReader(options, true);
 }
 function createFactUsefulnessReader(options: RepairFactUsefulnessOptions, page: boolean) {
@@ -108,6 +111,7 @@ function createFactUsefulnessReader(options: RepairFactUsefulnessOptions, page: 
   // Serial batches share a single four-request concurrency limit and one budget.
   let queue: Promise<unknown> = Promise.resolve();
   const assertCurrent = () => {
+    requireSemanticKnowledge();
     if (failed) throw failed;
     if (signal?.aborted) throw new Held('aborted');
     if (configured) {
@@ -145,6 +149,7 @@ function createFactUsefulnessReader(options: RepairFactUsefulnessOptions, page: 
     const port: JudgmentPort = {
       model: configuredModel!, ...(captured.recorder === undefined ? {} : { recorder: captured.recorder }),
       async ask(request) {
+        requireSemanticKnowledge();
         check();
         const result = await captured.ask({ ...request, model: configuredModel! });
         check();
@@ -192,6 +197,7 @@ function createFactUsefulnessReader(options: RepairFactUsefulnessOptions, page: 
     assertCurrent,
     preflight(inputs: readonly RepairFactUsefulnessInput[]): void { snapshotInputs(inputs, page); },
     async read(inputs: readonly RepairFactUsefulnessInput[]): Promise<readonly RepairFactUsefulnessReading[]> {
+      requireSemanticKnowledge();
       // Snapshot immediately, even when another batch is still in flight.
       let snapshots: ReturnType<typeof snapshotInputs>;
       try {
@@ -214,5 +220,6 @@ function createFactUsefulnessReader(options: RepairFactUsefulnessOptions, page: 
 }
 
 export async function prepareRepairFactUsefulness(inputs: readonly RepairFactUsefulnessInput[], options: RepairFactUsefulnessOptions = {}): Promise<readonly RepairFactUsefulnessReading[]> {
+  requireSemanticKnowledge();
   return createRepairFactUsefulnessReader(options).read(inputs);
 }

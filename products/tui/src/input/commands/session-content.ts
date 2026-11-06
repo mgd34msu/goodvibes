@@ -1,9 +1,10 @@
-import { join, resolve } from 'path';
-import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
-import type { CommandRegistry } from '../command-registry.ts';
+import { createSessionSaveCommand, restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { join } from 'path';
+import { unlinkSync } from 'node:fs';
+import 'node:fs/promises';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import { exportToMarkdown } from '@goodvibes-jev/engine/sdk/platform/export';
+import '@goodvibes-jev/engine/sdk/platform/export';
 import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/sdk/platform/templates';
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -12,127 +13,11 @@ import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 import { filterUserFacingSessions } from './session-picker-filter.ts';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'export',
-    description: 'Export conversation to a Markdown file',
-    usage: '[format] [path]',
-    argsHint: '[markdown] [path]',
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      let format = 'markdown';
-      let outPath: string | undefined;
-      for (const arg of args) {
-        if (arg === 'markdown' || arg === 'md' || arg === 'text' || arg === 'txt') {
-          format = arg === 'md' ? 'markdown' : arg === 'txt' ? 'text' : arg;
-        } else {
-          outPath = arg;
-        }
-      }
-      if (!outPath) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        outPath = `./conversation-${ts}.${format === 'markdown' ? 'md' : 'txt'}`;
-      }
-      const resolvedPath = shellPaths.resolveWorkspacePath(outPath);
-      if (!shellPaths.isWithinWorkingDirectory(resolvedPath)) {
-        ctx.print('Error: Export path must be within the current directory.');
-        return;
-      }
+  registry.register(contentCommands.exportCommand);
 
-      try {
-        const data = ctx.session.conversationManager.toJSON() as { messages: Array<Record<string, unknown>> };
-        const msgs = data.messages ?? [];
-        let fileContent: string;
-        if (format === 'markdown') {
-          const exportMsgs = msgs.map(m => ({
-            role: String(m.role ?? 'user') as 'user' | 'assistant' | 'system' | 'tool',
-            content: Array.isArray(m.content)
-              ? m.content as import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[]
-              : String(m.content ?? ''),
-            toolCalls: m.toolCalls as import('@goodvibes-jev/engine/sdk/platform/types').ToolCall[] | undefined,
-            callId: m.callId as string | undefined,
-            toolName: m.toolName as string | undefined,
-            reasoningContent: m.reasoningContent as string | undefined,
-            reasoningSummary: m.reasoningSummary as string | undefined,
-            usage: m.usage as { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined,
-          }));
-          fileContent = exportToMarkdown(exportMsgs, {
-            model: ctx.session.runtime.model,
-            provider: ctx.session.runtime.provider,
-            sessionId: ctx.session.runtime.sessionId,
-            title: ctx.session.conversationManager.title || undefined,
-          });
-        } else {
-          const lines: string[] = [];
-          for (const m of msgs) {
-            const role = String(m.role ?? 'unknown').toUpperCase();
-            const content = typeof m.content === 'string' ? m.content : '';
-            if (!content.trim()) continue;
-            lines.push(`[${role}]`);
-            lines.push(content);
-            lines.push('');
-          }
-          fileContent = lines.join('\n');
-        }
-        const { dirname } = await import('node:path');
-        const dir = dirname(resolvedPath);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        await writeFile(resolvedPath, fileContent, 'utf-8');
-        ctx.print(`Exported ${msgs.length} messages to: ${resolvedPath}`);
-      } catch (err) {
-        ctx.print(`Export failed: ${summarizeError(err)}`);
-      }
-    },
-  });
+  registry.register(contentCommands.titleCommand);
 
-  registry.register({
-    name: 'title',
-    description: 'Show or set the conversation title',
-    usage: '[text]',
-    argsHint: '[text]',
-    handler(args, ctx) {
-      if (args.length === 0) ctx.print(ctx.session.conversationManager.title ? `Conversation title: ${ctx.session.conversationManager.title}` : 'No title set.');
-      else {
-        ctx.session.conversationManager.title = args.join(' ');
-        ctx.print(`Title set to: ${ctx.session.conversationManager.title}`);
-        ctx.renderRequest();
-      }
-    },
-  });
-
-  registry.register({
-    name: 'save',
-    description: 'Save current session to .goodvibes/tui/sessions/',
-    usage: '[name]',
-    argsHint: '[name]',
-    handler(args, ctx) {
-      const sessionManager = requireSessionManager(ctx);
-      const rawName = args[0] || ctx.session.conversationManager.title || `session-${Date.now()}`;
-      const exportData = ctx.session.conversationManager.toJSON() as { messages: object[] };
-      const messages = exportData.messages ?? [];
-      const meta = {
-        title: ctx.session.conversationManager.title,
-        model: ctx.session.runtime.model,
-        provider: ctx.session.runtime.provider,
-        timestamp: Date.now(),
-        // `/save` is the user asking to keep this conversation. Stamped so
-        // the session-conversations retention sweep never expires it, unlike
-        // the automatic per-turn snapshot (turn-event-wiring.ts, 'auto').
-        saveSource: 'user' as const,
-      };
-      try {
-        const agentManager = ctx.ops.agentManager;
-        if (!agentManager) {
-          ctx.print('Agent manager is not available in this runtime.');
-          return;
-        }
-        const agentRecords = agentManager.exportState();
-        const { filePath, sanitizedName } = sessionManager.save(rawName, messages, meta, agentRecords);
-        ctx.print(`Session saved: ${rawName}${sanitizedName !== rawName ? ` (saved as "${sanitizedName}")` : ''}${agentRecords.length > 0 ? ` [${agentRecords.length} agent records]` : ''}\n  → ${filePath}`);
-      } catch (e) {
-        ctx.print(`Failed to save session: ${summarizeError(e)}`);
-      }
-    },
-  });
+  registry.register(saveCommand);
 
   registry.register({
     name: 'load',
@@ -152,14 +37,13 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ctx.print('Agent manager is not available in this runtime.');
           return;
         }
-        ctx.session.conversationManager.resetAll();
-        ctx.session.conversationManager.fromJSON({ messages: messages as never[] });
-        if (meta.title) ctx.session.conversationManager.title = meta.title;
-        ctx.session.conversationManager.rebuildHistory();
+        restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
         agentManager.clear();
         if (agentRecords.length > 0) agentManager.importState(agentRecords);
         ctx.renderRequest();
-        ctx.print(`Session loaded: ${args[0]} (${messages.length} messages)${agentRecords.length > 0 ? ` [${agentRecords.length} agent records restored]` : ''}`);
+        ctx.print(
+          `Session loaded: ${args[0]} (${messages.length} messages)${agentRecords.length > 0 ? ` [${agentRecords.length} agent records restored]` : ''}`,
+        );
       } catch (e) {
         ctx.print(`Failed to load session: ${summarizeError(e)}`);
       }
@@ -169,7 +53,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
   registry.register({
     name: 'undo',
     aliases: [],
-    description: 'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts the last file write/edit. /undo alone removes the last conversation turn',
+    description:
+      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts the last file write/edit. /undo alone removes the last conversation turn',
     usage: '[rewind|file]',
     argsHint: '[rewind|file]',
     async handler(args, ctx) {
@@ -185,7 +70,11 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         }
         try {
           const result = ctx.workspace.fileUndoManager.undo();
-          ctx.print(result ? `File reverted: ${result.path} (${result.tool} tool). Use /redo file to re-apply.` : 'Nothing to undo. No file operations recorded.');
+          ctx.print(
+            result
+              ? `File reverted: ${result.path} (${result.tool} tool). Use /redo file to re-apply.`
+              : 'Nothing to undo. No file operations recorded.',
+          );
         } catch (err) {
           ctx.print(`File undo failed: ${summarizeError(err)}`);
         }
@@ -203,7 +92,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
   registry.register({
     name: 'redo',
-    description: 'Redo last undone action. /redo rewind re-applies the last undone /rewind. /redo file re-applies the last reverted file. /redo alone restores a conversation turn',
+    description:
+      'Redo last undone action. /redo rewind re-applies the last undone /rewind. /redo file re-applies the last reverted file. /redo alone restores a conversation turn',
     usage: '[rewind|file]',
     argsHint: '[rewind|file]',
     async handler(args, ctx) {
@@ -235,21 +125,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     },
   });
 
-  registry.register({
-    name: 'retry',
-    aliases: ['r'],
-    description: 'Retry the last request while retaining completed work',
-    usage: '[modified text]',
-    argsHint: '[modified text]',
-    handler(args, ctx) {
-      const lastMsg = ctx.session.conversationManager.getLastUserMessage();
-      if (!lastMsg) {
-        ctx.print('No message to retry.');
-        return;
-      }
-      ctx.submitInput?.(args.length > 0 ? args.join(' ') : lastMsg);
-    },
-  });
+  registry.register(contentCommands.retryCommand);
 
   registry.register({
     name: 'sessions',
@@ -273,13 +149,14 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       const sessions = filterUserFacingSessions(sessionManager.list());
       if (ctx.openSelection) {
         const deleteAction = new Map([['d', 'delete' as const]]);
-        const items: SelectionItem[] = sessions.length === 0
-          ? [{ id: '_empty', label: 'No saved sessions', detail: 'Use /save [name] to save' }]
-          : sessions.map(s => ({ id: s.name, label: s.name, detail: s.title || '(untitled)', actions: '[d] delete' }));
+        const items: SelectionItem[] =
+          sessions.length === 0
+            ? [{ id: '_empty', label: 'No saved sessions', detail: 'Use /save [name] to save' }]
+            : sessions.map((s) => ({ id: s.name, label: s.name, detail: s.title || '(untitled)', actions: '[d] delete' }));
         ctx.openSelection('Sessions', items, { allowSearch: true, customActions: deleteAction }, (result) => {
           if (!result) return;
           if (result.action === 'delete') {
-            const sessionInfo = sessions.find(s => s.name === result.item.id);
+            const sessionInfo = sessions.find((s) => s.name === result.item.id);
             if (!sessionInfo) return;
             const remove = (): void => {
               try {
@@ -295,22 +172,21 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
               remove();
               return;
             }
-            void ctx.confirm({
-              title: 'Delete session?',
-              body: `This removes "${sessionInfo.name}" and its ${sessionInfo.messageCount} message${sessionInfo.messageCount === 1 ? '' : 's'} from this project.\nIt cannot be undone.`,
-              confirmLabel: 'Delete',
-              tone: 'danger',
-            }).then((confirmed) => {
-              if (confirmed) remove();
-              else ctx.renderRequest();
-            });
+            void ctx
+              .confirm({
+                title: 'Delete session?',
+                body: `This removes "${sessionInfo.name}" and its ${sessionInfo.messageCount} message${sessionInfo.messageCount === 1 ? '' : 's'} from this project.\nIt cannot be undone.`,
+                confirmLabel: 'Delete',
+                tone: 'danger',
+              })
+              .then((confirmed) => {
+                if (confirmed) remove();
+                else ctx.renderRequest();
+              });
           } else {
             try {
               const { meta, messages } = sessionManager.load(result.item.id);
-              ctx.session.conversationManager.resetAll();
-              ctx.session.conversationManager.fromJSON({ messages: messages as never[] });
-              if (meta.title) ctx.session.conversationManager.title = meta.title;
-              ctx.session.conversationManager.rebuildHistory();
+              restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
               ctx.renderRequest();
               ctx.print(`Session loaded: ${result.item.id} (${messages.length} messages)`);
             } catch (e) {
@@ -321,7 +197,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         return;
       }
       const lines = ['Saved sessions:', ''];
-      for (const s of sessions) lines.push(`  ${s.name.padEnd(30)} ${(s.title || '(untitled)').padEnd(24)} ${new Date(s.timestamp).toLocaleString()}  (${s.messageCount} msgs)`);
+      for (const s of sessions)
+        lines.push(
+          `  ${s.name.padEnd(30)} ${(s.title || '(untitled)').padEnd(24)} ${new Date(s.timestamp).toLocaleString()}  (${s.messageCount} msgs)`,
+        );
       ctx.print(lines.join('\n'));
     },
   });
@@ -343,10 +222,20 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       if (!sub || sub === 'list') {
         const templates = templateManager.list();
         if (ctx.openSelection) {
-          const actions = new Map([['d', 'delete' as const], ['e', 'edit' as const]]);
-          const items: SelectionItem[] = templates.length === 0
-            ? [{ id: '_empty', label: 'No templates saved', detail: 'Use /template save <name>' }]
-            : templates.map(t => ({ id: t.name, label: t.name, detail: t.preview, category: t.scope === 'project' ? 'project' : 'global', actions: '[d] delete  [e] edit' }));
+          const actions = new Map([
+            ['d', 'delete' as const],
+            ['e', 'edit' as const],
+          ]);
+          const items: SelectionItem[] =
+            templates.length === 0
+              ? [{ id: '_empty', label: 'No templates saved', detail: 'Use /template save <name>' }]
+              : templates.map((t) => ({
+                  id: t.name,
+                  label: t.name,
+                  detail: t.preview,
+                  category: t.scope === 'project' ? 'project' : 'global',
+                  actions: '[d] delete  [e] edit',
+                }));
           ctx.openSelection('Templates', items, { allowSearch: true, customActions: actions }, (result) => {
             if (!result) return;
             if (result.action === 'delete') {
@@ -364,7 +253,13 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           });
           return;
         }
-        ctx.print(['Templates:', '', ...templates.map(t => `  ${t.scope === 'project' ? '[project]' : '[global] '} ${t.name.padEnd(28)} ${t.preview}`)].join('\n'));
+        ctx.print(
+          [
+            'Templates:',
+            '',
+            ...templates.map((t) => `  ${t.scope === 'project' ? '[project]' : '[global] '} ${t.name.padEnd(28)} ${t.preview}`),
+          ].join('\n'),
+        );
         return;
       }
       if (sub === 'save') {
@@ -374,7 +269,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           return;
         }
         try {
-          templateManager.save(name, ctx.session.conversationManager.getLastUserMessage() || '# Template\n\nReplace this with your template content.\n');
+          templateManager.save(
+            name,
+            ctx.session.conversationManager.getLastUserMessage() || '# Template\n\nReplace this with your template content.\n',
+          );
           ctx.print(`Template saved: ${name}`);
         } catch (e) {
           ctx.print(`Failed to save template: ${summarizeError(e)}`);
@@ -438,9 +336,11 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       const sub = args[0] ?? 'list';
       if (sub === 'list' || args.length === 0) {
         const memories = requireSessionMemoryStore(ctx).list();
-        ctx.print(memories.length === 0
-          ? 'No session notes. Use !# prefix or /note add <text> to create one.'
-          : [`Session Notes (${memories.length}):`, ...memories.map(m => `  [${m.id}] ${m.text}`)].join('\n'));
+        ctx.print(
+          memories.length === 0
+            ? 'No session notes. Use !# prefix or /note add <text> to create one.'
+            : [`Session Notes (${memories.length}):`, ...memories.map((m) => `  [${m.id}] ${m.text}`)].join('\n'),
+        );
       } else if (sub === 'add') {
         const text = args.slice(1).join(' ').trim();
         if (!text) {
@@ -458,8 +358,58 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         const store = requireSessionMemoryStore(ctx);
         ctx.print(store.remove(id) ? `Note removed: [${id}]` : `Note not found: ${id}`);
       } else {
-        ctx.print('Usage: /note [list|add <text>|remove <id>]\n  /note              — list all session notes\n  /note list         — list all session notes\n  /note add <text>   — add a note without sending a message\n  /note remove <id>  — remove a specific note');
+        ctx.print(
+          'Usage: /note [list|add <text>|remove <id>]\n  /note              — list all session notes\n  /note list         — list all session notes\n  /note add <text>   — add a note without sending a message\n  /note remove <id>  — remove a specific note',
+        );
       }
     },
   });
 }
+
+import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+const contentCommands = createSessionContentCommands<CommandContext, Record<string, unknown>>({
+  paths: requireShellPaths,
+  capture: (ctx) => (ctx.session.conversationManager.toJSON() as { messages?: Record<string, unknown>[] }).messages ?? [],
+  markdown(messages) {
+    return messages.map((m) => ({
+      role: String(m.role ?? 'user') as 'user' | 'assistant' | 'system' | 'tool',
+      content: Array.isArray(m.content)
+        ? (m.content as import('@goodvibes-jev/engine/sdk/platform/providers').ContentPart[])
+        : String(m.content ?? ''),
+      toolCalls: m.toolCalls as import('@goodvibes-jev/engine/sdk/platform/types').ToolCall[] | undefined,
+      callId: m.callId as string | undefined,
+      toolName: m.toolName as string | undefined,
+      reasoningContent: m.reasoningContent as string | undefined,
+      reasoningSummary: m.reasoningSummary as string | undefined,
+      usage: m.usage as { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined,
+    }));
+  },
+  text: (message) => (typeof message.content === 'string' ? message.content : ''),
+  role: (message) => String(message.role ?? 'unknown'),
+  confirmExport: false,
+  invalidPath: 'Error: Export path must be within the current directory.',
+  exported: (count, path) => `Exported ${count} messages to: ${path}`,
+  failed: (_action, error) => 'Export failed: ' + summarizeError(error),
+  title: (title) => `Conversation title: ${title}`,
+  titleSet: (title) => `Title set to: ${title}`,
+  retryDescription: 'Retry the last request while retaining completed work',
+  retryRemovesLastTurn: false,
+});
+
+const saveCommand = createSessionSaveCommand<CommandContext>({
+  manager: requireSessionManager,
+  messages: (ctx) => (ctx.session.conversationManager.toJSON() as { messages?: object[] }).messages ?? [],
+  extraMeta: () => ({}),
+  records: (ctx) => {
+    const manager = ctx.ops.agentManager;
+    if (!manager) {
+      ctx.print('Agent manager is not available in this runtime.');
+      return null;
+    }
+    return manager.exportState();
+  },
+  description: 'Save current session to .goodvibes/tui/sessions/',
+  saved: (rawName, { filePath, sanitizedName }, records) =>
+    `Session saved: ${rawName}${sanitizedName !== rawName ? ` (saved as "${sanitizedName}")` : ''}${records > 0 ? ` [${records} agent records]` : ''}\n  → ${filePath}`,
+  failed: (error) => 'Failed to save session: ' + summarizeError(error),
+});

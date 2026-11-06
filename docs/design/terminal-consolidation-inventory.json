@@ -700,7 +700,8 @@
       "path": "input/commands/session-content.ts",
       "baselineTuiLines": 465,
       "baselineSimilarity": 0.4485,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "notes": "Partial: platform now owns export path/format/confirmation/write lifecycle, title/retry dispatch, explicit user saves and saved-content restore sequence. Product adapters retain snapshot parsing, exact text/markdown formatting, retry undo versus retain behavior, Agent confirmation and TUI agent-state records. Saved-session list/selection dispatch still being converged; TUI-only template/note and file/rewind undo remain product commands."
     },
     {
       "path": "input/commands/session-workflow.ts",

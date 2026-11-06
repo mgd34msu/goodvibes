@@ -2898,6 +2898,11 @@
       "bun": "./terminal-shell/src/shell-ui-openers.ts",
       "types": "./terminal-shell/dist/shell-ui-openers.d.ts",
       "import": "./terminal-shell/dist/shell-ui-openers.js"
+    },
+    "./terminal-shell/session-content-commands": {
+      "bun": "./terminal-shell/src/session-content-commands.ts",
+      "types": "./terminal-shell/dist/session-content-commands.d.ts",
+      "import": "./terminal-shell/dist/session-content-commands.js"
     }
   },
   "publishConfig": {

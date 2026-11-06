@@ -349,7 +349,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
       body,
       category: response.status === 401 ? 'authentication' : 'service',
     });
-    if (path !== '/api/judgment/batteries/run' && path !== webuiRouteFor('control.status')?.path) await resolveDaemonRefusal(error, runBrowserJudgment, {
+    if (path !== WEBUI_METHOD_ROUTES['judgment.battery.run'].path && path !== WEBUI_METHOD_ROUTES['control.status'].path) await resolveDaemonRefusal(error, runBrowserJudgment, {
       signal: options.signal, isCurrent: () => isClientLifetimeCurrent(failureLifetime),
     });
     // Interpretation never replaces the original HTTP failure, even if its
@@ -2758,8 +2758,7 @@ export async function invokeMethod<TMethodId extends OperatorTypedMethodId>(
 export async function readBrowserDecisionPolicy(signal: AbortSignal) {
   signal.throwIfAborted();
   if (!browserDecisionPolicy.snapshot()) {
-    const status = webuiRouteFor('control.status');
-    if (!status) throw new Error('Decision policy observation is unavailable.');
+    const status = WEBUI_METHOD_ROUTES['control.status'];
     await requestJson(status.path, { signal });
     signal.throwIfAborted();
   }

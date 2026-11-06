@@ -4,7 +4,8 @@ import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
 import { rankCommandSnapshot, readCommandRankResponse } from './command-judgment';
 import { getCommands, getCommandRegistryRevision, registerCommand, unregisterCommand } from './commands';
-import { sdk, tokenStore } from './goodvibes';
+import { readBrowserDecisionPolicy, sdk, tokenStore } from './goodvibes';
+import { browserDecisionPolicy } from './decision-policy';
 import { closeRelayClient, setActiveRoute } from './relay-connection';
 import { clearStoredRelayPairing, storeRelayPairing } from './relay-pairing';
 import { WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
@@ -14,6 +15,11 @@ type Wire = Extract<OperatorMethodOutput<'judgment.battery.run'>, { battery: 'we
 const originalFetch = globalThis.fetch;
 const snapshot = () => ({ commands: getCommands(), revision: getCommandRegistryRevision() });
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const enabledPolicy = () => new Headers({ 'x-goodvibes-decision-policy': JSON.stringify({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }) });
+// Battery/ownership fixtures begin after an authenticated status response.
+// Identity changes clear that observation and require a fresh one. The cold
+// status wire is exercised separately rather than hidden in battery responses.
+const observeEnabledPolicy = () => browserDecisionPolicy.observe(enabledPolicy());
 const request = (): Request => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.palette.command-rank', batteryVersion: 1,
   input: { query: { kind: 'inline', text: 'start over' }, registryVersion: WEBUI_COMMAND_CATALOG_VERSION,
     candidates: [{ kind: 'builtin', commandId: 'chat.new' }, { kind: 'builtin', commandId: 'nav.chat' }] } });
@@ -33,6 +39,7 @@ function wire(input: Request, outcome: 'act' | 'confirm' | 'escalate' = 'act'): 
 beforeEach(async () => {
   for (const command of getCommands()) unregisterCommand(command.id);
   await tokenStore.setToken('offline-fixture-token');
+  observeEnabledPolicy();
   registerCommand({ id: 'chat.new', title: 'New Chat', group: 'chat', run() {} });
   registerCommand({ id: 'nav.chat', title: 'Go to Chat', group: 'navigation', run() {} });
 });
@@ -44,12 +51,59 @@ afterEach(async () => {
 });
 
 describe('authenticated palette reader', () => {
+  test('a cold policy observation uses the authenticated status route before reading a battery', async () => {
+    browserDecisionPolicy.reset();
+    const calls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url), window.location.origin).pathname;
+      calls.push(path);
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer offline-fixture-token');
+      if (path === '/status') return Response.json({ ok: true }, { headers: enabledPolicy() });
+      return response(wire(JSON.parse(String(init?.body)) as Request));
+    }, { preconnect: originalFetch.preconnect });
+    expect((await readBrowserDecisionPolicy(new AbortController().signal)).policy).toBe('Default - On');
+    const result = await rankCommandSnapshot('start over', snapshot(), new AbortController().signal);
+    expect(result.status).toBe('ready');
+    expect(calls).toEqual(['/status', '/api/judgment/batteries/run']);
+  });
+
+  test('a cold Classic status observation ranks locally without requesting a battery', async () => {
+    browserDecisionPolicy.reset();
+    const calls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: RequestInfo | URL) => {
+      const path = new URL(String(url), window.location.origin).pathname;
+      calls.push(path);
+      if (path !== '/status') throw new Error('Unexpected semantic request');
+      return Response.json({ ok: true }, { headers: {
+        'x-goodvibes-decision-policy': JSON.stringify({ policy: 'Classic - Off', operation: 'classic', reason: 'selected', revision: 0 }),
+      } });
+    }, { preconnect: originalFetch.preconnect });
+    expect(await rankCommandSnapshot('New Chat', snapshot(), new AbortController().signal))
+      .toMatchObject({ status: 'ready', provenance: 'classic' });
+    expect(calls).toEqual(['/status']);
+  });
+
+  test.each([401, 503])('a failed cold status lookup (%s) cannot recurse into judgment or invent a Classic policy', async status => {
+    browserDecisionPolicy.reset();
+    const calls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: RequestInfo | URL) => {
+      calls.push(new URL(String(url), window.location.origin).pathname);
+      if (calls.length > 1) throw new Error('Unexpected recursive policy lookup');
+      return response({ error: 'Synthetic status failure' }, status);
+    }, { preconnect: originalFetch.preconnect });
+    expect(await rankCommandSnapshot('New Chat', snapshot(), new AbortController().signal))
+      .toEqual({ status: 'unavailable', reason: 'unavailable' });
+    expect(calls).toEqual(['/status']);
+    expect(browserDecisionPolicy.snapshot()).toBeUndefined();
+  });
+
   test('a settled direct callback expires by clock alone', async () => {
     let now = Date.now();
     const clock = spyOn(Date, 'now').mockImplementation(() => now);
     let runs = 0;
     try {
       await tokenStore.setTokenEntry('offline-account-a', now + 60_000);
+      observeEnabledPolicy();
       registerCommand({ id: 'chat.new', title: 'New Chat', group: 'chat', run() { runs++; } });
       globalThis.fetch = (async (_url, init) => response(wire(JSON.parse(String(init?.body)) as Request))) as typeof fetch;
       const result = await rankCommandSnapshot('start over', snapshot(), new AbortController().signal);
@@ -66,6 +120,7 @@ describe('authenticated palette reader', () => {
     const clock = spyOn(Date, 'now').mockImplementation(() => now);
     try {
       await tokenStore.setTokenEntry('offline-account-a', now + 60_000);
+      observeEnabledPolicy();
       let pending!: { input: Request; finish: (value: Response) => void; signal: AbortSignal };
       globalThis.fetch = ((_url, init) => new Promise<Response>((finish) => {
         pending = { input: JSON.parse(String(init?.body)) as Request, finish, signal: init!.signal! };

@@ -54,10 +54,11 @@ test('required aggregate always runs and fails unless every shard succeeded', ()
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const matrix = workflow.split('  types-resolution-shards:')[1]!.split('  types-resolution-check:')[0]!;
   expect(matrix).toContain('fail-fast: false');
-  expect(matrix).toContain('max-parallel: 4');
+  expect(matrix).toContain('max-parallel: 16');
   const shardValues = matrix.match(/shard: \[([^\]]+)\]/)![1]!.split(',').map(Number);
-  expect(shardValues).toEqual(Array.from({ length: 16 }, (_, i) => i));
-  expect(matrix).toContain('types:resolution-check --shard ${{ matrix.shard }}/16');
+  expect(shardValues).toEqual(Array.from({ length: 32 }, (_, i) => i));
+  expect(matrix).toContain('types:resolution-check --shard ${{ matrix.shard }}/32');
+  expect(matrix).toContain('timeout-minutes: 15');
   const aggregate = workflow.split('  types-resolution-check:')[1]!.split('  publint-check:')[0]!;
   expect(aggregate).toContain('name: Are the types wrong? (exports map resolution)');
   expect(aggregate).toContain('if: always()');

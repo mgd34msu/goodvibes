@@ -951,15 +951,17 @@ jobs:
   # non-determinism window from independent package builds.
   # ---------------------------------------------------------------------------
   types-resolution-shards:
-    name: Exports resolution shard (${{ matrix.shard }}/16)
+    name: Exports resolution shard (${{ matrix.shard }}/32)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     needs: [build]
+    # Bound each lane to about twenty exports. Sixteen lanes exceeded ten
+    # minutes after terminal consolidation; per-process deadlines stay unchanged.
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 16
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -983,7 +985,7 @@ jobs:
           # dist-freshness checks would misread the restore as staleness.
           find packages/engine/*/dist packages/judgment/dist -type f -exec touch {} +
       - name: Run are-the-types-wrong check
-        run: bun run types:resolution-check --shard ${{ matrix.shard }}/16
+        run: bun run types:resolution-check --shard ${{ matrix.shard }}/32
 
   # Preserve the required-check name and fail closed on failure/cancel/skip.
   types-resolution-check:

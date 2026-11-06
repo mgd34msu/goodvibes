@@ -1155,10 +1155,11 @@
       "path": "permissions/prompt.ts",
       "baselineTuiLines": 121,
       "baselineSimilarity": 0.2827,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "getPermissionCategoryLabel"
-      ]
+      ],
+      "notes": "Shared permission fact methods and platform modal primitives; TUI retains hunk selection/remember tiers/broker queue UI, Agent retains its smaller explicit approval card."
     },
     {
       "path": "providers/reasoning-effort-surface.ts",
@@ -1669,7 +1670,8 @@
       "path": "runtime/client/fleet-union.ts",
       "baselineTuiLines": 147,
       "baselineSimilarity": 0.3348,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "notes": "Shared daemon polling, local-first merge and captured time. TUI binds a tree snapshot with owned-child actions; Agent binds a read-only node source."
     },
     {
       "path": "runtime/client/hosted-sessions.ts",

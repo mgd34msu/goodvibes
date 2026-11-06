@@ -38,7 +38,7 @@
  * daemon serves.
  */
 import {
-  createDaemonFleetRowsPoller,
+  createFleetUnionRowsPoller,
   daemonOnlyFleetActRefusal,
   DEFAULT_FLEET_REFRESH_MS,
   mergeFleetNodes,
@@ -85,11 +85,7 @@ const SURFACE_LABEL = 'this terminal';
  */
 export function createFleetUnionReadModel(options: FleetUnionOptions): FleetUnionReadModel {
   const local = options.local;
-  const poller = createDaemonFleetRowsPoller({
-    verbs: options.verbs,
-    ...(options.refreshIntervalMs === undefined ? {} : { refreshIntervalMs: options.refreshIntervalMs }),
-    ...(options.log === undefined ? {} : { log: options.log }),
-  });
+  const poller = createFleetUnionRowsPoller(options);
 
   const listeners = new Set<() => void>();
   const unsubscribePoller = poller.subscribe(() => {
@@ -97,20 +93,15 @@ export function createFleetUnionReadModel(options: FleetUnionOptions): FleetUnio
   });
 
   /** Ids this surface owns right now, the set the daemon's copy defers to. */
-  const localNodeIds = (snapshot: FleetSnapshot): Set<string> =>
-    new Set(snapshot.rows.map((row) => row.node.id));
+  const localNodeIds = (snapshot: FleetSnapshot): Set<string> => new Set(snapshot.rows.map((row) => row.node.id));
   const isLocalId = (id: string): boolean => localNodeIds(local.getSnapshot()).has(id);
 
   return {
     getSnapshot(): FleetSnapshot {
       const localSnapshot = local.getSnapshot();
-      const daemonRows = poller.rows();
-      if (!daemonRows || daemonRows.nodes.length === 0) return localSnapshot;
-      const merged = mergeFleetNodes(localSnapshot.rows.map((row) => row.node), daemonRows.nodes);
-      // Rebuilt through the SAME builder the local view uses, so the rollups,
-      // the cost/token totals and the blocked-on-user ordering are computed
-      // once, over the whole fleet, rather than summed from two halves.
-      return buildFleetSnapshot(merged, Math.max(localSnapshot.capturedAt, daemonRows.capturedAt));
+      const merged = poller.mergedRows(localSnapshot.rows.map((row) => row.node));
+      if (!merged) return localSnapshot;
+      return buildFleetSnapshot(merged.nodes, Math.max(localSnapshot.capturedAt, merged.capturedAt));
     },
 
     subscribe(listener: () => void): () => void {
@@ -125,15 +116,12 @@ export function createFleetUnionReadModel(options: FleetUnionOptions): FleetUnio
     interrupt: (id) => local.interrupt(id),
     resume: (id) => local.resume(id),
     kill: (id, opts) => local.kill(id, opts),
-    steer: (id, text) => (isLocalId(id)
-      ? local.steer(id, text)
-      : { queued: false, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) }),
+    steer: (id, text) => (isLocalId(id) ? local.steer(id, text) : { queued: false, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) }),
     subscribeConsumed: (listener) => local.subscribeConsumed(listener),
     // The archive is this surface's own view state; the daemon keeps its own.
     getArchivedSnapshot: () => local.getArchivedSnapshot(),
-    archive: (id) => (isLocalId(id)
-      ? local.archive(id)
-      : { archived: false, count: 0, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) }),
+    archive: (id) =>
+      isLocalId(id) ? local.archive(id) : { archived: false, count: 0, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) },
     archiveFinished: () => local.archiveFinished(),
     unarchive: (id) => local.unarchive(id),
 

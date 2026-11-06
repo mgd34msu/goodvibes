@@ -1,12 +1,18 @@
-import { getPermissionCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/permission-category-label';
+import { PermissionPromptFacts } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
+import '@goodvibes-jev/engine/terminal-shell/permission-category-label';
 import { activeTokens } from '../renderer/theme.ts';
 import { beginModal, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
 import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts';
-import type { PermissionCategory, PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/sdk/platform/permissions';
 
-import type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type {
+  PermissionPromptRequest,
+  PermissionPromptDecision,
+  PermissionRequestHandler,
+  PermissionRequest,
+} from '@goodvibes-jev/engine/sdk/platform/permissions';
 export type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest };
 
 /**
@@ -21,16 +27,18 @@ export type { PermissionPromptRequest, PermissionPromptDecision, PermissionReque
  *   n / N  -> Deny
  *   Escape -> Deny
  */
-export class PermissionPromptUI {
+export class PermissionPromptUI extends PermissionPromptFacts {
   private static fallbackAnalysis(request: PermissionPromptRequest): PermissionRequestAnalysis {
-    return request.analysis ?? {
-      classification: request.category,
-      riskLevel: request.category === 'read' ? 'low' : request.category === 'write' ? 'medium' : 'high',
-      summary: `Review ${request.tool} request`,
-      reasons: ['Inspect the target and intent before approving this action.'],
-      target: getDisplayArg(request.tool, request.args),
-      targetKind: 'generic',
-    };
+    return (
+      request.analysis ?? {
+        classification: request.category,
+        riskLevel: request.category === 'read' ? 'low' : request.category === 'write' ? 'medium' : 'high',
+        summary: `Review ${request.tool} request`,
+        reasons: ['Inspect the target and intent before approving this action.'],
+        target: getDisplayArg(request.tool, request.args),
+        targetKind: 'generic',
+      }
+    );
   }
 
   /**
@@ -58,20 +66,8 @@ export class PermissionPromptUI {
   }
 
   /** Returns the key argument to display for a given tool invocation. */
-  static getDisplayArg(tool: string, args: Record<string, unknown>): string {
-    return getDisplayArg(tool, args);
-  }
 
   /** Returns the category label and the active-theme color for display. */
-  static getCategoryLabel(category: PermissionCategory): { label: string; color: string } { return getPermissionCategoryLabel(category); }
-
-  static getPromptTitle(request: PermissionPromptRequest): string {
-    return buildPermissionApprovalBrief(request).title;
-  }
-
-  static getSubjectLabel(request: PermissionPromptRequest): string {
-    return buildPermissionApprovalBrief(request).subjectLabel;
-  }
 
   /** The facts of a request as label / value pairs, every one shown in full. */
   static promptFacts(request: PermissionRequest): Array<{ label: string; value: string; fg: string }> {
@@ -80,14 +76,17 @@ export class PermissionPromptUI {
     const brief = buildPermissionApprovalBrief(request);
     const { color } = this.getCategoryLabel(request.category);
     const facts: Array<{ label: string; value: string; fg: string }> = [];
-    const add = (label: string, value: string, fg: string = tokens.textMuted): void => { facts.push({ label, value, fg }); };
+    const add = (label: string, value: string, fg: string = tokens.textMuted): void => {
+      facts.push({ label, value, fg });
+    };
     add('Tool', request.tool, tokens.text);
     const attribution = this.attributionLine(request);
     if (attribution) add('Asked by', attribution);
     add(brief.subjectLabel, this.getDisplayArg(request.tool, request.args), tokens.text);
     add('Directory', request.workingDirectory ?? '(unknown)');
     add('Risk', `${analysis.riskLevel} (${analysis.classification})`, color);
-    if (analysis.surface || analysis.blastRadius) add('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? `  radius=${analysis.blastRadius}` : ''}`);
+    if (analysis.surface || analysis.blastRadius)
+      add('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? `  radius=${analysis.blastRadius}` : ''}`);
     if (analysis.host) add('Host', analysis.host);
     add('Summary', analysis.summary, tokens.text);
     add('Decision', brief.decisionModeLabel);
@@ -147,7 +146,12 @@ export class PermissionPromptUI {
 }
 
 /** Keycap hints of the permission dialog (the keys live in shell/blocking-input.ts). */
-const PROMPT_HINTS: readonly KitHint[] = [['y', 'allow once'], ['a', 'allow for this session'], ['n', 'deny'], ['esc', 'deny']];
+const PROMPT_HINTS: readonly KitHint[] = [
+  ['y', 'allow once'],
+  ['a', 'allow for this session'],
+  ['n', 'deny'],
+  ['esc', 'deny'],
+];
 const PROMPT_CHOICES: ReadonlyArray<readonly [key: string, text: string, tone: ButtonTone]> = [
   ['y', 'Allow once', 'primary'],
   ['a', 'Allow for session', 'warning'],

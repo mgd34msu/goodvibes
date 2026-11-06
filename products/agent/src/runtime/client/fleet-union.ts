@@ -24,7 +24,7 @@
  * daemon serves.
  */
 import {
-  createDaemonFleetRowsPoller,
+  createFleetUnionRowsPoller,
   DEFAULT_FLEET_REFRESH_MS,
   mergeFleetNodes,
   type DaemonVerbCaller,
@@ -66,21 +66,17 @@ export interface AgentFleetUnion {
  * honest answer rather than a degraded one.
  */
 export function createAgentFleetUnion(options: AgentFleetUnionOptions): AgentFleetUnion {
-  const poller = createDaemonFleetRowsPoller({
-    verbs: options.verbs,
-    ...(options.refreshIntervalMs === undefined ? {} : { refreshIntervalMs: options.refreshIntervalMs }),
-    ...(options.log === undefined ? {} : { log: options.log }),
-  });
+  const poller = createFleetUnionRowsPoller(options);
 
   return {
     nodes(): readonly ProcessNode[] {
       const local = options.local.nodes();
-      const daemonRows = poller.rows();
-      if (!daemonRows || daemonRows.nodes.length === 0) return local;
-      return mergeFleetNodes(local, daemonRows.nodes);
+      return poller.mergedRows(local)?.nodes ?? local;
     },
     hasDaemonRows: () => poller.rows() !== null,
     refresh: () => poller.refresh(),
-    stop: () => { poller.stop(); },
+    stop: () => {
+      poller.stop();
+    },
   };
 }

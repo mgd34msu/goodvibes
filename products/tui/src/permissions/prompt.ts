@@ -1,14 +1,20 @@
-import { getPermissionCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/permission-category-label';
-import type { PermissionCategory } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { activeTokens } from '../renderer/theme.ts';
+import { PermissionPromptFacts } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
+import '@goodvibes-jev/engine/terminal-shell/permission-category-label';
+
+import '@goodvibes-jev/engine/sdk/platform/permissions';
+import '../renderer/theme.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { HunkSelectionState } from './hunk-selection.ts';
 import { rememberScopeKey, renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
 export { buildPendingPermissionExtras } from './hunk-selection.ts';
 export { permissionButtons, type PermissionButton, type PermissionButtonId, type PermissionCardState } from './prompt-card.ts';
 
-import type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest } from '@goodvibes-jev/engine/sdk/platform/permissions';
+import type {
+  PermissionPromptRequest,
+  PermissionPromptDecision,
+  PermissionRequestHandler,
+  PermissionRequest,
+} from '@goodvibes-jev/engine/sdk/platform/permissions';
 export type { PermissionPromptRequest, PermissionPromptDecision, PermissionRequestHandler, PermissionRequest };
 
 /**
@@ -44,7 +50,7 @@ export interface PendingPromptView {
  * y allow once, a allow for this session (1-9 remember at a tier when the
  * request offers tiers), n deny, d details; typing denies with a reason.
  */
-export class PermissionPromptUI {
+export class PermissionPromptUI extends PermissionPromptFacts {
   /**
    * The exact session-scoped permission rule "Allow for session" remembers.
    * Mirrors the SDK PermissionManager's approval key (`<tool>:<path>`,
@@ -60,7 +66,11 @@ export class PermissionPromptUI {
    * asks share one record, so they are never double-counted).
    */
   static promptViewState(
-    pending: { readonly callId: string; readonly replyMode?: 'deny-reason' | 'exec-answer' | undefined; readonly replyBuffer?: string | undefined },
+    pending: {
+      readonly callId: string;
+      readonly replyMode?: 'deny-reason' | 'exec-answer' | undefined;
+      readonly replyBuffer?: string | undefined;
+    },
     broker?: { listApprovals(limit?: number): ReadonlyArray<{ readonly callId: string; readonly status: string }> } | null,
   ): PromptViewState {
     let queueCount = 0;
@@ -97,18 +107,6 @@ export class PermissionPromptUI {
   }
 
   /** Returns the key argument to display for a given tool invocation. */
-  static getDisplayArg(tool: string, args: Record<string, unknown>): string {
-    return getDisplayArg(tool, args);
-  }
 
   /** Returns the category label and the active-theme color for display. */
-  static getCategoryLabel(category: PermissionCategory): { label: string; color: string } { return getPermissionCategoryLabel(category); }
-
-  static getPromptTitle(request: PermissionPromptRequest): string {
-    return buildPermissionApprovalBrief(request).title;
-  }
-
-  static getSubjectLabel(request: PermissionPromptRequest): string {
-    return buildPermissionApprovalBrief(request).subjectLabel;
-  }
 }

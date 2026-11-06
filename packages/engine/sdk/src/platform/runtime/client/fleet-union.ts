@@ -72,7 +72,7 @@ export interface DaemonFleetRows {
 export function readDaemonFleetRows(payload: unknown, now: () => number = Date.now): DaemonFleetRows | null {
   if (!payload || typeof payload !== 'object') return null;
   const record = payload as Record<string, unknown>;
-  const nodes = Array.isArray(record['nodes']) ? record['nodes'] as readonly ProcessNode[] : null;
+  const nodes = Array.isArray(record['nodes']) ? (record['nodes'] as readonly ProcessNode[]) : null;
   if (!nodes) return null;
   const capturedAt = typeof record['capturedAt'] === 'number' ? record['capturedAt'] : now();
   return { nodes, capturedAt };
@@ -83,10 +83,7 @@ export function readDaemonFleetRows(payload: unknown, now: () => number = Date.n
  * node already carries. Order is local-first so a product that renders in array
  * order shows the rows it can act on at the top.
  */
-export function mergeFleetNodes(
-  localNodes: readonly ProcessNode[],
-  daemonNodes: readonly ProcessNode[],
-): readonly ProcessNode[] {
+export function mergeFleetNodes(localNodes: readonly ProcessNode[], daemonNodes: readonly ProcessNode[]): readonly ProcessNode[] {
   const owned = new Set(localNodes.map((node) => node.id));
   return [...localNodes, ...daemonNodes.filter((node) => !owned.has(node.id))];
 }
@@ -152,7 +149,7 @@ export function createDaemonFleetRowsPoller(options: DaemonFleetRowsPollerOption
       // Keep the last known rows. A failed poll is a stale view, which the
       // capturedAt on the snapshot already discloses; dropping them would make
       // the daemon's half of the fleet disappear on one bad request.
-      log.debug('[fleet] the daemon\'s rows could not be refreshed; keeping the last set', {
+      log.debug("[fleet] the daemon's rows could not be refreshed; keeping the last set", {
         error: summarizeError(error),
       });
     } finally {
@@ -160,7 +157,9 @@ export function createDaemonFleetRowsPoller(options: DaemonFleetRowsPollerOption
     }
   };
 
-  timer = setInterval(() => { void refresh(); }, options.refreshIntervalMs ?? DEFAULT_FLEET_REFRESH_MS);
+  timer = setInterval(() => {
+    void refresh();
+  }, options.refreshIntervalMs ?? DEFAULT_FLEET_REFRESH_MS);
   timer.unref?.();
   void refresh();
 
@@ -169,11 +168,31 @@ export function createDaemonFleetRowsPoller(options: DaemonFleetRowsPollerOption
     refresh,
     subscribe(listener) {
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     stop() {
-      if (timer !== null) { clearInterval(timer); timer = null; }
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
       listeners.clear();
+    },
+  };
+}
+
+/** Poll/merge lifetime shared by tree views and plain node sources. Local absence stays distinguishable. */
+export function createFleetUnionRowsPoller(options: DaemonFleetRowsPollerOptions): DaemonFleetRowsPoller & {
+  mergedRows(local: readonly ProcessNode[]): DaemonFleetRows | null;
+} {
+  const poller = createDaemonFleetRowsPoller(options);
+  return {
+    ...poller,
+    mergedRows(local) {
+      const remote = poller.rows();
+      if (!remote || remote.nodes.length === 0) return null;
+      return { nodes: mergeFleetNodes(local, remote.nodes), capturedAt: remote.capturedAt };
     },
   };
 }

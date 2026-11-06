@@ -3013,6 +3013,11 @@
       "bun": "./terminal-shell/src/renderer/model-workspace-facts.ts",
       "types": "./terminal-shell/dist/renderer/model-workspace-facts.d.ts",
       "import": "./terminal-shell/dist/renderer/model-workspace-facts.js"
+    },
+    "./terminal-shell/permission-prompt-facts": {
+      "bun": "./terminal-shell/src/permission-prompt-facts.ts",
+      "types": "./terminal-shell/dist/permission-prompt-facts.d.ts",
+      "import": "./terminal-shell/dist/permission-prompt-facts.js"
     }
   },
   "publishConfig": {

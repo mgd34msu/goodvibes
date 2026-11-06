@@ -25,11 +25,7 @@
 export type { DaemonReachability, DaemonVerbCaller } from './daemon-verbs.js';
 
 export { createClientApprovalRaiser } from './approval-raiser.js';
-export type {
-  ApprovalUpdateSubscriber,
-  ClientApprovalRaiserOptions,
-  LocalPermissionPrompt,
-} from './approval-raiser.js';
+export type { ApprovalUpdateSubscriber, ClientApprovalRaiserOptions, LocalPermissionPrompt } from './approval-raiser.js';
 
 export {
   APPROVAL_UPDATE_DOMAIN,
@@ -49,24 +45,21 @@ export type {
 export { createDaemonConfigClient, isDaemonOwnedConfigKey } from './config-client.js';
 export type { DaemonConfigClient, PreparedDaemonSettingsClient, PreparedDaemonSettingsImportClient } from './config-client.js';
 export { captureRemoteSettingsPrecondition } from '../../config/settings-precondition-client.js';
-export type { RemoteSettingsPrecondition, RemoteSettingsPreconditionFacts, SettingsPreconditionRequest, SettingsPreconditionReceipt } from '../../config/settings-precondition-client.js';
+export type {
+  RemoteSettingsPrecondition,
+  RemoteSettingsPreconditionFacts,
+  SettingsPreconditionRequest,
+  SettingsPreconditionReceipt,
+} from '../../config/settings-precondition-client.js';
 
 export { createDaemonCredentialsClient } from './credentials-client.js';
 export type { CredentialWriteReceipt, DaemonCredentialsClient } from './credentials-client.js';
 
 export { createWireSessionDispatch, readSurfaceAgentOutcome } from './session-dispatch.js';
-export type {
-  SessionInputsWireClient,
-  SurfaceAgentOutcome,
-  WireSessionDispatch,
-  WireSessionDispatchOptions,
-} from './session-dispatch.js';
+export type { SessionInputsWireClient, SurfaceAgentOutcome, WireSessionDispatch, WireSessionDispatchOptions } from './session-dispatch.js';
 
 export { createConversationRewindHost } from './conversation-rewind-host.js';
-export type {
-  ConversationRewindHostClient,
-  ConversationRewindHostOptions,
-} from './conversation-rewind-host.js';
+export type { ConversationRewindHostClient, ConversationRewindHostOptions } from './conversation-rewind-host.js';
 
 export { createDevicesClient } from './devices-client.js';
 export type {
@@ -81,26 +74,17 @@ export { createClientPhoneTool, registerClientPhoneTool } from './phone-tool.js'
 export type { PhoneToolRegistry } from './phone-tool.js';
 
 export { createTasksClient } from './tasks-client.js';
-export type {
-  LocalTaskSource,
-  TaskOrigin,
-  TasksClient,
-  TasksUnionResult,
-  UnionTask,
-} from './tasks-client.js';
+export type { LocalTaskSource, TaskOrigin, TasksClient, TasksUnionResult, UnionTask } from './tasks-client.js';
 
 export {
   createDaemonFleetRowsPoller,
+  createFleetUnionRowsPoller,
   daemonOnlyFleetActRefusal,
   DEFAULT_FLEET_REFRESH_MS,
   mergeFleetNodes,
   readDaemonFleetRows,
 } from './fleet-union.js';
-export type {
-  DaemonFleetRows,
-  DaemonFleetRowsPoller,
-  DaemonFleetRowsPollerOptions,
-} from './fleet-union.js';
+export type { DaemonFleetRows, DaemonFleetRowsPoller, DaemonFleetRowsPollerOptions } from './fleet-union.js';
 
 export {
   autostartInstalledDaemon,

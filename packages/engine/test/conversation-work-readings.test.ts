@@ -1,9 +1,12 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { decisionModelPolicyState, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /** Deterministic qualification of actual callers; not live Jev calibration. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { gateSurfaceSpawn, resolveOriginBinding, type ConversationGateDeps } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
+import { gateSurfaceSpawn, resolveOriginBinding, startAgreedWork, type ConversationGateDeps } from '../sdk/src/platform/daemon/surface-conversation-gate.js';
 import { tryResolveWorkProposalReplyFromChannel } from '../sdk/src/platform/daemon/work-proposal-reply.js';
 import { WorkProposalStore } from '../sdk/src/platform/agents/work-proposal-store.js';
 import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
@@ -180,4 +183,94 @@ for (const change of ['policy', 'abort', 'expiry']) test(`delivery ${change} can
     else await expect(work).rejects.toBeDefined();
     expect(store.listPending()).toEqual([]); expect(h.spawns).toEqual([]);
   } finally { h.store.dispose(); store.dispose(); }
+});
+
+
+describe('Classic channel conversation admission', () => {
+  test('Classic forwards the complete task once with channel capabilities, no proposal and zero decision requests', async () => {
+    const h = harness(); const text = 'Please inspect the complete original task and report back.';
+    let asks = 0; installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        await gateSurfaceSpawn(h.deps, { surface: 'ntfy', userId: 'owner', channelId: 'original-channel', text }, { mode: 'spawn', task: text }, 'classic', 'original-session');
+        expect(h.spawns).toHaveLength(1);
+        expect(h.spawns[0]).toMatchObject({ task: text, outsideContract: true, replyStyle: 'conversational' });
+        expect(h.store.listPending()).toEqual([]); expect(asks).toBe(0);
+      });
+    } finally { h.store.dispose(); }
+  });
+
+  test('Preferred actual classification exhaustion forwards the original conversation once', async () => {
+    const h = harness(); let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await gateSurfaceSpawn(h.deps, { surface: 'ntfy', text: 'Original task' }, { mode: 'spawn', task: 'Original task' });
+        expect(h.spawns).toHaveLength(1); expect(h.spawns[0]).toMatchObject({ task: 'Original task', outsideContract: true });
+        expect(h.store.listPending()).toEqual([]); expect(asks).toBe(1);
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+      });
+    } finally { h.store.dispose(); }
+  });
+
+  for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) {
+    test(`channel ${kind} does not activate Preferred fallback`, async () => {
+      const h = harness(); installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+      try {
+        await withDecisionModelPolicy(() => 'Preferred', async () => {
+          await expect(gateSurfaceSpawn(h.deps, { surface: 'ntfy', text: 'Original task' }, { mode: 'spawn', task: 'Original task' })).rejects.toThrow();
+          expect(h.spawns).toEqual([]); expect(h.store.listPending()).toEqual([]); expect(decisionModelPolicyState().operation).toBe('decision');
+        });
+      } finally { h.store.dispose(); }
+    });
+  }
+
+  test('Classic cancellation and source retirement still prevent spawn; agreed contracts fail before spawning', async () => {
+    const h = harness(); const abort = new AbortController(); abort.abort();
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        await expect(gateSurfaceSpawn({ ...h.deps, readingOptions: { signal: abort.signal } }, { surface: 'ntfy', text: 'task' }, { mode: 'spawn', task: 'task' })).rejects.toThrow();
+        await expect(gateSurfaceSpawn({ ...h.deps, captureReadingSource: () => () => { throw new Error('Native source retired'); } }, { surface: 'ntfy', text: 'task' }, { mode: 'spawn', task: 'task' })).rejects.toThrow();
+        await expect(startAgreedWork(h.deps, h.proposal())).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+        expect(h.spawns).toEqual([]);
+      });
+    } finally { h.store.dispose(); }
+  });
+});
+
+
+test('Classic channel spawn stays outside contracts when proposal storage is disabled', async () => {
+  const h = harness(); let asks = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
+  try {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      await gateSurfaceSpawn({ ...h.deps, workProposals: undefined }, { surface: 'ntfy', channelId: 'original', text: 'task' }, { mode: 'spawn', task: 'task' });
+      expect(h.spawns).toHaveLength(1); expect(h.spawns[0]).toMatchObject({ outsideContract: true, replyStyle: 'conversational' }); expect(asks).toBe(0);
+    });
+  } finally { h.store.dispose(); }
+});
+
+test('Preferred unsettled intent and private inputs stay held without promoting to Classic', async () => {
+  const h = harness(); confidence = 0.5;
+  try {
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const response = await gateSurfaceSpawn(h.deps, { surface: 'ntfy', text: 'task' }, { mode: 'spawn', task: 'task' });
+      if (!(response instanceof Response)) throw new Error('Unsettled intent unexpectedly spawned');
+      expect(await response.json()).toMatchObject({ outcome: 'work-intent-unsettled' });
+      expect(h.spawns).toEqual([]); expect(decisionModelPolicyState().operation).toBe('decision');
+      await expect(gateSurfaceSpawn(h.deps, { surface: 'ntfy', text: 'Authorization: Bearer synthetic-secret' }, { mode: 'spawn', task: 'task' })).rejects.toThrow();
+      expect(h.spawns).toEqual([]); expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  } finally { h.store.dispose(); }
+});
+
+test('a retired channel source cannot activate Preferred fallback on a late availability failure', async () => {
+  const h = harness(), origin = { surface: 'ntfy', text: 'original task' };
+  installJudgmentPort({ model: 'fixture', async ask() { origin.text = 'replacement task'; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+  try {
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      await expect(gateSurfaceSpawn(h.deps, origin, { mode: 'spawn', task: 'original task' })).rejects.toThrow();
+      expect(h.spawns).toEqual([]); expect(h.store.listPending()).toEqual([]); expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  } finally { h.store.dispose(); }
 });

@@ -1,4 +1,5 @@
 import { inboundIntent } from './batteries/conversation-gate.js';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
@@ -103,11 +104,18 @@ export async function gateSurfaceSpawn(
   logLabel?: string,
   sessionId?: string,
 ): Promise<AgentRecord | Response> {
+  return withConfiguredDecisionModelPolicy(() => gateOwnedSurfaceSpawn(deps, origin, input, logLabel, sessionId));
+}
+
+async function gateOwnedSurfaceSpawn(
+  deps: ConversationGateDeps, origin: SurfaceIngressOrigin | null, input: SpawnInput, logLabel?: string, sessionId?: string,
+): Promise<AgentRecord | Response> {
+  const classic = isClassicOperation();
   const store = deps.workProposals;
-  if (!store) return deps.trySpawnAgent(input, logLabel, sessionId);
+  if (!store && !classic) return deps.trySpawnAgent(input, logLabel, sessionId);
 
   const config = readConversationGateConfig(deps.configManager);
-  if (!isGatedSurface(config, origin?.surface)) {
+  if (!isGatedSurface(config, origin?.surface) && !classic) {
     return deps.trySpawnAgent(input, logLabel, sessionId);
   }
 
@@ -128,11 +136,24 @@ export async function gateSurfaceSpawn(
     }
   };
   assertCurrent();
-  const inboundText = snapshotJudgmentInput(origin?.text ?? input.task ?? '') as string;
-  // Also screen the actual task before retaining it in a pending proposal.
-  snapshotJudgmentInput(input.task);
-  const result = await inboundIntent.run(daemonReadingPort('daemon.inbound-intent', assertCurrent, options.signal), { message: inboundText }, { ...options, beforeAttempt: assertCurrent });
+  const spawnClassic = () => {
+    assertCurrent();
+    // No semantic statement about the message. Keep the same native first-turn
+    // channel capabilities as conversation, with no autonomous contract launch.
+    const spawn = { ...input, ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
+      outsideContract: true, replyStyle: 'conversational' as const };
+    assertCurrent(); return deps.trySpawnAgent(spawn, logLabel, sessionId);
+  };
+  if (classic) return spawnClassic();
+  let inboundText = '';
+  const result = await decisionOrClassic<Awaited<ReturnType<typeof inboundIntent.run>> | null>(async () => {
+    inboundText = snapshotJudgmentInput(origin?.text ?? input.task ?? '') as string;
+    // Also screen the actual task before retaining it in a pending proposal.
+    snapshotJudgmentInput(input.task);
+    return inboundIntent.run(daemonReadingPort('daemon.inbound-intent', assertCurrent, options.signal), { message: inboundText }, { ...options, beforeAttempt: assertCurrent });
+  }, () => { assertCurrent(); return null; }, () => { assertCurrent(); return true; });
   assertCurrent();
+  if (result === null) return spawnClassic();
   if (result.readings.reading.outcome !== 'act') {
     result.recordAction('held: inbound intent unsettled');
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-intent-unsettled' }, { status: 202 });
@@ -164,6 +185,7 @@ export async function gateSurfaceSpawn(
     );
   }
 
+  if (!store) throw new Error('Conversation gate proposal store is unavailable');
   const summary = summarizeWorkRequest(inboundText);
   const binding = resolveOriginBinding(deps, origin, sessionId);
   const proposal = store.create({
@@ -308,6 +330,9 @@ export async function startAgreedWork(
   proposal: WorkProposalRecord,
   note?: string,
 ): Promise<void> {
+  deps.readingOptions?.signal?.throwIfAborted();
+  assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
+  requireDecisionFeature('starting agreed autonomous work; continue through an ordinary Classic conversation and its native tool approvals');
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
   const spawned = deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;

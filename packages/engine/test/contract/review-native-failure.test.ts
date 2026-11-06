@@ -57,7 +57,7 @@ test('review: exhausted decision targets halt a native contract without retrying
     expect(h.store.get(id)?.nativeWaiting).toBeUndefined();
     expect(h.store.get(id)?.status).toBe('failed');
     expect(failureInput).toMatchObject({ originalSource: { goal: source.goal, criteria: source.criteria } });
-    expect(log.query({ status: 'failed' }).some((entry) => entry.error?.kind === 'unavailable')).toBe(true);
+    expect(log.query({ status: 'failed' }).some((entry) => entry.status === 'failed' && entry.error.kind === 'unavailable')).toBe(true);
   } finally {
     h.dispose();
   }

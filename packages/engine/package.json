@@ -2258,6 +2258,16 @@
       "bun": "./terminal-shell/src/onboarding-verification.ts",
       "types": "./terminal-shell/dist/onboarding-verification.d.ts",
       "import": "./terminal-shell/dist/onboarding-verification.js"
+    },
+    "./terminal-shell/mcp-workspace-state": {
+      "bun": "./terminal-shell/src/mcp-workspace-state.ts",
+      "types": "./terminal-shell/dist/mcp-workspace-state.d.ts",
+      "import": "./terminal-shell/dist/mcp-workspace-state.js"
+    },
+    "./terminal-shell/mcp-workspace-input": {
+      "bun": "./terminal-shell/src/mcp-workspace-input.ts",
+      "types": "./terminal-shell/dist/mcp-workspace-input.d.ts",
+      "import": "./terminal-shell/dist/mcp-workspace-input.js"
     }
   },
   "publishConfig": {

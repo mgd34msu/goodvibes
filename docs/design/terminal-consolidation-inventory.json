@@ -791,7 +791,9 @@
         "serverConfigToForm",
         "formToServerConfig",
         "nextEnumValue",
-        "mergeServers"
+        "mergeServers",
+        "McpWorkspaceState",
+        "handleMcpWorkspaceToken"
       ]
     },
     {

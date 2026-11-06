@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { createShellPathService, type ShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
 import { listProviderRuntimeSnapshots, type ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -99,6 +100,10 @@ export function createSupportBundleCommand<
     );
   }
   async function handleBundleCommand(runtime: Runtime, options: JudgmentReadingOptions = {}): Promise<CliCommandOutput> {
+    return withDecisionModelPolicy(() => runtime.configManager.get('judgment.policy'), () => handleOwnedBundleCommand(runtime, options));
+  }
+
+  async function handleOwnedBundleCommand(runtime: Runtime, options: JudgmentReadingOptions): Promise<CliCommandOutput> {
     const [sub = 'inspect', ...rest] = runtime.cli.commandArgs;
     const shellPaths = createShellPathService({
       workingDirectory: runtime.workingDirectory,
@@ -169,14 +174,17 @@ export function createSupportBundleCommand<
         runtime,
         async (services) => {
           assertCurrent();
-          const owner = captureJudgmentPort(policy.site, { ...options, assertCurrent });
-          owner.assertCurrent();
+          const owner = await decisionOrClassic(() => Promise.resolve(captureJudgmentPort(policy.site, { ...options, assertCurrent })),
+            () => undefined, () => { assertCurrent(); return true; });
+          const current = () => { assertCurrent(); if (!isClassicOperation()) owner?.assertCurrent(); assertCurrent(); };
+          current();
           const providers = await providerReadiness(services);
-          owner.assertCurrent();
-          const reading = { ...options, signal: owner.signal, assertCurrent: owner.assertCurrent };
+          current();
+          const reading = { ...options, signal: owner?.signal ?? options.signal, assertCurrent: current };
           const redactedConfig = await prepareConfigRedaction(rawConfig, reading);
           const service = await bindings.servicePosture(runtime, { ...reading, logTailBytes: 8192 });
           const bundle = {
+            ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
             version: 2,
             type: policy.bundleType,
             capturedAt: Date.now(),
@@ -205,12 +213,18 @@ export function createSupportBundleCommand<
             },
           };
           const targetPath = shellPaths.resolveWorkspacePath(outputPath);
-          const serialized = await redactSerializedSecrets(JSON.stringify(bundle, null, 2), redactedConfig.sensitiveValues, reading);
+          let serialized = await redactSerializedSecrets(JSON.stringify(bundle, null, 2), redactedConfig.sensitiveValues, reading);
+          if (isClassicOperation()) {
+            // The final redaction phase can be the one that exhausts the chain.
+            // Stamp only fixed native metadata onto its already-redacted JSON.
+            serialized = JSON.stringify({ ...JSON.parse(serialized) as Record<string, unknown>,
+              operationProvenance: 'classic', semanticAssessment: 'not-evaluated' }, null, 2);
+          }
           redactedConfig.assertCurrent();
-          owner.assertCurrent();
+          current();
           mkdirSync(dirname(targetPath), { recursive: true });
           redactedConfig.assertCurrent();
-          owner.assertCurrent();
+          current();
           writeFileSync(targetPath, serialized + '\n', 'utf-8');
           return {
             output: formatJsonOrText(

@@ -65,6 +65,15 @@ export function withConfiguredDecisionModelPolicy<T>(operation: () => T, onChang
   return withDecisionModelPolicy(configured, operation, onChange);
 }
 
+/** Re-enter one owned operation across separate events; fallback persists and a setting change revokes it. */
+export function captureDecisionModelPolicyOperation(onChange?: (state: DecisionModelPolicyState) => void): <T>(operation: () => T) => T {
+  return withConfiguredDecisionModelPolicy(() => {
+    const scope = scopes.getStore();
+    if (!scope) throw new Error('Decision-model operation has no policy owner');
+    return <T>(operation: () => T): T => scopes.run(scope, () => { scope.current(); return operation(); });
+  }, onChange);
+}
+
 /** Only explicit availability exhaustion may downgrade Preferred; never unwrap unrelated failures. */
 export function activateClassicFallback(error: unknown): boolean {
   const scope = scopes.getStore();

@@ -7,6 +7,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { captureFailureSnapshot, captureJudgmentFailureInput } from '../../gate/failure-input-snapshot.js';
 import { TtsTextChunker } from './text-chunker.js';
 import type { AudioSink } from './audio-sink.js';
+import { activateClassicFallback, captureDecisionModelPolicyOperation, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 
 /**
  * How many synthesis requests may sit in the pipeline at once (synthesizing,
@@ -80,6 +81,7 @@ export class SpokenTurnController {
   private chunker: TtsTextChunker | null = null;
   private chunkSequence = 0;
   private turnOwner: JudgmentPortCapture | undefined;
+  private runTurnPolicy: (<T>(operation: () => T) => T) | undefined;
   private turnCancellation: AbortController | undefined;
   private turnConfig: { provider: string | undefined; voice: string | undefined; speed: number | undefined } | undefined;
   private retireListener: (() => void) | undefined;
@@ -198,6 +200,21 @@ export class SpokenTurnController {
 
   async handleTurnEvent(event: TurnEvent): Promise<void> {
     try {
+      if (event.type === 'TURN_SUBMITTED' && this.pendingPrompt && event.prompt.trim() === this.pendingPrompt) {
+        this.runTurnPolicy = captureDecisionModelPolicyOperation(state => {
+          if (state.operation === 'classic') this.notice(state.reason === 'unavailable'
+            ? '[TTS] Decision models unavailable; continuing spoken output in Classic mode.'
+            : '[TTS] Spoken output is using Classic mode.');
+        });
+      }
+      await (this.runTurnPolicy ?? withConfiguredDecisionModelPolicy)(() => this.handleOwnedTurnEvent(event));
+    } catch {
+      try { this.stop(); } catch { /* Preserve the text conversation if speech teardown fails. */ }
+    }
+  }
+
+  private async handleOwnedTurnEvent(event: TurnEvent): Promise<void> {
+    try {
       if (event.type === 'TURN_SUBMITTED') {
         this.maybeStartTurn(event.turnId, event.prompt);
         return;
@@ -252,9 +269,9 @@ export class SpokenTurnController {
       }
     };
     this.turnCancellation = new AbortController();
-    try { this.turnOwner = captureJudgmentPort('voice.spoken-turn.chunking', { signal: this.turnCancellation.signal, assertCurrent }); }
+    try { if (!isClassicOperation()) this.turnOwner = captureJudgmentPort('voice.spoken-turn.chunking', { signal: this.turnCancellation.signal, assertCurrent }); }
     catch (error) {
-      if (!(error instanceof JudgmentPortMissingError)) { this.stop(); return; }
+      if (!activateClassicFallback(error) && !(error instanceof JudgmentPortMissingError)) { this.stop(); return; }
     }
     this.chunker = new TtsTextChunker({ now: this.now, owner: this.turnOwner, assertCurrent });
     const owner = this.turnOwner;
@@ -288,6 +305,7 @@ export class SpokenTurnController {
     this.retireListener?.(); this.retireListener = undefined;
     this.turnCancellation?.abort(); this.turnCancellation = undefined;
     this.turnOwner = undefined; this.turnConfig = undefined; this.assertTurnFunctions = undefined;
+    this.runTurnPolicy = undefined;
   }
 
   private assertSpeechCurrent(): void {
@@ -298,7 +316,7 @@ export class SpokenTurnController {
     if (!config || config.provider !== current.provider || config.voice !== current.voice || config.speed !== current.speed) {
       throw new Error('Spoken turn configuration changed');
     }
-    this.turnOwner?.assertCurrent();
+    if (!isClassicOperation()) this.turnOwner?.assertCurrent();
   }
 
   private async acceptChunks(work: Promise<string[]> | undefined, turnId: string): Promise<void> {
@@ -420,7 +438,7 @@ export class SpokenTurnController {
     const assertCurrent = () => {
       assertTurnCurrent();
       if (!owner && !(readingUnavailable instanceof JudgmentPortMissingError)) throw readingUnavailable;
-      owner?.assertCurrent();
+      if (!isClassicOperation()) owner?.assertCurrent();
     };
     const isCurrent = () => {
       try { assertCurrent(); return true; } catch { return false; }

@@ -44,6 +44,22 @@ function fixture(url: string) {
 }
 
 describe('Agent support bundle retained canonical redaction', () => {
+  test('Classic standalone export keeps native diagnostics and redaction with zero decision requests', async () => {
+    const backend = startBundleJudgmentFixture(false, true), f = fixture(backend.url);
+    f.config.setDynamic('judgment.policy', 'Classic - Off');
+    try {
+      const result = await handleBundleCommand(f.runtime);
+      expect(result.exitCode).toBe(0);
+      const payload = readFileSync(f.path, 'utf-8');
+      expect(payload).not.toContain(privateSigningValue);
+      expect(payload).not.toContain(privateCard);
+      expect(bundleRecord(JSON.parse(payload))).toMatchObject({
+        version: 2, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+      });
+      expect(backend.calls).toHaveLength(0);
+    } finally { backend.close(); }
+  });
+
   test('standalone export owns a real composition through publication without exposing raw values', async () => {
     const backend = startBundleJudgmentFixture(false, true); const f = fixture(backend.url);
     const backupValue = 'synthetic-backup-transport-key';

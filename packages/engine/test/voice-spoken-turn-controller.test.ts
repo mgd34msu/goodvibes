@@ -7,7 +7,8 @@ import { SpokenTurnController } from '../sdk/src/platform/voice/spoken-turn/cont
 import type { AudioSink } from '../sdk/src/platform/voice/spoken-turn/audio-sink.js';
 
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { configureDecisionModelPolicy, type DecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 function failurePort(category = 'rate_limit', yes: readonly string[] = []) {
@@ -85,6 +86,49 @@ function makeHarness() {
   });
   return { controller, synthesized, played, messages };
 }
+
+test.each(['Classic - Off', 'Preferred'] as const)('%s spoken turns preserve native playback across separately delivered events', async policy => {
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted decision chain'); });
+  let metadata = 0;
+  installJudgmentPort(policy === 'Classic - Off' ? {
+    get model(): never { metadata++; throw new Error('Classic must not read model metadata'); },
+    async ask() { throw new Error('Classic must not ask a decision model'); },
+  } : fake.port);
+  const retirePolicy = configureDecisionModelPolicy(() => policy);
+  const h = makeHarness();
+  try {
+    h.controller.submitNextTurn('speak this answer');
+    await h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'classic-speech', prompt: 'speak this answer' }));
+    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
+      content: 'The first spoken sentence should remain available. ', accumulated: '' }));
+    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
+      content: 'The second spoken sentence should remain available.', accumulated: '' }));
+    await h.controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'classic-speech', response: '', stopReason: 'completed' }));
+    await drain();
+    const spoken = h.played.join(' ');
+    expect(spoken.match(/The first spoken sentence/g)).toHaveLength(1);
+    expect(spoken.match(/The second spoken sentence/g)).toHaveLength(1);
+    expect(metadata).toBe(0);
+    expect(fake.requests.length).toBe(policy === 'Classic - Off' ? 0 : 1);
+  } finally { h.controller.stop(); retirePolicy(); }
+});
+
+test('changing the decision policy retires an existing spoken turn instead of borrowing a new model', async () => {
+  let policy: DecisionModelPolicy = 'Classic - Off', requests = 0, metadata = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Retired turn borrowed a model'); },
+    async ask() { requests++; throw new Error('Retired turn asked a model'); } });
+  const retirePolicy = configureDecisionModelPolicy(() => policy), h = makeHarness();
+  try {
+    h.controller.submitNextTurn('policy change');
+    await h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'policy-change', prompt: 'policy change' }));
+    policy = 'Default - On';
+    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'policy-change',
+      content: 'This stale output must never be synthesized.', accumulated: '' }));
+    await drain();
+    expect(h.synthesized).toHaveLength(0);
+    expect({ requests, metadata }).toEqual({ requests: 0, metadata: 0 });
+  } finally { h.controller.stop(); retirePolicy(); }
+});
 
 async function drain(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));

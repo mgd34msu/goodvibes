@@ -48,6 +48,7 @@ function outcomeLabel(outcome: string): string {
     case 'quiet': return 'Ran quiet: nothing worth surfacing';
     case 'skipped-disabled': return 'Skipped: check-in is disabled';
     case 'skipped-quiet-hours': return 'Skipped: within quiet hours';
+    case 'skipped-decision-models-disabled': return 'Skipped: requires decision models';
     case 'skipped': return 'Skipped';
     case 'error': return 'Error';
     default: return outcome;

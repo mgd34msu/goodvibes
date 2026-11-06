@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { createSystemOnePort, JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createProviderBackedCheckinJudge } from '../sdk/src/platform/checkin/judge.js';
@@ -155,4 +156,94 @@ test('fidelity unavailability retains contact provenance without sending', async
   installJudgmentPort(withDecisionLog(fake.port, log)); const h = harness();
   expect((await h.service.evaluate('manual')).outcome).toBe('error'); expect(h.sent).toEqual([]);
   expect((await h.receipts.list())[0]!.judgment?.decisionId).toBeTruthy();
+});
+
+// Classic skips this semantic feature; it never fabricates a quiet judgment.
+test('Classic check-in service skips before snapshot, judge, content generation or delivery', async () => {
+  const fake = readings(); let snapshots = 0, judged = 0, sent = 0;
+  const receipts = new CheckinReceiptStore(':memory:');
+  const config = new Map<string, unknown>([['checkin.enabled', true], ['checkin.quietHours', '']]);
+  const service = new CheckinService({
+    config: { get: key => config.get(key), set: (key, value) => { config.set(key, value); } }, receipts,
+    stateReader: { snapshot: async () => { snapshots++; return snapshot; } },
+    judge: { decide: async () => { judged++; return { contact: true, reason: 'Unexpected bypass', message: note }; } },
+    deliverer: { deliver: async () => { sent++; return 'unexpected'; } },
+  });
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    expect((await service.evaluate('manual')).outcome).toBe('skipped');
+    const receipt = (await receipts.list())[0]!;
+    expect(receipt.outcome).toBe('skipped-decision-models-disabled');
+    expect(receipt.judgment).toBeUndefined(); expect(receipt.deliveredMessage).toBeUndefined();
+    expect(receipt.decisionReason).toContain('require decision models');
+    expect({ snapshots, judged, sent }).toEqual({ snapshots: 0, judged: 0, sent: 0 });
+    expect(fake.requests).toHaveLength(0);
+  });
+  service.dispose();
+});
+
+test('standalone Classic check-in judge reports the feature limitation without contacting either provider', async () => {
+  const fake = readings(); let generated = 0;
+  const judge = createProviderBackedCheckinJudge(generator(async () => { generated++; return { content: note }; }));
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(judge.decide('one blocked session')).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(fake.requests).toHaveLength(0); expect(generated).toBe(0);
+  });
+});
+
+test('Preferred exhausted check-in models produce an explicit skipped receipt, not a semantic no', async () => {
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); });
+  installJudgmentPort(withDecisionLog(fake.port, log)); let generated = 0;
+  const h = harness(async () => { generated++; return { content: note }; });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const result = await h.service.evaluate('manual');
+    expect(result.outcome).toBe('skipped'); expect(decisionModelPolicyState().operation).toBe('classic');
+    const receipt = (await h.receipts.list())[0]!;
+    expect(receipt.outcome).toBe('skipped-decision-models-disabled'); expect(receipt.judgment).toBeUndefined();
+    expect(h.sent).toEqual([]); expect(generated).toBe(0);
+    const attempted = fake.requests.length; expect(attempted).toBeGreaterThan(0);
+    await h.service.evaluate('manual'); expect(fake.requests).toHaveLength(attempted);
+  });
+  h.service.dispose();
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request'] as const) {
+  test(`Preferred check-in ${kind} remains an error and never activates Classic`, async () => {
+    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); });
+    installJudgmentPort(withDecisionLog(fake.port, log)); const h = harness();
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      expect((await h.service.evaluate('manual')).outcome).toBe('error');
+      expect(decisionModelPolicyState().operation).toBe('decision'); expect(h.sent).toEqual([]);
+      expect((await h.receipts.list())[0]!.outcome).toBe('error');
+    });
+    h.service.dispose();
+  });
+}
+
+test('Classic check-in cancellation is recorded as cancellation, never a feature skip or quiet judgment', async () => {
+  const fake = readings(); const h = harness(); const controller = new AbortController(); controller.abort();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    expect((await h.service.evaluate('manual', undefined, controller.signal)).outcome).toBe('skipped');
+    expect((await h.receipts.list())[0]!.outcome).toBe('cancelled');
+    expect(h.sent).toEqual([]); expect(fake.requests).toHaveLength(0);
+  });
+  h.service.dispose();
+});
+
+test('Preferred outage during note verification retains the real contact reading without sending or regenerating', async () => {
+  const fake = fakePort(name => {
+    if (name === 'contact') return noulAnswer(0.99);
+    throw new JudgmentError('unavailable', 'Synthetic verification outage');
+  });
+  installJudgmentPort(withDecisionLog(fake.port, log)); let generated = 0;
+  const h = harness(async () => { generated++; return { content: note }; });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    expect((await h.service.evaluate('manual')).outcome).toBe('skipped');
+    const receipt = (await h.receipts.list())[0]!;
+    expect(receipt.outcome).toBe('skipped-decision-models-disabled');
+    expect(receipt.judgment?.reading.verdict).toBe('yes');
+    expect(receipt.judgment?.note).toBeUndefined(); expect(receipt.deliveredMessage).toBeUndefined();
+    expect(h.sent).toEqual([]); expect(generated).toBe(1);
+    expect(decisionModelPolicyState().operation).toBe('classic');
+  });
+  h.service.dispose();
 });

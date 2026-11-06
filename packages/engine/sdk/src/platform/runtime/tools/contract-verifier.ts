@@ -20,6 +20,7 @@
  */
 
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import { descriptionQuality } from './batteries/description-quality.js';
 import type { PhasedTool } from './adapter.js';
@@ -84,6 +85,9 @@ export interface ContractVerificationResult {
   readonly verifiedAt: number;
   /** Whether this tool was verified as a PhasedTool (has extended metadata). */
   readonly isPhasedTool: boolean;
+  /** Structural checks never certify the semantic quality of a description. */
+  readonly descriptionQuality?: 'assessed' | 'not-evaluated';
+  readonly provenance?: 'classic';
 }
 
 /**
@@ -393,10 +397,22 @@ export class ToolContractVerifier {
    * @returns A ContractVerificationResult with all violations and a pass/fail flag.
    */
   async verify(tool: Tool): Promise<ContractVerificationResult> {
-    const structure = this.verifyStructure(tool);
-    const described = await checkDescription(tool.definition);
-    if (described.length === 0) return structure;
-    return { ...structure, violations: [...structure.violations, ...described], verifiedAt: Date.now() };
+    return withConfiguredDecisionModelPolicy(async () => {
+      const structure = this.verifyStructure(tool);
+      const description = tool.definition.description;
+      // Missing and blank descriptions have native diagnostics in every mode.
+      const needsReading = typeof description === 'string' && description.trim().length > 0;
+      const described = needsReading
+        ? await decisionOrClassic<ContractViolation[] | null>(() => checkDescription(tool.definition), () => null)
+        : await checkDescription(tool.definition);
+      return {
+        ...structure,
+        violations: [...structure.violations, ...(described ?? [])],
+        descriptionQuality: needsReading && described !== null ? 'assessed' : 'not-evaluated',
+        ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+        verifiedAt: Date.now(),
+      };
+    });
   }
 
   /**
@@ -427,6 +443,7 @@ export class ToolContractVerifier {
       violations,
       verifiedAt: Date.now(),
       isPhasedTool,
+      descriptionQuality: 'not-evaluated',
     };
   }
 
@@ -437,8 +454,10 @@ export class ToolContractVerifier {
    * @returns Map of tool name to verification result.
    */
   async verifyAll(tools: readonly Tool[]): Promise<Map<string, ContractVerificationResult>> {
-    const verified = await Promise.all(tools.map((tool) => this.verify(tool)));
-    return new Map(verified.map((result) => [result.toolName, result]));
+    return withConfiguredDecisionModelPolicy(async () => {
+      const verified = await Promise.all(tools.map((tool) => this.verify(tool)));
+      return new Map(verified.map((result) => [result.toolName, result]));
+    });
   }
 
   /**
@@ -455,7 +474,8 @@ export class ToolContractVerifier {
     lines.push(`[${status}] ${result.toolName}${phasedNote}`);
 
     if (result.violations.length === 0) {
-      lines.push('  All contract checks passed.');
+      lines.push(result.descriptionQuality === 'not-evaluated'
+        ? '  All structural contract checks passed.' : '  All contract checks passed.');
     } else {
       for (const v of result.violations) {
         const prefix = v.severity === 'error' ? '  [ERROR]' : '  [WARN] ';
@@ -466,6 +486,7 @@ export class ToolContractVerifier {
       }
     }
 
+    if (result.descriptionQuality === 'not-evaluated') lines.push('  Description quality was not assessed by a decision model.');
     return lines.join('\n');
   }
 

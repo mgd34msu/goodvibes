@@ -197,6 +197,8 @@ export class ToolContractsPanel {
       })),
       verifiedAt: result.verifiedAt,
       isPhasedTool: result.isPhasedTool,
+      ...(result.descriptionQuality === undefined ? {} : { descriptionQuality: result.descriptionQuality }),
+      ...(result.provenance === undefined ? {} : { provenance: result.provenance }),
     };
   }
 

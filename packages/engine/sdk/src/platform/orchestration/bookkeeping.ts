@@ -4,6 +4,7 @@ import { types as nodeTypes } from 'node:util';
 import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export const repositoryFailureReading = defineBattery({
   name: 'orchestration.repository-failure', version: 1, accuracyFloor: 0.95,
@@ -24,6 +25,7 @@ export interface BookkeepingFailureReading {
   readonly reason: string;
   /** Retained through cleanup and the final engine publication. */
   readonly assertCurrent: () => void;
+  readonly provenance?: 'classic';
 }
 const unavailable = 'Commit or merge failed; repository condition could not be established.';
 
@@ -36,39 +38,50 @@ function messageOf(error: unknown): string | undefined {
 }
 
 export async function classifyBookkeepingFailure(error: unknown, options: JudgmentReadingOptions = {}): Promise<BookkeepingFailureReading> {
-  let reason = unavailable;
-  let current = () => {
-    if (options.signal?.aborted) throw new Error('Repository failure reading cancelled.');
-    const result: unknown = options.assertCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Repository failure owner unavailable.'); }
-  };
-  try {
-    current();
-    const message = messageOf(error);
-    if (message === undefined || message.trim() === '') return { classification: 'held', reason, assertCurrent: current };
-    const state = snapshotJudgmentInput({ message }) as { message: string };
-    reason = state.message;
-    const outerCurrent = current;
-    current = () => { outerCurrent(); if (messageOf(error) !== message) throw new Error('Repository failure source replaced.'); };
-    const owner = captureJudgmentPort('orchestration.repository-failure', { signal: options.signal, assertCurrent: current });
-    current = owner.assertCurrent;
-    const port: JudgmentPort = { ...owner.port, async ask(request) {
-      owner.assertCurrent();
-      const result = await owner.port.ask(request);
-      owner.assertCurrent();
-      checkAnswers(request.questions, result.answers);
-      return result;
-    } };
-    const run = await repositoryFailureReading.run(port, state, { signal: owner.signal, site: 'orchestration.repository-failure' });
-    current();
-    const reading = run.readings.negating;
-    const classification = reading.outcome !== 'act' || reading.verdict === 'uncertain' ? 'held'
-      : reading.verdict === 'yes' ? 'negating' : 'non-negating';
-    run.recordAction(classification === 'held' ? 'held repository failure classification' : 'returned repository failure classification');
-    current();
-    return { classification, reason, assertCurrent: current };
-  } catch {
-    // Refusal, malformed answers and unavailability never become semantic no.
-    return { classification: 'held', reason, assertCurrent: current };
-  }
+  return withConfiguredDecisionModelPolicy(async () => {
+    let reason = unavailable;
+    let current = () => {
+      if (options.signal?.aborted) throw new Error('Repository failure reading cancelled.');
+      const result: unknown = options.assertCurrent?.();
+      if (result !== undefined) { drainOwned(result); throw new Error('Repository failure owner unavailable.'); }
+    };
+    try {
+      current();
+      const message = messageOf(error);
+      if (message === undefined || message.trim() === '') return { classification: 'held', reason, assertCurrent: current };
+      const state = snapshotJudgmentInput({ message }) as { message: string };
+      reason = state.message;
+      const outerCurrent = current;
+      current = () => { outerCurrent(); if (messageOf(error) !== message) throw new Error('Repository failure source replaced.'); };
+      const nativeCurrent = current;
+      return await decisionOrClassic<BookkeepingFailureReading>(async () => {
+        const owner = captureJudgmentPort('orchestration.repository-failure', { signal: options.signal, assertCurrent: current });
+        current = owner.assertCurrent;
+        const port: JudgmentPort = { ...owner.port, async ask(request) {
+          owner.assertCurrent();
+          const result = await owner.port.ask(request);
+          owner.assertCurrent();
+          checkAnswers(request.questions, result.answers);
+          return result;
+        } };
+        const run = await repositoryFailureReading.run(port, state, { signal: owner.signal, site: 'orchestration.repository-failure' });
+        current();
+        const reading = run.readings.negating;
+        const classification = reading.outcome !== 'act' || reading.verdict === 'uncertain' ? 'held'
+          : reading.verdict === 'yes' ? 'negating' : 'non-negating';
+        run.recordAction(classification === 'held' ? 'held repository failure classification' : 'returned repository failure classification');
+        current();
+        return { classification, reason, assertCurrent: current };
+      }, () => {
+        // The git operation already failed. Preserve that fact without diagnosing
+        // corruption, authorizing repair, or replaying the commit/merge.
+        current = nativeCurrent;
+        current();
+        return { classification: 'held', reason, assertCurrent: current, provenance: 'classic' };
+      });
+    } catch {
+      // Refusal, malformed answers and unavailability never become semantic no.
+      return { classification: 'held', reason, assertCurrent: current };
+    }
+  });
 }

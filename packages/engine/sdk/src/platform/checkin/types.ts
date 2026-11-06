@@ -61,6 +61,7 @@ export type CheckinReceiptOutcome =
   | 'skipped-disabled'
   | 'skipped-quiet-hours'
   | 'skipped-stale'
+  | 'skipped-decision-models-disabled'
   | 'cancelled'
   | 'error';
 

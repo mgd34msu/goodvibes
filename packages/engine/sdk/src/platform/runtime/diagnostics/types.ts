@@ -400,6 +400,8 @@ export interface ToolContractEntry {
   readonly verifiedAt: number;
   /** Whether this tool implements the PhasedTool interface. */
   readonly isPhasedTool: boolean;
+  readonly descriptionQuality?: 'assessed' | 'not-evaluated';
+  readonly provenance?: 'classic';
 }
 
 // ── Transport negotiation entries ─────────────────────────────────────────────

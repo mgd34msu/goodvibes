@@ -23,6 +23,7 @@
  * `contractStarted: true` (a format the tool itself writes, read as code).
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { ToolResult } from '../types/tools.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { ESCALATION_TURN_SITE, escalationTurn, turnIsUnrelated } from './batteries/escalation-turn.js';
@@ -67,33 +68,47 @@ export function openEscalation(contracts: readonly ContractView[]): { readonly c
 export function createContractIntake(deps: ContractIntakeDeps): ContractIntake {
   return {
     async intake(turn) {
-      if (deps.runner.nativeMode === true) throw new Error('Native intake requires source-bearing host admission; legacy owner replies are unavailable');
-      const signal = turn.signal === undefined ? {} : { signal: turn.signal };
-      const waiting = openEscalation(deps.runner.list({ sessionId: turn.sessionId }));
-      if (waiting !== null) {
-        const read = await escalationTurn.run(
-          judgmentPort(ESCALATION_TURN_SITE),
-          { question: waiting.escalation.question, turn: turn.text },
-          { site: ESCALATION_TURN_SITE, ...signal },
-        );
-        const reading = read.readings.responds;
-        if (!turnIsUnrelated(reading)) {
-          read.recordAction(`the owner's reply to ${waiting.escalation.id} (${reading.verdict}, ${reading.outcome})`);
-          const outcome = await deps.runner.reply(waiting.contract.id, waiting.escalation.id, turn.text);
-          return { kind: 'replied', contractId: waiting.contract.id, outcome };
+      return withConfiguredDecisionModelPolicy(async () => {
+        turn.signal?.throwIfAborted();
+        if (deps.runner.nativeMode === true) throw new Error('Native intake requires source-bearing host admission; legacy owner replies are unavailable');
+        const signal = turn.signal === undefined ? {} : { signal: turn.signal };
+        // Only classification may fall back. Never repeat reply/start effects.
+        const route = await decisionOrClassic(async () => {
+          const waiting = openEscalation(deps.runner.list({ sessionId: turn.sessionId }));
+          if (waiting !== null) {
+            const read = await escalationTurn.run(
+              judgmentPort(ESCALATION_TURN_SITE),
+              { question: waiting.escalation.question, turn: turn.text },
+              { site: ESCALATION_TURN_SITE, ...signal },
+            );
+            turn.signal?.throwIfAborted();
+            const reading = read.readings.responds;
+            if (!turnIsUnrelated(reading)) {
+              read.recordAction(`the owner's reply to ${waiting.escalation.id} (${reading.verdict}, ${reading.outcome})`);
+              return { kind: 'reply' as const, waiting };
+            }
+            read.recordAction(`not a reply to ${waiting.escalation.id}: read as a request`);
+          }
+          const routed = await requestRoute.route(judgmentPort(REQUEST_ROUTE_SITE), { request: turn.text }, { site: REQUEST_ROUTE_SITE, ...signal });
+          turn.signal?.throwIfAborted();
+          if (routed.route !== 'contract' || routed.reading.outcome !== 'act') {
+            routed.recordAction(`left to the conversation (${routed.route}, ${routed.reading.outcome})`);
+            return { kind: 'turn' as const };
+          }
+          return { kind: 'contract' as const, routed };
+        }, () => ({ kind: 'turn' as const }));
+        turn.signal?.throwIfAborted();
+        if (route.kind === 'turn') return route;
+        if (route.kind === 'reply') {
+          const outcome = await deps.runner.reply(route.waiting.contract.id, route.waiting.escalation.id, turn.text);
+          return { kind: 'replied', contractId: route.waiting.contract.id, outcome };
         }
-        read.recordAction(`not a reply to ${waiting.escalation.id}: read as a request`);
-      }
-      const routed = await requestRoute.route(judgmentPort(REQUEST_ROUTE_SITE), { request: turn.text }, { site: REQUEST_ROUTE_SITE, ...signal });
-      if (routed.route !== 'contract' || routed.reading.outcome !== 'act') {
-        routed.recordAction(`left to the conversation (${routed.route}, ${routed.reading.outcome})`);
-        return { kind: 'turn' };
-      }
-      const started = deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
-        ...(deps.getSelectedModel === undefined ? {} : { selectedModel: deps.getSelectedModel() }),
+        const started = deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
+          ...(deps.getSelectedModel === undefined ? {} : { selectedModel: deps.getSelectedModel() }),
+        });
+        route.routed.recordAction(`started contract ${started.contract.id}`);
+        return { kind: 'started', contractId: started.contract.id, ownerAgentId: started.owner.id };
       });
-      routed.recordAction(`started contract ${started.contract.id}`);
-      return { kind: 'started', contractId: started.contract.id, ownerAgentId: started.owner.id };
     },
   };
 }

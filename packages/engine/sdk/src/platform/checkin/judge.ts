@@ -3,6 +3,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { worthInterrupting, checkinNoteFidelity } from './batteries/worth-interrupting.js';
 import type { CheckinDecision, CheckinJudge, CheckinJudgeOptions, CheckinJudgmentReceipt } from './types.js';
 
@@ -28,6 +29,7 @@ export function createProviderBackedCheckinJudge(
     async decide(briefing: string, lifetime: CheckinJudgeOptions = {}): Promise<CheckinDecision> {
       const active = () => { lifetime.signal?.throwIfAborted(); lifetime.beforeAttempt?.(); };
       active();
+      requireDecisionFeature('automatic check-in contact and note verification');
       assertJudgmentInput({ briefing });
       const port = judgmentPort(SITE);
       if (!port.recorder) throw new JudgmentError('unrecorded', 'Check-in requires the recorded judgment runtime');

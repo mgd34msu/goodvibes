@@ -420,7 +420,7 @@ describe('canonical semantic record catalogs', () => {
   for (const entry of cases) {
     test(`${entry.kind} reads every candidate before applying the limit and permits counter-lexical results`, async () => {
       const f = fixture(), fake = readings({ [entry.chosen]: 0.99 }); installJudgmentPort(fake.port);
-      let invocation: 'literal' | 'filtered' | 'detail' = 'literal';
+      let invocation: 'literal' | 'filtered' = 'literal';
       try {
         const all = await entry.summary(f.context, {}, options());
         const expectedTotal = Number(all.total);
@@ -431,9 +431,6 @@ describe('canonical semantic record catalogs', () => {
         const catalogRequests = fake.requests.filter(request => request.context?.battery === 'engine.tools.registry-rank');
         expect(catalogRequests).toHaveLength(expectedTotal);
         expect(new Set(catalogRequests.map(request => (request.state as unknown as { candidate: { name: string } }).candidate.name)).size).toBe(expectedTotal);
-        invocation = 'detail';
-        const detail = await entry.detail(f.context, { query: 'mail' }, options());
-        expect(detail.status).toBe('found');
       } catch (error) {
         if (entry.kind === 'autonomy' && !nodeTypes.isProxy(error) && error instanceof ToolInputProjectionError) {
           const cause: unknown = Object.getOwnPropertyDescriptor(error, 'cause')?.value;
@@ -456,48 +453,72 @@ describe('canonical semantic record catalogs', () => {
       }
     });
 
-    test(`${entry.kind} keeps one uncertain candidate visible and ambiguous`, async () => {
-      const f = fixture(); installJudgmentPort(readings({ [entry.chosen]: 0.5 }).port);
-      const result = await entry.summary(f.context, { query: 'mail' }, options());
-      expect(result[entry.field]).toMatchObject([{ [entry.id]: entry.chosen, judgment: { reading: { verdict: 'uncertain' } } }]);
-      const detail = await entry.detail(f.context, { query: 'mail' }, options());
-      expect(detail).toMatchObject({ status: 'ambiguous', candidates: [{ [entry.id]: entry.chosen }] });
+    // Every autonomy entry point reads the complete native contract for all
+    // four lanes. Give independent summary/detail operations their own unchanged
+    // per-test deadline rather than stacking several full catalogs in one test.
+    test(`${entry.kind} detail permits counter-lexical results`, async () => {
+      const f = fixture(); installJudgmentPort(readings({ [entry.chosen]: 0.99 }).port);
+      expect((await entry.detail(f.context, { query: 'mail' }, options())).status).toBe('found');
     });
 
-    test(`${entry.kind} holds a yes reading whose disposition is still unresolved`, async () => {
-      const f = fixture(); installJudgmentPort(readings({ [entry.chosen]: 0.575 }).port);
-      const result = await entry.summary(f.context, { query: 'mail' }, options());
-      expect(result[entry.field]).toMatchObject([{ [entry.id]: entry.chosen, judgment: { reading: { verdict: 'yes', outcome: 'confirm' } } }]);
-      expect(await entry.detail(f.context, { query: 'mail' }, options())).toMatchObject({ status: 'ambiguous', candidates: [{ [entry.id]: entry.chosen }] });
-    });
+    for (const view of ['summary', 'detail'] as const) {
+      test(`${entry.kind} ${view} keeps one uncertain candidate visible and ambiguous`, async () => {
+        const f = fixture(); installJudgmentPort(readings({ [entry.chosen]: 0.5 }).port);
+        if (view === 'summary') {
+          const result = await entry.summary(f.context, { query: 'mail' }, options());
+          expect(result[entry.field]).toMatchObject([{ [entry.id]: entry.chosen, judgment: { reading: { verdict: 'uncertain' } } }]);
+        } else {
+          expect(await entry.detail(f.context, { query: 'mail' }, options())).toMatchObject({ status: 'ambiguous', candidates: [{ [entry.id]: entry.chosen }] });
+        }
+      });
 
-    test(`${entry.kind} refuses unavailable canonical readings and preserves exact-ID selection grammar`, async () => {
+      test(`${entry.kind} ${view} holds a yes reading whose disposition is still unresolved`, async () => {
+        const f = fixture(); installJudgmentPort(readings({ [entry.chosen]: 0.575 }).port);
+        if (view === 'summary') {
+          const result = await entry.summary(f.context, { query: 'mail' }, options());
+          expect(result[entry.field]).toMatchObject([{ [entry.id]: entry.chosen, judgment: { reading: { verdict: 'yes', outcome: 'confirm' } } }]);
+        } else {
+          expect(await entry.detail(f.context, { query: 'mail' }, options())).toMatchObject({ status: 'ambiguous', candidates: [{ [entry.id]: entry.chosen }] });
+        }
+      });
+
+      test(`${entry.kind} ${view} does not fall back to a lexical match after negative readings`, async () => {
+        const f = fixture(); installJudgmentPort(readings({}).port);
+        if (view === 'summary') {
+          const result = await entry.summary(f.context, { query: 'mail' }, options());
+          expect(result[entry.field]).toEqual([]);
+          expect(result.total).toBeGreaterThan(0);
+          if (entry.kind === 'process') expect(result.summary).toMatchObject({ tracked: 2, running: 2 });
+        } else {
+          expect((await entry.detail(f.context, { query: 'mail' }, options())).status).toBe('missing_lookup');
+        }
+      });
+    }
+
+    test(`${entry.kind} refuses unavailable canonical readings`, async () => {
       const f = fixture();
       await expect(entry.summary(f.context, { query: 'mail' }, options())).rejects.toBeInstanceOf(JudgmentPortMissingError);
       if (entry.kind === 'autonomy' || entry.kind === 'learning') {
         await expect(entry.summary(f.context, {})).rejects.toBeInstanceOf(ToolInputProjectionError);
         await expect(entry.detail(f.context, { [entry.id]: entry.chosen })).rejects.toBeInstanceOf(ToolInputProjectionError);
-        const privacy = readings({});
-        installJudgmentPort(privacy.port);
-        expect((await entry.summary(f.context, {}, options())).total).toBeGreaterThan(0);
-        expect((await entry.detail(f.context, { [entry.id]: entry.chosen }, options())).status).toBe('found');
-        expect((await entry.detail(f.context, { [entry.id]: 'unknown-id' }, options())).status).toBe('missing_lookup');
-        expect(privacy.requests.some(request => request.context?.battery === 'engine.tools.registry-rank')).toBe(false);
-        return;
       }
-      expect((await entry.summary(f.context, {})).total).toBeGreaterThan(0);
-      expect((await entry.detail(f.context, { [entry.id]: entry.chosen })).status).toBe('found');
-      expect((await entry.detail(f.context, { [entry.id]: 'unknown-id' })).status).toBe('missing_lookup');
     });
 
-    test(`${entry.kind} does not fall back to a lexical match after negative readings`, async () => {
-      const f = fixture(); installJudgmentPort(readings({}).port);
-      const result = await entry.summary(f.context, { query: 'mail' }, options());
-      expect(result[entry.field]).toEqual([]);
-      expect(result.total).toBeGreaterThan(0);
-      if (entry.kind === 'process') expect(result.summary).toMatchObject({ tracked: 2, running: 2 });
-      expect((await entry.detail(f.context, { query: 'mail' }, options())).status).toBe('missing_lookup');
-    });
+    for (const selection of ['list', 'exact', 'missing'] as const) {
+      test(`${entry.kind} ${selection} preserves exact-ID selection grammar`, async () => {
+        const f = fixture(), privacy = readings({});
+        const protectedCatalog = entry.kind === 'autonomy' || entry.kind === 'learning';
+        if (protectedCatalog) installJudgmentPort(privacy.port);
+        const readingOptions = protectedCatalog ? options() : undefined;
+        if (selection === 'list') {
+          expect((await entry.summary(f.context, {}, readingOptions)).total).toBeGreaterThan(0);
+        } else {
+          expect((await entry.detail(f.context, { [entry.id]: selection === 'exact' ? entry.chosen : 'unknown-id' }, readingOptions)).status)
+            .toBe(selection === 'exact' ? 'found' : 'missing_lookup');
+        }
+        expect(privacy.requests.some(request => request.context?.battery === 'engine.tools.registry-rank')).toBe(false);
+      });
+    }
   }
 
   test('the actual harness dispatch retains source guards through final catalog publication', async () => {

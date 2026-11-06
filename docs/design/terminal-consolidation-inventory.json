@@ -722,7 +722,12 @@
       "path": "input/commands/shell-core.ts",
       "baselineTuiLines": 468,
       "baselineSimilarity": 0.4973,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "shell-core-actions: model/effort/clear/keybindings",
+        "basic-shell-commands: reset/paste"
+      ],
+      "notes": "Common model/effort selection, fresh-conversation admission and keybinding presentation now share platform actions. Product ports retain credential intake, effort publication scope/advice, toast versus receipt, shortcut overlay versus list and command catalogs. Remaining compaction/help/pin product commands still need final audit."
     },
     {
       "path": "input/commands/status-runtime.ts",

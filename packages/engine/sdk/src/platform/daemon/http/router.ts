@@ -5,6 +5,8 @@ import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '../../config
 import { createBrowserJudgmentHttpHandler, type BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-sdk';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { isValidConfigKey } from '../../config/schema.js';
+import { DECISION_MODEL_POLICY_HEADER, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -276,7 +278,7 @@ export class DaemonHttpRouter {
   }
 
   async handleRequest(req: Request): Promise<Response> {
-    return correlationCtx.run(
+    return withDecisionModelPolicy(() => this.getConfigValue('judgment.policy'), () => correlationCtx.run(
       { requestId: req.headers.get('x-request-id') ?? crypto.randomUUID() },
       async () => {
         // Opt-in cross-origin + bundle-serving posture (both default off → no CORS,
@@ -301,9 +303,12 @@ export class DaemonHttpRouter {
         const response = asset ? original : await attachBrowserJudgmentError(req, original, {
           service: this.context.browserJudgment, methods: this.context.gatewayMethods, method, principal, currentPrincipal,
         });
-        return serving.cors.enabled ? applyCorsHeaders(req, response, serving) : response;
+        if (response.status === 101) return response;
+        const observed = new Response(response.body, response);
+        observed.headers.set(DECISION_MODEL_POLICY_HEADER, JSON.stringify(decisionModelPolicyState()));
+        return serving.cors.enabled ? applyCorsHeaders(req, observed, serving) : observed;
       },
-    );
+    ));
   }
 
   private async dispatchAuthedRequest(req: Request): Promise<Response> {

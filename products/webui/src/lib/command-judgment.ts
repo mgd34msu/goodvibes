@@ -1,7 +1,8 @@
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import { runBrowserJudgment } from './goodvibes';
+import { readBrowserDecisionPolicy, runBrowserJudgment } from './goodvibes';
+import { classicCommandIndices, DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { getCommandRegistryRevision, getCommands, type CommandDef } from './commands';
 import { randomUuid } from './uuid';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
@@ -12,6 +13,7 @@ type Settled = Extract<PaletteResponse, { status: 'settled' }>;
 type Held = Extract<PaletteResponse, { status: 'held' }>;
 export type CommandSearchResult =
   | { readonly status: 'ready'; readonly commands: readonly CommandDef[]; readonly reading: Settled; readonly isCurrent: () => boolean }
+  | { readonly status: 'ready'; readonly provenance: 'classic'; readonly commands: readonly CommandDef[]; readonly isCurrent: () => boolean }
   | { readonly status: 'held'; readonly reason: 'uncertain'; readonly reading: Held }
   | { readonly status: 'held'; readonly reason: 'permission' | 'source' | 'unsupported' }
   | { readonly status: 'unavailable'; readonly reason: 'unavailable' | 'invalid-response' | 'aborted' | 'stale' };
@@ -98,6 +100,19 @@ export async function rankCommandSnapshot(query: string, snapshot: CommandSearch
   if (signal.aborted) return unavailable('aborted');
   if (!isCommandSearchCurrent(snapshot)) return unavailable('stale');
   if (!query.trim() || query.length > 256 || snapshot.commands.length < 1 || snapshot.commands.length > 64) return { status: 'held', reason: 'unsupported' };
+  const classicLifetime = getClientLifetime();
+  const classic = (): CommandSearchResult => {
+    if (signal.aborted) return unavailable('aborted');
+    const isCurrent = () => isClientLifetimeCurrent(classicLifetime) && isCommandSearchCurrent(snapshot);
+    if (!isCurrent()) return unavailable('stale');
+    return { status: 'ready', provenance: 'classic', isCurrent,
+      commands: classicCommandIndices(query, snapshot.commands).map(index => {
+        const command = snapshot.commands[index]!;
+        return Object.freeze({ ...command, run: () => { if (isCurrent()) command.run(); } });
+      }) };
+  };
+  try { if ((await readBrowserDecisionPolicy(signal)).operation === 'classic') return classic(); }
+  catch { return unavailable(signal.aborted ? 'aborted' : 'unavailable'); }
   const candidates: PaletteRequest['input']['candidates'][number][] = [];
   const seen = new Set<string>();
   for (const command of snapshot.commands) {
@@ -136,6 +151,7 @@ export async function rankCommandSnapshot(query: string, snapshot: CommandSearch
   } catch (error) {
     if (signal.aborted) return unavailable('aborted');
     if (!isCurrent()) return unavailable('stale');
+    if (error instanceof DecisionModelsDisabledError) return classic();
     const code = object(object(object(error)?.body)?.error)?.code;
     if (typeof code === 'string' && ['JUDGMENT_PERMISSION_HELD', 'JUDGMENT_AUTH_REQUIRED', 'JUDGMENT_ACCESS_DENIED', 'JUDGMENT_ORIGIN_DENIED'].includes(code)) return { status: 'held', reason: 'permission' };
     if (code === 'JUDGMENT_REFERENCE_HELD') return { status: 'held', reason: 'source' };

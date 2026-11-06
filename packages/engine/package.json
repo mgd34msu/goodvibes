@@ -1444,6 +1444,11 @@
       "types": "./sdk/dist/browser-decision-router.d.ts",
       "import": "./sdk/dist/browser-decision-router.js"
     },
+    "./sdk/browser/decision-policy": {
+      "bun": "./sdk/src/browser-decision-policy.ts",
+      "types": "./sdk/dist/browser-decision-policy.d.ts",
+      "import": "./sdk/dist/browser-decision-policy.js"
+    },
     "./terminal-shell/session-focus": {
       "bun": "./terminal-shell/src/session-focus.ts",
       "types": "./terminal-shell/dist/session-focus.d.ts",

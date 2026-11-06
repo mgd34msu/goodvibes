@@ -12,6 +12,25 @@ export interface DecisionModelPolicyState {
   readonly reason: 'selected' | 'unavailable' | null;
   readonly revision: number;
 }
+/** Authenticated host observation; never accepts a client's policy as execution authority. */
+export const DECISION_MODEL_POLICY_HEADER = 'x-goodvibes-decision-policy';
+export function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): DecisionModelPolicyState | undefined {
+  const raw = headers.get(DECISION_MODEL_POLICY_HEADER);
+  if (!raw || raw.length > 512) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return undefined;
+    const state = value as Record<string, unknown>;
+    const policy = parseDecisionModelPolicy(state.policy);
+    if (state.policy === undefined || !Number.isSafeInteger(state.revision) || (state.revision as number) < 0) return undefined;
+    const reason = state.reason;
+    if (reason !== null && reason !== 'selected' && reason !== 'unavailable') return undefined;
+    if (state.operation !== (reason === null ? 'decision' : 'classic')
+      || (policy === 'Default - On' && reason !== null) || (policy === 'Classic - Off' && reason !== 'selected')
+      || (policy === 'Preferred' && reason === 'selected')) return undefined;
+    return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: state.revision as number });
+  } catch { return undefined; }
+}
 
 const defaultState: DecisionModelPolicyState = Object.freeze({
   policy: 'Default - On', operation: 'decision', reason: null, revision: 0,

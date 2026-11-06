@@ -283,7 +283,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
     composeRef.current?.focus('body');
     const pending = { abort: new AbortController(), message };
     replyRequest.current = pending;
-    const result = await readMailReplySubject(message.replySubjectRef, pending.abort.signal);
+    const result = await readMailReplySubject(message.replySubjectRef, pending.abort.signal, message.subject);
     if (replyRequest.current !== pending || pending.abort.signal.aborted) return;
     replyRequest.current = null;
     if (result.status !== 'ready' || !result.isCurrent()) { setReplySubjectState('held'); return; }

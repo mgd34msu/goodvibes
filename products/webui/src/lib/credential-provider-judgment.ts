@@ -1,5 +1,6 @@
 import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
 import { runBrowserJudgment } from "./goodvibes";
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import {
   getClientLifetime,
   isClientLifetimeCurrent,
@@ -13,6 +14,7 @@ export type CredentialProviderResult =
   | {
       readonly status: "ready";
       readonly matches: readonly boolean[];
+      readonly provenance?: 'classic';
       readonly isCurrent: () => boolean;
     }
   | { readonly status: "held" | "unavailable" };
@@ -162,7 +164,12 @@ export async function readCredentialProvider(
     return result?.status === "ready"
       ? { ...result, isCurrent }
       : (result ?? { status: "unavailable" });
-  } catch {
+  } catch (error) {
+    if (error instanceof DecisionModelsDisabledError && isCurrent()) return {
+      status: 'ready', provenance: 'classic', isCurrent,
+      // Exact provider IDs remain usable; ambiguous stored names require manual selection.
+      matches: names.map(name => name === providerId),
+    };
     return { status: "unavailable" };
   } finally {
     unsubscribe();

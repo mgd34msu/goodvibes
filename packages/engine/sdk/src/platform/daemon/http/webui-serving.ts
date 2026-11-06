@@ -243,6 +243,7 @@ export function applyCorsHeaders(req: Request, response: Response, posture: Webu
   if (isOriginAllowed(origin, posture.cors.allowedOrigins)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Access-Control-Allow-Credentials', 'true');
+    headers.set('Access-Control-Expose-Headers', 'x-goodvibes-decision-policy');
   }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

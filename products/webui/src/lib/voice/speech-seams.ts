@@ -1,5 +1,6 @@
 import { BROWSER_SPEECH_SEAM_BAND, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk/browser-judgment-contract';
 import { runBrowserJudgment } from '../goodvibes';
+import { classicSpeechEndOffsets, DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
 import { randomUuid } from '../uuid';
 
@@ -70,6 +71,9 @@ export async function readSpeechSeams(source: SpeechSource, start: number, end: 
       offsets.push(...result);
     }
     assertCurrent(); return offsets;
-  } catch { throw new SpeechSeamsUnavailable(); }
+  } catch (error) {
+    if (error instanceof DecisionModelsDisabledError) { assertCurrent(); return classicSpeechEndOffsets(paragraph); }
+    throw new SpeechSeamsUnavailable();
+  }
   finally { unsubscribe(); signal.removeEventListener('abort', cancel); }
 }

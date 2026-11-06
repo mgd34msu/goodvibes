@@ -37,6 +37,21 @@ The Decision Router uses its configured General answer target during Classic
 operation, with no categorization call. Decision-only capabilities must expose
 their limitation before execution; they must not be backed by fake answers.
 
+Native conversation intake retains a separate owner-provenance record for Classic
+admission. Its paired identity, original input, current source and durable dispatch
+claim still apply. It neither forges an autonomous act decision nor starts a native
+work contract. An authenticated retained turn permit carries Preferred fallback
+into the actual conversation; caller-supplied policy fields cannot grant it.
+
+The daemon reports current operation policy through `x-goodvibes-decision-policy`.
+Browser observations reset with the selected account/host lifetime. Classic browser
+features use lexical command matching, declared code languages or plaintext,
+punctuation-based speech chunks, and explicit reply prefixes. Unknown credential
+fields remain masked; ambiguous credential-provider associations require manual
+selection. These presentation results carry Classic provenance without model
+probabilities or decision receipts. A semantic browser request made by another
+client while Classic is active reports `JUDGMENT_CLASSIC` without model I/O.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

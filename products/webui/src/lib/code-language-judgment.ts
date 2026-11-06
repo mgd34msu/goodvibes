@@ -2,12 +2,13 @@ import { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from '@goodvibes-jev/eng
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
 import { captureChoiceAnswer } from '@goodvibes-jev/judgment/decisions';
 import { runBrowserJudgment } from './goodvibes';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { randomUuid } from './uuid';
 
 type Request = BrowserJudgmentRequest<'webui.code.language'>;
 export type CodeSource = { readonly sessionId: string; readonly messageId: string; readonly content: string; readonly start: number; readonly end: number };
-export type CodeLanguageResult = { readonly status: 'ready'; readonly language: WebuiCodeLanguage; readonly isCurrent: () => boolean } | { readonly status: 'held' | 'unavailable' };
+export type CodeLanguageResult = { readonly status: 'ready'; readonly language: WebuiCodeLanguage; readonly provenance?: 'classic'; readonly isCurrent: () => boolean } | { readonly status: 'held' | 'unavailable' };
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const keys = (value: Record<string, unknown>, names: readonly string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
 const nonnegative = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -64,6 +65,9 @@ export async function readCodeLanguage(source: CodeSource, signal: AbortSignal):
     if (!isCurrent()) return { status: 'unavailable' };
     const result = readCodeLanguageResponse(request, raw);
     return result?.status === 'ready' ? { ...result, isCurrent } : result ?? { status: 'unavailable' };
-  } catch { return { status: 'unavailable' }; }
+  } catch (error) {
+    if (error instanceof DecisionModelsDisabledError && isCurrent()) return { status: 'ready', language: 'plaintext', provenance: 'classic', isCurrent };
+    return { status: 'unavailable' };
+  }
   finally { unsubscribe(); signal.removeEventListener('abort', cancel); }
 }

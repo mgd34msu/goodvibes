@@ -1,4 +1,6 @@
 import { JudgmentError } from '@goodvibes-jev/judgment';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { JudgmentPort, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import {
   BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS as LIMIT, parseBrowserJudgmentRequest, captureBrowserJudgmentJson, missingScopes,
@@ -28,15 +30,17 @@ export interface BrowserJudgmentServiceOptions {
 type Evidence = Pick<JudgmentResult<Questions>, 'decisionId' | 'model' | 'requestedModel' | 'usage' | 'latencyMs'>;
 
 function normalizedError(error: unknown, signal: AbortSignal): BrowserJudgmentError {
+  if (error instanceof DecisionModelsDisabledError) return new BrowserJudgmentError('JUDGMENT_CLASSIC');
   if (signal.aborted && signal.reason instanceof BrowserJudgmentError) return signal.reason;
   if (error instanceof BrowserJudgmentError) return error;
   if (error instanceof JudgmentError) {
     if (error.kind === 'unrecorded') return new BrowserJudgmentError('JUDGMENT_UNRECORDED');
     if (error.kind === 'invalid-response') return new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
     if (error.kind === 'aborted') return new BrowserJudgmentError('JUDGMENT_ABORTED');
+    if (error.kind === 'unavailable') return new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
   }
   // Missing key is currently an internal invalid-request: it is NOT a client input error.
-  return new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
+  return new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
 }
 
 /** Owns admitted runs, references, cancellation, and drain; borrows the configured port/log. */
@@ -75,7 +79,15 @@ export class BrowserJudgmentService {
     const cancelled = () => abort.abort(new BrowserJudgmentError('JUDGMENT_ABORTED'));
     if (signal.aborted) cancelled(); else signal.addEventListener('abort', cancelled, { once: true });
     // Defer the resolver until after the run is owned, including synchronous throws.
-    const work = Promise.resolve().then(() => this.run(request, battery, identity, abort, currentPrincipal));
+    const work = Promise.resolve().then(() => withConfiguredDecisionModelPolicy(async () => {
+      if (isClassicOperation()) throw new DecisionModelsDisabledError(request.battery);
+      try { return await this.run(request, battery, identity, abort, currentPrincipal); }
+      catch (error) {
+        signal.throwIfAborted();
+        if (activateClassicFallback(error)) throw new DecisionModelsDisabledError(request.battery);
+        throw error;
+      }
+    }));
     this.#active.set(work, { principal: identity.principalId, abort });
     const release = () => { signal.removeEventListener('abort', cancelled); this.#active.delete(work); };
     void work.then(release, release);

@@ -1,11 +1,12 @@
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
-import { runBrowserJudgment } from './goodvibes';
+import { readBrowserDecisionPolicy, runBrowserJudgment } from './goodvibes';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from './client-lifetime';
 import { randomUuid } from './uuid';
 
 type Request = BrowserJudgmentRequest<'webui.mail.reply-subject'>;
 export type MailReplySubjectResult =
-  | { readonly status: 'ready'; readonly alreadyReply: boolean; readonly isCurrent: () => boolean }
+  | { readonly status: 'ready'; readonly alreadyReply: boolean; readonly provenance?: 'classic'; readonly isCurrent: () => boolean }
   | { readonly status: 'held' | 'unavailable' };
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const keys = (value: Record<string, unknown>, names: readonly string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
@@ -39,21 +40,26 @@ export function readMailReplySubjectResponse(request: Request, raw: unknown): { 
 }
 
 /** One authenticated selected-host request. Availability retries belong to the shared server port. */
-export async function readMailReplySubject(subjectRef: string | undefined, signal: AbortSignal): Promise<MailReplySubjectResult> {
-  if (!subjectRef || subjectRef.length > 256 || signal.aborted) return { status: 'held' };
+export async function readMailReplySubject(subjectRef: string | undefined, signal: AbortSignal, originalSubject?: string): Promise<MailReplySubjectResult> {
+  if ((subjectRef !== undefined && subjectRef.length > 256) || signal.aborted) return { status: 'held' };
   const lifetime = getClientLifetime();
   const abort = new AbortController();
   const cancel = () => abort.abort();
   const unsubscribe = subscribeClientLifetime(cancel);
   signal.addEventListener('abort', cancel, { once: true });
   const isCurrent = () => !signal.aborted && !abort.signal.aborted && isClientLifetimeCurrent(lifetime);
+  const classic = (): MailReplySubjectResult => typeof originalSubject === 'string' && originalSubject.length <= 32768 && isCurrent()
+    ? { status: 'ready', provenance: 'classic', alreadyReply: /^\s*re(?:\[\d+\])?:/iu.test(originalSubject), isCurrent }
+    : { status: 'held' };
   try {
     if (!isCurrent()) return { status: 'unavailable' };
+    if ((await readBrowserDecisionPolicy(abort.signal)).operation === 'classic') return classic();
+    if (!subjectRef) return { status: 'held' };
     const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.mail.reply-subject', batteryVersion: 1, input: { subjectRef } };
     const raw = await runBrowserJudgment(request, abort.signal);
     if (!isCurrent()) return { status: 'unavailable' };
     const result = readMailReplySubjectResponse(request, raw);
     return result?.status === 'ready' ? { ...result, isCurrent } : result ?? { status: 'unavailable' };
-  } catch { return { status: 'unavailable' }; }
+  } catch (error) { return error instanceof DecisionModelsDisabledError ? classic() : { status: 'unavailable' }; }
   finally { unsubscribe(); signal.removeEventListener('abort', cancel); }
 }

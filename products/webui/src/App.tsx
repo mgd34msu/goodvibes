@@ -1,6 +1,7 @@
 import { Plug, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import AppShell from './components/shell/AppShell';
+import { DecisionPolicyNotice } from './components/DecisionPolicyNotice';
 import { ShellLayout } from './components/shell/ShellLayout';
 import { viewTitle } from './components/shell/nav';
 import { PowerChip } from './components/status/PowerChip';
@@ -468,6 +469,7 @@ export default function App() {
   return (
     <AppShell view={view} onNavigate={handleNavigate} onOpenSettings={openSettings}>
     <div className="app-shell-root">
+    <DecisionPolicyNotice />
     <StepUpHost />
     {confirmDialog.element}
     {/* A hand-off bundle (#pair=<token>&offers=…) surfaces its offer set once the

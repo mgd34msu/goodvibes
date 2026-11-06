@@ -10,6 +10,8 @@ export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
 import { resolveDaemonRefusal } from './daemon-refusal';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { browserDecisionPolicy } from './decision-policy';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -336,6 +338,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
   // on one dedicated probe, since this is the one HTTP helper nearly every operator
   // call passes through.
   recordObservedClientCompatibilityFloor(readClientCompatibilityFloor(response.headers));
+  if (options.authenticated !== false) browserDecisionPolicy.observe(response.headers);
   const body = await readJson(response);
   check();
   if (!response.ok) {
@@ -346,7 +349,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
       body,
       category: response.status === 401 ? 'authentication' : 'service',
     });
-    if (path !== '/api/judgment/batteries/run') await resolveDaemonRefusal(error, runBrowserJudgment, {
+    if (path !== '/api/judgment/batteries/run' && path !== webuiRouteFor('control.status')?.path) await resolveDaemonRefusal(error, runBrowserJudgment, {
       signal: options.signal, isCurrent: () => isClientLifetimeCurrent(failureLifetime),
     });
     // Interpretation never replaces the original HTTP failure, even if its
@@ -2752,13 +2755,34 @@ export async function invokeMethod<TMethodId extends OperatorTypedMethodId>(
 }
 
 /** Direct authenticated, cancellable call to the generated judgment route. */
+export async function readBrowserDecisionPolicy(signal: AbortSignal) {
+  signal.throwIfAborted();
+  if (!browserDecisionPolicy.snapshot()) {
+    const status = webuiRouteFor('control.status');
+    if (!status) throw new Error('Decision policy observation is unavailable.');
+    await requestJson(status.path, { signal });
+    signal.throwIfAborted();
+  }
+  const state = browserDecisionPolicy.snapshot();
+  if (!state) throw new Error('The daemon did not report its decision-model policy.');
+  return state;
+}
+
 export async function runBrowserJudgment(
   input: OperatorMethodInput<'judgment.battery.run'>,
   signal: AbortSignal,
 ): Promise<OperatorMethodOutput<'judgment.battery.run'>> {
+  const policy = await readBrowserDecisionPolicy(signal);
+  if (policy.operation === 'classic') throw new DecisionModelsDisabledError(input.battery);
   const route = webuiRouteFor('judgment.battery.run');
   if (route?.method !== 'POST') throw new Error('Command judgment is unavailable.');
-  return requestJson(route.path, { method: route.method, body: input, signal });
+  try { return await requestJson(route.path, { method: route.method, body: input, signal }); }
+  catch (error) {
+    signal.throwIfAborted();
+    const code = asRecord(asRecord(asRecord(error).body).error).code;
+    if (code === 'JUDGMENT_CLASSIC') throw new DecisionModelsDisabledError(input.battery);
+    throw error;
+  }
 }
 
 export async function getCurrentAuth(): Promise<unknown> {

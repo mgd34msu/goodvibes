@@ -1,5 +1,8 @@
 import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-sdk";
 import { runBrowserJudgment } from "./goodvibes";
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
+import { isSecretConfigKey, isUnresolvedConfigKey } from './config-redaction';
+import { isDeclaredCardMaterialKey } from './card-material';
 import {
   getClientLifetime,
   isClientLifetimeCurrent,
@@ -13,6 +16,7 @@ export type ConfigKeyResult =
   | {
       readonly status: "ready";
       readonly matches: readonly boolean[];
+      readonly provenance?: 'classic';
       readonly isCurrent: () => boolean;
     }
   | { readonly status: "held" | "unavailable" };
@@ -167,7 +171,12 @@ export async function readConfigKey(
     return result?.status === "ready"
       ? { ...result, isCurrent }
       : (result ?? { status: "unavailable" });
-  } catch {
+  } catch (error) {
+    if (error instanceof DecisionModelsDisabledError && isCurrent()) return {
+      status: 'ready', provenance: 'classic', isCurrent,
+      matches: names.map(name => battery === 'webui.config.credential-key' ? isSecretConfigKey(name)
+        : isDeclaredCardMaterialKey(name) || isUnresolvedConfigKey(name)),
+    };
     return { status: "unavailable" };
   } finally {
     unsubscribe();

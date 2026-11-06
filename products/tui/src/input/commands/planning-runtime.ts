@@ -201,7 +201,9 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         submission = beginCommandReading(ctx, args, 'planningReading');
         const reading = await readPlanningGoal(source, { signal: submission.signal, assertCurrent: submission.assertCurrent });
         reading.assertCurrent(); submission.assertCurrent();
-        if (reading.conclusion !== 'goal') {
+        // This command already carries the original authenticated owner's
+        // explicit planning request. Classic does not need to reinterpret it.
+        if (reading.provenance !== 'classic' && reading.conclusion !== 'goal') {
           ctx.print(reading.conclusion === 'command'
             ? 'This text does not state a planning goal. Use /project-plan <a change to make>, or an explicit planning command.'
             : 'Planning goal reading is unsettled. No native request was submitted.');

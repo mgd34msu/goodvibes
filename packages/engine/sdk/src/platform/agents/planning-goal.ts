@@ -1,11 +1,34 @@
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/index.js';
 import { planningGoal } from './batteries/planning-goal.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 
-export type PlanningGoalReading = 'goal' | 'command' | 'held';
+export type PlanningGoalReading = 'goal' | 'command' | 'held' | 'unassessed';
+export interface PlanningGoalObservation {
+  readonly conclusion: PlanningGoalReading;
+  readonly provenance?: 'classic';
+  readonly assertCurrent: () => void;
+}
 
 /** A semantic observation only; the caller retains native intake authority. */
-export async function readPlanningGoal(input: { readonly text: string }, options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {}) {
+export async function readPlanningGoal(input: { readonly text: string }, options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {}): Promise<PlanningGoalObservation> {
+  return decisionOrClassic(() => readDecisionPlanningGoal(input, options), () => {
+    const original = retainStrictJudgmentJson(input);
+    assertJudgmentInput(original.snapshot);
+    const signal = options.signal, callerCurrent = options.assertCurrent;
+    const current = () => {
+      signal?.throwIfAborted(); original.assertCurrent();
+      if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new TypeError('Planning source owner changed.');
+      const restriction: unknown = callerCurrent?.();
+      if (restriction !== undefined) { drainOwned(restriction); throw new TypeError('Invalid planning source guard.'); }
+      signal?.throwIfAborted(); original.assertCurrent();
+    };
+    current();
+    return Object.freeze({ conclusion: 'unassessed' as const, provenance: 'classic' as const, assertCurrent: current });
+  });
+}
+async function readDecisionPlanningGoal(input: { readonly text: string }, options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<PlanningGoalObservation> {
   const original = retainStrictJudgmentJson(input);
   assertJudgmentInput(original.snapshot);
   const signal = options.signal, callerCurrent = options.assertCurrent, run = planningGoal.run;

@@ -21,6 +21,7 @@ import { captureToolInputCalls, projectToolInputBatch } from './tool-input-ingre
 import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
 import type { ContractSessionHooks } from '../contract/agent-hooks.js';
 import { toolResultStartedContract } from '../contract/intake-route.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/index.js').EmitterContext;
 export type ChatResponseWithReasoning = Awaited<ReturnType<LLMProvider['chat']>> & {
@@ -38,6 +39,11 @@ export async function maybeEmitAdaptivePlannerDecision(
   classification?: ClassificationResult,
   signal?: AbortSignal,
 ): Promise<void> {
+  return decisionOrClassic(() => emitDecisionAdaptivePlannerDecision(text, flagEnabled, adaptivePlanner, runtimeBus, emitterContext, turnId, classification, signal), () => { signal?.throwIfAborted(); });
+}
+async function emitDecisionAdaptivePlannerDecision(text: string, flagEnabled: boolean,
+  adaptivePlanner: Pick<AdaptivePlanner, 'select'> | null, runtimeBus: RuntimeEventBus | null,
+  emitterContext: EmitterContextFactory, turnId: string, classification?: ClassificationResult, signal?: AbortSignal): Promise<void> {
   if (!flagEnabled) return;
   if (!adaptivePlanner) return;
   const reading = classification ?? await classifyIntent(text, signal ? { signal } : {});
@@ -118,8 +124,9 @@ export async function prepareConversationForTurn(
   // retain their existing routing without a second classifier interpreting it.
   if (nativeTurn || options.directUserInput) return preTurnPlan;
   // The submitted message is retained even if judgment fails or is cancelled.
-  const classification = await classifyIntent(text, options.signal ? { signal: options.signal } : {});
+  const classification = await decisionOrClassic(() => classifyIntent(text, options.signal ? { signal: options.signal } : {}), () => undefined);
   options.signal?.throwIfAborted();
+  if (classification === undefined) return preTurnPlan;
   await options.onClassification?.(classification);
   options.signal?.throwIfAborted();
   if (options.deferPlanPriming) classification.recordAction('plan priming deferred until contract intake');
@@ -130,7 +137,7 @@ export async function prepareConversationForTurn(
 
 /** Apply only after contract intake leaves this as an ordinary conversational turn. */
 export function primeConversationForTurn(conversation: ConversationManager, classification: ClassificationResult, activePlan: ExecutionPlan | null): void {
-  if (isNativeConversationTurn()) return;
+  if (isNativeConversationTurn() || isClassicOperation()) return;
   if (!activePlan && classification.needsPlan.verdict === 'yes' && classification.needsPlan.outcome === 'act') {
     classification.recordAction('inject specification and execution-plan instruction');
     conversation.addSystemMessage(

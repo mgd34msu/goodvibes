@@ -48,9 +48,10 @@ interface ArchetypeModeDetails {
 type ResolvedArchetypeMode = ArchetypeModeDetails & (
   | { readonly reading: 'settled'; readonly family: ArchetypeFamily; readonly executionProtocol: 'direct' | 'gather-plan-apply' }
   | { readonly reading: 'held' }
+  | { readonly reading: 'unclassified'; readonly provenance: 'classic' }
 );
-const familyLabel = (mode: ResolvedArchetypeMode) => mode.reading === 'settled' ? mode.family : 'held';
-const protocolLabel = (mode: ResolvedArchetypeMode) => mode.reading === 'settled' ? mode.executionProtocol : 'held';
+const familyLabel = (mode: ResolvedArchetypeMode) => mode.reading === 'settled' ? mode.family : mode.reading;
+const protocolLabel = (mode: ResolvedArchetypeMode) => mode.reading === 'settled' ? mode.executionProtocol : mode.reading;
 
 interface TeamworkReviewSnapshot {
   readonly builtinArchetypes: number;
@@ -115,6 +116,7 @@ function buildArchetypeMode(archetype: AgentArchetype, reading: ArchetypeFamilyR
     validationIssues: archetype.validationIssues ?? [], tools: archetype.tools,
   };
   if (reading.kind === 'held') return { ...details, reading: 'held' };
+  if (reading.kind === 'unclassified') return { ...details, reading: 'unclassified', provenance: 'classic' };
   return { ...details, reading: 'settled', family: reading.family,
     executionProtocol: reading.family === 'implement' || reading.family === 'research' ? 'gather-plan-apply' : 'direct' };
 }
@@ -366,8 +368,10 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             ctx.print(`Unknown archetype: ${archetypeName}`);
             return;
           }
-          if (mode.reading === 'held') {
-            ctx.print(`Archetype ${mode.id} has no settled family. No teamwork task was created.`);
+          if (mode.reading !== 'settled') {
+            ctx.print(mode.reading === 'unclassified'
+              ? `Classic can list archetype ${mode.id}, but choosing an orchestration protocol from its prose requires a decision model. No teamwork task was created.`
+              : `Archetype ${mode.id} has no settled family. No teamwork task was created.`);
             return;
           }
           try {

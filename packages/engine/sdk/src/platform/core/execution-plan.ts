@@ -14,6 +14,7 @@ import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-j
 import { logger } from '../utils/logger.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export type PlanItemStatus = 'pending' | 'in_progress' | 'complete' | 'failed' | 'skipped';
 
@@ -412,31 +413,41 @@ export class ExecutionPlanManager {
    * Robust to minor formatting variations models may produce.
    */
   async parseFromMarkdown(markdown: string, options: JudgmentReadingOptions = {}): Promise<ParsedExecutionPlan> {
+    return withConfiguredDecisionModelPolicy(() => this.parseMarkdownUnderPolicy(markdown, options));
+  }
+
+  private async parseMarkdownUnderPolicy(markdown: string, options: JudgmentReadingOptions): Promise<ParsedExecutionPlan> {
     let authority: JudgmentPortCapture | undefined;
+    const parseIssues: ExecutionPlanParseIssue[] = [];
     const controller = new AbortController();
     const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-    const assertCurrent = () => { signal.throwIfAborted(); options.assertCurrent?.(); authority?.assertCurrent(); };
-    const readStatus = async (checkbox: string, label?: string): Promise<PlanItemStatus> => {
+    const assertCurrent = () => { signal.throwIfAborted(); options.assertCurrent?.(); if (!isClassicOperation()) authority?.assertCurrent(); };
+    const readStatus = async (checkbox: string, label: string | undefined, line: number): Promise<PlanItemStatus> => {
       assertCurrent();
       const canonical = canonicalStatus(label);
       if (canonical !== undefined) return canonical;
       if (!label) return checkboxStatus(checkbox);
-      // Screen the COMPLETE markdown before the first projection/transmission,
-      // including unrelated lines and later items; never send a partial safe prefix.
-      assertJudgmentInput({ markdown });
-      authority ??= captureJudgmentPort('engine.core.plan-item-status', { signal, assertCurrent: options.assertCurrent });
-      const run = await planItemStatus.run(authority.port, { label }, { site: 'engine.core.plan-item-status', signal: authority.signal });
-      assertCurrent();
-      if (run.readings.status.outcome !== 'act' || !Object.hasOwn(STATUS_LABEL, run.readings.status.choice)) throw new PlanStatusUnavailableError();
-      run.recordAction(`Read plan item state: ${run.readings.status.choice}`);
-      assertCurrent();
-      return run.readings.status.choice;
+      return decisionOrClassic(async () => {
+        // Screen the COMPLETE markdown before the first projection/transmission,
+        // including unrelated lines and later items; never send a partial safe prefix.
+        assertJudgmentInput({ markdown });
+        authority ??= captureJudgmentPort('engine.core.plan-item-status', { signal, assertCurrent: options.assertCurrent });
+        const run = await planItemStatus.run(authority.port, { label }, { site: 'engine.core.plan-item-status', signal: authority.signal });
+        assertCurrent();
+        if (run.readings.status.outcome !== 'act' || !Object.hasOwn(STATUS_LABEL, run.readings.status.choice)) throw new PlanStatusUnavailableError();
+        run.recordAction(`Read plan item state: ${run.readings.status.choice}`);
+        assertCurrent();
+        return run.readings.status.choice;
+      }, () => {
+        assertCurrent();
+        parseIssues.push({ line, text: label, reason: 'Classic used the explicit checkbox; the noncanonical status label was not semantically interpreted.' });
+        return checkboxStatus(checkbox);
+      });
     };
     try {
       assertCurrent();
       const lines = markdown.split('\n');
       const items: PlanItem[] = [];
-      const parseIssues: ExecutionPlanParseIssue[] = [];
       let title = '';
       let currentPhase = '';
 
@@ -520,7 +531,7 @@ export class ExecutionPlanManager {
               id: randomUUID(),
               phase: currentPhase,
               description,
-              status: await readStatus(checkbox!, statusLabel),
+              status: await readStatus(checkbox!, statusLabel, lineIndex + 1),
               ...(agentId ? { agentId } : {}),
               ...(dependencies && dependencies.length > 0 ? { dependencies } : {}),
             });

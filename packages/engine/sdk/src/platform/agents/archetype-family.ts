@@ -6,6 +6,8 @@ import { fanOut } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/index.js';
 import { ArchetypeLoader, type AgentArchetype } from './archetypes.js';
 import { archetypeFamilyAt, type ArchetypeFamily } from './batteries/archetype-family.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 
 export type { ArchetypeFamily } from './batteries/archetype-family.js';
 export class ArchetypeReadingHeldError extends Error {
@@ -85,11 +87,28 @@ export function captureArchetypeListing(directory: string) {
 }
 
 export type ArchetypeFamilyReading =
+  | { readonly kind: 'unclassified'; readonly provenance: 'classic' }
   | { readonly kind: 'settled'; readonly family: ArchetypeFamily }
   | { readonly kind: 'held' };
 
 /** All native entries share one canonical request. Nothing guesses a held family. */
 export async function readArchetypeFamilies(archetypes: readonly AgentArchetype[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {}) {
+  return decisionOrClassic(() => readDecisionArchetypeFamilies(archetypes, options), () => {
+    const original = retainStrictJudgmentJson(archetypes);
+    assertJudgmentInput(original.snapshot);
+    const signal = options.signal, callerCurrent = options.assertCurrent;
+    const current = () => {
+      signal?.throwIfAborted(); original.assertCurrent();
+      if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new ArchetypeReadingHeldError();
+      const restriction: unknown = callerCurrent?.();
+      if (restriction !== undefined) { drainOwned(restriction); throw new TypeError('Invalid archetype source guard.'); }
+      signal?.throwIfAborted(); original.assertCurrent();
+    };
+    current();
+    return Object.freeze({ readings: Object.freeze(original.snapshot.map((): ArchetypeFamilyReading => ({ kind: 'unclassified', provenance: 'classic' }))), assertCurrent: current });
+  });
+}
+async function readDecisionArchetypeFamilies(archetypes: readonly AgentArchetype[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>) {
   const original = retainStrictJudgmentJson(archetypes);
   assertJudgmentInput(original.snapshot);
   const parts: Record<string, ReturnType<typeof archetypeFamilyAt>> = {};

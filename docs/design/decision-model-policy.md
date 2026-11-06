@@ -122,6 +122,15 @@ as unassessed when changed values were not semantically reviewed. Sandbox
 host-access checks and optional advisories require owner approval during Classic;
 advisory auto-approval cannot manufacture an approval or a decision receipt.
 
+Classic conversation setup does not classify the user's intent or inject an
+automatic semantic plan. An explicit planning command retains the original owner
+input without claiming it was judged a goal. Local Markdown plans use exact
+status labels and checkbox values; noncanonical labels produce a parse notice.
+The adaptive planner defaults to one worker, with no semantic ranking, while
+retaining explicit owner strategy choices. Archetypes remain listable with
+unclassified families; prose-based orchestration selection reports its decision
+model requirement before creating a task.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

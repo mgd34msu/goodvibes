@@ -16,6 +16,7 @@ import type { CallOptions, Outcome } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { executionStrategy } from './batteries/planner.js';
 import { logger } from '../utils/logger.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import {
   assemblePlanProposal,
   singleItemProposal,
@@ -49,6 +50,7 @@ export const VALID_STRATEGIES: ExecutionStrategy[] = ['auto', 'single', 'cohort'
  * `AdaptivePlanner.explainReasonCode()`.
  */
 export type StrategyReasonCode =
+  | 'CLASSIC_SINGLE'
   // Selection reasons; legacy codes remain readable for older event/history consumers.
   | 'JUDGMENT_SELECTED'
   | 'JUDGMENT_UNSETTLED'
@@ -112,6 +114,7 @@ export interface DecompositionGate {
 
 /** The outcome of a planner selection pass. */
 export interface PlannerDecision {
+  readonly provenance?: 'classic';
   /** The strategy that was ultimately selected. */
   selected: ExecutionStrategy;
 
@@ -139,6 +142,7 @@ export interface PlannerDecision {
 // ---------------------------------------------------------------------------
 
 const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
+  CLASSIC_SINGLE: 'Classic uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
   JUDGMENT_SELECTED: 'The recorded execution-strategy reading selected this available strategy.',
   JUDGMENT_UNSETTLED: 'The execution-strategy reading did not settle. No strategy was authorized.',
   PINNED_MODE: 'The owner explicitly pinned this strategy with /plan mode.',
@@ -209,6 +213,22 @@ export class AdaptivePlanner {
    * The decision is appended to the history log.
    */
   async select(inputs: PlannerInputs, options: CallOptions = {}): Promise<PlannerDecision> {
+    return decisionOrClassic(() => this.selectDecision(inputs, options), () => {
+      options.signal?.throwIfAborted(); options.beforeAttempt?.();
+      const captured = this._validateInputs(inputs);
+      assertJudgmentInput({ task: captured.taskDescription ?? '' });
+      const selected = this.overrideStrategy ?? (this.mode === 'auto' ? 'single' : this.mode);
+      const decision: PlannerDecision = {
+        selected, provenance: 'classic', candidates: [], overrideActive: this.overrideStrategy !== null,
+        reasonCode: this.overrideStrategy !== null ? 'OVERRIDE_IN_EFFECT' : this.mode !== 'auto' ? 'PINNED_MODE' : 'CLASSIC_SINGLE',
+        timestamp: Date.now(), inputs: captured,
+      };
+      this._appendHistory(decision);
+      return decision;
+    });
+  }
+
+  private async selectDecision(inputs: PlannerInputs, options: CallOptions): Promise<PlannerDecision> {
     options.signal?.throwIfAborted();
     const validated = this._validateInputs(inputs);
     // Materialize once before preflight; later reads must not revisit caller getters.

@@ -4,6 +4,7 @@ import { daemonRefusalValue, readDaemonRefusalResponse, resolveDaemonRefusal } f
 import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isMethodUnavailableError, isSessionActiveError, isSessionClosedError, isSessionNotFoundError, isSessionNotLocalError } from './errors';
 import { runBrowserJudgment, sdk } from './goodvibes';
+import { browserDecisionPolicy } from './decision-policy';
 
 type Request = BrowserJudgmentRequest<'webui.errors.daemon-refusal'>;
 type Refusal = BrowserJudgmentValueMap['webui.errors.daemon-refusal'];
@@ -47,7 +48,14 @@ const classify = {
   method_unknown: isMethodUnavailableError,
 } satisfies Record<Name, (error: unknown) => boolean>;
 
-beforeEach(async () => { await tokenStore.setToken('synthetic-account-a'); });
+beforeEach(async () => {
+  await tokenStore.setToken('synthetic-account-a');
+  // Failure-adoption fixtures start after the host's authenticated status
+  // observation; cold policy lookup has its own palette/HTTP regression cases.
+  browserDecisionPolicy.observe(new Headers({ 'x-goodvibes-decision-policy': JSON.stringify({
+    policy: 'Default - On', operation: 'decision', reason: null, revision: 0,
+  }) }));
+});
 afterEach(async () => {
   globalThis.fetch = originalFetch;
   await tokenStore.clearToken();

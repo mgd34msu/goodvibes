@@ -96,7 +96,8 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     status,
     contentType: 'application/json',
-    headers: { 'access-control-allow-origin': '*' },
+    headers: { 'access-control-allow-origin': '*',
+      'x-goodvibes-decision-policy': JSON.stringify({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }) },
     body: JSON.stringify(body),
   });
 }

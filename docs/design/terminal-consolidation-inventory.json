@@ -168,7 +168,10 @@
       "path": "config/host-settings.ts",
       "baselineTuiLines": 49,
       "baselineSimilarity": 0.3953,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "NOTIFICATIONS_METADATA_ONLY_SETTING"
+      ]
     },
     {
       "path": "config/secret-config.ts",
@@ -789,19 +792,35 @@
       "path": "input/model-picker-open.ts",
       "baselineTuiLines": 100,
       "baselineSimilarity": 0.6201,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/model-picker-types.ts",
       "baselineTuiLines": 125,
       "baselineSimilarity": 0.7964,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/model-picker.ts",
       "baselineTuiLines": 766,
       "baselineSimilarity": 0.5784,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "beginCatalogLoad",
+        "isCatalogLoadCurrent",
+        "fillCatalog",
+        "selectedItemId",
+        "getFilteredModels",
+        "getFilteredProviders",
+        "getModelGroupKey",
+        "getItems.model",
+        "getItems.provider",
+        "_getSyntheticSubgroup",
+        "_modelToItem",
+        "setKey",
+        "orderedListKey",
+        "mapKey"
+      ]
     },
     {
       "path": "input/notifications-modal.ts",

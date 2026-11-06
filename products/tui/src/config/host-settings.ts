@@ -1,14 +1,9 @@
 import { ConfigManager, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/sdk/platform/config';
-import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 
 export const TUI_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_KEY;
 
-const NOTIFICATION_PRIVACY_SETTING: HostBooleanSetting = Object.freeze({
-  key: NOTIFICATIONS_METADATA_ONLY_KEY,
-  type: 'boolean',
-  default: true,
-  description: 'Keep notifications metadata-only. Only explicit false permits details on supported notification paths.',
-});
+
 
 // This switch is consumed by the TUI terminal notifier and exposed in its
 // settings workspace. Register it before ingestion so an enabled OSC 9 feature
@@ -23,7 +18,7 @@ const TERMINAL_TURN_END_SETTING: HostBooleanSetting = Object.freeze({
 /** Register TUI-owned settings without changing the shared SDK schema or defaults. */
 export class TuiConfigManager extends ConfigManager {
   constructor(options: ConstructorParameters<typeof ConfigManager>[0]) {
-    super({ ...options, hostSettings: [...(options.hostSettings ?? []), NOTIFICATION_PRIVACY_SETTING, TERMINAL_TURN_END_SETTING] });
+    super({ ...options, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING] });
   }
 }
 

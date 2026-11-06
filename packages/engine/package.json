@@ -2168,6 +2168,36 @@
       "bun": "./terminal-shell/src/onboarding-read-facts.ts",
       "types": "./terminal-shell/dist/onboarding-read-facts.d.ts",
       "import": "./terminal-shell/dist/onboarding-read-facts.js"
+    },
+    "./terminal-shell/model-picker-types": {
+      "bun": "./terminal-shell/src/model-picker-types.ts",
+      "types": "./terminal-shell/dist/model-picker-types.d.ts",
+      "import": "./terminal-shell/dist/model-picker-types.js"
+    },
+    "./terminal-shell/model-picker-catalog": {
+      "bun": "./terminal-shell/src/model-picker-catalog.ts",
+      "types": "./terminal-shell/dist/model-picker-catalog.d.ts",
+      "import": "./terminal-shell/dist/model-picker-catalog.js"
+    },
+    "./terminal-shell/model-picker-open": {
+      "bun": "./terminal-shell/src/model-picker-open.ts",
+      "types": "./terminal-shell/dist/model-picker-open.d.ts",
+      "import": "./terminal-shell/dist/model-picker-open.js"
+    },
+    "./terminal-shell/model-picker-filter": {
+      "bun": "./terminal-shell/src/model-picker-filter.ts",
+      "types": "./terminal-shell/dist/model-picker-filter.d.ts",
+      "import": "./terminal-shell/dist/model-picker-filter.js"
+    },
+    "./terminal-shell/model-picker-items": {
+      "bun": "./terminal-shell/src/model-picker-items.ts",
+      "types": "./terminal-shell/dist/model-picker-items.d.ts",
+      "import": "./terminal-shell/dist/model-picker-items.js"
+    },
+    "./terminal-shell/model-picker-provider-filter": {
+      "bun": "./terminal-shell/src/model-picker-provider-filter.ts",
+      "types": "./terminal-shell/dist/model-picker-provider-filter.d.ts",
+      "import": "./terminal-shell/dist/model-picker-provider-filter.js"
     }
   },
   "publishConfig": {

@@ -843,6 +843,8 @@ describe('ModelPickerModal', () => {
       const items = picker.getItems();
       // First non-header item (after Favorites header) should be reasoning-1
       const favoritesHeaderIndex = items.findIndex(i => i.isGroupHeader && i.label === 'Favorites');
+      picker.selectedIndex = 0;
+      expect(picker.getSelected()?.id).toBe('reasoning-1');
       expect(favoritesHeaderIndex).toBe(0);
       expect(items[favoritesHeaderIndex + 1]).toEqual(expect.objectContaining({
         id: 'reasoning-1',

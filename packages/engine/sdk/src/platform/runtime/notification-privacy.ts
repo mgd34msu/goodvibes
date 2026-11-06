@@ -1,7 +1,15 @@
+import type { HostBooleanSetting } from '../config/index.js';
 import type { ConfigGet } from './alert-gating.js';
 
 /** Host-owned preference read by notification producers at delivery time. */
 export const NOTIFICATIONS_METADATA_ONLY_KEY = 'behavior.notificationsMetadataOnly';
+
+export const NOTIFICATIONS_METADATA_ONLY_SETTING: HostBooleanSetting = Object.freeze({
+  key: NOTIFICATIONS_METADATA_ONLY_KEY,
+  type: 'boolean',
+  default: true,
+  description: 'Keep notifications metadata-only. Only explicit false permits details on supported notification paths.',
+});
 
 /**
  * Read notification privacy live. Only an explicit boolean false permits

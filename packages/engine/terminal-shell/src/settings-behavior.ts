@@ -1,5 +1,6 @@
 import type { ConfigSetting } from '@goodvibes-jev/engine/sdk/platform/config';
-export type ModelPickerTarget = 'main' | 'helper' | 'tool' | 'tts';
+import type { ModelPickerTarget as PlatformModelTarget } from './model-picker-types.js';
+export type ModelPickerTarget = Exclude<PlatformModelTarget, 'embeddings'>;
 export type ModelPickerLaunch = {
     readonly flow: 'providerModel';
     readonly target: ModelPickerTarget;

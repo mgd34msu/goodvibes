@@ -5,7 +5,7 @@ import type { OnboardingAcknowledgementSnapshot, OnboardingShellPaths, Onboardin
 export function sortUnique(values: readonly string[]): string[] {
     return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
-export function buildProviderRoutingSnapshot(config: Pick<GoodVibesConfig, 'provider' | 'helper' | 'tools' | 'permissions' | 'behavior' | 'display' | 'storage'>, getProviderIdFromModel: (model: string) => string) {
+export function buildProviderRoutingSnapshot(config: Pick<GoodVibesConfig, 'provider' | 'helper'> & { readonly tools: Pick<GoodVibesConfig['tools'], 'llmEnabled' | 'llmProvider' | 'llmModel'> }, getProviderIdFromModel: (model: string) => string) {
     return {
         primaryProviderId: getProviderIdFromModel(config.provider.model),
         primaryModelId: config.provider.model,
@@ -20,7 +20,7 @@ export function buildProviderRoutingSnapshot(config: Pick<GoodVibesConfig, 'prov
         toolModelId: config.tools.llmModel,
     };
 }
-export function buildRuntimeDefaultsSnapshot(config: Pick<GoodVibesConfig, 'provider' | 'helper' | 'tools' | 'permissions' | 'behavior' | 'display' | 'storage'>) {
+export function buildRuntimeDefaultsSnapshot(config: Pick<GoodVibesConfig, 'provider' | 'permissions' | 'behavior' | 'display' | 'storage'>) {
     return {
         providerReasoningEffort: config.provider.reasoningEffort,
         permissionsMode: config.permissions.mode,

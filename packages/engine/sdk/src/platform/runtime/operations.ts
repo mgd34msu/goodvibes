@@ -142,6 +142,7 @@ export {
 export type { ConfigGet } from './alert-gating.js';
 export {
   NOTIFICATIONS_METADATA_ONLY_KEY,
+  NOTIFICATIONS_METADATA_ONLY_SETTING,
   readNotificationsMetadataOnly,
 } from './notification-privacy.js';
 

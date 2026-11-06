@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
@@ -8,6 +9,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 
 export interface RemoteCaptureOutcomeRecord {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly runnerId: string;
   readonly status: string;
@@ -27,6 +30,8 @@ export interface RemoteCaptureOutcomeRecord {
 }
 
 export interface RemoteWorkspaceEvidenceRecord {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly id: string;
   readonly runnerId: string;
   readonly status: string;
@@ -43,13 +48,15 @@ export interface RemoteWorkspaceEvidenceRecord {
 }
 
 export interface RemoteReadModelSnapshot {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly outcomes: readonly RemoteCaptureOutcomeRecord[];
   readonly workspaces: readonly RemoteWorkspaceEvidenceRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
 }
 
 export interface RemoteRuntimeRecordCertification {
-  readonly schemaStatus: 'certified' | 'legacy';
+  readonly schemaStatus: 'certified' | 'legacy' | 'unassessed';
   readonly schemaVersion?: string;
   readonly publicationGuarantee?: string;
   readonly publisher?: string;
@@ -214,7 +221,8 @@ function remoteCertification(input: {
     firstAcross(records, ['sourceTool']) ? `sourceTool ${firstAcross(records, ['sourceTool'])}` : '',
   ].map((entry) => safePreview(entry, 180)).filter(Boolean))].slice(0, 8);
   const missingSignals = [
-    ...(schemaStatus === 'certified' ? [] : [`Certified ${input.recordKind} schema is not published.`]),
+    ...(schemaStatus === 'unassessed' ? [`${input.recordKind} schema was not interpreted during Classic operation; certification is unassessed.`]
+      : schemaStatus === 'certified' ? [] : [`Certified ${input.recordKind} schema is not published.`]),
     ...(input.durableId ? [] : [`Durable ${input.recordKind} id is not published.`]),
     ...(input.runnerId ? [] : [`${input.recordKind} runner id is not published.`]),
     ...(publicationGuarantee ? [] : [`${input.recordKind} publication guarantee is not published.`]),
@@ -370,13 +378,13 @@ function captureRemotePublisherMeanings(value: unknown): RemotePublisherMeanings
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)
       || !('schemaStatus' in entry) || !('kind' in entry) || Object.keys(entry).length !== 2) throw new ToolInputProjectionError('held');
     const schemaStatus = entry.schemaStatus, kind = entry.kind;
-    if (schemaStatus !== 'certified' && schemaStatus !== 'legacy') throw new ToolInputProjectionError('held');
-    if (kind !== 'capture' && kind !== 'export' && kind !== 'closeout' && kind !== 'artifact' && kind !== 'other')
+    if (schemaStatus !== 'certified' && schemaStatus !== 'legacy' && schemaStatus !== 'unassessed') throw new ToolInputProjectionError('held');
+    if (kind !== 'capture' && kind !== 'export' && kind !== 'closeout' && kind !== 'artifact' && kind !== 'other' && kind !== 'unassessed')
       throw new ToolInputProjectionError('held');
     return { schemaStatus, kind };
   });
   const workspaces = captured.workspaces.map((schemaStatus: unknown): RemoteRuntimeRecordCertification['schemaStatus'] => {
-    if (schemaStatus !== 'certified' && schemaStatus !== 'legacy') throw new ToolInputProjectionError('held');
+    if (schemaStatus !== 'certified' && schemaStatus !== 'legacy' && schemaStatus !== 'unassessed') throw new ToolInputProjectionError('held');
     return schemaStatus;
   });
   return { outcomes, workspaces };
@@ -385,7 +393,8 @@ function captureRemotePublisherMeanings(value: unknown): RemotePublisherMeanings
 function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: PublisherSemantics): RemoteCaptureOutcomeRecord | null {
   const runner = runnerId(entry.record);
   if (!runner) return null;
-  const kind = meaning?.kind ?? 'other';
+  const kind = meaning?.kind ?? (isClassicOperation() ? 'unassessed' : 'other');
+  const schemaStatus = meaning?.schemaStatus ?? (isClassicOperation() ? 'unassessed' : 'legacy');
   const task = nestedString(entry.record, 'task') || nestedString(entry.record, 'title') || nestedString(entry.record, 'request');
   const summary = nestedString(entry.record, 'summary')
     || nestedString(entry.record, 'description')
@@ -398,6 +407,8 @@ function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: Publi
   const artifactId = nestedString(entry.record, 'artifactId') || nestedString(entry.record, 'sourceArtifactId') || null;
   const modelRoute = routeForRunner(entry.record, runner);
   return {
+    ...(kind === 'unassessed' || schemaStatus === 'unassessed' ? { operationProvenance: 'classic' as const,
+      semanticAssessment: kind === 'unassessed' && schemaStatus === 'unassessed' ? 'not-evaluated' as const : 'partial' as const } : {}),
     id,
     runnerId: runner,
     status,
@@ -417,7 +428,7 @@ function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: Publi
       record: entry.record,
       sourcePath: entry.path,
       recordKind: 'remote outcome',
-      schemaStatus: meaning?.schemaStatus ?? 'legacy',
+      schemaStatus,
       durableId: id,
       runnerId: runner,
       modelRoute,
@@ -463,7 +474,7 @@ function selectedWorkspacePath(record: Record<string, unknown>): { readonly owne
     || selectedNestedWorkspacePath(record, 'directory');
 }
 
-function normalizeWorkspaceOwned(entry: CollectedRecord, index: number, schemaStatus: RemoteRuntimeRecordCertification['schemaStatus'] = 'legacy'): {
+function normalizeWorkspaceOwned(entry: CollectedRecord, index: number, schemaStatus: RemoteRuntimeRecordCertification['schemaStatus'] = isClassicOperation() ? 'unassessed' : 'legacy'): {
   readonly record: RemoteWorkspaceEvidenceRecord;
   readonly path: ReturnType<typeof selectedWorkspacePath>;
 } | null {
@@ -478,6 +489,7 @@ function normalizeWorkspaceOwned(entry: CollectedRecord, index: number, schemaSt
   const worktreeRef = safePathRef(path);
   const branch = safeNullablePreview(nestedString(entry.record, 'branch') || nestedString(entry.record, 'ref') || nestedString(entry.record, 'baseRef'), 100);
   return { record: {
+    ...(schemaStatus === 'unassessed' ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     id,
     runnerId: runner,
     status,
@@ -616,7 +628,12 @@ function normalizeRemoteEntries(entries: RemoteEntries, captures?: NativeWorkspa
       source: entry.record, assertSource: capturePersonalOpsSnapshot(entry.record).assertCurrent, path: native.path.value });
     return native?.record ?? null;
   });
+  const unassessed = outcomes.some(record => record.kind === 'unassessed' || record.certification.schemaStatus === 'unassessed')
+    || workspaces.some(record => record?.certification.schemaStatus === 'unassessed');
+  const assessed = outcomes.some(record => record.kind !== 'unassessed' || record.certification.schemaStatus !== 'unassessed')
+    || workspaces.some(record => record !== null && record.certification.schemaStatus !== 'unassessed');
   const snapshot = {
+    ...(unassessed || isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: assessed ? 'partial' as const : 'not-evaluated' as const } : {}),
     outcomes,
     workspaces: dedupeById(workspaces.filter((entry): entry is RemoteWorkspaceEvidenceRecord => entry !== null)),
     sourceCounts: { ...sourceCounts(outcomeEntries), ...sourceCounts(workspaceEntries) },
@@ -674,12 +691,17 @@ function assertPublisherEntryCurrent(owner: NativePublisherCapture, assertCurren
 }
 
 /** Publisher prose is read only after complete native path/text projection.
- * A failed or uncertain reading retires this capture; no word or field-presence
- * fallback can publish a certified schema or classify an operation. */
+ * Classic retains native records with explicitly unassessed meanings. Failed or
+ * uncertain readings still retire the capture; no wording heuristic certifies it. */
 export async function settleNativeRemotePublisherSemantics(token: object, options: CatalogRankingOptions & {
   readonly assertCurrent: () => void; readonly assertSourceCurrent: () => void;
   readonly assertSourceMethods?: () => void;
 },
+  projection: NativeRemotePublisherProjection): Promise<RemoteReadModelSnapshot> {
+  return withConfiguredDecisionModelPolicy(() => settleOwnedRemotePublisherSemantics(token, options, projection));
+}
+
+async function settleOwnedRemotePublisherSemantics(token: object, options: Parameters<typeof settleNativeRemotePublisherSemantics>[1],
   projection: NativeRemotePublisherProjection): Promise<RemoteReadModelSnapshot> {
   const owner = nativePublisherCaptures.get(token), display = nativeWorkspaceDisplays.get(token);
   if (!owner || owner.state.kind !== 'captured' || !display || display.binding) throw new ToolInputProjectionError('held');

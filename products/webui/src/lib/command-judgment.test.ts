@@ -117,7 +117,7 @@ describe('authenticated palette reader', () => {
     const current = snapshot();
     const result = await rankCommandSnapshot('start over', current, abort.signal);
     expect(result.status).toBe('ready');
-    if (result.status !== 'ready') throw new Error('fixture result missing');
+    if (result.status !== 'ready' || !('reading' in result)) throw new Error('Semantic fixture reading missing');
     expect(result.commands.map(({ id }) => id)).toEqual([current.commands[0]!.id]);
     expect(result.isCurrent()).toBe(true);
     expect(result.reading.value.accepted[0]?.probability).toBe(0.93);

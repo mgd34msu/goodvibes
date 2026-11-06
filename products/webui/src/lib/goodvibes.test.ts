@@ -908,7 +908,8 @@ describe('decision policy observations belong to the authenticated client identi
   test('an authenticated facade response publishes Classic observation without an extra model request', async () => {
     await tokenStore.setToken('synthetic-current-account');
     const requests: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => { requests.push(String(input)); return classicResponse(); }) as typeof fetch;
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => { requests.push(String(input)); return classicResponse(); },
+      { preconnect: originalFetch.preconnect });
     await sdk.operator.sessions.delete('sess-1');
     expect(requests).toHaveLength(1);
     expect(browserDecisionPolicy.snapshot()).toMatchObject({ policy: 'Classic - Off', operation: 'classic' });
@@ -917,7 +918,8 @@ describe('decision policy observations belong to the authenticated client identi
   test('a late response from a replaced account cannot repopulate its cleared policy notice', async () => {
     await tokenStore.setToken('synthetic-original-account');
     const held = Promise.withResolvers<Response>(), entered = Promise.withResolvers<void>();
-    globalThis.fetch = (async () => { entered.resolve(); return held.promise; }) as typeof fetch;
+    globalThis.fetch = Object.assign(async () => { entered.resolve(); return held.promise; },
+      { preconnect: originalFetch.preconnect });
     const pending = sdk.operator.sessions.delete('sess-1');
     try {
       await entered.promise;

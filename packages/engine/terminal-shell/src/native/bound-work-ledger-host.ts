@@ -150,7 +150,7 @@ export function createBoundNativeWorkLedgerView(
         endpoint: host.baseUrl,
         projectId,
         workspace: realpathSync(host.workspace),
-        journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`),
+        journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`, {}, policy.intake),
         bind: () =>
           createNativeConversationIntakeBinding(
             host,

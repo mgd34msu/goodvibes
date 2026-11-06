@@ -233,6 +233,14 @@ describe('redactConfig', () => {
 });
 
 describe('collectSensitiveConfigValues', () => {
+  test('Classic screens namespace leaves without collecting public sibling settings as secret values', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const values = await collectSensitiveConfigValues({ judgment: { policy: 'Classic - Off' }, payments: { currency: 'USD' },
+        surfaces: { slack: { signingSecret: 'synthetic-private-signing-value' } }, extension: { material: 'unknown-private-value' } });
+      expect([...values].sort()).toEqual(['synthetic-private-signing-value', 'unknown-private-value'].sort());
+    });
+  });
+
   test('collects the middle-word credential values so the serialized bundle can be swept', async () => {
     const config = {
       surfaces: {

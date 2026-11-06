@@ -44,9 +44,10 @@ function fixture(url: string) {
 }
 
 describe('Agent support bundle retained canonical redaction', () => {
-  test('Classic standalone export keeps native diagnostics and redaction with zero decision requests', async () => {
+  test.each([privateSigningValue, 'on'])('Classic standalone export keeps native diagnostics and redaction with zero decision requests (secret %s)', async signingValue => {
     const backend = startBundleJudgmentFixture(false, true), f = fixture(backend.url);
     f.config.setDynamic('judgment.policy', 'Classic - Off');
+    f.config.setDynamic('surfaces.slack.signingSecret', signingValue);
     try {
       const result = await handleBundleCommand(f.runtime);
       expect(result.exitCode).toBe(0);

@@ -54,3 +54,93 @@ export function projectCommandProviderServices<
     [Key in 'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore']: Options[Key];
   };
 }
+
+export function projectCommandSessionSection<
+  Options extends {
+    readonly conversation?: unknown | undefined;
+    readonly runtime?: unknown | undefined;
+    readonly sessionManager?: unknown | undefined;
+    readonly sessionMemoryStore?: unknown | undefined;
+    readonly sessionLineageTracker?: unknown | undefined;
+    readonly changeTracker?: unknown | undefined;
+    readonly hydrateSessionUsage?: unknown | undefined;
+  },
+>(options: Options) {
+  return {
+    conversationManager: options.conversation,
+    runtime: options.runtime,
+    sessionManager: options.sessionManager,
+    sessionMemoryStore: options.sessionMemoryStore,
+    sessionLineageTracker: options.sessionLineageTracker,
+    changeTracker: options.changeTracker,
+    hydrateSessionUsage: options.hydrateSessionUsage,
+  } as {
+    conversationManager: Options['conversation'];
+    runtime: Options['runtime'];
+    sessionManager: Options['sessionManager'];
+    sessionMemoryStore: Options['sessionMemoryStore'];
+    sessionLineageTracker: Options['sessionLineageTracker'];
+    changeTracker: Options['changeTracker'];
+    hydrateSessionUsage: Options['hydrateSessionUsage'];
+  };
+}
+
+export function projectCommandWorkspaceSection<
+  Options extends {
+    readonly keybindingsManager?: unknown | undefined;
+    readonly fileUndoManager?: unknown | undefined;
+    readonly profileManager?: unknown | undefined;
+    readonly bookmarkManager?: unknown | undefined;
+    readonly projectPlanningService?: unknown | undefined;
+    readonly projectPlanningProjectId?: unknown | undefined;
+    readonly workPlanStore?: unknown | undefined;
+  },
+>(options: Options) {
+  return {
+    keybindingsManager: options.keybindingsManager,
+    fileUndoManager: options.fileUndoManager,
+    profileManager: options.profileManager,
+    bookmarkManager: options.bookmarkManager,
+    projectPlanningService: options.projectPlanningService,
+    projectPlanningProjectId: options.projectPlanningProjectId,
+    workPlanStore: options.workPlanStore,
+  } as {
+    keybindingsManager: Options['keybindingsManager'];
+    fileUndoManager: Options['fileUndoManager'];
+    profileManager: Options['profileManager'];
+    bookmarkManager: Options['bookmarkManager'];
+    projectPlanningService: Options['projectPlanningService'];
+    projectPlanningProjectId: Options['projectPlanningProjectId'];
+    workPlanStore: Options['workPlanStore'];
+  };
+}
+
+export function projectCommandClientsSection<
+  Options extends {
+    readonly operatorClient?: unknown | undefined;
+    readonly peerClient?: unknown | undefined;
+    readonly providerApi?: unknown | undefined;
+    readonly hookApi?: unknown | undefined;
+    readonly mcpApi?: unknown | undefined;
+    readonly opsApi?: unknown | undefined;
+    readonly directTransport?: unknown | undefined;
+  },
+>(options: Options) {
+  return {
+    operator: options.operatorClient,
+    peer: options.peerClient,
+    providerApi: options.providerApi,
+    hookApi: options.hookApi,
+    mcpApi: options.mcpApi,
+    opsApi: options.opsApi,
+    transport: options.directTransport,
+  } as {
+    operator: Options['operatorClient'];
+    peer: Options['peerClient'];
+    providerApi: Options['providerApi'];
+    hookApi: Options['hookApi'];
+    mcpApi: Options['mcpApi'];
+    opsApi: Options['opsApi'];
+    transport: Options['directTransport'];
+  };
+}

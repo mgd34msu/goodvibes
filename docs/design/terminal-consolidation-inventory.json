@@ -1594,11 +1594,12 @@
       "path": "runtime/bootstrap-command-parts.ts",
       "baselineTuiLines": 443,
       "baselineSimilarity": 0.7517,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "createBootstrapCommandProviderSection",
         "createBootstrapCommandActions.completeModelSelection"
-      ]
+      ],
+      "notes": "Platform owns initial command action ports, common session/workspace/client projections and model-selection mechanics. Product declarations retain actual capability sets (TUI contracts/evaluation/workspace trust; Agent execution ledger, private Knowledge and consolidation), UI attachment messages and effort publication scope."
     },
     {
       "path": "runtime/bootstrap-core.ts",

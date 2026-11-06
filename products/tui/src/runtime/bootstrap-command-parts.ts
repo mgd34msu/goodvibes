@@ -1,5 +1,11 @@
-import {createModelSelectionAction} from '@goodvibes-jev/engine/terminal-shell/model-selection-action';
-import {projectCommandProviderServices} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import {
+  projectCommandSessionSection,
+  projectCommandWorkspaceSection,
+  projectCommandClientsSection,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import { createBootstrapActionBase } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-actions';
+import { createModelSelectionAction } from '@goodvibes-jev/engine/terminal-shell/model-selection-action';
+import { projectCommandProviderServices } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { EvalRegistry } from '@goodvibes-jev/engine/sdk/platform/observe';
 import { activeTokens } from '../renderer/theme.ts';
 import { getConfigSnapshot } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -156,10 +162,6 @@ export interface BootstrapCommandSectionOptions {
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
 }
 
-function unwiredShellAction(name: string): never {
-  throw new Error(`commandContext.${name} was called before the shell bridge was attached in main.ts`);
-}
-
 export function createBootstrapCommandActions(
   options: BootstrapCommandActionOptions,
 ): Pick<
@@ -192,17 +194,7 @@ export function createBootstrapCommandActions(
   | 'openSubscriptionView'
   | 'openLocalAuthMaskedEntry'
 > {
-  const {
-    providerRegistry,
-    configManager,
-    conversation,
-    runtime,
-    requestRender,
-    loadSystemPrompt,
-    activatePlan,
-    requestPermission,
-    completeModelSelectionSideEffect,
-  } = options;
+  const { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect } = options;
 
   // The views these open are kit modals, which exist once the shell attaches
   // (shell/ui-openers.ts replaces every one of these with the real opener).
@@ -212,22 +204,19 @@ export function createBootstrapCommandActions(
   };
 
   return {
-    renderRequest: requestRender,
-    submitInput: () => unwiredShellAction('submitInput'),
-    executeCommand: async () => unwiredShellAction('executeCommand'),
-    cancelGeneration: () => unwiredShellAction('cancelGeneration'),
-    clearScreen: () => unwiredShellAction('clearScreen'),
-    activatePlan,
-    requestPermission: (request) => requestPermission(request),
-    completeModelSelection: createModelSelectionAction({providerRegistry,configManager,conversation,runtime,requestRender,completeModelSelectionSideEffect},{setToolEnabled:()=>configManager.setDynamic('tools.llmEnabled' as never,true),effortModel:model=>toEffortModel(model),publishEffortOptions:model=>publishActiveEffortOptions(model),alwaysShowEffort:true,noteColor:()=>activeTokens().warning}),
-    jumpToBookmark: () => unwiredShellAction('jumpToBookmark'),
-    scrollToLine: () => unwiredShellAction('scrollToLine'),
-    print: (text: string) => {
-      conversation.log(text, { fg: activeTokens().text });
-      requestRender();
-    },
-    exit: () => unwiredShellAction('exit'),
-    reloadSystemPrompt: loadSystemPrompt,
+    ...createBootstrapActionBase(options, {
+      unwiredMessage: (name) => `commandContext.${name} was called before the shell bridge was attached in main.ts`,
+      completeModelSelection: createModelSelectionAction(
+        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect },
+        {
+          setToolEnabled: () => configManager.setDynamic('tools.llmEnabled' as never, true),
+          effortModel: (model) => toEffortModel(model),
+          publishEffortOptions: (model) => publishActiveEffortOptions(model),
+          alwaysShowEffort: true,
+          noteColor: () => activeTokens().warning,
+        },
+      ),
+    }),
     openForensicsView: viewNotAttached('Agents'),
     openIncidentView: viewNotAttached('Agents'),
     openPolicyView: viewNotAttached('Policy'),
@@ -235,7 +224,6 @@ export function createBootstrapCommandActions(
     openCommunicationView: viewNotAttached('Agents'),
     openOrchestrationView: viewNotAttached('Agents'),
     openCockpitView: viewNotAttached('Agents'),
-    openMcpWorkspace: () => unwiredShellAction('openMcpWorkspace'),
     openSecurityView: viewNotAttached('Security'),
     openKnowledgeView: viewNotAttached('Knowledge'),
     openMemoryView: viewNotAttached('Memory'),
@@ -248,18 +236,24 @@ export function createBootstrapCommandActions(
 export function createBootstrapCommandSessionSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'conversation' | 'runtime' | 'sessionManager' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'contractRunner' | 'changeTracker' | 'hydrateSessionUsage' | 'contractOperator' | 'codeIndexStore' | 'codeIndexReindexScheduler' | 'isPassiveCodeInjectionFlagEnabled' | 'getMainSessionTurnInjections'
+    | 'conversation'
+    | 'runtime'
+    | 'sessionManager'
+    | 'sessionMemoryStore'
+    | 'sessionLineageTracker'
+    | 'contractRunner'
+    | 'changeTracker'
+    | 'hydrateSessionUsage'
+    | 'contractOperator'
+    | 'codeIndexStore'
+    | 'codeIndexReindexScheduler'
+    | 'isPassiveCodeInjectionFlagEnabled'
+    | 'getMainSessionTurnInjections'
   >,
 ): BootstrapCommandSessionSection {
   return {
-    conversationManager: options.conversation,
-    runtime: options.runtime,
-    sessionManager: options.sessionManager,
-    sessionMemoryStore: options.sessionMemoryStore,
-    sessionLineageTracker: options.sessionLineageTracker,
+    ...projectCommandSessionSection(options),
     contractRunner: options.contractRunner,
-    changeTracker: options.changeTracker,
-    hydrateSessionUsage: options.hydrateSessionUsage,
     contractOperator: options.contractOperator,
     codeIndexStore: options.codeIndexStore,
     codeIndexReindexScheduler: options.codeIndexReindexScheduler,
@@ -269,33 +263,36 @@ export function createBootstrapCommandSessionSection(
 }
 
 export function createBootstrapCommandProviderSection(
-  options: Pick<
-    BootstrapCommandSectionOptions,
-    'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'
-  >,
-): BootstrapCommandProviderSection {return projectCommandProviderServices(options);}
+  options: Pick<BootstrapCommandSectionOptions, 'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'>,
+): BootstrapCommandProviderSection {
+  return projectCommandProviderServices(options);
+}
 
 export function createBootstrapCommandWorkspaceSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'surface' | 'keybindingsManager' | 'fileUndoManager' | 'workspaceCheckpointManager' | 'gatewayMethods' | 'workspaceTrustManager' | 'workspaceRegistrationManager' | 'profileManager' | 'bookmarkManager'
-    | 'projectPlanningService' | 'projectPlanningProjectId' | 'workPlanStore'
+    | 'surface'
+    | 'keybindingsManager'
+    | 'fileUndoManager'
+    | 'workspaceCheckpointManager'
+    | 'gatewayMethods'
+    | 'workspaceTrustManager'
+    | 'workspaceRegistrationManager'
+    | 'profileManager'
+    | 'bookmarkManager'
+    | 'projectPlanningService'
+    | 'projectPlanningProjectId'
+    | 'workPlanStore'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandWorkspaceSection {
   return {
+    ...projectCommandWorkspaceSection(options),
     surface: options.surface,
-    keybindingsManager: options.keybindingsManager,
-    fileUndoManager: options.fileUndoManager,
     workspaceCheckpointManager: options.workspaceCheckpointManager,
     gatewayMethods: options.gatewayMethods,
     workspaceTrustManager: options.workspaceTrustManager,
     workspaceRegistrationManager: options.workspaceRegistrationManager,
-    profileManager: options.profileManager,
-    bookmarkManager: options.bookmarkManager,
-    projectPlanningService: options.projectPlanningService,
-    projectPlanningProjectId: options.projectPlanningProjectId,
-    workPlanStore: options.workPlanStore,
     ...shellServices.workspace,
   };
 }
@@ -303,7 +300,14 @@ export function createBootstrapCommandWorkspaceSection(
 export function createBootstrapCommandPlatformSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'configManager' | 'pairingTokens' | 'featureFlagManager' | 'voiceProviderRegistry' | 'voiceService' | 'webSearchService' | 'mediaProviders' | 'artifactStore'
+    | 'configManager'
+    | 'pairingTokens'
+    | 'featureFlagManager'
+    | 'voiceProviderRegistry'
+    | 'voiceService'
+    | 'webSearchService'
+    | 'mediaProviders'
+    | 'artifactStore'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandPlatformSection {
@@ -321,17 +325,12 @@ export function createBootstrapCommandPlatformSection(
   };
 }
 
-export function createBootstrapCommandOpsSection(
-  shellServices: BootstrapCommandShellServices,
-): BootstrapCommandOpsSection {
+export function createBootstrapCommandOpsSection(shellServices: BootstrapCommandShellServices): BootstrapCommandOpsSection {
   return shellServices.ops;
 }
 
 export function createBootstrapCommandExtensionsSection(
-  options: Pick<
-    BootstrapCommandSectionOptions,
-    'toolRegistry' | 'mcpRegistry'
-  >,
+  options: Pick<BootstrapCommandSectionOptions, 'toolRegistry' | 'mcpRegistry'>,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandExtensionSection {
   return {
@@ -346,19 +345,22 @@ export function createBootstrapCommandExtensionsSection(
 export function createBootstrapCommandClientsSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'operatorClient' | 'userPermissionRuleStore' | 'peerClient' | 'providerApi' | 'knowledgeApi' | 'memorySpine' | 'hookApi' | 'mcpApi' | 'opsApi' | 'directTransport'
+    | 'operatorClient'
+    | 'userPermissionRuleStore'
+    | 'peerClient'
+    | 'providerApi'
+    | 'knowledgeApi'
+    | 'memorySpine'
+    | 'hookApi'
+    | 'mcpApi'
+    | 'opsApi'
+    | 'directTransport'
   >,
 ): BootstrapCommandClientSection {
   return {
-    operator: options.operatorClient,
+    ...projectCommandClientsSection(options),
     userPermissionRuleStore: options.userPermissionRuleStore,
-    peer: options.peerClient,
-    providerApi: options.providerApi,
     knowledgeApi: options.knowledgeApi,
     memorySpine: options.memorySpine,
-    hookApi: options.hookApi,
-    mcpApi: options.mcpApi,
-    opsApi: options.opsApi,
-    transport: options.directTransport,
   };
 }

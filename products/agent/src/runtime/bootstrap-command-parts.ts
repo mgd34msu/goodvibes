@@ -1,5 +1,11 @@
-import {createModelSelectionAction} from '@goodvibes-jev/engine/terminal-shell/model-selection-action';
-import {projectCommandProviderServices} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import {
+  projectCommandSessionSection,
+  projectCommandWorkspaceSection,
+  projectCommandClientsSection,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import { createBootstrapActionBase } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-actions';
+import { createModelSelectionAction } from '@goodvibes-jev/engine/terminal-shell/model-selection-action';
+import { projectCommandProviderServices } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { getConfigSnapshot } from '../config/index.ts';
 import { publishActiveEffortOptions, toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -184,17 +190,7 @@ export function createBootstrapCommandActions(
   | 'openKnowledgeWorkspace'
   | 'openSubscriptionWorkspace'
 > {
-  const {
-    providerRegistry,
-    configManager,
-    conversation,
-    runtime,
-    requestRender,
-    loadSystemPrompt,
-    activatePlan,
-    requestPermission,
-    completeModelSelectionSideEffect,
-  } = options;
+  const { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect } = options;
 
   const pointToWorkspace = (what: string) => {
     conversation.log(`${what} lives in the Agent workspace, press Ctrl+P or run /agent.`, { fg: activeTokens().warning });
@@ -202,23 +198,19 @@ export function createBootstrapCommandActions(
   };
 
   return {
-    renderRequest: requestRender,
-    submitInput: () => unwiredShellAction('submitInput'),
-    executeCommand: async () => unwiredShellAction('executeCommand'),
-    cancelGeneration: () => unwiredShellAction('cancelGeneration'),
-    clearScreen: () => unwiredShellAction('clearScreen'),
-    activatePlan,
-    requestPermission: (request) => requestPermission(request),
-    completeModelSelection: createModelSelectionAction({providerRegistry,configManager,conversation,runtime,requestRender,completeModelSelectionSideEffect},{setToolEnabled:()=>configManager.setDynamic('tools.llmEnabled',true),effortModel:()=>toEffortModel(providerRegistry.getCurrentModel()),publishEffortOptions:model=>publishActiveEffortOptions(model,runtime.sessionId),alwaysShowEffort:false,noteColor:()=>activeTokens().secondary}),
-    jumpToBookmark: () => unwiredShellAction('jumpToBookmark'),
-    scrollToLine: () => unwiredShellAction('scrollToLine'),
-    print: (text: string) => {
-      conversation.log(text, { fg: activeTokens().text });
-      requestRender();
-    },
-    exit: () => unwiredShellAction('exit'),
-    reloadSystemPrompt: loadSystemPrompt,
-    openMcpWorkspace: () => unwiredShellAction('openMcpWorkspace'),
+    ...createBootstrapActionBase(options, {
+      unwiredMessage: (name) => `Agent runtime action "${name}" was called before the operator route was attached.`,
+      completeModelSelection: createModelSelectionAction(
+        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect },
+        {
+          setToolEnabled: () => configManager.setDynamic('tools.llmEnabled', true),
+          effortModel: () => toEffortModel(providerRegistry.getCurrentModel()),
+          publishEffortOptions: (model) => publishActiveEffortOptions(model, runtime.sessionId),
+          alwaysShowEffort: false,
+          noteColor: () => activeTokens().secondary,
+        },
+      ),
+    }),
     openAgentWorkspace: () => unwiredShellAction('openAgentWorkspace'),
     dismissAgentWorkspace: () => unwiredShellAction('dismissAgentWorkspace'),
     openSecurityWorkspace: () => {
@@ -236,56 +228,60 @@ export function createBootstrapCommandActions(
 export function createBootstrapCommandSessionSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'conversation' | 'runtime' | 'sessionManager' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'changeTracker' | 'writeLastSessionPointer' | 'restoreTurnAnchors'
-    | 'surface' | 'hydrateSessionUsage'
+    | 'conversation'
+    | 'runtime'
+    | 'sessionManager'
+    | 'sessionMemoryStore'
+    | 'sessionLineageTracker'
+    | 'changeTracker'
+    | 'writeLastSessionPointer'
+    | 'restoreTurnAnchors'
+    | 'surface'
+    | 'hydrateSessionUsage'
   >,
 ): BootstrapCommandSessionSection {
   return {
-    conversationManager: options.conversation,
-    runtime: options.runtime,
-    sessionManager: options.sessionManager,
-    sessionMemoryStore: options.sessionMemoryStore,
-    sessionLineageTracker: options.sessionLineageTracker,
-    changeTracker: options.changeTracker,
+    ...projectCommandSessionSection(options),
     writeLastSessionPointer: options.writeLastSessionPointer,
     restoreTurnAnchors: options.restoreTurnAnchors,
     surface: options.surface,
-    hydrateSessionUsage: options.hydrateSessionUsage,
   };
 }
 
 export function createBootstrapCommandProviderSection(
-  options: Pick<
-    BootstrapCommandSectionOptions,
-    'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'
-  >,
-): BootstrapCommandProviderSection {return projectCommandProviderServices(options);}
+  options: Pick<BootstrapCommandSectionOptions, 'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore'>,
+): BootstrapCommandProviderSection {
+  return projectCommandProviderServices(options);
+}
 
 export function createBootstrapCommandWorkspaceSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'keybindingsManager' | 'fileUndoManager' | 'profileManager' | 'bookmarkManager'
-    | 'processManager' | 'projectPlanningService' | 'projectPlanningProjectId' | 'workPlanStore'
+    | 'keybindingsManager'
+    | 'fileUndoManager'
+    | 'profileManager'
+    | 'bookmarkManager'
+    | 'processManager'
+    | 'projectPlanningService'
+    | 'projectPlanningProjectId'
+    | 'workPlanStore'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandWorkspaceSection {
-  return {
-    keybindingsManager: options.keybindingsManager,
-    fileUndoManager: options.fileUndoManager,
-    processManager: options.processManager,
-    profileManager: options.profileManager,
-    bookmarkManager: options.bookmarkManager,
-    projectPlanningService: options.projectPlanningService,
-    projectPlanningProjectId: options.projectPlanningProjectId,
-    workPlanStore: options.workPlanStore,
-    ...shellServices.workspace,
-  };
+  return { ...projectCommandWorkspaceSection(options), processManager: options.processManager, ...shellServices.workspace };
 }
 
 export function createBootstrapCommandPlatformSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'configManager' | 'voiceProviderRegistry' | 'voiceService' | 'voiceSetup' | 'memoryGovernor' | 'mediaProviderRegistry' | 'artifactStore' | 'channelDeliveryRouter'
+    | 'configManager'
+    | 'voiceProviderRegistry'
+    | 'voiceService'
+    | 'voiceSetup'
+    | 'memoryGovernor'
+    | 'mediaProviderRegistry'
+    | 'artifactStore'
+    | 'channelDeliveryRouter'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandPlatformSection {
@@ -315,10 +311,7 @@ export function createBootstrapCommandOpsSection(
 }
 
 export function createBootstrapCommandExtensionsSection(
-  options: Pick<
-    BootstrapCommandSectionOptions,
-    'toolRegistry' | 'mcpRegistry'
-  >,
+  options: Pick<BootstrapCommandSectionOptions, 'toolRegistry' | 'mcpRegistry'>,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandExtensionSection {
   const shellExtensionServices = shellServices.extensions;
@@ -333,22 +326,25 @@ export function createBootstrapCommandExtensionsSection(
 export function createBootstrapCommandClientsSection(
   options: Pick<
     BootstrapCommandSectionOptions,
-    'operatorClient' | 'peerClient' | 'providerApi' | 'agentKnowledgeApi' | 'promptContextReceipts' | 'hookApi' | 'mcpApi' | 'opsApi' | 'directTransport' | 'memoryConsolidationScheduler'
+    | 'operatorClient'
+    | 'peerClient'
+    | 'providerApi'
+    | 'agentKnowledgeApi'
+    | 'promptContextReceipts'
+    | 'hookApi'
+    | 'mcpApi'
+    | 'opsApi'
+    | 'directTransport'
+    | 'memoryConsolidationScheduler'
   >,
 ): BootstrapCommandClientSection {
   const memoryConsolidationScheduler = options.memoryConsolidationScheduler;
   return {
-    operator: options.operatorClient,
-    peer: options.peerClient,
-    providerApi: options.providerApi,
+    ...projectCommandClientsSection(options),
     agentKnowledgeApi: options.agentKnowledgeApi,
     promptContextReceipts: options.promptContextReceipts,
-    hookApi: options.hookApi,
-    mcpApi: options.mcpApi,
-    opsApi: options.opsApi,
     ...(memoryConsolidationScheduler
       ? { memoryConsolidation: { listPendingProposals: () => listPendingConsolidationProposals(memoryConsolidationScheduler) } }
       : {}),
-    transport: options.directTransport,
   };
 }

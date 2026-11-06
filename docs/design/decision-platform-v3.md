@@ -1,7 +1,8 @@
 # Decision platform and v3 consolidation
 
-Status: implementation in progress. This document records the agreed scope;
-unchecked items describe planned behavior, not shipped capabilities.
+Status: implementation complete; documentation refresh and integrated qualification
+are in progress. Checked implementation items are not a release-readiness claim.
+Unchecked items below remain required before publishing v3.
 
 All first-party packages share the root version. Development uses
 `3.0.0-dev.0`; the qualified release will be `3.0.0`. Protocol and storage schema
@@ -28,8 +29,10 @@ Historical changelogs identify retired packages as `legacy-package:name`.
   preserve active task continuity across brief lookup turns. Pin the selected
   answer model through each user turn, including streaming and tool execution.
 - [x] Show the actual route and attribute actual model usage and cost in products.
-- [ ] Consolidate duplicated terminal behavior into the engine platform and
-  existing terminal-shell, preserving product-specific adapters and views.
+- [x] Consolidate duplicated terminal behavior into the engine platform and
+  existing terminal-shell, preserving product-specific adapters and views. The
+  [inventory](terminal-consolidation-inventory.json) records all 276 baseline
+  file dispositions and the source audit across both terminal products.
 - [x] Share equivalent rejected-promise draining without hiding meaningful errors.
 - [x] Add deterministic judgment-call budgets for representative operations,
   distinguishing logical decisions from wire attempts. Live calibration is optional.

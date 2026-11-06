@@ -1,5 +1,5 @@
 {
-  "status": "in-progress",
+  "status": "implementation-complete-awaiting-integration",
   "baseline": "review census at 415ceea; thin platform forwarders are shared ownership, not duplicate implementations",
   "files": [
     {
@@ -439,7 +439,8 @@
       "path": "input/commands.ts",
       "baselineTuiLines": 234,
       "baselineSimilarity": 0.191,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Product command composition only: registrations select different supported capabilities and ordering. Command lookup/owner provenance and the shared command implementations are platform owned. TUI categories/reference metadata and Agent-only operator/library commands remain explicit product configuration."
     },
     {
       "path": "input/commands/calendar-runtime.ts",
@@ -1158,7 +1159,8 @@
       "path": "main.ts",
       "baselineTuiLines": 957,
       "baselineSimilarity": 0.0062,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "TUI main and off-path Agent interactive composition now use shared frame observations, submission source capture, native readiness/options, footer/render/input/lifecycle primitives and CLI startup. Keep TUI trust/recovery/contract/failover UI and Agent paired-host/hosted-turn/workspace flows as distinct product bindings. Agent main itself is the metadata-only lazy entrypoint."
     },
     {
       "path": "permissions/prompt.ts",
@@ -1670,10 +1672,11 @@
       "path": "runtime/bootstrap.ts",
       "baselineTuiLines": 767,
       "baselineSimilarity": 0.471,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "createPluginStartupTask"
-      ]
+      ],
+      "notes": "Shared event/core initialization, orchestrator construction, companion dispatch, common core-service projection, plugin command adapter, MCP reload and session lifecycle announcements. Product prompt composition, MCP discovery policy, Agent Knowledge and TUI ACP/owner features remain explicit adapters."
     },
     {
       "path": "runtime/client/fleet-union.ts",
@@ -1964,7 +1967,8 @@
       "path": "runtime/services.ts",
       "baselineTuiLines": 713,
       "baselineSimilarity": 0.1659,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Both consume the platform client-runtime floor. Shared leaf compositions, memory admission, knowledge cleanup and teardown retain store ownership/order. Product capability selection, isolated credential/Knowledge roots, Agent local behavior and TUI host services remain product composition rather than duplicated implementations."
     },
     {
       "path": "runtime/store/domains/index.ts",
@@ -2227,5 +2231,29 @@
       "reason": "One source label and node formatter, preserving product confidence copy.",
       "status": "platform-implementation-with-product-policy-adapter"
     }
-  ]
+  ],
+  "sourceAudit": {
+    "revision": "7f1bcbb682967298085c71971f9997eb9f3286c5",
+    "scope": "1566 non-test/non-generated TypeScript/TSX modules across both terminal products, including different relative paths",
+    "exactFunctionBodies": {
+      "minimumLines": 3,
+      "minimumTokens": 25,
+      "remainingCrossProductGroups": 0
+    },
+    "statementInspection": {
+      "minimumTokens": 50,
+      "remainingGroups": 6,
+      "disposition": "Retained product projections/calls into shared implementations; no duplicated algorithm in these groups.",
+      "retained": [
+        "Frame observation and composer-state input adapters",
+        "Onboarding operation-to-validator dispatch (different auth authority)",
+        "Health-maintenance evaluator input projection",
+        "Shared session-export target lookup followed by product-specific redaction/error handling",
+        "Final CLI command dispatch and product runtime return",
+        "Bootstrap local aliases and late-bound control-plane-event callback"
+      ]
+    },
+    "limits": "Static clone inspection is not a behavioral certificate and thresholds do not prove absence of every repeated expression. Public re-exports, type aliases, product configuration and repeated calls to the same platform implementation intentionally remain.",
+    "qualification": "Types, builds, generated artifacts, behavior checks, packaging, installed products, CI and release remain pending for the final consolidated revision."
+  }
 }

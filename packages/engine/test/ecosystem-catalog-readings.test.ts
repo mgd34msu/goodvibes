@@ -12,17 +12,20 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { EntryType, Question } from '@goodvibes-jev/judgment';
+import { JudgmentError, type EntryType, type Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import {
   installEcosystemCatalogEntry,
   reviewEcosystemCatalogEntry,
+  reviewEcosystemCatalogSource,
   searchEcosystemCatalog,
   upsertEcosystemCatalogEntry,
   type EcosystemCatalogEntry,
 } from '../sdk/src/platform/runtime/ecosystem/catalog.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { rankRecommendationCandidates } from '../sdk/src/platform/runtime/ecosystem/recommendations.js';
 
 type SearchState = { readonly query: string; readonly entry: { readonly id: string } };
 type NoteState = { readonly name: string; readonly trustNotes: string };
@@ -48,6 +51,35 @@ beforeEach(() => {
 });
 afterEach(() => {
   installJudgmentPort(previous);
+});
+
+test('Classic catalog browsing and source inspection use literal records without inventing trust or recommendations', async () => {
+  let metadata = 0, requests = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic model lookup'); },
+    async ask() { requests++; throw new Error('Classic decision request'); } });
+  const entry = plugin('pr-tools', 'Pull request tools', { tags: ['review'] });
+  upsertEcosystemCatalogEntry(entry, options);
+  upsertEcosystemCatalogEntry(plugin('author-stats', 'Author statistics'), options);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    expect((await searchEcosystemCatalog('plugin', 'pull request', options)).map(row => row.id)).toEqual(['pr-tools']);
+    expect((await searchEcosystemCatalog('plugin', '', options))).toHaveLength(2);
+    expect(reviewEcosystemCatalogSource(entry, options).entry.id).toBe('pr-tools');
+    await expect(reviewEcosystemCatalogEntry(entry, options)).rejects.toMatchObject({ code: 'decision-models-disabled' });
+    await expect(rankRecommendationCandidates([])).rejects.toMatchObject({ code: 'decision-models-disabled' });
+  });
+  expect({ metadata, requests }).toEqual({ metadata: 0, requests: 0 });
+});
+
+test('Preferred exhausted catalog search continues literal browsing without restarting its decision phase', async () => {
+  upsertEcosystemCatalogEntry(plugin('pr-tools', 'Pull request tools'), options);
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    expect((await searchEcosystemCatalog('plugin', 'pull request', options)).map(row => row.id)).toEqual(['pr-tools']);
+    const attempted = fake.requests.length;
+    expect(attempted).toBeGreaterThan(0);
+    await searchEcosystemCatalog('plugin', 'request', options);
+    expect(fake.requests).toHaveLength(attempted);
+  });
 });
 
 describe('catalog search', () => {

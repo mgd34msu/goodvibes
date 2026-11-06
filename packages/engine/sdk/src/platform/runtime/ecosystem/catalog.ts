@@ -4,6 +4,8 @@ import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../../utils/atomi
 import { dirname, join, resolve } from 'node:path';
 import { VERSION } from '../../version.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, requireDecisionFeature } from '../decision-policy.js';
+import { rankClassicCatalog } from '../classic-catalog.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { catalogSearch, catalogSearchEntryView } from './batteries/catalog-search.js';
 import { trustNoteCaution } from './batteries/trust-note-caution.js';
@@ -376,19 +378,26 @@ export async function searchEcosystemCatalog(
   options: EcosystemCatalogPathOptions,
   run: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemCatalogEntry[]> {
+  run.signal?.throwIfAborted();
   const trimmed = query.trim();
   const entries = loadEcosystemCatalog(kind, options);
   if (!trimmed || entries.length === 0) return entries;
-  const port = judgmentPort(SEARCH_SITE);
-  const context = { site: SEARCH_SITE, ...(run.signal ? { signal: run.signal } : {}) };
-  const kept = await mapLimit(entries, SEARCH_CONCURRENCY, async (entry) => {
-    const search = await catalogSearch.run(port, { query: trimmed, entry: catalogSearchEntryView(entry) }, context);
-    const reading = search.readings.wanted;
-    const dropped = reading.verdict === 'no' && reading.outcome === 'act';
-    search.recordAction(dropped ? 'hidden' : 'listed');
-    return !dropped;
+  return decisionOrClassic(async () => {
+    const port = judgmentPort(SEARCH_SITE);
+    const context = { site: SEARCH_SITE, ...(run.signal ? { signal: run.signal } : {}) };
+    const kept = await mapLimit(entries, SEARCH_CONCURRENCY, async (entry) => {
+      const search = await catalogSearch.run(port, { query: trimmed, entry: catalogSearchEntryView(entry) }, context);
+      const reading = search.readings.wanted;
+      const dropped = reading.verdict === 'no' && reading.outcome === 'act';
+      search.recordAction(dropped ? 'hidden' : 'listed');
+      return !dropped;
+    });
+    return entries.filter((_, index) => kept[index]);
+  }, () => {
+    run.signal?.throwIfAborted();
+    return rankClassicCatalog(entries, trimmed, entry => ({ id: entry.id,
+      description: JSON.stringify(catalogSearchEntryView(entry)) })).map(match => match.entry);
   });
-  return entries.filter((_, index) => kept[index]);
 }
 
 /** The path and fit part of a catalog review: code only, no reading. Install uses this. */
@@ -469,6 +478,7 @@ export async function reviewEcosystemCatalogEntry(
   options: EcosystemCatalogPathOptions,
   run: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemCatalogReview> {
+  requireDecisionFeature('semantic ecosystem trust-note review; native catalog source and compatibility inspection remain available');
   const source = reviewEcosystemCatalogSource(entry, options);
   const trustNotes = entry.trustNotes?.trim();
   let cautioned = false;

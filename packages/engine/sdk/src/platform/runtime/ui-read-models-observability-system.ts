@@ -6,6 +6,7 @@ import {
 } from './ecosystem/recommendations.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isClassicOperation } from './decision-policy.js';
 import type { RuntimeServices } from './services.js';
 import type { UiReadModel } from './ui-read-models-base.js';
 import { combineSubscriptions, createStoreBackedReadModel } from './ui-read-model-helpers.js';
@@ -145,7 +146,10 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiReadMod
       if (staleSchemas.length > 0) {
         startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
       }
-      refreshRecommendations();
+      if (isClassicOperation()) {
+        rankedKey = undefined; recommendations = [];
+        startupIssues.push('Classic mode: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
+      } else refreshRecommendations();
       return { startupIssues, recommendations };
     },
     subscribe(listener) {

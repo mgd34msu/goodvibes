@@ -8,6 +8,7 @@
  * MAX_RECOMMENDATIONS.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { requireDecisionFeature } from '../decision-policy.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import type { RuntimeStore } from '../store/index.js';
 import {
@@ -113,6 +114,7 @@ export async function rankRecommendationCandidates(
   candidates: readonly RecommendationCandidates[],
   options: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemRecommendation[]> {
+  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries in Classic');
   const pairs = candidates.flatMap((candidate) => candidate.entries.map((entry) => ({ candidate, entry })));
   if (pairs.length === 0) return [];
   const port = judgmentPort(RECOMMENDATION_SITE);
@@ -149,5 +151,6 @@ export async function buildEcosystemRecommendations(
   runtimeStore: RuntimeStore | undefined,
   options: EcosystemCatalogPathOptions,
 ): Promise<EcosystemRecommendation[]> {
+  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries in Classic');
   return rankRecommendationCandidates(collectRecommendationCandidates(runtimeStore, options));
 }

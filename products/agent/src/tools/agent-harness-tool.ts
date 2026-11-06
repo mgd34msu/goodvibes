@@ -281,6 +281,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         const resolved = await describePersonalOpsLane(deps.commandContext, args, catalogOptions);
         if (resolved.status === 'found') return publishCatalog(output(resolved.lane));
         if (resolved.status === 'deferred') return publishCatalog(output(resolved));
+        if (resolved.status === 'selection_required') return publishCatalog(output(resolved));
         if (resolved.status === 'ambiguous') return publishCatalog(error(`Ambiguous Personal Ops lane ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`));
         return publishCatalog(error(resolved.usage));
       }

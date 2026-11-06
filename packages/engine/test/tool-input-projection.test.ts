@@ -518,8 +518,8 @@ test('local capture accepts large payloads, wide batches and deep JSON without a
 
 test('Classic preparation never borrows a supplied semantic port recorder and executes a native repair once', async () => {
   let metadataReads = 0, asks = 0;
-  const port: JudgmentPort = { get model() { metadataReads++; throw new Error('Semantic model metadata borrowed'); },
-    get recorder() { metadataReads++; throw new Error('Semantic recorder borrowed'); },
+  const port: JudgmentPort = { get model(): never { metadataReads++; throw new Error('Semantic model metadata borrowed'); },
+    get recorder(): never { metadataReads++; throw new Error('Semantic recorder borrowed'); },
     async ask() { asks++; throw new Error('Classic must not ask'); } };
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const { registry, tool, bodies } = fixture({ type: 'object', properties: { count: { type: 'number' } }, required: ['count'] });

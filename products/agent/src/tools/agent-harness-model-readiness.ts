@@ -1,4 +1,4 @@
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';

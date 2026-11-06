@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';

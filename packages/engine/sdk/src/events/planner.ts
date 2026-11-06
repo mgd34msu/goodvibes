@@ -11,6 +11,7 @@ export interface StrategyCandidate {
 }
 
 export interface PlannerDecision {
+  readonly provenance?: 'classic';
   readonly selected: ExecutionStrategy;
   readonly reasonCode: string;
   readonly candidates: readonly StrategyCandidate[];
@@ -20,7 +21,8 @@ export interface PlannerDecision {
   readonly outcome?: 'act' | 'confirm' | 'escalate' | undefined;
   readonly decisionId?: string | undefined;
   readonly inputs: {
-    readonly riskScore: number;
+    /** Null means no risk assessment was taken. */
+    readonly riskScore: number | null;
     readonly latencyBudgetMs: number;
     readonly isMultiStep: boolean;
     readonly remoteAvailable: boolean;

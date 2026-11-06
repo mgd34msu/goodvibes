@@ -106,7 +106,7 @@ async function translate(error: unknown): Promise<never> {
     throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
   const failure = await readErrorFailure(error instanceof Error ? error : new Error(message), 'email.gateway.failure').catch(() => null);
-  if (failure?.readings.category.outcome === 'act' && failure.category === 'authentication') {
+  if (failure?.category === 'authentication') {
     throw new GatewayVerbError(
       `${message} The stored mail password was refused; store a current one and retry.`,
       'EMAIL_CREDENTIALS_REJECTED',

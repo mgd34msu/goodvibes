@@ -213,7 +213,7 @@ for (const policy of ['Classic - Off', 'Preferred'] as const) {
       try {
         const record = await store.add(options[0]!);
         expect(record.reviewState).toBe('fresh');
-        const rendered = renderVibeProjection(store.getAll());
+        const rendered = renderVibeProjection(await store.search({}));
         expect(rendered).toContain(body); expect(rendered).toContain(VIBE_PROJECTION_CAVEAT);
       } finally { store.close(); }
       expect(policy === 'Classic - Off' ? fake.requests.length === 0 : fake.requests.length > 0).toBe(true);

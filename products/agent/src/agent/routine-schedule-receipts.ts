@@ -671,7 +671,7 @@ async function classifyScheduleListError(
   const status = typeof rawStatus === 'number' ? rawStatus : undefined;
   const known = status === 401 || status === 403 ? 'authentication' : status === 404 ? 'not_found' : undefined;
   const reading = known ? undefined : await readErrorFailure(error instanceof Error ? error : new Error(message), 'agent.connected-host.failure');
-  if (reading && reading.readings.category.outcome !== 'act') throw new Error('Connected host failure classification remains unsettled.');
+  if (reading?.readings && reading.readings.category.outcome !== 'act') throw new Error('Connected host failure classification remains unsettled.');
   const category = known ?? reading?.category;
   if (category === 'authentication' || category === 'authorization') {
     return { ok: false, kind: 'auth_required', error: message, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: connection.baseUrl };

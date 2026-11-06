@@ -1,4 +1,4 @@
-import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { types as nodeTypes } from 'node:util';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';

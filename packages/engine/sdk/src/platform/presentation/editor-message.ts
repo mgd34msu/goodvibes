@@ -32,7 +32,7 @@ export interface EditorMessageInput {
 
 /** Privacy inspection precedes port acquisition, including failure/outage paths. */
 export async function readEditorMessage(input: EditorMessageInput, signal: AbortSignal): Promise<EditorMessagePresentation> {
-  return decisionOrClassic(() => readDecisionEditorMessage(input, signal), () => {
+  return decisionOrClassic<EditorMessagePresentation>(() => readDecisionEditorMessage(input, signal), () => {
     signal.throwIfAborted();
     return Object.freeze({ provenance: 'classic' as const });
   });

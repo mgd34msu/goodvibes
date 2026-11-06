@@ -82,7 +82,7 @@ export class BrowserControlIdentityWork {
 
   /** Uses this action's original reader; a later installation cannot be adopted. */
   async credentialPage(state: object, currentPage: () => Promise<void>): Promise<'yes' | 'no' | 'unresolved'> {
-    return decisionOrClassic(() => this.readCredentialPage(state, currentPage), async () => {
+    return decisionOrClassic<'yes' | 'no' | 'unresolved'>(() => this.readCredentialPage(state, currentPage), async () => {
       this.assertCurrent(); await currentPage(); this.assertCurrent();
       return 'unresolved';
     });

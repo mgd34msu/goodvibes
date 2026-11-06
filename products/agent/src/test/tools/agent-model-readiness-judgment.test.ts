@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { OpenAICompatProvider, OllamaProvider } from '@goodvibes-jev/engine/sdk/platform/providers';

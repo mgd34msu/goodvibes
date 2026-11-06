@@ -151,7 +151,13 @@ export function proposeSkillDrafts(input: ProposeSkillDraftsInput): readonly Ski
         (c.status === 'proposal-ready' || c.status === 'ready-to-promote') &&
         c.proposalTarget === 'skill',
     )
-    .sort((a, b) => b.priority - a.priority);
+    .sort((a, b) => {
+      // Unassessed candidates retain their input order after measured ones;
+      // null is not a zero-valued semantic priority.
+      if (a.priority === null) return b.priority === null ? 0 : 1;
+      if (b.priority === null) return -1;
+      return b.priority - a.priority;
+    });
 
   for (const candidate of eligible) {
     if (proposals.length >= MAX_PROPOSALS) break;

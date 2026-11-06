@@ -52,7 +52,8 @@ export async function detectReferencedMemoryIds(
   options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {},
 ): Promise<MemoryReferenceResult> {
   return decisionOrClassic(() => detectDecisionReferencedMemoryIds(responseText, records, options), () => {
-    const original = retainOwnedJson({ responseText, records });
+    const input = { responseText, records };
+    const original = retainOwnedJson(input);
     const signal = options.signal, callerCurrent = options.assertCurrent;
     const current = () => {
       signal?.throwIfAborted(); original.assertCurrent();
@@ -64,7 +65,7 @@ export async function detectReferencedMemoryIds(
     current();
     // These records were injected by the host. Their use in the answer was
     // not assessed, so presence must never earn a reference credit.
-    const present = original.snapshot.records.map(record => record.id);
+    const present = (original.snapshot as typeof input).records.map(record => record.id);
     return { provenance: 'classic' as const, referenced: [], present,
       perId: new Map(present.map(id => [id, 'present' as const])), assertCurrent: current };
   });

@@ -1,4 +1,4 @@
-import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime/decision-policy';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure } from '@goodvibes-jev/engine/sdk/platform/routing';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';

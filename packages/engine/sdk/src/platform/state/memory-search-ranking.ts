@@ -93,7 +93,7 @@ export async function rankSemanticSearch(store: SemanticRetrieval, filter: Memor
     const result = candidates.length ? candidates.map(entry => ({ ...entry, provenance: 'classic' as const, scoreSource: 'vector-similarity' as const, score: entry.similarity * 100 }))
       : store.retrieve({ ...filter, semantic: false, limit: undefined }, operation).map(record => ({ record,
         distance: Number.POSITIVE_INFINITY, similarity: 0,
-        score: classicLexicalOverlap(filter.query ?? '', rerankContent(record)) * 100,
+        score: classicLexicalOverlap(filter.query ?? '', JSON.stringify(rerankContent(record))) * 100,
         provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
     assertMemoryOperationCurrent(operation);
     const sorted = result.sort((a, b) => b.score - a.score);

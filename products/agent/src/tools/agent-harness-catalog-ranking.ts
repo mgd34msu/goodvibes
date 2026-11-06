@@ -410,7 +410,7 @@ export async function rankHarnessCatalog<T>(
   decisionName = 'engine.tools.registry-rank',
   contextEvidence?: unknown,
 ): Promise<HarnessCatalogRanking<T>> {
-  return decisionOrClassic(() => rankDecisionHarnessCatalog(entries, query, describe, site, options, decisionName, contextEvidence), async () => {
+  return decisionOrClassic<HarnessCatalogRanking<T>>(() => rankDecisionHarnessCatalog(entries, query, describe, site, options, decisionName, contextEvidence), async () => {
     const source = captureCatalogSnapshot(entries);
     const context = contextEvidence === undefined ? undefined : captureCatalogSnapshot(contextEvidence);
     const assertSource = () => { source.assertCurrent(entries); context?.assertCurrent(contextEvidence); };

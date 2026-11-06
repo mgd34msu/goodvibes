@@ -775,7 +775,8 @@ export class PermissionManager {
     remembered?.assertCurrent(); input.assertCurrent();
     if (remembered) return { result: this.result(remembered.approved, true, remembered.source, remembered.reason, analysis) };
     const tools = this.configReader.getSnapshot().permissions.tools;
-    const configured = tools?.[TOOL_CONFIG_KEYS[input.toolName] ?? 'unknown'];
+    const toolConfigKey = TOOL_CONFIG_KEYS[input.toolName];
+    const configured = toolConfigKey === undefined ? undefined : tools?.[toolConfigKey];
     if (configured === 'allow' || input.category === 'read' && configured !== 'prompt') {
       input.assertCurrent();
       return { result: this.result(true, false, 'config_policy', 'config_allow', analysis,

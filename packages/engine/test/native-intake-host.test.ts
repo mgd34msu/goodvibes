@@ -92,7 +92,7 @@ test('Classic authenticated intake survives duplicate admission and restart with
     expect(f.log.query()).toEqual([]);
     expect(f.fake.requests).toEqual([]);
     expect(f.proposals()).toBe(0);
-    expect((await (await f.store.openWorkLedgerStorage('project')).read()).works).toEqual([]);
+    expect(await (await f.store.openWorkLedgerStorage('project')).read()).toMatchObject({ works: [] });
     await f.host.close();
     const restarted = createNativeConversationIntakeHost(f.deps);
     cleanups.push(() => restarted.close());

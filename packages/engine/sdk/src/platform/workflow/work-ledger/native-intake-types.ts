@@ -121,7 +121,8 @@ export function parseNativeConversationCapture(value: unknown): NativeConversati
   try {
     plain(value);
     const { decisions, ...rest } = value as NativeConversationCapture;
-    const parsed = captureSchema.parse(rest);
+    const { classic, ...fields } = captureSchema.parse(rest);
+    const parsed = { ...fields, ...(classic ? { classic } : {}) };
     if (!Array.isArray(decisions) || decisions.length > NATIVE_CONVERSATION_MAX_DECISIONS
       || new Set(parsed.owner.authorityScopes).size !== parsed.owner.authorityScopes.length
       || parsed.sourceId !== nativeConversationSourceId(parsed.projectId, parsed.principalId, parsed.inputId)

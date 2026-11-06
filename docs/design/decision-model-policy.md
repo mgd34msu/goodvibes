@@ -232,3 +232,10 @@ refusal and cursor diagnostics remain explicitly unassessed. A Drafts folder
 without a server declaration requires an explicit mailbox choice before APPEND;
 Classic never guesses a destination from a folder name. Account/publication
 ownership and cancellation remain attached to these local results.
+
+Classic channel progress keeps original notices visible without assigning a
+semantic substance verdict or consuming an old model-specific suppression cache.
+Worker prompts retain declared test-runner facts and omit inferred framework and
+repeated-call progress hints. The read-only secret check escalates to the existing
+secret-aware approval path when unassessed; it never reuses a cached semantic
+absence of secrets during Classic or asserts that unknown file contents are safe.

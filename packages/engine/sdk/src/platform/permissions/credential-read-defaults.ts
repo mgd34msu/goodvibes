@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * credential-read-defaults.ts: whether a read-only tool call touches secret or
  * credential material.
@@ -16,6 +17,8 @@
  * A yes (or an uncertain reading) sends the call through the gate's full
  * reading, where touching secrets is at least high stakes. Readings are kept
  * per call for the life of the process, so a path read twice is asked once.
+ * Classic routes unresolved reads to secret-aware owner approval without
+ * claiming that a file contains secrets or issuing a semantic request.
  */
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -36,18 +39,25 @@ export async function readTouchesSecrets(toolName: string, args: Record<string, 
   signal?.throwIfAborted();
   const state = readingState(toolName, args, workingDirectory);
   const key = JSON.stringify(state);
-  const seen = SEEN.get(key);
-  if (seen !== undefined) return seen;
-  const run = await executePolicyCheck(
-    () => sideEffect.run(judgmentPort(READ_SECRETS_SITE), state, { site: READ_SECRETS_SITE, only: ['secrets'], ...(signal === undefined ? {} : { signal }) }),
-    signal,
-  );
-  signal?.throwIfAborted();
-  const touches = run.readings.secrets.verdict !== 'no';
-  run.recordAction(touches ? 'secrets' : 'no-secrets');
-  SEEN.set(key, touches);
-  if (SEEN.size > SEEN_LIMIT) SEEN.delete(SEEN.keys().next().value!);
-  return touches;
+  return decisionOrClassic(async () => {
+    const seen = SEEN.get(key);
+    if (seen !== undefined) return seen;
+    const run = await executePolicyCheck(
+      () => sideEffect.run(judgmentPort(READ_SECRETS_SITE), state, { site: READ_SECRETS_SITE, only: ['secrets'], ...(signal === undefined ? {} : { signal }) }),
+      signal,
+    );
+    signal?.throwIfAborted();
+    const touches = run.readings.secrets.verdict !== 'no';
+    run.recordAction(touches ? 'secrets' : 'no-secrets');
+    SEEN.set(key, touches);
+    if (SEEN.size > SEEN_LIMIT) SEEN.delete(SEEN.keys().next().value!);
+    return touches;
+  }, () => {
+    signal?.throwIfAborted();
+    // This boolean requests the secret-aware permission path. Classic cannot
+    // establish absence of secrets and never reuses a cached semantic no.
+    return true;
+  });
 }
 
 /** Forgets every remembered reading (tests, and a settings change that alters the model). */

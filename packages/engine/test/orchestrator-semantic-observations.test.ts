@@ -1,3 +1,5 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { bindContractPlanConsumer } from '../sdk/src/platform/tools/agent/contract-binding.js';
 import { afterEach, beforeEach, describe, expect, test, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -1320,4 +1322,34 @@ test('only a host-owned contract proposal defers fulfillment to the contract pla
   await runAgentTask(ordinary.context, ordinary.record);
   expect(ordinary.record.status).toBe('completed');
   expect(fake.requests.filter((request) => request.context?.battery === 'engine.core.response-completion')).toHaveLength(1);
+});
+
+
+test('Classic workers keep declared project facts and omit unassessed progress hints with zero requests', async () => {
+  const f = setup();
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); });
+  installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    project(f.root, { scripts: { test: 'jest' } });
+    expect((await prepareProjectFramework(f.context, f.record)).framework).toBe('jest');
+    project(f.root, { scripts: { test: 'bun scripts/run-tests.ts' }, dependencies: { vitest: '1' } });
+    expect((await prepareProjectFramework(f.context, f.record)).framework).toBeUndefined();
+    expect(await readRepeatedCalls(history(), f.context, f.record)).toBeUndefined();
+    expect(fake.requests).toHaveLength(0);
+    f.record.status = 'cancelled';
+    await expect(readRepeatedCalls(history(), f.context, f.record)).rejects.toBeInstanceOf(OrchestratorObservationHeldError);
+  });
+});
+
+test('Preferred optional worker observation outage keeps Classic active for later hints', async () => {
+  const f = setup();
+  project(f.root, { scripts: { test: 'bun scripts/run-tests.ts' }, dependencies: { vitest: '1' } });
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); });
+  installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    expect((await prepareProjectFramework(f.context, f.record)).framework).toBeUndefined();
+    const attempted = fake.requests.length; expect(attempted).toBe(1);
+    expect(await readRepeatedCalls(history(), f.context, f.record)).toBeUndefined();
+    expect(fake.requests).toHaveLength(attempted);
+  });
 });

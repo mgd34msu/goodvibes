@@ -1,3 +1,4 @@
+import { activateClassicFallback, isClassicOperation } from '../runtime/decision-policy.js';
 /** Run-owned semantic observations. Neither reading grants tool authority. */
 import { readFileSync, statSync, type BigIntStats } from 'node:fs';
 import { join } from 'node:path';
@@ -90,6 +91,7 @@ export async function prepareProjectFramework(context: AgentOrchestratorRunConte
     };
     const declared = declaredTestRunner(state);
     if (declared !== undefined) { assertSourceCurrent(); return Object.freeze({ framework: declared, assertCurrent: owner }); }
+    if (isClassicOperation()) { assertSourceCurrent(); return omitted; }
     const authority = captureJudgmentPort('agents.project-test-framework', { signal: context.getCancellationSignal?.(record.id), assertCurrent: assertSourceCurrent });
     const run = await projectTestFramework.run(checkedPort(authority), state as never, { site: 'agents.project-test-framework', signal: authority.signal, beforeAttempt: authority.assertCurrent });
     authority.assertCurrent();
@@ -99,7 +101,8 @@ export async function prepareProjectFramework(context: AgentOrchestratorRunConte
     run.recordAction('include project framework');
     authority.assertCurrent();
     return Object.freeze({ framework, assertCurrent: owner });
-  } catch {
+  } catch (error) {
+    activateClassicFallback(error);
     owner();
     return omitted;
   }
@@ -107,6 +110,8 @@ export async function prepareProjectFramework(context: AgentOrchestratorRunConte
 
 export async function readRepeatedCalls(history: readonly RetainedToolObservation[], context: AgentOrchestratorRunContext, record: AgentRecord, repeatedSignature = history[0]?.signature) {
   const owner = captureOrchestratorObservationOwner(context, record);
+  owner();
+  if (isClassicOperation()) return undefined;
   // The reading supplies a progress hint, not authorization for the next tool.
   // Retain the original run and data checks, but consume the Jev observation
   // here so a later service refresh cannot revoke an already-delivered hint.
@@ -125,7 +130,8 @@ export async function readRepeatedCalls(history: readonly RetainedToolObservatio
     run.recordAction(stuck ? 'repeated calls are stuck' : 'repeated calls show progress');
     authority.assertCurrent();
     return Object.freeze({ stuck, assertCurrent: current, retainForTools: () => { current(); toolsStarted = true; } });
-  } catch {
+  } catch (error) {
+    activateClassicFallback(error);
     owner();
     return undefined;
   }

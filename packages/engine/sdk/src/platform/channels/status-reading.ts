@@ -1,3 +1,4 @@
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { defineBattery, yesNo, STAKES_BANDS, type JudgmentPort, mapLimit } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
@@ -15,22 +16,28 @@ export const channelStatusContent = defineBattery({
 });
 const caches = new WeakMap<JudgmentPort, Map<string, boolean>>();
 export function peekChannelStatusContent(content: string): boolean | undefined {
+  if (isClassicOperation()) return undefined;
   try { const port = judgmentPort(channelStatusContent.name); return caches.get(port)?.get(JSON.stringify([port.model, content])); } catch { return undefined; }
 }
 export async function prepareChannelStatusContent(contents: readonly string[]): Promise<void> {
   assertJudgmentInput(contents);
   if (contents.some(content => content.length > 160_000)) throw new JudgmentInputError('unsupported-input');
-  const port = judgmentPort(channelStatusContent.name), model = port.model;
-  let cache = caches.get(port); if (!cache) { cache = new Map(); caches.set(port, cache); }
-  const current = () => { if (judgmentPort(channelStatusContent.name) !== port || port.model !== model) throw new Error('Status judgment configuration changed.'); };
-  await mapLimit([...new Set(contents)].filter(Boolean), 4, async content => {
-    const key = JSON.stringify([model, content]); if (cache.has(key)) return;
-    const run = await channelStatusContent.run(port, { content }, { site: channelStatusContent.name, beforeAttempt: current });
-    current();
-    if (run.readings.substantive.outcome === 'act') {
-      if (cache.size >= 512) cache.delete(cache.keys().next().value!);
-      cache.set(key, run.readings.substantive.verdict === 'yes');
-      run.recordAction('Use settled notice substance for progress presentation.');
-    }
+  return decisionOrClassic(async () => {
+    const port = judgmentPort(channelStatusContent.name), model = port.model;
+    let cache = caches.get(port); if (!cache) { cache = new Map(); caches.set(port, cache); }
+    const current = () => { if (judgmentPort(channelStatusContent.name) !== port || port.model !== model) throw new Error('Status judgment configuration changed.'); };
+    await mapLimit([...new Set(contents)].filter(Boolean), 4, async content => {
+      const key = JSON.stringify([model, content]); if (cache.has(key)) return;
+      const run = await channelStatusContent.run(port, { content }, { site: channelStatusContent.name, beforeAttempt: current });
+      current();
+      if (run.readings.substantive.outcome === 'act') {
+        if (cache.size >= 512) cache.delete(cache.keys().next().value!);
+        cache.set(key, run.readings.substantive.verdict === 'yes');
+        run.recordAction('Use settled notice substance for progress presentation.');
+      }
+    });
+  }, () => {
+    // The original notice remains visible. No semantic substance verdict is
+    // invented, and old model-specific cache entries are not consumed.
   });
 }

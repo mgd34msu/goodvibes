@@ -1,3 +1,4 @@
+import { isDeepEqual } from '@goodvibes-jev/engine/terminal-shell/onboarding-values';
 import { DEFAULT_CONFIG } from '../../config/index.ts';
 import { getProviderIdFromModel } from '../../config/provider-model.ts';
 import type {
@@ -67,27 +68,7 @@ const INBOUND_EVENT_SURFACE_KINDS = new Set<string>([
   'whatsapp',
 ]);
 
-function isDeepEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((value, index) => isDeepEqual(value, right[index]));
-  }
 
-  if (
-    typeof left === 'object' && left !== null
-    && typeof right === 'object' && right !== null
-    && !Array.isArray(left)
-    && !Array.isArray(right)
-  ) {
-    const leftEntries = Object.entries(left);
-    const rightEntries = Object.entries(right);
-    if (leftEntries.length !== rightEntries.length) return false;
-
-    return leftEntries.every(([key, value]) => isDeepEqual(value, Reflect.get(right, key)));
-  }
-
-  return false;
-}
 
 function countPermissionToolOverrides(snapshot: OnboardingSnapshotState): number {
   return Object.entries(snapshot.config.permissions.tools).filter(([key, value]) => {

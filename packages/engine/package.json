@@ -2248,6 +2248,16 @@
       "bun": "./terminal-shell/src/trust-review.ts",
       "types": "./terminal-shell/dist/trust-review.d.ts",
       "import": "./terminal-shell/dist/trust-review.js"
+    },
+    "./terminal-shell/onboarding-values": {
+      "bun": "./terminal-shell/src/onboarding-values.ts",
+      "types": "./terminal-shell/dist/onboarding-values.d.ts",
+      "import": "./terminal-shell/dist/onboarding-values.js"
+    },
+    "./terminal-shell/onboarding-verification": {
+      "bun": "./terminal-shell/src/onboarding-verification.ts",
+      "types": "./terminal-shell/dist/onboarding-verification.d.ts",
+      "import": "./terminal-shell/dist/onboarding-verification.js"
     }
   },
   "publishConfig": {

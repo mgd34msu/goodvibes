@@ -1,3 +1,4 @@
+export type { OnboardingVerificationStatus, OnboardingVerificationItem, OnboardingVerificationResult } from '@goodvibes-jev/engine/terminal-shell/onboarding-verification';
 import type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 export type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 import type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
@@ -24,7 +25,7 @@ export type OnboardingAcknowledgementReason =
   | 'bootstrap-credential'
   | 'active-sessions';
 
-export type OnboardingVerificationStatus = 'pass' | 'warn' | 'fail';
+
 
 export interface OnboardingConfigSnapshot {
   readonly display: GoodVibesConfig['display'];
@@ -319,18 +320,9 @@ export interface OnboardingApplyResult {
   readonly errors: readonly OnboardingApplyError[];
 }
 
-export interface OnboardingVerificationItem {
-  readonly id: string;
-  readonly status: OnboardingVerificationStatus;
-  readonly message: string;
-  readonly target?: string;
-}
 
-export interface OnboardingVerificationResult {
-  readonly verifiedAt: number;
-  readonly ok: boolean;
-  readonly items: readonly OnboardingVerificationItem[];
-}
+
+
 
 export interface WizardProgressPayload {
   readonly version: 1;

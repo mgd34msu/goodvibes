@@ -1549,7 +1549,10 @@
       "path": "runtime/onboarding/derivation.ts",
       "baselineTuiLines": 539,
       "baselineSimilarity": 0.7476,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "isDeepEqual"
+      ]
     },
     {
       "path": "runtime/onboarding/index.ts",
@@ -1606,7 +1609,7 @@
       "path": "runtime/onboarding/verify.ts",
       "baselineTuiLines": 171,
       "baselineSimilarity": 0.6275,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/path-shadow-startup.ts",

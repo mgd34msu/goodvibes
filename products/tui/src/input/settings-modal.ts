@@ -1,3 +1,10 @@
+import type {
+  SettingsModalChange as PlatformSettingsModalChange,
+  SettingsModalChangeResult as PlatformSettingsModalChangeResult,
+  SettingsModalChangeHandler as PlatformSettingsModalChangeHandler,
+} from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
+import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
+import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 /**
  * SettingsModal, state management for the /settings and /config fullscreen workspace.
  *
@@ -62,9 +69,7 @@ import {
   activateSelected as _activateSelected,
   handleSubscriptionLogoutKey as _handleSubscriptionLogoutKey,
 } from './settings-modal-activation.ts';
-import {
-  adjustSelected as _adjustSelected,
-} from './settings-modal-adjustment.ts';
+import { adjustSelected as _adjustSelected } from './settings-modal-adjustment.ts';
 import {
   resetSelected as _resetSelected,
   initiateResetCategory as _initiateResetCategory,
@@ -74,17 +79,11 @@ import {
 } from './settings-modal-reset.ts';
 import { commitEditValue as _commitEditValue } from './settings-modal-commit.ts';
 
-export interface SettingsModalChange {
-  readonly key: string;
-  readonly previousValue: unknown;
-  readonly value: unknown;
-}
+export type SettingsModalChange = PlatformSettingsModalChange<string>;
 
-export interface SettingsModalChangeResult {
-  readonly message?: string;
-}
+export type SettingsModalChangeResult = PlatformSettingsModalChangeResult;
 
-export type SettingsModalChangeHandler = (change: SettingsModalChange) => SettingsModalChangeResult | void;
+export type SettingsModalChangeHandler = PlatformSettingsModalChangeHandler<string>;
 
 export interface SettingsModalOpenOptions {
   readonly onSettingApplied?: SettingsModalChangeHandler;
@@ -123,44 +122,43 @@ export {
 // SettingsModal
 // ---------------------------------------------------------------------------
 
-export class SettingsModal {
-  public active = false;
-
+export class SettingsModal extends TerminalSettingsModalState<
+  SettingsCategory,
+  SettingEntry,
+  ModelPickerTarget,
+  'tts-provider' | 'tts-voice' | 'theme'
+> {
   /** Index into SETTINGS_CATEGORIES. */
-  public categoryIndex = 0;
 
   /** Selected setting index within the current category. */
-  public selectedIndex = 0;
 
   /** Which region (settings list or documentation) receives up/down navigation and Enter/Space actions. */
   public focusRegion: SettingsFocusRegion = 'settings';
 
   /** Whether we're in inline edit mode for the selected string/number setting. */
-  public editingMode = false;
 
   /** Current value of the inline edit buffer. */
-  public editBuffer = '';
+
   /**
    * Scroll offset (in wrapped lines) of the documentation region for the
    * selected row. The renderer clamps it to the region's real content height
    * and shows honest more-above/below markers, long feature documentation
    * scrolls, it never clips. Reset whenever the selection changes.
    */
-  public contextScroll = 0;
+
   /** Server awaiting explicit allow-all confirmation, if any. */
-  public mcpAllowAllConfirmationTarget: string | null = null;
+
   /**
    * Set by activateSelected() when the highlighted setting should open the
    * model picker rather than entering inline text edit mode.
    * Consumed and cleared by the route handler after each Enter/Space action.
    */
-  public pendingModelPickerTarget: ModelPickerTarget | null = null;
+
   /** Set when the highlighted setting should open provider selection before model selection. */
-  public pendingProviderModelPickerTarget: ModelPickerTarget | null = null;
+
   /** Set when a highlighted setting needs an external picker owned by the shell route. */
-  public pendingSettingsPickerAction: 'tts-provider' | 'tts-voice' | 'theme' | null = null;
+
   /** Provider awaiting explicit logout confirmation, if any. */
-  public subscriptionLogoutConfirmationTarget: string | null = null;
 
   /** Pending category-reset confirmation gate, or null when inactive. */
   public resetCategoryConfirm: { readonly subject: string } | null = null;
@@ -168,12 +166,11 @@ export class SettingsModal {
   public resetAllConfirm: { readonly subject: 'all' } | null = null;
 
   /** Settings grouped by category. */
-  public groups: Map<SettingsCategory, SettingEntry[]> = new Map();
 
   /** MCP server trust entries (populated when mcp tab is active). */
-  public mcpEntries: McpEntry[] = [];
+
   /** Provider subscription entries (populated when subscriptions tab is active). */
-  public subscriptionEntries: SubscriptionEntry[] = [];
+
   /** Connections-tab state; all of it driven by settings-modal-connections.ts. */
   public connectionEntries: ConnectionStatus[] = initialConnectionEntries();
   public gatewayMethods: GatewayMethodCatalog | null = null;
@@ -186,20 +183,17 @@ export class SettingsModal {
    * user may have deleted all chars while remaining in search mode.
    * Renderer should display the search prompt when this is true.
    */
-  public searchFocused = false;
 
   /**
    * Current search query. Non-empty activates cross-category search mode.
    * Renderer should display searchResults instead of the per-category list
    * when searchQuery is non-empty.
    */
-  public searchQuery = '';
 
   /**
    * Ranked cross-category results when searchQuery is non-empty.
    * Populated by setSearchQuery(); empty when searchQuery is ''.
    */
-  public searchResults: SettingEntry[] = [];
 
   /**
    * Set after a network-category save that touches controlPlane or httpListener
@@ -207,9 +201,9 @@ export class SettingsModal {
    * Cleared on next open() or close().
    */
   public lastSaveTriggeredRestart: 'control-plane' | 'http-listener' | 'web' | null = null;
-  public lastSettingEffectMessage: string | null = null;
+
   /** Accepted secret edits finish here; commitEdit remains a synchronous keystroke API. */
-  public pendingSecretWrite: Promise<boolean> | null = null;
+
   private secretWriteSession = 0;
 
   private configManager: ConfigManager | null = null;
@@ -275,13 +269,15 @@ export class SettingsModal {
     this.searchFocused = false;
     this.contextScroll = 0;
     this.active = true;
-    const unsubscribes = configManager.getHostSettingsSchema().map(setting =>
+    const unsubscribes = configManager.getHostSettingsSchema().map((setting) =>
       configManager.getHostBooleanSetting(setting.key).subscribe(() => {
         refreshSettingsPolicyAvailability(this.groups, configManager);
         this.requestRender?.();
       }),
     );
-    this.unsubscribeHostSetting = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
+    this.unsubscribeHostSetting = () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
   }
 
   /** Scroll the documentation region by `delta` wrapped lines (renderer clamps the top end). */
@@ -294,15 +290,10 @@ export class SettingsModal {
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.active = false;
-    this.editingMode = false;
-    this.editBuffer = '';
-    this.pendingModelPickerTarget = null;
-    this.pendingProviderModelPickerTarget = null;
-    this.pendingSettingsPickerAction = null;
-    this.mcpAllowAllConfirmationTarget = null;
-    this.subscriptionLogoutConfirmationTarget = null;
+    this.resetSettingsInteraction();
+
     this.lastSaveTriggeredRestart = null;
-    this.lastSettingEffectMessage = null;
+
     this.searchQuery = '';
     this.searchResults = [];
     this.searchFocused = false;
@@ -400,53 +391,33 @@ export class SettingsModal {
   }
 
   moveUp(): void {
-    if (this.editingMode) return;
-    this.contextScroll = 0;
-    if (this.searchFocused) {
-      if (this.searchResults.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.searchResults.length) % this.searchResults.length;
-      }
-      return;
-    }
-    const items = this._currentItems();
-    if (items.length === 0) {
-      if (this.currentCategory === 'mcp' && this.mcpEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.mcpEntries.length) % this.mcpEntries.length;
-      } else if (this.currentCategory === 'subscriptions' && this.subscriptionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.subscriptionEntries.length) % this.subscriptionEntries.length;
-        this.subscriptionLogoutConfirmationTarget = null;
-      } else if (this.currentCategory === 'connections' && this.connectionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.connectionEntries.length) % this.connectionEntries.length;
-      }
-      return;
-    }
-    this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
-    this.subscriptionLogoutConfirmationTarget = null;
+    moveSettingsSelection(this, -1, {
+      items: () => this._currentItems().length,
+      specialItems: () =>
+        this.currentCategory === 'mcp'
+          ? this.mcpEntries.length
+          : this.currentCategory === 'subscriptions'
+            ? this.subscriptionEntries.length
+            : this.currentCategory === 'connections'
+              ? this.connectionEntries.length
+              : 0,
+      clearSearchConfirmation: false,
+    });
   }
 
   moveDown(): void {
-    if (this.editingMode) return;
-    this.contextScroll = 0;
-    if (this.searchFocused) {
-      if (this.searchResults.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.searchResults.length;
-      }
-      return;
-    }
-    const items = this._currentItems();
-    if (items.length === 0) {
-      if (this.currentCategory === 'mcp' && this.mcpEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.mcpEntries.length;
-      } else if (this.currentCategory === 'subscriptions' && this.subscriptionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.subscriptionEntries.length;
-        this.subscriptionLogoutConfirmationTarget = null;
-      } else if (this.currentCategory === 'connections' && this.connectionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.connectionEntries.length;
-      }
-      return;
-    }
-    this.selectedIndex = (this.selectedIndex + 1) % items.length;
-    this.subscriptionLogoutConfirmationTarget = null;
+    moveSettingsSelection(this, 1, {
+      items: () => this._currentItems().length,
+      specialItems: () =>
+        this.currentCategory === 'mcp'
+          ? this.mcpEntries.length
+          : this.currentCategory === 'subscriptions'
+            ? this.subscriptionEntries.length
+            : this.currentCategory === 'connections'
+              ? this.connectionEntries.length
+              : 0,
+      clearSearchConfirmation: false,
+    });
   }
 
   getSelected(): SettingEntry | null {
@@ -457,7 +428,6 @@ export class SettingsModal {
     if (items.length === 0) return null;
     return items[Math.max(0, Math.min(items.length - 1, this.selectedIndex))] ?? null;
   }
-
 
   /**
    * Get the flag entry for the currently selected feature-unit header row, or
@@ -490,29 +460,12 @@ export class SettingsModal {
   }
 
   selectTarget(target?: string): void {
-    const normalized = target?.trim();
-    if (!normalized) return;
-    this.contextScroll = 0;
-
-    const categoryIndex = SETTINGS_CATEGORIES.indexOf(normalized as SettingsCategory);
-    if (categoryIndex >= 0) {
-      this.categoryIndex = categoryIndex;
-      this.selectedIndex = 0;
-      this.focusRegion = 'settings';
-      return;
-    }
-
-    for (let index = 0; index < SETTINGS_CATEGORIES.length; index += 1) {
-      const category = SETTINGS_CATEGORIES[index]!;
-      const entries = this.groups.get(category) ?? [];
-      const entryIndex = entries.findIndex((entry) => entry.setting.key === normalized);
-      if (entryIndex >= 0) {
-        this.categoryIndex = index;
-        this.selectedIndex = entryIndex;
+    selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
+      resetScroll: true,
+      focusSettings: () => {
         this.focusRegion = 'settings';
-        return;
-      }
-    }
+      },
+    });
   }
 
   /**
@@ -528,13 +481,27 @@ export class SettingsModal {
       getSelected: () => this.getSelected(),
       setValue: (key, value) => this._setValue(key, value),
       setHostValue: (key, value) => this._setHostValue(key, value),
-      setEditingMode: (v) => { this.editingMode = v; },
-      setEditBuffer: (v) => { this.editBuffer = v; },
-      setMcpAllowAllConfirmationTarget: (v) => { this.mcpAllowAllConfirmationTarget = v; },
-      setSubscriptionLogoutConfirmationTarget: (v) => { this.subscriptionLogoutConfirmationTarget = v; },
-      setPendingSettingsPickerAction: (v) => { this.pendingSettingsPickerAction = v; },
-      setPendingModelPickerTarget: (v) => { this.pendingModelPickerTarget = v; },
-      setPendingProviderModelPickerTarget: (v) => { this.pendingProviderModelPickerTarget = v; },
+      setEditingMode: (v) => {
+        this.editingMode = v;
+      },
+      setEditBuffer: (v) => {
+        this.editBuffer = v;
+      },
+      setMcpAllowAllConfirmationTarget: (v) => {
+        this.mcpAllowAllConfirmationTarget = v;
+      },
+      setSubscriptionLogoutConfirmationTarget: (v) => {
+        this.subscriptionLogoutConfirmationTarget = v;
+      },
+      setPendingSettingsPickerAction: (v) => {
+        this.pendingSettingsPickerAction = v;
+      },
+      setPendingModelPickerTarget: (v) => {
+        this.pendingModelPickerTarget = v;
+      },
+      setPendingProviderModelPickerTarget: (v) => {
+        this.pendingProviderModelPickerTarget = v;
+      },
     });
   }
 
@@ -548,31 +515,46 @@ export class SettingsModal {
    *   - INACTIVE: no confirm pending   → returns 'inactive' (caller continues)
    */
   handleSubscriptionLogoutKey(key: string): 'confirmed' | 'cancelled' | 'absorbed' | 'inactive' {
-    return _handleSubscriptionLogoutKey({
-      subscriptionLogoutConfirmationTarget: this.subscriptionLogoutConfirmationTarget,
-      subscriptionManager: this.subscriptionManager,
-      serviceRegistry: this.serviceRegistry,
-      setSubscriptionEntries: (entries) => { this.subscriptionEntries = entries; },
-      setSubscriptionLogoutConfirmationTarget: (v) => { this.subscriptionLogoutConfirmationTarget = v; },
-    }, key);
+    return _handleSubscriptionLogoutKey(
+      {
+        subscriptionLogoutConfirmationTarget: this.subscriptionLogoutConfirmationTarget,
+        subscriptionManager: this.subscriptionManager,
+        serviceRegistry: this.serviceRegistry,
+        setSubscriptionEntries: (entries) => {
+          this.subscriptionEntries = entries;
+        },
+        setSubscriptionLogoutConfirmationTarget: (v) => {
+          this.subscriptionLogoutConfirmationTarget = v;
+        },
+      },
+      key,
+    );
   }
 
   adjustSelected(direction: 'left' | 'right', step = 1): void {
     this._refreshPolicyAvailability();
-    _adjustSelected({
-      editingMode: this.editingMode,
-      currentCategory: this.currentCategory,
-      configManager: this.configManager,
-      featureFlagManager: this.featureFlagManager,
-      mcpRegistry: this.mcpRegistry,
-      getSelectedFlag: () => this.getSelectedFlag(),
-      getSelectedMcp: () => this.getSelectedMcp(),
-      getSelected: () => this.getSelected(),
-      setValue: (key, value) => this._setValue(key, value),
-      setHostValue: (key, value) => this._setHostValue(key, value),
-      setMcpEntries: (entries) => { this.mcpEntries = entries; },
-      setMcpAllowAllConfirmationTarget: (v) => { this.mcpAllowAllConfirmationTarget = v; },
-    }, direction, step);
+    _adjustSelected(
+      {
+        editingMode: this.editingMode,
+        currentCategory: this.currentCategory,
+        configManager: this.configManager,
+        featureFlagManager: this.featureFlagManager,
+        mcpRegistry: this.mcpRegistry,
+        getSelectedFlag: () => this.getSelectedFlag(),
+        getSelectedMcp: () => this.getSelectedMcp(),
+        getSelected: () => this.getSelected(),
+        setValue: (key, value) => this._setValue(key, value),
+        setHostValue: (key, value) => this._setHostValue(key, value),
+        setMcpEntries: (entries) => {
+          this.mcpEntries = entries;
+        },
+        setMcpAllowAllConfirmationTarget: (v) => {
+          this.mcpAllowAllConfirmationTarget = v;
+        },
+      },
+      direction,
+      step,
+    );
   }
 
   /**
@@ -614,10 +596,18 @@ export class SettingsModal {
       getSelectedMcp: () => this.getSelectedMcp(),
       getSelected: () => this.getSelected(),
       setValue: (key, value) => this._setValue(key, value),
-      setEditingMode: (v) => { this.editingMode = v; },
-      setEditBuffer: (v) => { this.editBuffer = v; },
-      setMcpEntries: (entries) => { this.mcpEntries = entries; },
-      setMcpAllowAllConfirmationTarget: (v) => { this.mcpAllowAllConfirmationTarget = v; },
+      setEditingMode: (v) => {
+        this.editingMode = v;
+      },
+      setEditBuffer: (v) => {
+        this.editBuffer = v;
+      },
+      setMcpEntries: (entries) => {
+        this.mcpEntries = entries;
+      },
+      setMcpAllowAllConfirmationTarget: (v) => {
+        this.mcpAllowAllConfirmationTarget = v;
+      },
     });
   }
 
@@ -640,23 +630,33 @@ export class SettingsModal {
         if (!configManager) throw new Error('Settings owner unavailable.');
         if (daemonConfig?.ownsKey(key)) await daemonConfig.set(key, value);
         configManager.validateDynamic?.(key, value);
-        const result = applySettingValue({ key, value, configManager, groups,
-          onSettingApplied: onApplied, refreshGroups: () => refreshEntryValues(groups, configManager) });
+        const result = applySettingValue({
+          key,
+          value,
+          configManager,
+          groups,
+          onSettingApplied: onApplied,
+          refreshGroups: () => refreshEntryValues(groups, configManager),
+        });
         if (result.effectMessage?.startsWith('Save failed:')) throw new Error(result.effectMessage);
         effectMessage = result.effectMessage;
       },
       trackSecretWrite: (write: Promise<boolean>) => {
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = 'Saving credential…';
-        this.pendingSecretWrite = write.then((ok) => {
-          if (session === this.secretWriteSession) {
-            if (ok) {
-              this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.';
-              if (configManager) refreshEntryValues(this.groups, configManager);
-            } else this.lastSettingEffectMessage = secretWriteError ?? 'Saving that credential failed.';
-            this.requestRender?.();
-          }
-          return ok;
-        }).finally(() => { this.pendingSecretWrite = null; });
+        this.pendingSecretWrite = write
+          .then((ok) => {
+            if (session === this.secretWriteSession) {
+              if (ok) {
+                this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.';
+                if (configManager) refreshEntryValues(this.groups, configManager);
+              } else this.lastSettingEffectMessage = secretWriteError ?? 'Saving that credential failed.';
+              this.requestRender?.();
+            }
+            return ok;
+          })
+          .finally(() => {
+            this.pendingSecretWrite = null;
+          });
       },
     };
   }
@@ -668,11 +668,17 @@ export class SettingsModal {
     const daemonCredentials = this.daemonCredentials;
     return (entries) => {
       if (!configManager || entries.length === 0) return;
-      const writes = entries.map(({ key, value }) => setSecretBackedSettingValue({
-        key, value: String(value ?? ''), configManager, secretsManager,
-        daemonCredentials, setConfigValue: context.setSecretConfigValue,
-        onError: context.reportError,
-      }));
+      const writes = entries.map(({ key, value }) =>
+        setSecretBackedSettingValue({
+          key,
+          value: String(value ?? ''),
+          configManager,
+          secretsManager,
+          daemonCredentials,
+          setConfigValue: context.setSecretConfigValue,
+          onError: context.reportError,
+        }),
+      );
       context.trackSecretWrite(Promise.all(writes).then((results) => results.every(Boolean)));
     };
   }
@@ -704,8 +710,12 @@ export class SettingsModal {
     _initiateResetCategory({
       hasConfigManager: this.configManager !== null,
       currentCategory: this.currentCategory,
-      setResetCategoryConfirm: (v) => { this.resetCategoryConfirm = v; },
-      setResetAllConfirm: (v) => { this.resetAllConfirm = v; },
+      setResetCategoryConfirm: (v) => {
+        this.resetCategoryConfirm = v;
+      },
+      setResetAllConfirm: (v) => {
+        this.resetAllConfirm = v;
+      },
     });
   }
 
@@ -714,15 +724,19 @@ export class SettingsModal {
     if (this.pendingSecretWrite) return;
     _initiateResetAll({
       hasConfigManager: this.configManager !== null,
-      setResetCategoryConfirm: (v) => { this.resetCategoryConfirm = v; },
-      setResetAllConfirm: (v) => { this.resetAllConfirm = v; },
+      setResetCategoryConfirm: (v) => {
+        this.resetCategoryConfirm = v;
+      },
+      setResetAllConfirm: (v) => {
+        this.resetAllConfirm = v;
+      },
     });
   }
 
   /** Route a key through the active reset confirm gate. See ResetConfirmKeyResult for the return contract. */
   handleResetConfirmKey(key: string): ResetConfirmKeyResult {
-    if (this.pendingSecretWrite && (this.resetCategoryConfirm || this.resetAllConfirm)
-      && (key === 'enter' || key === 'y')) return 'absorbed';
+    if (this.pendingSecretWrite && (this.resetCategoryConfirm || this.resetAllConfirm) && (key === 'enter' || key === 'y'))
+      return 'absorbed';
     if (this.resetCategoryConfirm || this.resetAllConfirm) this._refreshPolicyAvailability();
     return _handleResetConfirmKey({
       key,
@@ -734,8 +748,12 @@ export class SettingsModal {
       resetSecrets: this._createSecretResetter(),
       setValue: (k, value) => this._setValue(k, value),
       setHostValue: (key, value) => this._setHostValue(key, value),
-      setResetCategoryConfirm: (v) => { this.resetCategoryConfirm = v; },
-      setResetAllConfirm: (v) => { this.resetAllConfirm = v; },
+      setResetCategoryConfirm: (v) => {
+        this.resetCategoryConfirm = v;
+      },
+      setResetAllConfirm: (v) => {
+        this.resetAllConfirm = v;
+      },
     });
   }
 
@@ -769,11 +787,7 @@ export class SettingsModal {
    * feature-unit headers included.
    */
   private _currentItems(): SettingEntry[] {
-    if (
-      this.currentCategory === 'mcp'
-      || this.currentCategory === 'subscriptions'
-      || this.currentCategory === 'connections'
-    ) return [];
+    if (this.currentCategory === 'mcp' || this.currentCategory === 'subscriptions' || this.currentCategory === 'connections') return [];
     const items = this.groups.get(this.currentCategory) ?? [];
     if (this.currentCategory === 'network') {
       return buildNetworkFilteredItems(items, this.configManager);
@@ -788,7 +802,10 @@ export class SettingsModal {
   private _setHostValue(key: string, value: boolean): void {
     if (!this.configManager) return;
     const result = applyHostSettingValue({
-      key, value, configManager: this.configManager, groups: this.groups,
+      key,
+      value,
+      configManager: this.configManager,
+      groups: this.groups,
       onSettingApplied: this.onSettingApplied,
     });
     this.lastSettingEffectMessage = result.effectMessage;
@@ -797,9 +814,7 @@ export class SettingsModal {
   private _setValue(key: ConfigKey, value: unknown): void {
     if (!this.configManager) return;
 
-    const callback: SettingAppliedCallback | null = this.onSettingApplied
-      ? (change) => this.onSettingApplied!(change)
-      : null;
+    const callback: SettingAppliedCallback | null = this.onSettingApplied ? (change) => this.onSettingApplied!(change) : null;
 
     const result = applySettingValue({
       key,
@@ -848,5 +863,4 @@ export class SettingsModal {
       }
     }
   }
-
 }

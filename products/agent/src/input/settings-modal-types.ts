@@ -1,18 +1,18 @@
+import type {
+  CommonSettingsCategory,
+  CommonSettingEntryState,
+  SettingsValueSource,
+  SettingsModalChangeHandler,
+} from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
-import type { ConfigKey } from '@goodvibes-jev/engine/sdk/platform/config';
+
 import type { FeatureSetting, FlagState } from '@/runtime/index.ts';
 
-export interface SettingsModalChange {
-  readonly key: ConfigKey;
-  readonly previousValue: unknown;
-  readonly value: unknown;
-}
+export type { SettingsModalChange } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 
-export interface SettingsModalChangeResult {
-  readonly message?: string;
-}
+export type { SettingsModalChangeResult } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 
-export type SettingsModalChangeHandler = (change: SettingsModalChange) => SettingsModalChangeResult | void;
+export type { SettingsModalChangeHandler } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 
 export interface SettingsModalOpenOptions {
   readonly onSettingApplied?: SettingsModalChangeHandler;
@@ -20,83 +20,9 @@ export interface SettingsModalOpenOptions {
   readonly requestRender?: () => void;
 }
 
-export type SettingsCategory =
-  | 'display'
-  | 'ui'
-  | 'provider'
-  | 'judgment'
-  | 'subscriptions'
-  | 'behavior'
-  | 'profile'
-  | 'storage'
-  | 'permissions'
-  | 'diagnostics'
-  | 'tools'
-  | 'helper'
-  | 'tts'
-  | 'surfaces'
-  | 'conversationGate'
-  | 'hostedSessions'
-  | 'automation'
-  | 'checkin'
-  | 'occasions'
-  | 'service'
-  | 'controlPlane'
-  | 'httpListener'
-  | 'danger'
-  | 'web'
-  | 'watchers'
-  | 'relay'
-  | 'network'
-  | 'orchestration'
-  | 'planner'
-  | 'runtime'
-  | 'sandbox'
-  | 'batch'
-  | 'cloudflare'
-  | 'contract'
-  | 'telemetry'
-  | 'cache'
-  | 'mcp'
-  | 'flags'
-  | 'release'
-  | 'daemon'
-  | 'atRest'
-  | 'learning'
-  | 'agents'
-  | 'notifications'
-  | 'policy'
-  | 'fetch'
-  | 'security'
-  | 'integrations'
-  | 'update'
-  | 'pricing'
-  | 'power'
-  | 'fleet'
-  | 'voice'
-  | 'device'
-  | 'cluster'
-  | 'memory'
-  | 'payments'
-  // email.* / calendar.* / google.*, the connector keys the daemon really
-  // reads for its mail and calendar services (platform runtime 2.0.8 registered
-  // all 22 of them as described schema rows; before that they were cast onto
-  // the live config at runtime, so this surface answered "Unknown setting" for
-  // a key the daemon reads and writes every time it composes mail or refreshes
-  // a calendar).
-  //
-  // Both this entry AND the SETTINGS_CATEGORY_GROUPS membership below are
-  // mandatory: a setting's category is its key's first segment and every push
-  // is guarded by `if (groups.has(cat))`, so a root with an entry here but no
-  // group membership, or the reverse, is dropped from the workspace entirely
-  // and reachable only by hand-editing a settings file. That is exactly what
-  // happened to push.* and cluster.*, which is why they are cross-listed in
-  // CROSS_LISTED_SETTING_ROOTS above rather than left silently unreachable.
-  | 'email'
-  | 'calendar'
-  | 'google';
+export type SettingsCategory = CommonSettingsCategory | 'flags' | 'fleet' | 'cluster';
 
-export type SettingsFocusPane = 'categories' | 'settings';
+export type { SettingsFocusRegion as SettingsFocusPane } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 
 /**
  * Config-key roots that have no category of their own, and the category each
@@ -151,7 +77,24 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   // to a calendar, how many questions the gift interview asks. Daemon-owned like
   // `profile` and `payments`, which is a routing fact about where the write
   // lands rather than a reason to file it away from the settings he weighs.
-  { label: 'Agent Experience', categories: ['display', 'ui', 'behavior', 'profile', 'occasions', 'agents', 'notifications', 'permissions', 'policy', 'fetch', 'diagnostics', 'power', 'payments'] },
+  {
+    label: 'Agent Experience',
+    categories: [
+      'display',
+      'ui',
+      'behavior',
+      'profile',
+      'occasions',
+      'agents',
+      'notifications',
+      'permissions',
+      'policy',
+      'fetch',
+      'diagnostics',
+      'power',
+      'payments',
+    ],
+  },
   { label: 'Models and Providers', categories: ['provider', 'judgment', 'subscriptions', 'helper', 'tools', 'tts', 'voice', 'pricing'] },
   { label: 'Agent-local state', categories: ['storage', 'cache', 'telemetry', 'atRest', 'security', 'learning'] },
   // `email`, `calendar` and `google` sit beside `surfaces` for the reason
@@ -160,7 +103,22 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   // reads and writes, and the Google OAuth record the two share, rather than
   // anything about how this terminal presents them. Daemon-owned, like several
   // other categories in this group.
-  { label: 'Channels and Tools', categories: ['surfaces', 'conversationGate', 'hostedSessions', 'device', 'email', 'calendar', 'google', 'mcp', 'automation', 'checkin', 'integrations'] },
+  {
+    label: 'Channels and Tools',
+    categories: [
+      'surfaces',
+      'conversationGate',
+      'hostedSessions',
+      'device',
+      'email',
+      'calendar',
+      'google',
+      'mcp',
+      'automation',
+      'checkin',
+      'integrations',
+    ],
+  },
   // `danger` sits with the other listener/binding categories because that is
   // what it is: danger.httpListener opens an inbound webhook listener. It is
   // rendered like any other setting rather than hidden, the write is gated by
@@ -174,23 +132,21 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   // them would leave the owner unable to configure which of his machines reads
   // the inbox from the surface he actually uses, which is the same mistake the
   // retired host-owned lock made.
-  { label: 'Daemon Runtime', categories: ['daemon', 'service', 'controlPlane', 'httpListener', 'danger', 'web', 'watchers', 'network', 'relay', 'cluster', 'update'] },
-  { label: 'Advanced Runtime', categories: ['orchestration', 'fleet', 'planner', 'runtime', 'sandbox', 'batch', 'cloudflare', 'contract', 'memory'] },
+  {
+    label: 'Daemon Runtime',
+    categories: ['daemon', 'service', 'controlPlane', 'httpListener', 'danger', 'web', 'watchers', 'network', 'relay', 'cluster', 'update'],
+  },
+  {
+    label: 'Advanced Runtime',
+    categories: ['orchestration', 'fleet', 'planner', 'runtime', 'sandbox', 'batch', 'cloudflare', 'contract', 'memory'],
+  },
   { label: 'Advanced', categories: ['flags', 'release'] },
 ];
 
-export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap(group => group.categories);
+export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap((group) => group.categories);
 
-export interface SettingEntry {
+export interface SettingEntry extends CommonSettingEntryState<SettingsValueSource | 'unavailable'> {
   setting: AgentConfigSetting;
-  currentValue: unknown;
-  isDefault: boolean;
-  effectiveSource?: 'default' | 'local' | 'synced' | 'managed' | 'unavailable';
-  metadataUnavailable?: string;
-  locked?: boolean;
-  conflict?: boolean;
-  sourceLabel?: string;
-  lockReason?: string;
 }
 
 export interface FlagEntry {
@@ -202,13 +158,6 @@ export interface FlagEntry {
   enablementValue: string;
 }
 
-export interface McpEntry {
-  name: string;
-  connected: boolean;
-  role: string;
-  trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked';
-  allowedPaths: string[];
-  allowedHosts: string[];
-}
+export type { McpEntry } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 
 export type { SubscriptionEntry } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';

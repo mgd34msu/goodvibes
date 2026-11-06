@@ -1,3 +1,5 @@
+import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
+import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/sdk/platform/config';
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
@@ -12,25 +14,17 @@ import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
-import {
-  getNumericAdjustmentMeta,
-  modelPickerLaunchForKey,
-  parseNumberEditBuffer,
-  roundToPrecision,
-} from './settings-modal-behavior.ts';
+import { getNumericAdjustmentMeta, modelPickerLaunchForKey, parseNumberEditBuffer, roundToPrecision } from './settings-modal-behavior.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/sdk/platform/payments';
-import {
-  setSecretBackedSettingValue,
-  type SettingsSecretsManager,
-} from './settings-modal-secrets.ts';
+import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsSyntheticEntries } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagState } from '@/runtime/index.ts';
-import { FEATURE_SETTINGS } from '@/runtime/index.ts';
-import { isFeatureEnabledInConfig, resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
+import '@/runtime/index.ts';
+import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -71,59 +65,58 @@ export { isAgentHiddenSettingKey } from './settings-modal-agent-policy.ts';
 // SettingsModal
 // ---------------------------------------------------------------------------
 
-export class SettingsModal {
-  public active = false;
-
+export class SettingsModal extends TerminalSettingsModalState<
+  SettingsCategory,
+  SettingEntry,
+  ModelPickerTarget,
+  'tts-provider' | 'tts-voice' | 'theme' | 'daemon-timezone'
+> {
   /** Index into SETTINGS_CATEGORIES. */
-  public categoryIndex = 0;
 
   /** Selected setting index within the current category. */
-  public selectedIndex = 0;
 
   /** Which pane receives up/down navigation and Enter/Space actions. */
   public focusPane: SettingsFocusPane = 'settings';
 
   /** Whether we're in inline edit mode for the selected string/number setting. */
-  public editingMode = false;
 
   /** Current value of the inline edit buffer. */
-  public editBuffer = '';
+
   /** Server awaiting explicit allow-all confirmation, if any. */
-  public mcpAllowAllConfirmationTarget: string | null = null;
+
   /**
    * Set by activateSelected() when the highlighted setting should open the
    * model picker rather than entering inline text edit mode.
    * Consumed and cleared by the route handler after each Enter/Space action.
    */
-  public pendingModelPickerTarget: ModelPickerTarget | null = null;
+
   /** Set when the highlighted setting should open provider selection before model selection. */
-  public pendingProviderModelPickerTarget: ModelPickerTarget | null = null;
+
   /** Set when a highlighted setting needs an external picker owned by the shell route. */
-  public pendingSettingsPickerAction: 'tts-provider' | 'tts-voice' | 'daemon-timezone' | 'theme' | null = null;
+
   /** Provider awaiting explicit logout confirmation, if any. */
-  public subscriptionLogoutConfirmationTarget: string | null = null;
 
   /** Settings grouped by category. */
-  public groups: Map<SettingsCategory, SettingEntry[]> = new Map();
 
   /** Feature entries grouped by settings domain (populated when the features tab is active). */
   public flagEntries: FlagEntry[] = [];
   /** MCP server trust entries (populated when mcp tab is active). */
-  public mcpEntries: McpEntry[] = [];
-  /** Provider subscription entries (populated when subscriptions tab is active). */
-  public subscriptionEntries: SubscriptionEntry[] = [];
 
-  public lastSettingEffectMessage: string | null = null;
+  /** Provider subscription entries (populated when subscriptions tab is active). */
+
   /** Accepted secret edits finish here; commitEdit remains a synchronous keystroke API. */
-  public pendingSecretWrite: Promise<boolean> | null = null;
+
   private secretWriteSession = 0;
   /** The always-live search row: a non-empty query lists ranked matches from every category. */
-  public searchQuery = '';
-  public searchResults: SettingEntry[] = [];
-  get searchFocused(): boolean { return this.searchQuery.length > 0; }
+
+  get searchFocused(): boolean {
+    return this.searchQuery.length > 0;
+  }
   /** Rows the selected setting's documentation is scrolled (PgUp/PgDn); reset when the selection moves. */
-  public contextScroll = 0;
-  scrollContext(delta: number): void { this.contextScroll = Math.max(0, this.contextScroll + delta); }
+
+  scrollContext(delta: number): void {
+    this.contextScroll = Math.max(0, this.contextScroll + delta);
+  }
 
   private configManager: ConfigManager | null = null;
   private unsubscribeHostSetting: (() => void) | null = null;
@@ -181,27 +174,34 @@ export class SettingsModal {
     const hostSubscriptions: Array<() => void> = [];
     for (const setting of configManager.getHostSettingsSchema?.() ?? []) {
       if (!isAgentHostSettingKey(setting.key)) continue;
-      hostSubscriptions.push(configManager.getHostBooleanSetting(setting.key).subscribe(() => {
-        if (!this.active || this.configManager !== configManager) return;
-        for (const entries of this.groups.values()) {
-          for (const entry of entries) this._refreshHostEntry(entry);
-        }
-        this.requestHostSettingRender?.();
-      }));
+      hostSubscriptions.push(
+        configManager.getHostBooleanSetting(setting.key).subscribe(() => {
+          if (!this.active || this.configManager !== configManager) return;
+          for (const entries of this.groups.values()) {
+            for (const entry of entries) this._refreshHostEntry(entry);
+          }
+          this.requestHostSettingRender?.();
+        }),
+      );
     }
-    this.unsubscribeHostSetting = () => { for (const unsubscribe of hostSubscriptions) unsubscribe(); };
+    this.unsubscribeHostSetting = () => {
+      for (const unsubscribe of hostSubscriptions) unsubscribe();
+    };
     if (hasActiveExecutionMode(configManager)) {
       const opened = this.secretWriteSession;
-      void refreshExecutionMode(configManager).then(() => {
-        if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
-        this._refreshAllEntries();
-        this.requestHostSettingRender?.();
-      }, () => {
-        if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
-        this.lastSettingEffectMessage = 'The active hosted execution mode is unavailable.';
-        this._refreshAllEntries();
-        this.requestHostSettingRender?.();
-      });
+      void refreshExecutionMode(configManager).then(
+        () => {
+          if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
+          this._refreshAllEntries();
+          this.requestHostSettingRender?.();
+        },
+        () => {
+          if (!this.active || this.configManager !== configManager || opened !== this.secretWriteSession) return;
+          this.lastSettingEffectMessage = 'The active hosted execution mode is unavailable.';
+          this._refreshAllEntries();
+          this.requestHostSettingRender?.();
+        },
+      );
     }
   }
 
@@ -224,14 +224,8 @@ export class SettingsModal {
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = null;
-    this.editingMode = false;
-    this.editBuffer = '';
-    this.pendingModelPickerTarget = null;
-    this.pendingProviderModelPickerTarget = null;
-    this.pendingSettingsPickerAction = null;
-    this.mcpAllowAllConfirmationTarget = null;
-    this.subscriptionLogoutConfirmationTarget = null;
-    this.lastSettingEffectMessage = null;
+    this.resetSettingsInteraction();
+
     this.serviceRegistry = null;
     this.secretsManager = null;
     this.onSettingApplied = null;
@@ -294,43 +288,33 @@ export class SettingsModal {
   }
 
   moveUp(): void {
-    if (this.editingMode) return;
-    this.contextScroll = 0;
-    const items = this.searchFocused ? this.searchResults : this._currentItems();
-    if (this.searchFocused && items.length === 0) return;
-    if (items.length === 0) {
-      if (this.currentCategory === 'flags' && this.flagEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.flagEntries.length) % this.flagEntries.length;
-      } else if (this.currentCategory === 'mcp' && this.mcpEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.mcpEntries.length) % this.mcpEntries.length;
-      } else if (this.currentCategory === 'subscriptions' && this.subscriptionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex - 1 + this.subscriptionEntries.length) % this.subscriptionEntries.length;
-        this.subscriptionLogoutConfirmationTarget = null;
-      }
-      return;
-    }
-    this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
-    this.subscriptionLogoutConfirmationTarget = null;
+    moveSettingsSelection(this, -1, {
+      items: () => this._currentItems().length,
+      specialItems: () =>
+        this.currentCategory === 'mcp'
+          ? this.mcpEntries.length
+          : this.currentCategory === 'subscriptions'
+            ? this.subscriptionEntries.length
+            : this.currentCategory === 'flags'
+              ? this.flagEntries.length
+              : 0,
+      clearSearchConfirmation: true,
+    });
   }
 
   moveDown(): void {
-    if (this.editingMode) return;
-    this.contextScroll = 0;
-    const items = this.searchFocused ? this.searchResults : this._currentItems();
-    if (this.searchFocused && items.length === 0) return;
-    if (items.length === 0) {
-      if (this.currentCategory === 'flags' && this.flagEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.flagEntries.length;
-      } else if (this.currentCategory === 'mcp' && this.mcpEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.mcpEntries.length;
-      } else if (this.currentCategory === 'subscriptions' && this.subscriptionEntries.length > 0) {
-        this.selectedIndex = (this.selectedIndex + 1) % this.subscriptionEntries.length;
-        this.subscriptionLogoutConfirmationTarget = null;
-      }
-      return;
-    }
-    this.selectedIndex = (this.selectedIndex + 1) % items.length;
-    this.subscriptionLogoutConfirmationTarget = null;
+    moveSettingsSelection(this, 1, {
+      items: () => this._currentItems().length,
+      specialItems: () =>
+        this.currentCategory === 'mcp'
+          ? this.mcpEntries.length
+          : this.currentCategory === 'subscriptions'
+            ? this.subscriptionEntries.length
+            : this.currentCategory === 'flags'
+              ? this.flagEntries.length
+              : 0,
+      clearSearchConfirmation: true,
+    });
   }
 
   getSelected(): SettingEntry | null {
@@ -367,28 +351,12 @@ export class SettingsModal {
   }
 
   selectTarget(target?: string): void {
-    const normalized = target?.trim();
-    if (!normalized) return;
-
-    const categoryIndex = SETTINGS_CATEGORIES.indexOf(normalized as SettingsCategory);
-    if (categoryIndex >= 0) {
-      this.categoryIndex = categoryIndex;
-      this.selectedIndex = 0;
-      this.focusPane = 'settings';
-      return;
-    }
-
-    for (let index = 0; index < SETTINGS_CATEGORIES.length; index += 1) {
-      const category = SETTINGS_CATEGORIES[index]!;
-      const entries = this.groups.get(category) ?? [];
-      const entryIndex = entries.findIndex((entry) => entry.setting.key === normalized);
-      if (entryIndex >= 0) {
-        this.categoryIndex = index;
-        this.selectedIndex = entryIndex;
+    selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
+      resetScroll: false,
+      focusSettings: () => {
         this.focusPane = 'settings';
-        return;
-      }
-    }
+      },
+    });
   }
 
   /**
@@ -484,9 +452,7 @@ export class SettingsModal {
       if (!entry || !this.mcpRegistry) return;
       const modes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
       const currentIndex = Math.max(0, modes.indexOf(entry.trustMode));
-      const nextIndex = direction === 'right'
-        ? (currentIndex + 1) % modes.length
-        : (currentIndex - 1 + modes.length) % modes.length;
+      const nextIndex = direction === 'right' ? (currentIndex + 1) % modes.length : (currentIndex - 1 + modes.length) % modes.length;
       this.mcpRegistry.setServerTrustMode(entry.name, modes[nextIndex]!);
       this._loadMcpEntries();
       this.mcpAllowAllConfirmationTarget = null;
@@ -505,9 +471,10 @@ export class SettingsModal {
 
     if (setting.type === 'enum' && setting.enumValues && setting.enumValues.length > 0) {
       const currentIndex = Math.max(0, setting.enumValues.indexOf(String(entry.currentValue)));
-      const nextIndex = direction === 'right'
-        ? (currentIndex + 1) % setting.enumValues.length
-        : (currentIndex - 1 + setting.enumValues.length) % setting.enumValues.length;
+      const nextIndex =
+        direction === 'right'
+          ? (currentIndex + 1) % setting.enumValues.length
+          : (currentIndex - 1 + setting.enumValues.length) % setting.enumValues.length;
       this._setValue(setting.key, setting.enumValues[nextIndex]!);
       return;
     }
@@ -518,10 +485,7 @@ export class SettingsModal {
       const adjustment = getNumericAdjustmentMeta(setting);
       const delta = adjustment.step * step;
       const rounded = roundToPrecision(currentNumber + (direction === 'right' ? delta : -delta), adjustment.precision);
-      const nextValue = Math.min(
-        adjustment.max ?? rounded,
-        Math.max(adjustment.min ?? rounded, rounded),
-      );
+      const nextValue = Math.min(adjustment.max ?? rounded, Math.max(adjustment.min ?? rounded, rounded));
       if (setting.validate && !setting.validate(nextValue)) return;
       this._setValue(setting.key, nextValue);
     }
@@ -653,7 +617,9 @@ export class SettingsModal {
     const session = this.secretWriteSession;
     this.lastSettingEffectMessage = 'Saving credential…';
     this.pendingSecretWrite = setSecretBackedSettingValue({
-      key, value, configManager,
+      key,
+      value,
+      configManager,
       secretsManager: this.secretsManager,
       setConfigValue: async (key, value) => {
         if (configClient?.ownsKey(key)) {
@@ -669,13 +635,20 @@ export class SettingsModal {
         if (report.ok) effectMessage = report.message;
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = report.message;
       },
-    }).then((ok) => {
-      if (session === this.secretWriteSession) {
-        if (ok) { this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.'; this._refreshAllEntries(); }
-        this.requestHostSettingRender?.();
-      }
-      return ok;
-    }).finally(() => { this.pendingSecretWrite = null; });
+    })
+      .then((ok) => {
+        if (session === this.secretWriteSession) {
+          if (ok) {
+            this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.';
+            this._refreshAllEntries();
+          }
+          this.requestHostSettingRender?.();
+        }
+        return ok;
+      })
+      .finally(() => {
+        this.pendingSecretWrite = null;
+      });
   }
 
   /** Cancel inline edit without saving. */
@@ -727,7 +700,13 @@ export class SettingsModal {
       if (isAgentHiddenSettingKey(setting.key)) continue;
       const rawCat = setting.key.split('.')[0] as string;
       const cat = rawCat as SettingsCategory;
-      const display = readConfigSettingForDisplay(() => setting.key === 'permissions.mode' ? readExecutionMode(configManager) : setting.kind === 'host' ? configManager.getHostBooleanSetting(setting.key).get() : configManager.get(setting.key));
+      const display = readConfigSettingForDisplay(() =>
+        setting.key === 'permissions.mode'
+          ? readExecutionMode(configManager)
+          : setting.kind === 'host'
+            ? configManager.getHostBooleanSetting(setting.key).get()
+            : configManager.get(setting.key),
+      );
       const currentValue = display.value;
       const resolved = setting.kind === 'host' || policyError ? undefined : getResolvedSettingLookup(configManager, setting.key)?.entry;
       const entry: SettingEntry = {
@@ -741,7 +720,8 @@ export class SettingsModal {
         // is gone, those keys route to the daemon that owns them.
         locked: resolved?.locked,
         conflict: resolved?.conflict,
-        sourceLabel: setting.key === 'permissions.mode' && hasActiveExecutionMode(configManager) ? 'Active hosted session' : resolved?.sourceLabel,
+        sourceLabel:
+          setting.key === 'permissions.mode' && hasActiveExecutionMode(configManager) ? 'Active hosted session' : resolved?.sourceLabel,
         lockReason: resolved?.lockReason,
       };
       this._refreshHostEntry(entry);
@@ -770,10 +750,17 @@ export class SettingsModal {
       }
     }
     if (policyError) {
-      for (const entries of this.groups.values()) for (const entry of entries) {
-        Object.assign(entry, { effectiveSource: 'unavailable', metadataUnavailable: policyError,
-          locked: undefined, conflict: undefined, sourceLabel: undefined, lockReason: undefined });
-      }
+      for (const entries of this.groups.values())
+        for (const entry of entries) {
+          Object.assign(entry, {
+            effectiveSource: 'unavailable',
+            metadataUnavailable: policyError,
+            locked: undefined,
+            conflict: undefined,
+            sourceLabel: undefined,
+            lockReason: undefined,
+          });
+        }
     }
 
     const uiEntries = this.groups.get('ui');
@@ -816,12 +803,20 @@ export class SettingsModal {
     if (!this.configManager) return;
     for (const entries of this.groups.values()) {
       for (const entry of entries) {
-        if (entry.setting.kind === 'host') { this._refreshHostEntry(entry); continue; }
-        const display = readConfigSettingForDisplay(() => entry.setting.key === 'permissions.mode' ? readExecutionMode(this.configManager!) : this.configManager!.get(entry.setting.key as never));
+        if (entry.setting.kind === 'host') {
+          this._refreshHostEntry(entry);
+          continue;
+        }
+        const display = readConfigSettingForDisplay(() =>
+          entry.setting.key === 'permissions.mode'
+            ? readExecutionMode(this.configManager!)
+            : this.configManager!.get(entry.setting.key as never),
+        );
         entry.currentValue = display.value;
         entry.metadataUnavailable = display.held;
         entry.isDefault = entry.currentValue === entry.setting.default;
-        if (entry.setting.key === 'permissions.mode') entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
+        if (entry.setting.key === 'permissions.mode')
+          entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
         this._refreshHostEntry(entry);
       }
     }
@@ -836,13 +831,22 @@ export class SettingsModal {
     try {
       const resolved = handle.getResolved();
       Object.assign(entry, {
-        effectiveSource: resolved.source, locked: resolved.managedLock !== null,
-        metadataUnavailable: undefined, conflict: undefined, sourceLabel: undefined,
+        effectiveSource: resolved.source,
+        locked: resolved.managedLock !== null,
+        metadataUnavailable: undefined,
+        conflict: undefined,
+        sourceLabel: undefined,
         lockReason: resolved.managedLock ? `${resolved.managedLock.source}: ${resolved.managedLock.reason}` : undefined,
       });
     } catch (error) {
-      Object.assign(entry, { effectiveSource: 'unavailable', metadataUnavailable: summarizeError(error),
-        locked: undefined, conflict: undefined, sourceLabel: undefined, lockReason: undefined });
+      Object.assign(entry, {
+        effectiveSource: 'unavailable',
+        metadataUnavailable: summarizeError(error),
+        locked: undefined,
+        conflict: undefined,
+        sourceLabel: undefined,
+        lockReason: undefined,
+      });
     }
   }
 
@@ -868,15 +872,18 @@ export class SettingsModal {
       this.lastSettingEffectMessage = 'Saving execution mode…';
       const owner = this.configManager;
       const opened = this.secretWriteSession;
-      void setExecutionMode(owner, value).then(() => {
-        if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
-        this.lastSettingEffectMessage = 'Execution mode updated.';
-        this._refreshAllEntries();
-      }, error => {
-        if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
-        this.lastSettingEffectMessage = `Save failed: ${summarizeError(error)}`;
-        this.requestHostSettingRender?.();
-      });
+      void setExecutionMode(owner, value).then(
+        () => {
+          if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
+          this.lastSettingEffectMessage = 'Execution mode updated.';
+          this._refreshAllEntries();
+        },
+        (error) => {
+          if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
+          this.lastSettingEffectMessage = `Save failed: ${summarizeError(error)}`;
+          this.requestHostSettingRender?.();
+        },
+      );
       return true;
     }
     const previousValue = postalConfigKey(key) ? this.configManager.getStored(key) : this.configManager.get(key);
@@ -934,22 +941,31 @@ export class SettingsModal {
         if (isAgentHostSettingKey(setting.key)) config.getHostBooleanSetting(setting.key).getResolved();
       }
       return undefined;
-    } catch (error) { return summarizeError(error); }
+    } catch (error) {
+      return summarizeError(error);
+    }
   }
 
   private _canEditSettings(): boolean {
     if (!this.configManager) return false;
     const error = this._hostPolicyMetadataError();
     if (error) {
-      for (const entries of this.groups.values()) for (const entry of entries) {
-        Object.assign(entry, { effectiveSource: 'unavailable', metadataUnavailable: error,
-          locked: undefined, conflict: undefined, sourceLabel: undefined, lockReason: undefined });
-      }
+      for (const entries of this.groups.values())
+        for (const entry of entries) {
+          Object.assign(entry, {
+            effectiveSource: 'unavailable',
+            metadataUnavailable: error,
+            locked: undefined,
+            conflict: undefined,
+            sourceLabel: undefined,
+            lockReason: undefined,
+          });
+        }
       this.lastSettingEffectMessage = `Editing unavailable: ${error}`;
       return false;
     }
-    if ([...this.groups.values()].some(entries => entries.some(entry => entry.metadataUnavailable))) this._loadGroups(this.configManager);
+    if ([...this.groups.values()].some((entries) => entries.some((entry) => entry.metadataUnavailable)))
+      this._loadGroups(this.configManager);
     return true;
   }
-
 }

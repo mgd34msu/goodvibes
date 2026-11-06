@@ -1094,13 +1094,15 @@
       "path": "input/settings-modal-types.ts",
       "baselineTuiLines": 217,
       "baselineSimilarity": 0.3514,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns the common category union, value/lock/source state, focus model, MCP rows and generic change callback contract. Product type extensions retain TUI builtin/host union and feature-unit rows versus Agent-specific schema, unavailable source, flags and category grouping."
     },
     {
       "path": "input/settings-modal.ts",
       "baselineTuiLines": 852,
       "baselineSimilarity": 0.352,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns shared state allocation and interaction reset, selection movement/target resolution, settings data/search/edit/MCP/subscription helpers and command/row rendering. Product controllers retain exact write authority, Agent execution-mode and host routing, TUI daemon credentials/connections and distinct reset/flag/picker affordances."
     },
     {
       "path": "input/submission-intent.ts",

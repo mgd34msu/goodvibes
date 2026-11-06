@@ -2913,6 +2913,21 @@
       "bun": "./terminal-shell/src/auth-review-command.ts",
       "types": "./terminal-shell/dist/auth-review-command.d.ts",
       "import": "./terminal-shell/dist/auth-review-command.js"
+    },
+    "./terminal-shell/settings-model-types": {
+      "bun": "./terminal-shell/src/settings-model-types.ts",
+      "types": "./terminal-shell/dist/settings-model-types.d.ts",
+      "import": "./terminal-shell/dist/settings-model-types.js"
+    },
+    "./terminal-shell/settings-navigation": {
+      "bun": "./terminal-shell/src/settings-navigation.ts",
+      "types": "./terminal-shell/dist/settings-navigation.d.ts",
+      "import": "./terminal-shell/dist/settings-navigation.js"
+    },
+    "./terminal-shell/settings-modal-state": {
+      "bun": "./terminal-shell/src/settings-modal-state.ts",
+      "types": "./terminal-shell/dist/settings-modal-state.d.ts",
+      "import": "./terminal-shell/dist/settings-modal-state.js"
     }
   },
   "publishConfig": {

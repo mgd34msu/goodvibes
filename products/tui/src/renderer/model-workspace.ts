@@ -1,3 +1,8 @@
+import {
+  modelWorkspaceKey as modelKey,
+  modelWorkspaceTargetSummary,
+  modelWorkspaceProviderRows,
+} from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
 /**
  * renderModelWorkspace, the model picker drawn with the surface kit.
  *
@@ -52,25 +57,7 @@ function formatContext(value: number | undefined): string {
   return abbreviateCount(value, { rounding: 'round', decimals: 0 });
 }
 
-function modelKey(model: ModelDefinition): string {
-  return model.registryKey ?? `${model.provider}:${model.id}`;
-}
-
-function formatRoute(provider: string, model: string): string {
-  if (!provider && !model) return '(not set)';
-  if (!provider) return model;
-  if (!model) return provider;
-  return model.startsWith(`${provider}:`) ? model : `${provider}:${model}`;
-}
-
-function targetSummary(info: ModelPickerTargetInfo): string {
-  if (!info.enabled) return 'disabled';
-  // 'embeddings' has no model concept; configuredNote carries the honest
-  // provider id + dimensions + configured-state summary instead.
-  if (info.configuredNote) return info.configuredNote;
-  const route = formatRoute(info.provider, info.model);
-  return info.inherited ? `inherits ${route}` : route;
-}
+const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, true);
 
 function targetLabelFor(target: string): string {
   if (target === 'helper') return 'Helper';
@@ -128,43 +115,18 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
       selected,
     });
   });
-  if (rows.length === 0 && !picker.catalogLoading) rows.push({ label: picker.query ? `No models match "${picker.query}".` : 'No models are available for this target.', muted: true });
+  if (rows.length === 0 && !picker.catalogLoading)
+    rows.push({ label: picker.query ? `No models match "${picker.query}".` : 'No models are available for this target.', muted: true });
   return rows;
 }
 
-function providerRows(picker: ModelPickerModal): KitRow[] {
-  const t = activeTokens();
-  const counts = new Map<string, number>();
-  for (const model of picker.models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
-  const providers = picker.getFilteredProviders();
-  const rows: KitRow[] = [];
-  let index = 0;
-  for (const item of picker.getItems()) {
-    if (item.isGroupHeader) {
-      rows.push({ header: item.label });
-      continue;
-    }
-    const provider = item.id;
-    const configured = picker.configuredProviders.has(provider);
-    const via = picker.configuredViaMap.get(provider) ?? (configured ? 'configured' : 'not configured');
-    const i = providers.indexOf(provider);
-    rows.push({
-      label: provider,
-      desc: via,
-      right: `${counts.get(provider) ?? 0} models`,
-      mark: configured ? '●' : '○',
-      markFg: configured ? t.success : t.warning,
-      selected: (i >= 0 ? i : index) === picker.selectedIndex,
-    });
-    index++;
-  }
-  if (rows.length === 0 && !picker.catalogLoading) rows.push({ label: picker.query ? `No providers match "${picker.query}".` : 'No providers are registered.', muted: true });
-  return rows;
-}
+const providerRows = (picker: ModelPickerModal): KitRow[] =>
+  modelWorkspaceProviderRows(picker, { unconfiguredColor: activeTokens().warning, groupedItems: picker.getItems() });
 
 function embeddingRows(picker: ModelPickerModal): KitRow[] {
   const t = activeTokens();
-  if (picker.embeddingProviders.length === 0) return picker.catalogLoading ? [] : [{ label: 'No embedding providers are registered.', muted: true }];
+  if (picker.embeddingProviders.length === 0)
+    return picker.catalogLoading ? [] : [{ label: 'No embedding providers are registered.', muted: true }];
   return picker.embeddingProviders.map((provider, index) => ({
     label: provider.label,
     desc: provider.detail,
@@ -194,7 +156,8 @@ function effortRows(picker: ModelPickerModal): KitRow[] {
   picker.effortLevels.forEach((effort, index) => {
     rows.push({ label: effort, desc: presentation?.choices[index]?.description || undefined, selected: index === picker.selectedIndex });
   });
-  if (presentation?.caveat && picker.effortLevels.length > 0) rows.push({ label: presentation.caveat, selectable: false, labelFg: t.textFaint });
+  if (presentation?.caveat && picker.effortLevels.length > 0)
+    rows.push({ label: presentation.caveat, selectable: false, labelFg: t.textFaint });
   return rows;
 }
 
@@ -266,7 +229,8 @@ function drawModelDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): 
       y += 2;
     }
     if (model.description && y <= p.bottom) y = insetWrap(c, p, p.l, y, model.description, { fg: t.textMuted }) + 1;
-    if (picker.isLocalModel(model) && y <= p.bottom) y = insetWrap(c, p, p.l, y, 'Local model: space sets a context cap.', { fg: t.textFaint }) + 1;
+    if (picker.isLocalModel(model) && y <= p.bottom)
+      y = insetWrap(c, p, p.l, y, 'Local model: space sets a context cap.', { fg: t.textFaint }) + 1;
   }
   drawTargetFooter(f, picker, p, y);
 }
@@ -301,10 +265,19 @@ function drawStepDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): v
     const target = picker.getSelectedTargetInfo();
     y = insetWrap(c, p, p.l, y, provider || 'No provider selected', { fg: t.text, bold: true });
     y++;
-    y = insetWrap(c, p, p.l, y, `Choose a provider, then choose a model for ${target?.label ?? targetLabelFor(picker.target)}.`, { fg: t.textMuted });
+    y = insetWrap(c, p, p.l, y, `Choose a provider, then choose a model for ${target?.label ?? targetLabelFor(picker.target)}.`, {
+      fg: t.textMuted,
+    });
     if (provider) {
       const via = picker.configuredViaMap.get(provider);
-      y = kv(c, p, y + 1, 'Status', picker.configuredProviders.has(provider) ? `configured${via ? ` via ${via}` : ''}` : 'not configured', picker.configuredProviders.has(provider) ? t.success : t.warning);
+      y = kv(
+        c,
+        p,
+        y + 1,
+        'Status',
+        picker.configuredProviders.has(provider) ? `configured${via ? ` via ${via}` : ''}` : 'not configured',
+        picker.configuredProviders.has(provider) ? t.success : t.warning,
+      );
       y = kv(c, p, y, 'Models', String(picker.models.filter((m) => m.provider === provider).length));
     }
   } else if (picker.mode === 'embeddingProvider') {
@@ -319,9 +292,11 @@ function drawStepDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): v
     }
   } else if (picker.mode === 'effort') {
     const model = picker.pendingModel;
-    y = insetWrap(c, p, p.l, y, model ? (model.displayName || model.id) : 'Reasoning effort', { fg: t.text, bold: true });
+    y = insetWrap(c, p, p.l, y, model ? model.displayName || model.id : 'Reasoning effort', { fg: t.text, bold: true });
     if (model) y = insetWrap(c, p, p.l, y, modelKey(model), { fg: t.textFaint });
-    y = insetWrap(c, p, p.l, y + 1, 'Reasoning effort applies to the main chat model. Select the default effort for this model.', { fg: t.textMuted });
+    y = insetWrap(c, p, p.l, y + 1, 'Reasoning effort applies to the main chat model. Select the default effort for this model.', {
+      fg: t.textMuted,
+    });
   }
   drawTargetFooter(f, picker, p, y + 1);
 }
@@ -355,19 +330,49 @@ function drawContextCap(f: ModalFrame, picker: ModelPickerModal, top: number, x0
 // ---------------------------------------------------------------------------
 
 /** The filter chords of the model list (shown in the detail inset, or in the hints without one). */
-const FILTER_HINTS: readonly KitHint[] = [['ctrl+t', 'price'], ['ctrl+k', 'capability'], ['ctrl+a', 'available'], ['ctrl+b', 'benchmark sort'], ['ctrl+g', 'group']];
+const FILTER_HINTS: readonly KitHint[] = [
+  ['ctrl+t', 'price'],
+  ['ctrl+k', 'capability'],
+  ['ctrl+a', 'available'],
+  ['ctrl+b', 'benchmark sort'],
+  ['ctrl+g', 'group'],
+];
 
 function pickerHints(picker: ModelPickerModal, withFilters: boolean): KitHint[] {
   const target = picker.getSelectedTargetInfo()?.label ?? targetLabelFor(picker.target);
   switch (picker.mode) {
-    case 'effort': return [['↑↓', 'move'], ['⏎', 'use this effort'], ['esc', 'back to models']];
-    case 'contextCap': return [['0-9', 'cap'], ['⏎', 'confirm'], ['esc', 'back to models']];
-    case 'embeddingProvider': return [['↑↓', 'move'], ['⏎', 'use'], ['tab', 'next target']];
-    case 'provider': return [['↑↓', 'move'], ['⏎', 'choose provider'], ['tab', 'next target']];
-    default: return [
-      ['⏎', `use for ${target}`], ['tab', 'next target'], ['ctrl+f', 'pin'], ['ctrl+r', 'refresh catalog'],
-      ...(withFilters ? FILTER_HINTS : []),
-    ];
+    case 'effort':
+      return [
+        ['↑↓', 'move'],
+        ['⏎', 'use this effort'],
+        ['esc', 'back to models'],
+      ];
+    case 'contextCap':
+      return [
+        ['0-9', 'cap'],
+        ['⏎', 'confirm'],
+        ['esc', 'back to models'],
+      ];
+    case 'embeddingProvider':
+      return [
+        ['↑↓', 'move'],
+        ['⏎', 'use'],
+        ['tab', 'next target'],
+      ];
+    case 'provider':
+      return [
+        ['↑↓', 'move'],
+        ['⏎', 'choose provider'],
+        ['tab', 'next target'],
+      ];
+    default:
+      return [
+        ['⏎', `use for ${target}`],
+        ['tab', 'next target'],
+        ['ctrl+f', 'pin'],
+        ['ctrl+r', 'refresh catalog'],
+        ...(withFilters ? FILTER_HINTS : []),
+      ];
   }
 }
 
@@ -383,26 +388,37 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   if (cached?.key === cacheKey && cached.tokens === activeTokens()) return cached.layer;
 
   const pending = picker.mode === 'effort' ? picker.pendingModel : picker.mode === 'contextCap' ? picker.contextCapPendingModel : null;
-  const crumbs = picker.mode === 'effort' ? [pending?.displayName ?? 'model', 'Reasoning effort']
-    : picker.mode === 'contextCap' ? [pending?.displayName ?? 'model', 'Context cap']
-    : picker.mode === 'provider' ? ['Providers']
-    : undefined;
+  const crumbs =
+    picker.mode === 'effort'
+      ? [pending?.displayName ?? 'model', 'Reasoning effort']
+      : picker.mode === 'contextCap'
+        ? [pending?.displayName ?? 'model', 'Context cap']
+        : picker.mode === 'provider'
+          ? ['Providers']
+          : undefined;
   const inner = modalInnerWidth(standardModalWidth(screenWidth));
   const sideBySide = inner >= 60;
   const f = beginModal(screenWidth, screenHeight, { title: 'Models', crumbs, hints: pickerHints(picker, !sideBySide) });
 
   // Targets as tabs; the active tab carries the gradient.
-  const labels = picker.targetInfos.length > 0
-    ? picker.targetInfos.map((info) => `${targetLabelFor(info.target)}${info.enabled ? '' : ' (off)'}`)
-    : [targetLabelFor(picker.target)];
-  tabs(f.canvas, f.l, f.top, labels, picker.targetInfos.length > 0 ? picker.targetIndex : 0, f.r, index => { const target = picker.targetInfos[index]; if (target) picker.setTarget(target.target); });
+  const labels =
+    picker.targetInfos.length > 0
+      ? picker.targetInfos.map((info) => `${targetLabelFor(info.target)}${info.enabled ? '' : ' (off)'}`)
+      : [targetLabelFor(picker.target)];
+  tabs(f.canvas, f.l, f.top, labels, picker.targetInfos.length > 0 ? picker.targetIndex : 0, f.r, (index) => {
+    const target = picker.targetInfos[index];
+    if (target) picker.setTarget(target.target);
+  });
 
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
   let body = f.top + 2;
   if (searchable) {
     const total = picker.mode === 'model' ? picker.models.length : picker.providers.length;
     const shown = picker.getItemCount();
-    const counted = picker.query.length > 0 || shown !== total ? `${shown.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}` : `${total.toLocaleString('en-US')} ${picker.mode === 'model' ? 'models' : 'providers'}`;
+    const counted =
+      picker.query.length > 0 || shown !== total
+        ? `${shown.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`
+        : `${total.toLocaleString('en-US')} ${picker.mode === 'model' ? 'models' : 'providers'}`;
     const filters = picker.mode === 'model' ? filterSummary(picker) : '';
     const count = filters ? `${filters} · ${counted}` : counted;
     searchRow(f, body, picker.query, picker.mode === 'model' ? 'Search models' : 'Search providers', count);
@@ -415,10 +431,14 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   if (picker.mode === 'contextCap') {
     drawContextCap(f, picker, body, f.l, x1);
   } else {
-    const listed = picker.mode === 'model' ? modelRows(picker, !sideBySide)
-      : picker.mode === 'provider' ? providerRows(picker)
-      : picker.mode === 'embeddingProvider' ? embeddingRows(picker)
-      : effortRows(picker);
+    const listed =
+      picker.mode === 'model'
+        ? modelRows(picker, !sideBySide)
+        : picker.mode === 'provider'
+          ? providerRows(picker)
+          : picker.mode === 'embeddingProvider'
+            ? embeddingRows(picker)
+            : effortRows(picker);
     // The picker opens on its cached catalog; the rest fills in while this row shows.
     const rows = picker.catalogLoading && picker.mode !== 'effort' ? [LOADING_ROW, ...listed] : listed;
     result = drawList(f.canvas, { mouseNavigation: true, rows, top: body, bottom: f.bottom, x0: f.l, x1, scrollKey });
@@ -509,15 +529,17 @@ function keyForMap(values: ReadonlyMap<string, string | undefined>): string {
 
 function keyForTargets(values: readonly ModelPickerTargetInfo[]): string {
   return values
-    .map((entry) => [
-      entry.target,
-      entry.label,
-      entry.description,
-      entry.provider,
-      entry.model,
-      entry.enabled ? 1 : 0,
-      entry.inherited ? 1 : 0,
-      entry.configuredNote ?? '',
-    ].join('\u001d'))
+    .map((entry) =>
+      [
+        entry.target,
+        entry.label,
+        entry.description,
+        entry.provider,
+        entry.model,
+        entry.enabled ? 1 : 0,
+        entry.inherited ? 1 : 0,
+        entry.configuredNote ?? '',
+      ].join('\u001d'),
+    )
     .join('\u001f');
 }

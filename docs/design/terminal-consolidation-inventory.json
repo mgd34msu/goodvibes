@@ -1360,7 +1360,8 @@
       "path": "renderer/model-workspace.ts",
       "baselineTuiLines": 523,
       "baselineSimilarity": 0.1532,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "notes": "Shared route/key/target facts and provider rows over platform modal kit. Product model lists/details intentionally differ: TUI embedding targets, benchmark meters and render cache; Agent local-fit/sign-in rows and hardware guidance. Grouping and unconfigured-row colors remain explicit presentation policy."
     },
     {
       "path": "renderer/notifications-modal.ts",

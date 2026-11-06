@@ -1,3 +1,8 @@
+import {
+  modelWorkspaceKey as modelKey,
+  modelWorkspaceTargetSummary,
+  modelWorkspaceProviderRows,
+} from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
 /**
  * The provider/model picker, drawn with the modal surface kit.
  *
@@ -22,7 +27,14 @@ import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/provide
 import type { ModelPickerModal } from '../input/model-picker.ts';
 import type { ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { isLocalFitRecommendation, isProviderSignInRow, LOCAL_REC_PROVIDER } from '../input/model-picker-local-fit.ts';
-import { estimateModelBytes, fitAssessment, fitVerdictLabel, paramCountFromModel, readHardwareProfileSync, REPRESENTATIVE_7B_PARAMS } from '../core/hardware-profile.ts';
+import {
+  estimateModelBytes,
+  fitAssessment,
+  fitVerdictLabel,
+  paramCountFromModel,
+  readHardwareProfileSync,
+  REPRESENTATIVE_7B_PARAMS,
+} from '../core/hardware-profile.ts';
 import { activeTokens } from './theme.ts';
 import { beginModal, finishModal, scrollCountText, searchRow, type KitHint, type SurfaceLayer } from './surface-kit.ts';
 import { drawList, type KitRow } from './surface-kit-list.ts';
@@ -54,11 +66,13 @@ const MODEL_WORKSPACE_TABLE_HEADERS = {
   tier: 'Tier',
   caps: 'Caps',
 } as const;
-const MODEL_WORKSPACE_REASONING_EFFORT_DETAIL = 'Reasoning effort applies to the main chat model. Select the default effort for this model.';
+const MODEL_WORKSPACE_REASONING_EFFORT_DETAIL =
+  'Reasoning effort applies to the main chat model. Select the default effort for this model.';
 const MODEL_WORKSPACE_CONTEXT_CAP_DETAIL = 'Context cap overrides the detected local-model context window for this selection.';
 const MODEL_WORKSPACE_CONTEXT_CAP_INPUT_HELP = 'Type digits to set a cap. Enter confirms; Esc returns to the model list.';
 const MODEL_WORKSPACE_LOCAL_ONLY_HEADER = 'No provider signed in, these run on your machine';
-const MODEL_WORKSPACE_LOCAL_ONLY_SIGN_IN = 'Sign in instead: select "Sign in to a provider" in the list below to connect a cloud or local provider.';
+const MODEL_WORKSPACE_LOCAL_ONLY_SIGN_IN =
+  'Sign in instead: select "Sign in to a provider" in the list below to connect a cloud or local provider.';
 
 /**
  * Returns true when every model in the picker's list is a synthetic local
@@ -77,27 +91,11 @@ function formatContext(value: number | undefined): string {
   return String(value);
 }
 
-function modelKey(model: ModelDefinition): string {
-  return model.registryKey ?? `${model.provider}:${model.id}`;
-}
-
-function targetSummary(info: ModelPickerTargetInfo): string {
-  if (!info.enabled) return 'disabled';
-  const route = formatRoute(info.provider, info.model);
-  if (info.inherited) return `inherits ${route}`;
-  return route;
-}
+const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, false);
 
 function selectedModel(picker: ModelPickerModal): ModelDefinition | null {
   if (picker.mode !== 'model') return null;
   return picker.getSelected();
-}
-
-function formatRoute(provider: string, model: string): string {
-  if (!provider && !model) return '(not set)';
-  if (!provider) return model;
-  if (!model) return provider;
-  return model.startsWith(`${provider}:`) ? model : `${provider}:${model}`;
 }
 
 function targetLabelFor(target: string): string {
@@ -115,16 +113,9 @@ function modelSelectionDetail(targetLabel: string): string {
   return `Model selection: choose the model to store for ${targetLabel}. Use filters to narrow large catalogs.`;
 }
 
-function modelWorkspaceFilterText(
-  query: string,
-  price: string,
-  capability: string,
-  group: string,
-  availableOnly: string,
-): string {
+function modelWorkspaceFilterText(query: string, price: string, capability: string, group: string, availableOnly: string): string {
   return `Search: ${query} | Price: ${price} | Capability: ${capability} | Group: ${group} | Available only: ${availableOnly}`;
 }
-
 
 export function renderModelWorkspacePackageText(): string {
   return [
@@ -210,9 +201,7 @@ function modelHardwareFitLine(model: ModelDefinition): string {
   const params = parsedParams ?? REPRESENTATIVE_7B_PARAMS;
   const sizeBytes = estimateModelBytes(params);
   // Build a human-readable size descriptor only when we could parse the real size.
-  const sizeDescriptor = parsedParams !== null
-    ? formatParamDescriptor(parsedParams)
-    : undefined;
+  const sizeDescriptor = parsedParams !== null ? formatParamDescriptor(parsedParams) : undefined;
   const label = fitVerdictLabel(fitAssessment(sizeBytes, readHardwareProfileSync()), sizeDescriptor);
   return label ? `Hardware: ${label}` : '';
 }
@@ -242,18 +231,18 @@ function detailLines(picker: ModelPickerModal): string[] {
     lines.push(modelSelectionDetail(targetLabel));
     if (selected) {
       const caps = selected.capabilities ?? {};
-      const capText = [
-        caps.reasoning ? 'reasoning' : '',
-        caps.multimodal ? 'vision' : '',
-        caps.toolCalling ? 'tools' : '',
-      ].filter(Boolean).join(', ') || 'standard';
+      const capText =
+        [caps.reasoning ? 'reasoning' : '', caps.multimodal ? 'vision' : '', caps.toolCalling ? 'tools' : ''].filter(Boolean).join(', ') ||
+        'standard';
       // Suppress the key:id line for synthetic local recommendations, they have
       // no real registry key and displaying the synthetic id would confuse users.
       if (isProviderSignInRow(selected)) {
         lines.push('Sign in to a provider to connect a cloud or local model.');
         if (selected.description) lines.push(selected.description);
       } else if (!isLocalFitRecommendation(selected)) {
-        lines.push(`Selected: ${modelKey(selected)} | ${selected.displayName} | context ${formatContext(selected.contextWindow)} | ${capText}`);
+        lines.push(
+          `Selected: ${modelKey(selected)} | ${selected.displayName} | context ${formatContext(selected.contextWindow)} | ${capText}`,
+        );
       } else {
         lines.push(`Selected: ${selected.displayName}`);
         // Show the fit hint from the description (e.g. "not yet installed (fits in GPU memory)")
@@ -267,18 +256,46 @@ function detailLines(picker: ModelPickerModal): string[] {
   } else {
     lines.push(MODEL_WORKSPACE_CONTEXT_CAP_DETAIL);
   }
-  const filterText = modelWorkspaceFilterText(picker.query || '(none)', picker.categoryFilter, picker.capabilityFilter, picker.groupBy, picker.availableOnly ? 'yes' : 'no');
+  const filterText = modelWorkspaceFilterText(
+    picker.query || '(none)',
+    picker.categoryFilter,
+    picker.capabilityFilter,
+    picker.groupBy,
+    picker.availableOnly ? 'yes' : 'no',
+  );
   lines.push(filterText);
   return lines;
 }
 
-
 /** Keycap hints for a picker step. */
 function hintsFor(mode: ModelPickerModal['mode']): KitHint[] {
-  if (mode === 'effort') return [['↑↓', 'move'], ['⏎', 'use this effort']];
-  if (mode === 'contextCap') return [['0-9', 'type a cap'], ['⏎', 'confirm']];
-  if (mode === 'provider') return [['↑↓', 'move'], ['⏎', 'show models'], ['tab', 'target']];
-  return [['↑↓', 'move'], ['⏎', 'select'], ['tab', 'target'], ['ctrl+t', 'price'], ['ctrl+k', 'caps'], ['ctrl+a', 'available'], ['ctrl+b', 'benchmark'], ['ctrl+g', 'group'], ['space', 'context cap (local)']];
+  if (mode === 'effort')
+    return [
+      ['↑↓', 'move'],
+      ['⏎', 'use this effort'],
+    ];
+  if (mode === 'contextCap')
+    return [
+      ['0-9', 'type a cap'],
+      ['⏎', 'confirm'],
+    ];
+  if (mode === 'provider')
+    return [
+      ['↑↓', 'move'],
+      ['⏎', 'show models'],
+      ['tab', 'target'],
+    ];
+  return [
+    ['↑↓', 'move'],
+    ['⏎', 'select'],
+    ['tab', 'target'],
+    ['ctrl+t', 'price'],
+    ['ctrl+k', 'caps'],
+    ['ctrl+a', 'available'],
+    ['ctrl+b', 'benchmark'],
+    ['ctrl+g', 'group'],
+    ['space', 'context cap (local)'],
+  ];
 }
 
 function capabilityText(model: ModelDefinition): string {
@@ -314,23 +331,8 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
   return rows;
 }
 
-function providerRows(picker: ModelPickerModal): KitRow[] {
-  const t = activeTokens();
-  const counts = new Map<string, number>();
-  for (const model of picker.models) counts.set(model.provider, (counts.get(model.provider) ?? 0) + 1);
-  return picker.getFilteredProviders().map((provider, index) => {
-    const configured = picker.configuredProviders.has(provider);
-    const via = picker.configuredViaMap.get(provider) ?? (configured ? 'configured' : 'not configured');
-    return {
-      label: provider,
-      desc: via,
-      right: `${counts.get(provider) ?? 0} models`,
-      mark: configured ? '●' : '○',
-      markFg: configured ? t.success : t.textFaint,
-      selected: index === picker.selectedIndex,
-    };
-  });
-}
+const providerRows = (picker: ModelPickerModal): KitRow[] =>
+  modelWorkspaceProviderRows(picker, { unconfiguredColor: activeTokens().textFaint });
 
 function effortRows(picker: ModelPickerModal): KitRow[] {
   return picker.effortLevels.map((effort, index) => ({
@@ -363,7 +365,10 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
   if (searchable) {
     const total = picker.mode === 'model' ? picker.models.length : picker.providers.length;
-    const count = picker.query.length > 0 ? `${picker.mode === 'model' ? picker.getFilteredModels().length : picker.getFilteredProviders().length} of ${total}` : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
+    const count =
+      picker.query.length > 0
+        ? `${picker.mode === 'model' ? picker.getFilteredModels().length : picker.getFilteredProviders().length} of ${total}`
+        : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
     searchRow(f, top, picker.query, picker.mode === 'model' ? 'Search models' : 'Search providers', count);
     top += 2;
   }
@@ -379,13 +384,20 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   if (picker.mode === 'contextCap') {
     const model = picker.contextCapPendingModel;
     const input = picker.contextCapQuery.length > 0 ? `${picker.contextCapQuery}▏` : '▏(use detected context)';
-    drawTextBlock(f.canvas, split.x0, split.top, split.x1 - split.x0 + 1, [
-      { text: `Model: ${model ? modelKey(model) : '(none)'}`, style: { fg: t.text } },
-      { text: `Detected context: ${formatContext(model?.contextWindow)}`, style: { fg: t.textMuted } },
-      { text: `Override: ${input}`, style: { fg: t.brand, bold: true } },
-      { text: '' },
-      { text: MODEL_WORKSPACE_CONTEXT_CAP_INPUT_HELP, style: { fg: t.textFaint } },
-    ], split.bottom);
+    drawTextBlock(
+      f.canvas,
+      split.x0,
+      split.top,
+      split.x1 - split.x0 + 1,
+      [
+        { text: `Model: ${model ? modelKey(model) : '(none)'}`, style: { fg: t.text } },
+        { text: `Detected context: ${formatContext(model?.contextWindow)}`, style: { fg: t.textMuted } },
+        { text: `Override: ${input}`, style: { fg: t.brand, bold: true } },
+        { text: '' },
+        { text: MODEL_WORKSPACE_CONTEXT_CAP_INPUT_HELP, style: { fg: t.textFaint } },
+      ],
+      split.bottom,
+    );
     return finishModal(f);
   }
 
@@ -397,8 +409,14 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
     drawTextBlock(f.canvas, split.x0, split.top, split.x1 - split.x0 + 1, [{ text: message, style: { fg: t.textMuted } }], split.bottom);
     return finishModal(f);
   }
-  const res = drawList(f.canvas, { rows, top: split.top, bottom: split.bottom, x0: split.x0, x1: split.x1, scrollKey: { owner: picker, name: picker.mode } });
+  const res = drawList(f.canvas, {
+    rows,
+    top: split.top,
+    bottom: split.bottom,
+    x0: split.x0,
+    x1: split.x1,
+    scrollKey: { owner: picker, name: picker.mode },
+  });
   f.hintRight = scrollCountText(res.above, res.below);
   return finishModal(f);
 }
-

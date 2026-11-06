@@ -147,7 +147,6 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
     return chips;
   }
   function buildShellFooter(options: Options): ShellFooterBuildResult {
-    const t = activeTokens();
     const lines: Line[] = [];
     const view = options.view ?? null;
     // Passive hint rows, topmost first: the retry affordance (actionable, time

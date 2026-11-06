@@ -3008,6 +3008,11 @@
       "bun": "./terminal-shell/src/renderer/shell-footer.ts",
       "types": "./terminal-shell/dist/renderer/shell-footer.d.ts",
       "import": "./terminal-shell/dist/renderer/shell-footer.js"
+    },
+    "./terminal-shell/model-workspace-facts": {
+      "bun": "./terminal-shell/src/renderer/model-workspace-facts.ts",
+      "types": "./terminal-shell/dist/renderer/model-workspace-facts.d.ts",
+      "import": "./terminal-shell/dist/renderer/model-workspace-facts.js"
     }
   },
   "publishConfig": {

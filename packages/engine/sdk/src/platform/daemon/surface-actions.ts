@@ -1,4 +1,5 @@
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { surfaceControl, type SurfaceControlTarget, type SurfaceControlReading } from './batteries/surface-control.js';
@@ -401,9 +402,18 @@ export class DaemonSurfaceActionHelper {
         if (!current || current.kind !== target.kind || current.record !== records.get(target.id)) throw new Error('Surface control target is no longer available');
       }
     };
-    const reading = await surfaceControl.read(daemonReadingPort('daemon.surface-control', assertCurrent, options.signal), text, targets, { ...options, beforeAttempt: assertCurrent });
-    if (reading.command) this.controlTargets.set(reading.command, assertCurrent);
-    return reading.command;
+    const command = await decisionOrClassic<SurfaceControlReading | null>(async () => {
+      const reading = await surfaceControl.read(daemonReadingPort('daemon.surface-control', assertCurrent, options.signal), text, targets, { ...options, beforeAttempt: assertCurrent });
+      return reading.command;
+    }, () => {
+      assertCurrent();
+      const literal = /^\/(status|cancel|retry)\s+([a-z0-9:_-]+)$/iu.exec(text.trim());
+      const action = literal?.[1]?.toLowerCase(), id = literal?.[2];
+      return id && targets.some(target => target.id === id) && (action === 'status' || action === 'cancel' || action === 'retry')
+        ? Object.freeze({ action, id }) : null;
+    });
+    if (command) this.controlTargets.set(command, assertCurrent);
+    return command;
   }
 
   async performSurfaceControlCommand(

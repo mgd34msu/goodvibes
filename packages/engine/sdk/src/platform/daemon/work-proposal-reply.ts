@@ -1,4 +1,5 @@
 import { workProposalReply } from './batteries/conversation-gate.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
@@ -22,7 +23,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export type WorkProposalReplyOutcome =
-  | { readonly consumed: false }
+  | { readonly consumed: false; readonly reason?: 'decision-model-required' }
   | { readonly consumed: true; readonly action: 'accepted' | 'declined' | 'expired' | 'unsettled' };
 
 export interface WorkProposalReplyDeps {
@@ -74,6 +75,7 @@ export async function tryResolveWorkProposalReplyFromChannel(
   input: ChannelIngressPolicyInput,
   deps: WorkProposalReplyDeps,
 ): Promise<WorkProposalReplyOutcome> {
+  if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   const store = deps.proposals;
   if (!store) return { consumed: false };
   // Explicit authenticated button wire tokens are not conversational replies.

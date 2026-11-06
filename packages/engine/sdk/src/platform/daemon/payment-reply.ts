@@ -16,6 +16,7 @@ import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../channe
 import type { PaymentReplyInbox, PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { parseCommandAuthorityChannel } from '../payments/types.js';
 import { logger } from '../utils/logger.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 
 /**
  * Offer an inbound message to the purchase windows waiting on its channel.
@@ -27,6 +28,7 @@ export async function tryResolvePaymentReplyFromChannel(
   decision: ChannelPolicyDecision,
   inbox: PaymentReplyInbox | undefined,
 ): Promise<PaymentReplyOffer> {
+  if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   if (inbox === undefined || inbox.pending === 0 || !input.userId || !input.text) return { consumed: false, reason: 'no-window' };
   const owners = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
   if (owners.length === 0 || !owners.includes(input.userId)) return { consumed: false, reason: 'no-window' };

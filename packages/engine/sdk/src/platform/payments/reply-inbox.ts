@@ -41,7 +41,7 @@ export class PaymentReplyInboxClosedError extends Error {
 }
 
 export type PaymentReplyOffer =
-  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' }
+  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'decision-model-required' }
   | { readonly consumed: true; readonly answer: PaymentAnswer };
 
 export class PaymentReplyInbox implements PaymentReplySource {

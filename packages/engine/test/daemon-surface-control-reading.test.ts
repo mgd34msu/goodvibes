@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createSystemOnePort, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
 import { handleHomeAssistantSurfaceWebhook } from '../sdk/src/platform/adapters/homeassistant/index.ts';
 import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.ts';
@@ -54,6 +55,20 @@ function harness(unregistered = false) {
 }
 
 describe('the real daemon surface control caller', () => {
+  test('Classic accepts an explicit existing-target command once and leaves ordinary prose alone without a model', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const h = harness();
+      await h.authorize('/cancel run-1');
+      const command = await h.context.parseSurfaceControlCommand('/cancel run-1');
+      expect(command).toEqual({ action: 'cancel', id: 'run-1' });
+      await h.context.performSurfaceControlCommand(command!);
+      expect(h.effects).toEqual(['cancel:run-1']);
+      expect(() => h.context.performSurfaceControlCommand(command!)).toThrow();
+      expect(await h.context.parseSurfaceControlCommand('Explain the text "/cancel run-1"')).toBeNull();
+      expect(await h.context.parseSurfaceControlCommand('/cancel missing-run')).toBeNull();
+      expect(requests).toEqual([]);
+    });
+  });
   for (const action of ['status', 'cancel', 'retry'] as const) test(`reads paraphrased ${action} and executes the exact existing ID`, async () => {
     const h = harness(); route = action;
     const text = action === 'status' ? 'How is run-1 progressing?' : action === 'cancel' ? 'Please stop run-1 now' : 'Give run-1 another try';

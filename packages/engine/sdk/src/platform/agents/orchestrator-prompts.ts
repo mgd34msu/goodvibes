@@ -11,6 +11,7 @@ import { CONVERSATIONAL_DIAGNOSIS_SECTION } from './conversational-contract.js';
 import { readPreparedKnowledgePromptPacket, type PreparedKnowledgePromptPacket } from '../knowledge/packet.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
@@ -33,6 +34,13 @@ export async function prepareOrchestratorPromptContext(
   deps?: PromptContextDeps,
   signal?: AbortSignal,
 ): Promise<PromptContextDeps | undefined> {
+  return decisionOrClassic(() => prepareDecisionOrchestratorPromptContext(record, deps, signal), () => {
+    signal?.throwIfAborted(); deps?.projectFramework?.assertCurrent();
+    return deps ? { ...deps, knowledgeService: undefined, preparedKnowledgePrompt: undefined } : deps;
+  });
+}
+
+async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, deps?: PromptContextDeps, signal?: AbortSignal): Promise<PromptContextDeps | undefined> {
   if (!deps?.knowledgeService) return deps;
   const preparedKnowledgePrompt = await deps.knowledgeService.preparePromptPacket(
     record.task, record.writeScope ?? [], undefined, { ...(signal ? { signal } : {}) },
@@ -45,6 +53,7 @@ export async function prepareOrchestratorPromptContext(
  */
 export function assertOrchestratorKnowledgeCurrent(record: AgentRecord, deps?: PromptContextDeps): void {
   deps?.projectFramework?.assertCurrent();
+  if (isClassicOperation()) return;
   if (deps?.preparedKnowledgePrompt) {
     readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, record.task, record.writeScope ?? []);
   } else if (deps?.knowledgeService) {
@@ -346,7 +355,7 @@ ${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOS
     parts.push(knowledgePrompt);
   }
   assertOrchestratorKnowledgeCurrent(record, deps);
-  const curatedKnowledgePrompt = deps?.preparedKnowledgePrompt
+  const curatedKnowledgePrompt = !isClassicOperation() && deps?.preparedKnowledgePrompt
     ? readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, record.task, record.writeScope ?? [])
     : null;
   if (curatedKnowledgePrompt) {

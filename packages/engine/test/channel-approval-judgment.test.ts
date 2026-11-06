@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { actionOf, readingsOf, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { ApprovalBroker } from '../sdk/src/platform/control-plane/approval-broker.ts';
 import { ChannelPolicyManager } from '../sdk/src/platform/channels/policy-manager.ts';
@@ -93,6 +94,21 @@ function assertRecorded(approvalId: string, choice: string, selected = false) {
 }
 
 describe('channel replies use settled meaning instead of leading words', () => {
+  test('Classic exact owner approval resolves through the real broker without a decision request', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const h = await harness();
+      const ask = await h.ask();
+      const command = `/approve ${ask.approval.id}`;
+      const response = await h.send(command);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toContain('approval-reply-consumed');
+      expect((await ask.decision).approved).toBe(true);
+      expect(h.broker.getApproval(ask.approval.id)?.decision).toMatchObject({ approved: true, disposition: 'approved', reason: 'Explicit owner command during Classic operation.' });
+      expect(h.submitted).toEqual([]);
+      expect(allRequests).toEqual([]);
+      expect(readings.log.query()).toEqual([]);
+    });
+  });
   test.each([
     ['negated assent', 'Yes? No, do not deploy it.', 'reject', false],
     ['negative word with affirmative meaning', 'No problem, go ahead.', 'approve', true],

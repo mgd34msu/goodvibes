@@ -2,6 +2,7 @@ import type { ConversationMessageSnapshot, ConversationTitleSource } from '../co
 import type { HelperModel } from '../config/helper-model.js';
 import type { ConfigManager } from '../config/manager.js';
 import { reportsPendingApproval } from './batteries/pending-approval.js';
+import { decisionOrClassic } from './decision-policy.js';
 
 export type ReturnContextMode = 'off' | 'local' | 'assisted';
 
@@ -20,7 +21,8 @@ export interface SessionReturnContextSummary {
   readonly statusLabel: string;
   readonly lastUserPrompt?: string | undefined;
   readonly lastAssistantReply?: string | undefined;
-  readonly pendingApprovals: number;
+  /** Null when the host supplied no count and prose interpretation was not performed. */
+  readonly pendingApprovals: number | null;
   readonly toolCallCount: number;
   readonly toolResultCount: number;
   readonly assistantTurnCount: number;
@@ -95,14 +97,14 @@ export async function buildLocalReturnContextSummary(
   messages: readonly ConversationMessageSnapshot[],
   hints?: SessionContinuityHints,
 ): Promise<SessionReturnContextSummary> {
-  const pendingApprovals = hints?.pendingApprovals ?? (await countPendingApprovals(messages));
+  const pendingApprovals = hints?.pendingApprovals ?? (await decisionOrClassic<number | null>(() => countPendingApprovals(messages), () => null));
   return buildReturnContextFromFacts(messages, { ...hints, pendingApprovals });
 }
 
 /** A host-provided pending count is a recorded fact and needs no asynchronous interpretation. */
 export function buildReturnContextFromFacts(
   messages: readonly ConversationMessageSnapshot[],
-  hints: SessionContinuityHints & { readonly pendingApprovals: number },
+  hints: Omit<SessionContinuityHints, 'pendingApprovals'> & { readonly pendingApprovals: number | null },
 ): SessionReturnContextSummary {
   const userMessages = messages.filter((message) => message.role === 'user');
   const assistantMessages = messages.filter((message) => message.role === 'assistant');
@@ -136,7 +138,8 @@ export function buildReturnContextFromFacts(
   lines.push(`Status: ${statusLabel}`);
   if (lastUserPrompt) lines.push(`Last prompt: ${lastUserPrompt}`);
   if (lastAssistantReply) lines.push(`Last reply: ${lastAssistantReply}`);
-  if (pendingApprovals > 0) lines.push(`Pending approvals spotted: ${pendingApprovals}`);
+  if (pendingApprovals === null) lines.push('Pending approvals: consult the live approval queue; no count was inferred from saved prose.');
+  else if (pendingApprovals > 0) lines.push(`Pending approvals spotted: ${pendingApprovals}`);
   if (toolMessages.length > 0) lines.push(`Tool results in session: ${toolMessages.length}`);
   if ((hints?.activeTasks ?? 0) > 0 || (hints?.blockedTasks ?? 0) > 0) {
     lines.push(`Tasks: active ${hints?.activeTasks ?? 0}, blocked ${hints?.blockedTasks ?? 0}`);
@@ -217,7 +220,7 @@ export async function maybeAssistReturnContextSummary(
     `Status: ${summary.statusLabel}`,
     ...(summary.lastUserPrompt ? [`Last prompt: ${summary.lastUserPrompt}`] : []),
     ...(summary.lastAssistantReply ? [`Last reply: ${summary.lastAssistantReply}`] : []),
-    `Pending approvals: ${summary.pendingApprovals}`,
+    `Pending approvals: ${summary.pendingApprovals ?? 'unknown; consult the live queue'}`,
     `Tool calls: ${summary.toolCallCount}`,
     `Tool results: ${summary.toolResultCount}`,
   ].join('\n');

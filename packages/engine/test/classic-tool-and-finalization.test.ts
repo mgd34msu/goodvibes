@@ -13,6 +13,7 @@ import { readNormalizedError } from '../sdk/src/platform/utils/error-display.js'
 import { readReadable, readSummary } from '../sdk/src/platform/tools/fetch/page-reading.js';
 import { readCredentialHeader } from '../sdk/src/platform/tools/credential-header-reading.js';
 import { validateLinkTarget } from '../sdk/src/platform/security/link-validation.js';
+import { buildLocalReturnContextSummary } from '../sdk/src/platform/runtime/session-return-context.js';
 
 let prior: ReturnType<typeof installJudgmentPort>;
 let decisionRequests = 0;
@@ -106,6 +107,20 @@ test('Classic publication still rejects cancellation and changes to the accepted
     expect(current).toThrow();
     abort.abort(new Error('owner cancelled'));
     await expect(guard.check(input, { signal: abort.signal })).rejects.toThrow();
+    expect(decisionRequests).toBe(0);
+  });
+});
+
+test('Classic session summaries use actual host approval counts and otherwise report unknown', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const conversation = new ConversationManager();
+    conversation.addUserMessage('Resume the existing task.');
+    conversation.addSystemMessage('[Approval] A historical request was waiting.');
+    const messages = conversation.getMessageSnapshot();
+    const unknown = await buildLocalReturnContextSummary(messages);
+    expect(unknown.pendingApprovals).toBeNull();
+    expect(unknown.lines.join('\n')).toContain('consult the live approval queue');
+    expect((await buildLocalReturnContextSummary(messages, { pendingApprovals: 2 })).pendingApprovals).toBe(2);
     expect(decisionRequests).toBe(0);
   });
 });

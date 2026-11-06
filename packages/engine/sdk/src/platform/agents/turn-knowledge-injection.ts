@@ -20,6 +20,7 @@
 // turn" cache-reuse guard and the AgentRecord/session-transcript recording; this module is
 // a pure function of its inputs so it can be unit-tested without a live agent loop.
 import type { CodeInjectionRanking, CodeInjectionAuthorityOptions } from '../state/code-injection-ranking.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { ContentPart, ProviderMessage } from '../providers/interface.js';
 import { estimateTokens } from '../core/context-compaction.js';
 import { buildKnowledgeInjectionPrompt, selectKnowledgeForTaskScored } from '../state/index.js';
@@ -111,6 +112,7 @@ export function defaultTurnKnowledgeBudgetTokens(
  * event-contract member, per the brief's "prefer existing-event reuse" constraint.
  */
 export interface TurnInjectionRecord {
+  readonly provenance?: 'classic';
   /** The agent turn number this retrieval ran on. */
   readonly turn: number;
   /** The derived query actually sent through the ranking pipeline (task + conversation tail). */
@@ -375,6 +377,14 @@ export async function buildPerTurnKnowledgeInjection(
   const query = deriveTurnKnowledgeQuery(task, conversationTail);
   const alreadyInjectedIdSet = new Set(alreadyInjectedIds);
   const embeddingBackend = resolveEmbeddingBackend(memoryRegistry);
+  if (isClassicOperation()) {
+    codeAuthority?.signal?.throwIfAborted();
+    return { block: null, record: {
+      provenance: 'classic', turn, query, candidatesConsidered: 0, codeCandidatesConsidered: 0,
+      injectedIds: [], injectedSources: [], droppedForBudget: [], tokenCost: 0, budgetTokens, relevanceFloor,
+      ingestModes: [], embeddingBackend, reason: 'Classic: passive semantic enrichment is disabled; explicit memory and code search remain available.',
+    } };
+  }
 
   const scored = (await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit))
     .filter((entry) => !alreadyInjectedIdSet.has(entry.injection.id));

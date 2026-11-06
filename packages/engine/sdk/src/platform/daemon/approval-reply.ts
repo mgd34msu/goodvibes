@@ -6,6 +6,7 @@ import type { ApprovalBroker, SharedApprovalRecord } from '../control-plane/appr
 import { logger } from '../utils/logger.js';
 import { assertJudgmentInput, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { channelApprovalReply, channelApprovalTarget } from './batteries/approval-reply.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 
 export type ApprovalReplyBroker = Pick<ApprovalBroker, 'listApprovals' | 'resolveApproval'>;
 
@@ -64,6 +65,19 @@ export async function tryResolveApprovalReplyFromChannel(
   const candidates = surfaceBound.length > 0 ? surfaceBound : pending.length === 1 ? pending : [];
   // A selector has one additional option for none. Never truncate candidates.
   if (candidates.length === 0 || candidates.length >= LIMITS.maxChoiceOptions) return false;
+  if (isClassicOperation()) {
+    const command = /^\/(approve|deny)\s+(\S+)$/u.exec(text.trim());
+    const action = command?.[1], id = command?.[2];
+    if (!id || (action !== 'approve' && action !== 'deny')) return false;
+    const target = candidates.find(candidate => candidate.id === id);
+    if (!target) return false;
+    const identity = sourceKey(target, deps.routeBindings);
+    const current = broker.listApprovals(Number.MAX_SAFE_INTEGER).find(record => record.id === id);
+    if (current !== target || !isPending(current) || sourceKey(current, deps.routeBindings) !== identity) return false;
+    const resolved = await broker.resolveApproval(id, { approved: action === 'approve', disposition: action === 'approve' ? 'approved' : 'denied',
+      actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command during Classic operation.' });
+    return resolved !== null;
+  }
 
   // Validate every candidate and the full reply before any request starts.
   // Keep this safe snapshot across the asynchronous selection/reply steps.

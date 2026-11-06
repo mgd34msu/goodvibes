@@ -235,7 +235,7 @@ describe('finite configured decision model failover', () => {
     const port = createSystemOnePort(config(async () => { calls += 1; return Response.json({ nonsense: primary.apiKey }); }));
     expect((await failure(port.ask({ state: '', questions: {} }))).kind).toBe('invalid-request');
     expect(calls).toBe(0);
-    expect((await failure(port.ask(request))).kind).toBe('unavailable');
+    expect((await failure(port.ask(request))).kind).toBe('invalid-response');
     expect(calls).toBe(2);
   });
 

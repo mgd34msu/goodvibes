@@ -81,6 +81,19 @@ Automated checkout also reports that requirement before driver acquisition,
 reservations, approval windows, card filling or payment submission. Budget and
 payment-ledger inspection remain independent of that unavailable automation.
 
+Classic resume summaries use structured approval counts when the host supplies
+them. Otherwise the count is unknown and the live approval queue is named;
+historical prose is not treated as current authorization state. Channel controls
+use explicit `/status ID`, `/cancel ID` and `/retry ID` commands for current host
+targets. Classic owner replies to ordinary approval requests use `/approve ID`
+or `/deny ID`, subject to the existing authenticated broker and owner-proof
+requirements. Natural-language work-proposal and payment-window interpretation
+requires decision models and cannot silently resolve those records in Classic.
+Remote ingress retains local PAN/checksum and protected-literal checks. Classic
+also handles explicitly labelled security-code and expiry shapes locally; bare
+short numbers are not semantically classified. Findings retain only positions,
+kinds and Classic provenance, never the matched secret text.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

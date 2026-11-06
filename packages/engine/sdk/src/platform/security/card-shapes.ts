@@ -54,6 +54,7 @@
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { cardTalk, maskDigits } from './batteries/card-talk.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** The decision site the card-talk reading is logged under. */
 export const CARD_TALK_SITE = 'security.card-shapes';
@@ -71,6 +72,7 @@ export type CardShapeKind = 'pan' | 'security-code' | 'expiry';
  * boundary that did not already hold the text.
  */
 export interface CardShapeFinding {
+  readonly provenance?: 'classic';
   readonly kind: CardShapeKind;
   readonly startIndex: number;
   readonly length: number;
@@ -281,6 +283,19 @@ function findMatches(pattern: RegExp, text: string, kind: CardShapeKind, exclude
  * Findings are returned in ascending `startIndex` order and never overlap.
  */
 export async function detectCardShapes(text: string): Promise<readonly CardShapeFinding[]> {
+  return decisionOrClassic(() => detectDecisionCardShapes(text), () => {
+    const pans = findCardNumberShapes(text);
+    const expiries = findMatches(EXPIRY_PAIR, text, 'expiry', pans);
+    const codes = findMatches(BARE_SHORT_DIGIT_RUN, text, 'security-code', [...pans, ...expiries]);
+    const labelled = (finding: CardShapeFinding, label: RegExp) => label.test(text.slice(Math.max(0, finding.startIndex - 80), finding.startIndex));
+    return [...pans,
+      ...expiries.filter(finding => labelled(finding, /\b(?:exp(?:iry|iration)?(?:\s+date)?|valid\s+thru)\s*(?:is\s*)?[:=]?\s*$/iu)),
+      ...codes.filter(finding => labelled(finding, /\b(?:cvv2?|cvc2?|cid|security\s+code|card\s+code)\s*(?:is\s*)?[:=]?\s*$/iu)),
+    ].map(finding => Object.freeze({ ...finding, provenance: 'classic' as const })).sort((a, b) => a.startIndex - b.startIndex);
+  });
+}
+
+async function detectDecisionCardShapes(text: string): Promise<readonly CardShapeFinding[]> {
   if (text.length === 0) return [];
   const pans = findCardNumberShapes(text);
   const expiries = findMatches(EXPIRY_PAIR, text, 'expiry', pans);

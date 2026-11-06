@@ -1,5 +1,6 @@
 /** Browser-safe conversation data. Capture and admission never grant execution authority. */
 import { nativeConversationContinuationRefSchema, nativeConversationContinuationSchema } from './native-continuation-context.js';
+import { nativeClassicConversationAdmissionSchema } from './native-intake-policy.js';
 import { nativeSelectedDiffSelector, nativeSelectedDiffSelectorSchema, nativeSelectedDiffContextSchema } from './native-diff-context.js';
 import { array, enum as enumSchema, literal, number, strictObject, string, union, type z } from 'zod/v4';
 
@@ -21,7 +22,8 @@ export const nativeConversationIntakeCaptureRequestSchema = strictObject({
 }).refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES), 'Capture exceeds byte limit');
 export const nativeConversationIntakeLookupRequestSchema = strictObject({ inputId: id });
 export const nativeConversationIntakeTransitionRequestSchema = strictObject({ inputId: id, sourceRevision: id });
-export const nativeConversationIntakeSourceRefSchema = strictObject({ version: literal(1), inputId: id, sourceId: id, sourceRevision: id, sessionId: id, continuation: nativeConversationContinuationRefSchema.optional() });
+export const nativeConversationIntakeSourceRefSchema = strictObject({ version: literal(1), inputId: id, sourceId: id, sourceRevision: id, sessionId: id,
+  classic: nativeClassicConversationAdmissionSchema.optional(), continuation: nativeConversationContinuationRefSchema.optional() });
 const spanSchema = strictObject({ partId: literal('input'), start: revision, end: revision });
 /** Immutable admission-event projection, not an execution receipt or client-supplied proof. */
 export const nativeConversationIntakeWorkReceiptSchema = strictObject({

@@ -413,7 +413,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 }
             }
             const turnPermit = turnReady ? binding.client.bindTurn(result) : undefined;
-            return { status: 'recorded', message: hostedTurn ? 'Native conversational decision recorded for host-owned delivery.' : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit } : {}) };
+            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit } : {}) };
         }
         catch {
             if (!current())
@@ -434,7 +434,7 @@ function describeResult(result: NativeConversationIntakeResult, turnReady: boole
     switch (result.kind) {
         case 'captured': return 'Original text is durably captured. Use /work intake-retry to request admission.';
         case 'processing': return `Native intake is ${result.stage}. Use /work intake-status to inspect or intake-resume for explicit recovery.`;
-        case 'turn': return turnReady ? `Native ${result.route} decision recorded; original turn dispatch claimed.` : dispatched ? 'Recovery required: this original turn already has a durable dispatch claim and may have run. Inspect the conversation before submitting a new input; it will not be automatically replayed.' : 'Native conversational decision is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.';
+        case 'turn': return turnReady ? result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded; original turn dispatch claimed without a decision-model receipt.' : `Native ${result.route} decision recorded; original turn dispatch claimed.` : dispatched ? 'Recovery required: this original turn already has a durable dispatch claim and may have run. Inspect the conversation before submitting a new input; it will not be automatically replayed.' : result.sourceRef.classic ? 'Classic conversation is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.' : 'Native conversational decision is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.';
         case 'blocked': return `Native intake blocked: ${result.reason}. This input is unchanged; submit a new complete input to proceed.`;
         case 'refused': return `Native intake refused: ${result.reason}. This input cannot be retried into new work.`;
         case 'cancelled': return 'Native intake cancelled. No ordinary turn or work execution was started.';

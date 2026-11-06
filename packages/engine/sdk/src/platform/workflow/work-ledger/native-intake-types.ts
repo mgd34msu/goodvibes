@@ -5,6 +5,7 @@ import { array, enum as enumSchema, literal, number, strictObject, string } from
 import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext, type JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import type { WorkLedgerStorage, WorkLedgerSubmission } from './types.js';
+import { nativeClassicConversationAdmissionSchema, type NativeClassicConversationAdmission } from './native-intake-policy.js';
 
 export const NATIVE_CONVERSATION_MAX_PROPOSALS = 3;
 export const NATIVE_CONVERSATION_MAX_DECISIONS = 32;
@@ -20,6 +21,7 @@ export interface NativeConversationOwner {
 export interface NativeConversationDecision { readonly decision: JevDecision; readonly context: JevDecisionContext; }
 export interface NativeConversationAssociation { readonly workId: string; readonly attemptId: string; readonly ledgerRevision: number; }
 export interface NativeConversationCapture extends NativeConversationKey {
+  readonly classic?: NativeClassicConversationAdmission;
   readonly version: 1; readonly projectId: string; readonly requestId: string;
   readonly text: string; readonly continuation?: NativeConversationContinuation | undefined; readonly unsupportedSources: readonly NativeConversationUnsupportedSource[];
   readonly sourceId: string; readonly sourceRevision: string; readonly sessionId: string; readonly owner: NativeConversationOwner;
@@ -100,6 +102,7 @@ export function validateNativeConversationProposal(value: unknown, text: string,
   } catch { throw new NativeConversationStorageError('invalid'); }
 }
 const captureSchema = strictObject({
+  classic: nativeClassicConversationAdmissionSchema.optional(),
   version: literal(1), projectId: id, principalId: id, inputId: id, requestId: id,
   text: string().min(1).max(20_000)
     .refine(value => value.length <= 20_000, 'Must contain at most 20000 UTF-16 code units')
@@ -139,9 +142,12 @@ export function parseNativeConversationCapture(value: unknown): NativeConversati
     const result = { ...parsed, ...(parsed.continuation ? { continuation: captureNativeConversationContinuation(parsed.continuation) } : {}), decisions: retained };
     if (parsed.state === 'turn') {
       const final = retained.at(-1)?.decision;
-      if (!['converse', 'answer'].includes(parsed.route ?? '') || parsed.unsupportedSources.length || final?.outcome !== 'act'
-        || !isDeepStrictEqual(final.binding, nativeConversationDecisionBinding(result, 'ordinary-turn'))) throw new Error();
+      if (!['converse', 'answer'].includes(parsed.route ?? '') || parsed.unsupportedSources.length) throw new Error();
+      if (parsed.classic) {
+        if (parsed.route !== 'converse' || retained.some(entry => entry.decision.outcome === 'reject') || parsed.association !== null) throw new Error();
+      } else if (final?.outcome !== 'act' || !isDeepStrictEqual(final.binding, nativeConversationDecisionBinding(result, 'ordinary-turn'))) throw new Error();
     }
+    if (parsed.classic && parsed.state !== 'turn' && parsed.state !== 'cancelled') throw new Error();
     if (!isDeepStrictEqual(result, value) || new TextEncoder().encode(JSON.stringify(result)).byteLength > NATIVE_CONVERSATION_MAX_RECORD_BYTES) throw new Error();
     return result;
   } catch { throw new NativeConversationStorageError('invalid'); }

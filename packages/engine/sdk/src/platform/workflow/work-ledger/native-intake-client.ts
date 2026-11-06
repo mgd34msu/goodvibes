@@ -74,7 +74,7 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
   function eligible(result: NativeConversationIntakeResult): void {
     if (result.kind === 'turn') eligibleTurns.set(result, Object.freeze({ ...result,
       ...(result.continuation ? { continuation: captureNativeConversationContinuation(result.continuation) } : {}),
-      sourceRef: Object.freeze({ ...result.sourceRef, ...(result.sourceRef.continuation ? { continuation: Object.freeze({ ...result.sourceRef.continuation, ...(result.sourceRef.continuation.selectedDiff ? { selectedDiff: Object.freeze({ ...result.sourceRef.continuation.selectedDiff }) } : {}) }) } : {}) }) }));
+      sourceRef: Object.freeze({ ...result.sourceRef, ...(result.sourceRef.classic ? { classic: Object.freeze({ ...result.sourceRef.classic }) } : {}), ...(result.sourceRef.continuation ? { continuation: Object.freeze({ ...result.sourceRef.continuation, ...(result.sourceRef.continuation.selectedDiff ? { selectedDiff: Object.freeze({ ...result.sourceRef.continuation.selectedDiff }) } : {}) }) } : {}) }) }));
   }
   function active(signal?: AbortSignal): void {
     if (disposed) throw new NativeConversationIntakeClientError('disposed');

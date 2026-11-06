@@ -1,5 +1,7 @@
 /** Durable original-input ownership before native work exists. Never starts execution. */
 import { nativeSelectedDiffSelector, type NativeSelectedDiffSelector } from './native-diff-context.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -70,7 +72,7 @@ export function createNativeConversationIntakeHost(deps: {
   const keyOf = (inputId: string, authority: NativePairedExecutionAuthority): NativeConversationKey => ({ principalId: paired(authority).principalId, inputId });
   const keyId = (key: NativeConversationKey) => JSON.stringify({ principalId: key.principalId, inputId: key.inputId });
   function track<T>(operation: () => Promise<T>): Promise<T> {
-    assertOpen(); const promise = Promise.resolve().then(operation); pending.add(promise);
+    assertOpen(); const promise = Promise.resolve().then(() => withConfiguredDecisionModelPolicy(operation)); pending.add(promise);
     void promise.then(() => pending.delete(promise), () => pending.delete(promise)); return promise;
   }
   function owner(authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions) {
@@ -139,6 +141,7 @@ export function createNativeConversationIntakeHost(deps: {
   async function projection(record: NativeConversationCapture): Promise<NativeConversationIntakeResult> {
     const common = { projectId: record.projectId, requestId: record.requestId,
       sourceRef: { version: 1 as const, inputId: record.inputId, sourceId: record.sourceId, sourceRevision: record.sourceRevision, sessionId: record.sessionId,
+        ...(record.classic ? { classic: record.classic } : {}),
         ...(record.continuation ? { continuation: { sessionId: record.continuation.sessionId, revision: record.continuation.revision, ...(record.continuation.selectedDiff ? { selectedDiff: nativeSelectedDiffSelector(record.continuation.selectedDiff) } : {}) } } : {}) } };
     switch (record.state) {
       case 'captured': return { kind: 'captured', ...common };
@@ -198,6 +201,7 @@ export function createNativeConversationIntakeHost(deps: {
     if (record.state !== 'processing') return projection(record);
     const generation = record.generation; const delivery = deliveries.get(keyId(key)); if (delivery) delivery.generation = generation;
     const assertCurrent = () => {
+      decisionModelPolicyState();
       signal.throwIfAborted(); const current = load(key, authority, options, revision); assertContinuation(current);
       if (current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
     };
@@ -209,7 +213,21 @@ export function createNativeConversationIntakeHost(deps: {
         const next = parseNativeConversationCapture({ ...current, ...change }); return { next, value: next };
       }));
     }
+    async function classicConversation(): Promise<NativeConversationIntakeResult> {
+      assertCurrent();
+      const policy = decisionModelPolicyState();
+      if (policy.operation !== 'classic' || policy.policy === 'Default - On' || policy.reason === null
+        || record.association || record.decisions.some(entry => entry.decision.outcome === 'reject')) throw new NativeConversationIntakeError('forbidden');
+      if (record.unsupportedSources.length) {
+        await update({ state: 'blocked', stage: null, reason: 'unsupported-source' });
+      } else {
+        await update({ state: 'turn', stage: null, route: 'converse', reason: null,
+          classic: { provenance: 'owner', policy: policy.policy, reason: policy.reason } });
+      }
+      return projection(record);
+    }
     try {
+      if (isClassicOperation()) return await classicConversation();
       const routeEvidence = await readNativeIntakeRoute({ text: record.text, sourceRevision: record.sourceRevision, ...(record.continuation ? { continuation: record.continuation } : {}), sourceIssues: record.unsupportedSources,
         port: deps.port, decisionLog: deps.decisionLog, binding: nativeConversationDecisionBinding(record, 'routing'), assertCurrent, signal });
       assertCurrent(); await update({ route: routeEvidence.route });
@@ -272,6 +290,11 @@ export function createNativeConversationIntakeHost(deps: {
         await publish(record, result.autonomous, requirements.criteria, authority, options, signal, assertCurrent);
         return projection(load(key, authority, options, revision));
       }
+    } catch (error) {
+      signal.throwIfAborted(); assertCurrent();
+      if (!record.association && !record.decisions.some(entry => entry.decision.outcome === 'reject') && activateClassicFallback(error))
+        return await classicConversation();
+      throw error;
     } finally { clearInterval(watch); }
   }
   async function publish(record: NativeConversationCapture, decision: AutonomousDecision, criteria: readonly string[], authority: NativePairedExecutionAuthority,

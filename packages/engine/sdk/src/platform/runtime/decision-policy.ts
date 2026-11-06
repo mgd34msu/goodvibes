@@ -60,12 +60,27 @@ export function withDecisionModelPolicy<T>(read: () => unknown, operation: () =>
   });
 }
 
+/** Entry point for owned daemon/background operations that use the composition's policy source. */
+export function withConfiguredDecisionModelPolicy<T>(operation: () => T, onChange?: (state: DecisionModelPolicyState) => void): T {
+  return withDecisionModelPolicy(configured, operation, onChange);
+}
+
 /** Only explicit availability exhaustion may downgrade Preferred; never unwrap unrelated failures. */
 export function activateClassicFallback(error: unknown): boolean {
   const scope = scopes.getStore();
   scope?.current();
   if (!scope || scope.policy !== 'Preferred') return false;
   if (!(error instanceof JudgmentPortMissingError) && !(error instanceof JudgmentError && error.kind === 'unavailable')) return false;
+  return inheritClassicDecisionFallback();
+}
+
+/** Continue an authenticated host admission's fallback after its request scope ends.
+ * Callers must validate the retained admission capability first; request fields are not authority.
+ */
+export function inheritClassicDecisionFallback(): boolean {
+  const scope = scopes.getStore();
+  scope?.current();
+  if (!scope || scope.policy !== 'Preferred') return false;
   if (scope.reason === null) {
     scope.reason = 'unavailable'; scope.revision++;
     scope.onChange?.(observe());

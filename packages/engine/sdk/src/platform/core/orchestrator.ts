@@ -10,7 +10,7 @@ import { TurnCancellationFence, type TurnCancellationResult } from './turn-cance
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { inheritClassicDecisionFallback, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
 import { ResponseCompletionError } from './response-completion.js';
@@ -797,6 +797,8 @@ export class Orchestrator {
           await revalidateNativeConversationTurnPermit(nativeTurn.permit);
           admissionAbort.signal.throwIfAborted();
           if (this.disposed) throw new NativeConversationTurnAdmissionError('recovery_required');
+          const classic = nativeTurn.source.sourceRef.classic;
+          if (classic?.policy === 'Preferred' && classic.reason === 'unavailable') inheritClassicDecisionFallback();
         }
         await this.runTurnBody(text, content, options, nativeTurn, resume);
       }

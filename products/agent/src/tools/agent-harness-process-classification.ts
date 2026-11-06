@@ -1,4 +1,5 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { gateJudgmentRegistry, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type SourceScreeningReceipt } from '@goodvibes-jev/engine/sdk/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -52,6 +53,7 @@ export async function withLongLivedProcessReading<T>(
     // Neither a registry lookup nor a port/cache/log/transport is reached until
     // the complete source has a settled, current local screening projection.
     assertSourceCurrent();
+    const classification = await decisionOrClassic(async () => {
     const decision = gateJudgmentRegistry.get(BATTERY);
     if (!decision || !('run' in decision) || typeof decision.run !== 'function') throw new ToolInputProjectionError('unavailable');
     const port = judgmentPort(SITE);
@@ -80,6 +82,9 @@ export async function withLongLivedProcessReading<T>(
     }
     run.recordAction(reading.verdict === 'yes' ? 'classified long_lived' : 'classified command');
     assertCurrent();
-    return await consume(reading.verdict === 'yes', assertCurrent);
+    return { longLived: reading.verdict === 'yes', assertCurrent };
+    }, () => ({ longLived: false, assertCurrent: assertSourceCurrent }));
+    classification.assertCurrent();
+    return await consume(classification.longLived, classification.assertCurrent);
   } finally { await release(); }
 }

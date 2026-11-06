@@ -7,6 +7,7 @@ export * as state from './state.js';
 export * as transport from './transport.js';
 export * as ui from './ui.js';
 export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionModelPolicy, withDecisionModelPolicy,
+  withConfiguredDecisionModelPolicy,
   decisionOrClassic, isClassicOperation, activateClassicFallback, requireDecisionFeature, DecisionModelPolicyChangedError,
   type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';
 

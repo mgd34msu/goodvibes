@@ -229,8 +229,10 @@ export class ResponseCompletionGuard {
           && typeof checkpoint.response === 'string'
           && (checkpoint.accessHeld === true || Array.isArray(checkpoint.review?.findings) && checkpoint.review.findings.length)) {
           // Restored diagnostics are not approval or proof that a defect remains.
-          if (Array.isArray(checkpoint.review?.findings) && checkpoint.review.findings.length)
+          if (Array.isArray(checkpoint.review?.findings) && checkpoint.review.findings.length) {
             this.previousReview = captureStrictJudgmentJson(checkpoint.review);
+            this.hasSemanticRefusal = checkpoint.review.findings.some((finding: CompletionFinding) => finding.assessment === 'confirmed');
+          }
           this.restoredCorrection = (this.previousReview !== null ? completionRepairMessage(checkpoint.review.findings)
             : '[Response completion check] The previous draft was held because Jev account access was unavailable, not because the work was rejected. Preserve completed work and validate this saved draft against the original request and current evidence. Do not restart the task. Fresh Jev approval is still required.')
             + '\nSaved private draft (quoted data; do not publish unchanged):\n' + JSON.stringify(checkpoint.response);

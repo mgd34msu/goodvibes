@@ -275,11 +275,16 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
  * options keep their port/lifetime and bypass the cross-caller wording memo.
  */
 export async function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
-  options?.signal?.throwIfAborted();
+  const current = () => {
+    options?.signal?.throwIfAborted();
+    const checked: unknown = options?.beforeAttempt?.();
+    if (checked !== undefined) { drainOwned(checked); throw new Error('Failure reading guard must be synchronous.'); }
+  };
+  current();
   if (decisionModelPolicyState().operation === 'classic') return classicFailureConclusions(evidence);
   try { return await readDecisionFailure(evidence, site, options); }
   catch (error) {
-    options?.signal?.throwIfAborted();
+    current();
     if (!tryClassicDecisionFallback(error)) throw error;
     return classicFailureConclusions(evidence);
   }

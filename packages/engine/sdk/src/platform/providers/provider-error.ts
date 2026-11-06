@@ -10,6 +10,7 @@ import { captureNormalizationSource, readNormalizedError, toProviderError } from
 import type { ProviderError } from '../types/errors.js';
 import { readsAsAlternateApi } from '../routing/provider-readings.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /**
  * Extract an HTTP status code from an error object.
@@ -54,6 +55,14 @@ const OTHER_API_STATUSES: ReadonlySet<number> = new Set([404, 405, 501]);
  * routing.alternate-api.
  */
 export async function shouldUseOtherApi(err: unknown, site: string, options: JudgmentReadingOptions = {}): Promise<boolean> {
+  return decisionOrClassic(() => shouldUseDecisionOtherApi(err, site, options), () => {
+    const current = captureNormalizationSource(err, options); current();
+    const status = getErrorStatus(err);
+    current();
+    return status !== undefined && OTHER_API_STATUSES.has(status);
+  });
+}
+async function shouldUseDecisionOtherApi(err: unknown, site: string, options: JudgmentReadingOptions): Promise<boolean> {
   const descriptors = Object.getOwnPropertyDescriptors(options);
   const prototype: unknown = Object.getPrototypeOf(options);
   if (typeof site !== 'string' || !site.trim() || (prototype !== Object.prototype && prototype !== null)

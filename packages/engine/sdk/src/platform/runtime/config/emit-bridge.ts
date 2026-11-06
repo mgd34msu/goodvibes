@@ -66,6 +66,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { eventCredentialKey } from './batteries/event-credential-key.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { decisionOrClassic } from '../decision-policy.js';
 
 /**
  * The narrow config surface this needs: one subscription per key, and nothing
@@ -142,6 +143,9 @@ const undeclaredKeyReadings = new Map<string, Promise<boolean>>();
  * be made.
  */
 export function readConfigEventCarriesValue(key: string): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionConfigEventCarriesValue(key), () => false);
+}
+function readDecisionConfigEventCarriesValue(key: string): Promise<boolean> {
   let reading = undeclaredKeyReadings.get(key);
   if (reading === undefined) {
     reading = (async (): Promise<boolean> => {

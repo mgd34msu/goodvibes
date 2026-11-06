@@ -16,6 +16,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { settingForm } from './batteries/setting-form.js';
 import { configKeyDescription } from './credential-key-reading.js';
 import { knownSettingNamesBySection, type SettingsIngestionNotice, type UnknownSettingKey } from './settings-ingestion.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 const SITE = 'config.settings.unknown-form';
 
@@ -30,6 +31,9 @@ function candidatesFor(section: string): Candidate[] {
 
 /** The known setting `unknown` is a newer form of, as a dot path, or undefined. Throws when no reading can be made. */
 export async function readUnknownSettingForm(unknown: UnknownSettingKey): Promise<string | undefined> {
+  return decisionOrClassic(() => readDecisionUnknownSettingForm(unknown), () => undefined);
+}
+async function readDecisionUnknownSettingForm(unknown: UnknownSettingKey): Promise<string | undefined> {
   const candidates = candidatesFor(unknown.section);
   if (candidates.length === 0) return undefined;
   const selection = await settingForm.select(judgmentPort(SITE), { section: unknown.section, name: unknown.name }, candidates, { site: SITE });
@@ -39,7 +43,18 @@ export async function readUnknownSettingForm(unknown: UnknownSettingKey): Promis
 
 /** A skipped-key notice for every unknown key that reads as a newer form of a known setting. */
 export async function readUnknownSettingForms(file: string, unknownKeys: readonly UnknownSettingKey[]): Promise<SettingsIngestionNotice[]> {
+  return decisionOrClassic(() => readDecisionUnknownSettingForms(file, unknownKeys), () => classicUnknownSettingNotices(file, unknownKeys));
+}
+function classicUnknownSettingNotices(file: string, unknownKeys: readonly UnknownSettingKey[]): SettingsIngestionNotice[] {
+  return unknownKeys.map(unknown => ({
+    file, key: unknown.key, action: 'skipped' as const,
+    reason: 'is not a setting this build knows; Classic does not infer renamed settings',
+    remedy: 'check the setting name against this version; the value was left in the file untouched',
+  }));
+}
+async function readDecisionUnknownSettingForms(file: string, unknownKeys: readonly UnknownSettingKey[]): Promise<SettingsIngestionNotice[]> {
   const readings = await Promise.all(unknownKeys.map(async (unknown) => ({ unknown, form: await readUnknownSettingForm(unknown) })));
+  if (isClassicOperation()) return classicUnknownSettingNotices(file, unknownKeys);
   return readings.flatMap(({ unknown, form }) => form === undefined ? [] : [{
     file,
     key: unknown.key,

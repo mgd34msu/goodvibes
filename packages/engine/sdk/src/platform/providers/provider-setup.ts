@@ -7,9 +7,11 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { YesNoReading } from '@goodvibes-jev/judgment';
 import type { ProviderRuntimeMetadata } from './interface.js';
 import { providerSetupReading } from './setup-reading.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 export type ProviderSetupClass = 'api-key' | 'cloud-account' | 'local' | 'no-key-free' | 'self-hosted' | 'subscription' | 'unknown';
 export interface ProviderSetupClassification {
+  readonly provenance?: 'classic';
   readonly setupClass: ProviderSetupClass;
   readonly setupLabel: string;
   readonly setupDetail: string;
@@ -39,6 +41,12 @@ export function describeProviderSetup(setupClass: ProviderSetupClass): ProviderS
   return Object.freeze({ setupClass, setupLabel, setupDetail });
 }
 const unknownSetup = describeProviderSetup('unknown');
+function classicProviderSetup(facts: ProviderSetupFacts): ProviderSetupClassification {
+  const runtime = facts.runtime;
+  const kind: ProviderSetupClass = runtime?.policy?.local === true ? 'local'
+    : runtime?.auth?.mode === 'oauth' ? 'subscription' : runtime?.auth?.mode === 'api-key' ? 'api-key' : 'unknown';
+  return Object.freeze({ ...describeProviderSetup(kind), provenance: 'classic' as const });
+}
 const classes = {
   api_key: 'api-key', cloud_account: 'cloud-account', local_runtime: 'local',
   no_key_free: 'no-key-free', self_hosted: 'self-hosted', subscription: 'subscription',
@@ -101,6 +109,13 @@ export class ProviderSetupReadings {
   invalidate(): void { this.#cache.clear(); this.#current.clear(); }
 
   async read(facts: ProviderSetupFacts, options: ProviderSetupReadOptions = {}): Promise<ProviderSetupClassification> {
+    return decisionOrClassic(() => this.readDecision(facts, options), () => {
+      options.signal?.throwIfAborted();
+      return classicProviderSetup(facts);
+    });
+  }
+
+  private async readDecision(facts: ProviderSetupFacts, options: ProviderSetupReadOptions): Promise<ProviderSetupClassification> {
     if (options.signal?.aborted) return unknownSetup;
     if (facts.runtime === undefined) { this.#cache.delete(facts.providerId); this.#current.delete(facts.providerId); return unknownSetup; }
     const state = providerSetupState(facts);
@@ -130,7 +145,11 @@ export class ProviderSetupReadings {
       timer = setTimeout(cancel, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 1500);
       timer.unref?.();
       // Promise boundary also contains a missing/unavailable judgment port.
-      void Promise.resolve().then(() => providerSetupReading.run(judgmentPort(site), state, { site, signal: controller.signal })).then((run) => {
+      void Promise.resolve().then(() => decisionOrClassic(
+        () => providerSetupReading.run(judgmentPort(site), state, { site, signal: controller.signal }),
+        () => undefined,
+      )).then((run) => {
+        if (run === undefined || isClassicOperation()) { finish(classicProviderSetup(facts)); return; }
         if (settled || options.signal?.aborted || this.#current.get(facts.providerId) !== token) { finish(unknownSetup); return; }
         const setupClass = providerSetupFrom(run.readings);
         run.recordAction(`presentation:${setupClass}`);

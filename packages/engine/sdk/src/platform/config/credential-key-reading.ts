@@ -12,6 +12,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { credentialKey, type CredentialKeyState } from './batteries/credential-key.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { CONFIG_SCHEMA } from './schema.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** Jev's reading of whether `state.key` holds a credential. Throws when no reading can be made. */
 export async function readCredentialKey(state: CredentialKeyState, site: string, options: JudgmentReadingOptions = {}): Promise<YesNoReading> {
@@ -44,8 +45,10 @@ export async function readCredentialKey(state: CredentialKeyState, site: string,
  */
 export async function holdsCredential(key: string, description: string, site: string): Promise<boolean> {
   if (isSecretBearingConfigKey(key)) return true;
-  const reading = await readCredentialKey({ key, description }, site);
-  return reading.verdict === 'yes' && reading.outcome === 'act';
+  return decisionOrClassic(async () => {
+    const reading = await readCredentialKey({ key, description }, site);
+    return reading.verdict === 'yes' && reading.outcome === 'act';
+  }, () => !CONFIG_SCHEMA.some(setting => setting.key === key));
 }
 
 /** The schema description of a config key, or empty when the schema has no entry for it. */

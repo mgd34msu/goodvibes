@@ -19,6 +19,7 @@
  * catastrophic block.
  */
 import { randomUUID } from 'node:crypto';
+import { decisionOrClassic } from '../decision-policy.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
 import {
   runSandboxJudgment,
@@ -93,7 +94,7 @@ export function createSandboxEscalationApprovalHandler(
 
     let judgmentReceipt: SandboxJudgmentReceipt | undefined;
     if (judgment?.config.enabled) {
-      const resolved = await runSandboxJudgment(
+      const resolved = await decisionOrClassic(() => runSandboxJudgment(
         {
           command: request.command,
           sandboxPlan: request.boundary,
@@ -101,17 +102,21 @@ export function createSandboxEscalationApprovalHandler(
           policyReasons: request.policyReasons,
           ...(request.workspaceContext ? { workspaceContext: request.workspaceContext } : {}),
         },
-      );
-      const applied = applySandboxJudgment(resolved, judgment.config, request.command);
-      judgmentReceipt = applied.receipt;
-      judgment.onReceipt?.(applied.receipt);
+      ), () => undefined);
+      if (resolved) {
+        const applied = applySandboxJudgment(resolved, judgment.config, request.command);
+        judgmentReceipt = applied.receipt;
+        judgment.onReceipt?.(applied.receipt);
 
-      if (applied.autoApprove) {
+        if (applied.autoApprove) {
         // Opt-in auto-approve of a `looks-safe` verdict. The tier only ever
         // relaxes a standing ask to an allow, never allow→deny.
-        return { approved: true, judgmentReceipt };
+          return { approved: true, judgmentReceipt };
+        }
+        reasons.push(...applied.annotations);
+      } else {
+        reasons.push('Classic operation: no decision-model advisory was taken; owner approval is required.');
       }
-      reasons.push(...applied.annotations);
     }
 
     const promptRequest: PermissionPromptRequest = {

@@ -93,6 +93,11 @@ export function decideSandboxedExec(input: SandboxPolicyInput): SandboxPolicyDec
     };
   }
 
+  if (input.needs.provenance === 'classic') return {
+    effect: 'ask', sandboxed: true, escalations: [],
+    reason: 'Classic did not assess command host-access needs; owner approval is required inside the sandbox',
+  };
+
   const escalations: string[] = [];
   if (input.needs.needsNetwork) {
     escalations.push(

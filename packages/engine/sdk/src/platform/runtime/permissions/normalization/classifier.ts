@@ -17,8 +17,12 @@ import {
   type JudgmentReadingOptions,
 } from '@goodvibes-jev/engine/errors';
 import { sandboxNeeds } from '../../../gate/batteries/sandbox-needs.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { decisionOrClassic } from '../../decision-policy.js';
 
 export interface CommandNeeds {
+  /** No host-access assessment was taken; the sandbox policy must ask the owner. */
+  readonly provenance?: 'classic';
   /** It reaches the network (uncertain counts as yes). */
   readonly needsNetwork: boolean;
   /** It needs host administrator privileges (uncertain counts as yes). */
@@ -42,6 +46,16 @@ export async function readCommandNeeds(
   workspace?: string,
   options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {},
 ): Promise<CommandNeeds> {
+  return decisionOrClassic(() => readDecisionCommandNeeds(command, workspace, options), () => {
+    options.signal?.throwIfAborted();
+    const restriction: unknown = options.assertCurrent?.();
+    if (restriction !== undefined) { drainOwned(restriction); throw new JudgmentAuthorityRetiredError(); }
+    options.signal?.throwIfAborted();
+    return Object.freeze({ needsNetwork: false, needsPrivilege: false, provenance: 'classic' as const });
+  });
+}
+async function readDecisionCommandNeeds(command: string, workspace: string | undefined,
+  options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<CommandNeeds> {
   // Caller cancellation retires its reading, never a shared authority's cache.
   const authority = captureJudgmentPort(COMMAND_NEEDS_SITE);
   const reading = captureJudgmentPort(COMMAND_NEEDS_SITE, options);

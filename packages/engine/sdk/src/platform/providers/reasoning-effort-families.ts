@@ -21,6 +21,7 @@
 
 import { catalogModelsForReference } from './model-catalog-facts.js';
 import { knownReasoningFamily, readReasoningFamily } from '../routing/provider-readings.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import type { ReasoningFamily } from '../routing/batteries/provider.js';
 import {
   type ReasoningEffortSpec,
@@ -157,6 +158,7 @@ const FAMILY_SPECS: Readonly<Record<ReasoningFamily, ReasoningEffortSpec>> = {
  * yet, or no documented family).
  */
 export function findFamilyReasoningEffortSpec(modelId: string): ReasoningEffortSpec | undefined {
+  if (isClassicOperation()) return undefined;
   const family = knownReasoningFamily(modelId.trim());
   return family ? FAMILY_SPECS[family] : undefined;
 }
@@ -165,8 +167,10 @@ export function findFamilyReasoningEffortSpec(modelId: string): ReasoningEffortS
 export async function readFamilyReasoningEffortSpec(modelId: string, site: string): Promise<ReasoningEffortSpec | undefined> {
   const id = modelId.trim();
   if (!id) return undefined;
-  const family = await readReasoningFamily(id, site);
-  return family ? FAMILY_SPECS[family] : undefined;
+  return decisionOrClassic(async () => {
+    const family = await readReasoningFamily(id, site);
+    return family ? FAMILY_SPECS[family] : undefined;
+  }, () => undefined);
 }
 
 /**

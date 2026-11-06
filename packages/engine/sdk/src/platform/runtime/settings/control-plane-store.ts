@@ -7,6 +7,7 @@ import type { ConfigKey } from '../../config/index.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { settingsRisk, type SettingsRisk } from './batteries/settings-risk.js';
+import { decisionOrClassic } from '../decision-policy.js';
 import { defaultStore, getSettingsControlPath, migrateStore } from './host-setting-policy-read.js';
 export { defaultStore } from './host-setting-policy-read.js';
 
@@ -67,7 +68,7 @@ export interface StagedManagedBundle {
   readonly path: string;
   readonly importedAt: number;
   readonly changeCount: number;
-  readonly risk: 'low' | 'medium' | 'high';
+  readonly risk: 'low' | 'medium' | 'high' | 'unassessed';
   readonly changes: readonly ManagedBundleChange[];
 }
 
@@ -201,7 +202,10 @@ export function sourcePriority(source: SettingsSource): number {
 export async function readBundleRisk(
   changes: readonly ManagedBundleChange[],
   site: string,
-): Promise<SettingsRisk> {
+): Promise<StagedManagedBundle['risk']> {
+  return decisionOrClassic(() => readDecisionBundleRisk(changes, site), () => changes.some(change => change.changed) ? 'unassessed' : 'low');
+}
+async function readDecisionBundleRisk(changes: readonly ManagedBundleChange[], site: string): Promise<SettingsRisk> {
   const changed = changes.filter((change) => change.changed);
   if (changed.length === 0) return 'low';
   const port = judgmentPort(site);

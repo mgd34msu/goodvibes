@@ -108,6 +108,20 @@ failures, revoked authority and actual semantic refusals remain held. Classic
 screening receipts attest only the local checks. Query-bearing research links
 remain omitted when their parameter roles cannot be assessed.
 
+Provider adapters retain their documented wire tables in Classic. An unknown
+stop reason remains unknown; arbitrary error prose cannot trigger another API
+attempt. Declared catalog/runtime metadata still governs setup and reasoning
+options. Unclassified model families use the existing adapter defaults rather
+than a decision lookup. Undocumented content types that require interpretation
+report that limitation. Raw process output remains visible without inferred
+error classifications or inferred server ports.
+
+Settings ingestion names unknown keys without guessing a replacement. Unknown
+config-event values stay masked, and managed settings bundles report their risk
+as unassessed when changed values were not semantically reviewed. Sandbox
+host-access checks and optional advisories require owner approval during Classic;
+advisory auto-approval cannot manufacture an approval or a decision receipt.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Database } from 'bun:sqlite';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { sqliteVecLoadFailureView, sqliteVecRefusal } from './batteries/sqlite-vec-refusal.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 const SQLITE_VEC_REFUSAL_SITE = 'state.sqlite-vec-loader';
 
@@ -85,6 +86,10 @@ export class SqliteVecPlatformUnsupportedError extends Error {
  * true only on a yes the band allows acting on. The action is recorded.
  */
 async function readsAsPlatformRefusal(message: string): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionPlatformRefusal(message), () => process.platform === 'darwin'
+    && ['not authorized', 'extension loading is disabled', 'extension loading is not supported'].some(text => message.toLowerCase().includes(text)));
+}
+async function readDecisionPlatformRefusal(message: string): Promise<boolean> {
   const run = await sqliteVecRefusal.run(
     judgmentPort(SQLITE_VEC_REFUSAL_SITE),
     sqliteVecLoadFailureView(message, process.platform, isBundledRun()),

@@ -11,6 +11,7 @@ import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureNormalizationSource } from '../utils/error-display.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import {
   alternateApi,
   contentPartKind,
@@ -59,6 +60,13 @@ export type LocalServerSoftware = 'lm-studio' | 'vllm' | 'llamacpp' | 'localai' 
 /** Which server software answered a probe; 'unknown' unless the reading is strong enough to act on. */
 export async function readLocalServerIdentity(evidence: ServerProbeEvidence, site: string,
   options: JudgmentReadingOptions = {}): Promise<LocalServerSoftware> {
+  return decisionOrClassic(() => readDecisionLocalServerIdentity(evidence, site, options), () => {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    return 'unknown';
+  });
+}
+async function readDecisionLocalServerIdentity(evidence: ServerProbeEvidence, site: string,
+  options: JudgmentReadingOptions): Promise<LocalServerSoftware> {
   const original = retainStrictJudgmentJson(evidence);
   assertJudgmentInput(original.snapshot);
   const owner = captureJudgmentPort(site, { ...options, prepareResultCapture: prepareJudgmentResult,
@@ -90,6 +98,13 @@ let alternateApiMemos = new WeakMap<object, ReadingMemo<boolean>>();
  */
 export async function readsAsAlternateApi(error: { readonly status?: number | undefined; readonly message: string }, site: string,
   options: JudgmentReadingOptions = {}): Promise<boolean> {
+  return decisionOrClassic(() => readsAsDecisionAlternateApi(error, site, options), () => {
+    const current = captureNormalizationSource(error, options); current();
+    return false;
+  });
+}
+async function readsAsDecisionAlternateApi(error: { readonly status?: number | undefined; readonly message: string }, site: string,
+  options: JudgmentReadingOptions): Promise<boolean> {
   const descriptors = Object.getOwnPropertyDescriptors(options);
   const prototype: unknown = Object.getPrototypeOf(options);
   if (typeof site !== 'string' || !site.trim() || (prototype !== Object.prototype && prototype !== null)
@@ -153,6 +168,9 @@ function rememberSettled<T>(cache: Map<string, T>, key: string, value: T, limit:
 
 /** A rejection about a reasoning setting must be settled in either direction. */
 export async function readsAsReasoningRejection(providerText: string, site: string): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionReasoningRejection(providerText, site), () => false);
+}
+async function readDecisionReasoningRejection(providerText: string, site: string): Promise<boolean> {
   const state = { error: providerText };
   assertJudgmentInput(state);
   const { owner, cache, call } = configured(site);
@@ -168,9 +186,16 @@ export async function readsAsReasoningRejection(providerText: string, site: stri
 
 /** Peeks only at settled evidence from the current installation/model. */
 export function knownContentPartIsReasoning(label: string): boolean | undefined {
+  if (isClassicOperation()) return undefined;
   try { return configured('routing.content-part-kind.peek').cache.partKinds.get(label); } catch { return undefined; }
 }
 export async function readContentPartIsReasoning(label: string, site: string): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionContentPartIsReasoning(label, site), () => {
+    requireDecisionFeature('interpret an undocumented provider content type');
+    throw new Error('Decision content-type interpretation is unavailable');
+  });
+}
+async function readDecisionContentPartIsReasoning(label: string, site: string): Promise<boolean> {
   assertJudgmentInput({ type: label });
   const { owner, cache, call } = configured(site);
   const result = await cache.partMemo.get(label, async () => {
@@ -184,9 +209,12 @@ export async function readContentPartIsReasoning(label: string, site: string): P
   owner.assertCurrent(); return result;
 }
 
-export type ReadStopReason = 'completed' | 'tool_call' | 'max_tokens';
+export type ReadStopReason = 'completed' | 'tool_call' | 'max_tokens' | 'unknown';
 /** Uncertain stop reasons never report completion. */
 export async function readStopReason(rawReason: string, site: string): Promise<ReadStopReason> {
+  return decisionOrClassic(() => readDecisionStopReason(rawReason, site), () => 'unknown');
+}
+async function readDecisionStopReason(rawReason: string, site: string): Promise<ReadStopReason> {
   assertJudgmentInput({ raw_reason: rawReason });
   const { owner, cache, call } = configured(site);
   const result = await cache.stopMemo.get(rawReason, async () => {
@@ -199,6 +227,7 @@ export async function readStopReason(rawReason: string, site: string): Promise<R
 }
 
 export function knownReasoningFamily(modelId: string): ReasoningFamily | null | undefined {
+  if (isClassicOperation()) return undefined;
   try { return configured('routing.reasoning-family.peek').cache.families.get(modelId); } catch { return undefined; }
 }
 /** Null means a settled none, never an unavailable or uncertain reading. */

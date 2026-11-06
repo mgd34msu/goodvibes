@@ -1,6 +1,7 @@
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, decisionModelPolicyState, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 export const PROCESS_OUTPUT_READING_LIMITS = { questions: 64, concurrency: 4, endpointCandidates: 256 } as const;
 export interface ProcessOutputEvidenceLine { readonly id: string; readonly text: string; readonly raw: string; readonly stream: 'stdout' | 'stderr'; }
@@ -11,6 +12,7 @@ export interface ProcessOutputEvidence {
   readonly done: boolean;
 }
 export interface ProcessOutputReading {
+  readonly provenance?: 'classic';
   readonly errors: ReadonlyMap<string, boolean | undefined>;
   readonly port: number | undefined;
   readonly assertCurrent: () => void;
@@ -50,6 +52,22 @@ export function processEndpointCandidates(lines: readonly ProcessOutputEvidenceL
 }
 
 export async function readProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & { readonly authoritySignal: AbortSignal }): Promise<ProcessOutputReading> {
+  return decisionOrClassic(() => readDecisionProcessOutput(evidence, lineIds, options), () => {
+    const captured = captureEvidence(evidence, lineIds);
+    const revision = JSON.stringify(captured);
+    const authorityCurrent = () => { options.authoritySignal.throwIfAborted(); decisionModelPolicyState(); };
+    const current = () => {
+      authorityCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
+      if (JSON.stringify(captureEvidence(evidence, lineIds)) !== revision) throw new Error('Process output changed during Classic observation');
+    };
+    current();
+    // Raw output stays visible. No unknown line is called an error and no
+    // numeric span is advertised as a server endpoint without that evidence.
+    return { provenance: 'classic' as const, errors: new Map(captured.lineIds.map(id => [id, undefined])), port: undefined,
+      assertCurrent: current, assertAuthorityCurrent: authorityCurrent, recordPublication: current };
+  });
+}
+async function readDecisionProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & { readonly authoritySignal: AbortSignal }): Promise<ProcessOutputReading> {
   // Screen complete retained raw evidence before stripping controls or capturing authority.
   const captured = captureEvidence(evidence, lineIds);
   const source = captured.evidence;

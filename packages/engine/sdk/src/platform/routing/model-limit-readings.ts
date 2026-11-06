@@ -8,17 +8,24 @@ import {
 import { ReadingMemo } from './provider-readings.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 const outputCapRows = new Map<string, AnthropicOutputCapRow | null>();
 const outputCapMemo = new ReadingMemo<AnthropicOutputCapRow | null>(256);
 
 /** The remembered output-cap row of an Anthropic model id: a row, null for none, undefined when not read. */
 export function knownAnthropicOutputCapRow(modelId: string): AnthropicOutputCapRow | null | undefined {
+  if (isClassicOperation()) return undefined;
   return outputCapRows.get(modelId);
 }
 
 /** Reads which documented output-cap row an Anthropic model id belongs to; null only for a settled none; uncertainty remains held. */
 export function readAnthropicOutputCapRow(modelId: string, site: string): Promise<AnthropicOutputCapRow | null> {
+  // Classic leaves the interpreted family unknown. The adapter already uses
+  // the smallest documented cap when neither live nor catalog facts exist.
+  return decisionOrClassic(() => readDecisionAnthropicOutputCapRow(modelId, site), () => null);
+}
+function readDecisionAnthropicOutputCapRow(modelId: string, site: string): Promise<AnthropicOutputCapRow | null> {
   assertJudgmentInput({ modelId });
   const known = outputCapRows.get(modelId);
   if (known !== undefined) return Promise.resolve(known);

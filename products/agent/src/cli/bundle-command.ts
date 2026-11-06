@@ -1,6 +1,7 @@
+import { formatJsonOrText, readJsonFile, getNestedValue, containsRedactedValue, inspectBundle as inspect } from '@goodvibes-jev/engine/terminal-shell/support-bundle-inspection';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import { listProviderRuntimeSnapshots } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -14,63 +15,14 @@ import type { CliCommandOutput } from './types.ts';
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
 import { buildCliServicePosture } from './service-posture.ts';
-import { REDACTED_VALUE, isRedactedValue, prepareConfigRedaction, redactSerializedSecrets, retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
+import { REDACTED_VALUE, prepareConfigRedaction, redactSerializedSecrets, retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureOwnedJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
-interface BundleInspectSummary {
-  readonly type: string;
-  readonly version: string;
-  readonly path: string;
-  readonly capturedAt: number | null;
-  readonly configKeys: number;
-  readonly redactedConfigPaths: readonly string[];
-  readonly hasDiagnostics: boolean;
-}
-
-function formatJsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
-
-function getNestedValue(source: unknown, key: string): unknown {
-  let cursor = source;
-  for (const part of key.split('.')) {
-    if (cursor == null || typeof cursor !== 'object') return undefined;
-    cursor = Reflect.get(cursor, part);
-  }
-  return cursor;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readJsonFile(path: string): { readonly ok: true; readonly value: Record<string, unknown> } | { readonly ok: false; readonly error: string } {
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    if (!isRecord(value)) return { ok: false, error: 'Bundle file must contain a JSON object.' };
-    return { ok: true, value };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-function inspectBundle(path: string, parsed: Record<string, unknown>): BundleInspectSummary {
-  return {
-    type: String(parsed['type'] ?? 'unknown'),
-    version: String(parsed['version'] ?? 'unknown'),
-    path,
-    capturedAt: typeof parsed['capturedAt'] === 'number' ? parsed['capturedAt'] : null,
-    configKeys: parsed['config'] && typeof parsed['config'] === 'object'
-      ? CONFIG_SCHEMA.filter((setting) => getNestedValue(parsed['config'], setting.key) !== undefined).length
-      : 0,
-    redactedConfigPaths: Array.isArray((parsed['redaction'] as { redactedConfigPaths?: unknown } | undefined)?.redactedConfigPaths)
-      ? (parsed['redaction'] as { redactedConfigPaths: string[] }).redactedConfigPaths
-      : [],
-    hasDiagnostics: Boolean(parsed['diagnostics'] && typeof parsed['diagnostics'] === 'object'),
-  };
 }
 
 function readAuthPosture(runtime: CliCommandRuntime) {
@@ -116,7 +68,7 @@ export async function handleBundleCommand(runtime: CliCommandRuntime, options: J
     const sourcePath = shellPaths.resolveWorkspacePath(path);
     const parsed = readJsonFile(sourcePath);
     if (!parsed.ok) return { output: `Invalid bundle JSON ${parsed.error}`, exitCode: 1 };
-    const summary = inspectBundle(sourcePath, parsed.value);
+    const summary = inspect(sourcePath, parsed.value, CONFIG_SCHEMA);
     return {
       output: formatJsonOrText(runtime, summary, [
         'GoodVibes Agent support bundle',
@@ -228,7 +180,7 @@ export async function handleBundleCommand(runtime: CliCommandRuntime, options: J
     for (const setting of CONFIG_SCHEMA) {
       const value = getNestedValue(config, setting.key);
       if (value === undefined) continue;
-      if (isRedactedValue(value)) {
+      if (containsRedactedValue(value)) {
         skippedRedacted++;
         continue;
       }

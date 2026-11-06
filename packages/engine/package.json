@@ -2273,6 +2273,36 @@
       "bun": "./terminal-shell/src/command-registry.ts",
       "types": "./terminal-shell/dist/command-registry.d.ts",
       "import": "./terminal-shell/dist/command-registry.js"
+    },
+    "./terminal-shell/renderer/profile-picker-modal": {
+      "bun": "./terminal-shell/src/renderer/profile-picker-modal.ts",
+      "types": "./terminal-shell/dist/renderer/profile-picker-modal.d.ts",
+      "import": "./terminal-shell/dist/renderer/profile-picker-modal.js"
+    },
+    "./terminal-shell/renderer/search-overlay": {
+      "bun": "./terminal-shell/src/renderer/search-overlay.ts",
+      "types": "./terminal-shell/dist/renderer/search-overlay.d.ts",
+      "import": "./terminal-shell/dist/renderer/search-overlay.js"
+    },
+    "./terminal-shell/npm-pack-report": {
+      "bun": "./terminal-shell/src/npm-pack-report.ts",
+      "types": "./terminal-shell/dist/npm-pack-report.d.ts",
+      "import": "./terminal-shell/dist/npm-pack-report.js"
+    },
+    "./terminal-shell/transcript-kinds": {
+      "bun": "./terminal-shell/src/transcript-kinds.ts",
+      "types": "./terminal-shell/dist/transcript-kinds.d.ts",
+      "import": "./terminal-shell/dist/transcript-kinds.js"
+    },
+    "./terminal-shell/support-bundle-inspection": {
+      "bun": "./terminal-shell/src/support-bundle-inspection.ts",
+      "types": "./terminal-shell/dist/support-bundle-inspection.d.ts",
+      "import": "./terminal-shell/dist/support-bundle-inspection.js"
+    },
+    "./terminal-shell/model-picker": {
+      "bun": "./terminal-shell/src/model-picker.ts",
+      "types": "./terminal-shell/dist/model-picker.d.ts",
+      "import": "./terminal-shell/dist/model-picker.js"
     }
   },
   "publishConfig": {

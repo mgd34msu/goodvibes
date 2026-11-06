@@ -274,13 +274,13 @@ describe('package-facing text preserves public engine references and legacy excl
         'Install with `bun add -g @goodvibes-jev/agent`.',
         'It ships with the bundled GoodVibes platform runtime.',
         'Built on @goodvibes-jev/engine/sdk.',
-        'Legacy package: @goodvibes-jev/engine/sdk.',
+        'Legacy package: @goodvibes-jev/goodvibes-legacy-sdk.',
         'Or run `npm install -g @goodvibes-jev/agent`.',
         '',
       ].join('\n'));
       writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## 2.1.0 - 2026-09-30\n\n- Notes.\n');
       expect(verifyPackageFacingText(dir).failures).toEqual([
-        'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/engine/sdk',
+        'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/goodvibes-legacy-sdk',
         'package-facing text README.md:6 contains non-Bun Agent install/run instruction.',
       ]);
     });

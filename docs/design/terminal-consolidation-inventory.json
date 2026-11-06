@@ -66,7 +66,14 @@
       "path": "cli/bundle-command.ts",
       "baselineTuiLines": 235,
       "baselineSimilarity": 0.8184,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "BundleInspectSummary",
+        "formatJsonOrText",
+        "getNestedValue",
+        "readJsonFile",
+        "inspectBundle"
+      ]
     },
     {
       "path": "cli/completion.ts",
@@ -138,7 +145,16 @@
       "path": "cli/package-verification.ts",
       "baselineTuiLines": 231,
       "baselineSimilarity": 0.3971,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "NpmPackDryRunResult",
+        "NpmPackJsonEntry",
+        "describeNpmPackOutput",
+        "extractJsonDocument",
+        "looksLikePackEntry",
+        "selectPackEntry",
+        "parseNpmPackJson"
+      ]
     },
     {
       "path": "cli/provider-auth-routes.ts",
@@ -581,7 +597,10 @@
       "path": "input/commands/session-workflow.ts",
       "baselineTuiLines": 523,
       "baselineSimilarity": 0.6137,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "parseTranscriptKind"
+      ]
     },
     {
       "path": "input/commands/session.ts",
@@ -820,7 +839,7 @@
       "path": "input/model-picker.ts",
       "baselineTuiLines": 766,
       "baselineSimilarity": 0.5784,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "beginCatalogLoad",
         "isCatalogLoadCurrent",
@@ -836,7 +855,8 @@
         "setKey",
         "orderedListKey",
         "mapKey"
-      ]
+      ],
+      "note": "Platform owns picker state, filters, catalog lifecycle, selection, targets and caches; Agent retains focus/effort presentation and narrower product target facade."
     },
     {
       "path": "input/notifications-modal.ts",
@@ -1166,13 +1186,13 @@
       "path": "renderer/profile-picker-modal.ts",
       "baselineTuiLines": 76,
       "baselineSimilarity": 0.6864,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/search-overlay.ts",
       "baselineTuiLines": 81,
       "baselineSimilarity": 0.4161,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "renderer/selection-modal-overlay.ts",

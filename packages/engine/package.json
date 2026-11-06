@@ -2788,6 +2788,21 @@
       "bun": "./terminal-shell/src/cli-subscription-view.ts",
       "types": "./terminal-shell/dist/cli-subscription-view.d.ts",
       "import": "./terminal-shell/dist/cli-subscription-view.js"
+    },
+    "./terminal-shell/cli-output": {
+      "bun": "./terminal-shell/src/cli-output.ts",
+      "types": "./terminal-shell/dist/cli-output.d.ts",
+      "import": "./terminal-shell/dist/cli-output.js"
+    },
+    "./terminal-shell/cli-secrets-command": {
+      "bun": "./terminal-shell/src/cli-secrets-command.ts",
+      "types": "./terminal-shell/dist/cli-secrets-command.d.ts",
+      "import": "./terminal-shell/dist/cli-secrets-command.js"
+    },
+    "./terminal-shell/cli-workspace-commands": {
+      "bun": "./terminal-shell/src/cli-workspace-commands.ts",
+      "types": "./terminal-shell/dist/cli-workspace-commands.d.ts",
+      "import": "./terminal-shell/dist/cli-workspace-commands.js"
     }
   },
   "publishConfig": {

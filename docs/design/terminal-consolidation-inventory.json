@@ -121,10 +121,11 @@
       "path": "cli/management-commands.ts",
       "baselineTuiLines": 508,
       "baselineSimilarity": 0.4944,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "cli-subscription-view: providers, inspection, OAuth start/finish/refresh/logout and list"
-      ]
+      ],
+      "notes": "Platform owns subscription OAuth, secrets, saved-session and task command mechanics. Product ports retain credential directories/scope relocation, CLI/date/presentation copy, TUI task submission versus Agent refusal, and distinct pairing/host control capabilities."
     },
     {
       "path": "cli/management.ts",
@@ -480,10 +481,11 @@
       "path": "input/commands/health-runtime.ts",
       "baselineTuiLines": 523,
       "baselineSimilarity": 0.4024,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "health-findings: services/settings/remote/MCP/continuity"
-      ]
+      ],
+      "notes": "Common service/settings/remote/MCP/continuity findings live in platform, as do setup/maintenance models and memory diagnostics. Remaining handlers assemble product-specific views and authorized repair guidance: local TUI controls versus connected-host read-only Agent posture."
     },
     {
       "path": "input/commands/knowledge.ts",
@@ -696,13 +698,13 @@
       "path": "input/commands/session-workflow.ts",
       "baselineTuiLines": 523,
       "baselineSimilarity": 0.6137,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "parseTranscriptKind",
         "transcript-review",
         "session-workflow-commands: current/list/rename/info/search/review/delete/save/fork"
       ],
-      "notes": "Shared session mechanics now cover listing, metadata, rename, search, transcript review, confirmed deletion and save/fork metadata/sidecar/switch ordering. Remaining resume and export adapters retain product journal/liveness policies and Agent owned/redacted export boundary; continue auditing those paths."
+      "notes": "Platform owns current/list/rename/info/search/review/delete/save/fork and shared core restore/sidecar mechanics. Remaining resume/export adapters retain TUI journal/live-instance recovery and Agent source-bound redacted export, confirmed disclosure and isolated host policy."
     },
     {
       "path": "input/commands/session.ts",

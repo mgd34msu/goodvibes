@@ -1,3 +1,5 @@
+import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 import { getLocalNetworkIp, openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 export { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
@@ -67,16 +69,6 @@ export interface CliCommandRuntime {
 interface CliCommandResult {
   readonly handled: boolean;
   readonly exitCode: number;
-}
-
-type Formatter = (value: unknown, text: string) => string;
-
-export function yesNo(value: unknown): string {
-  return value === true ? 'yes' : 'no';
-}
-
-export function formatJsonOrText(cli: GoodVibesCliParseResult): Formatter {
-  return (value, text) => (cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text);
 }
 
 function exitCodeForText(output: string): number {

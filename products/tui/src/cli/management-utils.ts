@@ -1,6 +1,24 @@
-import {getLocalNetworkIp} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
-import {splitCommandOption,readOptionValue,readOptionValues,hasCommandFlag,commandValues,isPresentConfigValue,extractAuthorizationCode} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
-export {splitCommandOption,readOptionValue,readOptionValues,hasCommandFlag,commandValues,isPresentConfigValue,extractAuthorizationCode} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { getLocalNetworkIp } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import {
+  splitCommandOption,
+  readOptionValue,
+  readOptionValues,
+  hasCommandFlag,
+  commandValues,
+  isPresentConfigValue,
+  extractAuthorizationCode,
+} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+export {
+  splitCommandOption,
+  readOptionValue,
+  readOptionValues,
+  hasCommandFlag,
+  commandValues,
+  isPresentConfigValue,
+  extractAuthorizationCode,
+} from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 /**
  * management-utils.ts, shared CLI utility functions.
@@ -32,39 +50,24 @@ import '@goodvibes-jev/engine/sdk/platform/utils';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { applyRuntimeEndpointFlagOverrides } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import type { CliCommandRuntime, GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import '../utils/browser.ts';
-
-type Formatter = (value: unknown, text: string) => string;
-
-export function yesNo(value: unknown): string {
-  return value === true ? 'yes' : 'no';
-}
-
-export function formatJsonOrText(cli: GoodVibesCliParseResult): Formatter {
-  return (value, text) => cli.flags.outputFormat === 'json'
-    ? JSON.stringify(value, null, 2)
-    : text;
-}
 
 export function exitCodeForText(output: string): number {
   if (output.startsWith('Usage:') || output.startsWith('Invalid ')) return 2;
   if (output.startsWith('Session not found:') || output.startsWith('Unknown task:') || output.startsWith('Task submit failed ')) return 1;
-  if (output.startsWith('No stored ') || output.startsWith('No pending ') || output.startsWith('No model ') || output.startsWith('No provider ') || output.startsWith('No auth ')) return 1;
+  if (
+    output.startsWith('No stored ') ||
+    output.startsWith('No pending ') ||
+    output.startsWith('No model ') ||
+    output.startsWith('No provider ') ||
+    output.startsWith('No auth ')
+  )
+    return 1;
   if (output.startsWith('Unknown ')) return 1;
   if (output === 'Bundle has no config object to import.') return 1;
   return 0;
 }
-
-
-
-
-
-
-
-
-
-
 
 export function readPassword(args: readonly string[]): string | null {
   const explicit = readOptionValue(args, '--password');
@@ -72,10 +75,6 @@ export function readPassword(args: readonly string[]): string | null {
   if (hasCommandFlag(args, '--password-stdin')) return readFileSync(0, 'utf-8').trimEnd();
   return process.env.GOODVIBES_AUTH_PASSWORD ?? null;
 }
-
-
-
-
 
 export function getNestedValue(source: unknown, key: string): unknown {
   let cursor = source;
@@ -85,8 +84,6 @@ export function getNestedValue(source: unknown, key: string): unknown {
   }
   return cursor;
 }
-
-
 
 function connectHostForBindHost(host: string): string {
   if (host === '0.0.0.0' || host === '::') return '127.0.0.1';
@@ -122,10 +119,7 @@ export function enableEndpointLanDefault(config: ConfigManager, endpoint: Runtim
   config.setDynamic('web.host', '0.0.0.0');
 }
 
-export function applyTargetEndpointFlagsOrDefault(
-  runtime: CliCommandRuntime,
-  endpoint: RuntimeEndpointId,
-): string | null {
+export function applyTargetEndpointFlagsOrDefault(runtime: CliCommandRuntime, endpoint: RuntimeEndpointId): string | null {
   const errors = applyRuntimeEndpointFlagOverrides(runtime.configManager, endpoint, runtime.cli.flags);
   if (errors.length > 0) return errors.join('\n');
   if (runtime.cli.flags.hostname === undefined) {

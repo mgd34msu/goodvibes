@@ -1,3 +1,4 @@
+import { yesNo, formatJsonOrText } from './cli-output.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import {
   formatProviderModel,
@@ -10,7 +11,7 @@ import {
 } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
 import type { formatProviderAuthRoute } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
-import { formatJsonOrText as formatOutput } from './support-bundle-inspection.js';
+
 export interface CliProviderRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
   readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'>;
@@ -19,8 +20,7 @@ export interface CliProviderServices {
   readonly providerRegistry: ProviderRegistry;
   readonly favoritesStore: FavoritesStore;
 }
-const yesNo = (value: unknown) => (value === true ? 'yes' : 'no');
-const formatJsonOrText = (cli: CliProviderRuntime['cli']) => (value: unknown, text: string) => formatOutput({ cli }, value, text);
+
 function inferProviderFromRegistryKey(modelKey: string): string {
   if (modelKey.includes(':')) return modelKey.split(':')[0] || 'openai';
   if (modelKey.includes('/')) return modelKey.split('/')[0] || 'openai';

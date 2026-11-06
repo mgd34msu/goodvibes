@@ -1,14 +1,11 @@
+import { createCliSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/cli-secrets-command';
+import { createCliWorkspaceCommands } from '@goodvibes-jev/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/cli-subscription-view';
-import { findSessionCandidates } from '@goodvibes-jev/engine/sdk/platform/sessions';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import '@goodvibes-jev/engine/sdk/platform/sessions';
+import 'node:fs';
+import { join } from 'node:path';
 import { SecretsManager } from '../config/secrets.ts';
-import {
-  BUILTIN_SECRET_PROVIDER_SOURCES,
-  describeSecretRef,
-  isSecretRefInput,
-  resolveSecretRef,
-} from '@goodvibes-jev/engine/sdk/platform/config';
+import '@goodvibes-jev/engine/sdk/platform/config';
 import '@goodvibes-jev/engine/sdk/platform/config';
 import '@goodvibes-jev/engine/sdk/platform/config';
 import '@/runtime/index.ts';
@@ -36,174 +33,6 @@ import {
   withRuntimeServices,
   yesNo,
 } from './management-utils.ts';
-
-export async function handleSecrets(runtime: CliCommandRuntime): Promise<string> {
-  const secrets = new SecretsManager({
-    projectRoot: runtime.workingDirectory,
-    globalHome: runtime.homeDirectory,
-    configManager: runtime.configManager,
-  });
-  const [sub = 'list', ...rest] = runtime.cli.commandArgs;
-  if (sub === 'providers') {
-    const value = { providers: BUILTIN_SECRET_PROVIDER_SOURCES };
-    return formatJsonOrText(runtime.cli)(
-      value,
-      [
-        'GoodVibes secret providers',
-        ...BUILTIN_SECRET_PROVIDER_SOURCES.map((provider) => `  ${provider}`),
-        '',
-        'Secret refs use goodvibes://secrets/<source>/... and never embed secret values.',
-      ].join('\n'),
-    );
-  }
-  if (sub === 'test') {
-    const ref = rest.join(' ').trim();
-    if (!ref || !ref.startsWith('goodvibes://secrets/') || !isSecretRefInput(ref)) {
-      return 'Usage: goodvibes secrets test goodvibes://secrets/<source>/...';
-    }
-    const resolved = await resolveSecretRef(ref, { resolveLocalSecret: (key) => secrets.get(key) });
-    const value = { ref: describeSecretRef(ref), resolved: Boolean(resolved.value) };
-    return formatJsonOrText(runtime.cli)(value, `[secrets] ${value.ref}: ${value.resolved ? 'resolved <redacted>' : 'missing'}`);
-  }
-  if (sub === 'set' || sub === 'link') {
-    const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
-    const values = rest.filter((arg) => !arg.startsWith('--'));
-    const [key, ...rawValueParts] = values;
-    const value = rawValueParts.join(' ');
-    if (!key || !value) return `Usage: goodvibes secrets ${sub} <KEY> <value> [--user|--project] [--secure|--plaintext]`;
-    if (sub === 'link' && (!value.startsWith('goodvibes://secrets/') || !isSecretRefInput(value))) {
-      return 'Invalid secret reference. Use goodvibes://secrets/<source>/...';
-    }
-    await secrets.set(key, value, {
-      scope: flags.has('--user') ? 'user' : 'project',
-      medium: flags.has('--plaintext') ? 'plaintext' : 'secure',
-    });
-    return `[secrets] ${sub === 'link' ? 'Linked' : 'Stored'}: ${key}`;
-  }
-  if (sub === 'delete') {
-    const key = rest.find((arg) => !arg.startsWith('--'));
-    if (!key) return 'Usage: goodvibes secrets delete <KEY> [--user|--project] [--secure|--plaintext]';
-    const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
-    await secrets.delete(key, {
-      scope: flags.has('--user') ? 'user' : flags.has('--project') ? 'project' : undefined,
-      medium: flags.has('--secure') ? 'secure' : flags.has('--plaintext') ? 'plaintext' : undefined,
-    });
-    return `[secrets] Deleted: ${key}`;
-  }
-  const [records, review] = await Promise.all([secrets.listDetailed(), secrets.inspect()]);
-  const stored = records.filter((record) => record.source !== 'env');
-  const value = { policy: review.policy, records: stored, warnings: review.warnings };
-  return formatJsonOrText(runtime.cli)(
-    value,
-    [
-      'GoodVibes secrets',
-      `  policy: ${review.policy}`,
-      `  secure available: ${yesNo(review.secureAvailable)}`,
-      `  stored keys: ${stored.length}`,
-      ...stored.map(
-        (record) =>
-          `    ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''})`,
-      ),
-      ...review.warnings.map((warning) => `  warning: ${warning}`),
-    ].join('\n'),
-  );
-}
-
-export async function handleSessions(runtime: CliCommandRuntime): Promise<string | null> {
-  return await withRuntimeServices(runtime, (services) => {
-    const [sub = 'list', ...rest] = runtime.cli.commandArgs;
-    const sessions = services.sessionManager.list();
-    if (sub === 'list') {
-      const value = sessions;
-      return formatJsonOrText(runtime.cli)(
-        value,
-        [
-          `GoodVibes sessions (${sessions.length})`,
-          ...sessions
-            .slice(0, 50)
-            .map(
-              (session) =>
-                `  ${session.name}  messages=${session.messageCount}  ${new Date(session.timestamp).toISOString()}  ${session.title || '(untitled)'}`,
-            ),
-        ].join('\n'),
-      );
-    }
-    if (sub === 'show' || sub === 'info') {
-      const target = rest.join(' ').trim();
-      if (!target) return 'Usage: goodvibes sessions show <id|name>';
-      const candidates = findSessionCandidates(sessions, target);
-      if (candidates.length > 1)
-        return `Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`;
-      const found = candidates[0];
-      if (!found) return `Session not found: ${target}`;
-      return formatJsonOrText(runtime.cli)(
-        found,
-        [
-          `Session ${found.name}`,
-          `  title: ${found.title || '(untitled)'}`,
-          `  messages: ${found.messageCount}`,
-          `  provider/model: ${found.provider}/${found.model}`,
-          `  updated: ${new Date(found.timestamp).toISOString()}`,
-          `  file: ${found.filePath}`,
-        ].join('\n'),
-      );
-    }
-    if (sub === 'export') {
-      const target = rest[0];
-      const outputPath = rest[1];
-      if (!target) return 'Usage: goodvibes sessions export <id|name> [path]';
-      const candidates = findSessionCandidates(sessions, target);
-      if (candidates.length > 1)
-        return `Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`;
-      const found = candidates[0];
-      if (!found) return `Session not found: ${target}`;
-      const data = services.sessionManager.load(found.name);
-      const text = JSON.stringify({ name: found.name, ...data }, null, 2) + '\n';
-      if (outputPath) {
-        const targetPath = services.shellPaths.resolveWorkspacePath(outputPath);
-        mkdirSync(dirname(targetPath), { recursive: true });
-        writeFileSync(targetPath, text, 'utf-8');
-        return `Session exported: ${targetPath}`;
-      }
-      return text.trimEnd();
-    }
-    if (sub === 'resume') {
-      const target = rest.join(' ').trim();
-      return target ? null : 'Usage: goodvibes sessions resume <id|name>';
-    }
-    return 'Usage: goodvibes sessions list|show <id>|export <id> [path]|resume <id>';
-  });
-}
-
-export async function handleTasks(runtime: CliCommandRuntime): Promise<string> {
-  const [sub = 'list', ...rest] = runtime.cli.commandArgs;
-  if (sub === 'submit') {
-    const prompt = rest.join(' ').trim();
-    if (!prompt) return 'Usage: goodvibes tasks submit <prompt>';
-    const runCli = {
-      ...runtime.cli,
-      command: 'run' as const,
-      flags: { ...runtime.cli.flags, prompt },
-      positionals: [prompt],
-    };
-    const code = await runNonInteractiveAgent({ ...runtime, cli: runCli });
-    return code === 0 ? '' : `Task submit failed with exit code ${code}`;
-  }
-  return await withRuntimeServices(runtime, (services) => {
-    const tasks = [...services.runtimeStore.getState().tasks.tasks.values()];
-    if (sub === 'list') {
-      return tasks.length === 0
-        ? 'GoodVibes tasks\n  No in-process runtime tasks are currently recorded.'
-        : ['GoodVibes tasks', ...tasks.map((task) => `  ${task.id} ${task.status} ${task.kind} ${task.title}`)].join('\n');
-    }
-    if (sub === 'show') {
-      if (!rest[0]) return 'Usage: goodvibes tasks show <taskId>';
-      const task = tasks.find((candidate) => candidate.id === rest[0]);
-      return task ? JSON.stringify(task, null, 2) : `Unknown task: ${rest[0] ?? ''}`;
-    }
-    return 'Usage: goodvibes tasks list|show <taskId>|submit <prompt>';
-  });
-}
 
 export interface ControlPlaneStatusResult {
   readonly enabled: unknown;
@@ -422,4 +251,33 @@ export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRunti
   binary: () => 'goodvibes',
   source: (source) => source,
   time: (timestamp) => new Date(timestamp).toISOString(),
+});
+
+export const { handleSecrets } = createCliSecretsCommand<CliCommandRuntime>({
+  createSecrets: (runtime) =>
+    new SecretsManager({ projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, configManager: runtime.configManager }),
+  binary: () => 'goodvibes',
+  inline: true,
+  writeScope: (_key, requested) => requested,
+  deleteScope: (_key, requested) => requested,
+  relocation: () => [],
+});
+export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+  binary: () => 'goodvibes',
+  inline: true,
+  time: (timestamp) => new Date(timestamp).toISOString(),
+  allowSubmit: true,
+  emptyTasks: 'GoodVibes tasks\n  No in-process runtime tasks are currently recorded.',
+  async submit(runtime, rest) {
+    const prompt = rest.join(' ').trim();
+    if (!prompt) return 'Usage: goodvibes tasks submit <prompt>';
+    const runCli = {
+      ...runtime.cli,
+      command: 'run' as const,
+      flags: { ...runtime.cli.flags, prompt },
+      positionals: [prompt],
+    };
+    const code = await runNonInteractiveAgent({ ...runtime, cli: runCli });
+    return code === 0 ? '' : `Task submit failed with exit code ${code}`;
+  },
 });

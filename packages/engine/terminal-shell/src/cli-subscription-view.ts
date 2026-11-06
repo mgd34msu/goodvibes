@@ -1,3 +1,4 @@
+import { yesNo, formatJsonOrText } from './cli-output.js';
 import {
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
@@ -11,7 +12,7 @@ import {
 import { inspectProviderAuth } from '@goodvibes-jev/engine/sdk/platform/runtime/security';
 import { extractAuthorizationCode, hasCommandFlag } from './cli-arguments.js';
 import { openBrowser } from './cli-environment.js';
-import { formatJsonOrText as formatOutput } from './support-bundle-inspection.js';
+
 interface SubscriptionRuntime {
   readonly cli: {
     readonly commandArgs: readonly string[];
@@ -23,8 +24,7 @@ interface SubscriptionServices {
   readonly serviceRegistry: ServiceRegistry;
   readonly secretsManager: SecretsManager;
 }
-const yesNo = (value: unknown) => (value === true ? 'yes' : 'no');
-const formatJsonOrText = (cli: SubscriptionRuntime['cli']) => (value: unknown, text: string) => formatOutput({ cli }, value, text);
+
 /** CLI subscription actions share their OAuth/state mechanics; explicit manual completion remains a product policy. */
 export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, Services extends SubscriptionServices>(
   withRuntimeServices: <T>(runtime: Runtime, fn: (services: Services) => Promise<T> | T) => Promise<T>,

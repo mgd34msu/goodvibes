@@ -4,8 +4,9 @@ import type { ModelPickerTargetInfo } from './model-picker-types.js';
 export function buildConversationModelPickerTargets(
   configManager: Pick<ConfigManager, 'get'>,
   runtime: { readonly model: string; readonly provider: string },
+  resolveProvider: (model: unknown) => string = getProviderIdFromModel,
 ): ModelPickerTargetInfo<'main' | 'helper' | 'tool' | 'tts'>[] {
-  const mainProvider = getProviderIdFromModel(configManager.get('provider.model') || runtime.provider).trim();
+  const mainProvider = resolveProvider(configManager.get('provider.model') || runtime.provider).trim();
   const mainModel = String(configManager.get('provider.model') || runtime.model || '').trim();
   const helperProvider = String(configManager.get('helper.globalProvider') ?? '').trim();
   const helperModel = String(configManager.get('helper.globalModel') ?? '').trim();
@@ -77,4 +78,20 @@ export function selectedModelPickerRoute(
         provider: String(configManager.get(fields.provider) || runtime.provider),
       }
     : { model: runtime.model, provider: runtime.provider };
+}
+
+/** Shared asynchronous decorations; a catalog-load ticket in the picker owns publication. */
+export function modelPickerCatalogServices(options: {
+  readonly picker: { pinnedIds: Set<string>; loadRecentModels(): Promise<void> };
+  readonly getPinned: () => Promise<string[]>;
+  readonly refreshLiveModels: () => Promise<readonly { readonly added: readonly unknown[]; readonly removed: readonly unknown[] }[]>;
+}) {
+  return {
+    refreshLiveModels: async () =>
+      (await options.refreshLiveModels()).some((result) => result.added.length > 0 || result.removed.length > 0),
+    prefetch: async () => {
+      options.picker.pinnedIds = new Set(await options.getPinned());
+      await options.picker.loadRecentModels();
+    },
+  };
 }

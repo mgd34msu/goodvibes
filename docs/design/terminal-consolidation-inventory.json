@@ -2015,7 +2015,7 @@
       "path": "shell/ui-openers.ts",
       "baselineTuiLines": 549,
       "baselineSimilarity": 0.5288,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "deriveConfiguredVia",
         "buildConfiguredViaMap",
@@ -2024,7 +2024,7 @@
         "selectedModelPickerRoute",
         "createCommonShellUiOpeners"
       ],
-      "notes": "Partial: shared model-target derivation/route resolution and selection/context/bookmark/profile/session/help/shortcuts/MCP/focus transitions. Remaining picker-open dependency setup and settings-modal lifecycle are still being converged; TUI trust/palette/config surfaces and Agent effort/process/composer affordances retain product policy."
+      "notes": "Platform owns model-target derivation/route resolution, catalog refresh/pinned/recent prefetch, common modal transitions and settings activate/configure/select/render lifecycle. Remaining composition is product capability policy: TUI trust/palette/config surfaces/embeddings and Agent hardware recommendations, effort/process/composer affordances, different setting writers and theme application. Agent bare-model provider resolution remains its explicit resolver."
     },
     {
       "path": "shell/voice-capture-shell.ts",

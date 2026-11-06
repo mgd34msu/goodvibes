@@ -1,3 +1,6 @@
+import { getProviderIdFromModel } from '../config/provider-model.ts';
+import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
+import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import {
@@ -103,7 +106,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       .provider;
 
   const buildModelPickerTargets = (): ModelPickerTargetInfo[] => {
-    return buildConversationModelPickerTargets(configManager, runtime);
+    return buildConversationModelPickerTargets(configManager, runtime, getProviderIdFromModel);
   };
 
   // The picker opens at once on the cached catalog; the credential-source
@@ -118,6 +121,11 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       : catalogModels;
   };
   const pickerOpenDeps: ModelPickerOpenDeps = {
+    ...modelPickerCatalogServices({
+      picker: input.modelPicker,
+      getPinned,
+      refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
+    }),
     picker: input.modelPicker,
     modalOpened: () => input.modalOpened('modelPicker'),
     render,
@@ -138,13 +146,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       ),
     buildTargets: buildModelPickerTargets,
     resolveSecretProviderIds,
-    // Picker-open re-check: re-verify each provider's live model list (TTL-respecting) so the open picker reflects models a provider started or stopped serving.
-    refreshLiveModels: async () =>
-      ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
-    prefetch: async () => {
-      input.modelPicker.pinnedIds = new Set(await getPinned());
-      await input.modelPicker.loadRecentModels();
-    },
     onError: (error) => {
       commandContext.print?.(`Model picker could not load everything: ${error instanceof Error ? error.message : String(error)}`);
       render();
@@ -318,35 +319,37 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     return true;
   };
 
-  commandContext.openSettingsModal = (target?: string) => {
-    input.modalOpened('settings');
-    input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
-      requestRender: render,
-      onSettingApplied: (change) => {
-        // Forced dark/light applies immediately (mode flip + full
-        // repaint via clearScreen's resetDiff); auto only re-probes at startup,
-        // so it takes effect next launch (stated honestly).
-        if (String(change.key) === THEME_MODE_CONFIG_KEY) {
-          return applyThemeModeSettingChange(change.value, () => commandContext.clearScreen?.());
-        }
-        // Theme changes apply immediately: rebuild palettes + full repaint.
-        if (String(change.key) === THEME_NAME_CONFIG_KEY) {
-          return applyThemeNameSettingChange(change.value, () => commandContext.clearScreen?.());
-        }
-        // The owner keep-awake toggle no longer needs a bespoke live-apply
-        // here: services.ts wires wireRuntimePower's subscribeConfig option
-        // (the SDK's own PowerManager config subscription), so setDynamic's
-        // persist above already flips the real local inhibitor, and a
-        // separate configManager.subscribe('power.keepAwake', ...) in
-        // services.ts forwards the toggle to an adopted daemon over the wire
-        // when one is reachable, both fire from the config change itself,
-        // not from this settings-modal callback.
-        return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
-      },
-    });
-    input.settingsModal.selectTarget(target);
-    render();
-  };
+  commandContext.openSettingsModal = createSettingsWorkspaceOpener({
+    activate: () => input.modalOpened('settings'),
+    configure: () => {
+      input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
+        requestRender: render,
+        onSettingApplied: (change) => {
+          // Forced dark/light applies immediately (mode flip + full
+          // repaint via clearScreen's resetDiff); auto only re-probes at startup,
+          // so it takes effect next launch (stated honestly).
+          if (String(change.key) === THEME_MODE_CONFIG_KEY) {
+            return applyThemeModeSettingChange(change.value, () => commandContext.clearScreen?.());
+          }
+          // Theme changes apply immediately: rebuild palettes + full repaint.
+          if (String(change.key) === THEME_NAME_CONFIG_KEY) {
+            return applyThemeNameSettingChange(change.value, () => commandContext.clearScreen?.());
+          }
+          // The owner keep-awake toggle no longer needs a bespoke live-apply
+          // here: services.ts wires wireRuntimePower's subscribeConfig option
+          // (the SDK's own PowerManager config subscription), so setDynamic's
+          // persist above already flips the real local inhibitor, and a
+          // separate configManager.subscribe('power.keepAwake', ...) in
+          // services.ts forwards the toggle to an adopted daemon over the wire
+          // when one is reachable, both fire from the config change itself,
+          // not from this settings-modal callback.
+          return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
+        },
+      });
+    },
+    selectTarget: (target) => input.settingsModal.selectTarget(target),
+    render,
+  });
 
   commandContext.openAgentWorkspace = (categoryId?: string) => {
     input.openAgentWorkspace(commandContext, categoryId);

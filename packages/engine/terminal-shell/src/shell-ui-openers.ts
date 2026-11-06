@@ -60,3 +60,17 @@ export function createCommonShellUiOpeners<Context>(options: {
     },
   };
 }
+
+export function createSettingsWorkspaceOpener(options: {
+  readonly activate: () => void;
+  readonly configure: () => void;
+  readonly selectTarget: (target?: string) => void;
+  readonly render: () => void;
+}): (target?: string) => void {
+  return (target) => {
+    options.activate();
+    options.configure();
+    options.selectTarget(target);
+    options.render();
+  };
+}

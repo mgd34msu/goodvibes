@@ -1,3 +1,5 @@
+import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
+import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import {
@@ -209,6 +211,11 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   // runtime-registered providers only, so the picker never offers a model
   // that fails with "Provider not registered" at turn time.
   const pickerOpenDeps: ModelPickerOpenDeps = {
+    ...modelPickerCatalogServices({
+      picker: input.modelPicker,
+      getPinned,
+      refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
+    }),
     picker: input.modelPicker,
     modalOpened: () => input.modalOpened('modelPicker'),
     render,
@@ -222,12 +229,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     buildTargets: buildModelPickerTargets,
     resolveSecretProviderIds,
     resolveEmbeddingProviders: resolveEmbeddingProviderEntries,
-    refreshLiveModels: async () =>
-      ((await providerRegistry.refreshLiveModelDiscovery?.()) ?? []).some((r) => r.added.length > 0 || r.removed.length > 0),
-    prefetch: async () => {
-      input.modelPicker.pinnedIds = new Set(await getPinned());
-      await input.modelPicker.loadRecentModels();
-    },
     onError: (error) => {
       commandContext.print?.(`Model picker could not load everything: ${summarizeError(error)}`);
       render();
@@ -269,49 +270,51 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  commandContext.openSettingsModal = (target?: string) => {
-    input.modalOpened('settings');
-    input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
-      // The Connections category probes through this app's catalog, which is
-      // empty by construction, so those rows read 'unreachable' rather than
-      // inventing a settled state nothing established. Retargeting that probe
-      // at the daemon is the remaining half of this seam.
-      ...(commandContext.workspace?.gatewayMethods ? { gatewayMethods: commandContext.workspace.gatewayMethods } : {}),
-      // A daemon-scoped credential goes to the daemon, which writes the secret,
-      // verifies it reads back, and only then points the config key at it.
-      ...(daemonCredentials ? { daemonCredentials } : {}),
-      // A daemon-owned setting is applied by the daemon, so it is written there.
-      ...(daemonConfig ? { daemonConfig } : {}),
-      reportError: (message: string) => {
-        commandContext.print?.(message);
-      },
-      requestRender: render,
-      onSettingApplied: (change) => {
-        // forced dark/light applies immediately (rebuild palettes + full
-        // repaint); auto only re-probes at startup, so it takes effect next launch.
-        if (String(change.key) === THEME_NAME_CONFIG_KEY) {
-          // Theme changes apply immediately: rebuild palettes + full repaint.
-          const applied = setActiveThemeName(change.value);
-          commandContext.requestFullRepaint?.();
-          return { message: `Theme: ${applied} (applied now)` };
-        }
-        if (String(change.key) === THEME_MODE_CONFIG_KEY) {
-          const next = coerceThemeModeSetting(change.value);
-          if (next === 'dark' || next === 'light') {
-            setActiveThemeMode(next);
+  commandContext.openSettingsModal = createSettingsWorkspaceOpener({
+    activate: () => input.modalOpened('settings'),
+    configure: () => {
+      input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
+        // The Connections category probes through this app's catalog, which is
+        // empty by construction, so those rows read 'unreachable' rather than
+        // inventing a settled state nothing established. Retargeting that probe
+        // at the daemon is the remaining half of this seam.
+        ...(commandContext.workspace?.gatewayMethods ? { gatewayMethods: commandContext.workspace.gatewayMethods } : {}),
+        // A daemon-scoped credential goes to the daemon, which writes the secret,
+        // verifies it reads back, and only then points the config key at it.
+        ...(daemonCredentials ? { daemonCredentials } : {}),
+        // A daemon-owned setting is applied by the daemon, so it is written there.
+        ...(daemonConfig ? { daemonConfig } : {}),
+        reportError: (message: string) => {
+          commandContext.print?.(message);
+        },
+        requestRender: render,
+        onSettingApplied: (change) => {
+          // forced dark/light applies immediately (rebuild palettes + full
+          // repaint); auto only re-probes at startup, so it takes effect next launch.
+          if (String(change.key) === THEME_NAME_CONFIG_KEY) {
+            // Theme changes apply immediately: rebuild palettes + full repaint.
+            const applied = setActiveThemeName(change.value);
             commandContext.requestFullRepaint?.();
-            return { message: `Theme mode: ${next} (applied now)` };
+            return { message: `Theme: ${applied} (applied now)` };
           }
-          return { message: 'Theme mode: auto (probes terminal on next startup)' };
-        }
-        const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
-        if (!builtinSetting) return;
-        return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: builtinSetting.key });
-      },
-    });
-    input.settingsModal.selectTarget(target);
-    render();
-  };
+          if (String(change.key) === THEME_MODE_CONFIG_KEY) {
+            const next = coerceThemeModeSetting(change.value);
+            if (next === 'dark' || next === 'light') {
+              setActiveThemeMode(next);
+              commandContext.requestFullRepaint?.();
+              return { message: `Theme mode: ${next} (applied now)` };
+            }
+            return { message: 'Theme mode: auto (probes terminal on next startup)' };
+          }
+          const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
+          if (!builtinSetting) return;
+          return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: builtinSetting.key });
+        },
+      });
+    },
+    selectTarget: (target) => input.settingsModal.selectTarget(target),
+    render,
+  });
 
   // Open a config-modal surface by name (or by an old name that redirects to
   // one, e.g. 'accounts' opens 'providers-modal'). Surfaces are registered in

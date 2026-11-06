@@ -1,0 +1,23 @@
+name: Decision integration budgets and outages
+on:
+  schedule:
+    - cron: '15 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: decision-integration
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup
+      - name: Build workspace packages
+        run: bun packages/engine/scripts/build.ts
+      - name: Verify model adapters, finite failover, cancellation and protocol fixtures
+        run: bun run test:judgment
+      - name: Verify call budgets, recurring alerts and router outage behavior
+        run: bun packages/engine/scripts/test.ts test/judgment-call-volume.test.ts test/judgment-volume-monitor.test.ts test/decision-router.test.ts

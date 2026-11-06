@@ -47,3 +47,32 @@ must fit the entry limit for a check to pass. The volume check is independent of
 the existing accuracy-floor check and makes no live model calls. A local scheduled
 report can inspect that installation's log on its own cadence. GitHub's application
 regression tests use synthetic transport fixtures and need no paid endpoint key.
+
+## Recurring local alerts
+
+Set `GOODVIBES_JUDGMENT_MONITOR` to a JSON configuration file for the runtime
+whose log you want to monitor. No timer or log scan is added when it is unset.
+For example:
+
+```json
+{
+  "intervalMs": 60000,
+  "windowMs": 3600000,
+  "limit": 10000,
+  "budgets": [{ "name": "Hourly decisions", "maxLogicalDecisions": 500, "maxWireAttempts": 1000 }]
+}
+```
+
+Limits are operator choices, not model accuracy claims. The runtime checks on
+startup and on the configured interval, reports budget incidents through its
+local warning log, and reports recovery. Repeated checks suppress duplicate
+incident alerts. Incomplete windows, missing wire evidence and unreadable logs
+cannot report a healthy wire budget. Raise the entry limit or narrow the window
+when needed. Each process monitors only its own log; enable this separately for
+processes you want observed. Monitoring stops with its runtime before log closure.
+It neither makes model calls nor sends log contents elsewhere.
+
+The daily `Decision integration budgets and outages` workflow also reruns the
+protocol, failover and representative operation budget tests. A regression fails
+the workflow and uses the repository's normal GitHub Actions failure reporting;
+no paid credentials or live model certification are required.

@@ -1,3 +1,4 @@
+import { composeJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
 import {
@@ -265,5 +266,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     // shape: AsyncDisposalRegistry observes it and waits before older owners.
     return Promise.allSettled([...active]).then(() => { decisionLog[Symbol.dispose](); });
   });
+  composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal);
   return { port, decisionLog };
 }

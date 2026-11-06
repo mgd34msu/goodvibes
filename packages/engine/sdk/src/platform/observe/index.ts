@@ -33,3 +33,6 @@ export {
 
 export { judgmentVolume, judgmentVolumeBreaches, captureJudgmentVolumeBudgets } from './judgment-volume.js';
 export type { JudgmentVolume, JudgmentVolumeRow, JudgmentVolumeBudget, JudgmentVolumeBreach } from './judgment-volume.js';
+
+export { captureJudgmentVolumeMonitorSettings, startJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
+export type { JudgmentVolumeMonitorSettings, JudgmentVolumeAlert } from './judgment-volume-monitor.js';

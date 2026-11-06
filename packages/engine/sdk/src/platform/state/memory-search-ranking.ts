@@ -9,6 +9,8 @@ import { mapLimit } from '@goodvibes-jev/judgment';
 import { memoryReviewPriority, reviewPriorityState } from './batteries/memory-review-priority.js';
 import { memorySearchRerank, rerankContent, rerankShortlistSize } from './batteries/memory-search-rerank.js';
 import type { MemoryRecord, MemorySearchFilter, MemorySemanticSearchResult } from './memory-store.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { classicLexicalOverlap } from './classic-ranking.js';
 
 const SEARCH_SITE = 'state.memory-search';
 const REVIEW_SITE = 'state.memory-review-queue';
@@ -18,6 +20,13 @@ const REVIEW_CONCURRENCY = 8;
 
 /** The rerank's probability for each record against the query, by record id. */
 export async function rerankProbabilities(query: string, records: readonly MemoryRecord[], options?: MemoryOperationOptions): Promise<Map<string, number>> {
+  return decisionOrClassic(() => readRerankProbabilities(query, records, options), () => {
+    assertMemoryOperationCurrent(captureMemoryOperation(options));
+    return new Map<string, number>();
+  });
+}
+
+async function readRerankProbabilities(query: string, records: readonly MemoryRecord[], options?: MemoryOperationOptions): Promise<Map<string, number>> {
   const operation = captureMemoryOperation(options);
   assertMemoryOperationCurrent(operation);
   if (records.length === 0) return new Map();
@@ -41,11 +50,18 @@ export async function rerankRetrieved(
   limit: number | undefined,
   options?: MemoryOperationOptions,
 ): Promise<Array<{ readonly record: MemoryRecord; readonly probability: number | undefined }>> {
+  return decisionOrClassic(() => rerankDecisionRetrieved(query, retrieved, limit, options), () => {
+    assertMemoryOperationCurrent(captureMemoryOperation(options));
+    return retrieved.map(record => ({ record, probability: undefined }));
+  });
+}
+
+async function rerankDecisionRetrieved(query: string, retrieved: readonly MemoryRecord[], limit: number | undefined, options?: MemoryOperationOptions): Promise<Array<{ readonly record: MemoryRecord; readonly probability: number | undefined }>> {
   const operation = captureMemoryOperation(options);
   assertMemoryOperationCurrent(operation);
   const size = rerankShortlistSize(limit);
   const shortlist = retrieved.slice(0, size);
-  const probabilities = await awaitMemoryOperation(() => rerankProbabilities(query, shortlist, operation), operation);
+  const probabilities = await awaitMemoryOperation(() => readRerankProbabilities(query, shortlist, operation), operation);
   const ranked = shortlist
     .map((record) => ({ record, probability: probabilities.get(record.id) }))
     .sort((a, b) => (b.probability ?? 0) - (a.probability ?? 0));
@@ -70,6 +86,22 @@ export interface SemanticRetrieval {
  * 0; records past its shortlist carry no reading and score 0.
  */
 export async function rankSemanticSearch(store: SemanticRetrieval, filter: MemorySearchFilter, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
+  return decisionOrClassic(() => rankDecisionSemanticSearch(store, filter, options), () => {
+    const operation = captureMemoryOperation(options);
+    assertMemoryOperationCurrent(operation);
+    const candidates = store.semanticCandidates(filter, operation);
+    const result = candidates.length ? candidates.map(entry => ({ ...entry, provenance: 'classic' as const, scoreSource: 'vector-similarity' as const, score: entry.similarity * 100 }))
+      : store.retrieve({ ...filter, semantic: false, limit: undefined }, operation).map(record => ({ record,
+        distance: Number.POSITIVE_INFINITY, similarity: 0,
+        score: classicLexicalOverlap(filter.query ?? '', rerankContent(record)) * 100,
+        provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
+    assertMemoryOperationCurrent(operation);
+    const sorted = result.sort((a, b) => b.score - a.score);
+    return filter.limit === undefined ? sorted : sorted.slice(0, filter.limit);
+  });
+}
+
+async function rankDecisionSemanticSearch(store: SemanticRetrieval, filter: MemorySearchFilter, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
   const operation = captureMemoryOperation(options);
   assertMemoryOperationCurrent(operation);
   const query = filter.query?.trim();
@@ -84,7 +116,7 @@ export async function rankSemanticSearch(store: SemanticRetrieval, filter: Memor
 
   const candidates = store.semanticCandidates(filter, operation);
   if (candidates.length === 0) {
-    const ranked = await awaitMemoryOperation(() => rerankRetrieved(query, store.retrieve({ ...filter, semantic: false, limit: undefined }, operation), filter.limit, operation), operation);
+    const ranked = await awaitMemoryOperation(() => rerankDecisionRetrieved(query, store.retrieve({ ...filter, semantic: false, limit: undefined }, operation), filter.limit, operation), operation);
     const results = ranked.map(({ record, probability }) => ({
       record,
       distance: Number.POSITIVE_INFINITY,
@@ -96,7 +128,7 @@ export async function rankSemanticSearch(store: SemanticRetrieval, filter: Memor
 
   const requestedLimit = Math.max(1, filter.limit ?? 10);
   const shortlist = candidates.slice(0, rerankShortlistSize(requestedLimit));
-  const probabilities = await awaitMemoryOperation(() => rerankProbabilities(query, shortlist.map((entry) => entry.record), operation), operation);
+  const probabilities = await awaitMemoryOperation(() => readRerankProbabilities(query, shortlist.map((entry) => entry.record), operation), operation);
   return shortlist
     .map((entry) => ({ ...entry, score: (probabilities.get(entry.record.id) ?? 0) * 100 }))
     .sort((a, b) => b.score - a.score || a.distance - b.distance || b.record.updatedAt - a.record.updatedAt)
@@ -110,6 +142,13 @@ export async function rankSemanticSearch(store: SemanticRetrieval, filter: Memor
  * follow in the order given. Returns at most `limit` records.
  */
 export async function rankReviewQueue(candidates: readonly MemoryRecord[], limit: number, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
+  return decisionOrClassic(() => rankDecisionReviewQueue(candidates, limit, options), () => {
+    assertMemoryOperationCurrent(captureMemoryOperation(options));
+    return [...candidates].sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt).slice(0, limit);
+  });
+}
+
+async function rankDecisionReviewQueue(candidates: readonly MemoryRecord[], limit: number, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
   const operation = captureMemoryOperation(options);
   assertMemoryOperationCurrent(operation);
   const size = rerankShortlistSize(limit);

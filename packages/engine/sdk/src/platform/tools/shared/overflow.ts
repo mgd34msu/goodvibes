@@ -5,6 +5,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import type { FeatureFlagReader } from '../../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled } from '../../runtime/feature-flags/index.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { outputBlockView, outputKeep } from '../batteries/output-keep.js';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -419,6 +420,15 @@ export function outputBlocks(content: string, blockChars: number): Array<{ start
  * their original order, with a marker where blocks were left out.
  */
 export async function keepForCall(content: string, budget: number, call: string): Promise<string> {
+  return decisionOrClassic(() => keepDecisionPartsForCall(content, budget, call), () => {
+    if (content.length <= budget) return content;
+    const count = Math.max(0, Math.floor(budget));
+    const head = Math.ceil(count / 2), tail = count - head;
+    return content.slice(0, head) + '\n[... middle omitted ...]\n' + (tail ? content.slice(-tail) : '');
+  });
+}
+
+async function keepDecisionPartsForCall(content: string, budget: number, call: string): Promise<string> {
   const blocks = outputBlocks(content, Math.max(1, Math.floor(budget / BLOCKS_PER_BUDGET)));
   const candidates = blocks.map((block, index) => ({ id: String(index), content: outputBlockView(block.start, block.text, content.length) }));
   const { ranked } = await outputKeep.rerank(judgmentPort(OUTPUT_KEEP_SITE), call, candidates, { site: OUTPUT_KEEP_SITE });

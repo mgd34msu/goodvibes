@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { join, extname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
@@ -109,6 +110,8 @@ export class AutoHealer {
     const warnings: string[] = [];
     if (hasCapturedToolInvocation() && !this.execution) throw new Error('Captured repair requires its construction-owned backend');
     await this.check();
+    if (isClassicOperation()) return { healed: false, content,
+      warnings: ['Automatic semantic repair is unavailable in Classic. The original validation errors are retained; submit an explicit corrected edit.'] };
     try {
       // Config gate: only run when tools.autoHeal is enabled
       if (!this.configManager.get('tools.autoHeal')) {

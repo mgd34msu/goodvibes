@@ -9,6 +9,7 @@ import { conversationSubstance, toolResultRelevance, resolvedProblemEvidence } f
 import { checkedCompactionPort, CompactionReadingError } from './section-judgment.js';
 export { CompactionReadingError } from './section-judgment.js';
 import { readDependencyQualifiedMembership, type CompactionEvidenceCase } from './section-evidence.js';
+import { isClassicOperation } from '../decision-policy.js';
 
 type SelectionBattery = typeof conversationSubstance;
 
@@ -101,6 +102,32 @@ export async function readCompactionSections(input: {
   readonly toolBudget: number;
   readonly problemsBudget: number;
 }, work: OwnedJudgmentWork): Promise<{ conversation: string; tools: string; problems: string }> {
+  if (isClassicOperation()) {
+    work.assertCurrent();
+    // Quote source text mechanically. No claim that an exchange resolved a problem
+    // or that selected text independently preserves every semantic obligation.
+    const quote = (messages: readonly ProviderMessage[], budget: number): string => {
+      const count = Math.max(0, Math.floor(budget * 4));
+      if (!count || !messages.length) return '';
+      const lines = messages.map(message => {
+        const text = typeof message.content === 'string' ? message.content : message.content.map(part => part.type === 'text' ? part.text : '[non-text content retained in saved history]').join('');
+        return sourcePrefix(message) + text;
+      });
+      const full = lines.join('\n\n');
+      if (full.length <= count) return full;
+      const marker = '\n[Classic excerpt clipped; consult saved conversation history for omitted text.]\n';
+      const available = Math.max(0, count - marker.length);
+      const head = Math.ceil(available / 2), tail = available - head;
+      return full.slice(0, head) + marker + (tail ? full.slice(-tail) : '');
+    };
+    const result = {
+      conversation: quote(input.messages.filter(message => message.role === 'user' || message.role === 'assistant'), input.conversationBudget),
+      tools: quote(input.messages.filter(message => message.role === 'tool'), input.toolBudget),
+      problems: '',
+    };
+    work.assertCurrent();
+    return result;
+  }
   const sources = input.messages.map(render);
   const conversation = sources.map((source, index) => `#${index + 1} ${source}`).join('\n\n');
   const partners = sourcePartners(input.messages);

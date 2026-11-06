@@ -5,6 +5,7 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
 import { stat as statAsync } from 'node:fs/promises';
 import { relative } from 'node:path';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { contentMatchView, contentRank } from '../batteries/content-rank.js';
 import type { ContentQuery, OutputOptions, ContentMatch } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -37,6 +38,13 @@ async function rankMatchedFiles(
   pattern: string,
   projectRoot: string,
 ): Promise<Map<string, { content: string; matches: ContentMatch[] }>> {
+  return decisionOrClassic(() => rankDecisionMatchedFiles(matchedFiles, pattern, projectRoot), async () => {
+    await assertCapturedToolAccessCurrent();
+    return new Map([...matchedFiles].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  });
+}
+
+async function rankDecisionMatchedFiles(matchedFiles: Map<string, { content: string; matches: ContentMatch[] }>, pattern: string, projectRoot: string): Promise<Map<string, { content: string; matches: ContentMatch[] }>> {
   const candidates = Array.from(matchedFiles, ([file, { matches }]) => ({
     id: file,
     content: contentMatchView(relative(projectRoot, file) || file, matches),

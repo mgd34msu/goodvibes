@@ -7,6 +7,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readNoticeSeverity, type NoticeSeverityReading } from './notice-severity.js';
 import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
@@ -64,6 +65,14 @@ export interface NoticePublicationPolicy {
   readonly retainOnDecorationError: boolean;
 }
 async function presentationSeverity(text: string, options: NoticeOptions): Promise<NoticeSeverityReading> {
+  return decisionOrClassic(() => decisionPresentationSeverity(text, options), () => {
+    const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+    current();
+    return { provenance: 'classic', severity: 'info', assertCurrent: current, recordPublication: current };
+  });
+}
+
+async function decisionPresentationSeverity(text: string, options: NoticeOptions): Promise<NoticeSeverityReading> {
   const owner = captureJudgmentPort('terminal-shell.notice-presentation', options);
   const presentation = await prepareSystemMessagePresentation(text, owner.signal);
   owner.assertCurrent();

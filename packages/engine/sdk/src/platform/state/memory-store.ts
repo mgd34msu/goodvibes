@@ -271,10 +271,13 @@ export interface MemoryImportResult {
 }
 
 export interface MemorySemanticSearchResult {
+  /** Classic scores describe retrieval only, never independent semantic confidence. */
+  readonly provenance?: 'classic';
+  readonly scoreSource?: 'literal-overlap' | 'vector-similarity';
   record: MemoryRecord;
   distance: number;
   similarity: number;
-  /** The memory-search rerank's probability on 0 to 100 (the record's confidence when there is no query). */
+  /** Decision rerank probability on 0 to 100, or the explicitly named Classic retrieval score. */
   score: number;
 }
 

@@ -148,6 +148,8 @@ export interface BoundaryCommit {
  * Populated after transitioning through boundary_commit → done.
  */
 export interface CompactionLifecycleResult {
+  /** Classic compaction has no independently measured semantic quality score. */
+  provenance?: 'classic';
   /** Session ID this run was executed for. */
   sessionId: string;
   /** Strategy that was selected and executed. */

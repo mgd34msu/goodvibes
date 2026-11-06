@@ -67,6 +67,9 @@ export interface CodeIndexStats {
 
 /** A single search hit: the matched chunk plus its distance/similarity and an honest retrieval-quality label. */
 export interface CodeContextResult {
+  readonly provenance?: 'classic';
+  /** Classic lexical similarity is literal query-term overlap, never model confidence. */
+  readonly scoreSource?: 'literal-overlap';
   readonly chunk: CodeChunk;
   readonly distance: number;
   readonly similarity: number;

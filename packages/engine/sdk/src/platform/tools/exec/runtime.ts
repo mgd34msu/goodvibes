@@ -46,6 +46,7 @@ import {
   type ExecRunPolicy,
 } from './policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { execFailureView, execRetry, type ExecFailureCategory } from '../batteries/exec-retry.js';
 
@@ -723,6 +724,14 @@ export async function isRetryableExecResult(
   allowed?: ReadonlyArray<ExecRetryCategory>,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  return decisionOrClassic(() => isDecisionRetryableExecResult(result, allowed, signal), () => {
+    signal?.throwIfAborted();
+    // An executed command's failure is not proof that repeating its effects is safe.
+    return false;
+  });
+}
+
+async function isDecisionRetryableExecResult(result: ExecCommandResult, allowed?: ReadonlyArray<ExecRetryCategory>, signal?: AbortSignal): Promise<boolean> {
   signal?.throwIfAborted();
   if (result.timed_out) return false;
   // Cancelled commands must never be retried, retrying

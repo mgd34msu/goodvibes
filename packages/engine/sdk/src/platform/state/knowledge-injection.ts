@@ -18,6 +18,7 @@ import type {
   MemorySemanticSearchResult,
 } from './memory-store.js';
 import { isMemoryTemporallyActive } from './memory-store.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 export interface KnowledgeInjection {
   readonly id: string;
@@ -173,6 +174,10 @@ export async function selectKnowledgeForTaskScored(
   writeScope: readonly string[] = [],
   limit = 3,
 ): Promise<ScoredKnowledgeInjection[]> {
+  return decisionOrClassic(() => selectDecisionKnowledgeForTaskScored(registry, task, writeScope, limit), () => []);
+}
+
+async function selectDecisionKnowledgeForTaskScored(registry: KnowledgeRegistrySource, task: string, writeScope: readonly string[], limit: number): Promise<ScoredKnowledgeInjection[]> {
   const shortlist = buildShortlist(registry, task, writeScope, limit);
   if (shortlist.length === 0) return [];
   const port = judgmentPort(SITE);

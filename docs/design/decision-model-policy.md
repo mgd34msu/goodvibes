@@ -52,6 +52,17 @@ selection. These presentation results carry Classic provenance without model
 probabilities or decision receipts. A semantic browser request made by another
 client while Classic is active reports `JUDGMENT_CLASSIC` without model I/O.
 
+Classic tool handling retains exact and whitespace-normalized edits, bounded
+regex workers and explicit interactive commands. It requests an exact target
+instead of guessing a fuzzy edit. Search results use stable local ordering;
+overflow shows a head/tail excerpt with the full retained-output reference.
+An unsuccessful command is not automatically replayed on a guessed retry class.
+Unstructured notices use a neutral display default and transcript category;
+declared runtime events keep their actual structured levels. Classic compaction
+quotes history mechanically, marks clipping and leaves semantic quality scores
+absent. Automatic semantic repair is explicitly unavailable; validation errors
+and the original candidate remain available for a corrected explicit edit.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

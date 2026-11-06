@@ -1,8 +1,10 @@
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { noticeSeverity, type NoticeSeverity } from './batteries/notice-severity.js';
+import { decisionOrClassic } from '@goodvibes-jev/engine/sdk/platform/runtime';
 
 export interface NoticeSeverityReading {
+  readonly provenance?: 'classic';
   readonly severity: NoticeSeverity | undefined;
   readonly assertCurrent: () => void;
   /** Record and fence publication immediately before the caller's display effect. */
@@ -11,6 +13,15 @@ export interface NoticeSeverityReading {
 
 /** Full-input privacy screening precedes port capture, logging and transmission. */
 export async function readNoticeSeverity(text: string, options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {}): Promise<NoticeSeverityReading> {
+  return decisionOrClassic(() => readDecisionNoticeSeverity(text, options), () => {
+    const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+    current();
+    // Neutral display default only; the notice text still carries its actual outcome.
+    return { provenance: 'classic', severity: 'info', assertCurrent: current, recordPublication: current };
+  });
+}
+
+async function readDecisionNoticeSeverity(text: string, options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<NoticeSeverityReading> {
   snapshotJudgmentInput({ text });
   const owner = captureJudgmentPort('terminal-shell.notice-severity', { ...options, prepareResultCapture: prepareJudgmentResult });
   const run = await noticeSeverity.run(owner.port, { text }, { site: 'terminal-shell.notice-severity', signal: owner.signal });

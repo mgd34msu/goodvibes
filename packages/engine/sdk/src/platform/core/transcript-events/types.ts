@@ -17,6 +17,7 @@ export type TranscriptEventKind =
   | 'system_notice';
 
 export interface TranscriptEvent {
+  readonly provenance?: 'classic';
   readonly id: string;
   readonly kind: TranscriptEventKind;
   readonly messageIndex: number;

@@ -27,6 +27,7 @@ import { collapseKeep, type KeepEntry } from '../batteries/collapse-keep.js';
 import { clip, fit, renderMessage, type Entry } from '../judged-views.js';
 import { MAX_COMPRESSION_RATIO } from '../quality-score.js';
 import type { StrategyInput, StrategyOutput } from '../types.js';
+import { decisionOrClassic, isClassicOperation } from '../../decision-policy.js';
 
 export const COLLAPSE_KEEP_SITE = 'runtime.compaction.collapse';
 
@@ -80,7 +81,7 @@ export async function runCollapse(input: StrategyInput, options: OwnedJudgmentOp
       `Session: ${sessionId}`,
       `${messages.length} message(s) collapsed to reduce context from ~${tokensBefore} tokens.`,
       '',
-      '## Key Decisions and Outcomes',
+      isClassicOperation() ? '## Earlier Messages (Classic quotations; no semantic selection)' : '## Key Decisions and Outcomes',
       ...keySection,
       '',
       '## Most Recent Exchange',
@@ -125,6 +126,13 @@ export async function runCollapse(input: StrategyInput, options: OwnedJudgmentOp
  * conversation order. The recent exchange is quoted on its own and is not asked about.
  */
 async function selectKeyMessages(messages: readonly ProviderMessage[], recentIndexes: ReadonlySet<number>, options: OwnedJudgmentOptions): Promise<string[]> {
+  return decisionOrClassic(() => selectDecisionKeyMessages(messages, recentIndexes, options), () => {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    return messages.filter((_, index) => !recentIndexes.has(index)).map(renderMessage);
+  });
+}
+
+async function selectDecisionKeyMessages(messages: readonly ProviderMessage[], recentIndexes: ReadonlySet<number>, options: OwnedJudgmentOptions): Promise<string[]> {
   const entries: KeepEntry[] = messages
     .map((msg, index) => ({ number: index + 1, text: renderMessage(msg) }))
     .filter((entry) => !recentIndexes.has(entry.number - 1));

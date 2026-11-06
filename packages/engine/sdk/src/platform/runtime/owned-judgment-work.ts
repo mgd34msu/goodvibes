@@ -1,5 +1,6 @@
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { isClassicOperation } from './decision-policy.js';
 
 /** A reader may borrow one operation's captured port without recapturing its source. */
 export interface OwnedJudgmentOptions extends JudgmentReadingOptions {
@@ -21,7 +22,8 @@ export class OwnedJudgmentWork {
   readonly assertCurrent = (): void => {
     this._signal.throwIfAborted();
     this._options.assertCurrent?.();
-    this._capture?.assertCurrent();
+    this._capture?.signal.throwIfAborted();
+    if (!isClassicOperation()) this._capture?.assertCurrent();
     this._signal.throwIfAborted();
   };
 

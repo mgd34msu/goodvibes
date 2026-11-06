@@ -5,6 +5,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, assertJudgmentInput } from '../gate/judgment-input.js';
 import { codeChunkView, rerankCodeParts } from './batteries/code-search-rerank.js';
 import type { CodeContextResult } from './code-index-types.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 const SITE = 'state.code-injection-relevance';
 export interface CodeInjectionAuthorityOptions {
@@ -13,6 +14,7 @@ export interface CodeInjectionAuthorityOptions {
 }
 export interface CodeInjectionSnapshot { readonly hit: CodeContextResult; readonly code: string }
 export interface CodeInjectionRanking {
+  readonly provenance?: 'classic';
   readonly ranked: readonly { readonly hit: CodeContextResult; readonly probability: number }[];
   /** Authority must still be current at consumption; readings are never cached across turns. */
   readonly assertCurrent: () => Promise<void>;
@@ -23,6 +25,17 @@ function record(value: unknown): value is Record<string, unknown> { return !!val
 export async function rankCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent: () => Promise<void>;
+}): Promise<CodeInjectionRanking> {
+  return decisionOrClassic(() => rankDecisionCodeInjectionSnapshots(query, inputs, options), async () => {
+    const assertCurrent = async () => { options.signal?.throwIfAborted(); await options.assertCurrent(); options.signal?.throwIfAborted(); };
+    await assertCurrent();
+    // Passive semantic enrichment is omitted; explicit lexical code search remains available.
+    return { provenance: 'classic', ranked: [], assertCurrent };
+  });
+}
+
+async function rankDecisionCodeInjectionSnapshots(query: string, inputs: readonly CodeInjectionSnapshot[], options: {
+  readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => Promise<void>;
 }): Promise<CodeInjectionRanking> {
   // Screen the complete owned source batch, including material beyond clipping limits,
   // before projection, budget checks, port lookup, or any hosted transmission.

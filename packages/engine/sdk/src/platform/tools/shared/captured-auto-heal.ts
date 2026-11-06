@@ -1,4 +1,5 @@
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 /** Captured repair: contained candidates, then the existing parser/Jev acceptance. */
 import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -37,7 +38,7 @@ export async function healToolFile(
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, ...(invocationSignal ? [invocationSignal] : [])]);
     const assertSource = () => { signal.throwIfAborted(); assertInvocation?.(); };
-    const reading = assertInvocation && config.get('tools.autoHeal') && errors.length ? captureJudgmentPort('tools.auto-heal.acceptance', { signal, assertCurrent: assertSource }) : undefined;
+    const reading = !isClassicOperation() && assertInvocation && config.get('tools.autoHeal') && errors.length ? captureJudgmentPort('tools.auto-heal.acceptance', { signal, assertCurrent: assertSource }) : undefined;
     const check = () => { assertSource(); reading?.assertCurrent(); };
     const monitor = setInterval(() => { try { check(); } catch (error) { controller.abort(error); } }, 50);
     monitor.unref?.();
@@ -69,7 +70,7 @@ export async function healToolFile(
     await executePolicyCheck(() => assertCapturedToolReadAccess(target), signal);
     checkSynchronous();
   };
-  const reading = assertInvocation ? captureJudgmentPort('tools.auto-heal.acceptance', { signal, assertCurrent: checkSynchronous }) : undefined;
+  const reading = !isClassicOperation() && assertInvocation ? captureJudgmentPort('tools.auto-heal.acceptance', { signal, assertCurrent: checkSynchronous }) : undefined;
   await check();
   const transform = async (stage: 'formatter' | 'linter', file: string, candidate: string, warnings: string[]): Promise<string> => {
     await check();

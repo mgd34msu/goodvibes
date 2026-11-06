@@ -3,6 +3,8 @@ import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { speechCandidates, snapshotSpeechSeams } from '../../judgment-browser/speech-source.js';
 import { speechSeamsBattery } from '../../judgment-browser/batteries/speech-seams.js';
 import { StreamingCodeFenceFilter, stripMarkdownForSpeech } from './speech-markdown.js';
+import { activateClassicFallback, isClassicOperation } from '../../runtime/decision-policy.js';
+import { classicSpeechEndOffsets } from '../../../browser-decision-policy.js';
 
 /** Streaming speech policy. Meaning comes from the canonical seam battery;
  * length, whitespace, latency and end-of-turn flushing remain mechanical. */
@@ -45,7 +47,7 @@ export class TtsTextChunker {
     this.now = options.now ?? (() => Date.now());
     this.assertCaller = options.assertCurrent ?? (() => {});
     let owner = options.owner;
-    if (!owner) {
+    if (!owner && !isClassicOperation()) {
       try { owner = captureJudgmentPort('voice.spoken-turn.chunking', { signal: this.cancellation.signal, assertCurrent: this.assertCaller }); }
       catch (error) { if (!(error instanceof JudgmentPortMissingError)) this.failure = error; }
     }
@@ -109,7 +111,8 @@ export class TtsTextChunker {
     if (this.failure) throw this.failure;
     this.cancellation.signal.throwIfAborted();
     this.assertCaller();
-    this.owner?.assertCurrent();
+    this.owner?.signal.throwIfAborted();
+    if (!isClassicOperation()) this.owner?.assertCurrent();
   }
 
   private requestMechanicalProgress(): void {
@@ -164,6 +167,8 @@ export class TtsTextChunker {
   }
 
   private async findLatestSentenceBoundary(): Promise<number> {
+    if (isClassicOperation()) return classicSpeechEndOffsets(this.buffer)
+      .filter(end => end < this.buffer.length && end >= this.minBoundaryChars && end <= this.maxChunkChars).at(-1) ?? -1;
     if (this.ending || !this.owner || this.buffer.length < this.minBoundaryChars || this.buffer.length > 32768) return -1;
     // Whitespace candidates supply no meaning. Keep the complete buffer as
     // evidence; a bounded candidate set is not a truncated source excerpt.
@@ -183,7 +188,8 @@ export class TtsTextChunker {
       if (readings.some(reading => !reading || reading.outcome !== 'act')) { run.recordAction('unsettled'); return -1; }
       run.recordAction('ready');
       return candidates.filter((_, i) => readings[i]!.verdict === 'yes').at(-1) ?? -1;
-    } catch {
+    } catch (error) {
+      if (!this.cancellation.signal.aborted && !reader.signal.aborted) activateClassicFallback(error);
       this.assertCurrent();
       // Unavailable meaning never revives punctuation. Only the independent
       // size/latency/end-of-turn rules may release the buffered text.

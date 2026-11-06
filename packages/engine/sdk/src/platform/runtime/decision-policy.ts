@@ -97,7 +97,8 @@ export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => 
     }
     try { return await decision(); }
     catch (error) {
-      if (!fallbackAllowed() || !activateClassicFallback(error)) throw error;
+      const switchedBySibling = error instanceof DecisionModelsDisabledError && isClassicOperation();
+      if (!fallbackAllowed() || !switchedBySibling && !activateClassicFallback(error)) throw error;
       return classic();
     }
   });

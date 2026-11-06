@@ -88,6 +88,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         validateQuestions(questions);
         validateContextBudget(state, questions);
         let lastFailure: JudgmentError | undefined;
+        let malformedFailure: JudgmentError | undefined;
         const eligible = targets.map((target, endpointIndex) => ({ target, endpointIndex }));
         for (let eligibleIndex = 0; eligibleIndex < eligible.length; eligibleIndex++) {
           const entry = eligible[eligibleIndex];
@@ -170,6 +171,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               failure = controller.signal.aborted ? controller.signal.reason : attemptController.signal.aborted ? attemptController.signal.reason : error;
               const last = toJudgmentError(failure);
               lastFailure = last;
+              if (last.kind === 'invalid-response') malformedFailure = last;
               requestId = safeId(last.requestId) ?? requestId;
               remember({
                 attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
@@ -210,6 +212,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           }
         }
         const last = attempts.at(-1);
+        // Exhausting backups cannot turn a malformed answer into an availability
+        // downgrade. Preferred may enter Classic only for actual unavailability.
+        if (malformedFailure) throw malformedFailure;
         // Preserve a precise terminal protocol/configuration diagnostic when
         // there is only one target; context-limit callers can still partition
         // complete evidence. Availability failures always use the halt notice.

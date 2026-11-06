@@ -58,6 +58,7 @@ import {
   emitCompactionStrategySwitch,
 } from '../emitters/compaction.js';
 import { computeQualityScore, escalateStrategy, LOW_QUALITY_THRESHOLD } from './quality-score.js';
+import { activateClassicFallback, isClassicOperation } from '../decision-policy.js';
 import type { CompactionQualityScore } from './quality-score.js';
 import type { ProviderMessage } from '../../providers/interface.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -311,10 +312,10 @@ export class CompactionManager {
     // ── Score quality and auto-switch if low ─────────────────────────────────
     qualityScore = await this._score(strategyInput, strategyOutput, work);
     work.assertCurrent();
-    if (qualityScore === null) return null;
+    if (qualityScore === null && !isClassicOperation()) return null;
 
     work.assertCurrent();
-    emitCompactionQualityScore(this._bus, this._ctx, {
+    if (qualityScore) emitCompactionQualityScore(this._bus, this._ctx, {
       sessionId: this._sessionId,
       strategy,
       score: qualityScore.score,
@@ -326,7 +327,7 @@ export class CompactionManager {
     });
     work.assertCurrent();
 
-    if (qualityScore.isLowQuality) {
+    if (qualityScore?.isLowQuality) {
       const escalated = escalateStrategy(strategy);
       if (escalated !== strategy) {
         const reason = `Quality score ${qualityScore.score.toFixed(2)} below threshold ${LOW_QUALITY_THRESHOLD}; escalating from ${strategy} to ${escalated}`;
@@ -375,7 +376,7 @@ export class CompactionManager {
           // Re-score the escalated result
           const escalatedScore = await this._score(escalatedInput, escalatedOutput, work);
           work.assertCurrent();
-          if (escalatedScore === null) return null;
+          if (escalatedScore === null && !isClassicOperation()) return null;
           qualityScore = escalatedScore;
           strategyOutput = escalatedOutput;
           strategy = escalated;
@@ -390,7 +391,7 @@ export class CompactionManager {
       }
     }
 
-    if (qualityScore.isLowQuality) {
+    if (qualityScore?.isLowQuality) {
       work.assertCurrent();
       this._transition('failed');
       emitCompactionFailed(this._bus, this._ctx, {
@@ -468,6 +469,7 @@ export class CompactionManager {
       messages: strategyOutput.messages,
       warnings: strategyOutput.warnings,
       qualityScore,
+      ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
       strategySwitchReason,
     };
   }
@@ -696,9 +698,19 @@ export class CompactionManager {
    * committed.
    */
   private async _score(input: StrategyInput, output: StrategyOutput, work: OwnedJudgmentWork): Promise<CompactionQualityScore | null> {
+    if (isClassicOperation()) {
+      work.assertCurrent();
+      output.warnings.push('Classic compaction: no independent semantic quality score was taken. Full saved history remains available.');
+      return null;
+    }
     try {
       return await work.wait(() => computeQualityScore(input, output, work.options('runtime.compaction.quality-score')));
     } catch (err) {
+      if (!work.signal.aborted && activateClassicFallback(err)) {
+        work.assertCurrent();
+        output.warnings.push('Preferred fell back to Classic: this compaction has no independent semantic quality score.');
+        return null;
+      }
       work.assertCurrent();
       const error = summarizeError(err);
       this._transition('failed');

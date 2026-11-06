@@ -1,6 +1,7 @@
 import { commitExecPromptAnswer, discardExecPromptAnswer } from '../../runtime/permissions/autonomous-tool-prompts.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 /**
  * interactive.ts, PTY-backed prompt-answer path for the exec tool.
  *
@@ -147,6 +148,15 @@ export function pendingPromptLine(transcript: string): string | null {
  * yes surfaces it; the complete output remains available to the reading.
  */
 export async function readPendingPrompt(command: string, transcript: string, signal?: AbortSignal): Promise<string | null> {
+  return decisionOrClassic(() => readDecisionPendingPrompt(command, transcript, signal), () => {
+    signal?.throwIfAborted();
+    const line = pendingPromptLine(transcript);
+    // Present a literal terminal question to the owner; never answer it automatically.
+    return line && /(?:[:?]|\[[yYnN/]+\])\s*$/u.test(line) ? line : null;
+  });
+}
+
+async function readDecisionPendingPrompt(command: string, transcript: string, signal?: AbortSignal): Promise<string | null> {
   snapshotJudgmentInput({ command, transcript });
   const line = pendingPromptLine(transcript);
   if (line === null) return null;
@@ -169,6 +179,10 @@ export async function readPendingPrompt(command: string, transcript: string, sig
  * Jev. Only a yes that acts sends the command down the PTY path.
  */
 export async function readWillPrompt(command: string, signal?: AbortSignal): Promise<boolean> {
+  return decisionOrClassic(() => readDecisionWillPrompt(command, signal), () => { signal?.throwIfAborted(); return false; });
+}
+
+async function readDecisionWillPrompt(command: string, signal?: AbortSignal): Promise<boolean> {
   snapshotJudgmentInput({ command });
   const owner = captureJudgmentPort(WILL_PROMPT_SITE, { signal, prepareResultCapture: prepareJudgmentResult });
   const run = await executePolicyCheck(() => execPrompt.run(owner.port, { command }, { site: WILL_PROMPT_SITE, only: ['will_prompt'], signal: owner.signal, beforeAttempt: owner.assertCurrent }), signal);

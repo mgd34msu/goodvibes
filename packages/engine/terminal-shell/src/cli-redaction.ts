@@ -28,6 +28,7 @@ import {
 } from '@goodvibes-jev/engine/sdk/platform/config';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { captureOwnedJson, retainStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { redactSensitiveDataAsync, redactStructuredDataAsync } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { supportBundleFields } from './support-bundle-fields.js';
@@ -47,10 +48,12 @@ export async function isSensitiveConfigPath(path: string, options: JudgmentReadi
   const source = captureConfig(path, options);
   source.assertCurrent();
   if (SCHEMA_KEYS.has(path)) return isDeclaredSecretBearingConfigKey(path);
+  return decisionOrClassic(async () => {
   const reading = await readCredentialKey({ key: path, description: configKeyDescription(path) }, CONFIG_PATH_CREDENTIAL_SITE,
     { ...options, assertCurrent: source.assertCurrent });
   source.assertCurrent();
   return !(reading.verdict === 'no' && reading.outcome === 'act');
+  }, () => { source.assertCurrent(); return true; });
 }
 
 function captureConfig(config: unknown, options: JudgmentReadingOptions) {
@@ -73,7 +76,10 @@ function captureConfig(config: unknown, options: JudgmentReadingOptions) {
     sourceCurrent();
   };
   let owner: JudgmentPortCapture | undefined;
-  const assertCurrent = () => { if (owner) owner.assertCurrent(); else assertSource(); };
+  const assertCurrent = () => {
+    assertSource(); owner?.signal.throwIfAborted();
+    if (owner && !isClassicOperation()) owner.assertCurrent();
+  };
   const readingOptions = () => {
     assertSource();
     owner ??= captureJudgmentPort(CONFIG_PATH_CREDENTIAL_SITE, { ...options, assertCurrent: assertSource });
@@ -119,7 +125,7 @@ async function sensitivePaths(source: ReturnType<typeof captureConfig>, candidat
   const paths = [...candidates.keys()];
   const sensitive = await mapLimit(paths, PATH_READING_CONCURRENCY, async (path) =>
     isStructuredCredentialReferenceConfigKey(path) ? true
-      : isSensitiveConfigPath(path, SCHEMA_KEYS.has(path) ? { assertCurrent: source.assertCurrent } : source.readingOptions()));
+      : isSensitiveConfigPath(path, SCHEMA_KEYS.has(path) || isClassicOperation() ? { assertCurrent: source.assertCurrent } : source.readingOptions()));
   source.assertCurrent();
   return new Set(paths.filter((_path, index) => sensitive[index]));
 }

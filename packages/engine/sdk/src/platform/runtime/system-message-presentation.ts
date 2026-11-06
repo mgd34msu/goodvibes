@@ -2,6 +2,7 @@ import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
+import { decisionOrClassic, isClassicOperation } from './decision-policy.js';
 
 export type SystemMessageSeverity = 'error' | 'warning' | 'info';
 export const systemMessagePresentation = defineBattery({
@@ -48,6 +49,7 @@ export const systemMessagePresentation = defineBattery({
   ],
 });
 export interface SystemMessagePresentation {
+  readonly provenance?: 'classic';
   readonly activity?: keyof typeof systemMessagePresentation.items.activity.question.criteria;
   readonly severity?: SystemMessageSeverity;
   readonly event?: keyof typeof systemMessagePresentation.items.event.question.criteria;
@@ -63,10 +65,18 @@ function configured(signal?: AbortSignal) {
 }
 /** Rendering only reads prepared results. No network work or word heuristics in render. */
 export function peekSystemMessagePresentation(content: string): SystemMessagePresentation | undefined {
+  if (isClassicOperation()) return Object.freeze({ provenance: 'classic' });
   try { const { port, cache } = configured(); return cache.settled.get(JSON.stringify([port.model, content])); }
   catch { return undefined; }
 }
 export async function prepareSystemMessagePresentation(content: string, signal?: AbortSignal): Promise<SystemMessagePresentation> {
+  return decisionOrClassic(() => prepareDecisionSystemMessagePresentation(content, signal), () => {
+    signal?.throwIfAborted();
+    return Object.freeze({ provenance: 'classic' as const });
+  });
+}
+
+async function prepareDecisionSystemMessagePresentation(content: string, signal?: AbortSignal): Promise<SystemMessagePresentation> {
   assertJudgmentInput({ content });
   if (content.length > 160_000) throw new JudgmentInputError('unsupported-input');
   signal?.throwIfAborted();

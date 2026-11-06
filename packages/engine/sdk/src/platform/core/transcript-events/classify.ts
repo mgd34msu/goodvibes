@@ -8,6 +8,7 @@ import { captureTranscriptSnapshot } from './snapshot.js';
 import type { ToolCall } from '../../types/tools.js';
 import type { TranscriptEvent } from './types.js';
 import type { ConversationMessageSnapshot } from '../conversation.js';
+import { decisionOrClassic, isClassicOperation } from '../../runtime/decision-policy.js';
 
 function summarizeText(text: string, max = 96): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -45,6 +46,11 @@ export interface TranscriptReadingOptions extends JudgmentReadingOptions {
 }
 
 export async function classifyTranscriptMessages(messages: readonly ConversationMessageSnapshot[], options: TranscriptReadingOptions = {}): Promise<TranscriptEvent[]> {
+  return decisionOrClassic(() => classifyCurrentPolicyTranscript(messages, options), () => classifyCurrentPolicyTranscript(messages, options));
+}
+
+async function classifyCurrentPolicyTranscript(messages: readonly ConversationMessageSnapshot[], options: TranscriptReadingOptions): Promise<TranscriptEvent[]> {
+  const classic = isClassicOperation();
   const lifetime = options.lifetime ?? new TranscriptReadingLifetime();
   const captured = captureTranscriptSnapshot(messages) as readonly ConversationMessageSnapshot[];
   const source = JSON.stringify(captured);
@@ -57,11 +63,9 @@ export async function classifyTranscriptMessages(messages: readonly Conversation
   assertCurrent();
   // Preflight every complete system notice before transmitting any of them.
   // User, assistant and tool contents remain outside this presentation reading.
-  const notices = captured.filter(message => message.role === 'system' && !declaredNoticePresentation(message.content, message.runtimeEvent));
+  const notices = classic ? [] : captured.filter(message => message.role === 'system' && !declaredNoticePresentation(message.content, message.runtimeEvent));
   for (const message of notices) assertJudgmentInput({ content: message.content });
   const authority = notices.length ? captureJudgmentPort(systemMessagePresentation.name, { ...options, assertCurrent, prepareResultCapture: prepareJudgmentResult }) : undefined;
-  lifetime.retain(assertCurrent);
-  if (authority) lifetime.retain(authority.assertCurrent);
   const events: TranscriptEvent[] = [];
   for (const [messageIndex, message] of captured.entries()) {
     switch (message.role) {
@@ -108,6 +112,7 @@ export async function classifyTranscriptMessages(messages: readonly Conversation
         break;
       case 'system': {
         let kind = declaredNoticePresentation(message.content, message.runtimeEvent)?.event;
+        if (!kind && classic) kind = 'system_notice';
         if (!kind) {
           if (!authority) throw new TranscriptReadingUnsettledError();
           const result = await systemMessagePresentation.run(authority.port, { content: message.content }, {
@@ -122,6 +127,7 @@ export async function classifyTranscriptMessages(messages: readonly Conversation
         }
         events.push({
           id: `msg-${messageIndex}-system`,
+          ...(classic ? { provenance: 'classic' as const } : {}),
           kind,
           messageIndex,
           groupKey: `${kind}:${messageIndex}`,
@@ -133,6 +139,8 @@ export async function classifyTranscriptMessages(messages: readonly Conversation
     }
   }
   assertCurrent();
+  lifetime.retain(assertCurrent);
+  if (authority) lifetime.retain(authority.assertCurrent);
   lifetime.assertCurrent();
   return events;
 }

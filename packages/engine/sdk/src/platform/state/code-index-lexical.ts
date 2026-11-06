@@ -14,6 +14,8 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { codeChunkView, rerankCodeParts } from './batteries/code-search-rerank.js';
 import type { CodeChunk } from './code-index-chunking.js';
 import type { CodeContextResult } from './code-index-types.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { classicLexicalOverlap } from './classic-ranking.js';
 
 const CODE_SEARCH_SITE = 'state.code-index-search';
 
@@ -60,6 +62,23 @@ export async function rankLexicalChunks(
   chunks: readonly CodeChunk[],
   limit: number,
 ): Promise<CodeContextResult[]> {
+  return decisionOrClassic(() => rankDecisionLexicalChunks(rootDir, query, chunks, limit), () => {
+    const original = retainStrictJudgmentJson({ rootDir, query, chunks, limit });
+    const root = realpathSync(original.snapshot.rootDir);
+    const result = original.snapshot.chunks.map(chunk => {
+      const source = readLexicalSource(root, chunk.path);
+      const text = source.code?.split('\n').slice(Math.max(0, chunk.startLine - 1), chunk.endLine).join('\n') ?? '';
+      const similarity = classicLexicalOverlap(query, `${chunk.path}\n${chunk.symbol ?? ''}\n${text}`);
+      return { chunk, similarity, distance: 2 * (1 - similarity), label: 'lexical' as const,
+        provenance: 'classic' as const, scoreSource: 'literal-overlap' as const };
+    }).sort((a, b) => b.similarity - a.similarity).slice(0, Math.max(0, limit));
+    original.assertCurrent();
+    if (realpathSync(rootDir) !== root) throw new Error('Code search root changed');
+    return result;
+  });
+}
+
+async function rankDecisionLexicalChunks(rootDir: string, query: string, chunks: readonly CodeChunk[], limit: number): Promise<CodeContextResult[]> {
   if (chunks.length === 0) return [];
   const original = retainStrictJudgmentJson({ rootDir, query, chunks, limit });
   const snapshot = original.snapshot;

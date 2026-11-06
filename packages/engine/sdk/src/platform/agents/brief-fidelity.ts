@@ -3,6 +3,7 @@ import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev
 import { snapshotJudgmentEvidence } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import type { ExecutionIntent } from '../runtime/execution-intents.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 
 interface DelegationFix {
   readonly requirement: string;
@@ -94,6 +95,12 @@ export async function assertAgentBriefFidelity(input: { readonly request: string
   const authorizationState = snapshotJudgmentEvidence({ originalUserRequest: captured.request, proposedSpecialistCount: captured.assignments.length });
   const current = () => { source.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
+  if (isClassicOperation()) {
+    // This optional comparison grants no authority. Classic assignments must
+    // still pass normal owner/tool admission and their declared execution scope.
+    current();
+    return;
+  }
   const owner = captureJudgmentPort(agentBriefFidelity.name, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
   const [authorization, run] = await Promise.all([
     agentDelegationAuthorization.run(owner.port, authorizationState as never,

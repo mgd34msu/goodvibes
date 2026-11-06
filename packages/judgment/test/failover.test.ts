@@ -16,6 +16,15 @@ const failure = async (promise: Promise<unknown>): Promise<JudgmentError> => {
 };
 
 describe('finite configured decision model failover', () => {
+  test('a malformed answer followed by unavailable backups remains a protocol failure', async () => {
+    let attempts = 0;
+    const port = createSystemOnePort(config(async () => {
+      attempts++;
+      return attempts === 1 ? Response.json({ model: DEFAULT_MODEL, answers: { yes: { type: 'noul', noul: 7 } }, usage: { input_tokens: 1, output_tokens: 1 } }) : bad(503);
+    }));
+    expect((await failure(port.ask(request))).kind).toBe('invalid-response');
+    expect(attempts).toBe(2);
+  });
   test.each([408, 429, 500, 529])('advances after HTTP %i with one logical result and request lineage', async (status) => {
     const urls: string[] = [];
     const port = createSystemOnePort(config(async (url, init) => {

@@ -10,6 +10,7 @@ import { editWindow } from '../batteries/edit-window.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { requireActingReading, JudgmentHeldError } from '../../types/judgment-held.js';
 import { editTarget, editTargetView } from '../batteries/edit-target.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 type AstGrepModule = typeof import('@ast-grep/napi');
 type EditComputationResult =
@@ -570,6 +571,10 @@ export function buildFailedEditResult(item: EditItem, error: string, status: Edi
 
 /** All structurally possible windows participate; similarity never hides a target. */
 async function selectEditWindow(file: string, find: string) {
+  return decisionOrClassic(() => selectDecisionEditWindow(file, find), () => null);
+}
+
+async function selectDecisionEditWindow(file: string, find: string) {
   // Check every byte before any batch is sent, including protected material
   // beyond the first candidate window. Exact local edits need no remote read.
   assertJudgmentInput({ source: file, find });
@@ -667,6 +672,7 @@ export async function computeSingleEdit(
       usedFallback = 'whitespace';
     } else {
       const fuzzyMatch = await selectEditWindow(fileContent, findStr);
+      current(); await assertCapturedToolAccessCurrent();
       if (fuzzyMatch) {
         positions = [{ start: fuzzyMatch.start, end: fuzzyMatch.end }];
         usedFallback = 'fuzzy-lines';

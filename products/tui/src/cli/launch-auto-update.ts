@@ -1,4 +1,9 @@
-import { withTimeout, restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
+import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
+import {
+  withTimeout,
+  restartOntoUpdatedBinary as restart,
+  type RestartOntoUpdatedBinaryOptions,
+} from '@goodvibes-jev/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
 /**
@@ -39,12 +44,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * live build VERSION and never the real network.
  */
 import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
-import {
-  applyUpdate,
-  checkForUpdate,
-  createUpdateSwapProgress,
-  type ApplyUpdateOptions,
-} from '../input/commands/update-runtime.ts';
+import { applyUpdate, checkForUpdate, createUpdateSwapProgress, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
 import { readUpdateSettings, type UpdateSettings } from '../config/tui-extension-settings.ts';
 import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
@@ -102,47 +102,21 @@ export interface RunLaunchAutoUpdateOptions {
 
 /** Resolves to 'timeout' when `promise` does not settle within `ms`; the timer never keeps the process alive. */
 
-
 /**
  * The launch-time decision: receipt-and-continue (restarted process), skip
  * (disabled / unswappable / current / unreachable), install-and-restart, or
  * fail-and-continue on the current version. Never throws.
  */
 export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
-  const updatedFrom = options.env[LAUNCH_UPDATED_FROM_ENV];
-  if (typeof updatedFrom === 'string' && updatedFrom.length > 0) {
-    // Consumed here so sessions spawned from inside this one never inherit it.
-    delete options.env[LAUNCH_UPDATED_FROM_ENV];
-    options.print(`auto-update: updated from v${normalizeVersion(updatedFrom)} to v${normalizeVersion(options.currentVersion)} at launch`);
-    return { action: 'continue', reason: 'just-updated' };
-  }
-
-  if (!(options.settings.autoUpdateAtLaunch ?? true)) {
-    return { action: 'continue', reason: 'disabled' };
-  }
-
-  if (detectInstallKind(options.execPath) !== 'binary') {
-    return { action: 'continue', reason: 'not-swappable-install' };
-  }
-
-  const timeoutMs = options.timeoutMs ?? options.settings.launchCheckTimeoutMs ?? LAUNCH_UPDATE_CHECK_TIMEOUT_MS;
-  let check: Awaited<ReturnType<typeof checkForUpdate>> | 'timeout';
-  try {
-    check = await withTimeout(checkForUpdate(options.fetchImpl, options.currentVersion), timeoutMs);
-  } catch {
-    check = 'timeout';
-  }
-  if (check === 'timeout') {
-    // Honest about WHY the check was skipped, a timeout most commonly means
-    // the update server could not be reached in time, not necessarily that
-    // the whole machine is offline (a slow/flaky connection is just as
-    // common), so this no longer overclaims "offline".
-    options.print("couldn't reach the update server; check skipped");
-    return { action: 'continue', reason: 'check-skipped' };
-  }
-  if (check.isCurrent) {
-    return { action: 'continue', reason: 'already-current' };
-  }
+  const preflight = await runLaunchUpdatePreflight(options, {
+    updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
+    defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
+    check: checkForUpdate,
+    skipped: "couldn't reach the update server; check skipped",
+    unswappable: () => undefined,
+  });
+  if (!preflight.proceed) return preflight.outcome;
+  const check = preflight.check;
 
   const applyTimeoutMs = options.applyTimeoutMs ?? options.settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS;
   options.print(`downloading ${check.latestTag}…`);
@@ -266,9 +240,7 @@ export interface HandDaemonOverAtLaunchParams {
  * Only a binary install acts. A source or package-managed terminal has no
  * business replacing a daemon binary on the host it happens to be running on.
  */
-export async function handDaemonOverAtLaunch(
-  params: HandDaemonOverAtLaunchParams,
-): Promise<DaemonHandoverOutcome> {
+export async function handDaemonOverAtLaunch(params: HandDaemonOverAtLaunchParams): Promise<DaemonHandoverOutcome> {
   if (!(params.settings.autoUpdateAtLaunch ?? true)) {
     return { action: 'skipped', reason: 'disabled' };
   }
@@ -286,8 +258,6 @@ export async function handDaemonOverAtLaunch(
   });
 }
 
-
-
 /**
  * Runs the (just-swapped) binary at execPath with the original CLI arguments
  * and an inherited terminal, blocking until it exits, and returns its exit
@@ -295,5 +265,6 @@ export async function handDaemonOverAtLaunch(
  * child's environment, never on the command line.
  */
 
-
-export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number { return restart(options, LAUNCH_UPDATED_FROM_ENV); }
+export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {
+  return restart(options, LAUNCH_UPDATED_FROM_ENV);
+}

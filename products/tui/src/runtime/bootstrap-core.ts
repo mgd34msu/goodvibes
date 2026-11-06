@@ -1,5 +1,17 @@
-import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
-export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+import {
+  initializeTerminalCatalog,
+  seedTerminalControlPlane,
+  attachTerminalRuntimeBindings,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-runtime-bindings';
+import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
+import {
+  companionMessageToOrchestratorInputOptions,
+  type CompanionMessagePayload,
+} from '@goodvibes-jev/engine/terminal-shell/companion-input';
+export {
+  companionMessageToOrchestratorInputOptions,
+  type CompanionMessagePayload,
+} from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
@@ -14,7 +26,8 @@ import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { createSandboxContainmentNotice } from './daemon-attach-notices.ts';
 import type { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { Compositor } from '../renderer/compositor.ts'; import { activeTokens } from '../renderer/theme.ts';
+import { Compositor } from '../renderer/compositor.ts';
+import { activeTokens } from '../renderer/theme.ts';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platform/core';
@@ -23,9 +36,21 @@ import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform
 import type { BootstrapOptions } from './context.ts';
 import { createRuntimeStore, createDomainDispatch, type RuntimeStore } from './store/index.ts';
 import {
-  type MutableRuntimeState, type SessionEvent, bindFeatureSettingsBridge, createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus, ForensicsCollector,
-  ForensicsRegistry, generateUserSessionId, loadBootstrapSystemPrompt, syncConfiguredServices,
-  registerBootstrapHookBridge, registerBootstrapRuntimeEvents, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom,
+  type MutableRuntimeState,
+  type SessionEvent,
+  bindFeatureSettingsBridge,
+  createFeatureFlagManager,
+  deriveFeatureStates,
+  RuntimeEventBus,
+  ForensicsCollector,
+  ForensicsRegistry,
+  generateUserSessionId,
+  loadBootstrapSystemPrompt,
+  syncConfiguredServices,
+  registerBootstrapHookBridge,
+  registerBootstrapRuntimeEvents,
+  configureRuntimeEventBusDefaults,
+  runtimeEventBusOptionsFrom,
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { registerClientPhoneTool } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
@@ -125,19 +150,13 @@ export interface BootstrapCoreState {
   readonly sessionInboundInputs: SessionInboundInputPoller;
   /** Cache-backed read facade; bootstrap.ts drives its mode (external/local-only in this product, 'embedded' is a HostServiceMode value with no product-facing setting to select it here) from the same HostServiceMode as the spine above. */
   readonly sessionUnionCache: SessionUnionCache;
-
 }
-
-
 
 // --- Operator narration of inbound channel events ---
 
 /** Narrate an inbound channel event (GitHub, Slack, ntfy, etc.) that triggered an
  * agent turn, via the SystemMessageRouter, null for internal/companion sources. */
-export function narrateInboundEvent(event: {
-  source: string;
-  metadata: Readonly<Record<string, unknown>> | undefined;
-}): string | null {
+export function narrateInboundEvent(event: { source: string; metadata: Readonly<Record<string, unknown>> | undefined }): string | null {
   const { source, metadata } = event;
   if (!source) return null;
 
@@ -151,31 +170,47 @@ export function narrateInboundEvent(event: {
   // Build a surface label for the log prefix.
   const label = ((): string => {
     switch (surface) {
-      case 'github':        return '[GitHub]';
-      case 'slack':         return '[Slack]';
-      case 'discord':       return '[Discord]';
-      case 'ntfy':          return '[ntfy]';
-      case 'homeassistant': return '[HomeAssistant]';
-      case 'telegram':      return '[Telegram]';
-      case 'google-chat':   return '[Google Chat]';
-      case 'signal':        return '[Signal]';
-      case 'whatsapp':      return '[WhatsApp]';
-      case 'msteams':       return '[Teams]';
-      case 'imessage':      return '[iMessage]';
-      case 'bluebubbles':   return '[BlueBubbles]';
-      case 'mattermost':    return '[Mattermost]';
-      case 'matrix':        return '[Matrix]';
-      case 'webhook':       return '[Webhook]';
-      default:              return `[${surface[0]!.toUpperCase()}${surface.slice(1)}]`;
+      case 'github':
+        return '[GitHub]';
+      case 'slack':
+        return '[Slack]';
+      case 'discord':
+        return '[Discord]';
+      case 'ntfy':
+        return '[ntfy]';
+      case 'homeassistant':
+        return '[HomeAssistant]';
+      case 'telegram':
+        return '[Telegram]';
+      case 'google-chat':
+        return '[Google Chat]';
+      case 'signal':
+        return '[Signal]';
+      case 'whatsapp':
+        return '[WhatsApp]';
+      case 'msteams':
+        return '[Teams]';
+      case 'imessage':
+        return '[iMessage]';
+      case 'bluebubbles':
+        return '[BlueBubbles]';
+      case 'mattermost':
+        return '[Mattermost]';
+      case 'matrix':
+        return '[Matrix]';
+      case 'webhook':
+        return '[Webhook]';
+      default:
+        return `[${surface[0]!.toUpperCase()}${surface.slice(1)}]`;
     }
   })();
 
-  const eventType   = typeof metadata?.eventType   === 'string' ? metadata.eventType   : null;
-  const eventAction = typeof metadata?.eventAction  === 'string' ? metadata.eventAction : null;
-  const topic       = typeof metadata?.topic        === 'string' ? metadata.topic       : null;
-  const prNumber    = typeof metadata?.prNumber     === 'number' ? metadata.prNumber    : null;
-  const issueNumber = typeof metadata?.issueNumber  === 'number' ? metadata.issueNumber : null;
-  const repo        = typeof metadata?.repo         === 'string' ? metadata.repo        : null;
+  const eventType = typeof metadata?.eventType === 'string' ? metadata.eventType : null;
+  const eventAction = typeof metadata?.eventAction === 'string' ? metadata.eventAction : null;
+  const topic = typeof metadata?.topic === 'string' ? metadata.topic : null;
+  const prNumber = typeof metadata?.prNumber === 'number' ? metadata.prNumber : null;
+  const issueNumber = typeof metadata?.issueNumber === 'number' ? metadata.issueNumber : null;
+  const repo = typeof metadata?.repo === 'string' ? metadata.repo : null;
 
   // Build event-specific detail for GitHub events.
   if (surface === 'github' && eventType) {
@@ -201,8 +236,6 @@ export function narrateInboundEvent(event: {
   return `${label}${eventDetail} inbound event → agent triggered`;
 }
 
-
-
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,
   options: BootstrapOptions,
@@ -220,7 +253,8 @@ export async function initializeBootstrapCore(
   bindFeatureSettingsBridge(configManager, featureFlags);
 
   const userSessionId = `user-${generateUserSessionId()}`;
-  configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => configManager.get(key))); const runtimeBus = new RuntimeEventBus(); // cap from runtime.eventBus.maxListeners before the first bus exists
+  configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => configManager.get(key)));
+  const runtimeBus = new RuntimeEventBus(); // cap from runtime.eventBus.maxListeners before the first bus exists
   const store = createRuntimeStore();
   const domainDispatch = createDomainDispatch(store);
   let getConversationTitle = (): string | undefined => undefined;
@@ -230,52 +264,26 @@ export async function initializeBootstrapCore(
     runtimeBus,
     runtimeStore: store,
     getConversationTitle: () => getConversationTitle(),
-    workingDir, homeDirectory, ...(options.daemonHomeDirectory === undefined ? {} : { daemonHomeDirectory: options.daemonHomeDirectory }),
+    workingDir,
+    homeDirectory,
+    ...(options.daemonHomeDirectory === undefined ? {} : { daemonHomeDirectory: options.daemonHomeDirectory }),
     // This product only ever adopts an external daemon (or runs local-only), never embedding one,
     // so it holds its own OS inhibitor (fork default is non-spawning) and owns the wake-model boot retry itself. See services.ts.
-    powerSeam: createHostPowerSeam(), provisionWakeModelsAtBoot: true,
+    powerSeam: createHostPowerSeam(),
+    provisionWakeModelsAtBoot: true,
   });
   await services.workspaceTrustManager.load(); // settle any already-persisted trust decision before any tool runs
   const providerRegistry = services.providerRegistry;
-  providerRegistry.initModelLimits();
-  services.benchmarkStore.initBenchmarks();
-  providerRegistry.initCatalog();
-  // Wire cost-utils to the live catalog AND the ONE pricing resolver so every
-  // cost surface distinguishes real pricing from unpriced and names its source ("your price" vs "catalog price, as of <date>"), see cost-utils.
-  wireCostPricing(providerRegistry);
-  services.keybindingsManager.loadFromDisk();
-  domainDispatch.syncControlPlaneState({
-    enabled: Boolean(configManager.get('controlPlane.enabled')),
-    host: String(configManager.get('controlPlane.host') ?? '127.0.0.1'),
-    port: Number(configManager.get('controlPlane.port') ?? 3421),
-    connectionState: configManager.get('controlPlane.enabled') ? 'connected' : 'disabled',
-    isRunning: Boolean(configManager.get('controlPlane.enabled')),
-  }, 'bootstrap.control-plane');
-  domainDispatch.syncControlPlaneClient({
+  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => services.keybindingsManager.loadFromDisk(), wireCostPricing);
+  seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
     id: 'client:tui',
     kind: 'tui',
     label: 'Terminal UI',
-    transport: 'local',
-    connected: true,
-    sessionId: userSessionId,
-    authenticatedAt: Date.now(),
-    lastSeenAt: Date.now(),
     capabilities: ['session', 'panels', 'commands', 'automation'],
     metadata: {},
-  }, 'bootstrap.control-plane');
+  });
 
-  const {
-    approvalBroker,
-    automationManager,
-    deliveryManager,
-    hookDispatcher,
-    hookWorkbench,
-    memoryStore,
-    routeBindings,
-    sessionBroker: sharedSessionBroker,
-    surfaceRegistry,
-    watcherRegistry,
-  } = services;
+  const { approvalBroker, hookDispatcher, hookWorkbench, memoryStore, sessionBroker: sharedSessionBroker } = services;
   // Dormant for local-only, and for the SDK's 'embedded' HostServiceMode, no product-facing
   // setting can select it (SDK-internal embedder/test machinery); bootstrap.ts activates this spine only for an adopted 'external' daemon.
   const sessionSpine = new SessionSpineClient({ participant: TUI_SPINE_PARTICIPANT, recordKind: 'tui' });
@@ -284,29 +292,7 @@ export async function initializeBootstrapCore(
   // selfSessionIds keeps local authoritative for our own wire-mirrored session even when local/wire ids diverge (D-TUI-1).
   const sessionUnionCache = new SessionUnionCache({ local: sharedSessionBroker, selfSessionIds: () => sessionSpine.mirroredSessionIds });
 
-  routeBindings.attachRuntime({ runtimeBus, runtimeStore: store });
-  surfaceRegistry.attachRuntime(store);
-  surfaceRegistry.syncConfiguredSurfaces();
-  watcherRegistry.attachRuntime({ runtimeBus, runtimeStore: store });
-  if (configManager.get('watchers.enabled')) {
-    watcherRegistry.registerPollingWatcher({
-      id: 'runtime-heartbeat',
-      label: 'Runtime heartbeat',
-      source: {
-        id: 'source:runtime-heartbeat',
-        kind: 'watcher',
-        label: 'Runtime heartbeat',
-        enabled: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        metadata: {},
-      },
-      intervalMs: Number(configManager.get('watchers.heartbeatIntervalMs') ?? 30_000),
-      run: () => new Date().toISOString(),
-    });
-    watcherRegistry.startWatcher('runtime-heartbeat');
-  }
-  automationManager.attachRuntime({ runtimeBus, runtimeStore: store, deliveryManager });
+  const stopRuntimeBindings = attachTerminalRuntimeBindings(services, runtimeBus, store, configManager);
 
   const forensicsRegistry = new ForensicsRegistry();
   const forensicsCollector = new ForensicsCollector(runtimeBus, forensicsRegistry);
@@ -330,8 +316,12 @@ export async function initializeBootstrapCore(
   const toolRegistry = new ToolRegistry();
   const { fileCache, projectIndex } = registerTuiTurnTools(toolRegistry, services, {
     resolveSessionId: () => runtimeSessionIdRef.value,
-    onSandboxedRun: createSandboxContainmentNotice({ configManager, notify: (text) => conversation.log(`[Sandbox] ${text}`, { fg: activeTokens().secondary }) }),
-  }); registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the SDK's client/phone-tool.ts)
+    onSandboxedRun: createSandboxContainmentNotice({
+      configManager,
+      notify: (text) => conversation.log(`[Sandbox] ${text}`, { fg: activeTokens().secondary }),
+    }),
+  });
+  registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the SDK's client/phone-tool.ts)
   services.agentOrchestrator.setDependencies({
     contractRunner: services.contractRunner,
     contractHooks: services.contractRunner.hooks(),
@@ -370,56 +360,28 @@ export async function initializeBootstrapCore(
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
+  bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(() => conversation.setNoticeSink(null));
   await memoryStore.init();
   bootstrapUnsubs.push(async () => {
-    try { await memoryStore.save(); }
-    finally { memoryStore.close(); }
+    try {
+      await memoryStore.save();
+    } finally {
+      memoryStore.close();
+    }
   });
   // Fold this project's legacy per-project TUI memory into the home-scoped canonical store, ONCE, AFTER init(). Idempotent and non-fatal.
   await runBootMemoryFold(memoryStore, services.memoryEmbeddingRegistry, workingDir, logger);
 
-  const renderRequestRef = { value: (): void => {} };
-  // Coalescing render scheduler, collapses N requestRender() calls into 1 and
-  // enforces a 16ms minimum interval to cap repaints at ~60fps. renderScheduled stays
-  // set for the ENTIRE window (until run() executes), so requestRender() calls arriving
-  // on later event-loop ticks within the same 16ms window coalesce into the one
-  // already-pending tail render instead of each queuing their own setTimeout. (The
-  // streaming hot path drives its own direct repaints and skips this scheduler.)
-  let renderScheduled = false;
-  let lastRenderTime = 0;
-  const RENDER_INTERVAL_MS = 16;
-  // run() performs the actual render. It clears renderScheduled FIRST, even if the
-  // render callback throws, otherwise a single render exception would wedge the entire
-  // TUI (no future requestRender() would schedule anything); we log at error so the
-  // next requestRender() can still reschedule.
-  const run = (): void => {
-    renderScheduled = false;
-    lastRenderTime = Date.now();
-    try {
-      renderRequestRef.value();
-    } catch (err) {
-      logger.error('Render threw; next requestRender will reschedule', { error: String(err) });
-    }
-    // Debounced spine heartbeat on turn/render activity (no-op while dormant, i.e. local-only, or
-    // the SDK's 'embedded' mode, for which no product-facing setting exists): a cheap synchronous
-    // no-op unless its own internal window has elapsed (at most one wire call per heartbeatMinIntervalMs), safe on the hot path.
-    sessionSpine.heartbeat(runtimeSessionIdRef.value);
-  };
-  const requestRender = (): void => {
-    if (renderScheduled) return;
-    renderScheduled = true;
-    setImmediate(() => {
-      const elapsed = Date.now() - lastRenderTime;
-      if (elapsed < RENDER_INTERVAL_MS) {
-        // Too soon, debounce to the tail of the current 16ms window. The flag
-        // stays set until run() fires, so window-local requests coalesce here.
-        setTimeout(run, RENDER_INTERVAL_MS - elapsed);
-      } else {
-        run();
-      }
-    });
-  };
+  const {
+    renderRequestRef,
+    requestRender,
+    dispose: disposeRenderScheduler,
+  } = createTerminalRenderScheduler({
+    afterRender: () => sessionSpine.heartbeat(runtimeSessionIdRef.value),
+    onError: (error, _delayed) => logger.error('Render threw; next requestRender will reschedule', { error: String(error) }),
+  });
+  bootstrapUnsubs.push(disposeRenderScheduler);
   // THE ref, not a second one: the composition already holds the prompt seam its
   // client approval raiser calls, so the UI layer patching this patches that.
   const permissionPromptRef = services.localPromptRef as { requestPermission: PermissionRequestHandler };
@@ -436,7 +398,9 @@ export async function initializeBootstrapCore(
     let _value: SystemMessageRouter | null = null;
     const ref = {} as { value: SystemMessageRouter | null };
     Object.defineProperty(ref, 'value', {
-      get(): SystemMessageRouter | null { return _value; },
+      get(): SystemMessageRouter | null {
+        return _value;
+      },
       set(router: SystemMessageRouter | null): void {
         _value = router;
         if (router && startupNoticeBuffer.size > 0) {
@@ -505,9 +469,8 @@ export async function initializeBootstrapCore(
   const orchestratorHandleUserInputRef: {
     value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
   } = { value: null };
-  runtimeUnsubs.push(runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>(
-    'COMPANION_MESSAGE_RECEIVED',
-    ({ payload }) => {
+  runtimeUnsubs.push(
+    runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
       // Narrate inbound external events to the operator so they can observe
       // which channel event triggered the agent turn.
       const narration = narrateInboundEvent({
@@ -528,12 +491,16 @@ export async function initializeBootstrapCore(
         conversation.addUserMessage(payload.body);
         requestRender();
       }
-    },
-  ));
+    }),
+  );
 
   // Inbound steer delivery, see createBootstrapInboundInputPoller's doc comment.
   const sessionInboundInputs = createBootstrapInboundInputPoller({
-    runtimeSessionIdRef, routeOrBuffer, orchestratorHandleUserInputRef, conversation, requestRender,
+    runtimeSessionIdRef,
+    routeOrBuffer,
+    orchestratorHandleUserInputRef,
+    conversation,
+    requestRender,
   });
 
   providerRegistry.startWatching(runtimeBus);
@@ -552,16 +519,19 @@ export async function initializeBootstrapCore(
   const webhookUrls = (configManager.getCategory('notifications') as { webhookUrls?: string[] }).webhookUrls ?? [];
   if (webhookUrls.length > 0) {
     services.webhookNotifier.setUrls(webhookUrls);
-    domainDispatch.syncIntegration({
-      id: 'webhooks',
-      displayName: 'Webhooks',
-      category: 'communication',
-      status: 'healthy',
-      enabled: true,
-      successCount: 0,
-      errorCount: 0,
-      meta: { urlCount: webhookUrls.length },
-    }, 'bootstrap.webhooks');
+    domainDispatch.syncIntegration(
+      {
+        id: 'webhooks',
+        displayName: 'Webhooks',
+        category: 'communication',
+        status: 'healthy',
+        enabled: true,
+        successCount: 0,
+        errorCount: 0,
+        meta: { urlCount: webhookUrls.length },
+      },
+      'bootstrap.webhooks',
+    );
   }
   runtimeUnsubs.push(attachTypedRuntimeNotifications(services.webhookNotifier, runtimeBus));
 
@@ -579,7 +549,9 @@ export async function initializeBootstrapCore(
     debugMode: false,
     systemPrompt: loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
     reasoningEffort: (configManager.get('provider.reasoningEffort') as string | undefined) ?? '',
-    get sessionId() { return runtimeSessionIdRef.value; },
+    get sessionId() {
+      return runtimeSessionIdRef.value;
+    },
     set sessionId(value: string) {
       runtimeSessionIdRef.value = value;
       services.liveSessionIdRef.value = value;
@@ -591,37 +563,42 @@ export async function initializeBootstrapCore(
   // questions about it, only the process holding the messages can count or
   // drop them (conversation-rewind-port.ts, the SDK's client/conversation-rewind-host.ts).
   registerSessionConversation(runtime.sessionId, conversation);
-  void sharedSessionBroker.createSession({
-    id: runtime.sessionId,
-    title: 'Terminal UI session',
-    metadata: { source: 'tui' },
-    participant: {
-      surfaceKind: 'tui',
-      surfaceId: 'surface:tui',
-      displayName: 'Terminal UI',
-      lastSeenAt: Date.now(),
-    },
-  }).catch((err) => { logger.debug('session broker create session failed at bootstrap', { err }); });
+  void sharedSessionBroker
+    .createSession({
+      id: runtime.sessionId,
+      title: 'Terminal UI session',
+      metadata: { source: 'tui' },
+      participant: {
+        surfaceKind: 'tui',
+        surfaceId: 'surface:tui',
+        displayName: 'Terminal UI',
+        lastSeenAt: Date.now(),
+      },
+    })
+    .catch((err) => {
+      logger.debug('session broker create session failed at bootstrap', { err });
+    });
   // Fire-and-forget spine mirror, a permanent parallel-write posture alongside (never
   // instead of) the still-authoritative local SharedSessionBroker above. Dormant/queued
   // until bootstrap.ts's deferred task activates it for an adopted 'external' daemon.
   sessionSpine.register({ sessionId: runtime.sessionId, project: services.workingDirectory, title: 'Terminal UI session' });
 
-  domainDispatch.syncSessionState({
-    id: userSessionId,
-    projectRoot: workingDir,
-    status: 'active',
-    startedAt: Date.now(),
-    recoveryState: 'ready',
-    isResumed: false,
-    wasRepaired: false,
-    lineageId: userSessionId,
-    lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
-  }, 'bootstrap.session');
-
-  runtimeUnsubs.push(
-    ...registerBootstrapHookBridge({ runtimeBus, hookDispatcher, runtime }),
+  domainDispatch.syncSessionState(
+    {
+      id: userSessionId,
+      projectRoot: workingDir,
+      status: 'active',
+      startedAt: Date.now(),
+      recoveryState: 'ready',
+      isResumed: false,
+      wasRepaired: false,
+      lineageId: userSessionId,
+      lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
+    },
+    'bootstrap.session',
   );
+
+  runtimeUnsubs.push(...registerBootstrapHookBridge({ runtimeBus, hookDispatcher, runtime }));
 
   return {
     userSessionId,
@@ -642,7 +619,8 @@ export async function initializeBootstrapCore(
     bootstrapUnsubs,
     runtimeUnsubs,
     agentStatusIntervalRef,
-    permissionPromptRef, trustPromptRef,
+    permissionPromptRef,
+    trustPromptRef,
     systemMessageRouterRef,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,

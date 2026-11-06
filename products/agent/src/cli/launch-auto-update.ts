@@ -1,4 +1,5 @@
-import { withTimeout, restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
+import { runLaunchUpdatePreflight } from '@goodvibes-jev/engine/terminal-shell/launch-update-preflight';
+import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
 /**
@@ -35,7 +36,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * stubbed fetch, a stubbed apply, and pinned fixture versions, never the
  * live build VERSION and never the real network.
  */
-import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
+import { normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
 import { readUpdateSettings, type UpdateSettings } from '../config/update-settings.ts';
 import { recordSelfUpdate } from '../runtime/self-update-receipt.ts';
@@ -84,49 +85,24 @@ export interface RunLaunchAutoUpdateOptions {
 
 /** Resolves to 'timeout' when `promise` does not settle within `ms`; the timer never keeps the process alive. */
 
-
 /**
  * The launch-time decision: receipt-and-continue (restarted process), skip
  * (disabled / unswappable / current / unreachable), install-and-restart, or
  * fail-and-continue on the current version. Never throws.
  */
 export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): Promise<LaunchAutoUpdateOutcome> {
-  const updatedFrom = options.env[LAUNCH_UPDATED_FROM_ENV];
-  if (typeof updatedFrom === 'string' && updatedFrom.length > 0) {
-    // Consumed here so sessions spawned from inside this one never inherit it.
-    delete options.env[LAUNCH_UPDATED_FROM_ENV];
-    options.print(`auto-update: updated from v${normalizeVersion(updatedFrom)} to v${normalizeVersion(options.currentVersion)} at launch`);
-    return { action: 'continue', reason: 'just-updated' };
-  }
-
-  if (!(options.settings.autoUpdateAtLaunch ?? true)) {
-    return { action: 'continue', reason: 'disabled' };
-  }
-
-  const installKind = detectInstallKind(options.execPath);
-  if (installKind !== 'binary') {
-    // Honest, single-line skip: only a compiled release binary can be swapped
-    // in place, and the skip should never look like an update happened.
-    options.print(installKind === 'source'
-      ? 'auto-update skipped: running from source (dev checkout)'
-      : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent');
-    return { action: 'continue', reason: 'not-swappable-install' };
-  }
-
-  const timeoutMs = options.timeoutMs ?? options.settings.launchCheckTimeoutMs ?? LAUNCH_UPDATE_CHECK_TIMEOUT_MS;
-  let check: Awaited<ReturnType<typeof checkForUpdate>> | 'timeout';
-  try {
-    check = await withTimeout(checkForUpdate(options.fetchImpl, options.currentVersion), timeoutMs);
-  } catch {
-    check = 'timeout';
-  }
-  if (check === 'timeout') {
-    options.print('update check skipped: offline');
-    return { action: 'continue', reason: 'check-skipped' };
-  }
-  if (check.isCurrent) {
-    return { action: 'continue', reason: 'already-current' };
-  }
+  const preflight = await runLaunchUpdatePreflight(options, {
+    updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
+    defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
+    check: checkForUpdate,
+    skipped: 'update check skipped: offline',
+    unswappable: (kind) =>
+      kind === 'source'
+        ? 'auto-update skipped: running from source (dev checkout)'
+        : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes-jev/agent',
+  });
+  if (!preflight.proceed) return preflight.outcome;
+  const check = preflight.check;
 
   try {
     const apply = options.apply ?? applyUpdate;
@@ -201,8 +177,6 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
   return lines;
 }
 
-
-
 /**
  * Runs the (just-swapped) binary at execPath with the original CLI arguments
  * and an inherited terminal, blocking until it exits, and returns its exit
@@ -210,5 +184,6 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
  * child's environment, never on the command line.
  */
 
-
-export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number { return restart(options, LAUNCH_UPDATED_FROM_ENV); }
+export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {
+  return restart(options, LAUNCH_UPDATED_FROM_ENV);
+}

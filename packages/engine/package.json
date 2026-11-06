@@ -2763,6 +2763,21 @@
       "bun": "./terminal-shell/src/command-context-contracts.ts",
       "types": "./terminal-shell/dist/command-context-contracts.d.ts",
       "import": "./terminal-shell/dist/command-context-contracts.js"
+    },
+    "./terminal-shell/launch-update-preflight": {
+      "bun": "./terminal-shell/src/launch-update-preflight.ts",
+      "types": "./terminal-shell/dist/launch-update-preflight.d.ts",
+      "import": "./terminal-shell/dist/launch-update-preflight.js"
+    },
+    "./terminal-shell/render-scheduler": {
+      "bun": "./terminal-shell/src/render-scheduler.ts",
+      "types": "./terminal-shell/dist/render-scheduler.d.ts",
+      "import": "./terminal-shell/dist/render-scheduler.js"
+    },
+    "./terminal-shell/bootstrap-runtime-bindings": {
+      "bun": "./terminal-shell/src/bootstrap-runtime-bindings.ts",
+      "types": "./terminal-shell/dist/bootstrap-runtime-bindings.d.ts",
+      "import": "./terminal-shell/dist/bootstrap-runtime-bindings.js"
     }
   },
   "publishConfig": {

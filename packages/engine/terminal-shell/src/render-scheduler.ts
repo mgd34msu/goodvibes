@@ -88,3 +88,50 @@ export function createRenderScheduler(
 
   return { schedule, flushNow };
 }
+
+/** Coalesce a complete frame window, including the delayed tail, and retire queued work on shutdown. */
+export function createTerminalRenderScheduler(options: {
+  readonly intervalMs?: number | undefined;
+  readonly afterRender?: (() => void) | undefined;
+  readonly onError: (error: unknown, delayed: boolean) => void;
+}) {
+  const renderRequestRef = { value: (): void => {} };
+  const intervalMs = options.intervalMs ?? 16;
+  let scheduled = false;
+  let disposed = false;
+  let lastRenderTime = 0;
+  let immediate: ReturnType<typeof setImmediate> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = (delayed: boolean): void => {
+    timer = undefined;
+    if (disposed) return;
+    scheduled = false;
+    lastRenderTime = Date.now();
+    try {
+      renderRequestRef.value();
+    } catch (error) {
+      options.onError(error, delayed);
+    }
+    options.afterRender?.();
+  };
+  const requestRender = (): void => {
+    if (disposed || scheduled) return;
+    scheduled = true;
+    immediate = setImmediate(() => {
+      immediate = undefined;
+      if (disposed) return;
+      const elapsed = Date.now() - lastRenderTime;
+      if (elapsed < intervalMs) timer = setTimeout(() => run(true), intervalMs - elapsed);
+      else run(false);
+    });
+  };
+  const dispose = (): void => {
+    disposed = true;
+    scheduled = false;
+    if (immediate !== undefined) clearImmediate(immediate);
+    if (timer !== undefined) clearTimeout(timer);
+    immediate = undefined;
+    timer = undefined;
+  };
+  return { renderRequestRef, requestRender, dispose };
+}

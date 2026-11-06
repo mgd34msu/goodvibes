@@ -1,3 +1,9 @@
+import {
+  initializeTerminalCatalog,
+  seedTerminalControlPlane,
+  attachTerminalRuntimeBindings,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-runtime-bindings';
+import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
 import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
 import { registerSessionConversation } from './conversation-rewind-port.ts';
@@ -26,9 +32,7 @@ import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptio
 import type { SessionEvent } from '@/runtime/index.ts';
 import { createRuntimeStore, createDomainDispatch, type RuntimeStore } from './store/index.ts';
 import { ForensicsCollector, ForensicsRegistry } from '@/runtime/index.ts';
-import {
-  generateUserSessionId,
-} from '@/runtime/index.ts';
+import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';
 import { registerBootstrapHookBridge } from '@/runtime/index.ts';
 import { createRuntimeServices, foldAgentLegacyMemory, type RuntimeServices } from './services.ts';
@@ -155,74 +159,32 @@ export async function initializeBootstrapCore(
   installAgentDaemonCredentialsClient(services.daemonCredentialsClient);
   installAgentDaemonConfigClient(services.daemonConfigClient);
   const providerRegistry = services.providerRegistry;
-  providerRegistry.initModelLimits();
-  services.benchmarkStore.initBenchmarks();
-  providerRegistry.initCatalog();
-  services.keybindingsManager.loadFromDisk();
-  domainDispatch.syncControlPlaneState({
-    enabled: Boolean(configManager.get('controlPlane.enabled')),
-    host: String(configManager.get('controlPlane.host') ?? '127.0.0.1'),
-    port: Number(configManager.get('controlPlane.port') ?? 3421),
-    connectionState: configManager.get('controlPlane.enabled') ? 'connected' : 'disabled',
-    isRunning: Boolean(configManager.get('controlPlane.enabled')),
-  }, 'bootstrap.control-plane');
-  domainDispatch.syncControlPlaneClient({
+  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => services.keybindingsManager.loadFromDisk());
+  seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
     id: 'client:goodvibes-agent',
     kind: 'service',
     label: 'GoodVibes Agent',
-    transport: 'local',
-    connected: true,
-    sessionId: userSessionId,
-    authenticatedAt: Date.now(),
-    lastSeenAt: Date.now(),
     capabilities: ['session', 'commands', 'automation'],
     metadata: {
       product: 'goodvibes-agent',
       surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
       clientKindNote: 'Connected-host client kind; GoodVibes Agent remains an interactive operator TUI.',
     },
-  }, 'bootstrap.control-plane');
+  });
 
   const {
     approvalBroker,
-    automationManager,
-    deliveryManager,
     hookDispatcher,
     hookWorkbench,
     memoryStore,
-    routeBindings,
     // The register automation runs on. It is NOT the dispatch path any more,
     // inbound continuations reach the loop over services.sessionBroker, the wire
     // dispatch, but this process still creates its own session record in it so
     // an automation job targeting "the live session" finds one.
     automationSessionRegister: sharedSessionBroker,
-    surfaceRegistry,
-    watcherRegistry,
   } = services;
 
-  routeBindings.attachRuntime({ runtimeBus, runtimeStore: store });
-  surfaceRegistry.attachRuntime(store);
-  surfaceRegistry.syncConfiguredSurfaces();
-  watcherRegistry.attachRuntime({ runtimeBus, runtimeStore: store });
-  if (configManager.get('watchers.enabled')) {
-    watcherRegistry.registerPollingWatcher({
-      id: 'runtime-heartbeat',
-      label: 'Runtime heartbeat',
-      source: {
-        id: 'source:runtime-heartbeat',
-        kind: 'watcher',
-        label: 'Runtime heartbeat',
-        enabled: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        metadata: {},
-      },
-      intervalMs: Number(configManager.get('watchers.heartbeatIntervalMs') ?? 30_000),
-      run: () => new Date().toISOString(),
-    });
-    watcherRegistry.startWatcher('runtime-heartbeat');
-  }
-  automationManager.attachRuntime({ runtimeBus, runtimeStore: store, deliveryManager });
+  const stopRuntimeBindings = attachTerminalRuntimeBindings(services, runtimeBus, store, configManager);
 
   const forensicsRegistry = new ForensicsRegistry();
   const forensicsCollector = new ForensicsCollector(runtimeBus, forensicsRegistry);
@@ -301,15 +263,17 @@ export async function initializeBootstrapCore(
   services.agentOrchestrator.setDependencies(agentOrchestratorToolDeps);
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
+  bootstrapUnsubs.push(stopRuntimeBindings);
   // D5 fix: stop the heartbeat watcher on shutdown so the setInterval is cleared.
   // Registered here (after declaration) rather than inside the watcher block above.
-  if (configManager.get('watchers.enabled')) {
-    bootstrapUnsubs.push(() => { watcherRegistry.stopWatcher('runtime-heartbeat'); });
-  }
+
   await memoryStore.init();
   bootstrapUnsubs.push(async () => {
-    try { await memoryStore.save(); }
-    finally { memoryStore.close(); }
+    try {
+      await memoryStore.save();
+    } finally {
+      memoryStore.close();
+    }
   });
 
   // Fold the agent's legacy per-surface memory into the canonical
@@ -317,11 +281,7 @@ export async function initializeBootstrapCore(
   // SURFACE the fold report, migration honesty requires that what moved is visible,
   // not silently swallowed. Non-fatal: a fold failure must never block startup.
   try {
-    const foldReport = await foldAgentLegacyMemory(
-      services.memoryStore,
-      services.memoryEmbeddingRegistry,
-      services.shellPaths,
-    );
+    const foldReport = await foldAgentLegacyMemory(services.memoryStore, services.memoryEmbeddingRegistry, services.shellPaths);
     logger.info('agent legacy memory fold report', { report: formatMemoryFoldReport(foldReport) });
   } catch (err) {
     logger.warn('agent legacy memory fold failed (non-fatal)', { error: summarizeError(err) });
@@ -340,46 +300,15 @@ export async function initializeBootstrapCore(
     logger.warn('agent VIBE.md persona migration failed (non-fatal)', { error: summarizeError(err) });
   }
 
-  const renderRequestRef = { value: (): void => {} };
-  // R1: Coalescing render scheduler, collapses N same-microtask requestRender() calls into 1.
-  // Also enforces a 16ms minimum interval to cap at ~60fps during streaming.
-  let renderScheduled = false;
-  let lastRenderTime = 0;
-  const RENDER_INTERVAL_MS = 16;
-  const requestRender = (): void => {
-    if (renderScheduled) return;
-    renderScheduled = true;
-    setImmediate(() => {
-      // Error Handling: the scheduler flag MUST be cleared even if the render
-      // callback throws; otherwise a single render exception would wedge the
-      // entire TUI (no future requestRender() call would schedule anything).
-      renderScheduled = false;
-      const now = Date.now();
-      const elapsed = now - lastRenderTime;
-      try {
-        if (elapsed < RENDER_INTERVAL_MS) {
-          // Too soon, debounce to the tail of the current 16ms window
-          const delay = RENDER_INTERVAL_MS - elapsed;
-          setTimeout(() => {
-            try {
-              lastRenderTime = Date.now();
-              renderRequestRef.value();
-            } catch (err) {
-              // Throttled-render error: swallow but log at error so the next
-              // requestRender() call can still schedule. The renderer itself
-              // is expected to surface failures via its own error path.
-              logger.error('Throttled render threw; next requestRender will reschedule', { error: String(err) });
-            }
-          }, delay);
-        } else {
-          lastRenderTime = now;
-          renderRequestRef.value();
-        }
-      } catch (err) {
-        logger.error('Immediate render threw; next requestRender will reschedule', { error: String(err) });
-      }
-    });
-  };
+  const {
+    renderRequestRef,
+    requestRender,
+    dispose: disposeRenderScheduler,
+  } = createTerminalRenderScheduler({
+    onError: (error, delayed) =>
+      logger.error((delayed ? 'Throttled' : 'Immediate') + ' render threw; next requestRender will reschedule', { error: String(error) }),
+  });
+  bootstrapUnsubs.push(disposeRenderScheduler);
   // The graph owns the prompt holder now: the ask seam reads through it, and
   // the seam is part of the composition. The renderer still patches
   // `requestPermission` onto this same object, so nothing about how a prompt is
@@ -416,9 +345,8 @@ export async function initializeBootstrapCore(
   const orchestratorHandleUserInputRef: {
     value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
   } = { value: null };
-  runtimeUnsubs.push(runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>(
-    'COMPANION_MESSAGE_RECEIVED',
-    ({ payload }) => {
+  runtimeUnsubs.push(
+    runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
       if (orchestratorHandleUserInputRef.value) {
         // Delegate to the orchestrator: adds user message + fires a real LLM turn.
         // Preserve surface origin metadata so the SDK can correlate replies back
@@ -429,8 +357,8 @@ export async function initializeBootstrapCore(
         conversation.addUserMessage(payload.body);
         requestRender();
       }
-    },
-  ));
+    }),
+  );
 
   providerRegistry.startWatching(runtimeBus);
 
@@ -441,16 +369,19 @@ export async function initializeBootstrapCore(
     // bus so it receives SESSION_NOTIFICATION events, and register detach() in
     // runtimeUnsubs so the bus subscription is cleaned up on shutdown.
     registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs);
-    domainDispatch.syncIntegration({
-      id: 'webhooks',
-      displayName: 'Webhooks',
-      category: 'communication',
-      status: 'healthy',
-      enabled: true,
-      successCount: 0,
-      errorCount: 0,
-      meta: { urlCount: webhookUrls.length },
-    }, 'bootstrap.webhooks');
+    domainDispatch.syncIntegration(
+      {
+        id: 'webhooks',
+        displayName: 'Webhooks',
+        category: 'communication',
+        status: 'healthy',
+        enabled: true,
+        successCount: 0,
+        errorCount: 0,
+        meta: { urlCount: webhookUrls.length },
+      },
+      'bootstrap.webhooks',
+    );
   }
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key));
@@ -458,24 +389,27 @@ export async function initializeBootstrapCore(
   if (queueStatuses.length > 0) {
     notifier.attachToRuntimeBus(runtimeBus);
     for (const queueStatus of queueStatuses) {
-      domainDispatch.syncIntegration({
-        id: queueStatus.channel,
-        displayName: queueStatus.channel[0]!.toUpperCase() + queueStatus.channel.slice(1),
-        category: 'communication',
-        status: queueStatus.metrics.deadLettered > 0 ? 'degraded' : 'healthy',
-        enabled: true,
-        successCount: queueStatus.metrics.delivered,
-        errorCount: queueStatus.metrics.deadLettered,
-        ...(queueStatus.dlqEntries[0]?.deadAt ? { lastErrorAt: queueStatus.dlqEntries[0].deadAt } : {}),
-        ...(queueStatus.dlqEntries[0]?.finalError ? { lastError: queueStatus.dlqEntries[0].finalError } : {}),
-        meta: {
-          attempts: queueStatus.metrics.totalAttempts,
-          retrying: queueStatus.metrics.retrying,
-          deadLetters: queueStatus.metrics.deadLettered,
-          dlqSize: queueStatus.metrics.dlqSize,
-          sloEnforced: queueStatus.sloEnforced,
+      domainDispatch.syncIntegration(
+        {
+          id: queueStatus.channel,
+          displayName: queueStatus.channel[0]!.toUpperCase() + queueStatus.channel.slice(1),
+          category: 'communication',
+          status: queueStatus.metrics.deadLettered > 0 ? 'degraded' : 'healthy',
+          enabled: true,
+          successCount: queueStatus.metrics.delivered,
+          errorCount: queueStatus.metrics.deadLettered,
+          ...(queueStatus.dlqEntries[0]?.deadAt ? { lastErrorAt: queueStatus.dlqEntries[0].deadAt } : {}),
+          ...(queueStatus.dlqEntries[0]?.finalError ? { lastError: queueStatus.dlqEntries[0].finalError } : {}),
+          meta: {
+            attempts: queueStatus.metrics.totalAttempts,
+            retrying: queueStatus.metrics.retrying,
+            deadLetters: queueStatus.metrics.deadLettered,
+            dlqSize: queueStatus.metrics.dlqSize,
+            sloEnforced: queueStatus.sloEnforced,
+          },
         },
-      }, 'bootstrap.notifier');
+        'bootstrap.notifier',
+      );
     }
   }
 
@@ -524,41 +458,45 @@ export async function initializeBootstrapCore(
   // answer to a question it could not reach. Released at shutdown; a lapsed
   // lease reaches the same end state if this process dies first.
   services.conversationRewindHost.start(runtime.sessionId);
-  void sharedSessionBroker.createSession({
-    id: runtime.sessionId,
-    // The record's IDENTITY axis, and it has to be said out loud here.
-    //
-    // This call named neither `kind` nor `project`, so the broker fell back to
-    // its documented defaults for an ungrounded create: `classifySessionOriginKind`
-    // (session-broker-sessions.ts) maps a non-channel surface, this one is
-    // 'service', to 'tui', and project defaults to 'unknown'. The local mirror
-    // at ~/.goodvibes/agent/control-plane/sessions.json therefore filed every
-    // agent session as kind:"tui" project:"unknown", while the spine
-    // registration twenty lines below correctly filed the SAME session as
-    // kind:'agent' with its real project. Two stores describing one session and
-    // disagreeing about what it is: a fleet listing filtered on kind:"agent"
-    // missed this process's own sessions, and one filtered on kind:"tui" claimed
-    // terminal sessions that were never opened.
-    //
-    // The default was never wrong for what it knew, it is a fallback for a
-    // caller that says nothing. Saying it is this call site's job.
-    kind: 'agent',
-    project: workingDir,
-    title: 'GoodVibes Agent session',
-    // Declares the session permission mode at creation time in the shared
-    // metadata bag (safe-owner, safe-jev, yolo, or the read-only plan posture).
-    // Read-only declaration, the execution owner
-    // itself always reads permissions.mode live off configManager, so this
-    // does not change enforcement; it lets cross-session tooling see which
-    // mode a session started under without re-deriving it.
-    metadata: { source: 'goodvibes-agent', permissionMode: configManager.get('permissions.mode') },
-    participant: {
-      surfaceKind: 'service',
-      surfaceId: 'surface:goodvibes-agent',
-      displayName: 'GoodVibes Agent',
-      lastSeenAt: Date.now(),
-    },
-  }).catch((err) => { logger.debug('session broker create session failed at bootstrap', { err }); });
+  void sharedSessionBroker
+    .createSession({
+      id: runtime.sessionId,
+      // The record's IDENTITY axis, and it has to be said out loud here.
+      //
+      // This call named neither `kind` nor `project`, so the broker fell back to
+      // its documented defaults for an ungrounded create: `classifySessionOriginKind`
+      // (session-broker-sessions.ts) maps a non-channel surface, this one is
+      // 'service', to 'tui', and project defaults to 'unknown'. The local mirror
+      // at ~/.goodvibes/agent/control-plane/sessions.json therefore filed every
+      // agent session as kind:"tui" project:"unknown", while the spine
+      // registration twenty lines below correctly filed the SAME session as
+      // kind:'agent' with its real project. Two stores describing one session and
+      // disagreeing about what it is: a fleet listing filtered on kind:"agent"
+      // missed this process's own sessions, and one filtered on kind:"tui" claimed
+      // terminal sessions that were never opened.
+      //
+      // The default was never wrong for what it knew, it is a fallback for a
+      // caller that says nothing. Saying it is this call site's job.
+      kind: 'agent',
+      project: workingDir,
+      title: 'GoodVibes Agent session',
+      // Declares the session permission mode at creation time in the shared
+      // metadata bag (safe-owner, safe-jev, yolo, or the read-only plan posture).
+      // Read-only declaration, the execution owner
+      // itself always reads permissions.mode live off configManager, so this
+      // does not change enforcement; it lets cross-session tooling see which
+      // mode a session started under without re-deriving it.
+      metadata: { source: 'goodvibes-agent', permissionMode: configManager.get('permissions.mode') },
+      participant: {
+        surfaceKind: 'service',
+        surfaceId: 'surface:goodvibes-agent',
+        displayName: 'GoodVibes Agent',
+        lastSeenAt: Date.now(),
+      },
+    })
+    .catch((err) => {
+      logger.debug('session broker create session failed at bootstrap', { err });
+    });
 
   // Mirror the create into the daemon spine (fire-and-forget; the local
   // broker above stays the source of truth). kind:'agent' is the canonical record
@@ -577,17 +515,20 @@ export async function initializeBootstrapCore(
 
   // The public client runtime already publishes PRESET_CHANGED for live settings.
 
-  domainDispatch.syncSessionState({
-    id: userSessionId,
-    projectRoot: workingDir,
-    status: 'active',
-    startedAt: Date.now(),
-    recoveryState: 'ready',
-    isResumed: false,
-    wasRepaired: false,
-    lineageId: userSessionId,
-    lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
-  }, 'bootstrap.session');
+  domainDispatch.syncSessionState(
+    {
+      id: userSessionId,
+      projectRoot: workingDir,
+      status: 'active',
+      startedAt: Date.now(),
+      recoveryState: 'ready',
+      isResumed: false,
+      wasRepaired: false,
+      lineageId: userSessionId,
+      lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
+    },
+    'bootstrap.session',
+  );
 
   runtimeUnsubs.push(
     ...registerBootstrapHookBridge({

@@ -103,17 +103,19 @@
       "path": "cli/index.ts",
       "baselineTuiLines": 11,
       "baselineSimilarity": 0.4545,
-      "status": "pending-convergence"
+      "status": "product-export-surface",
+      "notes": "Reviewed product CLI export catalog only. Distinct product command surfaces contain no implementation to hoist."
     },
     {
       "path": "cli/launch-auto-update.ts",
       "baselineTuiLines": 327,
       "baselineSimilarity": 0.6608,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "withTimeout",
         "restartOntoUpdatedBinary"
-      ]
+      ],
+      "notes": "Platform owns receipt consumption, eligibility, bounded version checks and skip outcomes. Product adapters retain actual swap/receipt protocols, TUI swap progress and daemon handover, and Agent durable launch receipt."
     },
     {
       "path": "cli/management-commands.ts",
@@ -201,10 +203,11 @@
       "path": "config/host-settings.ts",
       "baselineTuiLines": 49,
       "baselineSimilarity": 0.3953,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "NOTIFICATIONS_METADATA_ONLY_SETTING"
-      ]
+      ],
+      "notes": "Reviewed product schema registration over platform ConfigManager and shared notification metadata setting. TUI OSC9 and Agent research-screening settings are distinct product opt-ins."
     },
     {
       "path": "config/secret-config.ts",
@@ -222,7 +225,8 @@
       "path": "config/surface.ts",
       "baselineTuiLines": 21,
       "baselineSimilarity": 0,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Reviewed product identity constants only: distinct storage and pairing scopes must remain separate; no duplicated implementation."
     },
     {
       "path": "core/agent-view-render.ts",
@@ -1579,7 +1583,11 @@
       "path": "runtime/bootstrap-core.ts",
       "baselineTuiLines": 672,
       "baselineSimilarity": 0.4858,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "bootstrap-runtime-bindings: catalog, control-plane seed, observer attachment and heartbeat cleanup",
+        "createTerminalRenderScheduler: bounded frame coalescing and teardown"
+      ]
     },
     {
       "path": "runtime/bootstrap-hook-bridge.ts",
@@ -1876,13 +1884,15 @@
       "path": "runtime/path-shadow-startup.ts",
       "baselineTuiLines": 54,
       "baselineSimilarity": 0.2393,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Reviewed composition adapter over shared announceReachability/boundedLatestRelease. Product command/package identities, release lookup and prelaunch versus in-session publication remain product policy."
     },
     {
       "path": "runtime/release-artifacts.ts",
       "baselineTuiLines": 26,
       "baselineSimilarity": 0.05,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Reviewed artifact policy adapter: canonical platform checksum/version/archive mechanics are shared. Agent binary/addon/browser asset identities differ from TUI release assets."
     },
     {
       "path": "runtime/services.ts",
@@ -1935,7 +1945,8 @@
       "path": "runtime/update-check.ts",
       "baselineTuiLines": 41,
       "baselineSimilarity": 0.4419,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Version parsing/comparison/release lookup/install detection are platform forwarders. Remaining function is the product-specific package/workspace update instruction."
     },
     {
       "path": "runtime/workspace-update-policy.ts",

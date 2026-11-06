@@ -39,7 +39,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/judgment/test/retry.test.ts](../judgment/test/retry.test.ts) |
 | [packages/judgment/test/truth.test.ts](../judgment/test/truth.test.ts) |
 
-## Engine platform (1949 files)
+## Engine platform (1950 files)
 
 | File |
 | --- |
@@ -647,6 +647,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/daemon-update-handover.test.ts](test/daemon-update-handover.test.ts) |
 | [packages/engine/test/daemon-version-compat.test.ts](test/daemon-version-compat.test.ts) |
 | [packages/engine/test/decision-log-otlp.test.ts](test/decision-log-otlp.test.ts) |
+| [packages/engine/test/decision-policy-import-identity.test.ts](test/decision-policy-import-identity.test.ts) |
 | [packages/engine/test/decision-router.test.ts](test/decision-router.test.ts) |
 | [packages/engine/test/default-config-runtime.test.ts](test/default-config-runtime.test.ts) |
 | [packages/engine/test/delegated-telegram-intake.test.ts](test/delegated-telegram-intake.test.ts) |

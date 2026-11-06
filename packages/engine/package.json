@@ -3068,6 +3068,11 @@
       "bun": "./terminal-shell/src/cli-entrypoint.ts",
       "types": "./terminal-shell/dist/cli-entrypoint.d.ts",
       "import": "./terminal-shell/dist/cli-entrypoint.js"
+    },
+    "./terminal-shell/startup-lifecycle": {
+      "bun": "./terminal-shell/src/startup-lifecycle.ts",
+      "types": "./terminal-shell/dist/startup-lifecycle.d.ts",
+      "import": "./terminal-shell/dist/startup-lifecycle.js"
     }
   },
   "publishConfig": {

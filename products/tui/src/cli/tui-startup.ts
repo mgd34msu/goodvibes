@@ -1,3 +1,4 @@
+import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
@@ -77,8 +78,7 @@ async function resumeNamedSessionWithRecoveryCheck(options: {
   readonly recovery: TuiStartupRecoveryDeps | undefined;
 }): Promise<void> {
   const { sessionId, surface, commandRegistry, commandContext, render, recovery } = options;
-  const plainResume = (): Promise<void> =>
-    commandRegistry.execute('session', ['resume', sessionId], commandContext).then(() => render());
+  const plainResume = (): Promise<void> => commandRegistry.execute('session', ['resume', sessionId], commandContext).then(() => render());
 
   if (!recovery) {
     await plainResume();
@@ -142,7 +142,12 @@ export function buildFirstOpenItems(): { readonly title: string; readonly items:
     title: 'New workspace: choose a trust level',
     items: [
       { id: 'trusted', label: 'Trust this workspace', detail: 'Full capability: all tools may run', primaryAction: 'select' },
-      { id: 'restricted', label: 'Keep restricted (read-only)', detail: 'Explore safely; writes and commands are denied until trusted', primaryAction: 'select' },
+      {
+        id: 'restricted',
+        label: 'Keep restricted (read-only)',
+        detail: 'Explore safely; writes and commands are denied until trusted',
+        primaryAction: 'select',
+      },
     ],
   };
 }
@@ -213,18 +218,14 @@ export function applyInitialTuiCliState(options: {
   }
 
   // Seeded prompt is always applied synchronously, regardless of session branch.
-  const seededPrompt = cli.flags.prompt ?? (cli.rawCommand === undefined && cli.positionals.length > 0 ? cli.positionals.join(' ') : undefined);
-  if (seededPrompt) {
-    input.prompt = seededPrompt;
-    input.cursorPos = seededPrompt.length;
-  }
+  applySeededCliPrompt(cli, input);
 
   if (cli.command === 'onboarding') {
     input.openOnboardingWizard({ mode: 'edit', reset: true });
   } else if (cli.command === 'sessions' && cli.commandArgs[0] === 'resume') {
     const target = cli.commandArgs.slice(1).join(' ').trim();
     if (target) {
-      return commandRegistry.execute('session', ['resume', target], commandContext).then(() => render());
+      return resumeSessionAndRender(commandRegistry, target, commandContext, render);
     }
   } else if (cli.flags.continueLast) {
     // --continue: resume the last session tracked by the pointer file. Checked
@@ -232,16 +233,30 @@ export function applyInitialTuiCliState(options: {
     // resumeNamedSessionWithRecoveryCheck's doc comment.
     const lastId = readLastSessionPointer({ surface });
     if (lastId) {
-      return resumeNamedSessionWithRecoveryCheck({ sessionId: lastId, surface, commandRegistry, commandContext, render, recovery: continueRecovery });
+      return resumeNamedSessionWithRecoveryCheck({
+        sessionId: lastId,
+        surface,
+        commandRegistry,
+        commandContext,
+        render,
+        recovery: continueRecovery,
+      });
     }
   } else if (cli.flags.resume !== undefined) {
     // --resume [id]: explicit id dispatches directly; bare form (sentinel 'latest') resolves via pointer
     if (cli.flags.resume !== 'latest') {
-      return commandRegistry.execute('session', ['resume', cli.flags.resume], commandContext).then(() => render());
+      return resumeSessionAndRender(commandRegistry, cli.flags.resume, commandContext, render);
     } else {
       const lastId = readLastSessionPointer({ surface });
       if (lastId) {
-        return resumeNamedSessionWithRecoveryCheck({ sessionId: lastId, surface, commandRegistry, commandContext, render, recovery: continueRecovery });
+        return resumeNamedSessionWithRecoveryCheck({
+          sessionId: lastId,
+          surface,
+          commandRegistry,
+          commandContext,
+          render,
+          recovery: continueRecovery,
+        });
       }
     }
   } else if (cli.flags.fork !== undefined) {
@@ -251,7 +266,8 @@ export function applyInitialTuiCliState(options: {
       return commandRegistry.execute('session', ['fork'], commandContext).then(() => render());
     } else {
       // Explicit id: resume the named session first, then fork
-      return commandRegistry.execute('session', ['resume', cli.flags.fork], commandContext)
+      return commandRegistry
+        .execute('session', ['resume', cli.flags.fork], commandContext)
         .then(() => commandRegistry.execute('session', ['fork'], commandContext))
         .then(() => render());
     }
@@ -299,23 +315,12 @@ export function applyInitialTuiCliState(options: {
 export function reportFatalStartupError(err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : undefined;
-  try {
-    logger.error('Fatal error', { message, ...(stack ? { stack } : {}) });
-  } catch {
-    // Startup diagnostics must never hide the original launch failure.
-  }
-  try {
-    // writeFatalLine, not process.stderr.write: this repository replaces
-    // process.stderr to keep the rendered screen clean
-    // (runtime/terminal-output-guard.ts), so a replaced writer that records
-    // instead of printing would swallow the one line explaining why the screen
-    // is blank, and a stream write issued immediately before the exit below
-    // can still be in flight when the process stops existing. The descriptor
-    // write is neither interceptable nor droppable. See
-    // daemon/fatal-boot-report.ts.
-    writeFatalLine(`goodvibes failed to start: ${message}${stack ? `\n${stack}` : ''}`);
-  } catch {
-    // Ignore secondary stderr failures during process teardown.
-  }
-  process.exit(1);
+  reportStartupFailure(err, {
+    stderrFirst: false,
+    userMessage: () => `goodvibes failed to start: ${message}${stack ? `\n${stack}` : ''}`,
+    logContext: () => ({ message, ...(stack ? { stack } : {}) }),
+    write: writeFatalLine,
+    log: (message, context) => logger.error(message, context),
+    exit: process.exit,
+  });
 }

@@ -1,3 +1,4 @@
+import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 // Startup diagnostics must not initialize the Agent runtime/onboarding barrels:
@@ -83,20 +84,14 @@ export function reportFatalStartupError(
     readonly exit: (code: number) => void;
   },
 ): void {
-  const userDetail = formatFatalStartupErrorForUser(err, options);
-  const writeStderr = sinks.writeStderr ?? writeFatalLine;
-  try {
-    writeStderr(`${options.binary} failed to launch:\n${userDetail}`);
-  } catch {
-    // Ignore secondary stderr failures during process teardown.
-  }
-  const detail = formatFatalStartupErrorForLog(err);
-  try {
-    sinks.logError('Fatal error', { error: detail });
-  } catch {
-    // Startup diagnostics must never hide the original launch failure.
-  }
-  sinks.exit(1);
+  reportStartupFailure(err, {
+    stderrFirst: true,
+    userMessage: (error) => `${options.binary} failed to launch:\n${formatFatalStartupErrorForUser(error, options)}`,
+    logContext: (error) => ({ error: formatFatalStartupErrorForLog(error) }),
+    write: sinks.writeStderr ?? writeFatalLine,
+    log: sinks.logError,
+    exit: sinks.exit,
+  });
 }
 
 export function formatFatalStartupErrorForUser(error: unknown, options: FatalStartupFormatOptions): string {
@@ -111,7 +106,9 @@ export function formatFatalStartupErrorForUser(error: unknown, options: FatalSta
       '  reason: permission denied',
       `  next: launch from a writable directory, pass '${options.binary} --cd <dir>', or set GOODVIBES_WORKING_DIR to a writable path.`,
       '  note: GOODVIBES_AGENT_HOME can be set to move Agent-local config, sessions, memory, skills, personas, and routines.',
-    ].filter((line) => line.length > 0).join('\n');
+    ]
+      .filter((line) => line.length > 0)
+      .join('\n');
   }
 
   if (isNodeLikeError(error) && error.code === 'ENOENT') {
@@ -120,13 +117,12 @@ export function formatFatalStartupErrorForUser(error: unknown, options: FatalSta
       error.path ? `  path: ${error.path}` : '',
       `  reason: ${message}`,
       `  next: check '${options.binary} --cd <dir>' and GOODVIBES_WORKING_DIR, then rerun '${options.binary} status'.`,
-    ].filter((line) => line.length > 0).join('\n');
+    ]
+      .filter((line) => line.length > 0)
+      .join('\n');
   }
 
-  return [
-    message || `${options.binary} failed during startup.`,
-    'Set GOODVIBES_AGENT_DEBUG=1 to print a stack trace.',
-  ].join('\n');
+  return [message || `${options.binary} failed during startup.`, 'Set GOODVIBES_AGENT_DEBUG=1 to print a stack trace.'].join('\n');
 }
 
 export function getInteractiveTerminalLaunchError(input: InteractiveTerminalCheckInput): string | null {
@@ -134,10 +130,7 @@ export function getInteractiveTerminalLaunchError(input: InteractiveTerminalChec
   const stdoutReady = input.stdoutIsTTY === true;
   if (stdinReady && stdoutReady) return null;
 
-  const missing = [
-    stdinReady ? null : 'stdin',
-    stdoutReady ? null : 'stdout',
-  ].filter((entry): entry is string => entry !== null);
+  const missing = [stdinReady ? null : 'stdin', stdoutReady ? null : 'stdout'].filter((entry): entry is string => entry !== null);
   const missingLabel = missing.length === 1 ? `${missing[0]} is` : `${missing.join(' and ')} are`;
 
   return [
@@ -158,14 +151,13 @@ export function applyInitialTuiCliState(options: {
 }): void {
   const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
   const onboardingCompletionMarker = readOnboardingCompletionMarker(shellPaths, 'user');
-  const seededPrompt = cli.flags.prompt ?? (cli.rawCommand === undefined && cli.positionals.length > 0 ? cli.positionals.join(' ') : undefined);
   if (cli.command === 'onboarding') {
     input.openAgentWorkspace(commandContext, undefined, 'ONBOARDING');
   } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
     const requested = cli.flags.resume ?? cli.commandArgs.slice(1).join(' ').trim();
-    const target = requested === 'latest' ? readLastSessionPointer({ surface }) ?? '' : requested;
+    const target = requested === 'latest' ? (readLastSessionPointer({ surface }) ?? '') : requested;
     if (target) {
-      void commandRegistry.execute('session', ['resume', target], commandContext).then(() => render());
+      void resumeSessionAndRender(commandRegistry, target, commandContext, render);
     } else {
       commandContext.print('[Resume] No saved session pointer is available. Run /session list to choose a saved session.');
     }
@@ -188,8 +180,5 @@ export function applyInitialTuiCliState(options: {
     });
   }
 
-  if (seededPrompt) {
-    input.prompt = seededPrompt;
-    input.cursorPos = seededPrompt.length;
-  }
+  applySeededCliPrompt(cli, input);
 }

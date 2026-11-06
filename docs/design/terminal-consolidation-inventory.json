@@ -208,7 +208,8 @@
       "path": "cli/tui-startup.ts",
       "baselineTuiLines": 321,
       "baselineSimilarity": 0.1473,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared seeded-prompt publication, resume/render dispatch and independent fatal sinks. Product adapters preserve recovery-vs-resume order, wizard/workspace startup, fatal message format and sink ordering. Agent stderr writes remain descriptor-based; TUI startup trust/recovery authority is unchanged."
     },
     {
       "path": "config/host-settings.ts",

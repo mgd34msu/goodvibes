@@ -1,6 +1,8 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
-import { type Candidate } from '@goodvibes-jev/judgment';
+import { readYesNo, type Candidate } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { PAGE_CONTENT_BAND } from '../tools/batteries/page-content.js';
 import { pageBlocks, pageUnits } from '../tools/fetch/page-blocks.js';
 import { htmlDocumentTitle, htmlMainContent } from './batteries/html-content.js';
 import { KnowledgeExtractionJudgmentHoldError, requireExtractionJudgment } from './extraction-policy.js';
@@ -26,12 +28,25 @@ export async function selectHtmlContent(html: string, documentTitle: string, met
   // Covers decoded content and every candidate before the pattern clips request samples.
   assertJudgmentInput({ documentTitle, blocks, titles });
   if (blocks.length === 0) return null;
-  return requireExtractionJudgment(async () => {
-    const readings = await htmlMainContent.read(owner.port('knowledge.extraction.html-content'), documentTitle.slice(0, TITLE_SAMPLE_CHARS), blocks, { site: 'knowledge.extraction.html-content', ...(owner.signal ? { signal: owner.signal } : {}), beforeAttempt: owner.assertCurrent });
+  let rejectedContent = false;
+  return requireExtractionJudgment(() => decisionOrClassic(async () => {
+    const configured = owner.port('knowledge.extraction.html-content');
+    const observed: typeof configured = { ...configured, async ask(request) {
+      const result = await configured.ask(request);
+      owner.assertCurrent();
+      for (const answer of Object.values(result.answers)) if (answer && typeof answer === 'object'
+        && 'type' in answer && answer.type === 'noul' && 'noul' in answer && typeof answer.noul === 'number') {
+        const reading = readYesNo({ type: 'noul', noul: answer.noul }, PAGE_CONTENT_BAND);
+        if (reading.outcome === 'act' && reading.verdict === 'no') rejectedContent = true;
+      }
+      return result;
+    } };
+    const readings = await htmlMainContent.read(observed, documentTitle.slice(0, TITLE_SAMPLE_CHARS), blocks, { site: 'knowledge.extraction.html-content', ...(owner.signal ? { signal: owner.signal } : {}), beforeAttempt: owner.assertCurrent });
     owner.assertCurrent();
     for (const block of blocks) {
       const reading = readings.get(block.number);
       if (!reading || reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new KnowledgeExtractionJudgmentHoldError();
+      if (reading.verdict === 'no') rejectedContent = true;
     }
     const kept = blocks.filter((block) => readings.get(block.number)?.verdict === 'yes');
     if (kept.length === 0) return null;
@@ -51,7 +66,15 @@ export async function selectHtmlContent(html: string, documentTitle: string, met
       headings: [...new Set(keptUnits.filter((unit) => unit.headingLevel !== undefined).map((unit) => unit.text))].slice(0, 24),
       paragraphSamples: [...new Set(keptUnits.filter((unit) => unit.headingLevel === undefined).map((unit) => unit.text))].slice(0, 12),
     };
-  });
+  }, () => {
+    owner.assertCurrent();
+    return {
+      textContent: blocks.map(block => block.text).join('\n\n'),
+      ...(documentTitle.trim() ? { title: documentTitle.trim() } : {}),
+      headings: [...new Set(units.filter(unit => unit.headingLevel !== undefined).map(unit => unit.text))].slice(0, 24),
+      paragraphSamples: [...new Set(units.filter(unit => unit.headingLevel === undefined).map(unit => unit.text))].slice(0, 12),
+    };
+  }, () => !rejectedContent));
 }
 
 /** Large candidate lists use the foundation's selection pattern in bounded tournaments. */

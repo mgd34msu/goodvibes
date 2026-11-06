@@ -1,3 +1,4 @@
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperation, retireKnowledgeIngestUriOperation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
@@ -6,7 +7,7 @@ import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { stableText } from './store-schema.js';
-import { prepareStagedObservedKnowledgeNodeInput } from './store-node-observation.js';
+import { prepareStagedObservedKnowledgeNodeInput, type KnowledgeObservationOrigin } from './store-node-observation.js';
 import { supportHash } from './semantic/verification/projection.js';
 import {
   emitKnowledgeCompileCompleted,
@@ -100,7 +101,7 @@ export async function finalizeKnowledgeIngestedSource(
         summary: extractionEvidence.summary, description: stableText(extracted.excerpt) ?? previousExtraction?.excerpt,
         tags: input.tags, folderPath: input.folderPath, status: 'indexed', artifactId: input.artifactId,
         contentHash: record.sha256, sessionId: input.sessionId,
-        metadata: { ...input.metadata, contentType: record.mimeType, extractionId,
+        metadata: { ...input.metadata, ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}), contentType: record.mimeType, extractionId,
           extractionFormat: extracted.format, outboundLinks: extracted.links },
       })],
       extractions: [{ id: extractionId, sourceId: input.sourceId, artifactId: input.artifactId,
@@ -131,7 +132,7 @@ export async function finalizeKnowledgeIngestedSource(
     }), source.sessionId);
     // Host-owned repair consumers promote under their retained read set. Do not
     // launch an unowned second publisher after the guarded source commit.
-    if (!ownership.deferSemanticEnrichment) void Promise.resolve(context.semanticEnrichSource?.(source.id, readKnowledgeSpaceId(source.metadata))).catch((error: unknown) => {
+    if (!ownership.deferSemanticEnrichment && !isClassicOperation()) void Promise.resolve(context.semanticEnrichSource?.(source.id, readKnowledgeSpaceId(source.metadata))).catch((error: unknown) => {
       logger.warn('Knowledge semantic enrichment after ingest failed', {
         sourceId: source.id,
         error: summarizeError(error),
@@ -236,7 +237,7 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
     const check = () => { assertCurrent(); stage.assertCurrent(); };
     check();
     const draft = stagedCompileWriter(context, check);
-    if (structuredOnly) await writeKnowledgeStructuredEntityHints(source, hints, draft.writer);
+    if (structuredOnly) await writeKnowledgeStructuredEntityHints(context, source, hints, draft.writer);
     else await compileKnowledgeSourceRecords(context, source, nextExtraction, hints, draft.writer, uris);
     check();
     return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent };
@@ -252,24 +253,24 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
 
 interface KnowledgeCompileWriter {
   node(input: KnowledgeNodeUpsertInput): Promise<{ readonly id: string }>;
-  observed(input: KnowledgeNodeUpsertInput, evidence: unknown, readEvidence: () => unknown): Promise<{ readonly id: string }>;
+  observed(input: KnowledgeNodeUpsertInput, evidence: unknown, readEvidence: () => unknown, origin?: KnowledgeObservationOrigin): Promise<{ readonly id: string }>;
   edge(input: KnowledgeEdgeUpsertInput): Promise<unknown>;
 }
 function stagedCompileWriter(context: KnowledgeIngestContext, assertCurrent: () => void) {
   const nodes = new Map<string, KnowledgeNodeUpsertInput>();
   const edges: KnowledgeEdgeUpsertInput[] = [];
-  function stageNode(input: KnowledgeNodeUpsertInput, observed?: { evidence: unknown; readEvidence: () => unknown }) {
+  function stageNode(input: KnowledgeNodeUpsertInput, observed?: { evidence: unknown; readEvidence: () => unknown; origin?: KnowledgeObservationOrigin | undefined }) {
     const key = JSON.stringify([input.kind, input.slug]);
     const prior = nodes.get(key);
     const id = prior?.id ?? context.store.getNodeByKindAndSlug(input.kind, input.slug)?.id ?? `node-${randomUUID().slice(0, 8)}`;
     const candidate = { ...prior, ...input, id, metadata: { ...prior?.metadata, ...input.metadata } };
     nodes.set(key, observed ? prepareStagedObservedKnowledgeNodeInput(context.store, candidate,
-      observed.evidence, observed.readEvidence, assertCurrent) : snapshotNodeInput(candidate));
+      observed.evidence, observed.readEvidence, assertCurrent, observed.origin) : snapshotNodeInput(candidate));
     return { id };
   }
   const writer: KnowledgeCompileWriter = {
     node: async (input) => stageNode(input),
-    observed: async (input, evidence, readEvidence) => stageNode(input, { evidence, readEvidence }),
+    observed: async (input, evidence, readEvidence, origin) => stageNode(input, { evidence, readEvidence, origin }),
     edge: async (input) => { edges.push(snapshotNodeInput(input)); },
   };
   return { writer, nodes, edges };
@@ -381,7 +382,7 @@ async function compileKnowledgeSourceRecords(
     });
   }
 
-  await writeKnowledgeStructuredEntityHints(source, entityHints, writer);
+  await writeKnowledgeStructuredEntityHints(context, source, entityHints, writer);
 
   if (extraction) {
     const tagSlugs = new Set(source.tags.map((tag) => slugify(tag)));
@@ -561,6 +562,7 @@ async function prepareKnowledgeStructuredEntityHints(
 }
 
 async function writeKnowledgeStructuredEntityHints(
+  context: KnowledgeIngestContext,
   source: KnowledgeSourceRecord,
   entities: readonly CompiledEntityHint[],
   writer: KnowledgeCompileWriter,
@@ -568,7 +570,7 @@ async function writeKnowledgeStructuredEntityHints(
   const spaceId = getKnowledgeSpaceId(source);
   for (const entity of entities) {
     const { kind, title, summaryPrefix, aliases, relation } = entity;
-    const node = await writer.node({
+    const input: KnowledgeNodeUpsertInput = {
       kind,
       slug: slugify(`${spaceId}-${title}`),
       title,
@@ -577,8 +579,12 @@ async function writeKnowledgeStructuredEntityHints(
       metadata: knowledgeSpaceMetadata(spaceId, {
         compiledFrom: source.id,
         tags: [...source.tags],
+        ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
       }),
-    });
+    };
+    const node = isClassicOperation()
+      ? await writer.observed(input, source, () => context.store.getSource(source.id), 'source-declaration')
+      : await writer.node(input);
     await writer.edge({
       fromKind: 'source',
       fromId: source.id,

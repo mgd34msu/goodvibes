@@ -1,6 +1,7 @@
+import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
-import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../../gate/judgment-result.js';
@@ -11,8 +12,11 @@ export * from './types.js';
 
 interface UriInput { readonly input: string; readonly parameters: readonly (readonly [string, string])[]; }
 interface RefInput { readonly uri: UriInput; readonly position: number; readonly value: string; }
-const failure = (error: unknown): Error => error instanceof Held || error instanceof JudgmentInputError ? error
-  : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : error instanceof JudgmentAuthorityRetiredError ? 'stale' : 'unavailable');
+const failure = (error: unknown): Error => {
+  if (error instanceof DecisionModelsDisabledError || (activateClassicFallback(error) && error instanceof Error)) return error;
+  return error instanceof Held || error instanceof JudgmentInputError ? error
+    : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : error instanceof JudgmentAuthorityRetiredError ? 'stale' : 'unavailable');
+};
 const admission = (reason: 'malformed' | 'stale') => new Held(reason);
 function normalized(uri: UriInput, referralPositions: ReadonlySet<number>): string {
   const url = new URL(uri.input);
@@ -56,6 +60,7 @@ export function createKnowledgeUriCanonicalizer(options: KnowledgeUriOptions = {
     && (typeof ownerCurrent !== 'function' || nodeTypes.isProxy(ownerCurrent) || nodeTypes.isAsyncFunction(ownerCurrent)))) throw new Held('malformed');
   const timeoutMs = configuredTimeout ?? LIMITS.defaultTimeoutMs;
   let authority: JudgmentPortCapture | undefined, resultModel: string | undefined, failed: Error | undefined;
+  let classic = isClassicOperation();
   let requests = 0, bytes = 0, queue: Promise<unknown> = Promise.resolve();
   const cache = new Map<string, string>(), retained: (() => void)[] = [];
   const assertOptions = () => {
@@ -77,7 +82,11 @@ export function createKnowledgeUriCanonicalizer(options: KnowledgeUriOptions = {
   };
   const assertCurrent = () => {
     if (failed) throw failed;
-    try { assertOwnerCurrent(); authority?.assertCurrent(); }
+    try {
+      assertOwnerCurrent();
+      if (isClassicOperation()) classic = true;
+      if (!classic) authority?.assertCurrent();
+    }
     catch (error) { failed ??= failure(error); throw failed; }
   };
   async function run(batch: ReturnType<typeof captureInputs>): Promise<readonly (string | null)[]> {
@@ -91,7 +100,7 @@ export function createKnowledgeUriCanonicalizer(options: KnowledgeUriOptions = {
     if (requests + refs.length > LIMITS.requests || bytes + pendingBytes > LIMITS.bytes) throw new Held('budget');
     if (refs.length && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
     const removals = new Map<string, Set<number>>();
-    if (refs.length) {
+    if (refs.length) await decisionOrClassic(async () => {
       authority ??= captureJudgmentPort(knowledgeUriRef.name, { signal, assertCurrent: assertOwnerCurrent,
         prepareResultCapture: (questions) => prepareJudgmentResult(questions, admission) });
       const captured = authority.port, configuredModel = captured.model;
@@ -130,7 +139,12 @@ export function createKnowledgeUriCanonicalizer(options: KnowledgeUriOptions = {
       };
       try { await Promise.race([work(), stopped]); check(); }
       finally { clearTimeout(timer); active.removeEventListener('abort', abort); controller.abort(); }
-    }
+    }, () => {
+      classic = true;
+      batch.assertCurrent(); assertCurrent();
+      // Keep unresolved ref occurrences. Known page-address refs remain intact;
+      // an outage never authorizes stripping a parameter or merging identities.
+    });
     batch.assertCurrent(); assertCurrent();
     const settled = pending.map((uri) => [uri.input, normalized(uri, removals.get(uri.input) ?? new Set<number>())] as const);
     batch.assertCurrent(); assertCurrent();

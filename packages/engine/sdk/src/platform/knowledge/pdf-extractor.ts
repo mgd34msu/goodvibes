@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { inflateSync } from 'node:zlib';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
@@ -340,7 +341,7 @@ async function decodeHexPdfString(value: string, owner: KnowledgeExtractionOwner
   const utf16be = bytes.length % 2 === 0 ? decodeUtf16Be(bytes) : null;
   // Both full interpretations are inspected before either bounded candidate leaves.
   assertJudgmentInput({ singleByte, utf16be });
-  return requireExtractionJudgment(async () => {
+  return requireExtractionJudgment(() => decisionOrClassic(async () => {
     const run = await pdfTextDecoding.run(owner.port('knowledge.extraction.pdf-decoding'), {
       singleByte: singleByte.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS),
       utf16be: utf16be?.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS) ?? null,
@@ -358,7 +359,12 @@ async function decodeHexPdfString(value: string, owner: KnowledgeExtractionOwner
       case 'singleByte': return singleByte;
       default: throw new KnowledgeExtractionJudgmentHoldError();
     }
-  });
+  }, () => {
+    owner.assertCurrent();
+    // Explicit BOM decoding above is authoritative. Otherwise keep only
+    // unambiguous ASCII bytes; ambiguous raw-stream encodings are omitted.
+    return /^[\x09\x0a\x0d\x20-\x7e]*$/.test(singleByte) ? singleByte : undefined;
+  }));
 }
 
 function decodeUtf16Be(bytes: Buffer): string {

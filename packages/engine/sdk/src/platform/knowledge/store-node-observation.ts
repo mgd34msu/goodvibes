@@ -5,7 +5,7 @@ import { getKnowledgeSpaceId } from './spaces.js';
 import { supportHash } from './semantic/verification/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 
-export type KnowledgeObservationOrigin = 'catalog-structure' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
+export type KnowledgeObservationOrigin = 'catalog-structure' | 'source-declaration' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
 interface Observation { readonly inputHash: string; readonly existingHash: string; readonly origin: KnowledgeObservationOrigin; readonly check: () => void; readonly checkEvidence: () => void; }
 export interface ObservedEvidence { readonly record: KnowledgeNodeRecord; readonly origin: KnowledgeObservationOrigin; readonly assertCurrent: () => void; }
 const observedRecords = new WeakMap<KnowledgeNodeRecord, ObservedEvidence>();
@@ -32,7 +32,8 @@ const observations = new WeakMap<KnowledgeNodeUpsertInput, Observation>();
 export function prepareObservedKnowledgeNodeInput(store: KnowledgeStore, input: KnowledgeNodeUpsertInput, origin: KnowledgeObservationOrigin,
   evidence: unknown, readEvidence: () => unknown): KnowledgeNodeUpsertInput {
   const kinds: Readonly<Record<KnowledgeObservationOrigin, readonly KnowledgeNodeRecord['kind'][]>> = {
-    'catalog-structure': ['domain', 'bookmark_folder', 'topic'], 'memory-mirror': ['memory'],
+    'catalog-structure': ['domain', 'bookmark_folder', 'topic'],
+    'source-declaration': ['project', 'capability', 'repo', 'provider', 'service', 'environment', 'user'], 'memory-mirror': ['memory'],
     'home-assistant-snapshot': ['ha_home', 'ha_entity', 'ha_device', 'ha_area', 'ha_automation', 'ha_script', 'ha_scene', 'ha_label', 'ha_integration'],
     'browser-profile': ['source_group'], 'generated-page-index': ['ha_device_passport'], 'research-task': ['knowledge_gap'],
   };
@@ -62,8 +63,8 @@ export function resolveKnowledgeNodeObservation(input: KnowledgeNodeUpsertInput,
 
 /** Staged catalog evidence is guarded before commit and read from the live store thereafter. */
 export function prepareStagedObservedKnowledgeNodeInput(store: KnowledgeStore, input: KnowledgeNodeUpsertInput,
-  evidence: unknown, readEvidence: () => unknown, assertCurrent: () => void): KnowledgeNodeUpsertInput {
-  const frozen = prepareObservedKnowledgeNodeInput(store, input, 'catalog-structure', evidence, readEvidence);
+  evidence: unknown, readEvidence: () => unknown, assertCurrent: () => void, origin: KnowledgeObservationOrigin = 'catalog-structure'): KnowledgeNodeUpsertInput {
+  const frozen = prepareObservedKnowledgeNodeInput(store, input, origin, evidence, readEvidence);
   const observation = observations.get(frozen)!;
   observations.set(frozen, Object.freeze({ ...observation, check: assertCurrent }));
   return frozen;

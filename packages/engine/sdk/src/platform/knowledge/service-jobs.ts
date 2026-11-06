@@ -10,7 +10,7 @@ import type { KnowledgeSemanticService } from './semantic/index.js';
 
 export interface KnowledgeServiceJobRunnerContext {
   readonly lint: () => Promise<readonly KnowledgeIssueRecord[]>;
-  readonly reindex: () => Promise<{ readonly status: KnowledgeStatus; readonly issues: readonly KnowledgeIssueRecord[] }>;
+  readonly reindex: () => Promise<{ readonly status: KnowledgeStatus; readonly issues: readonly KnowledgeIssueRecord[]; readonly provenance?: 'classic'; readonly semanticEnrichment?: 'attempted' | 'not-evaluated' }>;
   readonly refreshSources: (
     kind: 'stale' | 'bookmark',
     sourceIds?: readonly string[],
@@ -40,7 +40,9 @@ export async function runKnowledgeServiceJobByKind(
     }
     case 'reindex': {
       const result = await context.reindex();
-      return { sourceCount: result.status.sourceCount, issueCount: result.issues.length };
+      return { sourceCount: result.status.sourceCount, issueCount: result.issues.length,
+        ...(result.provenance ? { provenance: result.provenance } : {}),
+        ...(result.semanticEnrichment ? { semanticEnrichment: result.semanticEnrichment } : {}) };
     }
     case 'refresh-stale':
       return { refreshed: await context.refreshSources('stale', input.sourceIds, input.limit) };

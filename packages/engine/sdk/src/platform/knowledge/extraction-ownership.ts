@@ -1,3 +1,4 @@
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
@@ -14,6 +15,7 @@ export function createKnowledgeExtractionOwner(ownership: Pick<KnowledgeIngestOw
   const { signal, assertCurrent: callerCurrent } = ownership;
   const retained: (() => void)[] = [];
   const captures = new Map<string, JudgmentPortCapture>();
+  let classic = isClassicOperation();
   const assertCaller = () => {
     try {
       if (ownership.signal !== signal || ownership.assertCurrent !== callerCurrent) throw new Error('retired');
@@ -23,7 +25,10 @@ export function createKnowledgeExtractionOwner(ownership: Pick<KnowledgeIngestOw
   };
   const assertCurrent = () => {
     assertCaller();
-    try { for (const captured of captures.values()) captured.assertCurrent(); }
+    try {
+      if (isClassicOperation()) classic = true;
+      if (!classic) for (const captured of captures.values()) captured.assertCurrent();
+    }
     catch { throw new KnowledgeExtractionJudgmentHoldError(); }
   };
   return Object.freeze({ signal, assertCurrent, retain(check: () => void) { assertCurrent(); check(); retained.push(check); }, port(site: string) {

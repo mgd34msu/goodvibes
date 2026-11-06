@@ -9,7 +9,7 @@ import { logger } from '../utils/logger.js';
 
 /** Local health checks and rendering do not infer new semantic facts. */
 function classicJob(kind: KnowledgeJobRecord['kind']): boolean {
-  return kind === 'lint' || kind === 'rebuild-projections';
+  return kind === 'lint' || kind === 'reindex' || kind === 'refresh-stale' || kind === 'refresh-bookmarks' || kind === 'rebuild-projections';
 }
 function assertJobPolicy(job: KnowledgeJobRecord): void {
   if (!classicJob(job.kind)) requireDecisionFeature(`knowledge job: ${job.title}`);

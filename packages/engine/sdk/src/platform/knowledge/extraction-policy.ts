@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { extractionReadability } from './batteries/extraction-readability.js';
@@ -78,7 +79,7 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
   const normalized = value.toLowerCase();
   // These are this codebase's own extractor placeholder messages, not guesses.
   if (LIMITED_EXTRACTION_MARKERS.some((marker) => normalized.includes(marker))) return false;
-  return requireExtractionJudgment(async () => {
+  return requireExtractionJudgment(() => decisionOrClassic(async () => {
     const run = await extractionReadability.run(owner.port('knowledge.extraction.readability'), {
       sample: value.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS),
     }, { site: 'knowledge.extraction.readability', ...(signal ? { signal } : {}), beforeAttempt: owner.assertCurrent });
@@ -91,7 +92,12 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
     }
     run.recordAction(reading.verdict === 'yes' ? 'keep-readable-text' : 'reject-unreadable-text');
     return reading.verdict === 'yes';
-  });
+  }, () => {
+    owner.assertCurrent();
+    // Classic retains nonempty parser output. This is text presence, not a
+    // semantic readability certificate; extraction metadata records that limit.
+    return Boolean(value.trim());
+  }));
 }
 
 /** Compatibility name: the same readability judgment, never a PDF-token scan. */

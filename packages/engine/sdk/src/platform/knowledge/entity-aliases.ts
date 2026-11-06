@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
@@ -73,31 +74,38 @@ export async function readKnowledgeEntityAliases(
   if (requests.length === 0) return aliases;
   const actions: Array<{ readonly record: (action: string) => void; readonly action: string }> = [];
   try {
-    const captured = captureJudgmentPort('knowledge.ingest.entity-alias', { signal, assertCurrent: ownerCurrent, prepareResultCapture: prepareRepairJudgmentResult });
-    const port = captured.port;
-    const assertCurrent = () => {
-      try {
-        if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
-        ownerCurrent?.(); captured.assertCurrent();
-      } catch { throw new KnowledgeEntityAliasHoldError(); }
-    };
-    retainGuard?.(assertCurrent);
-    // Every retained alias has its own reading; the owner can cancel the pass.
-    for (const { index, state } of requests) {
-      assertCurrent();
-      const run = await abortableAliasRead(entityAlias.run(port, state, { site: 'knowledge.ingest.entity-alias', ...(signal ? { signal } : {}), beforeAttempt: assertCurrent }), signal);
-      assertCurrent();
-      const reading = run.readings.alias;
-      if (reading.outcome !== 'act' || reading.verdict === 'uncertain') {
-        run.recordAction('held: unresolved alias identity');
-        throw new KnowledgeEntityAliasHoldError();
+    return await decisionOrClassic<readonly (readonly string[])[]>(async () => {
+      const captured = captureJudgmentPort('knowledge.ingest.entity-alias', { signal, assertCurrent: ownerCurrent, prepareResultCapture: prepareRepairJudgmentResult });
+      const port = captured.port;
+      const assertCurrent = () => {
+        try {
+          if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+          ownerCurrent?.(); captured.assertCurrent();
+        } catch { throw new KnowledgeEntityAliasHoldError(); }
+      };
+      retainGuard?.(assertCurrent);
+      // Every retained alias has its own reading; the owner can cancel the pass.
+      for (const { index, state } of requests) {
+        assertCurrent();
+        const run = await abortableAliasRead(entityAlias.run(port, state, { site: 'knowledge.ingest.entity-alias', ...(signal ? { signal } : {}), beforeAttempt: assertCurrent }), signal);
+        assertCurrent();
+        const reading = run.readings.alias;
+        if (reading.outcome !== 'act' || reading.verdict === 'uncertain') {
+          run.recordAction('held: unresolved alias identity');
+          throw new KnowledgeEntityAliasHoldError();
+        }
+        const selected = reading.verdict === 'yes' && aliases[index]!.length < MAX_ALIASES_PER_ENTITY;
+        if (selected) aliases[index]!.push(state.candidate);
+        actions.push({ record: run.recordAction, action: selected ? 'selected: entity alias' : reading.verdict === 'yes' ? 'not selected: alias count budget' : 'not an alias' });
       }
-      const selected = reading.verdict === 'yes' && aliases[index]!.length < MAX_ALIASES_PER_ENTITY;
-      if (selected) aliases[index]!.push(state.candidate);
-      actions.push({ record: run.recordAction, action: selected ? 'selected: entity alias' : reading.verdict === 'yes' ? 'not selected: alias count budget' : 'not an alias' });
-    }
-    for (const { record, action } of actions) record(action);
-    return aliases;
+      for (const { record, action } of actions) record(action);
+      return aliases;
+    }, () => {
+      const current = () => { ownerCurrent?.(); if (signal?.aborted) throw new KnowledgeEntityAliasHoldError(); };
+      current(); retainGuard?.(current);
+      // Exact declared titles remain available. No additional alias is inferred.
+      return identities.map(() => []);
+    });
   } catch {
     // Lower captured ports normalize retirement. Recover only the host's
     // CURRENT typed extraction hold, never a provider-supplied error class.

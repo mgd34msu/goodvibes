@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
 import { extname } from 'node:path';
 import type { ArtifactDescriptor, ArtifactRecord } from '../artifacts/types.js';
@@ -595,6 +596,19 @@ export async function extractKnowledgeArtifact(
   artifact: Pick<ArtifactRecord, 'id' | 'mimeType' | 'filename'>,
   buffer: Buffer,
   owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner(),
+): Promise<KnowledgeExtractionResult> {
+  return withConfiguredDecisionModelPolicy(async () => {
+    const extraction = await extractArtifactUnderPolicy(artifact, buffer, owner);
+    owner.assertCurrent();
+    return isClassicOperation() ? { ...extraction, metadata: { ...extraction.metadata,
+      provenance: 'classic', semanticAssessment: 'not-evaluated' } } : extraction;
+  });
+}
+
+async function extractArtifactUnderPolicy(
+  artifact: Pick<ArtifactRecord, 'id' | 'mimeType' | 'filename'>,
+  buffer: Buffer,
+  owner: KnowledgeExtractionOwner,
 ): Promise<KnowledgeExtractionResult> {
   owner.assertCurrent();
   const format = chooseFormat(artifact);

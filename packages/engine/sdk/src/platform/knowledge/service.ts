@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { randomUUID } from 'node:crypto';
@@ -771,17 +771,20 @@ export class KnowledgeService {
     }, selection, request);
   }
 
-  async reindex(): Promise<{ status: KnowledgeStatus; issues: readonly KnowledgeIssueRecord[] }> {
-    requireDecisionFeature('knowledge reindexing with semantic extraction and compilation');
-    await this.store.init();
-    for (const source of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
-      if (isGeneratedKnowledgeSource(source)) continue;
-      await recompileKnowledgeSource(this.getIngestContext(), source);
-    }
-    await this.semanticService.reindex({ force: false });
-    await this.syncReviewedMemory();
-    const issues = await lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) });
-    return { status: this.store.status(), issues };
+  async reindex(): Promise<{ status: KnowledgeStatus; issues: readonly KnowledgeIssueRecord[]; provenance?: 'classic'; semanticEnrichment: 'attempted' | 'not-evaluated' }> {
+    return withConfiguredDecisionModelPolicy(async () => {
+      await this.store.init();
+      for (const source of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
+        if (isGeneratedKnowledgeSource(source)) continue;
+        await recompileKnowledgeSource(this.getIngestContext(), source);
+      }
+      if (!isClassicOperation()) await this.semanticService.reindex({ force: false });
+      await this.syncReviewedMemory();
+      const issues = await lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) });
+      return { status: this.store.status(), issues,
+        ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+        semanticEnrichment: isClassicOperation() ? 'not-evaluated' as const : 'attempted' as const };
+    });
   }
 
   async search(query: string, limit = 10): Promise<KnowledgeSearchResult[]> {

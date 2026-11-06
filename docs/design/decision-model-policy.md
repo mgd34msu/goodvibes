@@ -239,3 +239,19 @@ Worker prompts retain declared test-runner facts and omit inferred framework and
 repeated-call progress hints. The read-only secret check escalates to the existing
 secret-aware approval path when unassessed; it never reuses a cached semantic
 absence of secrets during Classic or asserts that unknown file contents are safe.
+
+Classic explicit knowledge ingestion retains artifact bytes, parser-derived text,
+structural sections and declared project/provider metadata without semantic
+readability, alias or main-content certification. Extraction and source metadata
+identify Classic and `semanticAssessment: not-evaluated`. Additional inferred
+aliases are omitted; source-declared identities retain native evidence guards
+and untrusted provenance. URI `ref` occurrences whose meaning is unresolved stay
+in the address, preventing a local guess from merging different source identities.
+HTML retains literal rendered blocks. PDF parsing retains explicit decoding facts
+and omits ambiguous raw-stream encodings rather than inventing an interpretation.
+
+Ordinary Classic reindex and source refresh may rebuild the local catalog from
+retained artifacts. Their semantic enrichment is omitted and reported as
+`not-evaluated`; the dedicated semantic enrichment/reindex APIs remain decision
+features. These paths retain atomic source/extraction/graph publication and do
+not replay an artifact fetch when a side-effect-free reading falls back.

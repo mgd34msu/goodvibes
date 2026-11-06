@@ -1,7 +1,8 @@
-import { defineBattery, estimateTokens, LIMITS, STAKES_BANDS, toJson, yesNo, type EntryType } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { defineBattery, estimateTokens, JudgmentError, LIMITS, STAKES_BANDS, toJson, yesNo, type EntryType } from '@goodvibes-jev/judgment';
+import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureJudgmentFailure } from '../../gate/failure-input.js';
 import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
+import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 
 export interface VoiceProofLifetime {
   readonly signal?: AbortSignal | undefined;
@@ -19,7 +20,8 @@ export function ownVoiceProofLifetime<T extends VoiceProofLifetime>(input: T): T
   const check = () => {
     assertPermissionActive(original.signal);
     original.assertCurrent?.();
-    owner?.assertCurrent();
+    owner?.signal.throwIfAborted();
+    if (!isClassicOperation()) owner?.assertCurrent();
   };
   scopes.set(check, { capture() {
     check();
@@ -54,6 +56,7 @@ export const voiceRoundTripReading = defineBattery({
 
 /** Admit the complete phrase before touching the installed port or its model. */
 export function beginVoiceProofReading(phrase: string, lifetime: VoiceProofLifetime): JudgmentPortCapture {
+  requireDecisionFeature('semantic voice round-trip comparison; Classic uses an explicitly labelled native word-sequence comparison');
   captureJudgmentFailure({ phrase });
   const scope = lifetime.assertCurrent && scopes.get(lifetime.assertCurrent);
   if (!scope) throw new Error('Voice proof has no owner.');
@@ -63,6 +66,7 @@ export function beginVoiceProofReading(phrase: string, lifetime: VoiceProofLifet
 export type VoiceProofComparison = 'yes' | 'no' | 'uncertain' | 'unavailable';
 export async function readVoiceRoundTrip(phrase: string, transcript: string, lifetime: VoiceProofLifetime,
   owner: JudgmentPortCapture | undefined): Promise<VoiceProofComparison> {
+  requireDecisionFeature('semantic voice round-trip comparison');
   assertVoiceProofCurrent(lifetime);
   try {
     // Admit FULL source, including any private tail, before caps or model lookup.
@@ -81,8 +85,12 @@ export async function readVoiceRoundTrip(phrase: string, transcript: string, lif
     run.recordAction(reading.verdict === 'yes' ? 'voice round trip proven' : 'voice round trip not proven');
     assertVoiceProofCurrent(lifetime);
     return reading.verdict;
-  } catch {
+  } catch (error) {
     assertVoiceProofCurrent(lifetime);
+    // Preserve the actual exhaustion for the owning pure comparison phase.
+    // Other failures remain unproven and cannot authorize a Classic downgrade.
+    if (decisionModelPolicyState().policy === 'Preferred'
+      && (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable')) throw error;
     return 'unavailable';
   }
 }

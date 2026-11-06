@@ -35,6 +35,9 @@ export type VoiceDiagnosticRoute = 'connected-host' | 'in-process' | 'none';
 
 /** One thing that happened on the voice path, with what it took to explain it. */
 export interface VoiceDiagnosticEntry {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  readonly proofBasis?: 'native-word-sequence' | undefined;
   readonly at: string;
   /** What was being attempted: `stt`, `wake-transcribe`, `provision-proof`. */
   readonly operation: string;

@@ -6,7 +6,8 @@ import { readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../../sdk/src/platform/runtime/decision-policy.js';
 import { createProtectedSourceOwner } from '../../sdk/src/platform/security/source-screening/owner.js';
 import { smokeLoadFailure } from '../../toolchain/src/batteries/smoke-load-failure.js';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
@@ -59,6 +60,37 @@ const CLEAN_ARTIFACT = [
   '  var lazy = exports_bootstrap.saveSession;', // indented: runs post-settle, safe
   '});',
 ].join('\n');
+
+test('Classic smoke accepts only native version/artifact evidence and never opens semantic diagnostics', async () => {
+  let metadata = 0, asks = 0, executions = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed a model'); },
+    async ask() { asks++; throw new Error('Classic request'); } });
+  const screened = protectedDiagnosticOwner();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const clean = await runPostBuildSmoke({ ...smokeFixture(''), exec: () => {
+      executions++; return { status: 0, stdout: 'goodvibes-agent 1.12.0\n', stderr: '' };
+    } });
+    expect(clean).toMatchObject({ ok: true, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+      qualificationBasis: 'native-version-and-artifact' });
+    const diagnostics = await runPostBuildSmoke({ ...smokeFixture('extra diagnostic output'), diagnosticSourceOwner: screened.owner,
+      exec: () => { executions++; return { status: 0, stdout: 'goodvibes-agent 1.12.0\n', stderr: 'extra diagnostic output' }; } });
+    expect(diagnostics).toMatchObject({ ok: false, operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+    expect(diagnostics.detail).toContain('cannot assess additional diagnostic output');
+  });
+  expect({ metadata, asks, executions }).toEqual({ metadata: 0, asks: 0, executions: 2 });
+  expect(screened.requests).toHaveLength(0);
+});
+
+test('Preferred diagnostic exhaustion holds qualification without replaying the binary', async () => {
+  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
+  const screened = protectedDiagnosticOwner(); let executions = 0;
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const result = await runPostBuildSmoke({ ...smokeFixture('extra diagnostic output'), diagnosticSourceOwner: screened.owner,
+      exec: () => { executions++; return { status: 0, stdout: 'goodvibes-agent 1.12.0\n', stderr: 'extra diagnostic output' }; } });
+    expect(result).toMatchObject({ ok: false, operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
+  });
+  expect(executions).toBe(1); expect(fake.requests).toHaveLength(1);
+});
 
 const TAINTED_ARTIFACT = `${CLEAN_ARTIFACT}\nvar saveSession2 = exports_bootstrap.saveSession;\nvar buildUrl2 = exports_transport.buildUrl;`;
 

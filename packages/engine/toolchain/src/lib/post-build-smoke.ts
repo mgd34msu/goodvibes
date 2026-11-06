@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
 import { smokeLoadFailure } from '../batteries/smoke-load-failure.js';
 import type { Exec, ExecResult, Logger } from './effects.js';
@@ -215,6 +216,9 @@ export function scanArtifactForEagerNamespaceReads(artifactText: string, limit =
 }
 
 export interface SmokeResult {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  readonly qualificationBasis?: 'native-version-and-artifact';
   readonly ok: boolean;
   readonly detail: string;
 }
@@ -282,6 +286,10 @@ export interface RunSmokeOptions {
 
 /** Run the version smoke against a binary path. */
 export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeResult> {
+  return withConfiguredDecisionModelPolicy(() => runOwnedPostBuildSmoke(options));
+}
+
+async function runOwnedPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeResult> {
   const exec = options.exec ?? realExec;
   const logger = options.logger ?? consoleLogger;
   const readArtifact = options.readArtifact ?? ((path: string) => readFileSync(path, 'latin1'));
@@ -298,7 +306,11 @@ export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<Smoke
       || sourceOwner.project !== sourceMethods.project || sourceOwner.release !== sourceMethods.release)) throw new Error('Smoke diagnostic source owner changed.');
     signal?.throwIfAborted();
   };
-  const failed = (detail: string): SmokeResult => { const result = { ok: false, detail }; logger.error(`[post-build-smoke] ${detail}`); return result; };
+  const failed = (detail: string): SmokeResult => {
+    const result = { ok: false, detail, ...(isClassicOperation()
+      ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}) };
+    logger.error(`[post-build-smoke] ${detail}`); return result;
+  };
   const fileIdentity = () => [lstatSync(binary, { bigint: true }), statSync(binary, { bigint: true })]
     .flatMap(stat => [stat.dev, stat.ino, stat.ctimeNs, stat.mtimeNs, stat.size]);
   let originalFile: readonly bigint[] | undefined;
@@ -332,9 +344,13 @@ export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<Smoke
     if (eagerReads.length > 0) return failed(`artifact contains ${eagerReads.length}${eagerReads.length >= 8 ? '+' : ''} top-level eager namespace read(s), a build-order lottery that can die at load on the next rebuild: ${eagerReads.slice(0, 3).join('; ')}`);
     logger.info(`[post-build-smoke] ${evaluated.detail}`);
     try { readingCurrent(); artifactCurrent(); } catch { return failed('artifact or smoke observation is no longer current'); }
-    return evaluated;
+    return { ...evaluated, ...(isClassicOperation() ? { operationProvenance: 'classic' as const,
+      semanticAssessment: 'not-evaluated' as const, qualificationBasis: 'native-version-and-artifact' as const } : {}) };
   };
   let evaluated = evaluateSmokeOutput(result, { bannerPrefix });
+  if (!evaluated.ok && result.status === 0 && versionProtocol(result, bannerPrefix) === 'diagnostic' && isClassicOperation()) {
+    return failed('Classic smoke qualification cannot assess additional diagnostic output; use a clean version protocol or enable decision models for semantic load-failure assessment');
+  }
   if (!evaluated.ok && result.status === 0 && versionProtocol(result, bannerPrefix) === 'diagnostic' && sourceOwner) {
     let source: ReturnType<ProtectedSourceOwner['capture']> | undefined;
     const cancelSource = () => { if (source && sourceMethods) void sourceMethods.release.call(sourceOwner, source).catch(() => {}); };
@@ -376,7 +392,11 @@ export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<Smoke
       await sourceOwner.release(source); source = undefined;
       restriction.assertCurrent(); artifactCurrent();
       return finished;
-    } catch { return failed('smoke diagnostic reading unavailable, malformed, or no longer current'); }
+    } catch (error) {
+      try { artifactCurrent(); } catch { return failed('smoke artifact or source owner is no longer current'); }
+      if (activateClassicFallback(error)) return failed('Classic smoke qualification cannot assess additional diagnostic output; semantic load-failure assessment was not evaluated');
+      return failed('smoke diagnostic reading unavailable, malformed, or no longer current');
+    }
     finally {
       signal?.removeEventListener('abort', cancelSource);
       if (source && sourceMethods) await sourceMethods.release.call(sourceOwner, source);

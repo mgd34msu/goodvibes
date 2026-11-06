@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, readVoiceRoundTrip, type VoiceProofComparison, type VoiceProofLifetime } from './round-trip-reading.js';
 import { awaitPermission } from '../../permissions/cancellation.js';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 
 /**
  * The phrase the proof speaks. Deliberately plain, common words: the point is
@@ -98,9 +99,12 @@ export interface VoiceRoundTripProofOptions extends VoiceProofLifetime {
 
 /** What the proof did, in enough detail to report it honestly either way. */
 export interface VoiceRoundTripProof {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  readonly proofBasis?: 'native-word-sequence';
   readonly proved: boolean;
-  /** Semantic comparison status; missing only if an engine stage failed. */
-  readonly comparison?: VoiceProofComparison | undefined;
+  /** Semantic verdict or an explicitly native comparison; absent if an engine stage failed. */
+  readonly comparison?: VoiceProofComparison | 'classic-exact-match' | 'classic-mismatch' | undefined;
   /** Which stage ran last: `synthesize`, `transcribe`, or `compare`. */
   readonly stage: 'synthesize' | 'transcribe' | 'compare';
   readonly phrase: string;
@@ -139,6 +143,10 @@ export function transcriptWordOverlap(expected: string, actual: string): number 
  * ownership reject instead of publishing a stale success or engine diagnosis.
  */
 export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): Promise<VoiceRoundTripProof> {
+  return withConfiguredDecisionModelPolicy(() => proveOwnedVoiceRoundTrip(options));
+}
+
+async function proveOwnedVoiceRoundTrip(options: VoiceRoundTripProofOptions): Promise<VoiceRoundTripProof> {
   options = Object.freeze({ ...options });
   const phrase = options.phrase ?? VOICE_PROOF_PHRASE;
   const runner = options.runner ?? defaultRunner;
@@ -149,7 +157,10 @@ export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): 
   check();
   // Capture before either subprocess; absence is an unproven comparison, not a broken engine.
   let owner: ReturnType<typeof beginVoiceProofReading> | undefined;
-  try { owner = beginVoiceProofReading(phrase, lifetime); } catch { check(); }
+  if (!isClassicOperation()) {
+    try { owner = beginVoiceProofReading(phrase, lifetime); }
+    catch (error) { check(); activateClassicFallback(error); }
+  }
   const activeSignal = AbortSignal.any([...(owner ? [owner.signal] : []), ...(lifetime.signal ? [lifetime.signal] : [])]);
   // Injected Promise-only seams are interruptible; the real runner itself
   // owns termination and does not settle until its child closes.
@@ -177,6 +188,7 @@ export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): 
       check();
       const detail = error instanceof Error ? error.message : String(error);
       return {
+        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
         proved: false,
         stage: 'synthesize',
         phrase,
@@ -200,6 +212,7 @@ export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): 
       check();
       const detail = error instanceof Error ? error.message : String(error);
       return {
+        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
         proved: false,
         stage: 'transcribe',
         phrase,
@@ -209,17 +222,31 @@ export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): 
     }
 
     const wordOverlap = transcriptWordOverlap(phrase, transcript);
-    const comparison = await readVoiceRoundTrip(phrase, rawTranscript, lifetime, owner);
+    const comparison = await decisionOrClassic<NonNullable<VoiceRoundTripProof['comparison']>>(
+      () => readVoiceRoundTrip(phrase, rawTranscript, lifetime, owner),
+      () => {
+        check();
+        // Exact ordered Unicode word tokens. No synonym, number-word or
+        // paraphrase interpretation, and no overlap threshold is authority.
+        const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+        const expected = words(phrase), actual = words(rawTranscript);
+        const same = expected.length > 0 && expected.length === actual.length && expected.every((word, index) => word === actual[index]);
+        check(); return same ? 'classic-exact-match' : 'classic-mismatch';
+      }, () => { check(); return true; });
     check();
-    const proved = comparison === 'yes';
+    const proved = comparison === 'yes' || comparison === 'classic-exact-match';
+    const nativeComparison = comparison === 'classic-exact-match' || comparison === 'classic-mismatch';
     return {
+      ...(nativeComparison ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const, proofBasis: 'native-word-sequence' as const } : {}),
       proved,
       comparison,
       stage: 'compare',
       phrase,
       transcript,
       wordOverlap,
-      summary: proved
+      summary: nativeComparison
+        ? `Classic voice test: spoke "${phrase}" with ${options.ttsEngine} and ${options.sttEngine} returned "${transcript}". The native ordered word sequence ${proved ? 'matched' : 'did not match'}; semantic equivalence was not evaluated.`
+        : proved
         ? `Spoke "${phrase}" with ${options.ttsEngine} and heard it back through ${options.sttEngine} as "${transcript}".`
         : `Spoke "${phrase}" with ${options.ttsEngine} and ${options.sttEngine} returned "${transcript}". The round trip remains unproven: ${comparison === 'no' ? 'the transcript does not say the complete test phrase' : comparison === 'uncertain' ? 'the comparison was uncertain' : 'the comparison was unavailable'}.`,
     };

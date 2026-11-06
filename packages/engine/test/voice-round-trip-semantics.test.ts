@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { bindJudgmentPortAuthority, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { proveVoiceRoundTrip, type ProofEngineRunner } from '../sdk/src/platform/voice/provisioning/round-trip-proof.js';
 import { createVoiceSetupService } from '../sdk/src/platform/runtime/voice-setup.js';
@@ -28,6 +30,49 @@ function runner(transcript: string, paths: string[] = []): ProofEngineRunner {
     return { stdout: transcript };
   };
 }
+
+describe('Classic physical voice test has native provenance, never a fabricated semantic verdict', () => {
+  test.each([
+    ['The quick brown fox jumps over the lazy dog.', true],
+    ['dog lazy the over jumps fox brown quick the', false],
+    ['the quick brown fox does not jump over the lazy dog', false],
+    ['the quick brown fox jumps over the lazy dog with added text', false],
+    ['', false],
+  ] as const)('native complete-sequence comparison: %s', async (transcript, matches) => {
+    let metadata = 0, requests = 0, engines = 0;
+    previous = installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic model access'); },
+      async ask() { requests++; throw new Error('Classic request'); } }); installed = true;
+    const proof = await withDecisionModelPolicy(() => 'Classic - Off', () => proveVoiceRoundTrip({ ...engine,
+      runner: async input => { engines++; return runner(transcript)(input); } }));
+    expect(proof).toMatchObject({ proved: matches, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
+      proofBasis: 'native-word-sequence', comparison: matches ? 'classic-exact-match' : 'classic-mismatch' });
+    expect(proof.summary).toContain('semantic equivalence was not evaluated');
+    expect({ metadata, requests, engines }).toEqual({ metadata: 0, requests: 0, engines: 2 });
+  });
+
+  test('Preferred availability exhaustion compares captured output without replaying the engines', async () => {
+    const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); });
+    previous = installJudgmentPort(fake.port); installed = true; let engines = 0;
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const proof = await proveVoiceRoundTrip({ ...engine, runner: async input => {
+        engines++; return runner('The quick brown fox jumps over the lazy dog.')(input);
+      } });
+      expect(proof).toMatchObject({ proved: true, comparison: 'classic-exact-match', operationProvenance: 'classic' });
+      expect(decisionModelPolicyState().operation).toBe('classic');
+    });
+    expect(engines).toBe(2); expect(fake.requests).toHaveLength(1);
+  });
+
+  test.each(['rejected', 'invalid-request', 'invalid-response', 'aborted'] as const)('Preferred %s cannot become a native positive result', async kind => {
+    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); });
+    previous = installJudgmentPort(fake.port); installed = true;
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('The quick brown fox jumps over the lazy dog.') });
+      expect(proof.proved).toBe(false); expect(proof.operationProvenance).toBeUndefined();
+      expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+  });
+});
 
 describe('complete-transcript semantic proof, never overlap authority', () => {
   for (const transcript of [
@@ -120,6 +165,22 @@ function setup(root: string, transcript: string, mutate?: () => void) {
 }
 
 describe('real setup service and gateway preserve semantic proof and ownership', () => {
+  test('Classic gateway install persists the actual native proof basis without decision requests', async () => {
+    const fake = reading(0.99), root = mkdtempSync(join(tmpdir(), 'voice-classic-setup-'));
+    try {
+      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+        const { service } = setup(root, 'The quick brown fox jumps over the lazy dog.');
+        const receipt = await createVoiceInstallHandler(service)({ context: {} }) as Awaited<ReturnType<typeof service.install>>;
+        expect(receipt).toMatchObject({ provisioned: true, operationProvenance: 'classic', proof: {
+          comparison: 'classic-exact-match', proofBasis: 'native-word-sequence', semanticAssessment: 'not-evaluated',
+        } });
+        expect(readVoiceDiagnostics(root).at(-1)).toMatchObject({ ok: true, operationProvenance: 'classic',
+          semanticAssessment: 'not-evaluated', proofBasis: 'native-word-sequence' });
+      });
+      expect(fake.requests).toHaveLength(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   for (const probability of [0.99, 0.01, 0.5]) test(`receipt and diagnostic preserve settled result ${probability}`, async () => {
     reading(probability); const root = mkdtempSync(join(tmpdir(), 'voice-service-'));
     try {

@@ -32,6 +32,7 @@ import {
 import { recordVoiceDiagnostic } from '../voice/diagnostics.js';
 import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, type VoiceProofLifetime } from '../voice/provisioning/round-trip-reading.js';
 import { VOICE_PROOF_PHRASE, type VoiceRoundTripProofOptions } from '../voice/provisioning/round-trip-proof.js';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from './decision-policy.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 import {
   createWakeSetupService,
@@ -45,6 +46,8 @@ import type { WakeInstallProvisionOutcome } from '../voice/wake/install-provisio
 
 /** What voice.local.install resolves with (the wire receipt). */
 export interface VoiceInstallReceipt {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
   /**
    * True only when the runtime was installed AND proved working by a live
    * round trip. Bytes on disk are not the claim anyone cares about, see
@@ -189,8 +192,8 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
               }
             },
           });
-          try { beginVoiceProofReading(VOICE_PROOF_PHRASE, proofLifetime); }
-          catch { assertVoiceProofCurrent(proofLifetime); }
+          try { if (!isClassicOperation()) beginVoiceProofReading(VOICE_PROOF_PHRASE, proofLifetime); }
+          catch (error) { assertVoiceProofCurrent(proofLifetime); activateClassicFallback(error); }
           proof = await (deps.prove ?? proveVoiceRoundTrip)({
             ...proofLifetime,
             ttsEngine: result.tts.engine,
@@ -203,6 +206,8 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
           assertVoiceProofCurrent(proofLifetime);
           notes.push(proof.summary);
           recordVoiceDiagnostic(deps.managedVoiceRoot, {
+            ...(proof.operationProvenance === 'classic' ? { operationProvenance: 'classic' as const,
+              semanticAssessment: 'not-evaluated' as const, proofBasis: proof.proofBasis } : {}),
             at: new Date().toISOString(),
             operation: 'provision-proof',
             route: 'in-process',
@@ -221,6 +226,7 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       }
       assertVoiceProofCurrent(proofLifetime);
       return {
+        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
         // Installed AND proven. A failed proof reports NOT provisioned, because
         // a false "ready" costs a session and an honest failure costs a retry.
         provisioned: result.tts.state === 'provisioned' && (proof === undefined ? !sttProvisioned : proof.proved),
@@ -244,21 +250,23 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       return installInProgress ? { ...status, installInProgress } : status;
     },
     async install(options: VoiceProofLifetime = {}): Promise<VoiceInstallReceipt> {
-      const request = Object.freeze({ ...options });
-      assertVoiceProofCurrent(request);
-      // Critical-tier admission: a provision run allocates archive + model
-      // buffers, refuse honestly instead of piling onto memory pressure.
-      const admission = deps.admitExpensiveWork('voice runtime install');
-      if (!admission.allowed) {
-        throw new Error(admission.reason ?? 'voice runtime install refused: daemon is under critical memory pressure.');
-      }
-      // The first request owns the shared work. Joining callers may cancel their
-      // wait, but cannot lend new authority to the original installation.
-      if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
-      const ownedRun = inFlight;
-      const receipt = await awaitPermission(() => ownedRun, request.signal);
-      assertVoiceProofCurrent(request);
-      return receipt;
+      return withConfiguredDecisionModelPolicy(async () => {
+        const request = Object.freeze({ ...options });
+        assertVoiceProofCurrent(request);
+        // Critical-tier admission: a provision run allocates archive + model
+        // buffers, refuse honestly instead of piling onto memory pressure.
+        const admission = deps.admitExpensiveWork('voice runtime install');
+        if (!admission.allowed) {
+          throw new Error(admission.reason ?? 'voice runtime install refused: daemon is under critical memory pressure.');
+        }
+        // The first request owns the shared work. Joining callers may cancel their
+        // wait, but cannot lend new authority to the original installation.
+        if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
+        const ownedRun = inFlight;
+        const receipt = await awaitPermission(() => ownedRun, request.signal);
+        assertVoiceProofCurrent(request);
+        return receipt;
+      });
     },
     wakeStatus: () => wake.status(),
     async wakeProvision() {

@@ -12,7 +12,7 @@
  * Bounded: the most recent MAX_ENTRIES diffs are kept.
  */
 
-import type { SemanticDiff } from './semantic-diff.js';
+import type { SemanticDiff } from './semantic-diff-core.js';
 
 const MAX_ENTRIES = 200;
 
@@ -60,7 +60,7 @@ export function semanticSummaryFor(diff: string, path: string | undefined): Sema
   memo.set(key, pending);
   trimMemo();
   const { before, after } = beforeAfter(diff);
-  void import('./semantic-diff.js')
+  void import('./semantic-diff-core.js')
     .then(({ computeSemanticDiff }) => computeSemanticDiff(path, before, after))
     .catch(() => null)
     .then((result) => {

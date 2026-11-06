@@ -70,3 +70,6 @@ export {
   applyModeContextPolicy,
   BurstPolicy,
 } from './notifications/policies/index.js';
+
+export { createUiReadModels } from './ui-read-models.js';
+export type { UiReadModels, UiReadModelOptions } from './ui-read-models.js';

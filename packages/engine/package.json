@@ -2303,6 +2303,51 @@
       "bun": "./terminal-shell/src/model-picker.ts",
       "types": "./terminal-shell/dist/model-picker.d.ts",
       "import": "./terminal-shell/dist/model-picker.js"
+    },
+    "./terminal-shell/native-ingress": {
+      "bun": "./terminal-shell/src/native/native-conversation-ingress.ts",
+      "types": "./terminal-shell/dist/native/native-conversation-ingress.d.ts",
+      "import": "./terminal-shell/dist/native/native-conversation-ingress.js"
+    },
+    "./terminal-shell/hosted-sessions-client": {
+      "bun": "./terminal-shell/src/hosted-sessions-client.ts",
+      "types": "./terminal-shell/dist/hosted-sessions-client.d.ts",
+      "import": "./terminal-shell/dist/hosted-sessions-client.js"
+    },
+    "./terminal-shell/hosted-session-registry": {
+      "bun": "./terminal-shell/src/hosted-session-registry.ts",
+      "types": "./terminal-shell/dist/hosted-session-registry.d.ts",
+      "import": "./terminal-shell/dist/hosted-session-registry.js"
+    },
+    "./terminal-shell/conversation-message-snapshot": {
+      "bun": "./terminal-shell/src/conversation-message-snapshot.ts",
+      "types": "./terminal-shell/dist/conversation-message-snapshot.d.ts",
+      "import": "./terminal-shell/dist/conversation-message-snapshot.js"
+    },
+    "./terminal-shell/session-resume": {
+      "bun": "./terminal-shell/src/session-resume.ts",
+      "types": "./terminal-shell/dist/session-resume.d.ts",
+      "import": "./terminal-shell/dist/session-resume.js"
+    },
+    "./terminal-shell/runtime-context": {
+      "bun": "./terminal-shell/src/runtime-context.ts",
+      "types": "./terminal-shell/dist/runtime-context.d.ts",
+      "import": "./terminal-shell/dist/runtime-context.js"
+    },
+    "./terminal-shell/ui-services": {
+      "bun": "./terminal-shell/src/ui-services.ts",
+      "types": "./terminal-shell/dist/ui-services.d.ts",
+      "import": "./terminal-shell/dist/ui-services.js"
+    },
+    "./terminal-shell/notice-publication": {
+      "bun": "./terminal-shell/src/notice-publication.ts",
+      "types": "./terminal-shell/dist/notice-publication.d.ts",
+      "import": "./terminal-shell/dist/notice-publication.js"
+    },
+    "./terminal-shell/profile-picker-state": {
+      "bun": "./terminal-shell/src/profile-picker-state.ts",
+      "types": "./terminal-shell/dist/profile-picker-state.d.ts",
+      "import": "./terminal-shell/dist/profile-picker-state.js"
     }
   },
   "publishConfig": {

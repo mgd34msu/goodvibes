@@ -271,7 +271,8 @@
       "path": "core/notices.ts",
       "baselineTuiLines": 96,
       "baselineSimilarity": 0.4044,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "note": "One fenced publication/history/decorating lifecycle; product severity battery, local-publication/error posture and declared delegated-task event adapters preserved."
     },
     {
       "path": "core/process-output-log.ts",
@@ -289,7 +290,8 @@
       "path": "core/session-resume-core.ts",
       "baselineTuiLines": 154,
       "baselineSimilarity": 0.0615,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Shared platform lifecycle with product identity, failure copy and explicit hosted-client versus local-registry composition preserved."
     },
     {
       "path": "core/system-message-noise.ts",
@@ -880,7 +882,8 @@
       "path": "input/profile-picker-modal.ts",
       "baselineTuiLines": 251,
       "baselineSimilarity": 0.8024,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Platform owns selection/filtering/loading/config application and confirmed saves; Agent denies inline deletion/save and unsupported privacy fields before any mutation."
     },
     {
       "path": "input/search.ts",
@@ -1447,7 +1450,8 @@
       "path": "runtime/client/hosted-sessions.ts",
       "baselineTuiLines": 188,
       "baselineSimilarity": 0.1703,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Shared platform lifecycle with product identity, failure copy and explicit hosted-client versus local-registry composition preserved."
     },
     {
       "path": "runtime/client/native-host-fetch.ts",
@@ -1465,7 +1469,8 @@
       "path": "runtime/context.ts",
       "baselineTuiLines": 156,
       "baselineSimilarity": 0.9408,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Canonical platform context/read-model contracts; product service graph and Agent daemon-grade read adapter retained."
     },
     {
       "path": "runtime/conversation-rewind-port.ts",
@@ -1489,7 +1494,8 @@
       "path": "runtime/native-conversation-ingress.ts",
       "baselineTuiLines": 42,
       "baselineSimilarity": 0.7568,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Shared platform lifecycle with product identity, failure copy and explicit hosted-client versus local-registry composition preserved."
     },
     {
       "path": "runtime/native-conversation-input.ts",
@@ -1687,13 +1693,17 @@
       "path": "runtime/ui-read-models.ts",
       "baselineTuiLines": 61,
       "baselineSimilarity": 0.9134,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "Canonical platform context/read-model contracts; product service graph and Agent daemon-grade read adapter retained."
     },
     {
       "path": "runtime/ui-services.ts",
       "baselineTuiLines": 219,
       "baselineSimilarity": 0.878,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "createTerminalUiServices"
+      ]
     },
     {
       "path": "runtime/update-check.ts",

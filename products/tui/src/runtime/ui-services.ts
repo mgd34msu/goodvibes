@@ -1,7 +1,8 @@
+import { createTerminalUiServices } from '@goodvibes-jev/engine/terminal-shell/ui-services';
 import type { RuntimeServices } from './services.ts';
 import type { RemoteRunnerRegistry } from '@/runtime/index.ts';
 import type { RemoteSupervisor } from '@/runtime/index.ts';
-import { createUiRuntimeEvents, type UiRuntimeEvents } from '@/runtime/index.ts';
+import { type UiRuntimeEvents } from '@/runtime/index.ts';
 import { createUiReadModels, type UiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
@@ -152,68 +153,10 @@ export function createUiRuntimeServices(
   runtimeServices: RuntimeServices,
   options: UiRuntimeServicesOptions = {},
 ): UiRuntimeServices {
-  return {
-    environment: {
-      workingDirectory: runtimeServices.workingDirectory,
-      homeDirectory: runtimeServices.homeDirectory,
-      shellPaths: runtimeServices.shellPaths,
-    },
-    shell: {
-      keybindingsManager: runtimeServices.keybindingsManager,
-      processManager: runtimeServices.processManager,
-      profileManager: runtimeServices.profileManager,
-      bookmarkManager: runtimeServices.bookmarkManager,
-    },
-    agents: {
-      agentManager: runtimeServices.agentManager,
-      agentMessageBus: runtimeServices.agentMessageBus,
-      contractRunner: runtimeServices.contractRunner,
-    },
-    providers: {
-      providerRegistry: runtimeServices.providerRegistry,
-      favoritesStore: runtimeServices.favoritesStore,
-      benchmarkStore: runtimeServices.benchmarkStore,
-    },
-    sessions: {
-      sessionManager: runtimeServices.sessionManager,
-      sessionBroker: options.sessionUnionCache ?? new SessionUnionCache({ local: runtimeServices.sessionBroker }),
-      sessionOrchestration: runtimeServices.sessionOrchestration,
-      sessionMemoryStore: runtimeServices.sessionMemoryStore,
-    },
-    platform: {
-      configManager: runtimeServices.configManager,
-      localUserAuthManager: runtimeServices.localUserAuthManager,
-      mcpRegistry: runtimeServices.mcpRegistry,
-      serviceRegistry: runtimeServices.serviceRegistry,
-      surfaceRegistry: runtimeServices.surfaceRegistry,
-      subscriptionManager: runtimeServices.subscriptionManager,
-      secretsManager: runtimeServices.secretsManager,
-      pairingTokens: runtimeServices.pairingTokens,
-      tokenAuditor: runtimeServices.tokenAuditor,
-      replayEngine: runtimeServices.replayEngine,
-      webhookNotifier: runtimeServices.webhookNotifier,
-      focusTracker: runtimeServices.focusTracker,
-      policyRuntimeState: runtimeServices.policyRuntimeState,
-    },
-    planning: {
-      planManager: runtimeServices.planManager,
-      adaptivePlanner: runtimeServices.adaptivePlanner,
-      projectPlanningService: runtimeServices.projectPlanningService,
-      projectPlanningProjectId: runtimeServices.projectPlanningProjectId,
-      workPlanStore: runtimeServices.workPlanStore,
-    },
-    coordination: {
-      approvalBroker: runtimeServices.approvalBroker,
-    },
-    runtime: {
-      distributedRuntime: runtimeServices.distributedRuntime,
-      remoteRunnerRegistry: runtimeServices.remoteRunnerRegistry,
-      remoteSupervisor: runtimeServices.remoteSupervisor,
-      processRegistry: runtimeServices.processRegistry,
-      fleetReadModel: runtimeServices.fleetReadModel,
-      runtimeBus: runtimeServices.runtimeBus,
-    },
-    events: createUiRuntimeEvents(runtimeServices.runtimeBus),
+  return createTerminalUiServices(runtimeServices, {
+    sessionBroker: options.sessionUnionCache ?? new SessionUnionCache({ local: runtimeServices.sessionBroker }),
+    platform: { pairingTokens: runtimeServices.pairingTokens },
+    runtime: { processRegistry: runtimeServices.processRegistry, fleetReadModel: runtimeServices.fleetReadModel, runtimeBus: runtimeServices.runtimeBus },
     readModels: createUiReadModels(runtimeServices, options),
-  };
+  });
 }

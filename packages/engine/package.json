@@ -3043,6 +3043,26 @@
       "bun": "./terminal-shell/src/service-setting-change.ts",
       "types": "./terminal-shell/dist/service-setting-change.d.ts",
       "import": "./terminal-shell/dist/service-setting-change.js"
+    },
+    "./terminal-shell/native/intake-preflight": {
+      "bun": "./terminal-shell/src/native/native-conversation-intake-preflight.ts",
+      "types": "./terminal-shell/dist/native/native-conversation-intake-preflight.d.ts",
+      "import": "./terminal-shell/dist/native/native-conversation-intake-preflight.js"
+    },
+    "./terminal-shell/native/work-ledger-view": {
+      "bun": "./terminal-shell/src/native/work-ledger-view.ts",
+      "types": "./terminal-shell/dist/native/work-ledger-view.d.ts",
+      "import": "./terminal-shell/dist/native/work-ledger-view.js"
+    },
+    "./terminal-shell/native/work-ledger-binding": {
+      "bun": "./terminal-shell/src/native/work-ledger-binding.ts",
+      "types": "./terminal-shell/dist/native/work-ledger-binding.d.ts",
+      "import": "./terminal-shell/dist/native/work-ledger-binding.js"
+    },
+    "./terminal-shell/native/bound-work-ledger-host": {
+      "bun": "./terminal-shell/src/native/bound-work-ledger-host.ts",
+      "types": "./terminal-shell/dist/native/bound-work-ledger-host.d.ts",
+      "import": "./terminal-shell/dist/native/bound-work-ledger-host.js"
     }
   },
   "publishConfig": {

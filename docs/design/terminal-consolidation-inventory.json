@@ -1771,7 +1771,8 @@
       "path": "runtime/native-work-ledger-host.ts",
       "baselineTuiLines": 200,
       "baselineSimilarity": 0.125,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Shared authenticated reader/execution binding, cleanup, intake preflight and bound-host view lifecycle. Agent supplies paired identity and hosted/no-selected-diff policy. TUI retains credential resolution, command registration and selected-project host policy."
     },
     {
       "path": "runtime/native-work-ledger.ts",

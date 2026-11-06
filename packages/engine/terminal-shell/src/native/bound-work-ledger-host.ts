@@ -1,0 +1,426 @@
+import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
+import { createNativeHostFetch } from './native-host-fetch.js';
+import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.js';
+import { NativeConversationIntakeControls, type NativeConversationIntakeState } from './native-conversation-intake.js';
+import { NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
+import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.js';
+import { NativeWorkSubmissionPreflight } from './native-work-submission-preflight.js';
+import { realpathSync } from 'node:fs';
+import { NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
+import {
+  NativeWorkSubmissionControls,
+  type NativeWorkSubmissionState,
+  type NativeWorkSubmissionBinding,
+} from './native-work-submission.js';
+import { createNativeWorkSubmissionBinding, nativeSubmissionIdentity, type NativeSubmissionHost } from './native-work-submission-host.js';
+import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
+import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
+
+import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
+import { BoundWorkLedgerModel as NativeWorkLedgerModel } from './bound-work-ledger.js';
+import type { NativeWorkLedgerView } from './work-ledger-view.js';
+import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';
+import { createNativeWorkLedgerReadBinding } from './work-ledger-binding.js';
+import type { NativeConversationIntakePolicy } from './native-conversation-intake.js';
+import type { NativeHostIdentityFormat } from './native-work-submission-host.js';
+
+export type NativeLedgerHost = (NativeSubmissionHost & { readonly readExecutionMode?: () => GatePresetName }) | { readonly reason: string };
+export type NativeLedgerBindingFactory = (
+  host: Exclude<NativeLedgerHost, { reason: string }>,
+  project: string,
+  unavailable: (error: Error) => void,
+  current?: () => boolean,
+) => NativeWorkLedgerBinding;
+export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, onUnavailable, current = () => true) => {
+  const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
+  const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
+    if (!current()) throw new Error('Native execution host selection changed');
+    if (host.expectedPrincipalId !== undefined) {
+      const auth = await operator.invoke('control.auth.current', {}, args[2]);
+      if (!current()) throw new Error('Native execution host selection changed');
+      // Execution has its own authority: do not require intake's write scope.
+      if (
+        auth.authenticated !== true ||
+        auth.admin !== true ||
+        auth.principalKind !== 'token' ||
+        auth.principalId !== host.expectedPrincipalId ||
+        !auth.principalId ||
+        auth.principalId.length > 200 ||
+        auth.principalId === 'shared-token' ||
+        !Array.isArray(auth.scopes) ||
+        !['read:work-ledger', 'write:fleet'].every((scope) => auth.scopes.includes('*') || auth.scopes.includes(scope))
+      ) {
+        throw Object.assign(new Error('Native execution requires the selected paired principal'), {
+          code: 'NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY',
+        });
+      }
+    }
+    if (!current()) throw new Error('Native execution host selection changed');
+    const value = await operator.invoke(...args);
+    if (!current()) throw new Error('Native execution host selection changed');
+    return value;
+  }) as OperatorRemoteClient['invoke'];
+  return createNativeWorkLedgerReadBinding(operator, project, { onUnavailable, execution: { invoke } });
+};
+
+export async function discoverNativeLedgerProject(
+  host: Exclude<NativeLedgerHost, { reason: string }>,
+  signal: AbortSignal,
+): Promise<string> {
+  const current = () => !signal.aborted;
+  const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
+  try {
+    return await getOperatorWorkLedgerProject(operator, { signal });
+  } finally {
+    operator.dispose();
+  }
+}
+
+/** Explicit project selection belongs to exactly one authenticated host/workspace. */
+export function createBoundNativeWorkLedgerView(
+  resolve: () => NativeLedgerHost,
+  changed: () => void,
+  policy: { readonly identityFormat: NativeHostIdentityFormat; readonly intake: NativeConversationIntakePolicy },
+  bind: NativeLedgerBindingFactory = createNativeLedgerBinding,
+  discover: typeof discoverNativeLedgerProject = discoverNativeLedgerProject,
+  bindSubmission: (
+    host: Exclude<NativeLedgerHost, { reason: string }>,
+    project: string,
+    current: () => boolean,
+  ) => NativeWorkSubmissionBinding = createNativeWorkSubmissionBinding,
+): NativeWorkLedgerView {
+  const nativeIdentity = (host: NativeSubmissionHost, project: string) => nativeSubmissionIdentity(host, project, policy.identityFormat);
+  const model = new NativeWorkLedgerModel(changed, () => {
+    sync();
+    return active;
+  });
+  let opening: Promise<void> = Promise.resolve();
+  let selected: { host: Exclude<NativeLedgerHost, { reason: string }>; project: string } | undefined;
+  let discovery: AbortController | undefined;
+  let discoveryHost: Exclude<NativeLedgerHost, { reason: string }> | undefined;
+  let selectionEpoch = 0;
+  let active = false;
+  let epoch = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const same = (a: Exclude<NativeLedgerHost, { reason: string }>, b: Exclude<NativeLedgerHost, { reason: string }>) =>
+    a.baseUrl === b.baseUrl &&
+    a.token === b.token &&
+    a.workspace === b.workspace &&
+    a.journalPath === b.journalPath &&
+    a.selectionIdentity === b.selectionIdentity &&
+    a.expectedPrincipalId === b.expectedPrincipalId;
+  const submission = new NativeWorkSubmissionControls(() => {
+    const host = resolve();
+    if ('reason' in host) return { available: false, identity: 'unavailable', reason: host.reason };
+    const identity = nativeIdentity(host, selected?.project ?? '');
+    if (!host.journalPath)
+      return { available: false, identity, reason: 'Native submission journal location is unavailable in this shell.' };
+    if (!selected || !same(host, selected.host))
+      return { available: false, identity, reason: 'Select the native daemon project before submitting source.' };
+    const projectId = selected.project;
+    return {
+      available: true,
+      identity,
+      endpoint: host.baseUrl,
+      projectId,
+      workspace: realpathSync(host.workspace),
+      journal: new NativeWorkSubmissionJournal(host.journalPath),
+      bind: () =>
+        bindSubmission(host, projectId, () => {
+          const now = resolve();
+          return !('reason' in now) && nativeIdentity(now, projectId) === identity && selected?.project === projectId;
+        }),
+    };
+  });
+  const intake = new NativeConversationIntakeControls(
+    () => {
+      const host = resolve();
+      if ('reason' in host) return { available: false, identity: 'unavailable', reason: host.reason };
+      const identity = nativeIdentity(host, selected?.project ?? '');
+      if (!host.journalPath || !selected || !same(host, selected.host))
+        return {
+          available: false,
+          identity,
+          reason: 'Native conversation intake requires its durable journal and selected daemon project.',
+        };
+      const projectId = selected.project;
+      return {
+        available: true,
+        identity,
+        endpoint: host.baseUrl,
+        projectId,
+        workspace: realpathSync(host.workspace),
+        journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`),
+        bind: () =>
+          createNativeConversationIntakeBinding(
+            host,
+            projectId,
+            () => {
+              const now = resolve();
+              return !('reason' in now) && nativeIdentity(now, projectId) === identity && selected?.project === projectId;
+            },
+            { allowHosted: policy.intake.allowHosted, ...(host.readExecutionMode ? { readMode: host.readExecutionMode } : {}) },
+          ),
+      };
+    },
+    () => crypto.randomUUID(),
+    policy.intake,
+  );
+  const preflight = new NativeWorkSubmissionPreflight(
+    () => {
+      const host = resolve();
+      return 'reason' in host ? JSON.stringify(host) : nativeIdentity(host, '');
+    },
+    () => {
+      submission.close();
+      intake.close();
+      discovery?.abort();
+    },
+  );
+  const intakePreflight = new NativeConversationIntakePreflight(
+    () => {
+      const host = resolve();
+      return 'reason' in host ? JSON.stringify(host) : nativeIdentity(host, '');
+    },
+    () => {
+      intake.close();
+      discovery?.abort();
+    },
+  );
+  const stop = () => {
+    ++epoch;
+    opening = Promise.resolve();
+    discovery?.abort();
+    discovery = undefined;
+    discoveryHost = undefined;
+    if (timer) clearInterval(timer);
+    timer = undefined;
+  };
+  const sync = () => {
+    if (!active) return;
+    const host = resolve();
+    if ('reason' in host || (selected && !same(host, selected.host)) || (discoveryHost && !same(host, discoveryHost))) {
+      submission.close();
+      intake.close();
+      selectionEpoch++;
+      selected = undefined;
+      active = false;
+      stop();
+      model.unavailable(
+        'reason' in host
+          ? host.reason
+          : 'Selected host, credentials, or workspace changed. Select the daemon project again with /work <project-id>.',
+      );
+    }
+  };
+  const open = (fromDiscovery = false) => {
+    if (!fromDiscovery) selectionEpoch++;
+    stop();
+    active = true;
+    const host = resolve();
+    if ('reason' in host) {
+      selected = undefined;
+      model.unavailable(host.reason);
+      return;
+    }
+    if (selected && !same(host, selected.host)) selected = undefined;
+    if (!selected) {
+      const generation = epoch;
+      const controller = new AbortController();
+      discovery = controller;
+      discoveryHost = host;
+      model.loading(`Discovering daemon project on ${host.baseUrl}…`);
+      // Loading can synchronously render and sync, revoking the host or closing
+      // the view. Keep local ownership and recheck before admitting any request.
+      if (generation !== epoch || !active || controller.signal.aborted) return;
+      timer = setInterval(sync, 1000);
+      timer.unref?.();
+      opening = discover(host, AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])).then(
+        (project) => {
+          if (generation !== epoch || !active) return;
+          const current = resolve();
+          if ('reason' in current || !same(current, host)) {
+            active = false;
+            stop();
+            model.unavailable('Host changed during discovery. Reopen /work.');
+            return;
+          }
+          selected = { host, project };
+          open(true);
+        },
+        (error) => {
+          if (generation !== epoch || !active) return;
+          active = false;
+          stop();
+          const reason = error instanceof Error ? error.message : String(error);
+          model.unavailable(
+            `Project discovery unavailable on ${host.baseUrl}: ${reason.split(host.token).join('[redacted]')}. Select explicitly with /work <project-id>; discovery requires read:work-ledger.`,
+          );
+        },
+      );
+      return;
+    }
+    const generation = epoch;
+    const project = selected.project;
+    try {
+      const binding = bind(
+        host,
+        project,
+        (error) => {
+          if (generation === epoch && active) {
+            active = false;
+            stop();
+            model.unavailable(error.message.split(host.token).join('[redacted]'));
+          }
+        },
+        () => {
+          const now = resolve();
+          return (
+            generation === epoch &&
+            active &&
+            selected?.project === project &&
+            same(host, selected.host) &&
+            !('reason' in now) &&
+            same(host, now)
+          );
+        },
+      );
+      const current = resolve();
+      if (generation !== epoch || !active || 'reason' in current || !same(current, host)) {
+        try {
+          binding.execution?.dispose();
+        } catch {}
+        if (binding.available) {
+          try {
+            binding.client.dispose();
+          } catch {}
+        }
+        sync();
+        return;
+      }
+      model.open(binding);
+      if (generation === epoch) {
+        timer = setInterval(sync, 1000);
+        timer.unref?.();
+      }
+    } catch (error) {
+      model.unavailable(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const submitAction = async (
+    action: () => Promise<NativeWorkSubmissionState | undefined>,
+    current: () => boolean,
+  ): Promise<NativeWorkSubmissionState | undefined> => {
+    if (!active) open();
+    const generation = selectionEpoch;
+    await opening;
+    sync();
+    if (!active || generation !== selectionEpoch || !current()) return;
+    const result = await action();
+    sync();
+    return active && generation === selectionEpoch ? result : undefined;
+  };
+  const intakeAction = (
+    action: () => Promise<NativeConversationIntakeState | undefined>,
+  ): Promise<NativeConversationIntakeState | undefined> =>
+    intakePreflight.run(async (_signal, current) => {
+      const host = resolve();
+      if ('reason' in host) return { status: 'unavailable', message: host.reason };
+      if (!active) open();
+      const generation = selectionEpoch;
+      await opening;
+      sync();
+      if (generation !== selectionEpoch || !current()) return;
+      if (!active) return model.state.status === 'unavailable' ? { status: 'unavailable', message: model.state.reason } : undefined;
+      const result = await action();
+      sync();
+      return active && generation === selectionEpoch ? result : undefined;
+    });
+  return {
+    get state() {
+      return model.state;
+    },
+    intake: {
+      submit: (source, options) => {
+        const captured = structuredClone(source);
+        const delivery = options ? structuredClone(options) : undefined;
+        return intakeAction(() => intake.submit(captured, delivery));
+      },
+      status: () => intakeAction(() => intake.status()),
+      retry: () => intakeAction(() => intake.retry()),
+      stop: () => {
+        const expected = intake.currentRequest();
+        intakePreflight.close();
+        return expected ? intakeAction(() => intake.cancel(expected)) : Promise.resolve(undefined);
+      },
+      resume: () => intakeAction(() => intake.resume()),
+      cancel: (expected) => {
+        const original = expected ? { ...expected } : undefined;
+        if (!original) intakePreflight.close();
+        return intakeAction(() => intake.cancel(original));
+      },
+      close: () => intakePreflight.close(),
+    },
+    submitFile: (path) =>
+      preflight.run(async (signal, isCurrent) => {
+        const host = resolve();
+        const generation = selectionEpoch;
+        if ('reason' in host) return { status: 'unavailable', message: host.reason };
+        try {
+          const source = await readNativeWorkSourceFile(path, realpathSync(host.workspace), signal);
+          const current = resolve();
+          if (!isCurrent() || generation !== selectionEpoch || 'reason' in current || !same(host, current)) return;
+          return submitAction(() => submission.submitSource(source), isCurrent);
+        } catch (error) {
+          const current = resolve();
+          if (!isCurrent() || generation !== selectionEpoch || 'reason' in current || !same(host, current)) return;
+          return {
+            status: 'invalid',
+            message: error instanceof NativeWorkSourceError ? error.message : 'Could not read a regular UTF-8 source JSON file.',
+          };
+        }
+      }),
+    submissionStatus: () => preflight.run((_signal, current) => submitAction(() => submission.status(), current)),
+    retrySubmission: () => preflight.run((_signal, current) => submitAction(() => submission.retry(), current)),
+    selectProject(project) {
+      preflight.close();
+      intakePreflight.close();
+      selectionEpoch++;
+      stop();
+      model.close();
+      const host = resolve();
+      if (!project.trim() || project.length > 200 || /[\u0000-\u001f\u007f]/.test(project)) {
+        selected = undefined;
+        model.unavailable('A nonempty daemon project ID of at most 200 characters is required.');
+        return;
+      }
+      if ('reason' in host) {
+        selected = undefined;
+        model.unavailable(host.reason);
+        return;
+      }
+      selected = { host, project };
+      if (active) open();
+    },
+    open,
+    sync,
+    async execute(action, workId) {
+      if (!active) open();
+      const generation = selectionEpoch;
+      await opening;
+      sync();
+      if (!active || generation !== selectionEpoch) return;
+      const result = await model.execute(action, workId);
+      sync();
+      return active && generation === selectionEpoch ? result : undefined;
+    },
+    close() {
+      preflight.close();
+      intakePreflight.close();
+      selectionEpoch++;
+      active = false;
+      stop();
+      model.close();
+    },
+  };
+}

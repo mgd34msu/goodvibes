@@ -1,5 +1,6 @@
+import { cardFieldConfigured } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 import { createPaymentCardCommands } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
-import { createCardFieldPrompter, CARD_SECRET_FIELDS, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
  * /payments card, capture a payment card through the composer's concealed
  * input mode, following the same guided-chain pattern as /channel pair
@@ -76,15 +77,10 @@ export const CARD_ENTRY_SURFACE = 'tui';
 
 /** Order matters only for the guided prompt sequence, not for storage. */
 
-function fieldConfigured(ctx: CommandContext, field: CardField): boolean {
-  const raw: unknown = ctx.platform.configManager.get(field.key);
-  return typeof raw === 'string' && raw.trim().length > 0;
-}
-
 function renderCardStatus(ctx: CommandContext): string[] {
   const lines = ['Payment card on file:'];
   for (const field of CARD_SECRET_FIELDS) {
-    lines.push(`  ${field.label.padEnd(20)} ${fieldConfigured(ctx, field) ? 'set' : 'not set'}`);
+    lines.push(`  ${field.label.padEnd(20)} ${cardFieldConfigured(ctx.platform.configManager, field) ? 'set' : 'not set'}`);
   }
   lines.push('');
   lines.push('Run /payments card to enter or replace the card (masked input, chained prompts).');

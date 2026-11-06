@@ -137,3 +137,11 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   }
   return { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands };
 }
+
+export function cardFieldConfigured(
+  manager: Pick<import('@goodvibes-jev/engine/sdk/platform/config').ConfigManager, 'get'>,
+  field: CardField,
+): boolean {
+  const value: unknown = manager.get(field.key);
+  return typeof value === 'string' && value.trim().length > 0;
+}

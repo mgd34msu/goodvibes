@@ -2928,6 +2928,11 @@
       "bun": "./terminal-shell/src/settings-modal-state.ts",
       "types": "./terminal-shell/dist/settings-modal-state.d.ts",
       "import": "./terminal-shell/dist/settings-modal-state.js"
+    },
+    "./terminal-shell/audio/wake-provision-presentation": {
+      "bun": "./terminal-shell/src/audio/wake-provision-presentation.ts",
+      "types": "./terminal-shell/dist/audio/wake-provision-presentation.d.ts",
+      "import": "./terminal-shell/dist/audio/wake-provision-presentation.js"
     }
   },
   "publishConfig": {

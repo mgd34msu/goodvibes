@@ -1,3 +1,4 @@
+import '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 import { createPaymentCardCommands } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
@@ -113,10 +114,6 @@ function readConfigString(ctx: CommandContext, key: ConfigKey): string {
   } catch {
     return '';
   }
-}
-
-function fieldConfigured(ctx: CommandContext, key: ConfigKey): boolean {
-  return readConfigString(ctx, key).trim().length > 0;
 }
 
 /**

@@ -351,7 +351,8 @@
       "path": "core/wake-provision-status.ts",
       "baselineTuiLines": 170,
       "baselineSimilarity": 0.5434,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "notes": "Platform owns artifact verification/status formatting, common wake settings/blockers/limitations and setup receipt assembly. Product adapters retain declared live capabilities, actual artifact labels, Agent measured VAD/noise explanations, installation/provisioning policy and byte/copy conventions."
     },
     {
       "path": "core/work-tree-contract.ts",

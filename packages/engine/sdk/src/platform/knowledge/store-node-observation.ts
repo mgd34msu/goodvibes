@@ -5,7 +5,7 @@ import { getKnowledgeSpaceId } from './spaces.js';
 import { supportHash } from './semantic/verification/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 
-export type KnowledgeObservationOrigin = 'catalog-structure' | 'source-declaration' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
+export type KnowledgeObservationOrigin = 'catalog-structure' | 'source-declaration' | 'link-declaration' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
 interface Observation { readonly inputHash: string; readonly existingHash: string; readonly origin: KnowledgeObservationOrigin; readonly check: () => void; readonly checkEvidence: () => void; }
 export interface ObservedEvidence { readonly record: KnowledgeNodeRecord; readonly origin: KnowledgeObservationOrigin; readonly assertCurrent: () => void; }
 const observedRecords = new WeakMap<KnowledgeNodeRecord, ObservedEvidence>();
@@ -33,6 +33,7 @@ export function prepareObservedKnowledgeNodeInput(store: KnowledgeStore, input: 
   evidence: unknown, readEvidence: () => unknown): KnowledgeNodeUpsertInput {
   const kinds: Readonly<Record<KnowledgeObservationOrigin, readonly KnowledgeNodeRecord['kind'][]>> = {
     'catalog-structure': ['domain', 'bookmark_folder', 'topic'],
+    'link-declaration': ['ha_home', 'ha_entity', 'ha_device', 'ha_area', 'ha_automation', 'ha_script', 'ha_scene', 'ha_label', 'ha_integration', 'ha_room', 'ha_device_passport', 'ha_maintenance_item', 'ha_troubleshooting_case', 'ha_purchase', 'ha_network_node'],
     'source-declaration': ['project', 'capability', 'repo', 'provider', 'service', 'environment', 'user'], 'memory-mirror': ['memory'],
     'home-assistant-snapshot': ['ha_home', 'ha_entity', 'ha_device', 'ha_area', 'ha_automation', 'ha_script', 'ha_scene', 'ha_label', 'ha_integration'],
     'browser-profile': ['source_group'], 'generated-page-index': ['ha_device_passport'], 'research-task': ['knowledge_gap'],

@@ -1,3 +1,4 @@
+import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
 import { prioritySubject } from './pages.js';
@@ -83,12 +84,14 @@ type ExtractionBySourceId = ReadonlyMap<string, ReturnType<KnowledgeStore['getEx
 export async function generateAutomaticHomeGraphPages(
   context: HomeGraphPageContext & { readonly input: HomeGraphSnapshotInput },
 ): Promise<HomeGraphGeneratedPagesSummary> {
+  if (isClassicOperation()) return classicGeneratedPagesSummary();
   return generateHomeGraphPagesForCurrentState(context, context.input.pageAutomation ?? {});
 }
 
 export async function refreshAutomaticHomeGraphPages(
   context: HomeGraphPageContext,
 ): Promise<HomeGraphGeneratedPagesSummary> {
+  if (isClassicOperation()) return classicGeneratedPagesSummary();
   return generateHomeGraphPagesForCurrentState(context, {});
 }
 
@@ -226,6 +229,7 @@ export async function refreshHomeGraphDevicePassport(
     readonly signal?: AbortSignal | undefined;
   },
 ): Promise<HomeGraphDevicePassportResult & { readonly artifactCreated: boolean }> {
+  requireDecisionFeature('verified Home Graph device passports');
   throwIfAborted(context.signal);
   const store = context.store, artifactStore = context.artifactStore, signal = context.signal, requestInput = context.input, requestData = context.state, requestAuthority = context.assertCurrent;
   const requestState = () => JSON.stringify({ input: context.input, spaceId: context.spaceId, installationId: context.installationId,
@@ -454,6 +458,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 export async function generateHomeGraphRoomPage(
   context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput; readonly signal?: AbortSignal | undefined },
 ): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
+  requireDecisionFeature('verified Home Graph room pages');
   const { store, artifactStore, spaceId, installationId, input } = context;
   const state = readHomeGraphServingState(store, spaceId);
   const writeGuard = createSemanticWriteGuard(store, context.signal);
@@ -528,6 +533,7 @@ export async function generateHomeGraphRoomPage(
 export async function generateHomeGraphPacket(
   context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput },
 ): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
+  requireDecisionFeature('verified Home Graph sharing packets');
   const { store, artifactStore, spaceId, installationId, input } = context;
   const title = input.title ?? `${input.packetKind ?? 'home'} packet`;
   const markdown = renderPacketPage({ ...readHomeGraphServingState(store, spaceId), title }, input);
@@ -645,6 +651,10 @@ function projectionArtifact(artifact: ArtifactDescriptor): HomeGraphProjectionRe
     createdAt: artifact.createdAt,
     metadata: artifact.metadata,
   };
+}
+
+export function classicGeneratedPagesSummary(): HomeGraphGeneratedPagesSummary {
+  return { ...createGeneratedPagesSummary(), provenance: 'classic', reason: 'decision-model-disabled' };
 }
 
 function createGeneratedPagesSummary(): {

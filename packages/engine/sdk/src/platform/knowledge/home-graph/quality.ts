@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import { isLegacyHomeGraphQualityIssue, KnowledgeIssueReplacementHeldError } from '../store-issue-replacement.js';
@@ -27,6 +28,7 @@ export async function refreshHomeGraphQualityReport(
   installationId: string,
   options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
 ): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number }> {
+  requireDecisionFeature('semantic Home Graph quality assessment');
   await store.init();
   const state = structuredClone(readHomeGraphState(store, spaceId));
   // Capture the full read-set, including hidden/terminal issues, BEFORE readings.

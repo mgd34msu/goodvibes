@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import type { KnowledgeStore } from '../store.js';
@@ -21,38 +22,40 @@ export async function listHomeGraphPages(input: {
   readonly signal?: AbortSignal;
   readonly assertCurrent?: () => void;
 }): Promise<HomeGraphPageListResult> {
-  const state = () => JSON.stringify({ sources: input.sources, nodes: input.nodes, edges: input.edges });
-  const original = state();
-  const assertCurrent = () => {
-    input.assertCurrent?.();
-    if (state() !== original) throw new HomeGraphPagePriorityHeldError('stale');
-  };
-  const result = await listGeneratedKnowledgePages<HomeGraphPageGraphNode>({
-    artifactStore: input.artifactStore,
-    spaceId: input.spaceId,
-    sources: input.sources,
-    nodes: input.nodes,
-    edges: input.edges,
-    limit: input.limit,
-    includeMarkdown: input.includeMarkdown,
-    isGeneratedSource: isGeneratedPageSource,
-    isPageSubjectNode,
-    resolvePageSubject,
-    projectNode: pageGraphNode,
-    rankGeneratedPages: (sources, graph) => rankHomeGraphPageCandidates({
-      candidates: sources, store: input.store, purpose: 'Order useful generated home references for the owner',
-      signal: input.signal, assertCurrent,
-      content: source => {
-        const target = graph.targetBySourceId.get(source.id);
-        const subject = target ? resolvePageSubject(target, graph) : undefined;
-        return { title: source.title, summary: source.summary, projectionKind: source.metadata.projectionKind,
-          ...(target ? { target: prioritySubject(target) } : {}),
-          ...(subject ? { subject: prioritySubject(subject) } : {}) };
-      },
-    }),
+  return withConfiguredDecisionModelPolicy(async () => {
+    const state = () => JSON.stringify({ sources: input.sources, nodes: input.nodes, edges: input.edges });
+    const original = state();
+    const assertCurrent = () => {
+      input.assertCurrent?.();
+      if (state() !== original) throw new HomeGraphPagePriorityHeldError('stale');
+    };
+    const result = await listGeneratedKnowledgePages<HomeGraphPageGraphNode>({
+      artifactStore: input.artifactStore,
+      spaceId: input.spaceId,
+      sources: input.sources,
+      nodes: input.nodes,
+      edges: input.edges,
+      limit: input.limit,
+      includeMarkdown: input.includeMarkdown,
+      isGeneratedSource: isGeneratedPageSource,
+      isPageSubjectNode,
+      resolvePageSubject,
+      projectNode: pageGraphNode,
+      rankGeneratedPages: (sources, graph) => rankHomeGraphPageCandidates({
+        candidates: sources, store: input.store, purpose: 'Order useful generated home references for the owner',
+        signal: input.signal, assertCurrent,
+        content: source => {
+          const target = graph.targetBySourceId.get(source.id);
+          const subject = target ? resolvePageSubject(target, graph) : undefined;
+          return { title: source.title, summary: source.summary, projectionKind: source.metadata.projectionKind,
+            ...(target ? { target: prioritySubject(target) } : {}),
+            ...(subject ? { subject: prioritySubject(subject) } : {}) };
+        },
+      }),
+    });
+    assertCurrent();
+    return { ...result, ...(isClassicOperation() ? { provenance: 'classic' as const, ordering: 'catalog' as const } : {}) };
   });
-  assertCurrent();
-  return result;
 }
 
 function resolvePageSubject(target: KnowledgeNodeRecord, graph: GeneratedKnowledgePageGraph): KnowledgeNodeRecord | undefined {

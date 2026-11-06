@@ -1,5 +1,6 @@
+import { activateClassicFallback, decisionOrClassic } from '../../runtime/decision-policy.js';
 import { knowledgeJudgmentRepresentation, sameKnowledgeRecord } from '../store-record-representation.js';
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from '../../gate/judgment-input.js';
 import { homeGraphPagePriority } from './batteries/page-priority.js';
@@ -59,31 +60,39 @@ export async function rankHomeGraphPageCandidates<T>(input: {
     if (!value || typeof value !== 'object') throw new JudgmentInputError('unsupported-input');
     return { id: `page-${index + 1}`, content: toJson(value) };
   });
-  let authority: ReturnType<typeof captureJudgmentPort>;
-  const boundedSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-  try { authority = captureJudgmentPort(homeGraphPagePriority.name, { signal: boundedSignal, assertCurrent: check }); }
-  catch (error) {
+  return decisionOrClassic(async () => {
+    let authority: ReturnType<typeof captureJudgmentPort>;
+    const boundedSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    try { authority = captureJudgmentPort(homeGraphPagePriority.name, { signal: boundedSignal, assertCurrent: check }); }
+    catch (error) {
+      if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
+      check();
+      if (error instanceof JudgmentPortMissingError) throw new HomeGraphPagePriorityHeldError('unavailable');
+      throw new HomeGraphPagePriorityHeldError('stale');
+    }
+    const query: JsonValue = input.purpose;
+    try {
+      const result = await homeGraphPagePriority.rerank(authority.port, query, candidates, {
+        site: homeGraphPagePriority.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
+      });
+      check(); authority.assertCurrent();
+      if (result.ranked.some(row => row.reading.outcome !== 'act' || row.reading.verdict === 'uncertain')) throw new HomeGraphPagePriorityHeldError('uncertain');
+      const byId = new Map(input.candidates.map((candidate, index) => [`page-${index + 1}`, { candidate, index }]));
+      return result.ranked.map(row => {
+        const original = byId.get(row.id);
+        if (!original) throw new HomeGraphPagePriorityHeldError('stale');
+        return { ...original, probability: row.probability };
+      }).sort((left, right) => right.probability - left.probability || left.index - right.index).map(row => row.candidate);
+    } catch (error) {
+      if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
+      check();
+      try { authority.assertCurrent(); } catch { throw new HomeGraphPagePriorityHeldError(signal?.aborted ? 'aborted' : 'stale'); }
+      if (error instanceof HomeGraphPagePriorityHeldError || error instanceof JudgmentInputError) throw error;
+      throw new HomeGraphPagePriorityHeldError('unavailable');
+    }
+  }, () => {
     check();
-    if (error instanceof JudgmentPortMissingError) throw new HomeGraphPagePriorityHeldError('unavailable');
-    throw new HomeGraphPagePriorityHeldError('stale');
-  }
-  const query: JsonValue = input.purpose;
-  try {
-    const result = await homeGraphPagePriority.rerank(authority.port, query, candidates, {
-      site: homeGraphPagePriority.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
-    });
-    check(); authority.assertCurrent();
-    if (result.ranked.some(row => row.reading.outcome !== 'act' || row.reading.verdict === 'uncertain')) throw new HomeGraphPagePriorityHeldError('uncertain');
-    const byId = new Map(input.candidates.map((candidate, index) => [`page-${index + 1}`, { candidate, index }]));
-    return result.ranked.map(row => {
-      const original = byId.get(row.id);
-      if (!original) throw new HomeGraphPagePriorityHeldError('stale');
-      return { ...original, probability: row.probability };
-    }).sort((left, right) => right.probability - left.probability || left.index - right.index).map(row => row.candidate);
-  } catch (error) {
-    check();
-    try { authority.assertCurrent(); } catch { throw new HomeGraphPagePriorityHeldError(signal?.aborted ? 'aborted' : 'stale'); }
-    if (error instanceof HomeGraphPagePriorityHeldError || error instanceof JudgmentInputError) throw error;
-    throw new HomeGraphPagePriorityHeldError('unavailable');
-  }
+    // Keep the complete catalog order. No semantic priority or confidence is manufactured.
+    return [...input.candidates];
+  });
 }

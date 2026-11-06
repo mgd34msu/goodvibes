@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import { REPAIRS_GAP_RELATION } from './types.js';
 import type { ArtifactDescriptor } from '../../artifacts/types.js';
@@ -66,6 +67,7 @@ export async function runHomeGraphReindex(
   context: HomeGraphReindexContext,
   input: HomeGraphReindexInput = {},
 ): Promise<HomeGraphReindexResult> {
+  requireDecisionFeature('semantic Home Graph reindexing');
   await context.store.init();
   const { spaceId, installationId } = resolveReadableHomeGraphSpace(context.store, input);
   const state = readHomeGraphSearchState(context.store, spaceId);

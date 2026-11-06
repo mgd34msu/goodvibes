@@ -1,3 +1,6 @@
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
+import { snapshotNodeInput } from '../activation/projection.js';
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
@@ -174,6 +177,9 @@ async function ensureHomeGraphLinkTarget(
   }
   const existing = store.getNode(ref.id);
   if (existing && belongsToSpace(existing, spaceId)) return { kind: 'node', id: existing.id, record: existing };
+  if (existing) throw new GoodVibesSdkError('Home Graph link target belongs to another knowledge space.', {
+    category: 'not_found', source: 'runtime', recoverable: false,
+  });
   const kind = ref.nodeKind ?? nodeKindForHomeGraphObject(target.kind as never);
   const deterministicId = homeGraphNodeId(spaceId, kind, ref.id);
   const deterministic = store.getNode(deterministicId);
@@ -192,8 +198,12 @@ async function ensureHomeGraphLinkTarget(
       // Marks a node the link itself materialized, so unlink can cleanly remove it
       // (and only it) on reversal.
       linkCreated: true,
+      ...(isClassicOperation() ? { provenance: 'classic', existence: 'caller-declared', semanticAssessment: 'not-evaluated' } : {}),
     }),
   };
-  const node = await store.upsertNode(nodeInput);
+  const evidence = snapshotNodeInput(target);
+  const node = isClassicOperation()
+    ? await upsertObservedKnowledgeNode(store, nodeInput, 'link-declaration', evidence, () => target)
+    : await store.upsertNode(nodeInput);
   return { kind: 'node', id: node.id, record: node };
 }

@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { withKnowledgeSourceAnswerAliases } from '../source-structural-references.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeSemanticAnswerInput } from '../semantic/types.js';
@@ -19,6 +20,7 @@ export async function answerHomeGraphQuery(input: {
   readonly state: HomeGraphSearchState;
   readonly results: readonly HomeGraphSearchResult[];
 }): Promise<HomeGraphAskResult> {
+  requireDecisionFeature('verified Home Graph answers');
   return answerHomeGraphQueryOnce(input);
 }
 

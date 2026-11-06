@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
@@ -90,6 +91,7 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   readonly options?: HomeGraphTriageOptions | undefined;
   readonly signal?: AbortSignal | undefined;
 }): Promise<HomeGraphTriageResult> {
+  requireDecisionFeature('automatic Home Graph issue triage');
   await input.store.init();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
   const options = input.options ?? {};

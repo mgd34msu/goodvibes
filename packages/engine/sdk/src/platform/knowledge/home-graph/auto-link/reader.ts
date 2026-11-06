@@ -1,6 +1,7 @@
+import { activateClassicFallback } from '../../../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { prepareJudgmentResult, retainStrictJudgmentJson, JudgmentResultAdmissionError } from '../../../gate/judgment-result.js';
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
 import { withSupportBudget } from '../../semantic/support-budget.js';
@@ -34,14 +35,14 @@ function validatedPort(port: JudgmentPort): JudgmentPort {
 export function createHomeGraphAutoLinkReader() {
   let installation: ReturnType<typeof captureJudgmentPort> | undefined;
   try { installation = captureJudgmentPort('engine.knowledge.homegraph-document-subject', { prepareResultCapture: prepareJudgmentResult }); } catch (error) {
-    if (!(error instanceof JudgmentPortMissingError)) throw error;
+    if (activateClassicFallback(error) || !(error instanceof JudgmentPortMissingError)) throw error;
   }
   const model = installation?.port.model;
   const assertCurrent = () => {
     if (!installation) throw new Held('unavailable');
     try { installation.assertCurrent();
       if (installation.signal.aborted || installation.port.model !== model) throw new Held('stale');
-    } catch { throw new Held('stale'); }
+    } catch (error) { if (error instanceof DecisionModelsDisabledError) throw error; throw new Held('stale'); }
   };
   const provenance = new WeakMap<object, { readonly judgmentDecisionIds: readonly string[]; readonly requestedModel: string; readonly model: string }>();
   return { assertCurrent, provenance(selection: object) { assertCurrent(); return provenance.get(selection); }, async read(input: AutoLinkReadingInput, options: {
@@ -95,7 +96,8 @@ export function createHomeGraphAutoLinkReader() {
       provenance.set(selection, Object.freeze({ judgmentDecisionIds: Object.freeze(decisionIds), requestedModel: kind.result.requestedModel, model: kind.result.model }));
       return selection;
     }, 30_000, AbortSignal.any([installation!.signal, ...(options.signal ? [options.signal] : [])])); }
-    catch (error) { if (error instanceof Held || error instanceof JudgmentInputError) throw error;
+    catch (error) { if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
+      if (error instanceof Held || error instanceof JudgmentInputError) throw error;
       if (error instanceof JudgmentResultAdmissionError) throw new Held(error.problem);
       if (options.signal?.aborted) throw new Held('aborted');
       assertCurrent();

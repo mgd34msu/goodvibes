@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeRefinementTaskRecord } from '../types.js';
@@ -64,6 +65,7 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   readonly result?: Awaited<ReturnType<KnowledgeSemanticService['selfImprove']>> | undefined;
   readonly triage?: HomeGraphTriageResult | undefined;
 }> {
+  requireDecisionFeature('automatic Home Graph refinement and triage');
   await input.store.init();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
 

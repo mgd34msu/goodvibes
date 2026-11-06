@@ -1,3 +1,4 @@
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { snapshotNodeInput } from '../activation/projection.js';
 import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
 import { HomeGraphPagePriorityHeldError } from './page-priority.js';
@@ -146,117 +147,125 @@ export class HomeGraphService {
   }
 
   async syncSnapshot(input: HomeGraphSnapshotInput): Promise<HomeGraphSyncResult> {
-    await this.store.init();
-    const result = await runHomeGraphSnapshotSync({
-      store: this.store,
-      artifactStore: this.artifactStore,
-      snapshot: input,
-      signal: this.autoLinkController.signal,
+    return withConfiguredDecisionModelPolicy(async () => {
+      await this.store.init();
+      const result = await runHomeGraphSnapshotSync({
+        store: this.store,
+        artifactStore: this.artifactStore,
+        snapshot: input,
+        signal: this.autoLinkController.signal,
+      });
+      this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
+      return result;
     });
-    this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
-    return result;
   }
 
   async ingestUrl(input: HomeGraphIngestUrlInput, ownership: KnowledgeIngestOwnership = {}): Promise<HomeGraphIngestResult> {
-    const { signal, assertCurrent, onCommitted, deferSemanticEnrichment } = ownership;
-    const owned = !!(signal || assertCurrent || onCommitted || deferSemanticEnrichment);
-    const current = () => {
-      if (ownership.signal !== signal || ownership.assertCurrent !== assertCurrent || ownership.onCommitted !== onCommitted
-        || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new KnowledgeWebGapRepairHeldError('stale');
-      signal?.throwIfAborted(); assertCurrent?.();
-    };
-    current();
-    this.requireAdmission('home-graph url ingestion');
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    const artifact = await this.artifactStore.create({
-      uri: input.url,
-      allowPrivateHosts: input.allowPrivateHosts,
-      metadata: buildHomeGraphMetadata(spaceId, installationId, {
-        homeGraphSourceKind: 'url',
-        requestedAt: Date.now(),
-      }),
-    }, { signal, assertCurrent: current });
-    current();
-    return this.ingestCreatedArtifact({
-      spaceId,
-      installationId,
-      artifact,
-      title: input.title,
-      sourceUri: input.url,
-      sourceType: inferHomeGraphSourceType(input.tags, 'url'),
-      tags: ['homeassistant', 'home-graph', ...(input.tags ?? [])],
-      target: input.target,
-      metadata: {
-        ...(input.metadata ?? {}),
-        homeGraphSourceKind: 'url',
-      },
-    }, owned ? { ...ownership, signal, assertCurrent: current } : ownership);
+    return withConfiguredDecisionModelPolicy(async () => {
+      const { signal, assertCurrent, onCommitted, deferSemanticEnrichment } = ownership;
+      const owned = !!(signal || assertCurrent || onCommitted || deferSemanticEnrichment);
+      const current = () => {
+        if (ownership.signal !== signal || ownership.assertCurrent !== assertCurrent || ownership.onCommitted !== onCommitted
+          || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new KnowledgeWebGapRepairHeldError('stale');
+        signal?.throwIfAborted(); assertCurrent?.();
+      };
+      current();
+      this.requireAdmission('home-graph url ingestion');
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const artifact = await this.artifactStore.create({
+        uri: input.url,
+        allowPrivateHosts: input.allowPrivateHosts,
+        metadata: buildHomeGraphMetadata(spaceId, installationId, {
+          homeGraphSourceKind: 'url',
+          requestedAt: Date.now(),
+        }),
+      }, { signal, assertCurrent: current });
+      current();
+      return this.ingestCreatedArtifact({
+        spaceId,
+        installationId,
+        artifact,
+        title: input.title,
+        sourceUri: input.url,
+        sourceType: inferHomeGraphSourceType(input.tags, 'url'),
+        tags: ['homeassistant', 'home-graph', ...(input.tags ?? [])],
+        target: input.target,
+        metadata: {
+          ...(input.metadata ?? {}),
+          homeGraphSourceKind: 'url',
+        },
+      }, owned ? { ...ownership, signal, assertCurrent: current } : ownership);
+    });
   }
 
   async ingestNote(input: HomeGraphIngestNoteInput): Promise<HomeGraphIngestResult> {
-    this.requireAdmission('home-graph note ingestion');
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
-    const artifact = await this.artifactStore.create({
-      kind: 'document',
-      mimeType: 'text/markdown',
-      filename: `${safeHomeGraphFilename(title)}.md`,
-      text: input.body,
-      metadata: buildHomeGraphMetadata(spaceId, installationId, {
-        homeGraphSourceKind: 'note',
-        category: input.category ?? 'note',
-      }),
-    });
-    return this.ingestCreatedArtifact({
-      spaceId,
-      installationId,
-      artifact,
-      title,
-      sourceType: 'document',
-      tags: uniqueStrings(['homeassistant', 'home-graph', 'note', input.category, ...(input.tags ?? [])]),
-      target: input.target,
-      metadata: {
-        ...(input.metadata ?? {}),
-        homeGraphSourceKind: 'note',
-        category: input.category ?? 'note',
-      },
+    return withConfiguredDecisionModelPolicy(async () => {
+      this.requireAdmission('home-graph note ingestion');
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
+      const artifact = await this.artifactStore.create({
+        kind: 'document',
+        mimeType: 'text/markdown',
+        filename: `${safeHomeGraphFilename(title)}.md`,
+        text: input.body,
+        metadata: buildHomeGraphMetadata(spaceId, installationId, {
+          homeGraphSourceKind: 'note',
+          category: input.category ?? 'note',
+        }),
+      });
+      return this.ingestCreatedArtifact({
+        spaceId,
+        installationId,
+        artifact,
+        title,
+        sourceType: 'document',
+        tags: uniqueStrings(['homeassistant', 'home-graph', 'note', input.category, ...(input.tags ?? [])]),
+        target: input.target,
+        metadata: {
+          ...(input.metadata ?? {}),
+          homeGraphSourceKind: 'note',
+          category: input.category ?? 'note',
+        },
+      });
     });
   }
 
   async ingestArtifact(input: HomeGraphIngestArtifactInput): Promise<HomeGraphIngestResult> {
-    this.requireAdmission('home-graph artifact ingestion');
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    const artifact = input.artifactId
-      ? this.artifactStore.get(input.artifactId)
-      : await this.artifactStore.create({
-          path: input.path,
-          uri: input.uri,
-          allowPrivateHosts: input.allowPrivateHosts,
-          metadata: buildHomeGraphMetadata(spaceId, installationId, {
-            homeGraphSourceKind: 'artifact',
-            requestedAt: Date.now(),
-          }),
+    return withConfiguredDecisionModelPolicy(async () => {
+      this.requireAdmission('home-graph artifact ingestion');
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const artifact = input.artifactId
+        ? this.artifactStore.get(input.artifactId)
+        : await this.artifactStore.create({
+            path: input.path,
+            uri: input.uri,
+            allowPrivateHosts: input.allowPrivateHosts,
+            metadata: buildHomeGraphMetadata(spaceId, installationId, {
+              homeGraphSourceKind: 'artifact',
+              requestedAt: Date.now(),
+            }),
+          });
+      if (!artifact) {
+        throw new GoodVibesSdkError('Unknown Home Graph artifact.', {
+          category: 'not_found',
+          source: 'runtime',
+          recoverable: false,
         });
-    if (!artifact) {
-      throw new GoodVibesSdkError('Unknown Home Graph artifact.', {
-        category: 'not_found',
-        source: 'runtime',
-        recoverable: false,
+      }
+      return this.ingestCreatedArtifact({
+        spaceId,
+        installationId,
+        artifact,
+        title: input.title,
+        sourceUri: input.uri ?? input.path ?? artifact.sourceUri,
+        sourceType: inferHomeGraphSourceType(input.tags, 'document'),
+        tags: ['homeassistant', 'home-graph', 'artifact', ...(input.tags ?? [])],
+        target: input.target,
+        metadata: {
+          ...(input.metadata ?? {}),
+          homeGraphSourceKind: 'artifact',
+        },
       });
-    }
-    return this.ingestCreatedArtifact({
-      spaceId,
-      installationId,
-      artifact,
-      title: input.title,
-      sourceUri: input.uri ?? input.path ?? artifact.sourceUri,
-      sourceType: inferHomeGraphSourceType(input.tags, 'document'),
-      tags: ['homeassistant', 'home-graph', 'artifact', ...(input.tags ?? [])],
-      target: input.target,
-      metadata: {
-        ...(input.metadata ?? {}),
-        homeGraphSourceKind: 'artifact',
-      },
     });
   }
 
@@ -273,6 +282,7 @@ export class HomeGraphService {
   }
 
   async ask(input: HomeGraphAskInput): Promise<HomeGraphAskResult> {
+    requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search during Classic');
     await this.store.init();
     const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
     return this.runForegroundOperation(spaceId, installationId, async () => {
@@ -295,6 +305,7 @@ export class HomeGraphService {
   }
 
   async reindex(input: HomeGraphReindexInput = {}): Promise<HomeGraphReindexResult> {
+    requireDecisionFeature('semantic Home Graph reindexing');
     await this.store.init();
     if (this.activeReindex) return coalescedHomeGraphReindexResult(this.store, input);
     const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
@@ -360,6 +371,7 @@ export class HomeGraphService {
   }
 
   async refreshDevicePassport(input: HomeGraphProjectionInput): Promise<HomeGraphDevicePassportResult> {
+    requireDecisionFeature('verified Home Graph device passports');
     await this.store.init();
     const { spaceId, installationId } = resolveHomeGraphSpace(input);
     return this.runForegroundOperation(spaceId, installationId, async () => {
@@ -375,6 +387,7 @@ export class HomeGraphService {
   }
 
   async generateRoomPage(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
+    requireDecisionFeature('verified Home Graph room pages');
     await this.store.init();
     const { spaceId, installationId } = resolveHomeGraphSpace(input);
     return this.runForegroundOperation(spaceId, installationId, async () => {
@@ -390,6 +403,7 @@ export class HomeGraphService {
   }
 
   async generatePacket(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
+    requireDecisionFeature('verified Home Graph sharing packets');
     await this.store.init();
     const { spaceId, installationId } = resolveHomeGraphSpace(input);
     return this.runForegroundOperation(spaceId, installationId, async () => {
@@ -554,7 +568,8 @@ export class HomeGraphService {
     readonly metadata: Record<string, unknown>;
   }, ownership: KnowledgeIngestOwnership = {}): Promise<HomeGraphIngestResult> {
     const owned = !!(ownership.signal || ownership.assertCurrent || ownership.onCommitted);
-    const extractionOwner = createKnowledgeExtractionOwner(ownership);
+    const extractionOwner = createKnowledgeExtractionOwner({ ...ownership, signal: ownership.signal
+      ? AbortSignal.any([ownership.signal, this.autoLinkController.signal]) : this.autoLinkController.signal });
     const assertOwned = extractionOwner.assertCurrent;
     assertOwned();
     // The repair consumer has no explicit target. Targeted linking requires its own
@@ -563,7 +578,7 @@ export class HomeGraphService {
     const sourceId = homeGraphSourceId(input.spaceId, input.metadata.homeGraphSourceKind as string, input.sourceUri ?? input.artifact.id);
     const canonicalUri = namespacedCanonicalUri(input.spaceId, 'source', input.sourceUri ?? input.artifact.id);
     let published = false;
-    if (owned) {
+    {
       const originalSource = this.store.getSource(sourceId), originalExtraction = this.store.getExtractionBySourceId(sourceId);
       const original = captureStrictRepairJson({ source: originalSource, extraction: originalExtraction });
       extractionOwner.retain(() => {
@@ -590,11 +605,13 @@ export class HomeGraphService {
       metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, {
         ...input.metadata,
         artifactMimeType: input.artifact.mimeType,
+        ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
       }),
     });
     let source: KnowledgeSourceRecord;
     let extraction: KnowledgeExtractionRecord | undefined;
-    if (owned) {
+    const atomic = owned || isClassicOperation();
+    if (atomic) {
       const existing = this.store.getExtractionBySourceId(sourceId);
       const generatedId = `hg-extract-${sourceId.replace(/^hg-src-/, '')}`;
       const extractionId = existing?.id ?? generatedId;
@@ -605,17 +622,17 @@ export class HomeGraphService {
         metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, prepared.metadata),
       }] : [], nodes: [], edges: [], issues: [] }, async () => {
         assertOwned(); return { nodes: [], edges: [], issues: [], assertCurrent: assertOwned };
-      }, { signal: ownership.signal }, () => { published = true; ownership.onCommitted?.(sourceId); });
+      }, { signal: extractionOwner.signal }, () => { published = true; ownership.onCommitted?.(sourceId); });
       source = this.store.getSource(sourceId)!;
       extraction = this.store.getExtractionBySourceId(sourceId) ?? undefined;
       assertOwned();
       registerGeneratedKnowledgeSourceReferences(this.store, source, { id: sourceId, canonicalUri,
         ...(!input.sourceUri && !input.artifact.sourceUri && source.sourceUri === canonicalUri ? { sourceUri: canonicalUri } : {}) });
       if (extraction?.id === generatedId) registerGeneratedKnowledgeExtractionReferences(this.store, source, extraction, generatedId);
-    } else source = await this.store.upsertSource(sourceInput);
+    } else { source = await this.store.upsertSource(sourceInput); published = true; }
     registerGeneratedKnowledgeSourceReferences(this.store, source, { id: sourceId, canonicalUri,
       ...(!input.sourceUri && !input.artifact.sourceUri && source.sourceUri === canonicalUri ? { sourceUri: canonicalUri } : {}) });
-    if (!owned) extraction = await storeHomeGraphArtifactExtraction(this.store, source, input.artifact, input.spaceId, input.installationId, prepared);
+    if (!atomic) extraction = await storeHomeGraphArtifactExtraction(this.store, source, input.artifact, input.spaceId, input.installationId, prepared);
     assertOwned();
     const linked = input.target
       ? (await this.linkKnowledge({ knowledgeSpaceId: input.spaceId, sourceId: source.id, target: input.target })).edge
@@ -636,6 +653,7 @@ export class HomeGraphService {
     return {
       ok: true,
       spaceId: input.spaceId,
+      ...(isClassicOperation() ? { provenance: 'classic' as const, ...(!input.target ? { autoLinkAssessment: 'not-evaluated' as const } : {}) } : {}),
       source,
       artifactId: input.artifact.id,
       extraction,
@@ -705,6 +723,7 @@ export class HomeGraphService {
   }
 
   private queueAnswerEnrichment(spaceId: string, answer: HomeGraphAskResult): void {
+    if (isClassicOperation()) return;
     if (!this.options.semanticService || this.autoLinkController.signal.aborted) return;
     const pending = this.pendingAnswerEnrichment.get(spaceId) ?? new Set<string>();
     const selected = new Set(answer.results.flatMap(result => result.source ? [result.source.id] : []));
@@ -714,6 +733,7 @@ export class HomeGraphService {
   }
 
   private scheduleAnswerEnrichment(spaceId: string): void {
+    if (isClassicOperation()) return;
     const semantic = this.options.semanticService;
     if (!semantic || this.autoLinkController.signal.aborted || this.foregroundOperations.has(spaceId)
       || this.answerEnrichmentRuns.has(spaceId) || this.scheduledAnswerEnrichment.has(spaceId)
@@ -762,6 +782,7 @@ export class HomeGraphService {
    * return before source search, semantic repair, and page refresh work begins.
    */
   private scheduleSyncSelfImprovement(spaceId: string, installationId: string): void {
+    if (isClassicOperation()) return;
     if (!this.options.semanticService || this.autoLinkController.signal.aborted || this.pendingSyncSelfImprove.has(spaceId)) return;
     if (this.foregroundOperations.has(spaceId)) { this.resumeSyncSelfImprove.add(spaceId); return; }
     this.pendingSyncSelfImprove.add(spaceId);
@@ -811,6 +832,7 @@ export class HomeGraphService {
   }
 
   private queueIngestEnrichment(spaceId: string, sourceId: string): void {
+    if (isClassicOperation()) return;
     if (!this.options.semanticService || this.autoLinkController.signal.aborted) return;
     const pending = this.pendingIngestEnrichment.get(spaceId) ?? new Set<string>();
     pending.add(sourceId); this.pendingIngestEnrichment.set(spaceId, pending);
@@ -818,12 +840,14 @@ export class HomeGraphService {
   }
 
   private scheduleIngestEnrichment(spaceId: string): void {
+    if (isClassicOperation()) return;
     if (!this.options.semanticService || this.autoLinkController.signal.aborted || this.foregroundOperations.has(spaceId)
       || this.ingestEnrichmentRuns.has(spaceId) || this.scheduledIngestEnrichment.has(spaceId)
       || !this.pendingIngestEnrichment.has(spaceId)) return;
     this.scheduledIngestEnrichment.add(spaceId);
     scheduleBackground(() => {
       this.scheduledIngestEnrichment.delete(spaceId);
+      if (isClassicOperation()) { this.pendingIngestEnrichment.delete(spaceId); return; }
       if (this.foregroundOperations.has(spaceId) || this.ingestEnrichmentRuns.has(spaceId)) return;
       const pending = this.pendingIngestEnrichment.get(spaceId), sourceId = pending?.values().next().value;
       if (sourceId === undefined) return;

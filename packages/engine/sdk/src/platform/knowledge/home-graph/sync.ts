@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from '../store-record-representation.js';
 import { captureGeneratedKnowledgeSourceUpdate, registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
 import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
@@ -47,84 +48,90 @@ export async function runHomeGraphSnapshotSync(input: {
   readonly snapshot: HomeGraphSnapshotInput;
   readonly signal?: AbortSignal | undefined;
 }): Promise<HomeGraphSyncResult> {
-  const { store, artifactStore } = input;
-  const snapshot = snapshotNodeInput(input.snapshot);
-  const { spaceId, installationId } = resolveHomeGraphSpace(snapshot);
-  const captured = await store.batch(async () => {
-    const capturedAt = snapshot.capturedAt ?? Date.now();
-    const sourceId = homeGraphSourceId(spaceId, 'snapshot', String(capturedAt));
-    const canonicalUri = namespacedCanonicalUri(spaceId, 'snapshot', String(capturedAt));
-    const sourceInput = {
-      id: sourceId,
-      connectorId: HOME_GRAPH_CONNECTOR_ID,
-      sourceType: 'dataset' as const,
-      title: snapshot.title ?? 'Home Assistant snapshot',
-      canonicalUri,
-      summary: 'Home Assistant entity, device, area, automation, script, scene, label, and integration snapshot.',
-      tags: ['homeassistant', 'home-graph', 'snapshot'],
-      status: 'indexed' as const,
-      lastCrawledAt: capturedAt,
-      metadata: buildHomeGraphMetadata(spaceId, installationId, {
-        ...(snapshot.metadata ?? {}),
-        homeGraphSourceKind: 'snapshot',
-        capturedAt: snapshot.capturedAt ?? knowledgeClockIso(capturedAt),
-      }),
-    };
-    const source = await store.upsertSource(snapshot.capturedAt === undefined
-      ? retainKnowledgeRepresentation(sourceInput, { ...knowledgeRawRepresentation(sourceInput), lastCrawledAt: knowledgeClockIso(capturedAt) })
-      : sourceInput);
-    registerGeneratedKnowledgeSourceReferences(store, source, { id: sourceId, canonicalUri });
-    const home = await upsertHomeNode(store, spaceId, installationId, snapshot);
-    const beforeState = readHomeGraphState(store, spaceId);
-    const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
-    const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
-    const activeSnapshotNodeIds = new Set([home.id]);
-    const groups = await upsertSnapshotObjects(store, spaceId, installationId, snapshot, home.id, source.id, activeSnapshotNodeIds);
-    await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotRetirementObjectKinds(snapshot));
-    return { source, home, beforeNodeIds, beforeEdgeIds, groups };
-  });
-  // batch() is a deferred save, not a rollback transaction. Finish the raw
-  // snapshot write phase before semantic readers inspect committed SQL rows.
-  // A later enrichment hold preserves this captured prefix but cannot publish
-  // an unvalidated link or generated page. Imports retain their own atomic seam.
-  const { source, home, beforeNodeIds, beforeEdgeIds, groups } = captured;
-  await autoLinkExistingSources(store, spaceId, installationId, input.signal);
-  return await store.batch(async () => {
-    let issueCount = 0;
-    let quality: NonNullable<HomeGraphSyncResult['quality']>;
-    try {
-      const report = await refreshHomeGraphQualityReport(store, spaceId, installationId);
-      issueCount = report.issues.length;
-      quality = report.retainedLegacyIssues
-        ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
-        : { status: 'refreshed' };
-    } catch (error) {
-      if (!(error instanceof HomeGraphQualityHeldError) && !(error instanceof JudgmentInputError)) throw error;
-      quality = { status: 'held', reason: error instanceof HomeGraphQualityHeldError ? error.reason : error.problem === 'unsupported-input' ? 'malformed' : 'protected-input' };
-    }
-    const generated = await generateAutomaticHomeGraphPages({
-      store,
-      artifactStore,
-      spaceId,
-      installationId,
-      input: snapshot,
+  return withConfiguredDecisionModelPolicy(async () => {
+    const { store, artifactStore } = input;
+    const snapshot = snapshotNodeInput(input.snapshot);
+    const { spaceId, installationId } = resolveHomeGraphSpace(snapshot);
+    const captured = await store.batch(async () => {
+      const capturedAt = snapshot.capturedAt ?? Date.now();
+      const sourceId = homeGraphSourceId(spaceId, 'snapshot', String(capturedAt));
+      const canonicalUri = namespacedCanonicalUri(spaceId, 'snapshot', String(capturedAt));
+      const sourceInput = {
+        id: sourceId,
+        connectorId: HOME_GRAPH_CONNECTOR_ID,
+        sourceType: 'dataset' as const,
+        title: snapshot.title ?? 'Home Assistant snapshot',
+        canonicalUri,
+        summary: 'Home Assistant entity, device, area, automation, script, scene, label, and integration snapshot.',
+        tags: ['homeassistant', 'home-graph', 'snapshot'],
+        status: 'indexed' as const,
+        lastCrawledAt: capturedAt,
+        metadata: buildHomeGraphMetadata(spaceId, installationId, {
+          ...(snapshot.metadata ?? {}),
+          homeGraphSourceKind: 'snapshot',
+          capturedAt: snapshot.capturedAt ?? knowledgeClockIso(capturedAt),
+        }),
+      };
+      const source = await store.upsertSource(snapshot.capturedAt === undefined
+        ? retainKnowledgeRepresentation(sourceInput, { ...knowledgeRawRepresentation(sourceInput), lastCrawledAt: knowledgeClockIso(capturedAt) })
+        : sourceInput);
+      registerGeneratedKnowledgeSourceReferences(store, source, { id: sourceId, canonicalUri });
+      const home = await upsertHomeNode(store, spaceId, installationId, snapshot);
+      const beforeState = readHomeGraphState(store, spaceId);
+      const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
+      const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
+      const activeSnapshotNodeIds = new Set([home.id]);
+      const groups = await upsertSnapshotObjects(store, spaceId, installationId, snapshot, home.id, source.id, activeSnapshotNodeIds);
+      await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotRetirementObjectKinds(snapshot));
+      return { source, home, beforeNodeIds, beforeEdgeIds, groups };
     });
-    const after = readHomeGraphState(store, spaceId);
-    return {
-      ok: true,
-      spaceId,
-      installationId,
-      source,
-      home,
-      created: {
-        nodes: after.nodes.filter((node) => !beforeNodeIds.has(node.id)).length,
-        edges: after.edges.filter((edge) => !beforeEdgeIds.has(edge.id)).length,
-        issues: issueCount,
-      },
-      generated,
-      quality,
-      counts: groups,
-    };
+    // batch() is a deferred save, not a rollback transaction. Finish the raw
+    // snapshot write phase before semantic readers inspect committed SQL rows.
+    // A later enrichment hold preserves this captured prefix but cannot publish
+    // an unvalidated link or generated page. Imports retain their own atomic seam.
+    const { source, home, beforeNodeIds, beforeEdgeIds, groups } = captured;
+    await autoLinkExistingSources(store, spaceId, installationId, input.signal);
+    return await store.batch(async () => {
+      let issueCount = 0;
+      let quality: NonNullable<HomeGraphSyncResult['quality']>;
+      if (isClassicOperation()) quality = { status: 'held', reason: 'decision-model-disabled' };
+      else try {
+        const report = await refreshHomeGraphQualityReport(store, spaceId, installationId, { signal: input.signal });
+        issueCount = report.issues.length;
+        quality = report.retainedLegacyIssues
+          ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
+          : { status: 'refreshed' };
+      } catch (error) {
+        if (input.signal?.aborted) throw error;
+        if (!(error instanceof HomeGraphQualityHeldError) && !(error instanceof JudgmentInputError)) throw error;
+        quality = { status: 'held', reason: error instanceof HomeGraphQualityHeldError ? error.reason : error.problem === 'unsupported-input' ? 'malformed' : 'protected-input' };
+      }
+      const generated = await generateAutomaticHomeGraphPages({
+        store,
+        artifactStore,
+        spaceId,
+        installationId,
+        input: snapshot,
+        signal: input.signal,
+      });
+      const after = readHomeGraphState(store, spaceId);
+      return {
+        ok: true,
+        ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+        spaceId,
+        installationId,
+        source,
+        home,
+        created: {
+          nodes: after.nodes.filter((node) => !beforeNodeIds.has(node.id)).length,
+          edges: after.edges.filter((edge) => !beforeEdgeIds.has(edge.id)).length,
+          issues: issueCount,
+        },
+        generated,
+        quality,
+        counts: groups,
+      };
+    });
   });
 }
 

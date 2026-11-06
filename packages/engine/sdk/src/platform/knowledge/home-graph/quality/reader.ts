@@ -1,3 +1,4 @@
+import { activateClassicFallback, requireDecisionFeature } from '../../../runtime/decision-policy.js';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { fanOut, toJson, type JudgmentPort, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
@@ -68,6 +69,7 @@ function validatedPort(port: JudgmentPort): JudgmentPort {
 export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInput[], options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined;
 } = {}): Promise<readonly HomeGraphQualityReading[]> {
+  requireDecisionFeature('semantic Home Graph quality assessment');
   if (options.signal?.aborted) throw new Held('aborted');
   const original = retainStrictJudgmentJson(inputs, () => new JudgmentInputError('unsupported-input'));
   const snapshots = checkedInputs(inputs);
@@ -126,7 +128,7 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
             }
             if (read.result.decisionId) decisionIds.push(read.result.decisionId);
             read.recordAction('settled derived-quality readings; no write or operator authority granted');
-          } catch (error) { checkSource(); const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+          } catch (error) { activateClassicFallback(error); checkSource(); const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
         }
         readings[index] = { assertCurrent: check, reference: input.reference, answers, provenance, decisionIds, batteries, model, requestedModel };
       }
@@ -134,7 +136,7 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
     check(); return freezeSupport(readings);
   };
   try { return await Promise.race([run(), stopped]); }
-  catch (error) { controller.abort(); throw error instanceof Held || error instanceof JudgmentInputError ? error
+  catch (error) { activateClassicFallback(error); controller.abort(); throw error instanceof Held || error instanceof JudgmentInputError ? error
     : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : error instanceof JudgmentAuthorityRetiredError ? 'stale' : 'unavailable'); }
   finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }

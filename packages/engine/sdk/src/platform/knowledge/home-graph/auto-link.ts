@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import { assertKnowledgeArrayExtras, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { assertJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
@@ -141,22 +142,30 @@ async function linkSources(input: AutoLinkSourcesInput): Promise<readonly HomeGr
   if (plans.length > 128 || candidates.length > 128 || plans.length * (candidates.length + 1) > 512
     || plans.reduce((bytes, plan) => bytes + new TextEncoder().encode(JSON.stringify(plan.reading)).byteLength
       * (candidates.length + 1) + 4_096 * (candidates.length + 1), 0) > 16 * 1024 * 1024) throw new Held('budget');
-  const reader = createHomeGraphAutoLinkReader();
-  const check = () => { assertCurrent(); reader.assertCurrent();
-    for (const plan of plans) if (input.extractionBySourceId.get(plan.source.id) !== plan.extraction) throw new Held('stale');
-  };
-  const selected: { source: KnowledgeSourceRecord; node: KnowledgeNodeRecord; relation: string; provenance: NonNullable<ReturnType<typeof reader.provenance>> }[] = [];
-  for (const plan of plans) {
-    const selection = await reader.read(plan.reading, { signal: input.signal, assertCurrent: check });
-    check();
-    if (selection) {
-      const index = candidates.findIndex((candidate) => candidate.reference === selection.reference);
-      if (index < 0) throw new Held('malformed');
-      const provenance = reader.provenance(selection);
-      if (!provenance) throw new Held('malformed');
-      selected.push({ source: plan.source, node: nodes[index]!, relation: selection.relation, provenance });
+  let check = assertCurrent;
+  const selected = await decisionOrClassic(async () => {
+    const reader = createHomeGraphAutoLinkReader();
+    check = () => { assertCurrent(); reader.assertCurrent();
+      for (const plan of plans) if (input.extractionBySourceId.get(plan.source.id) !== plan.extraction) throw new Held('stale');
+    };
+    const selected: { source: KnowledgeSourceRecord; node: KnowledgeNodeRecord; relation: string; provenance: NonNullable<ReturnType<typeof reader.provenance>> }[] = [];
+    for (const plan of plans) {
+      const selection = await reader.read(plan.reading, { signal: input.signal, assertCurrent: check });
+      check();
+      if (selection) {
+        const index = candidates.findIndex((candidate) => candidate.reference === selection.reference);
+        if (index < 0) throw new Held('malformed');
+        const provenance = reader.provenance(selection);
+        if (!provenance) throw new Held('malformed');
+        selected.push({ source: plan.source, node: nodes[index]!, relation: selection.relation, provenance });
+      }
     }
-  }
+    return selected;
+  }, () => {
+    check = assertCurrent; check();
+    // Omit optional inference; no guessed target or relation is published.
+    return [];
+  });
   // A held later source can never leave earlier links behind. The commit guard
   // is checked inside upsertEdge after its init await, at the synchronous write.
   const linked: HomeGraphAutoLinkResult[] = [];

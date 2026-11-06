@@ -255,3 +255,19 @@ retained artifacts. Their semantic enrichment is omitted and reported as
 `not-evaluated`; the dedicated semantic enrichment/reindex APIs remain decision
 features. These paths retain atomic source/extraction/graph publication and do
 not replay an artifact fetch when a side-effect-free reading falls back.
+
+Classic Home Graph supports structural Home Assistant snapshots, explicit source
+storage, browsing, maps, page inventory and caller-declared links. Snapshots label
+quality assessment as held and generated pages as omitted because decision models
+are disabled. Page inventory preserves catalog order without priority confidence.
+A newly declared link target is marked caller-declared and unassessed, rather
+than treated as a verified device or given a semantic activation receipt. A
+foreign knowledge-space node cannot be replaced while creating a target.
+
+Ingest publication retains source/extraction guards and uses an atomic publication
+in Classic. Preferred automatic-link exhaustion preserves an already stored source
+and omits inferred links without replaying ingestion. Automatic enrichment queues
+are not started during Classic. Verified Home Graph answers, semantic reindex,
+triage, refinement and generated sharing/device pages name their decision-model
+requirement before starting those operations. Existing stored content remains
+readable; import/revalidation and other remaining callers are still under review.

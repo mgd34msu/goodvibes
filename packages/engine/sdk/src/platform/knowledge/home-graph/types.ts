@@ -198,6 +198,8 @@ export interface HomeGraphPageAutomationOptions {
 }
 
 export interface HomeGraphGeneratedPagesSummary {
+  readonly reason?: string;
+  readonly provenance?: 'classic';
   readonly devicePassports: number;
   readonly roomPages: number;
   readonly artifacts: number;
@@ -232,6 +234,7 @@ export interface HomeGraphStatus {
 }
 
 export interface HomeGraphSyncResult {
+  readonly provenance?: 'classic';
   readonly ok: true;
   readonly spaceId: string;
   readonly installationId: string;
@@ -294,6 +297,8 @@ export interface HomeGraphKnowledgeTarget {
 }
 
 export interface HomeGraphIngestResult {
+  readonly autoLinkAssessment?: 'not-evaluated';
+  readonly provenance?: 'classic';
   readonly ok: true;
   readonly spaceId: string;
   readonly source: KnowledgeSourceRecord;
@@ -502,6 +507,8 @@ export interface HomeGraphDevicePassportResult extends HomeGraphProjectionResult
 }
 
 export interface HomeGraphPageListResult {
+  readonly ordering?: 'catalog';
+  readonly provenance?: 'classic';
   readonly ok: true;
   readonly spaceId: string;
   readonly pages: readonly {

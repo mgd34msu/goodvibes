@@ -1,15 +1,16 @@
+import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
 import type { Line } from '@goodvibes-jev/engine/sdk/platform/types';
-import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
+import '@goodvibes-jev/engine/sdk/platform/providers';
 import { UIFactory } from './ui-factory.ts';
-import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
+import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
 import { permissionModeLabel, permissionModeTone } from '../core/permission-mode.ts';
 import { SLEEP_DISABLED_CHIP } from '../core/power-status.ts';
-import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.ts';
+import './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
-import { renderThrobberLine, type ThrobberState } from './throbber.ts';
-import { renderBackToBottomPill, type BackToBottomState } from './back-to-bottom.ts';
-import { voiceCaptureChip } from './voice-capture-chip.ts';
+import { type ThrobberState } from './throbber.ts';
+import { type BackToBottomState } from './back-to-bottom.ts';
+import './voice-capture-chip.ts';
 import { tagFooterLine } from './footer-targets.ts';
 import { wrapText } from '../utils/terminal-width.ts';
 
@@ -50,10 +51,6 @@ import { wrapText } from '../utils/terminal-width.ts';
  * Esc leads: the way back to typing is never dropped for lack of room; the
  * other keys give way from the end (status-line.ts keeps whole keys in order).
  */
-const WORK_TREE_KEYS: ReadonlyArray<readonly [string, string]> = [
-  ['esc', 'back to typing'], ['↑↓', 'move between beads'], ['←→', 'fold / unfold'], ['enter', 'open'], ['y', 'copy'],
-];
-
 import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
 export type { ShellFooterView };
 
@@ -125,7 +122,6 @@ export interface ShellFooterBuildResult {
 }
 
 /** The status line under the composer. */
-const STATUS_ROWS = 1;
 
 function blankRow(width: number): Line {
   const line = UIFactory.stringToLine('', width);
@@ -138,36 +134,19 @@ function blankRow(width: number): Line {
  * prefers it so the pre-render viewport math accounts for the hint rows the
  * static formula cannot see. Null before any footer has rendered.
  */
-let lastRenderedFooterHeight: number | null = null;
 
 /**
  * The wrapped-prompt shape the composer reports each frame, the subset
  * promptCursorOffset needs (see InputHandler.getWrappedPromptInfo).
  */
-export interface WrappedPromptCursorInfo {
-  readonly visibleLines: readonly string[];
-  readonly visibleCursorLine: number;
-  readonly visibleCursorCol: number;
-}
 
 /**
  * Flatten a wrapped-prompt cursor position (line + column) into the single
  * character offset the composer's `cursorPos` expects, counting one separator
  * per wrapped line. Undefined when the cursor is not on a visible line.
  */
-export function promptCursorOffset(info: WrappedPromptCursorInfo): number | undefined {
-  if (info.visibleCursorLine < 0) return undefined;
-  const precedingChars = info.visibleLines
-    .slice(0, info.visibleCursorLine)
-    .reduce((sum: number, line: string) => sum + line.length + 1, 0);
-  return precedingChars + info.visibleCursorCol;
-}
 
 /** Rows the footer will take for this many prompt rows (exact when no hint rows show). */
-export function estimateShellFooterHeight(promptLineCount: number): number {
-  if (lastRenderedFooterHeight !== null) return lastRenderedFooterHeight;
-  return COMPOSER_FIXED_ROWS + Math.max(1, promptLineCount) + STATUS_ROWS;
-}
 
 /** The composer's bar color: the session mode, or shell while a shell command is typed. */
 function composerBarColor(permissionMode: string | undefined, shell: boolean): string {
@@ -188,149 +167,59 @@ function modeChips(permissionMode: string | undefined, dangerMode: boolean): Sta
   const t = activeTokens();
   const chips: StatusChip[] = [];
   if (!dangerMode || permissionMode === 'plan') {
-    chips.push({ text: permissionModeLabel(permissionMode), fg: permissionMode === 'plan' ? t.info : t.textMuted, bold: permissionMode === 'plan', keep: true });
+    chips.push({
+      text: permissionModeLabel(permissionMode),
+      fg: permissionMode === 'plan' ? t.info : t.textMuted,
+      bold: permissionMode === 'plan',
+      keep: true,
+    });
   }
   if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   return chips;
 }
 
 /** The chips no view hides: auto-approve, the live microphone, sleep disabled. */
-function safetyChips(options: ShellFooterBuildOptions): StatusChip[] {
-  const t = activeTokens();
-  const chips: StatusChip[] = [];
-  if (options.dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
-  const voice = options.voiceCapture ?? null;
-  if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
-  if (options.powerKeepAwake) chips.push({ text: SLEEP_DISABLED_CHIP, fg: t.warning, bold: true, keep: true });
-  return chips;
-}
 
 /** Format a USD amount with a precision that suits its magnitude. */
-function fmtCost(usd: number): string {
-  if (!(usd > 0)) return '0.00';
-  if (usd < 0.01) return usd.toFixed(4);
-  if (usd < 1) return usd.toFixed(3);
-  return usd.toFixed(2);
-}
 
 /** "~$0.246", or "you ~$0.25 · fleet ~$0.47" once delegated agents have cost something (estimates, hence the ~). */
-export function statusCostText(usage: ShellFooterBuildOptions['usage'], model: string | undefined): string | null {
-  if (usage.available === false) return 'usage unavailable';
-  const inp = usage.up;
-  const out = usage.down;
-  const main = model && isModelPriced(model)
-    ? `~$${fmtCost(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model))}`
-    : null;
-  const fleet = usage.fleetCostUsd;
-  if (typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ~$${fmtCost(fleet)}`;
-  return main;
-}
 
-function displayDirectory(workingDir: string | undefined, homeDirectory: string | undefined): string | undefined {
-  if (!workingDir) return undefined;
-  const home = homeDirectory ?? (typeof process !== 'undefined' ? process.env.HOME ?? '' : '');
-  if (!home) return workingDir;
-  if (workingDir === home) return '~';
-  return workingDir.startsWith(home.endsWith('/') ? home : `${home}/`) ? '~' + workingDir.slice(home.replace(/\/$/, '').length) : workingDir;
-}
+export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined) => priceUsage(usage, model, true);
 
-export function buildShellFooter(options: ShellFooterBuildOptions): ShellFooterBuildResult {
-  const t = activeTokens();
-  const lines: Line[] = [];
-  const view = options.view ?? null;
-  // Passive hint rows, topmost first: the retry affordance (actionable, time
-  // bounded), the context pressure hint, then the user's scriptable line.
-  const above: Line[] = [];
-  if (options.submissionStatus) {
-    const status = options.submissionStatus.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ');
-    for (const line of wrapText(status, Math.max(1, options.width - 6)).slice(0, 4)) above.push(UIFactory.stringToLine(`   ${line}`, options.width, { fg: t.textMuted }));
-  }
-  if (options.retryHint) above.push(UIFactory.stringToLine(`   ${options.retryHint}`, options.width, { fg: t.textMuted, bold: true }));
-  if (options.contextStatusHint) above.push(UIFactory.stringToLine(`   ${options.contextStatusHint}`, options.width, { fg: t.textMuted }));
-  if (options.scriptableStatusLine) above.push(UIFactory.stringToLine(`   ${options.scriptableStatusLine}`, options.width, { fg: t.textMuted }));
-  // The throbber: main's activity, led by "main" inside a view.
-  if (options.throbber) above.push(renderThrobberLine(options.width, view ? { ...options.throbber, owner: 'main' } : options.throbber));
-  // The back-to-bottom pill is a fill row: a full empty row keeps it off any text row above it.
-  if (options.backToBottom) {
-    if (above.length > 0) above.push(blankRow(options.width));
-    above.push(renderBackToBottomPill(options.width, options.backToBottom));
-  }
-  // A full empty row keeps these rows off the transcript (a view's body ends with one already).
-  if (above.length > 0 && !view) lines.push(blankRow(options.width));
-  lines.push(...above);
+export { promptCursorOffset, type WrappedPromptCursorInfo } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
 
-  const focused = options.promptFocused ?? !options.indicatorFocused;
-  lines.push(...renderComposer({
-    width: options.width,
-    promptText: options.promptText,
-    cursorPos: options.promptCursorPos,
-    focused,
-    argsHint: options.commandArgsHint,
-    modeColor: view ? view.barColor : composerBarColor(options.permissionMode, options.composerPendingRisk === 'shell'),
-    placeholder: view?.placeholder,
-    disabledReason: view?.disabledReason,
-  }));
-
-  // The left end of the status line: mode, auto-approve, microphone and
-  // sleep are kept at any width; the composer flags are dropped first.
-  const chips: StatusChip[] = modeChips(options.permissionMode, options.dangerMode === true);
-  const voice = options.voiceCapture ?? null;
-  if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
-  if (options.powerKeepAwake) chips.push({ text: SLEEP_DISABLED_CHIP, fg: t.warning, bold: true, keep: true });
-  for (const flag of options.composerFlags ?? []) {
-    if (flag === 'shell') continue; // the bar's accent color says shell
-    // An orchestration request leaves this terminal: its flag carries the remote color.
-    const remote = flag === 'orchestration' && options.composerPendingRisk === 'remote';
-    chips.push({ text: flag, fg: remote ? activeUiTones().chrome.remote : t.textFaint, bold: remote });
-  }
-
-  const copied = Date.now() - options.lastCopyTime < 2000;
-  if (view) {
-    // Inside an agent or process view: its keys (what Esc does first), then main kept in sight.
-    lines.push(tagFooterLine(renderStatusLine({
-      width: options.width,
-      chips: safetyChips(options),
-      notice: options.showExitNotice ? { text: 'Press Ctrl+C again to exit', tone: 'error' } : view.notice ?? (copied ? { text: 'Copied', tone: 'info' } : null),
-      keys: view.keys,
-      // While main works its throbber names what it does; the trail would only repeat "working".
-      trail: options.throbber ? null : view.trail ?? null,
-      cost: view.noContext ? null : view.cost ?? null,
-      context: null,
-    }), 'usage'));
-    lastRenderedFooterHeight = lines.length;
-    return { lines, height: lines.length };
-  }
-  // A click anywhere on the status line (the context bar, the cost) opens Usage.
-  lines.push(tagFooterLine(renderStatusLine({
-    width: options.width,
-    chips,
-    notice: options.showExitNotice
-      ? { text: 'Press Ctrl+C again to exit', tone: 'error' }
-      : copied ? { text: 'Copied', tone: 'info' } : null,
-    // With text in the composer the next Esc clears it; scrolled back, it returns to the
-    // bottom; only an empty composer's Esc at the bottom interrupts.
-    busy: options.turnRunning ? { escAction: options.promptText.trim().length > 0 ? 'clear input' : options.backToBottom ? 'back to bottom' : undefined } : null,
-    keys: options.workTreeFocused ? WORK_TREE_KEYS : null,
-    directory: displayDirectory(options.workingDir, options.homeDirectory),
-    branch: options.branch,
-    background: {
-      agents: options.runningAgentCount,
-      processes: options.runningProcessCount,
-      focused: options.indicatorFocused,
-      progress: options.runningAgentProgress,
-    },
-    cost: statusCostText(options.usage, options.model),
-    // null: the model's window is unknown, and the meter says so; 0 or
-    // undefined: no meter (no model yet).
-    context: options.contextWindow === null || (options.contextWindow !== undefined && options.contextWindow > 0)
-      ? {
-          usedTokens: options.lastInputTokens ?? 0,
-          available: options.contextUsageAvailable,
-          windowTokens: options.contextWindow,
-          compactFraction: options.compactThreshold && options.compactThreshold > 0 ? options.compactThreshold : 0.85,
-        }
-      : null,
-  }), 'usage'));
-  lastRenderedFooterHeight = lines.length;
-  return { lines, height: lines.length };
-}
+export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
+  blankRow,
+  renderStatusLine,
+  cost: (options) => statusCostText(options.usage, options.model),
+  decorateStatus: (line) => tagFooterLine(line, 'usage'),
+  hints(options) {
+    const t = activeTokens();
+    const above: Line[] = [];
+    if (options.submissionStatus) {
+      const status = options.submissionStatus.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ');
+      for (const line of wrapText(status, Math.max(1, options.width - 6)).slice(0, 4))
+        above.push(UIFactory.stringToLine(`   ${line}`, options.width, { fg: t.textMuted }));
+    }
+    if (options.retryHint) above.push(UIFactory.stringToLine(`   ${options.retryHint}`, options.width, { fg: t.textMuted, bold: true }));
+    if (options.contextStatusHint)
+      above.push(UIFactory.stringToLine(`   ${options.contextStatusHint}`, options.width, { fg: t.textMuted }));
+    if (options.scriptableStatusLine)
+      above.push(UIFactory.stringToLine(`   ${options.scriptableStatusLine}`, options.width, { fg: t.textMuted }));
+    return above;
+  },
+  barColor: (options) => composerBarColor(options.permissionMode, options.composerPendingRisk === 'shell'),
+  modeChips: (options) => modeChips(options.permissionMode, options.dangerMode === true),
+  powerNote: (options) => (options.powerKeepAwake ? SLEEP_DISABLED_CHIP : undefined),
+  compactFraction: (value) => (value && value > 0 ? value : 0.85),
+  flags(options) {
+    const t = activeTokens();
+    const chips: StatusChip[] = [];
+    for (const flag of options.composerFlags ?? []) {
+      if (flag === 'shell') continue;
+      const remote = flag === 'orchestration' && options.composerPendingRisk === 'remote';
+      chips.push({ text: flag, fg: remote ? activeUiTones().chrome.remote : t.textFaint, bold: remote });
+    }
+    return chips;
+  },
+});

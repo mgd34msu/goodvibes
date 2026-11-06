@@ -1,13 +1,14 @@
+import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
 import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/sdk/platform/types';
-import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
+import '@goodvibes-jev/engine/sdk/platform/providers';
+import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
-import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.ts';
+import './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
-import { renderThrobberLine, type ThrobberState } from './throbber.ts';
-import { renderBackToBottomPill, type BackToBottomState } from './back-to-bottom.ts';
-import { voiceCaptureChip } from './voice-capture-chip.ts';
+import { type ThrobberState } from './throbber.ts';
+import { type BackToBottomState } from './back-to-bottom.ts';
+import './voice-capture-chip.ts';
 
 /**
  * shell-surface.ts, everything under the transcript, top to bottom:
@@ -50,10 +51,6 @@ import { voiceCaptureChip } from './voice-capture-chip.ts';
  * Esc leads: the way back to typing is never dropped for lack of room; the
  * other keys give way from the end (status-line.ts keeps whole keys in order).
  */
-const WORK_TREE_KEYS: ReadonlyArray<readonly [string, string]> = [
-  ['esc', 'back to typing'], ['↑↓', 'move between beads'], ['←→', 'fold / unfold'], ['enter', 'open'], ['y', 'copy'],
-];
-
 import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
 export type { ShellFooterView };
 
@@ -126,20 +123,14 @@ export interface ShellFooterBuildResult {
 }
 
 /** The status line under the composer. */
-const STATUS_ROWS = 1;
 
 /**
  * Real height of the most recently rendered footer. estimateShellFooterHeight
  * prefers it so the pre-render viewport math accounts for the throbber rows
  * the static formula cannot see. Null before any footer has rendered.
  */
-let lastRenderedFooterHeight: number | null = null;
 
 /** Rows the footer takes for this many prompt rows (exact when main is at rest). */
-export function estimateShellFooterHeight(promptLineCount: number): number {
-  if (lastRenderedFooterHeight !== null) return lastRenderedFooterHeight;
-  return COMPOSER_FIXED_ROWS + Math.max(1, promptLineCount) + STATUS_ROWS;
-}
 
 function blankRow(width: number): Line {
   const line = createEmptyLine(width);
@@ -152,14 +143,21 @@ function composerModeStyle(options: ShellFooterBuildOptions): { label: string; c
   const t = activeTokens();
   const intent = options.composerMode ?? 'prompt';
   switch (intent) {
-    case 'shell': return { label: 'shell', color: t.accent };
-    case 'command': return { label: 'command', color: t.info };
-    case 'plan': return { label: 'plan', color: t.info };
+    case 'shell':
+      return { label: 'shell', color: t.accent };
+    case 'command':
+      return { label: 'command', color: t.info };
+    case 'plan':
+      return { label: 'plan', color: t.info };
     case 'delegation':
     case 'orchestration':
       return { label: intent, color: activeUiTones().chrome.remote };
-    case 'memory pin': return { label: 'memory pin', color: t.secondary };
-    default: return options.executionMode === 'unavailable' ? { label: 'Mode unavailable', color: t.warning } : { label: presetForMode(options.executionMode).label, color: t.brand };
+    case 'memory pin':
+      return { label: 'memory pin', color: t.secondary };
+    default:
+      return options.executionMode === 'unavailable'
+        ? { label: 'Mode unavailable', color: t.warning }
+        : { label: presetForMode(options.executionMode).label, color: t.brand };
   }
 }
 
@@ -184,39 +182,12 @@ function modeChips(label: string, dangerMode: boolean): StatusChip[] {
 }
 
 /** Format a USD amount with a precision that suits its magnitude. */
-function fmtCost(usd: number): string {
-  if (!(usd > 0)) return '0.00';
-  if (usd < 0.01) return usd.toFixed(4);
-  if (usd < 1) return usd.toFixed(3);
-  return usd.toFixed(2);
-}
 
 /** "~$0.246" for a priced model (an estimate, hence the ~); null when the model has no price. */
-export function statusCostText(usage: ShellFooterBuildOptions['usage'], model: string | undefined): string | null {
-  if (usage.available === false) return 'usage unavailable';
-  if (!model || !isModelPriced(model)) return null;
-  return `~$${fmtCost(calcSessionCost(usage.up, usage.down, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model))}`;
-}
 
 /** The chips no view hides: auto-approve, the live microphone, the power note. */
-function safetyChips(options: ShellFooterBuildOptions): StatusChip[] {
-  const t = activeTokens();
-  const chips: StatusChip[] = [];
-  if (options.dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
-  const voice = options.voiceCapture ?? null;
-  if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
-  if (options.powerNote) chips.push({ text: options.powerNote, fg: t.warning, bold: true, keep: true });
-  return chips;
-}
 
 /** The working directory with the home directory as ~ (only on a whole path segment). */
-function displayDirectory(workingDir: string | undefined, homeDirectory: string | undefined): string | undefined {
-  if (!workingDir) return undefined;
-  const home = homeDirectory ?? (typeof process !== 'undefined' ? process.env.HOME ?? '' : '');
-  if (!home) return workingDir;
-  if (workingDir === home) return '~';
-  return workingDir.startsWith(home.endsWith('/') ? home : `${home}/`) ? '~' + workingDir.slice(home.replace(/\/$/, '').length) : workingDir;
-}
 
 /** The compaction threshold as a fraction [0..1] (0.85 when unset or nonsense). */
 function compactFraction(value: number | undefined): number {
@@ -224,90 +195,15 @@ function compactFraction(value: number | undefined): number {
   return Math.min(1, value > 1 ? value / 100 : value);
 }
 
-export function buildShellFooter(options: ShellFooterBuildOptions): ShellFooterBuildResult {
-  const t = activeTokens();
-  const lines: Line[] = [];
-  const focused = options.promptFocused ?? !options.indicatorFocused;
-  const mode = composerModeStyle(options);
-  const view = options.view ?? null;
-  const above: Line[] = [];
-  // Main's activity, led by "main" inside a view.
-  if (options.throbber) above.push(renderThrobberLine(options.width, view ? { ...options.throbber, owner: 'main' } : options.throbber));
-  // The back-to-bottom pill is a fill row: a full empty row keeps it off any text row above it.
-  if (options.backToBottom) {
-    if (above.length > 0) above.push(blankRow(options.width));
-    above.push(renderBackToBottomPill(options.width, options.backToBottom));
-  }
-  // A full empty row keeps these rows off the transcript (a view's body ends with one already).
-  if (above.length > 0 && !view) lines.push(blankRow(options.width));
-  lines.push(...above);
-  lines.push(...renderComposer({
-    width: options.width,
-    promptText: options.promptText,
-    cursorPos: options.promptCursorPos,
-    focused,
-    argsHint: options.commandArgsHint,
-    modeColor: view ? view.barColor : mode.color,
-    placeholder: view?.placeholder,
-    disabledReason: view?.disabledReason,
-  }));
+export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined) => priceUsage(usage, model, false);
 
-  // The left end of the status line: the mode, auto-approve, microphone and
-  // power note are kept at any width; the attachment flag is dropped first.
-  const chips: StatusChip[] = modeChips(mode.label, options.dangerMode === true);
-  const voice = options.voiceCapture ?? null;
-  if (voice && voiceCaptureRowVisible(voice)) chips.push(voiceCaptureChip(voice));
-  if (options.powerNote) chips.push({ text: options.powerNote, fg: t.warning, bold: true, keep: true });
-  // An attachment changes what the next message carries; the other flags are
-  // already said elsewhere (the mode chip, and the throbber's waiting
-  // phrase while an approval is pending).
-  if ((options.composerFlags ?? []).includes('attachments')) chips.push({ text: 'image attached', fg: t.info });
-
-  const copied = Date.now() - options.lastCopyTime < 2000;
-  if (view) {
-    // Inside an agent or process view: its keys (what Esc does first), then main kept in sight.
-    lines.push(renderStatusLine({
-      width: options.width,
-      chips: safetyChips(options),
-      notice: options.showExitNotice ? { text: 'Press Ctrl+C again to exit', tone: 'error' } : view.notice ?? (copied ? { text: 'Copied', tone: 'info' } : null),
-      keys: view.keys,
-      // While main works its throbber names what it does; the trail would only repeat "working".
-      trail: options.throbber ? null : view.trail ?? null,
-      cost: view.noContext ? null : view.cost ?? null,
-      context: null,
-    }));
-    lastRenderedFooterHeight = lines.length;
-    return { lines, height: lines.length };
-  }
-  lines.push(renderStatusLine({
-    width: options.width,
-    chips,
-    notice: options.showExitNotice
-      ? { text: 'Press Ctrl+C again to exit', tone: 'error' }
-      : copied ? { text: 'Copied', tone: 'info' } : null,
-    // With text in the composer the next Esc clears it; scrolled back, it returns to the
-    // bottom; only an empty composer's Esc at the bottom interrupts.
-    busy: options.turnRunning ? { escAction: options.promptText.trim().length > 0 ? 'clear input' : options.backToBottom ? 'back to bottom' : undefined } : null,
-    keys: options.workTreeFocused ? WORK_TREE_KEYS : null,
-    directory: displayDirectory(options.workingDir, options.homeDirectory),
-    background: {
-      agents: options.runningAgentCount,
-      processes: options.runningProcessCount,
-      focused: options.indicatorFocused,
-      progress: options.runningAgentProgress,
-    },
-    cost: statusCostText(options.usage, options.model),
-    // null: the model's window is unknown, and the meter says so; 0 or
-    // undefined: no meter (no model yet).
-    context: options.contextWindow === null || (options.contextWindow !== undefined && options.contextWindow > 0)
-      ? {
-          usedTokens: options.lastInputTokens ?? 0,
-          available: options.contextUsageAvailable,
-          windowTokens: options.contextWindow,
-          compactFraction: compactFraction(options.compactThreshold),
-        }
-      : null,
-  }));
-  lastRenderedFooterHeight = lines.length;
-  return { lines, height: lines.length };
-}
+export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
+  blankRow,
+  renderStatusLine,
+  cost: (options) => statusCostText(options.usage, options.model),
+  barColor: (options) => composerModeStyle(options).color,
+  modeChips: (options) => modeChips(composerModeStyle(options).label, options.dangerMode === true),
+  powerNote: (options) => options.powerNote,
+  compactFraction,
+  flags: (options) => ((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
+});

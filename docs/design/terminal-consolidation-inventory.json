@@ -1449,10 +1449,11 @@
       "path": "renderer/shell-surface.ts",
       "baselineTuiLines": 352,
       "baselineSimilarity": 0.6344,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-presentation-adapter",
       "platformFunctions": [
         "ShellFooterView"
-      ]
+      ],
+      "notes": "Shared footer composition, cursor flattening, height tracking, voice/power warnings, usage pricing, directory display, view status and context rows. Product adapters retain mode/flag wording, hints, fleet cost, click targets and compaction threshold normalization."
     },
     {
       "path": "renderer/shortcuts-overlay.ts",

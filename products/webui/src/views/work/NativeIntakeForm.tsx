@@ -372,9 +372,9 @@ function ScopedNativeIntakeForm({
   return (
     <div className="work-form native-intake">
       <p>
-        Submit complete original text for Jev to assess. If Jev admits work, Submit automatically
-        requests native execution for that same work and attempt. If Jev routes a conversation turn,
-        Submit automatically requests hosted delivery of that exact original input.
+        Submit complete original text for the host to process under its current decision-model
+        policy. Conversation requests start hosted delivery of that exact input. Autonomous native
+        work requires an available decision model.
       </p>
       <p className="dv-muted">
         Original text and source markers are saved in this browser before sending. Closing this view

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "status": "Source dispositions and implementation recorded; final qualification, CI and release pending.",
-  "sourceRevision": "da3efc26fce32b9123bc4b37f17ca4cc522596f1",
+  "status": "Source dispositions recorded; local scoped workflow qualification passed; exact-final-commit CI and release pending.",
+  "sourceRevision": "2fd0ee8b1faee8b36bb24b419daacb79d4e7cdee",
   "scope": "Tracked TypeScript source only. Excludes vendor, generated, dist, test/tests/e2e and runtime .goodvibes copies. Includes explicit developer tooling and foundation transport.",
   "method": "Index literal judgmentPort/captureJudgmentPort/createSystemOnePort access sites and declarations, then trace actual enclosing consumers and native/semantic branches. These counts are source navigation, not request counts or exhaustive transitive-call proof.",
-  "verification": "On implementation revision da3efc26 the full build and fresh API extraction passed. The platform repair suite passed35 tests across6files (browser source/published entrypoints, native formatting, schedules, policy/router/transport); daemon policy suite passed9 across3files (all3policies through paired hosted HTTP, settings persistence and containment posture). Earlier broad scoped evidence remains documented separately. Full current-source typechecking, remaining workflows, exact-final-SHA CI and release remain pending; no per-origin certification is implied.",
+  "verification": "See docs/releases/3.1.0-qualification.md for scoped source, build, typecheck, platform, Agent/TUI process, daemon HTTP and real Chromium evidence. The browser proof passed actual submit/answer/reload/shutdown under all3policies with zero Classic decision requests. No per-origin execution or model-accuracy certificate is asserted. Exact-final-SHA CI and release publication remain pending.",
   "files": [
     {
       "file": "packages/engine/errors/src/failure-reading.ts",
@@ -16,7 +16,7 @@
       ],
       "classicDisposition": "Classic structural HTTP/errno conclusions; no semantic readings; current owner guards retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/errors/src/judgment-authority.ts",
@@ -28,7 +28,7 @@
       ],
       "classicDisposition": "Preserve typed Classic feature limitation instead of misreporting a retired authority",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/errors/src/judgment-port.ts",
@@ -44,7 +44,7 @@
       ],
       "classicDisposition": "Central Classic port lookup guard before model access",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/ci-readings/stored-readings.ts",
@@ -56,7 +56,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/delivery-proof.ts",
@@ -68,7 +68,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/gate-proof.ts",
@@ -80,7 +80,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/install-retry.ts",
@@ -96,7 +96,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/install-smoke-check.ts",
@@ -108,7 +108,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/observe-proof.ts",
@@ -120,7 +120,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/payments-proof.ts",
@@ -132,7 +132,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/project-calibration.ts",
@@ -144,7 +144,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/read-credential-keys.ts",
@@ -156,7 +156,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/read-stale-error-kinds.ts",
@@ -168,7 +168,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/read-static-source.ts",
@@ -180,7 +180,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/scripts/routing-proof.ts",
@@ -192,7 +192,7 @@
       ],
       "classicDisposition": "Explicit developer/release/calibration/proof tooling, separate from application startup/chat/completion. Live semantic scripts are opt-in; installed adapter smoke requests use synthetic fetches. No fabricated Classic readings.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/archetype-family.ts",
@@ -204,7 +204,7 @@
       ],
       "classicDisposition": "Classic list with unclassified families; prose-selected teamwork orchestration reports limitation before task creation",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/brief-fidelity.ts",
@@ -216,7 +216,7 @@
       ],
       "classicDisposition": "Classic omits optional semantic brief comparison; actual agent/tool admission retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/connector-reading.ts",
@@ -232,7 +232,7 @@
       ],
       "classicDisposition": "Public semantic-only connector classifier reports explicit feature limitation in Classic; empty declaration list remains native. No in-repo application caller beyond API export. Preferred owned scope switches on exact unavailable then reports limitation; never labels unknown effectful tools read-only or fabricates inbox/calendar flags.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/conversation-reading.ts",
@@ -256,7 +256,7 @@
       ],
       "classicDisposition": "Raw semantic intent/proposal readers disclose feature limitation in Classic before privacy projection or port lookup. Actual classifyInboundIntent/parseWorkProposalReply callers use shared side-effect-free decisionOrClassic: Classic conversation default (explicit reason), no inferred owner reply; cancellation retained. Classic proposal render no longer promises natural-language yes/no approval.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/orchestrator-observations.ts",
@@ -272,7 +272,7 @@
       ],
       "classicDisposition": "Classic retains declared test runners, omits inferred framework/repetition hints with live run ownership; Preferred optional outage transition survives catch",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/planning-goal.ts",
@@ -284,7 +284,7 @@
       ],
       "classicDisposition": "Classic unassessed observation; explicit authenticated planning command retains owner goal without semantic admission",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/agents/platform-work-reading.ts",
@@ -296,7 +296,7 @@
       ],
       "classicDisposition": "Inspected only product helper call chain; old platform source restriction no longer invokes semantic ownerAsked helper in active validatePlatformBoundary path",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/automation/schedule-reading.ts",
@@ -308,7 +308,7 @@
       ],
       "classicDisposition": "Classic whole-field zoned timestamp/five-field cron/every or in compact duration grammar; unsupported prose explicitly needs decision model; no confidence",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/browser/browser-control-identity.ts",
@@ -320,7 +320,7 @@
       ],
       "classicDisposition": "Classic retains native action/source ownership without model acquisition; exact snapshot/name matching remains, semantic paraphrases refused, credential page unassessed",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/browser/browser-failure-reading.ts",
@@ -336,7 +336,7 @@
       ],
       "classicDisposition": "Classic structured errno facts only; no prose-authorized library/install/network diagnosis; live source fences retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/browser/launch-reading.ts",
@@ -348,7 +348,7 @@
       ],
       "classicDisposition": "Classic generic unknown launch cause; no model call or inferred repair",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/calendar/batteries/missing-permission.ts",
@@ -360,7 +360,7 @@
       ],
       "classicDisposition": "Classic only exact supported authentication challenge can name a missing scope; original provider refusal otherwise",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/channels/status-reading.ts",
@@ -380,7 +380,7 @@
       ],
       "classicDisposition": "Classic keeps original progress notices without substance verdict/cache suppression; Preferred exact availability fallback; no requests in Classic",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/checkin/judge.ts",
@@ -392,7 +392,7 @@
       ],
       "classicDisposition": "Public judge early feature limitation in Classic before any port/provider. Service owns policy, skips before briefing/judge/message/delivery, explicit skipped-decision-models-disabled receipt/schema/UI. Preferred exact exhaustion skips without invented quiet/no; prior real contact receipt retained if fidelity unavailable.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/config/credential-key-reading.ts",
@@ -404,7 +404,7 @@
       ],
       "classicDisposition": "Classic holdsCredential uses declared schema classification, masks undeclared keys; explicit semantic reading API remains model-only",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/config/settings-unknown-forms.ts",
@@ -416,7 +416,7 @@
       ],
       "classicDisposition": "Classic unknown-key notices without inferred renames",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/agent-hooks.ts",
@@ -428,7 +428,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/best-of-n.ts",
@@ -440,7 +440,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/check.ts",
@@ -476,7 +476,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/completion.ts",
@@ -516,7 +516,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/correction.ts",
@@ -528,7 +528,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/escalation.ts",
@@ -548,7 +548,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/intake-route.ts",
@@ -564,7 +564,7 @@
       ],
       "classicDisposition": "Whole owned policy; Classic ordinary turn bypasses semantic auto-contract/reply route, leaving pending owner escalations untouched. Only side-effect-free classification may fall back; start/reply outside fallback boundary, cancellation/native admission retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/native-decisions.ts",
@@ -576,7 +576,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/plan-checks.ts",
@@ -588,7 +588,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/planner.ts",
@@ -600,7 +600,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/contract/unit-failures.ts",
@@ -612,7 +612,7 @@
       ],
       "classicDisposition": "Autonomous contract semantic-only feature. Shared runner startup holds saved Classic contracts before workspace restoration/owner adoption/reaping/commit. New starts and queued/resumed worker/session/commit continuations require decision feature before effects. Lower semantic check/planning/selection/reply/correction helpers also reject Classic before borrowed ports or state writes. Native receipt inspection and exact durable replay remain read-only paths.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/core/adaptive-planner.ts",
@@ -624,7 +624,7 @@
       ],
       "classicDisposition": "Classic single worker default, explicit owner strategy choices retained, no ranked candidates or Jev receipt",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/core/execution-plan.ts",
@@ -636,7 +636,7 @@
       ],
       "classicDisposition": "Classic exact canonical labels/checkboxes; noncanonical labels get explicit parse notice; owned parse scope retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/core/intent-classifier.ts",
@@ -648,7 +648,7 @@
       ],
       "classicDisposition": "Ordinary conversation/adaptive telemetry callers skip semantic classification in Classic; explicit classifier remains semantic-only",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/core/response-completion.ts",
@@ -664,7 +664,7 @@
       ],
       "classicDisposition": "Classic finalization tied to exact current transcript; no independent semantic certification",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/core/transcript-events/classify.ts",
@@ -676,7 +676,7 @@
       ],
       "classicDisposition": "Declared occurrences retained; unknown system notices use generic category",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/daemon/approval-reply.ts",
@@ -688,7 +688,7 @@
       ],
       "classicDisposition": "Classic exact /approve ID and /deny ID only; existing authorized candidate set and real broker owner proof retained; no semantic receipts",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/daemon/reading-lifetime.ts",
@@ -700,7 +700,7 @@
       ],
       "classicDisposition": "Shared semantic-only port, with all production caller roots traced. surface-conversation-gate native Classic conversation keeps original channel capability/profile/source guards and outsideContract; Preferred pure intent exhaustion falls back once. work-proposal reply native Classic passes message through; Preferred exhaustion preserves pending proposal and forwards chat, never accepts work. surface-actions explicit slash-command native Classic branch retains exact target custody. auto-updater lazy failure port is never accessed by error foundation Classic native HTTP/errno conclusions.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/email/imap-readings.ts",
@@ -712,7 +712,7 @@
       ],
       "classicDisposition": "Classic unassessed refusal/cursor, explicit Drafts target, live publication/account lease without semantic port; protocol facts retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/email/style-reading.ts",
@@ -728,7 +728,7 @@
       ],
       "classicDisposition": "Standalone semantic corpus-style API explicitly requires decision models at entry (after caller cancellation). Actual product draft path is style-reply.ts and has a Classic template alternative.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/email/style-reply-readings.ts",
@@ -740,7 +740,7 @@
       ],
       "classicDisposition": "Protected read/draft-only source wrapper pins policy; Classic default profile/native draft preserve source-owner capture/screen/project equality, original source/caller/signal and cleanup restrictions with zero port/network. No name/tone/sentence inference, explicit not-evaluated Classic provenance. Only known pure read/draft callbacks enable availability fallback; semantic-only counters/tone/name helpers report feature limitation. Parent Agent scope spans profile and draft; no sending route added.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/gate/batteries/execution-purpose.ts",
@@ -756,7 +756,7 @@
       ],
       "classicDisposition": "Semantic verification labeling is optional history enrichment; sole production caller is execution-ledger. Classic omits the call and leaves verification absent; Preferred typed exhaustion records partial Classic provenance without claiming verification.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/gate/policy/execution-ledger.ts",
@@ -768,7 +768,7 @@
       ],
       "classicDisposition": "Immediate native lifecycle history remains available. Classic skips role/route/purpose model work and caches, withholds unassessed argument values, emits explicit Classic provenance and absent verification. Preferred uses pure enrichment fallback only on actual typed exhaustion; no executor replay.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/gate/reading.ts",
@@ -788,7 +788,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/google/browser-readings.ts",
@@ -800,7 +800,7 @@
       ],
       "classicDisposition": "Automatic Google page interpretation explicitly unavailable in Classic before captured port or browser actions. Native manual browser ownership is separate, retains method/caller/signal guards, and authorizes no inferred page facts or decision receipts. Setup roots and actual runner paths inspected; exact Preferred exhaustion stops without replay.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/google/console-reading.ts",
@@ -812,7 +812,7 @@
       ],
       "classicDisposition": "Publishing/project status interpretation explicitly semantic-only; full owned Google policy scope. Classic reports manual Google settings alternative without fabricated status. Exact Preferred exhaustion transitions then stops current flow, never replaying effects.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/google/failure-readings.ts",
@@ -828,7 +828,7 @@
       ],
       "classicDisposition": "Classic keeps API/grant failures, returns unknown for prose cause without decision requests, and preserves exact native account/HTTP/ErrorInfo facts in actual parent callers. Provenance and unassessed diagnostic metadata are carried on parent failures. Preferred pure diagnostic fallback only on exact exhaustion; no HTTP replay, auth reset or consent changes. Source/privacy/caller/cancel guards retained before fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/google/verification-reading.ts",
@@ -840,7 +840,7 @@
       ],
       "classicDisposition": "Automatic artifact selection explicitly unavailable in Classic before token projection/source screening; Agent mail.verification preflights before opening Google connection/read. Manual mail.read and native consent remain available. Exact Preferred availability propagates through read wrappers and stops without extracting an unassessed token or consuming expectation.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/hooks/hook-api.ts",
@@ -852,7 +852,7 @@
       ],
       "classicDisposition": "Classic literal declared-contract suggestions with original catalog guards; no hook execution",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/hosted-sessions/spine-intake.ts",
@@ -864,7 +864,7 @@
       ],
       "classicDisposition": "Classic delivery failure reporting skips model acquisition and does not replay whole turns after possible completed tools",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/activation/reader.ts",
@@ -880,7 +880,7 @@
       ],
       "classicDisposition": "Classic synthesized nodes remain untrusted pending drafts with explicit native not-evaluated provenance, no battery/model/probability/decision ID and no port metadata access. Native observations, explicit owner review, unchanged active replay/restoration retain native routes. Changed active content and requireAccepted hold clearly. Preferred pure per-candidate typed availability exhaustion only; completed genuine no is retained. Caller/source/stage/cancel/model/ask/recorder and persisted publication guards remain; public node/import operations own policy throughout native staging and commit.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/consolidation.ts",
@@ -892,7 +892,7 @@
       ],
       "classicDisposition": "Classic semantic proposal refresh/automatic pass explicitly unavailable before pass startup; manual review separate",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/entity-aliases.ts",
@@ -904,7 +904,7 @@
       ],
       "classicDisposition": "Classic exact declared identities retained, inferred aliases omitted; whole-batch private/source/native guards retained; Preferred exact availability before held conversion",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/extraction-ownership.ts",
@@ -916,7 +916,7 @@
       ],
       "classicDisposition": "Classic owners retain artifact/source/caller checks while omitting semantic backend dependencies; full extraction still hash-bound and one-use",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/ask-page-recovery.ts",
@@ -928,7 +928,7 @@
       ],
       "classicDisposition": "Semantic verified-answer page recovery only. Sole production caller refreshDevicePagesForHomeGraphAsk constructs the reader before its first persisted subject-link writes; called through verified Home Graph ask root, whose explicit feature guard prevents Classic entry. The private helper itself acquires central captureJudgmentPort before operation, which yields typed Classic limitation without requests. Raw store/browse/manual activation remain native paths. No source/receipt rebaseline or replay fallback added.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/auto-link/reader.ts",
@@ -940,7 +940,7 @@
       ],
       "classicDisposition": "Classic producer omits automatic links before publication; Preferred exact availability preserved for no-inference fallback; semantic negatives/uncertainty never become links",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/page-priority.ts",
@@ -952,7 +952,7 @@
       ],
       "classicDisposition": "Classic stable catalog order without semantic probability; original complete catalog and caller/cancel guards retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/page-refresh-queue.ts",
@@ -964,7 +964,7 @@
       ],
       "classicDisposition": "Semantic passport refresh queue only. Sole production caller refreshHomeGraphDevicePassport in generated-pages.ts requires verified device-passport feature before constructing this queue; Classic is held before any queued operation or write. Native Home Graph raw storage/browse is a separate supported path. Queue preserves per-page serialization, original source/policy/native state/signal and installation currentness.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/quality/reader.ts",
@@ -976,7 +976,7 @@
       ],
       "classicDisposition": "Semantic quality preflight in shared public report and reader; Classic snapshot returns honest held assessment instead of regenerating issues; typed availability updates Preferred only",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/triage.ts",
@@ -988,7 +988,7 @@
       ],
       "classicDisposition": "Explicit decision-only limitation before store initialization or issue/fact effects; ordinary manual review/list/cancellation retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/home-graph/triage/reader.ts",
@@ -1000,7 +1000,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/project-planning/answer-actions.ts",
@@ -1016,7 +1016,7 @@
       ],
       "classicDisposition": "Classic planning readiness checks actual native goal presence/scope/questions/tasks/verification/owner approval, without claiming semantic goal clarity. State/evaluation persist an explicit readinessAssessment basis and not-evaluated semantic status. Full input/stored-row/clocks/workspace/source generation/current/cancel/publication/event guards retained. Public save/evaluate/action/answer operations own policy throughout commit. Optional answer suggestions use topics:null, empty IDs, no fake No/confidence for Classic; genuine completed topic readings survive later recommendation exhaustion. Native custom/ask-narrower choices remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/project-planning/readiness.ts",
@@ -1028,7 +1028,7 @@
       ],
       "classicDisposition": "Classic planning readiness checks actual native goal presence/scope/questions/tasks/verification/owner approval, without claiming semantic goal clarity. State/evaluation persist an explicit readinessAssessment basis and not-evaluated semantic status. Full input/stored-row/clocks/workspace/source generation/current/cancel/publication/event guards retained. Public save/evaluate/action/answer operations own policy throughout commit. Optional answer suggestions use topics:null, empty IDs, no fake No/confidence for Classic; genuine completed topic readings survive later recommendation exhaustion. Native custom/ask-narrower choices remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/scope-selection.ts",
@@ -1044,7 +1044,7 @@
       ],
       "classicDisposition": "Classic native namespace selection, retained record/extraction/topology/caller guards; prior semantic negatives remain excluded",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-excerpts/prepare.ts",
@@ -1060,7 +1060,7 @@
       ],
       "classicDisposition": "Native localKnowledgeSourceSpans quotes complete exact fields/offsets. Semantic preparation remains inside guarded answer path, with source/port identity checks and Disabled/availability propagation to native public-retrieval fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-excerpts/reader.ts",
@@ -1076,7 +1076,7 @@
       ],
       "classicDisposition": "Semantic-only excerpt selection retains source/config/timer/sibling cleanup; actual availability and Disabled propagate to owning public-retrieval phase. Native source quoting is separate and carries no semantic claim.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-fact-selection.ts",
@@ -1100,7 +1100,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-gap-plan/reader.ts",
@@ -1116,7 +1116,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-object-alignment/reader.ts",
@@ -1140,7 +1140,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-reading-ports.ts",
@@ -1152,7 +1152,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-source-ranking.ts",
@@ -1168,7 +1168,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/answer-verification/reader.ts",
@@ -1180,7 +1180,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/enrichment.ts",
@@ -1196,7 +1196,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/evidence-ranking/batch.ts",
@@ -1212,7 +1212,7 @@
       ],
       "classicDisposition": "Semantic-only evidence batches retain record/config/deadline guards and forward genuine unavailable/Disabled to owning public-retrieval fallback; local Classic ranking lives at that public boundary.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/evidence-ranking/reader.ts",
@@ -1228,7 +1228,7 @@
       ],
       "classicDisposition": "Pure semantic ranking validates complete candidates, provider/model and ownership; actual availability/Disabled propagate to native retrieval. No Classic probabilities are fabricated.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/extraction-value/reader.ts",
@@ -1240,7 +1240,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/fact-quality.ts",
@@ -1260,7 +1260,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-decisions.ts",
@@ -1272,7 +1272,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-fact-scoring/reader.ts",
@@ -1292,7 +1292,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-profile-requirement/reader.ts",
@@ -1312,7 +1312,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-profile/reader.ts",
@@ -1324,7 +1324,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-source-authority/reader.ts",
@@ -1344,7 +1344,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-subject-selection/reader.ts",
@@ -1364,7 +1364,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/repair-usefulness/reader.ts",
@@ -1384,7 +1384,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/self-improvement-assessment/reader.ts",
@@ -1400,7 +1400,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/self-improvement-failure.ts",
@@ -1416,7 +1416,7 @@
       ],
       "classicDisposition": "Native structured failure bookkeeping in Classic; unstructured causes explicitly unknown/not-evaluated; actual Preferred availability exhaustion only; native lifetime and cancellation guards retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/verification/generated-fact-support.ts",
@@ -1428,7 +1428,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/semantic/web-gap-repair/reader.ts",
@@ -1440,7 +1440,7 @@
       ],
       "classicDisposition": "Semantic-only knowledge APIs explicitly reject Classic before generation, model metadata or semantic work; retained assessment readers recheck policy before cached acceptance or fresh calls. Native pure projections remain available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/source-quality.ts",
@@ -1456,7 +1456,7 @@
       ],
       "classicDisposition": "Semantic usefulness/authority is an explicit Classic feature limitation before any model access or semantic cache reuse. Native excluded-source status checks remain pure and available. DecisionModelsDisabledError is a propagated knowledge quality hold, so cleanup/enrichment catch paths cannot silently swallow it or turn it into a completed semantic result.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/store-node-activation.ts",
@@ -1468,7 +1468,7 @@
       ],
       "classicDisposition": "Classic synthesized nodes remain untrusted pending drafts with explicit native not-evaluated provenance, no battery/model/probability/decision ID and no port metadata access. Native observations, explicit owner review, unchanged active replay/restoration retain native routes. Changed active content and requireAccepted hold clearly. Preferred pure per-candidate typed availability exhaustion only; completed genuine no is retained. Caller/source/stage/cancel/model/ask/recorder and persisted publication guards remain; public node/import operations own policy throughout native staging and commit.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/knowledge/uri-canonicalization/reader.ts",
@@ -1480,7 +1480,7 @@
       ],
       "classicDisposition": "Classic mechanically normalizes native URL syntax and retains unresolved ref occurrences; typed Preferred exhaustion omits no unknown query identity, native/cancel guards live",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/multimodal/service.ts",
@@ -1492,7 +1492,7 @@
       ],
       "classicDisposition": "Classic media analysis pins policy, preserves actual image/audio/document/video provider/extractor output and native artifact/privacy/cancel/policy fences; skips optional semantic entities with explicit metadata and packet notice. Preferred exact chain exhaustion falls back only entity phase, never reruns media provider. Analysis registry/serialized-result identity and explicit authenticated writeback unchanged; host provenance cannot be minted in provider metadata.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/occasions/readings.ts",
@@ -1504,7 +1504,7 @@
       ],
       "classicDisposition": "Classic native occasion lifetime avoids eager port capture while Default retains entry authority; native source/config/owner/policy/cancel retained through state publication. Explicit declared dates/plans/list/no/later/ack/history/resume remain usable. Semantic subject fallback unattributed unless native self marker, unassessed provenance; pending returns raw open items, no inferred reminder. Sweeps retain housekeeping and pause nudges/new mirrors/gift inference before effects. Mid-task wording outage returns held Classic with actual prior mirrored count, no effect replay. New gift interviews clearly require models; existing native interview records remain read/answer/complete capable.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/orchestration/bookkeeping.ts",
@@ -1516,7 +1516,7 @@
       ],
       "classicDisposition": "Classic held/unassessed failure with original admitted message, native source/owner/cancel fences and provenance; exact Preferred availability resets semantic observer to native guard. No git retry/repair or fabricated corruption diagnosis.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/orchestration/workstream-services.ts",
@@ -1528,7 +1528,7 @@
       ],
       "classicDisposition": "Classic whole draft decomposition scope uses null/unassessed risk, existing owner-pinned/single planner; gate/proposal/draft persist Classic provenance. Author/edit/approve/inspect/reload remain native; autonomous contract launch preflight before runner start/draft removal. Draft edits replace stale gate metadata.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/owner-profile/person-reading.ts",
@@ -1544,7 +1544,7 @@
       ],
       "classicDisposition": "Named private-person prose attribution is semantic-only: Classic explicit feature limitation after native source/privacy/cancellation checks and structural empty-input guards. Never substring-match or broaden to other private lines. Preferred real unavailable yields capability limitation rather than fake no matching person; no row is returned on incomplete interpretation. Raw structured/profile native surfaces retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/owner-profile/postal-reading.ts",
@@ -1556,7 +1556,7 @@
       ],
       "classicDisposition": "Classic explicit limitation before ordinary address proposer or JEV verifier; missing/disabled source field remains native absence. ConfigManager owned policy prepares stored address fields only in Classic with not-evaluated profile provenance. Preferred falls back to these native fields only on captured decision-port missing/full verification chain exhaustion; ordinary proposal-provider failures are never eligible. Native config epoch/source/privacy/cancel/currentness preserved, no address guesses or generator replay.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/cart.ts",
@@ -1572,7 +1572,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/entry-surface.ts",
@@ -1584,7 +1584,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/merchant-judge-model.ts",
@@ -1596,7 +1596,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/notice-delivery.ts",
@@ -1608,7 +1608,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/order-correlation.ts",
@@ -1628,7 +1628,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/payments/shipping.ts",
@@ -1640,7 +1640,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/permissions/credential-read-defaults.ts",
@@ -1652,7 +1652,7 @@
       ],
       "classicDisposition": "Classic requests secret-aware owner approval, never semantic absence-of-secrets cached result; not a claim about file contents",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/permissions/manager.ts",
@@ -1668,7 +1668,7 @@
       ],
       "classicDisposition": "Classic deterministic/owner authorization; remembered refusals remain denied",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/presentation/editor-message.ts",
@@ -1680,7 +1680,7 @@
       ],
       "classicDisposition": "Classic neutral local presentation object; no fabricated blocking verdict",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/providers/decision-router.ts",
@@ -1692,7 +1692,7 @@
       ],
       "classicDisposition": "Classic General target without categorization; answering context preserved",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/providers/provider-error.ts",
@@ -1704,7 +1704,7 @@
       ],
       "classicDisposition": "Classic alternate API only for exact endpoint/method HTTP statuses; no prose-driven replay",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/providers/provider-setup.ts",
@@ -1716,7 +1716,7 @@
       ],
       "classicDisposition": "Classic setup presentation from declared runtime auth/local facts, unknown otherwise, provenance retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/catalog-access.ts",
@@ -1728,7 +1728,7 @@
       ],
       "classicDisposition": "Classic refresh uses unknown interpreted provider access; no request or semantic cache write, actual published catalog facts retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/command-discovery.ts",
@@ -1740,7 +1740,7 @@
       ],
       "classicDisposition": "Classic local declared title/alias/keyword overlap suggestions; source/cancellation checks, provenance and no execution",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/model-limit-readings.ts",
@@ -1752,7 +1752,7 @@
       ],
       "classicDisposition": "Classic leaves interpreted cap family unknown; adapter uses its existing conservative documented cap",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/model-tiers.ts",
@@ -1764,7 +1764,7 @@
       ],
       "classicDisposition": "Automatic tier reads avoided at ordinary prompt caller by Classic tier-prompts facade; semantic contract router remains model-only. known/lastReading already return unknown under Classic guard",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/provider-cache-readings.ts",
@@ -1780,7 +1780,7 @@
       ],
       "classicDisposition": "Classic uses declared adapter facts first and deterministic Claude ID prefix compatibility fallback; failed optional cache creation remains unclassified and answer can proceed uncached",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/provider-readings.ts",
@@ -1800,7 +1800,7 @@
       ],
       "classicDisposition": "Classic unknown discovery/stop metadata, no prose-based alternate API or reasoning blame; undocumented content semantics explicitly unavailable; family lookup consumed through Classic-aware caller",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/request-reading.ts",
@@ -1812,7 +1812,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/route-planner.ts",
@@ -1828,7 +1828,7 @@
       ],
       "classicDisposition": "Inspected callers: semantic model-route planner reached through contract routing; Classic contract start preflight already reports decision-model requirement before work creation",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/route-scope.ts",
@@ -1844,7 +1844,7 @@
       ],
       "classicDisposition": "Inspected semantic route planner dependency; contract-only automatic family expansion, Classic contract execution start already preflight-blocked",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/task-routes/autonomy-intake.ts",
@@ -1856,7 +1856,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/task-routes/planner.ts",
@@ -1868,7 +1868,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/routing/user-error.ts",
@@ -1880,7 +1880,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/at-rest-persistence.ts",
@@ -1896,7 +1896,7 @@
       ],
       "classicDisposition": "Classic skips credential exemptions; native issuer/profile/candidate masking remains. Cached exemptions require current semantic authority and cannot clear values in Classic.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/batteries/pending-approval.ts",
@@ -1908,7 +1908,7 @@
       ],
       "classicDisposition": "Session-return-context caller uses real host count; Classic unknown count nullable, no transcript prose reading",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/batteries/setup-reply-command.ts",
@@ -1920,7 +1920,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/batteries/system-message-priority.ts",
@@ -1932,7 +1932,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/compaction/quality-score.ts",
@@ -1944,7 +1944,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/compaction/strategies/collapse.ts",
@@ -1956,7 +1956,7 @@
       ],
       "classicDisposition": "Mechanical exact quotations with clipping; no semantic selection",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/config/emit-bridge.ts",
@@ -1968,7 +1968,7 @@
       ],
       "classicDisposition": "Classic undeclared event values withheld without decision requests",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/ecosystem/catalog.ts",
@@ -1984,7 +1984,7 @@
       ],
       "classicDisposition": "Classic catalog search uses shared literal ranking over raw entries; listing, source/compatibility inspection and explicit install remain native. Semantic trust-note risk review reports an early Classic feature limit.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/ecosystem/recommendations.ts",
@@ -1996,7 +1996,7 @@
       ],
       "classicDisposition": "Automatic semantic recommendation ranking is an explicit feature limit. Classic marketplace read model skips ranking, retires pending result keys and explains that recommendations were not evaluated; raw browsing remains available.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/forensics/classifier.ts",
@@ -2008,7 +2008,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/forensics/slow-phases.ts",
@@ -2020,7 +2020,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/judgment-services.ts",
@@ -2032,7 +2032,7 @@
       ],
       "classicDisposition": "Lazy recorded transport enforces Classic before settings/credential/transport acquisition; composition skips semantic setting announcements in Classic. Finite failover, source ownership, cancellation and disposal preserved.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/ops/index.ts",
@@ -2044,7 +2044,7 @@
       ],
       "classicDisposition": "Classic literal playbook suggestions with native catalog/cancellation guards; no diagnostics/remediation execution",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/owned-judgment-work.ts",
@@ -2056,7 +2056,7 @@
       ],
       "classicDisposition": "Operation owns native signal/caller lifetime independently of lazy semantic port acquisition. Classic retains native guards and skips obsolete semantic capture assertions. Semantic options.port lookup remains guarded.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/permissions/lint.ts",
@@ -2068,7 +2068,7 @@
       ],
       "classicDisposition": "Native Classic failure presentation, system-message visibility, forensic reports and structural permission lint; semantic slow-phase and compaction grading explicitly unavailable; Default behavior retained and Preferred downgrades only actual availability exhaustion.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/permissions/normalization/classifier.ts",
@@ -2084,7 +2084,7 @@
       ],
       "classicDisposition": "Classic returns unassessed provenance consumed as mandatory owner ask by shared sandbox policy",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/permissions/sandbox-judgment.ts",
@@ -2096,7 +2096,7 @@
       ],
       "classicDisposition": "Advisory caller now omits model-only advisory in Classic and uses real owner broker; explicit runSandboxJudgment remains semantic-only",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/settings/control-plane-store.ts",
@@ -2108,7 +2108,7 @@
       ],
       "classicDisposition": "Classic changed managed settings report unassessed risk; no-change bundle is deterministically low",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/system-message-presentation.ts",
@@ -2120,7 +2120,7 @@
       ],
       "classicDisposition": "Classic leaves prose classification absent; neutral presentation",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/runtime/tools/contract-verifier.ts",
@@ -2132,7 +2132,7 @@
       ],
       "classicDisposition": "Classic full diagnostics retain native structure, omit semantic description cache/port, descriptionQuality not-evaluated and Classic provenance propagated to diagnostic panel; Preferred only typed availability fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/security/card-fields.ts",
@@ -2144,7 +2144,7 @@
       ],
       "classicDisposition": "Classic browser form-value retention and expected-code scanning are native; semantic-only payment interpretation requires a decision model before effects. Explicit payment entry surface policy and native budget arithmetic retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/security/card-shapes.ts",
@@ -2156,7 +2156,7 @@
       ],
       "classicDisposition": "Classic PAN/labelled-security-code/expiry patterns stay local, no meaning call, position-only findings",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/security/content-taint.ts",
@@ -2168,7 +2168,7 @@
       ],
       "classicDisposition": "Shared assessOutwardContent now reports unassessed Classic derivation and requires existing exact owner approval instead of invoking this semantic reader",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/security/link-validation.ts",
@@ -2180,7 +2180,7 @@
       ],
       "classicDisposition": "Classic deterministic HTTPS/port/userinfo/domain/redirect boundary; no semantic host certification",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/security/source-screening/owner.ts",
@@ -2192,7 +2192,7 @@
       ],
       "classicDisposition": "Classic local receipts; Preferred only on verified private-route availability exhaustion; original authority/privacy/refusal fences retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/code-index-lexical.ts",
@@ -2204,7 +2204,7 @@
       ],
       "classicDisposition": "Literal overlap score with Classic provenance; full source path/currentness fences",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/code-injection-ranking.ts",
@@ -2216,7 +2216,7 @@
       ],
       "classicDisposition": "Passive semantic injection omitted; manual code search remains available",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/knowledge-injection.ts",
@@ -2228,7 +2228,7 @@
       ],
       "classicDisposition": "Passive semantic enrichment omitted; stored memory retrieval remains available",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/memory-consolidation.ts",
@@ -2240,7 +2240,7 @@
       ],
       "classicDisposition": "Classic explicit skipped receipt with no merges/decays/archives or semantic requests",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/memory-search-ranking.ts",
@@ -2256,7 +2256,7 @@
       ],
       "classicDisposition": "Manual literal/vector retrieval remains; scores explicitly identify source; no invented probabilities",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/memory-usage-detection.ts",
@@ -2268,7 +2268,7 @@
       ],
       "classicDisposition": "Classic actual injected presence only; no inferred reference credit, input/cancellation fences retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/sqlite-vec-loader.ts",
@@ -2280,7 +2280,7 @@
       ],
       "classicDisposition": "Classic extension failure classification recognizes exact local platform refusal diagnostics; other packaging errors preserved",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/state/vibe-projection.ts",
@@ -2296,7 +2296,7 @@
       ],
       "classicDisposition": "Classic imports complete owner-authored VIBE body as one fresh literal constraint with Classic/unassessed tags and file provenance, retaining precedence caveat. Shared pure transform only availability fallback; source/options/owner/signal/policy checked before/after readings. Empty reading sets do not lookup a port. Actual Agent boot/manual migrations own entire policy scope and retain file/backend through MemoryAccess publication and marker write.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/agent/child-failure-envelope.ts",
@@ -2312,7 +2312,7 @@
       ],
       "classicDisposition": "Classic actual stamped/cancel reason or generic error; actual child partial output and provenance retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/analyze/git-modes.ts",
@@ -2328,7 +2328,7 @@
       ],
       "classicDisposition": "Classic raw git diff with unassessed semantic risk/compatibility; normal raw diff unchanged",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/analyze/scan-findings.ts",
@@ -2348,7 +2348,7 @@
       ],
       "classicDisposition": "Classic local credential candidates, env presence and actual filesystem mode bits; semantic dangerous-call assessment explicitly unavailable",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/analyze/scan-lines.ts",
@@ -2360,7 +2360,7 @@
       ],
       "classicDisposition": "Used only by semantic findings path; Classic bypasses existence/per-line readings at scan-findings facade",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/analyze/scan-modes.ts",
@@ -2376,7 +2376,7 @@
       ],
       "classicDisposition": "Classic declared env-template filename conventions and explicit importing test filename conventions, provenance retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/auto-repair.ts",
@@ -2388,7 +2388,7 @@
       ],
       "classicDisposition": "Classic native grammar repairs only; no supplied or installed decision-port access. Unresolved semantic parameters remain for schema validation; Preferred exact typed exhaustion retains completed pure repairs and never executes/replays a tool. Cancellation checked before fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/credential-header-reading.ts",
@@ -2400,7 +2400,7 @@
       ],
       "classicDisposition": "Classic exact public-header allowlist; unknowns retain credential handling; typed availability-only fallback",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/edit/match.ts",
@@ -2416,7 +2416,7 @@
       ],
       "classicDisposition": "Exact, bounded regex and whitespace matching; no guessed fuzzy target",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/exec/interactive.ts",
@@ -2432,7 +2432,7 @@
       ],
       "classicDisposition": "Native pipe default; explicit interactive supported; literal terminal questions shown to owner",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/exec/runtime.ts",
@@ -2444,7 +2444,7 @@
       ],
       "classicDisposition": "Classic does not automatically replay executed failed commands",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/fetch/page-reading.ts",
@@ -2460,7 +2460,7 @@
       ],
       "classicDisposition": "Classic literal HTML extraction and labelled excerpt/outline, not semantic summary",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/find/content.ts",
@@ -2472,7 +2472,7 @@
       ],
       "classicDisposition": "Stable local matched-path ordering; read access preserved",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/goodvibes-runtime/credential-redaction.ts",
@@ -2484,7 +2484,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/inspect/frontend-readings.ts",
@@ -2496,7 +2496,7 @@
       ],
       "classicDisposition": "Semantic frontend issue assessment explicitly unavailable in Classic; no apparently clean scan",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/inspect/project-routes.ts",
@@ -2512,7 +2512,7 @@
       ],
       "classicDisposition": "Classic API registration inference explicitly unavailable before generated API artifact writes",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/inspect/project.ts",
@@ -2528,7 +2528,7 @@
       ],
       "classicDisposition": "Classic manifest/lockfile/test-runner facts; inferred entry points unassessed",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/registry-tool/index.ts",
@@ -2540,7 +2540,7 @@
       ],
       "classicDisposition": "Classic literal catalog retrieval with source/currentness fences and explicit provenance",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/registry.ts",
@@ -2556,7 +2556,7 @@
       ],
       "classicDisposition": "Classic repair preparation does not borrow supplied port model/recorder metadata; supplied semantic asks guarded before invocation and each attempt. Native project/schema/one-use prepared proof, options/source/executor lifetime, admission and release retained. Native repairs used even with supplied ports.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/shared/auto-heal.ts",
@@ -2568,7 +2568,7 @@
       ],
       "classicDisposition": "Explicit semantic repair limitation before optional repair; validation errors preserved",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/shared/captured-auto-heal.ts",
@@ -2584,7 +2584,7 @@
       ],
       "classicDisposition": "Classic omits semantic acceptance; captured publication and write revision stay enforced",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/shared/overflow.ts",
@@ -2596,7 +2596,7 @@
       ],
       "classicDisposition": "Head/tail display, full output already retained by handler",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/tools/state/memory-mirror.ts",
@@ -2612,7 +2612,7 @@
       ],
       "classicDisposition": "Explicit Classic pending classification/native storage bucket, complete privacy admission before indexed mirror, no decision requests. Only actual typed Preferred availability activates Classic; cancellation/owner guards checked before fallback and filesystem effects. Native signal/owner preserved through actual store publication; state result/tags carry Classic and pending provenance. Replacing a value atomically resets old review metadata to native fresh defaults; no old semantic review is inherited.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/types/batteries/retry-wait.ts",
@@ -2632,7 +2632,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/utils/directory-reading.ts",
@@ -2644,7 +2644,7 @@
       ],
       "classicDisposition": "Optional exported semantic reader; actual DirectoryWalk is already local with explicit WALK_SKIP_DIRS and access fences; no production callers found",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/utils/error-display.ts",
@@ -2656,7 +2656,7 @@
       ],
       "classicDisposition": "Pure decisionOrClassic normalization has a native structured error/redaction branch with original caller signal/current checks; Classic does not assign inferred prose causes.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/utils/redaction-reading.ts",
@@ -2680,7 +2680,7 @@
       ],
       "classicDisposition": "Classic config reads use declared roles and native redaction; retry prose remains unassessed while structured waits survive; fresh or cached semantic gate/route readings require enabled decision models before effect or supplied-port use.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/utils/redaction.ts",
@@ -2696,7 +2696,7 @@
       ],
       "classicDisposition": "Classic sync/async text and structure use native issuer/protected-value/candidate masking with source/current/signal checks, and no semantic safe-value exemptions.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/voice/capture/recorder-failure-reading.ts",
@@ -2708,7 +2708,7 @@
       ],
       "classicDisposition": "Classic no semantic owner or microphone diagnosis; typed unavailable, actual recorder control remains independent",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/voice/providers/local-failure-reading.ts",
@@ -2720,7 +2720,7 @@
       ],
       "classicDisposition": "Classic no prose-based engine diagnosis or automatic disabling; structured process signals remain separate and authoritative",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/voice/provisioning/round-trip-reading.ts",
@@ -2732,7 +2732,7 @@
       ],
       "classicDisposition": "Native Classic managed-voice test compares the complete ordered Unicode word sequence from actual TTS/STT once; labels classic-exact-match/mismatch and native-word-sequence, no semantic receipt. Semantic helper explicitly disabled in Classic. Preferred actual exhaustion reuses captured transcript; terminal/malformed/no/uncertain do not become native positives. Native lifetime/cancellation/configuration checks retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/voice/spoken-turn/controller.ts",
@@ -2744,7 +2744,7 @@
       ],
       "classicDisposition": "One captured live policy scope spans spoken-turn events and timers; Classic skips model acquisition; actual Preferred outage continues native chunking without replay; native configuration/functions/cancellation guards remain live.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/sdk/src/platform/voice/spoken-turn/text-chunker.ts",
@@ -2756,7 +2756,7 @@
       ],
       "classicDisposition": "Local punctuation/cap/latency boundaries; Classic no port capture",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/cli-redaction.ts",
@@ -2768,7 +2768,7 @@
       ],
       "classicDisposition": "Declared fields structural; unknown fields masked Classic; no credential-name requests",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/cluster-commands.ts",
@@ -2780,7 +2780,7 @@
       ],
       "classicDisposition": "Classic join uses exact unambiguous declared group name/identity, existing key/auth still required",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/notice-publication.ts",
@@ -2792,7 +2792,7 @@
       ],
       "classicDisposition": "Classic neutral decoration without model lookup; publication owner retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/notice-severity.ts",
@@ -2804,7 +2804,7 @@
       ],
       "classicDisposition": "Neutral display default; original notice kept; no reading receipt",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/process-output-reading.ts",
@@ -2820,7 +2820,7 @@
       ],
       "classicDisposition": "Classic raw output with unknown error/port classifications; publication/cancellation restrictions retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/terminal-shell/src/support-bundle-command.ts",
@@ -2832,7 +2832,7 @@
       ],
       "classicDisposition": "Standalone export pins its persisted policy before service startup; Classic uses native redaction and diagnostics without a judgment owner; native source/publication guards preserved, including fallback after final redaction.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/engine/toolchain/src/lib/post-build-smoke.ts",
@@ -2844,7 +2844,7 @@
       ],
       "classicDisposition": "Classic clean version protocol and artifact checks remain native, explicitly labelled; extra diagnostic output reports an early semantic-assessment limitation before protected-source screening or port acquisition. Preferred actual exhaustion holds qualification without replaying the binary; no semantic evidence fabricated.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/judgment/scripts/calibrate.ts",
@@ -2856,7 +2856,7 @@
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/judgment/scripts/probe.ts",
@@ -2868,7 +2868,7 @@
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/judgment/scripts/proof.ts",
@@ -2880,7 +2880,7 @@
       ],
       "classicDisposition": "Explicit developer semantic calibration/probe/proof command; opt-in live transport, owned by the process cancellation signal. Not an application startup or completion dependency.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "packages/judgment/src/port/transport.ts",
@@ -2892,7 +2892,7 @@
       ],
       "classicDisposition": "Foundation wire transport: finite configured target chain, exact answer/model/schema validation and caller-owned cancellation. Application Classic policy is enforced by the platform installation before entering this transport; explicitly constructing a standalone SDK port is opt-in.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/agent/operator-request-policy.ts",
@@ -2904,7 +2904,7 @@
       ],
       "classicDisposition": "Classic connected-host policy avoids eager model port; shared exact outward approval boundary retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/cli/service-posture.ts",
@@ -2916,7 +2916,7 @@
       ],
       "classicDisposition": "Classic service log display uses shared local redactor and omits unused decision backend guard",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/input/commands/session-workflow.ts",
@@ -2928,7 +2928,7 @@
       ],
       "classicDisposition": "Classic transcript export keeps redaction/source guards and omits unused decision owner",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-background-privilege.ts",
@@ -2940,7 +2940,7 @@
       ],
       "classicDisposition": "Classic literal privilege restrictions retained, ambiguous mentions return null/unassessed, real background start blocks unknown with foreground/owner guidance. Only pure semantic classification is inside Preferred fallback; consumer effects run once outside. Source privacy/native options/sync owner/cancel/policy fences preserved.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-browser-device-readings.ts",
@@ -2952,7 +2952,7 @@
       ],
       "classicDisposition": "Classic browser/device catalog retains local matches instead of discarding them for absent judgment receipts. Shared platform exact declared capability/boolean helper returns null for unassessed prose, conflicts or missing facts; ready device routes require exact capability declaration and native ready status, no aliases/term inference. Read-only protected source leases/caller/definition/registry/revision/cancel guards retained; Preferred exact pure-phase exhaustion only. Browser/PWA and native device snapshots own whole policy scope; null readiness prevents certification, explicit metadata records partial fallback. Pairing reports unknown sensor publication rather than absence when published records remain unassessed.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-canonical-reading.ts",
@@ -2964,7 +2964,7 @@
       ],
       "classicDisposition": "Classic protected runtime inspection uses exact platform metadata and unassessed schema/route meanings; ambiguous keybinding modifiers require exact native booleans before persistence. Preferred pure reading phases only fall back on typed availability exhaustion; complete original source/native/definition/cancel restrictions retained.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-catalog-ranking.ts",
@@ -2984,7 +2984,7 @@
       ],
       "classicDisposition": "Literal Classic catalog retrieval with no model judgments or confidence; original source/currentness fences retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-catalog-selection.ts",
@@ -3008,7 +3008,7 @@
       ],
       "classicDisposition": "Exact declared identity only in Classic; semantic backend guards retired after Preferred fallback while source guards remain",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-execution-history.ts",
@@ -3020,7 +3020,7 @@
       ],
       "classicDisposition": "Classic execution history/record detail/local search retain native ledger outcomes, bounded args/output, process inspection and recovery routes without deciding verification role. Explicit not-evaluated observations/provenance replace hidden semantic dependency. Preferred exact exhaustion is isolated to pure verification classification inside original privacy lease; completed yes/no/uncertain readings remain, unattempted records become unassessed. Source/caller/backend/definition/cancel and full original projection guards retained; no effects or reruns.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-learning-curator-readings.ts",
@@ -3032,7 +3032,7 @@
       ],
       "classicDisposition": "Classic curator performs protected native inspection with null score/priority and explicit unassessed states. Stored review/eligibility facts remain visible, native flags/counts retained; automatic proposal/quality/duplicate analysis is not implied by zero counts. Direct semantic APIs and consolidation/transition resolution report a clear feature limitation before effects. Preferred fallback wraps only read-only candidate derivation over the same retained source; full Classic source admitted through native protected owner, genuine refusals/uncertainty/errors do not activate fallback. Source/registry/definition/caller/privacy/cancel/currentness preserved; unassessed collections permanently lack automatic transition authority even after scope exit.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-local-model-benchmarks.ts",
@@ -3044,7 +3044,7 @@
       ],
       "classicDisposition": "Classic benchmark snapshots/history credit exact native benchmarkKind declarations and exact sourceArtifactId links, retain actual human choices and numeric latency evidence, and mark unmarked membership not-evaluated without loading original bodies or making model requests. Undeclared stack remains null, never inferred from model names; exact declared winnerStack uses shared platform helper. Distinct unassessed-history prevents false absence claim. Whole snapshot policy scope retains Preferred transition across artifacts; pure membership fallback inside original protected-source lease, earlier yes/no/held observations preserved, no rerun. Original artifact/bytes/hash/clock/store/options/method/policy/definition/source/cancel guards remain; only obsolete semantic installation proof is disarmed on actual Classic fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-local-model-endpoints.ts",
@@ -3056,7 +3056,7 @@
       ],
       "classicDisposition": "Classic native publisher facts/cancellation/source guards, no eager decision-port capture; schema not-evaluated, real metrics and declared model routes retained; no probes or edits",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-local-model-readings.ts",
@@ -3084,7 +3084,7 @@
       ],
       "classicDisposition": "Shared platform exact literals in Classic; free prose unknown/null, certification unassessed; Preferred typed exhaustion only, native ownership restrictions retained",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-memory-provider-readings.ts",
@@ -3096,7 +3096,7 @@
       ],
       "classicDisposition": "Classic external provider inspection retains native booleans/counts/stable ids and exact-purpose native receipts; interpreted roles are unassessed, credential/membership/schema questions null/unknown with explicit unassessed certification and setup/contract states. Shared platform exact-id selection only; local credential-like spans receive no semantic disclosure exemptions. Whole provider, receipt, and public memory posture operations own one policy scope. Preferred pure interpretation exhaustion only, earlier actual negatives retained, no effect replay. Original source/producer/definition/registry/caller/retainer/privacy/cancel guards remain, selected original providers rechecked before publication. Ordinary local memory count/review/vector UI remains native.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-model-readiness.ts",
@@ -3108,7 +3108,7 @@
       ],
       "classicDisposition": "Classic deferred model/hardware-fit scores/confidence/decision IDs null with provenance; explicit native unavailable state retained; owner/source checks and no route effects",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-personal-ops-readings.ts",
@@ -3120,7 +3120,7 @@
       ],
       "classicDisposition": "Classic lane discovery keeps native literal matches. Full protected source/native option and retained lifetime guards surround only replaceable pure interpretation phases. Native conventional result fields and exact receipt statuses; prose/contradictions unassessed. Connector tool lane/effect meanings unassessed, schemas explicitly inspectable; no read-only classification or automatic dispatch from names. Native boolean flags retained; ambiguous inbox/conflict flags remain unknown. Complete public PersonalOps, lane, queue, review and watcher acquisitions own policy so exhaustion is not retried per field or replayed as an effect.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-process-classification.ts",
@@ -3136,7 +3136,7 @@
       ],
       "classicDisposition": "Side-effect-free lifetime decision fallback; consume/spawn occurs once after chosen guard",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-harness-remote-publisher-readings.ts",
@@ -3148,7 +3148,7 @@
       ],
       "classicDisposition": "Classic remote schema/operation meaning explicitly unassessed; native outcomes/status/ids/workspaces retained without inferred certification or category. Whole publisher settlement owns policy so Preferred exact exhaustion sticks across remaining fields, never replays source effects. Prior actual schema yes/no remains, partial metadata explicit. Source/projection/method/complete field/privacy/caller/cancel restrictions and one-use capture/current display binding preserved; malformed/refusal/uncertain paths retire the capture, not fallback.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     },
     {
       "file": "products/agent/src/tools/agent-model-compare-themes.ts",
@@ -3160,7 +3160,7 @@
       ],
       "classicDisposition": "Classic saved comparison synthesis retains native winner/dimension counts and authored reasons, explicitly not-evaluated theme categorization; no original artifact loads or decision requests solely for disabled optional themes. Preferred pure-phase actual exhaustion returns distinct Classic status and persists across all synthesis judgments. No false uncategorized/no-theme result; genuine uncertainty and terminal errors remain held. Full original source/privacy/store/definition/model/caller guards retained on actual reading path; synchronous native owner/cancel guards run even on Classic omission. No route updates/writes.",
       "sourceReview": "Source inspected; Classic disposition recorded. Workflow qualification is tracked separately.",
-      "workflowQualification": "pending"
+      "workflowQualification": "See release acceptance matrix for scoped workflow evidence; no independent per-origin execution certificate is asserted."
     }
   ]
 }

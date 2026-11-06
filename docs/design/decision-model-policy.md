@@ -1,12 +1,13 @@
 # Decision-model policy
 
-Status: source implementation written; final qualification pending. The full build
-and fresh API extraction pass on implementation revision `da3efc26`. The 35-test
-platform repair suite covers source/published browser imports, native formatting,
-schedule bookkeeping and policy/router behavior; the 9-test daemon suite covers
-all three policies through paired hosted HTTP plus persisted settings writes.
-Full current-source typechecking, remaining workflow qualification, final-commit
-CI and release remain pending. These scoped results do not certify every caller.
+Status: source implementation written; final CI and release pending. The full build,
+fresh API extraction, platform and Agent/TUI process suites, daemon HTTP workflows
+and WebUI checks have passed within the scopes recorded in the
+[release acceptance matrix](../releases/3.1.0-qualification.md). Real Chromium also
+completed native conversations under all three policies against the daemon-served
+production bundle, retaining the answer across reload without replay. Classic
+sent zero decision requests through shutdown. These results concern execution
+mechanics, not decision-model accuracy or exhaustive per-caller certification.
 
 The [source inventory](decision-model-policy-inventory.json) records concrete
 port access sites and their Classic dispositions. It indexes source review;

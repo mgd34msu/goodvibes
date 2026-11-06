@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
-import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { redactConfigValue, redactObjectByPath } from '../sdk/src/platform/tools/goodvibes-runtime/credential-redaction.js';
 import { readRetryWaitMs } from '../sdk/src/platform/types/batteries/retry-wait.js';
 import { ProviderError, readRetryWait } from '../sdk/src/platform/types/errors.js';
@@ -15,6 +15,41 @@ import { ProfileDistinctiveReader, readResidualProjection } from '../sdk/src/pla
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
 function install(port: JudgmentPort) { previous = installJudgmentPort(port); installed = true; }
+
+test('nested Classic consumers receive the current policy without replacing the operation owner', async () => {
+  const root: DecisionModelPolicyState[] = [], nested: DecisionModelPolicyState[] = [];
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await withDecisionModelPolicy(() => 'Default - On', async () => {
+      expect(decisionModelPolicyState()).toMatchObject({ policy: 'Classic - Off', operation: 'classic', reason: 'selected' });
+    }, state => nested.push(state));
+  }, state => root.push(state));
+  expect(root).toHaveLength(1); expect(nested).toEqual(root);
+});
+
+test('nested Preferred fallback notifies its consumer and parent while retaining shared refusal memory', async () => {
+  const root: DecisionModelPolicyState[] = [], nested: DecisionModelPolicyState[] = [];
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    rememberDecisionRefusal('original-action');
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      expect(wasDecisionRefused('original-action')).toBe(true);
+      rememberDecisionRefusal('second-action');
+      await decisionOrClassic(async () => { throw new JudgmentError('unavailable', 'Synthetic exhaustion'); }, () => 'native');
+    }, state => nested.push(state));
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable', revision: 1 });
+    expect(wasDecisionRefused('second-action')).toBe(true);
+  }, state => root.push(state));
+  expect(root).toHaveLength(1); expect(nested).toEqual(root);
+});
+
+test('a finished nested consumer cannot receive a later parent fallback or another operation notice', async () => {
+  const root: DecisionModelPolicyState[] = [], nested: DecisionModelPolicyState[] = [];
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await withDecisionModelPolicy(() => 'Preferred', async () => {}, state => nested.push(state));
+    await decisionOrClassic(async () => { throw new JudgmentError('unavailable', 'Synthetic exhaustion'); }, () => 'native');
+  }, state => root.push(state));
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {});
+  expect(root).toHaveLength(1); expect(nested).toHaveLength(0);
+});
 
 test('Classic config reads keep public schema values, mask unknown roles and preserve explicit provider retry guidance', async () => {
   let metadata = 0, requests = 0;

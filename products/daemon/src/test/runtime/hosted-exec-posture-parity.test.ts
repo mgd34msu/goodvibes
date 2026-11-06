@@ -83,7 +83,9 @@ describe("this daemon's hosted operator prompt", () => {
     const options = createHostedSessionOptions(getTestRuntimeServices());
     const prompt = options.systemPrompt?.({ sessionId: 'hosted-1', workspaceRoot: '/tmp/ws' }) ?? '';
     expect(prompt).toContain('/tmp/ws');
-    expect(prompt).toContain('Jev decides tool actions from the original goal and criteria');
-    expect(prompt).toContain('Do not wait for an attached human, invent authority, or route around a refusal.');
+    expect(prompt).toContain('When decision models are active, they decide tool actions from the original goal and criteria');
+    expect(prompt).toContain('In Classic operation, use native permission rules and owner approvals');
+    expect(prompt).toContain('A required owner approval in Classic must be resolved before proceeding.');
+    expect(prompt).toContain('Never invent authority or route around a refusal.');
   });
 });

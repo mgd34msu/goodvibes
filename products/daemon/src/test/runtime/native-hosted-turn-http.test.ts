@@ -10,10 +10,12 @@ import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/sdk/platform
 import { createNativeIntakeHttpFixture } from '../helpers/native-intake-http-fixture.js';
 const TEXT = '  Explain café e\u0301 🌻\nKeep this original text.\nKeep this original text.  ';
 
-test('paired native hosted HTTP preserves canonical identity, finishes a real turn and never replays on inspection', async () => {
-  const f = await createNativeIntakeHttpFixture({ route: 'converse' });
+for (const scenario of [
+  { policy: 'Default - On', unavailable: false },
+  { policy: 'Classic - Off', unavailable: false },
+  { policy: 'Preferred', unavailable: true },
+] as const) test(`${scenario.policy}: paired native hosted HTTP preserves canonical identity, finishes a real turn and never replays on inspection`, async () => {
   const turnErrors: string[] = [];
-  f.daemon.services.runtimeBus.on('TURN_ERROR', event => { if (event.payload.type === 'TURN_ERROR') turnErrors.push(event.payload.error); });
   const requests: { messages: { role: string; content: unknown }[]; stream?: boolean }[] = [];
   const judgmentRequests: { model: string; questions: Record<string, { type: string }> }[] = [];
   const previousJudgmentKey = process.env['TYPESAFE_API_KEY'];
@@ -32,15 +34,25 @@ test('paired native hosted HTTP preserves canonical identity, finishes a real tu
     }
     return Response.json({ id: 'owned-native-hosted', object: 'chat.completion', created: 1, model: 'native-model', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } });
   } });
+  process.env['TYPESAFE_API_KEY'] = scenario.policy === 'Classic - Off' ? '' : 'synthetic-native-hosted-judgment';
+  const f = await createNativeIntakeHttpFixture({ route: 'converse', ...scenario,
+    configure(config) {
+      config.set('judgment.endpoint', `http://127.0.0.1:${server.port}`);
+      config.set('judgment.keySource', 'env');
+    },
+  }).catch(error => {
+    server.stop(true);
+    if (previousJudgmentKey === undefined) delete process.env['TYPESAFE_API_KEY'];
+    else process.env['TYPESAFE_API_KEY'] = previousJudgmentKey;
+    throw error;
+  });
+  f.daemon.services.runtimeBus.on('TURN_ERROR', event => { if (event.payload.type === 'TURN_ERROR') turnErrors.push(event.payload.error); });
   async function wire(methodId: 'workLedger.turn.start' | 'workLedger.turn.status' | 'workLedger.turn.cancel', input: unknown, token = f.paired.token) {
     const route = WEBUI_METHOD_ROUTES[methodId], requestJson = JSON.stringify(input);
     const response = await fetch(`${f.daemon.baseUrl}${route.path}`, { method: route.method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: requestJson });
     return { methodId, method: route.method, path: route.path, requestBody: input, requestJson, status: response.status, body: await response.text() };
   }
   try {
-    process.env['TYPESAFE_API_KEY'] = 'synthetic-native-hosted-judgment';
-    f.daemon.services.configManager.set('judgment.endpoint', `http://127.0.0.1:${server.port}`);
-    f.daemon.services.configManager.set('judgment.keySource', 'env');
     f.daemon.services.providerRegistry.registerDiscoveredProviders([{ name: 'native-hosted-wire', host: '127.0.0.1', port: server.port!, baseURL: `http://127.0.0.1:${server.port}/v1`, models: ['native-model'], serverType: 'vllm' }]);
     f.daemon.services.configManager.set('provider.model', 'native-hosted-wire:native-model');
     const input = { requestId: 'native-hosted-http-request', inputId: 'native-hosted-http-input', text: TEXT, unsupportedSources: [] };
@@ -52,6 +64,10 @@ test('paired native hosted HTTP preserves canonical identity, finishes a real tu
     const admit = await f.wire('workLedger.intake.admit', transition);
     const admitted = nativeConversationIntakeLookupResultSchema.parse(JSON.parse(admit.body));
     expect(admitted.kind).toBe('turn'); expect(requests).toHaveLength(0);
+    if (admitted.kind === 'not-found') throw new Error(admit.body);
+    if (scenario.policy === 'Default - On') expect(admitted.sourceRef.classic).toBeUndefined();
+    else expect(admitted.sourceRef.classic).toEqual({ provenance: 'owner', policy: scenario.policy,
+      reason: scenario.policy === 'Classic - Off' ? 'selected' : 'unavailable' });
     const get = await f.wire('workLedger.intake.get', { inputId: input.inputId });
     expect(get.body).toBe(admit.body);
     const identity = { projectId: captured.projectId, ...transition };
@@ -95,8 +111,12 @@ test('paired native hosted HTTP preserves canonical identity, finishes a real tu
     }
     expect(requests.some(request => request.stream && request.messages.some(message => message.role === 'user' && message.content === TEXT))).toBe(true);
     const completionRequests = f.fake.requests.filter(request => request.context?.battery === 'engine.core.response-completion');
-    expect(completionRequests).toHaveLength(1);
-    expect(Object.keys(completionRequests[0]!.questions).sort()).toEqual(['false_blocker', 'unfinished', 'unnecessary_permission', 'unanswered', 'unsupported'].sort());
+    expect(completionRequests).toHaveLength(scenario.policy === 'Default - On' ? 1 : 0);
+    if (scenario.policy === 'Default - On') {
+      expect(Object.keys(completionRequests[0]!.questions).sort()).toEqual(['false_blocker', 'unfinished', 'unnecessary_permission', 'unanswered', 'unsupported'].sort());
+    }
+    if (scenario.policy === 'Classic - Off') expect(f.fake.requests).toHaveLength(0);
+    if (scenario.policy === 'Preferred') expect(f.fake.requests.length).toBeGreaterThan(0);
     expect(judgmentRequests).toHaveLength(0);
     const count = requests.length;
     const duplicate = await wire('workLedger.turn.start', identity);
@@ -120,6 +140,9 @@ test('paired native hosted HTTP preserves canonical identity, finishes a real tu
     ]) expect(firstJsonSchemaFailure(attachmentSchema!, { ...attachment, session })).toBeDefined();
     expect(attachment.history).toContainEqual({ role: 'user', content: TEXT });
     expect(attachment.history.some(message => message.role === 'assistant' && message.content.includes('Owned native hosted answer.'))).toBe(true);
+    if (scenario.policy !== 'Default - On') {
+      expect(attachment.history.some(message => message.role === 'system' && message.content.includes('[Decision policy]'))).toBe(true);
+    }
     expect(f.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
     expect(f.daemon.services.agentManager.list()).toHaveLength(0);
     const cancelledInput = { ...input, requestId: 'native-hosted-cancel-request', inputId: 'native-hosted-cancel-input' };
@@ -140,11 +163,17 @@ test('paired native hosted HTTP preserves canonical identity, finishes a real tu
     const prevented = await wire('workLedger.turn.start', cancelledIdentity);
     expect(prevented.body).toBe(cancellation.body); expect(requests).toHaveLength(count);
     const directory = process.env.GOODVIBES_TEST_NATIVE_HOSTED_FIXTURE_DIR;
-    if (directory) { mkdirSync(directory, { recursive: true });
+    if (directory && scenario.policy === 'Default - On') { mkdirSync(directory, { recursive: true });
       writeFileSync(join(directory, 'cancelled.json'), JSON.stringify({ source: 'owned loopback model; real paired DaemonServer cancellation-before-dispatch', input: cancelledInput, identity: cancelledIdentity, auth, project, capture: cancelledCapture, admit: cancelledAdmit, get: cancelledGet, absent: cancelledAbsent, cancel: cancellation, status: cancelledStatus, start: prevented }, null, 2) + '\n');
       writeFileSync(join(directory, 'completed.json'), JSON.stringify({ source: 'owned loopback model; real paired DaemonServer hosted delivery', input, identity, auth, project, capture, admit, get, absent, start, status, duplicate, attachment }, null, 2) + '\n'); }
   } finally {
-    try { await f.stop(); }
+    try {
+      await f.stop();
+      if (scenario.policy === 'Classic - Off') {
+        expect(f.fake.requests).toHaveLength(0);
+        expect(judgmentRequests).toHaveLength(0);
+      }
+    }
     finally {
       server.stop(true);
       if (previousJudgmentKey === undefined) delete process.env['TYPESAFE_API_KEY'];

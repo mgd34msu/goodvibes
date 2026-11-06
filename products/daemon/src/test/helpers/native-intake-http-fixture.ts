@@ -1,12 +1,13 @@
 /** Owned synthetic semantic endpoints around the real daemon, auth and intake routes. */
 import { spyOn } from 'bun:test';
-import { withDecisionLog } from '@goodvibes-jev/judgment';
+import { JudgmentError, withDecisionLog } from '@goodvibes-jev/judgment';
+import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { BenchmarkStore, ProviderRegistry, type ChatRequest, type ChatResponse, type LLMProvider, type ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/sdk/platform/workspace';
 import { registerInboxSurface } from '@goodvibes-jev/engine/sdk/platform/intake';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { startDaemonFixture } from '../../testing/daemon-fixture.js';
+import { startDaemonFixture, type DaemonFixtureOptions } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from './owned-temp.js';
 import { observeFixtureJudgmentFloors } from './judgment-floors.js';
 
@@ -32,6 +33,9 @@ export async function createNativeIntakeHttpFixture(options: {
   readonly route?: 'contract' | 'converse';
   readonly final?: 'act' | 'reject';
   readonly propose?: (request: ChatRequest, attempt: number) => Promise<ChatResponse>;
+  readonly policy?: DecisionModelPolicy;
+  readonly unavailable?: boolean;
+  readonly configure?: DaemonFixtureOptions['configure'];
 } = {}) {
   const discovery = spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]);
   const benchmarks = spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue(undefined);
@@ -40,9 +44,14 @@ export async function createNativeIntakeHttpFixture(options: {
   let daemon: Awaited<ReturnType<typeof startDaemonFixture>>;
   try {
     daemon = await startDaemonFixture({ root: makeOwnedTempDir('native-intake-http'),
+      configure(config) {
+        if (options.policy) config.set('judgment.policy', options.policy);
+        options.configure?.(config);
+      },
       inboxFactory: (context, _routing, settings) => registerInboxSurface(context, { ...settings, adapters: new Map() }) });
   } catch (error) { restoreDiscovery(); throw error; }
   const fake = fakePort((name, question) => {
+    if (options.unavailable) throw new JudgmentError('unavailable', 'Synthetic decision chain exhausted');
     if (name === 'completion_required') return noulAnswer(0.99);
     if (name === 'route') return choiceAnswer(question, options.route ?? 'contract', 0.99);
     if (name === 'relation') return choiceAnswer(question, 'supports', 0.99);

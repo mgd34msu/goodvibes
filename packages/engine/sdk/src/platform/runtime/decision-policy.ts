@@ -17,9 +17,11 @@ interface PolicyScope {
   readonly policy: DecisionModelPolicy;
   readonly current: () => void;
   readonly onChange: ((state: DecisionModelPolicyState) => void) | undefined;
-  reason: DecisionModelPolicyState['reason'];
-  revision: number;
-  readonly refusals: Set<string>;
+  readonly state: {
+    reason: DecisionModelPolicyState['reason'];
+    revision: number;
+    readonly refusals: Set<string>;
+  };
 }
 const scopes = new AsyncLocalStorage<PolicyScope>();
 const configurations: { readonly read: () => unknown; active: boolean }[] = [];
@@ -39,8 +41,8 @@ function observe(): DecisionModelPolicyState {
   const scope = scopes.getStore();
   scope?.current();
   const policy = scope?.policy ?? parseDecisionModelPolicy(configured());
-  const reason = scope?.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
-  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.revision ?? 0 });
+  const reason = scope?.state.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
+  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0 });
 }
 installDecisionModelPolicyObserver(observe, activateClassicFallback);
 
@@ -49,11 +51,22 @@ export function isClassicOperation(): boolean { return decisionModelPolicyState(
 /** Pin one operation. Changing policy revokes it; fallback changes no host permission or completed action. */
 export function withDecisionModelPolicy<T>(read: () => unknown, operation: () => T,
   onChange?: (state: DecisionModelPolicyState) => void): T {
-  if (scopes.getStore()) return operation();
+  const parent = scopes.getStore();
+  if (parent) {
+    if (!onChange) return operation();
+    // Nested consumers observe this operation without replacing its pinned
+    // policy, refusal memory or fallback state. ALS owns callback lifetime;
+    // another operation cannot retain this consumer's notice sink.
+    return scopes.run({ ...parent, onChange(state) { parent.onChange?.(state); onChange(state); } }, () => {
+      const state = observe();
+      if (state.operation === 'classic') onChange(state);
+      return operation();
+    });
+  }
   const readPolicy = () => parseDecisionModelPolicy(read() ?? configured());
   const policy = readPolicy();
   const current = () => { if (readPolicy() !== policy) throw new DecisionModelPolicyChangedError(); };
-  return scopes.run({ policy, current, onChange, reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0, refusals: new Set() }, () => {
+  return scopes.run({ policy, current, onChange, state: { reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0, refusals: new Set() } }, () => {
     current();
     if (policy === 'Classic - Off') onChange?.(observe());
     return operation();
@@ -90,8 +103,8 @@ export function inheritClassicDecisionFallback(): boolean {
   const scope = scopes.getStore();
   scope?.current();
   if (!scope || scope.policy !== 'Preferred') return false;
-  if (scope.reason === null) {
-    scope.reason = 'unavailable'; scope.revision++;
+  if (scope.state.reason === null) {
+    scope.state.reason = 'unavailable'; scope.state.revision++;
     scope.onChange?.(observe());
   }
   return true;
@@ -114,8 +127,8 @@ export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => 
 }
 
 /** A later outage cannot reopen the same refused action within its owning operation. Keys stay host-private. */
-export function rememberDecisionRefusal(action: string): void { scopes.getStore()?.refusals.add(action); }
-export function wasDecisionRefused(action: string): boolean { return scopes.getStore()?.refusals.has(action) ?? false; }
+export function rememberDecisionRefusal(action: string): void { scopes.getStore()?.state.refusals.add(action); }
+export function wasDecisionRefused(action: string): boolean { return scopes.getStore()?.state.refusals.has(action) ?? false; }
 
 /** Explicit capability report for genuinely decision-only features. */
 export function requireDecisionFeature(feature: string): void {

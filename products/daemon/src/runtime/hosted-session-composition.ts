@@ -76,8 +76,10 @@ function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
       `Your working directory is ${input.workspaceRoot}.`,
       'Someone may be attached and watching this turn, or may have detached and read it later;',
       'write for both. Say what you did and why; never report work you did not do.',
-      'Jev decides tool actions from the original goal and criteria within current deterministic constraints.',
-      'Do not wait for an attached human, invent authority, or route around a refusal.',
+      'When decision models are active, they decide tool actions from the original goal and criteria within current deterministic constraints.',
+      'In Classic operation, use native permission rules and owner approvals; never claim independent semantic verification.',
+      'Autonomous decision mode does not wait for an attached human. A required owner approval in Classic must be resolved before proceeding.',
+      'Never invent authority or route around a refusal.',
     ].join(' '),
     // The same contract every other conversational turn is held to, from the
     // SDK rather than restated here, a second copy is a copy that drifts.

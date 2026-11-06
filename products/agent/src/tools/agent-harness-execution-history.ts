@@ -1,5 +1,6 @@
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, JudgmentPortMissingError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { executionVerification, gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type SourceScreeningReceipt } from '@goodvibes-jev/engine/sdk/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -25,10 +26,11 @@ type ExecutionHistoryResolution =
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
 type ActivityCardStatus = AgentExecutionStatus | 'mixed';
-type VerificationStatus = 'passed' | 'failed' | 'running' | 'cancelled' | 'not_recorded' | 'held';
+type VerificationStatus = 'passed' | 'failed' | 'running' | 'cancelled' | 'not_recorded' | 'held' | 'not-evaluated';
 type VerificationReading = Awaited<ReturnType<typeof executionVerification.run>>['readings']['verification'];
 type VerificationObservation = { readonly status: 'settled'; readonly verification: boolean; readonly judgment: VerificationReading }
-  | { readonly status: 'held' };
+  | { readonly status: 'held'; readonly judgment?: VerificationReading }
+  | { readonly status: 'not-evaluated'; readonly provenance: 'classic' };
 type VerificationObservations = ReadonlyMap<string, VerificationObservation>;
 
 function readString(value: unknown): string {
@@ -214,10 +216,12 @@ function verificationSummary(records: readonly AgentExecutionRecord[], includePa
     const observation = observations.get(record.id);
     return observation?.status === 'settled' && observation.verification;
   });
-  const held = records.filter(record => observations.get(record.id)?.status !== 'settled');
-  const status = held.length ? 'held' : verificationStatus(verificationRecords);
+  const unassessed = records.filter(record => observations.get(record.id)?.status === 'not-evaluated');
+  const held = records.filter(record => { const state = observations.get(record.id)?.status; return state !== 'settled' && state !== 'not-evaluated'; });
+  const status = held.length ? 'held' : unassessed.length ? 'not-evaluated' : verificationStatus(verificationRecords);
   return {
     status,
+    ...(unassessed.length ? { unassessedExecutionRecordIds: unassessed.map(record => record.id), provenance: 'classic', reason: 'verification_evidence_role_not_evaluated' } : {}),
     ...(held.length ? { heldExecutionRecordIds: held.map(record => record.id), reason: 'verification_evidence_role_unsettled' } : {}),
     evidence: verificationRecords.slice(0, 5).map((record) => ({
       executionRecordId: record.id,
@@ -227,7 +231,9 @@ function verificationSummary(records: readonly AgentExecutionRecord[], includePa
       ...(record.resultSummary?.preview ? { outputPreview: previewHarnessText(record.resultSummary.preview, includeParameters ? 180 : 96) } : {}),
       modelRoute: routeForRecord(record),
     })),
-    nextAction: status === 'held'
+    nextAction: status === 'not-evaluated'
+      ? 'Classic operation shows recorded execution outcomes without deciding which commands verify the task. Inspect the actual records and output.'
+      : status === 'held'
       ? 'Verification evidence is held until its recorded meaning is settled.'
       : status === 'not_recorded'
       ? 'No verification command is recorded in this activity card.'
@@ -289,6 +295,7 @@ function activityNextAction(status: ActivityCardStatus, verification: Record<str
     : 'Inspect the first failure record before retrying.';
   if (status === 'running') return 'Open the process monitor or live-tail route when available.';
   if (status === 'cancelled') return 'Inspect the cancelled record before deciding whether to retry.';
+  if (verification.status === 'not-evaluated') return 'Inspect the actual execution records and output; verification meaning was not evaluated during Classic operation.';
   if (verification.status === 'not_recorded') return 'Run or inspect verification if the change needs proof.';
   return 'No recovery action is needed from this card.';
 }
@@ -360,6 +367,7 @@ function describeRecord(
 ): Record<string, unknown> {
   const recoverable = isRecoverableRoute(record) && (fileRecoveryCatalogStatus(context).undoDepth as number | undefined ?? 0) > 0;
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' } : {}),
     executionRecordId: record.id,
     callId: record.callId,
     turnId: record.turnId,
@@ -411,6 +419,7 @@ function describeRecord(
 
 function candidate(record: AgentExecutionRecord): Record<string, unknown> {
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' } : {}),
     executionRecordId: record.id,
     tool: record.tool,
     routeKind: record.routeKind,
@@ -480,7 +489,15 @@ async function matchingRecords(all: readonly AgentExecutionRecord[], query: stri
 async function readVerificationObservations(all: readonly AgentExecutionRecord[], options: CatalogRankingOptions): Promise<VerificationObservations> {
   const observations = new Map<string, VerificationObservation>(all.map(record => [record.id, { status: 'held' }]));
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  if (!all.length || !options.sourceOwner) return observations;
+  const unassessed = () => {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    for (const record of all) {
+      const previous = observations.get(record.id);
+      if (previous?.status === 'held' && previous.judgment === undefined) observations.set(record.id, { status: 'not-evaluated', provenance: 'classic' });
+    }
+    return observations;
+  };
+  if (!all.length || !options.sourceOwner) return isClassicOperation() ? unassessed() : observations;
   if (observations.size !== all.length) throw new ToolInputProjectionError('invalid');
   const owner = options.sourceOwner, signal = options.signal, callerCurrent = options.assertCurrent;
   const assertOwnerCurrent = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);
@@ -528,7 +545,7 @@ async function readVerificationObservations(all: readonly AgentExecutionRecord[]
     const projected: string[] = [];
     for (const handle of handles) {
       assertOwnedCurrent();
-      const screened = await owner.screen(handle);
+      const screened = await owner.screen(handle, { signal, assertCurrent: assertOwnedCurrent });
       assertOwnedCurrent();
       if (screened.status !== 'settled') throw new ToolInputProjectionError('held');
       const projection = owner.project(screened.receipt);
@@ -536,52 +553,62 @@ async function readVerificationObservations(all: readonly AgentExecutionRecord[]
     }
     assertOwnedCurrent();
     if (projected.length !== source.length || projected.some((text, index) => text !== source[index])) throw new ToolInputProjectionError('held');
-    const assertDefinitionSlots = captureCatalogMethods(executionVerification, ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtureCount', 'run', 'checkFixtures']);
-    const batteryRevision = JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
-      description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
-      items: executionVerification.items, fixtureCount: executionVerification.fixtureCount }));
-    const run = executionVerification.run, checkFixtures = executionVerification.checkFixtures;
-    const assertDefinitionCurrent = () => {
-      assertDefinitionSlots();
-      const descriptors = Object.getOwnPropertyDescriptors(executionVerification);
-      if (!descriptors.run || !('value' in descriptors.run) || descriptors.run.value !== run
-        || !descriptors.checkFixtures || !('value' in descriptors.checkFixtures) || descriptors.checkFixtures.value !== checkFixtures
-        || Object.values(descriptors).some(descriptor => !('value' in descriptor))
-        || gateJudgmentRegistry.get('engine.gate.execution-verification') !== executionVerification
-        || JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
-          description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
-          items: executionVerification.items, fixtureCount: executionVerification.fixtureCount })) !== batteryRevision) throw new ToolInputProjectionError('held');
-    };
-    let capture: ReturnType<typeof captureJudgmentPort>;
-    try { capture = captureJudgmentPort('agent.harness.execution-verification', { ...(signal ? { signal } : {}), assertCurrent: () => {
-      signal?.throwIfAborted(); assertDefinitionCurrent();
-    }, prepareResultCapture: prepareJudgmentResult }); }
-    catch (error) { if (error instanceof JudgmentPortMissingError) return observations; throw error; }
-    assertBackend = capture.assertCurrent;
-    options.retainCurrent?.(capture.assertCurrent, 'agent.harness.execution-verification.backend');
-    const recorder = capture.port.recorder;
-    const port: typeof capture.port = { model: capture.port.model,
-      ...(recorder ? { recorder: {
-        recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertOwnedCurrent(); recorder.recordReadings(...args); assertOwnedCurrent(); },
-        recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertOwnedCurrent(); recorder.recordAction(...args); assertOwnedCurrent(); },
-      } } : {}),
-      ask: async request => { assertOwnedCurrent(); const result = await capture.port.ask({ ...request,
-        beforeAttempt: () => { request.beforeAttempt?.(); assertOwnedCurrent(); },
-        assertLogCurrent: () => { request.assertLogCurrent?.(); assertOwnedCurrent(); },
-      }); assertOwnedCurrent(); return result; },
-    };
-    for (const [index, record] of all.entries()) {
-      assertOwnedCurrent();
-      const result = await run.call(executionVerification, port, { id: record.id, recordJson: projected[index]! }, { site: 'agent.harness.execution-verification', signal: capture.signal, beforeAttempt: assertOwnedCurrent });
-      assertOwnedCurrent();
-      const judgment = result.readings.verification;
-      if (judgment.outcome === 'act' && judgment.verdict !== 'uncertain') observations.set(record.id, { status: 'settled', verification: judgment.verdict === 'yes', judgment });
-    }
-    return observations;
+    return await decisionOrClassic(async () => {
+      const assertDefinitionSlots = captureCatalogMethods(executionVerification, ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtureCount', 'run', 'checkFixtures']);
+      const batteryRevision = JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
+        description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
+        items: executionVerification.items, fixtureCount: executionVerification.fixtureCount }));
+      const run = executionVerification.run, checkFixtures = executionVerification.checkFixtures;
+      const assertDefinitionCurrent = () => {
+        assertDefinitionSlots();
+        const descriptors = Object.getOwnPropertyDescriptors(executionVerification);
+        if (!descriptors.run || !('value' in descriptors.run) || descriptors.run.value !== run
+          || !descriptors.checkFixtures || !('value' in descriptors.checkFixtures) || descriptors.checkFixtures.value !== checkFixtures
+          || Object.values(descriptors).some(descriptor => !('value' in descriptor))
+          || gateJudgmentRegistry.get('engine.gate.execution-verification') !== executionVerification
+          || JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
+            description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
+            items: executionVerification.items, fixtureCount: executionVerification.fixtureCount })) !== batteryRevision) throw new ToolInputProjectionError('held');
+      };
+      let capture: ReturnType<typeof captureJudgmentPort>;
+      try { capture = captureJudgmentPort('agent.harness.execution-verification', { ...(signal ? { signal } : {}), assertCurrent: () => {
+        signal?.throwIfAborted(); assertDefinitionCurrent();
+      }, prepareResultCapture: prepareJudgmentResult }); }
+      catch (error) { if (error instanceof JudgmentPortMissingError && decisionModelPolicyState().policy !== 'Preferred') return observations; throw error; }
+      assertBackend = () => {
+        signal?.throwIfAborted(); assertDefinitionCurrent();
+        if (!isClassicOperation()) capture.assertCurrent();
+      };
+      options.retainCurrent?.(assertBackend, 'agent.harness.execution-verification.backend');
+      const recorder = capture.port.recorder;
+      const port: typeof capture.port = { model: capture.port.model,
+        ...(recorder ? { recorder: {
+          recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertOwnedCurrent(); recorder.recordReadings(...args); assertOwnedCurrent(); },
+          recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertOwnedCurrent(); recorder.recordAction(...args); assertOwnedCurrent(); },
+        } } : {}),
+        ask: async request => { assertOwnedCurrent(); const result = await capture.port.ask({ ...request,
+          beforeAttempt: () => { request.beforeAttempt?.(); assertOwnedCurrent(); },
+          assertLogCurrent: () => { request.assertLogCurrent?.(); assertOwnedCurrent(); },
+        }); assertOwnedCurrent(); return result; },
+      };
+      for (const [index, record] of all.entries()) {
+        assertOwnedCurrent();
+        const result = await run.call(executionVerification, port, { id: record.id, recordJson: projected[index]! }, { site: 'agent.harness.execution-verification', signal: capture.signal, beforeAttempt: assertOwnedCurrent });
+        assertOwnedCurrent();
+        const judgment = result.readings.verification;
+        if (judgment.outcome === 'act' && judgment.verdict !== 'uncertain') observations.set(record.id, { status: 'settled', verification: judgment.verdict === 'yes', judgment });
+        else observations.set(record.id, { status: 'held', judgment });
+      }
+      return observations;
+    }, () => { assertOwnedCurrent(); return unassessed(); }, () => { assertOwnedCurrent(); return true; });
   } finally { await release(); assertPublicationCurrent(); }
 }
 
 export async function executionHistorySummary(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+  return withConfiguredDecisionModelPolicy(() => ownedExecutionHistorySummary(context, args, options));
+}
+
+async function ownedExecutionHistorySummary(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const assertBackend = captureHistoryBackend(context);
   const sources = historySources(context);
@@ -596,6 +623,7 @@ export async function executionHistorySummary(context: CommandContext, args: Age
   assertCurrent();
   const cards = activityCards(context, filtered.map(({ entry }) => entry), includeParameters, observations);
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' } : {}),
     status: context.ops.executionLedger ? 'available' : 'unavailable',
     summary: {
       records: all.length,
@@ -614,6 +642,10 @@ export async function executionHistorySummary(context: CommandContext, args: Age
 }
 
 export async function describeExecutionHistoryItem(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions = {}): Promise<ExecutionHistoryResolution> {
+  return withConfiguredDecisionModelPolicy(() => ownedExecutionHistoryItem(context, args, options));
+}
+
+async function ownedExecutionHistoryItem(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions): Promise<ExecutionHistoryResolution> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const assertBackend = captureHistoryBackend(context);
   const lookup = lookupFromArgs(args);

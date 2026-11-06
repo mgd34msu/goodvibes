@@ -30,10 +30,15 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
         async runTurn(state, signal) {
           if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
           const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
+          let sessionReady = false;
           try {
             await restoreHeadlessSession(cli.flags, {
-              surface: ctx.services.surface, resume: ctx.commandContext.resumeSession,
+              surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
+              conversation: ctx.conversation, runtime: ctx.runtime,
+              selectModel: ctx.commandContext.clients?.providerApi?.selectModel,
+              canResume: () => !ctx.commandContext.isGenerating?.(),
             }, signal);
+            sessionReady = true;
             return await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat);
           } finally {
             const messages = ctx.conversation.getMessageSnapshot();
@@ -46,6 +51,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               }),
             };
             await ctx.shutdown(snapshot);
+            if (sessionReady) ctx._writeLastSessionPointer(ctx.runtime.sessionId);
           }
         },
       });

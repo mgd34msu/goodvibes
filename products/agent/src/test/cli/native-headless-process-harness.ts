@@ -19,6 +19,9 @@ export interface WireRequest { readonly path: string; readonly body: unknown; }
 /** Discard only the response, after the daemon has durably processed the request. */
 export function nativeDoor(upstream: string) {
   const requests: WireRequest[] = [];
+  // Fixture-only intake projections carry synthetic text and opaque identities.
+  // Keep response diagnostics without retaining authentication headers.
+  const responses: Array<WireRequest & { readonly status: number }> = [];
   const lifetime = new AbortController();
   let lostPath: string | undefined;
   let heldPath: string | undefined;
@@ -46,13 +49,20 @@ export function nativeDoor(upstream: string) {
       // A malformed successful response cannot trigger automatic HTTP retries.
       return Response.json({ fixture: 'durable response acknowledgement lost' });
     }
+    if (url.pathname.startsWith(intakePrefix)) {
+      const data = await response.arrayBuffer();
+      let result: unknown;
+      try { result = JSON.parse(new TextDecoder().decode(data)); } catch { result = undefined; }
+      responses.push({ path: url.pathname, status: response.status, body: result });
+      return new Response(data, { status: response.status, headers: response.headers });
+    }
     // Own the forwarded stream: passing Bun's native fetch body through can
     // retain a pending request after stop(true), even after the child exits.
     const bodyStream = response.body?.pipeThrough(new TransformStream<Uint8Array, Uint8Array>());
     return new Response(bodyStream, { status: response.status, headers: response.headers });
   } });
   return {
-    baseUrl: `http://127.0.0.1:${server.port}`, requests,
+    baseUrl: `http://127.0.0.1:${server.port}`, requests, responses,
     loseNext(operation: 'capture' | 'admit') { lostPath = `${intakePrefix}${operation}`; },
     holdNext(operation: 'get' | 'admit') {
       heldPath = `${intakePrefix}${operation}`;

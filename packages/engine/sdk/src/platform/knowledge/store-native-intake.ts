@@ -93,15 +93,21 @@ function validateAssociation(db: SqlReader, capture: NativeConversationCapture):
 }
 function immutable(capture: NativeConversationCapture): unknown {
   const { generation: _generation, state: _state, stage: _stage, route: _route, reason: _reason,
-    proposalsSpent: _spent, proposal: _proposal, decisions: _decisions, association: _association, ...facts } = capture;
+    proposalsSpent: _spent, proposal: _proposal, decisions: _decisions, association: _association, classic: _classic, ...facts } = capture;
   return facts;
 }
 function validateTransition(current: NativeConversationCapture | null, next: NativeConversationCapture, publication = false): void {
   if (!current) {
-    if (next.generation !== 1 || !['captured', 'cancelled'].includes(next.state) || next.proposalsSpent !== 0 || next.proposal || next.decisions.length || next.association) throw new NativeConversationStorageError('conflict');
+    if (next.classic || next.generation !== 1 || !['captured', 'cancelled'].includes(next.state) || next.proposalsSpent !== 0 || next.proposal || next.decisions.length || next.association) throw new NativeConversationStorageError('conflict');
     return;
   }
   if (!isDeepStrictEqual(immutable(current), immutable(next))) throw new NativeConversationStorageError('conflict');
+  // Admission is host-owned terminal metadata, never part of the captured
+  // source. It may be added once to this processing generation, then retained
+  // exactly through lookup, restart and cancellation.
+  if (!isDeepStrictEqual(current.classic, next.classic)
+    && (current.classic || !next.classic || current.state !== 'processing' || next.state !== 'turn'
+      || current.generation !== next.generation)) throw new NativeConversationStorageError('conflict');
   if (current.state === 'cancelled' && !isDeepStrictEqual(current, next)) throw new NativeConversationStorageError('cancelled');
   if (['blocked', 'refused'].includes(current.state) && next.state !== 'cancelled' && !isDeepStrictEqual(current, next)) throw new NativeConversationStorageError('conflict');
   if (current.state !== 'cancelled' && next.state === 'cancelled' && (next.generation !== current.generation + 1

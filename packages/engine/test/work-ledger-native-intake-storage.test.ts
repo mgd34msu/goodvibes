@@ -94,6 +94,30 @@ test('capture text/request/owner identity and cancellation survive restart; requ
   expect((await open(f.file, 'other-project')).storage.current(key)).toBeNull();
 });
 
+test('host Classic admission is added only at the terminal processing transition and survives restart unchanged', async () => {
+  const f = await open();
+  const source = await begin(f.storage);
+  const classic = { provenance: 'owner' as const, policy: 'Classic - Off' as const, reason: 'selected' as const };
+  const admitted = parseNativeConversationCapture({ ...source, state: 'turn', stage: null, route: 'converse', classic });
+  await f.storage.transaction(key, () => ({ next: admitted, value: undefined }));
+  const reopened = await open(f.file);
+  expect(reopened.storage.current(key)).toEqual(admitted);
+  const before = fs.readFileSync(f.file);
+  for (const changed of [
+    { ...admitted, classic: { provenance: 'owner', policy: 'Preferred', reason: 'unavailable' } },
+    { ...admitted, owner: { ...admitted.owner, authorityRevision: 'changed' } },
+    { ...admitted, sourceRevision: 'changed' },
+    { ...admitted, classic: undefined },
+  ]) await expect(reopened.storage.transaction(key, () => ({ next: changed as NativeConversationCapture, value: undefined }))).rejects.toThrow();
+  expect(fs.readFileSync(f.file)).toEqual(before);
+  const other = await open();
+  const initial = capture();
+  await other.storage.transaction(key, () => ({ next: initial, value: undefined }));
+  await expect(other.storage.transaction(key, () => ({ next: { ...initial, state: 'turn', route: 'converse', classic }, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
+  const fresh = await open();
+  await expect(fresh.storage.transaction(key, () => ({ next: { ...initial, state: 'cancelled', classic }, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
+});
+
 test('one publication atomically creates work, claim, receipt and exact source association; replay survives restart', async () => {
   const f = await open(), source = await ready(f.storage), p = publisher(f.storage, source);
   const result = await p.service.execute(command(source), p.actor); expect(result.kind).toBe('accepted');

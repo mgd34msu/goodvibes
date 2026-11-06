@@ -36,13 +36,19 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           homeDirectory,
           daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory),
         });
+        let sessionReady = false;
         try {
           await restoreHeadlessSession(cli.flags, {
-            surface: ctx.services.surface, resume: ctx.commandContext.resumeSession,
+            surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
+            conversation: ctx.conversation, runtime: ctx.runtime,
+            selectModel: ctx.commandContext.clients?.providerApi?.selectModel,
+            canResume: () => !ctx.commandContext.isGenerating?.(),
           }, signal);
+          sessionReady = true;
           return await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat);
         } finally {
           await ctx.shutdown(ctx.conversation.toJSON() as Parameters<typeof ctx.shutdown>[0]);
+          if (sessionReady) ctx._writeLastSessionPointer(ctx.runtime.sessionId);
         }
       };
       let result: NativeHeadlessResult;

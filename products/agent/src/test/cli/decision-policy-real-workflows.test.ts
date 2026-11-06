@@ -33,7 +33,7 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
     });
     workspace = f.home.workspace;
     const first = await f.run(['run', HEADLESS_PROMPT, ...json]);
-    expect(first.code, first.stderr).toBe(0);
+    expect(first.code, JSON.stringify({ output: first, intake: f.door.responses })).toBe(0);
     expect(readEnvelope(first).response).toBe(HEADLESS_REPLY);
     expect(readFileSync(join(workspace, 'classic-work.txt'), 'utf8')).toBe('Native edit landed\n');
     expect(readFileSync(join(workspace, 'classic-execution.log'), 'utf8')).toBe('native-execution\n');
@@ -42,7 +42,7 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
     // A new actual process loads the saved history. Existing tool results must
     // reach its answering model; they must not be executed again after resume.
     const resumed = await f.run(['run', HEADLESS_PROMPT, '--continue', ...json]);
-    expect(resumed.code, resumed.stderr).toBe(0);
+    expect(resumed.code, JSON.stringify({ output: resumed, intake: f.door.responses })).toBe(0);
     expect(readEnvelope(resumed).response).toBe(HEADLESS_REPLY);
     const latest = f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT).at(-1);
     expect(JSON.stringify(latest?.messages)).toContain('Native edit landed');
@@ -55,7 +55,7 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
   test('Preferred exhausted endpoint continues ordinary chat and completion', async () => {
     const f = await fixture(product, { policy: 'Preferred', unavailable: true });
     const output = await f.run(['run', HEADLESS_PROMPT, ...json]);
-    expect(output.code, output.stderr).toBe(0);
+    expect(output.code, JSON.stringify({ output, intake: f.door.responses })).toBe(0);
     expect(readEnvelope(output).response).toBe(HEADLESS_REPLY);
     expect(f.home.judgments.allRequests.length).toBeGreaterThan(0);
     expect(f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT)).toHaveLength(1);

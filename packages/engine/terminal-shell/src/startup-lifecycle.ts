@@ -1,4 +1,5 @@
-import { readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { readLastSessionPointer, writeLastSessionPointer } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 
 /** Fatal diagnostics are independent: failure of one sink cannot suppress another or the exit. */
 export function reportStartupFailure(
@@ -63,7 +64,7 @@ export function resumeSessionAndRender<Context>(
  */
 export async function restoreHeadlessSession(
   flags: { readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined },
-  ports: { readonly surface: SessionSurface; readonly resume?: ((id: string) => Promise<void>) | undefined },
+  ports: SessionResumeDeps,
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();
@@ -72,8 +73,12 @@ export async function restoreHeadlessSession(
   if (!requested) return;
   const target = named ?? readLastSessionPointer({ surface: ports.surface });
   if (!target) throw new Error('No saved conversation is available to resume. Inspect sessions before submitting a new request.');
-  if (!ports.resume) throw new Error('The headless runtime cannot restore the selected conversation.');
   signal.throwIfAborted();
-  await ports.resume(target);
+  // Interactive resume handlers present errors and may return after a declined
+  // modal. Headless callers require the actual restore to succeed before work.
+  await resumeSessionCore(target, { ...ports,
+    canResume: () => !signal.aborted && ports.canResume?.() !== false,
+  });
   signal.throwIfAborted();
+  writeLastSessionPointer(target, { surface: ports.surface });
 }

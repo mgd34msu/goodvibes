@@ -715,9 +715,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     commandRegistry,
     systemMessageRouter,
     shutdown: createRuntimeShutdown({
-      sessionId: runtime.sessionId,
-      model: runtime.model,
-      provider: runtime.provider,
+      get sessionId() { return runtime.sessionId; },
+      get model() { return runtime.model; },
+      get provider() { return runtime.provider; },
       conversationTitle: () => conversation.title || '',
       sessionSpineClient: services.sessionSpineClient,
       takeMemorySpineTimer: () => {

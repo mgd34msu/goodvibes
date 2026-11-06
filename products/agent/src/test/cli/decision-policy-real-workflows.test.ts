@@ -52,6 +52,22 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
     expect(`${first.stdout}${resumed.stdout}`).not.toContain(f.pairedToken);
   }, 60000);
 
+  test('Classic missing resume never submits a fresh turn or replaces the last saved conversation', async () => {
+    const f = await fixture(product, { policy: 'Classic - Off', missingCredentials: true });
+    const first = await f.run(['run', HEADLESS_PROMPT, ...json]);
+    expect(first.code, first.stdout).toBe(0);
+    const calls = f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT).length;
+    const missing = await f.run(['run', HEADLESS_PROMPT, '--resume', 'does-not-exist', ...json]);
+    expect(missing.code).not.toBe(0);
+    expect(readEnvelope(missing).ok).toBe(false);
+    expect(f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT)).toHaveLength(calls);
+    const resumed = await f.run(['run', HEADLESS_PROMPT, '--continue', ...json]);
+    expect(resumed.code, resumed.stdout).toBe(0);
+    const latest = f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT).at(-1);
+    expect(latest?.messages.filter(message => message.role === 'user')).toHaveLength(2);
+    expect(f.home.judgments.allRequests).toHaveLength(0);
+  }, 60000);
+
   test('Preferred exhausted endpoint continues ordinary chat and completion', async () => {
     const f = await fixture(product, { policy: 'Preferred', unavailable: true });
     const output = await f.run(['run', HEADLESS_PROMPT, ...json]);

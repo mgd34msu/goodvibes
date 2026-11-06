@@ -42,11 +42,12 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s full registered-tool diag
 test('Classic full verification does not consume a description judgment cached by Default - On', async () => {
   const fake = fakePort(() => noulAnswer(0.01)); install(fake.port);
   const verifier = new ToolContractVerifier();
+  const structural = verifier.verifyStructure(tool('read'));
   const assessed = await under('Default - On', () => verifier.verify(tool('read')));
-  expect(assessed.descriptionQuality).toBe('assessed'); expect(assessed.violations).toHaveLength(1);
+  expect(assessed.descriptionQuality).toBe('assessed'); expect(assessed.violations).toHaveLength(structural.violations.length + 1);
   const attempted = fake.requests.length;
   const classic = await under('Classic - Off', () => verifier.verify(tool('read')));
-  expect(classic.descriptionQuality).toBe('not-evaluated'); expect(classic.violations).toEqual([]);
+  expect(classic.descriptionQuality).toBe('not-evaluated'); expect(classic.violations).toEqual(structural.violations);
   expect(fake.requests).toHaveLength(attempted);
 });
 

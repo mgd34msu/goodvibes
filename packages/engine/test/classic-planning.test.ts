@@ -58,7 +58,7 @@ test('Preferred retains every explicit checkbox after status-interpretation outa
   const requests = outage();
   await withDecisionModelPolicy(() => 'Preferred', async () => {
     const plans = new ExecutionPlanManager('/synthetic/preferred-plans');
-    const parsed = await plans.parseFromMarkdown('# Work\n- [x] First edit — finished-ish\n- [ ] Second edit — not-started-ish');
+    const parsed = await plans.parseFromMarkdown('# Work\n## Implementation\n- [x] First edit — finished-ish\n- [ ] Second edit — not-started-ish');
     expect(parsed.items?.map(item => item.status)).toEqual(['complete', 'pending']);
     expect(parsed.parseIssues).toHaveLength(2);
     expect(requests).toHaveLength(1);

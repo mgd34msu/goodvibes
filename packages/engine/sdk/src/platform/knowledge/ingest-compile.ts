@@ -2,6 +2,7 @@ import { isClassicOperation } from '../runtime/decision-policy.js';
 import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperation, retireKnowledgeIngestUriOperation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
+import { prepareKnowledgeSourceRecord, prepareKnowledgeExtractionRecord } from './store-evidence-writes.js';
 import { randomUUID } from 'node:crypto';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
@@ -93,28 +94,39 @@ export async function finalizeKnowledgeIngestedSource(
       assertAliasesCurrent();
       if (context.artifactStore.getRecord(input.artifactId)?.sha256 !== token.contentHash) throw new KnowledgeExtractionJudgmentHoldError();
     };
+    const sourceInput = {
+      id: input.sourceId, connectorId: input.connectorId, sourceType: input.sourceType,
+      title: input.inputTitle?.trim() || extractionEvidence.title || record.filename,
+      sourceUri: record.sourceUri, canonicalUri: canonicalUri ?? undefined,
+      summary: extractionEvidence.summary, description: stableText(extracted.excerpt) ?? previousExtraction?.excerpt,
+      tags: input.tags, folderPath: input.folderPath, status: 'indexed' as const, artifactId: input.artifactId,
+      contentHash: record.sha256, sessionId: input.sessionId,
+      metadata: { ...input.metadata, contentType: record.mimeType, extractionId,
+        extractionFormat: extracted.format, outboundLinks: extracted.links },
+    };
+    const extractionInput = { id: extractionId, sourceId: input.sourceId, artifactId: input.artifactId,
+      extractorId: extracted.extractorId, format: extracted.format, title: extracted.title,
+      summary: extracted.summary, excerpt: extracted.excerpt, sections: extracted.sections,
+      links: extracted.links, estimatedTokens: extracted.estimatedTokens, structure: extracted.structure, metadata: extracted.metadata };
+    // Settle the pure alias phase against the same native normalization used
+    // by the staged import. Preferred may switch policy here; capture final
+    // source provenance only afterwards, before the one atomic publication.
+    const prospectiveSource = prepareKnowledgeSourceRecord(sourceInput, context.store.getSource(input.sourceId));
+    const prospectiveExtraction = prepareKnowledgeExtractionRecord(extractionInput, previousExtraction, prospectiveSource);
+    const entityHints = await prepareKnowledgeStructuredEntityHints(prospectiveSource, prospectiveExtraction, signal,
+      (guard) => { assertAliasesCurrent = guard; }, () => { ownership.assertCurrent?.(); assertCurrent(); assertExtractionCurrent(); });
+    assertPrepared();
     await context.store.applyPreparedIngest({
-      sources: [knowledgeSourceCrawledNow({
-        id: input.sourceId, connectorId: input.connectorId, sourceType: input.sourceType,
-        title: input.inputTitle?.trim() || extractionEvidence.title || record.filename,
-        sourceUri: record.sourceUri, canonicalUri: canonicalUri ?? undefined,
-        summary: extractionEvidence.summary, description: stableText(extracted.excerpt) ?? previousExtraction?.excerpt,
-        tags: input.tags, folderPath: input.folderPath, status: 'indexed', artifactId: input.artifactId,
-        contentHash: record.sha256, sessionId: input.sessionId,
-        metadata: { ...input.metadata, ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}), contentType: record.mimeType, extractionId,
-          extractionFormat: extracted.format, outboundLinks: extracted.links },
-      })],
-      extractions: [{ id: extractionId, sourceId: input.sourceId, artifactId: input.artifactId,
-        extractorId: extracted.extractorId, format: extracted.format, title: extracted.title,
-        summary: extracted.summary, excerpt: extracted.excerpt, sections: extracted.sections,
-        links: extracted.links, estimatedTokens: extracted.estimatedTokens, structure: extracted.structure, metadata: extracted.metadata }],
+      sources: [knowledgeSourceCrawledNow({ ...sourceInput, metadata: { ...sourceInput.metadata,
+        ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
+      } })],
+      extractions: [extractionInput],
       nodes: [], edges: [], issues: [],
     }, async (stage) => {
       assertPrepared();
       const source = stage.sources[0]!;
       const extraction = stage.extractions[0]!;
       committed = { source, extraction };
-      const entityHints = await prepareKnowledgeStructuredEntityHints(source, extraction, signal, (guard) => { assertAliasesCurrent = guard; }, () => { ownership.assertCurrent?.(); assertCurrent(); assertExtractionCurrent(); });
       const check = () => { assertPrepared(); stage.assertCurrent(); };
       const draft = stagedCompileWriter(context, check);
       await compileKnowledgeSourceRecords(context, source, extraction, entityHints, draft.writer, uris);

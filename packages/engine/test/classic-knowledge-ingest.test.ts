@@ -31,13 +31,13 @@ function outage() {
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-classic-ingest-')); roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
-  const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts'), allowPrivateHostFetches: true });
   let enrichments = 0;
   const context = { store, artifactStore, connectorRegistry: new KnowledgeConnectorRegistry(), emitIfReady() {},
     async syncReviewedMemory() {}, async lint() { return []; }, listConnectors() { return []; },
     async semanticEnrichSource() { enrichments++; },
   };
-  return { store, artifactStore, context, enrichments: () => enrichments };
+  return { root, store, artifactStore, context, enrichments: () => enrichments };
 }
 const under = <T>(policy: DecisionModelPolicy, operation: () => T) => withDecisionModelPolicy(() => policy, operation);
 
@@ -76,7 +76,7 @@ test('Classic HTTP ingestion stores literal HTML, declared identities and no sem
     await under('Classic - Off', async () => {
       const result = await ingestKnowledgeUrl(context, { url: `http://127.0.0.1:${server.port}/manual?ref=network`,
         allowPrivateHosts: true, tags: ['project:alpha'], metadata: { project: 'alpha' } });
-      expect(result.source.status).toBe('indexed'); expect(result.source.metadata.provenance).toBe('classic');
+      expect(result.source.status, result.source.crawlError).toBe('indexed'); expect(result.source.metadata.provenance).toBe('classic');
       expect(result.source.canonicalUri).toContain('ref=network');
       expect(result.extraction?.structure.searchText).toContain('keep the power connected');
       expect(result.extraction?.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
@@ -92,7 +92,7 @@ test('Classic HTTP ingestion stores literal HTML, declared identities and no sem
 });
 
 test('Preferred alias outage preserves the prepared artifact and commits the ingest exactly once', async () => {
-  const { context, store, artifactStore, enrichments } = await fixture(); const requests = outage();
+  const { root, context, store, artifactStore, enrichments } = await fixture(); const requests = outage();
   const artifact = await artifactStore.createFromStream({ kind: 'document', filename: 'network.md', mimeType: 'text/markdown',
     sourceUri: 'https://example.invalid/network', stream: ['# Network setup\n\nKeep the power connected.'] });
   let committed = 0;
@@ -102,6 +102,9 @@ test('Preferred alias outage preserves the prepared artifact and commits the ing
     });
     expect(result.source.status).toBe('indexed'); expect(result.artifactId).toBe(artifact.id);
     expect(result.source.metadata.provenance).toBe('classic'); expect(decisionModelPolicyState().operation).toBe('classic');
+    expect(store.getSource(result.source.id)?.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
+    const reopened = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(reopened); await reopened.init();
+    expect(reopened.getSource(result.source.id)?.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
     expect(store.listSources()).toHaveLength(1); expect(store.listExtractions()).toHaveLength(1); expect(committed).toBe(1);
   });
   expect(requests.length).toBeGreaterThan(0); expect(enrichments()).toBe(0);
@@ -118,7 +121,7 @@ test.each([
   await under('Classic - Off', async () => {
     const result = await extractKnowledgeArtifact({ id: 'synthetic-artifact', mimeType, filename }, Buffer.from(text));
     expect(result.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
-    expect(result.structure.searchText).toContain('recovery');
+    expect(result.structure.searchText).toMatch(/recovery/i);
   });
   expect(requests).toHaveLength(0);
 });

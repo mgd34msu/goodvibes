@@ -144,3 +144,193 @@ export function projectCommandClientsSection<
     transport: Options['directTransport'];
   };
 }
+
+/** Capture the shared terminal capabilities once; product-only authorities are added explicitly by composition. */
+export function projectBootstrapShellCommandOptions<
+  Input extends {
+    readonly configManager: unknown;
+    readonly services: {
+      readonly providerRegistry: unknown;
+      readonly keybindingsManager: unknown;
+      readonly mcpRegistry: unknown;
+      readonly voiceProviders: unknown;
+      readonly voiceService: unknown;
+      readonly artifactStore: unknown;
+      readonly shellPaths: unknown;
+      readonly surface: unknown;
+      readonly fileUndoManager: unknown;
+      readonly memoryRegistry: unknown;
+      readonly integrationHelpers: unknown;
+      readonly automationManager: unknown;
+      readonly projectPlanningService: unknown;
+      readonly projectPlanningProjectId: unknown;
+      readonly workPlanStore: unknown;
+      readonly providerOptimizer: unknown;
+      readonly pluginManager: unknown;
+      readonly hookWorkbench: unknown;
+      readonly agentManager: unknown;
+      readonly modeManager: unknown;
+      readonly sessionManager: unknown;
+      readonly profileManager: unknown;
+      readonly bookmarkManager: unknown;
+      readonly favoritesStore: unknown;
+      readonly benchmarkStore: unknown;
+      readonly subscriptionManager: unknown;
+      readonly secretsManager: unknown;
+      readonly serviceRegistry: unknown;
+      readonly localUserAuthManager: unknown;
+      readonly tokenAuditor: unknown;
+      readonly replayEngine: unknown;
+      readonly webhookNotifier: unknown;
+      readonly sessionMemoryStore: unknown;
+      readonly sessionLineageTracker: unknown;
+      readonly sessionChangeTracker: unknown;
+      readonly planManager: unknown;
+      readonly adaptivePlanner: unknown;
+      readonly sessionOrchestration: unknown;
+      readonly worktreeRegistry: unknown;
+      readonly sandboxSessionRegistry: unknown;
+      readonly componentHealthMonitor: unknown;
+    };
+    readonly conversation: unknown;
+    readonly runtime: unknown;
+    readonly requestRender: unknown;
+    readonly toolRegistry: unknown;
+    readonly forensicsRegistry: unknown;
+    readonly policyRuntimeState: unknown;
+    readonly uiServices: { readonly readModels: unknown };
+    readonly remoteRuntime: unknown;
+    readonly planRuntime: unknown;
+    readonly providerApi: unknown;
+    readonly directTransport: { readonly operator: unknown; readonly peer: unknown };
+    readonly hookApi: unknown;
+    readonly mcpApi: unknown;
+    readonly opsApi: unknown;
+    readonly completeModelSelectionSideEffect: unknown;
+    readonly hydrateSessionUsage: unknown;
+  },
+>(input: Input) {
+  return {
+    configManager: input.configManager,
+    providerRegistry: input.services.providerRegistry,
+    conversation: input.conversation,
+    runtime: input.runtime,
+    requestRender: input.requestRender,
+    keybindingsManager: input.services.keybindingsManager,
+    toolRegistry: input.toolRegistry,
+    mcpRegistry: input.services.mcpRegistry,
+    voiceProviderRegistry: input.services.voiceProviders,
+    voiceService: input.services.voiceService,
+    artifactStore: input.services.artifactStore,
+    forensicsRegistry: input.forensicsRegistry,
+    policyRuntimeState: input.policyRuntimeState,
+    readModels: input.uiServices.readModels,
+    shellPaths: input.services.shellPaths,
+    surface: input.services.surface,
+    remoteRuntime: input.remoteRuntime,
+    planRuntime: input.planRuntime,
+    fileUndoManager: input.services.fileUndoManager,
+    memoryRegistry: input.services.memoryRegistry,
+    integrationHelpers: input.services.integrationHelpers,
+    automationManager: input.services.automationManager,
+    projectPlanningService: input.services.projectPlanningService,
+    projectPlanningProjectId: input.services.projectPlanningProjectId,
+    workPlanStore: input.services.workPlanStore,
+    providerOptimizer: input.services.providerOptimizer,
+    pluginManager: input.services.pluginManager,
+    hookWorkbench: input.services.hookWorkbench,
+    agentManager: input.services.agentManager,
+    modeManager: input.services.modeManager,
+    sessionManager: input.services.sessionManager,
+    profileManager: input.services.profileManager,
+    bookmarkManager: input.services.bookmarkManager,
+    favoritesStore: input.services.favoritesStore,
+    benchmarkStore: input.services.benchmarkStore,
+    providerApi: input.providerApi,
+    subscriptionManager: input.services.subscriptionManager,
+    secretsManager: input.services.secretsManager,
+    serviceRegistry: input.services.serviceRegistry,
+    localUserAuthManager: input.services.localUserAuthManager,
+    tokenAuditor: input.services.tokenAuditor,
+    replayEngine: input.services.replayEngine,
+    webhookNotifier: input.services.webhookNotifier,
+    sessionMemoryStore: input.services.sessionMemoryStore,
+    sessionLineageTracker: input.services.sessionLineageTracker,
+    changeTracker: input.services.sessionChangeTracker,
+    planManager: input.services.planManager,
+    adaptivePlanner: input.services.adaptivePlanner,
+    sessionOrchestration: input.services.sessionOrchestration,
+    operatorClient: input.directTransport.operator,
+    peerClient: input.directTransport.peer,
+    hookApi: input.hookApi,
+    mcpApi: input.mcpApi,
+    opsApi: input.opsApi,
+    directTransport: input.directTransport,
+    worktreeRegistry: input.services.worktreeRegistry,
+    sandboxSessionRegistry: input.services.sandboxSessionRegistry,
+    completeModelSelectionSideEffect: input.completeModelSelectionSideEffect,
+    componentHealthMonitor: input.services.componentHealthMonitor,
+    hydrateSessionUsage: input.hydrateSessionUsage,
+  } as {
+    configManager: Input['configManager'];
+    providerRegistry: Input['services']['providerRegistry'];
+    conversation: Input['conversation'];
+    runtime: Input['runtime'];
+    requestRender: Input['requestRender'];
+    keybindingsManager: Input['services']['keybindingsManager'];
+    toolRegistry: Input['toolRegistry'];
+    mcpRegistry: Input['services']['mcpRegistry'];
+    voiceProviderRegistry: Input['services']['voiceProviders'];
+    voiceService: Input['services']['voiceService'];
+    artifactStore: Input['services']['artifactStore'];
+    forensicsRegistry: Input['forensicsRegistry'];
+    policyRuntimeState: Input['policyRuntimeState'];
+    readModels: Input['uiServices']['readModels'];
+    shellPaths: Input['services']['shellPaths'];
+    surface: Input['services']['surface'];
+    remoteRuntime: Input['remoteRuntime'];
+    planRuntime: Input['planRuntime'];
+    fileUndoManager: Input['services']['fileUndoManager'];
+    memoryRegistry: Input['services']['memoryRegistry'];
+    integrationHelpers: Input['services']['integrationHelpers'];
+    automationManager: Input['services']['automationManager'];
+    projectPlanningService: Input['services']['projectPlanningService'];
+    projectPlanningProjectId: Input['services']['projectPlanningProjectId'];
+    workPlanStore: Input['services']['workPlanStore'];
+    providerOptimizer: Input['services']['providerOptimizer'];
+    pluginManager: Input['services']['pluginManager'];
+    hookWorkbench: Input['services']['hookWorkbench'];
+    agentManager: Input['services']['agentManager'];
+    modeManager: Input['services']['modeManager'];
+    sessionManager: Input['services']['sessionManager'];
+    profileManager: Input['services']['profileManager'];
+    bookmarkManager: Input['services']['bookmarkManager'];
+    favoritesStore: Input['services']['favoritesStore'];
+    benchmarkStore: Input['services']['benchmarkStore'];
+    providerApi: Input['providerApi'];
+    subscriptionManager: Input['services']['subscriptionManager'];
+    secretsManager: Input['services']['secretsManager'];
+    serviceRegistry: Input['services']['serviceRegistry'];
+    localUserAuthManager: Input['services']['localUserAuthManager'];
+    tokenAuditor: Input['services']['tokenAuditor'];
+    replayEngine: Input['services']['replayEngine'];
+    webhookNotifier: Input['services']['webhookNotifier'];
+    sessionMemoryStore: Input['services']['sessionMemoryStore'];
+    sessionLineageTracker: Input['services']['sessionLineageTracker'];
+    changeTracker: Input['services']['sessionChangeTracker'];
+    planManager: Input['services']['planManager'];
+    adaptivePlanner: Input['services']['adaptivePlanner'];
+    sessionOrchestration: Input['services']['sessionOrchestration'];
+    operatorClient: Input['directTransport']['operator'];
+    peerClient: Input['directTransport']['peer'];
+    hookApi: Input['hookApi'];
+    mcpApi: Input['mcpApi'];
+    opsApi: Input['opsApi'];
+    directTransport: Input['directTransport'];
+    worktreeRegistry: Input['services']['worktreeRegistry'];
+    sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
+    completeModelSelectionSideEffect: Input['completeModelSelectionSideEffect'];
+    componentHealthMonitor: Input['services']['componentHealthMonitor'];
+    hydrateSessionUsage: Input['hydrateSessionUsage'];
+  };
+}

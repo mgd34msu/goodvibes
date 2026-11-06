@@ -1,3 +1,4 @@
+import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import { join } from 'node:path';
@@ -119,14 +120,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     taskManager,
     opsControlPlane,
   });
-  const {
-    directTransport,
-    hookApi,
-    knowledgeApi,
-    mcpApi,
-    opsApi,
-    providerApi,
-  } = foundationClients;
+  const { directTransport, hookApi, knowledgeApi, mcpApi, opsApi, providerApi } = foundationClients;
 
   const resumeSession = createResumeSessionHandler({
     runtimeBus,
@@ -148,11 +142,12 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     // openSelection is patched later still, by wireShellUiOpeners); a resume
     // only ever happens long after both. An unpatched opener reads as "no
     // surface to ask through", and the resume proceeds as it always did.
-    confirmLiveResume: (sessionId) => confirmLiveResume(sessionId, {
-      surface: services.surface,
-      openSelection: () => commandContext.openSelection,
-      confirm: () => commandContext.confirm,
-    }),
+    confirmLiveResume: (sessionId) =>
+      confirmLiveResume(sessionId, {
+        surface: services.surface,
+        openSelection: () => commandContext.openSelection,
+        confirm: () => commandContext.confirm,
+      }),
     configManager,
     providerRegistry: services.providerRegistry,
     hydrateSessionUsage,
@@ -171,15 +166,22 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   // that key has never been set, so it doesn't silently override a value the
   // user has already configured in a prior session.
   const parsedBudgetThreshold = Number(process.env.GOODVIBES_COST_BUDGET_USD);
-  const initialCostBudgetThreshold = Number.isFinite(parsedBudgetThreshold) && parsedBudgetThreshold > 0
-    ? parsedBudgetThreshold
-    : 0;
-  if (initialCostBudgetThreshold > 0 && readBudgetAlertUsd((k) => configManager.get(k as Parameters<typeof configManager.get>[0])) === BUDGET_ALERT_USD_DEFAULT) {
+  const initialCostBudgetThreshold = Number.isFinite(parsedBudgetThreshold) && parsedBudgetThreshold > 0 ? parsedBudgetThreshold : 0;
+  if (
+    initialCostBudgetThreshold > 0 &&
+    readBudgetAlertUsd((k) => configManager.get(k as Parameters<typeof configManager.get>[0])) === BUDGET_ALERT_USD_DEFAULT
+  ) {
     configManager.set('behavior.budgetAlertUsd' as Parameters<typeof configManager.set>[0], initialCostBudgetThreshold as never);
   }
 
   let commandContextRef: CommandContext | null = null;
-  const nativeWorkLedgerHost = createNativeWorkLedgerHost({ configManager, journalPath: services.shellPaths.resolveUserPath('tui', 'native-work-submission.json'), ...(options.daemonHomeDirectory ? { daemonHomeDirectory: options.daemonHomeDirectory } : {}), homeDirectory: uiServices.environment.shellPaths.homeDirectory, workspace: () => services.workingDirectory });
+  const nativeWorkLedgerHost = createNativeWorkLedgerHost({
+    configManager,
+    journalPath: services.shellPaths.resolveUserPath('tui', 'native-work-submission.json'),
+    ...(options.daemonHomeDirectory ? { daemonHomeDirectory: options.daemonHomeDirectory } : {}),
+    homeDirectory: uiServices.environment.shellPaths.homeDirectory,
+    workspace: () => services.workingDirectory,
+  });
   const views = createShellViews({
     nativeWorkLedgerSelection: nativeWorkLedgerHost.readSelection,
     providerRegistry: services.providerRegistry,
@@ -201,25 +203,31 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     // context's print and reuse its one-key jump affordance, both late-bound
     // (the command context is assigned to commandContextRef after bootstrap, and
     // main.ts patches armFixSessionAttach onto it).
-    fleetActsNotify: (message: string) => { commandContextRef?.print?.(message); requestRender(); },
-    armFixSessionAttach: (sessionId: string) => { commandContextRef?.armFixSessionAttach?.(sessionId); },
+    fleetActsNotify: (message: string) => {
+      commandContextRef?.print?.(message);
+      requestRender();
+    },
+    armFixSessionAttach: (sessionId: string) => {
+      commandContextRef?.armFixSessionAttach?.(sessionId);
+    },
   });
 
-  const systemMessageRouter = createSystemMessageRouter(
-    conversation,
-    (kind) => {
-      const ui = getConfigSnapshot(configManager).ui;
-      if (kind === 'contract') return ui.contractMessages;
-      if (kind === 'operational') return ui.operationalMessages;
-      return ui.systemMessages;
-    },
-
-  );
+  const systemMessageRouter = createSystemMessageRouter(conversation, (kind) => {
+    const ui = getConfigSnapshot(configManager).ui;
+    if (kind === 'contract') return ui.contractMessages;
+    if (kind === 'operational') return ui.operationalMessages;
+    return ui.systemMessages;
+  });
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 
   const commandRegistry = new CommandRegistry();
   registerBuiltinCommands(commandRegistry);
-  registerNativeWorkLedgerCommand(commandRegistry, nativeWorkLedgerHost.selectProject, nativeWorkLedgerHost.discoverProject, nativeWorkLedgerHost.submission);
+  registerNativeWorkLedgerCommand(
+    commandRegistry,
+    nativeWorkLedgerHost.selectProject,
+    nativeWorkLedgerHost.discoverProject,
+    nativeWorkLedgerHost.submission,
+  );
   registerTuiLegacyImportCommands(commandRegistry, options.daemonHomeDirectory);
   const remoteRuntime = createShellRemoteCommandService({
     readModels: uiServices.readModels,
@@ -228,90 +236,45 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   });
 
   const commandContext: CommandContext = createBootstrapCommandContext({
-    configManager,
+    ...projectBootstrapShellCommandOptions({
+      configManager,
+      services,
+      conversation,
+      runtime,
+      requestRender,
+      toolRegistry,
+      forensicsRegistry,
+      policyRuntimeState,
+      uiServices,
+      remoteRuntime,
+      planRuntime,
+      providerApi,
+      directTransport,
+      hookApi,
+      mcpApi,
+      opsApi,
+      completeModelSelectionSideEffect,
+      hydrateSessionUsage,
+    }),
     pairingTokens: services.pairingTokens,
-    providerRegistry: services.providerRegistry,
-    conversation,
-    runtime,
-    requestRender,
-    keybindingsManager: services.keybindingsManager,
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
-    toolRegistry,
-    mcpRegistry: services.mcpRegistry,
-    voiceProviderRegistry: services.voiceProviders,
-    voiceService: services.voiceService,
     webSearchService: services.webSearchService,
     mediaProviders: services.mediaProviders,
-    artifactStore: services.artifactStore,
-    forensicsRegistry,
-    policyRuntimeState,
-    readModels: uiServices.readModels,
-    shellPaths: services.shellPaths,
-    surface: services.surface,
-    remoteRuntime,
-    planRuntime,
-    fileUndoManager: services.fileUndoManager,
     workspaceCheckpointManager: services.workspaceCheckpointManager,
     gatewayMethods: services.gatewayMethods,
     workspaceTrustManager: services.workspaceTrustManager,
-    // Registration half is stateless (reads the shared registry on demand), so
-    // it is constructed here for the command context rather than threaded through
-    // RuntimeServices, no early-load requirement like the trust gate has.
     workspaceRegistrationManager: new WorkspaceRegistrationManager({ shellPaths: services.shellPaths }),
-    memoryRegistry: services.memoryRegistry,
-    integrationHelpers: services.integrationHelpers,
-    automationManager: services.automationManager,
     knowledgeService: services.knowledgeService,
-    projectPlanningService: services.projectPlanningService,
-    projectPlanningProjectId: services.projectPlanningProjectId,
-    workPlanStore: services.workPlanStore,
-    providerOptimizer: services.providerOptimizer,
-    pluginManager: services.pluginManager,
-    hookWorkbench: services.hookWorkbench,
-    agentManager: services.agentManager,
-    modeManager: services.modeManager,
-    sessionManager: services.sessionManager,
-    profileManager: services.profileManager,
-    bookmarkManager: services.bookmarkManager,
-    favoritesStore: services.favoritesStore,
-    benchmarkStore: services.benchmarkStore,
-    providerApi,
-    subscriptionManager: services.subscriptionManager,
-    secretsManager: services.secretsManager,
-    serviceRegistry: services.serviceRegistry,
-    localUserAuthManager: services.localUserAuthManager,
-    tokenAuditor: services.tokenAuditor,
-    replayEngine: services.replayEngine,
-    webhookNotifier: services.webhookNotifier,
-    sessionMemoryStore: services.sessionMemoryStore,
-    sessionLineageTracker: services.sessionLineageTracker,
     contractRunner: services.contractRunner,
     contractOperator: services.contractOperator,
     codeIndexStore: services.codeIndexStore,
     codeIndexReindexScheduler: services.codeIndexReindexScheduler,
     isPassiveCodeInjectionFlagEnabled: () => services.featureFlags.isEnabled('agent-passive-code-injection'),
     featureFlagManager: services.featureFlags,
-    // Expose the MAIN session's per-turn passive-injection ring
-    // so `/recall injections` (no agent id) renders it, see recall-review.ts.
     getMainSessionTurnInjections: () => orchestrator.getTurnInjections(),
-    changeTracker: services.sessionChangeTracker,
-    planManager: services.planManager,
-    adaptivePlanner: services.adaptivePlanner,
-    sessionOrchestration: services.sessionOrchestration,
-    operatorClient: directTransport.operator,
     userPermissionRuleStore: services.userPermissionRuleStore,
-    peerClient: directTransport.peer,
     knowledgeApi,
-    // /recall's browse/link/queue/export/import subcommands and the per-turn
-    // knowledge-injection read route through the spine client, not the raw
-    // local registry, so they fully detach when a daemon is adopted.
     memorySpine: services.memorySpine,
-    hookApi,
-    mcpApi,
-    opsApi,
-    directTransport,
-    worktreeRegistry: services.worktreeRegistry,
-    sandboxSessionRegistry: services.sandboxSessionRegistry,
     loadSystemPrompt: () => loadBootstrapSystemPrompt(configManager),
     activatePlan: (_planId, task) => {
       setTimeout(() => {
@@ -325,19 +288,21 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
         })();
       }, 50);
     },
-    completeModelSelectionSideEffect,
-    componentHealthMonitor: services.componentHealthMonitor,
-    hydrateSessionUsage,
   });
   commandContext.resumeSession = resumeSession;
   commandContextRef = commandContext;
 
   const gitStatusProvider = new GitStatusProvider(services.workingDirectory);
   const lastGitInfoRef = { value: undefined as GitHeaderInfo | undefined };
-  gitStatusProvider.getStatus().then((info) => {
-    lastGitInfoRef.value = info;
-    requestRender();
-  }).catch(() => { /* non-fatal */ });
+  gitStatusProvider
+    .getStatus()
+    .then((info) => {
+      lastGitInfoRef.value = info;
+      requestRender();
+    })
+    .catch(() => {
+      /* non-fatal */
+    });
   // FIX 2: the header's git segment otherwise only refreshes on
   // TURN_COMPLETED/TOOL_SUCCEEDED/TOOL_FAILED (see turn-event-wiring.ts's
   // refreshGit()), if the user runs `git init` externally and never submits
@@ -359,7 +324,10 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   return {
     commandRegistry,
     commandContext,
-    closeNativeWorkSubmission: () => { nativeWorkLedgerHost.submission.close(); nativeWorkLedgerHost.intake.close(); },
+    closeNativeWorkSubmission: () => {
+      nativeWorkLedgerHost.submission.close();
+      nativeWorkLedgerHost.intake.close();
+    },
     gitStatusProvider,
     lastGitInfoRef,
     inputHistory,

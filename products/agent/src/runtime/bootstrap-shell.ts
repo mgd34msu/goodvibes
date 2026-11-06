@@ -1,3 +1,4 @@
+import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
 import type { ConversationManager } from '../core/conversation';
 import type { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
@@ -70,19 +71,18 @@ export interface PlanningAnswerSubmitBridgeOptions {
   readonly defer?: (callback: () => void) => void;
 }
 
-export function submitPlanningAnswerWithShellFallback(
-  answer: string,
-  options: PlanningAnswerSubmitBridgeOptions,
-): void {
+export function submitPlanningAnswerWithShellFallback(answer: string, options: PlanningAnswerSubmitBridgeOptions): void {
   const submit = options.getSubmitInput();
   if (submit) {
     submit(answer);
     return;
   }
 
-  const defer = options.defer ?? ((callback) => {
-    setTimeout(callback, 0);
-  });
+  const defer =
+    options.defer ??
+    ((callback) => {
+      setTimeout(callback, 0);
+    });
   defer(() => {
     const deferredSubmit = options.getSubmitInput();
     if (deferredSubmit) {
@@ -90,10 +90,12 @@ export function submitPlanningAnswerWithShellFallback(
       return;
     }
 
-    options.addSystemMessage([
-      '[Planning] Could not submit the selected answer because the prompt route is not ready.',
-      `Paste this answer into the prompt to continue planning: ${answer}`,
-    ].join('\n'));
+    options.addSystemMessage(
+      [
+        '[Planning] Could not submit the selected answer because the prompt route is not ready.',
+        `Paste this answer into the prompt to continue planning: ${answer}`,
+      ].join('\n'),
+    );
     options.requestRender();
   });
 }
@@ -130,16 +132,12 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
 
   let commandContextRef: CommandContext | null = null;
 
-  const systemMessageRouter = createSystemMessageRouter(
-    conversation,
-    activityFeed,
-    (kind) => {
-      const ui = getConfigSnapshot(configManager).ui;
-      if (kind === 'contract') return ui.contractMessages;
-      if (kind === 'operational') return ui.operationalMessages;
-      return ui.systemMessages;
-    },
-  );
+  const systemMessageRouter = createSystemMessageRouter(conversation, activityFeed, (kind) => {
+    const ui = getConfigSnapshot(configManager).ui;
+    if (kind === 'contract') return ui.contractMessages;
+    if (kind === 'operational') return ui.operationalMessages;
+    return ui.systemMessages;
+  });
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 
   const commandRegistry = new CommandRegistry();
@@ -156,13 +154,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     tasksReadModel: uiServices.readModels.tasks,
     taskManager,
   });
-  const {
-    directTransport,
-    hookApi,
-    mcpApi,
-    opsApi,
-    providerApi,
-  } = foundationClients;
+  const { directTransport, hookApi, mcpApi, opsApi, providerApi } = foundationClients;
   const agentKnowledgeApi = createKnowledgeApi(services.agentKnowledgeService, { memoryRegistry: services.memoryRegistry });
   const remoteRuntime = createShellRemoteCommandService({
     readModels: uiServices.readModels,
@@ -175,73 +167,37 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   });
 
   const commandContext: CommandContext = createBootstrapCommandContext({
-    configManager,
-    providerRegistry: services.providerRegistry,
-    conversation,
-    runtime,
-    requestRender,
-    keybindingsManager: services.keybindingsManager,
+    ...projectBootstrapShellCommandOptions({
+      configManager,
+      services,
+      conversation,
+      runtime,
+      requestRender,
+      toolRegistry,
+      forensicsRegistry,
+      policyRuntimeState,
+      uiServices,
+      remoteRuntime,
+      planRuntime,
+      providerApi,
+      directTransport,
+      hookApi,
+      mcpApi,
+      opsApi,
+      completeModelSelectionSideEffect,
+      hydrateSessionUsage,
+    }),
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
-    toolRegistry,
-    mcpRegistry: services.mcpRegistry,
-    voiceProviderRegistry: services.voiceProviders,
-    voiceService: services.voiceService,
     voiceSetup: services.voiceSetup,
     memoryGovernor: services.memoryGovernor,
     mediaProviderRegistry: services.mediaProviders,
-    artifactStore: services.artifactStore,
     channelDeliveryRouter: services.channelDeliveryRouter,
-    forensicsRegistry,
-    policyRuntimeState,
-    readModels: uiServices.readModels,
-    shellPaths: services.shellPaths,
-    remoteRuntime,
-    planRuntime,
-    fileUndoManager: services.fileUndoManager,
     processManager: services.processManager,
     executionLedger: services.executionLedger,
     approvalsView: services.approvalsView,
-    memoryRegistry: services.memoryRegistry,
-    integrationHelpers: services.integrationHelpers,
-    automationManager: services.automationManager,
     knowledgeService: services.agentKnowledgeService,
-    projectPlanningService: services.projectPlanningService,
-    projectPlanningProjectId: services.projectPlanningProjectId,
-    workPlanStore: services.workPlanStore,
-    providerOptimizer: services.providerOptimizer,
-    pluginManager: services.pluginManager,
-    hookWorkbench: services.hookWorkbench,
-    agentManager: services.agentManager,
-    modeManager: services.modeManager,
-    sessionManager: services.sessionManager,
-    profileManager: services.profileManager,
-    bookmarkManager: services.bookmarkManager,
-    favoritesStore: services.favoritesStore,
-    benchmarkStore: services.benchmarkStore,
-    providerApi,
-    subscriptionManager: services.subscriptionManager,
-    secretsManager: services.secretsManager,
-    serviceRegistry: services.serviceRegistry,
-    localUserAuthManager: services.localUserAuthManager,
-    tokenAuditor: services.tokenAuditor,
-    replayEngine: services.replayEngine,
-    webhookNotifier: services.webhookNotifier,
-    sessionMemoryStore: services.sessionMemoryStore,
-    sessionLineageTracker: services.sessionLineageTracker,
-    changeTracker: services.sessionChangeTracker,
-    planManager: services.planManager,
-    adaptivePlanner: services.adaptivePlanner,
-    sessionOrchestration: services.sessionOrchestration,
-    operatorClient: directTransport.operator,
-    peerClient: directTransport.peer,
     agentKnowledgeApi,
     promptContextReceipts,
-    hookApi,
-    mcpApi,
-    opsApi,
-    directTransport,
-    worktreeRegistry: services.worktreeRegistry,
-    sandboxSessionRegistry: services.sandboxSessionRegistry,
     memoryConsolidationScheduler: services.memoryConsolidationScheduler,
     loadSystemPrompt: () => loadBootstrapSystemPrompt(configManager),
     activatePlan: (_planId, task) => {
@@ -251,13 +207,8 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
         });
       }, 50);
     },
-    completeModelSelectionSideEffect,
-    componentHealthMonitor: services.componentHealthMonitor,
     writeLastSessionPointer,
     restoreTurnAnchors,
-    surface: services.surface,
-    // Token counters and context occupancy come from the transcript (/clear empties it).
-    hydrateSessionUsage,
   });
   commandContextRef = commandContext;
 

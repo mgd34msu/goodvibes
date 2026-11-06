@@ -1635,7 +1635,8 @@
       "path": "runtime/bootstrap-shell.ts",
       "baselineTuiLines": 369,
       "baselineSimilarity": 0.5426,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns foundation command clients, common bootstrap command capability capture/projections, command composition and usage hydration primitives. Remaining product composition intentionally differs: TUI native ledger/views/spine/live resume/code/contract authorities and cost seeding versus Agent read-only host ops, isolated Agent Knowledge, activity routing and session restore hooks."
     },
     {
       "path": "runtime/bootstrap-shutdown.ts",

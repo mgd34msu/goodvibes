@@ -1,3 +1,5 @@
+import type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
+export type { OnboardingMode, OnboardingAcknowledgementTarget, OnboardingStateScope, OnboardingCheckMarkerSource, OnboardingAcknowledgementRuntimeState, OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingCheckMarkersState, WriteOnboardingCheckMarkerOptions } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 import type { ConfigManager, ConfigKey, GoodVibesConfig } from '../../config/index.ts';
 import type { SecretsManager, SecretRecord, SecretStorageReview } from '../../config/secrets.ts';
 import type { LegacyFeatureConfigKey } from '../feature-enablement.ts';
@@ -10,11 +12,7 @@ import type {
 } from '@/runtime/index.ts';
 import type { AgentBehaviorDiscoverySnapshot } from '../../agent/behavior-discovery-summary.ts';
 
-export type OnboardingMode = 'new' | 'edit' | 'reopen';
-
 export type OnboardingNetworkMode = 'local-network-default' | 'custom';
-
-export type OnboardingAcknowledgementTarget = 'providers' | 'subscriptions' | 'auth';
 
 export type OnboardingAcknowledgementReason =
   | 'not-needed'
@@ -27,10 +25,6 @@ export type OnboardingAcknowledgementReason =
   | 'active-sessions';
 
 export type OnboardingVerificationStatus = 'pass' | 'warn' | 'fail';
-
-export type OnboardingStateScope = 'user' | 'project';
-
-export type OnboardingCheckMarkerSource = 'wizard' | 'command' | 'import' | 'unknown';
 
 export interface OnboardingConfigSnapshot {
   readonly display: GoodVibesConfig['display'];
@@ -326,47 +320,6 @@ export interface OnboardingVerificationResult {
   readonly verifiedAt: number;
   readonly ok: boolean;
   readonly items: readonly OnboardingVerificationItem[];
-}
-
-export interface OnboardingAcknowledgementRuntimeState {
-  readonly version: 1;
-  readonly updatedAt: number;
-  readonly source: string;
-  readonly mode?: OnboardingMode;
-  readonly workspaceRoot?: string;
-  readonly acknowledgements: Partial<Record<OnboardingAcknowledgementTarget, boolean>>;
-}
-
-export interface OnboardingCheckMarkerPayload {
-  readonly version: 1;
-  readonly checkedAt: number;
-  readonly updatedAt: number;
-  readonly source: OnboardingCheckMarkerSource;
-  readonly mode?: OnboardingMode;
-  readonly workspaceRoot?: string;
-}
-
-export interface OnboardingCheckMarkerState {
-  readonly scope: OnboardingStateScope;
-  readonly path: string;
-  readonly exists: boolean;
-  readonly payload: OnboardingCheckMarkerPayload | null;
-  readonly parseError?: string;
-}
-
-export interface OnboardingCheckMarkersState {
-  readonly user: OnboardingCheckMarkerState;
-  readonly project: OnboardingCheckMarkerState;
-  readonly effective: OnboardingCheckMarkerState | null;
-}
-
-export interface WriteOnboardingCheckMarkerOptions {
-  readonly scope?: OnboardingStateScope;
-  readonly checkedAt?: number;
-  readonly updatedAt?: number;
-  readonly source?: OnboardingCheckMarkerSource;
-  readonly mode?: OnboardingMode;
-  readonly workspaceRoot?: string;
 }
 
 export interface OnboardingSurfaceReadHelper {

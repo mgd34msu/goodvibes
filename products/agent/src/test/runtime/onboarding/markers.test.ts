@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import {
@@ -65,7 +65,8 @@ describe('onboarding check marker helpers', () => {
 
     expect(markers.project.exists).toBe(true);
     expect(markers.project.payload).toBeNull();
-    expect(markers.project.parseError).toContain('JSON');
+    expect(markers.project.parseError).toContain('quarantined');
+    expect(existsSync(`${markers.project.path}.unrecognized`)).toBe(true);
     expect(markers.effective?.scope).toBe('user');
   });
 

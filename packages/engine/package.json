@@ -2058,6 +2058,31 @@
       "bun": "./terminal-shell/src/native/native-headless.ts",
       "types": "./terminal-shell/dist/native/native-headless.d.ts",
       "import": "./terminal-shell/dist/native/native-headless.js"
+    },
+    "./terminal-shell/mcp-workspace-model": {
+      "bun": "./terminal-shell/src/mcp-workspace-model.ts",
+      "types": "./terminal-shell/dist/mcp-workspace-model.d.ts",
+      "import": "./terminal-shell/dist/mcp-workspace-model.js"
+    },
+    "./terminal-shell/command-args-hint": {
+      "bun": "./terminal-shell/src/command-args-hint.ts",
+      "types": "./terminal-shell/dist/command-args-hint.d.ts",
+      "import": "./terminal-shell/dist/command-args-hint.js"
+    },
+    "./terminal-shell/onboarding-state-types": {
+      "bun": "./terminal-shell/src/onboarding-state-types.ts",
+      "types": "./terminal-shell/dist/onboarding-state-types.d.ts",
+      "import": "./terminal-shell/dist/onboarding-state-types.js"
+    },
+    "./terminal-shell/onboarding-state": {
+      "bun": "./terminal-shell/src/onboarding-state.ts",
+      "types": "./terminal-shell/dist/onboarding-state.d.ts",
+      "import": "./terminal-shell/dist/onboarding-state.js"
+    },
+    "./terminal-shell/onboarding-markers": {
+      "bun": "./terminal-shell/src/onboarding-markers.ts",
+      "types": "./terminal-shell/dist/onboarding-markers.d.ts",
+      "import": "./terminal-shell/dist/onboarding-markers.js"
     }
   },
   "publishConfig": {

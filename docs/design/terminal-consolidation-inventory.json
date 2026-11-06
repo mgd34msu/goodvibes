@@ -185,7 +185,7 @@
     {
       "path": "config/surface.ts",
       "baselineTuiLines": 21,
-      "baselineSimilarity": 0.0,
+      "baselineSimilarity": 0,
       "status": "pending-convergence"
     },
     {
@@ -239,7 +239,7 @@
     {
       "path": "core/conversation-usage.ts",
       "baselineTuiLines": 49,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -257,13 +257,13 @@
     {
       "path": "core/process-output-log.ts",
       "baselineTuiLines": 186,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "core/session-focus.ts",
       "baselineTuiLines": 190,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -311,7 +311,7 @@
     {
       "path": "core/work-tree-focus.ts",
       "baselineTuiLines": 290,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -353,14 +353,14 @@
     {
       "path": "input/bookmark-modal.ts",
       "baselineTuiLines": 139,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "input/command-args-hint.ts",
       "baselineTuiLines": 47,
       "baselineSimilarity": 0.8193,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/command-registry.ts",
@@ -389,7 +389,7 @@
     {
       "path": "input/commands/context-window.ts",
       "baselineTuiLines": 103,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -599,7 +599,7 @@
     {
       "path": "input/commands/transcript-reading.ts",
       "baselineTuiLines": 35,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -721,7 +721,7 @@
     {
       "path": "input/handler-work-tree-route.ts",
       "baselineTuiLines": 123,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
@@ -746,7 +746,24 @@
       "path": "input/mcp-workspace.ts",
       "baselineTuiLines": 594,
       "baselineSimilarity": 0.8405,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "MCP_WORKSPACE_MODAL_NAME",
+        "MCP_ROLES",
+        "MCP_FORM_TRUST_MODES",
+        "McpWorkspaceServerRow",
+        "McpWorkspaceActionRow",
+        "McpWorkspaceRow",
+        "McpWorkspaceForm",
+        "McpWorkspaceSnapshot",
+        "splitList",
+        "parseArgs",
+        "parseEnv",
+        "serverConfigToForm",
+        "formToServerConfig",
+        "nextEnumValue",
+        "mergeServers"
+      ]
     },
     {
       "path": "input/model-picker-open.ts",
@@ -775,7 +792,7 @@
     {
       "path": "input/overlay-filter.ts",
       "baselineTuiLines": 26,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -937,7 +954,7 @@
     {
       "path": "renderer/composer.ts",
       "baselineTuiLines": 146,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1021,7 +1038,7 @@
     {
       "path": "renderer/lane-graph/layout.ts",
       "baselineTuiLines": 248,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1033,7 +1050,7 @@
     {
       "path": "renderer/lane-graph/semantic-memo.ts",
       "baselineTuiLines": 79,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1087,7 +1104,7 @@
     {
       "path": "renderer/process-view.ts",
       "baselineTuiLines": 192,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1231,13 +1248,13 @@
     {
       "path": "renderer/terminal-palette-probe.ts",
       "baselineTuiLines": 322,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "renderer/terminal-palette-reader.ts",
       "baselineTuiLines": 183,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1357,7 +1374,7 @@
     {
       "path": "runtime/client/native-host-fetch.ts",
       "baselineTuiLines": 16,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1387,7 +1404,7 @@
     {
       "path": "runtime/native-conversation-execution.ts",
       "baselineTuiLines": 54,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1399,7 +1416,7 @@
     {
       "path": "runtime/native-conversation-input.ts",
       "baselineTuiLines": 24,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1417,7 +1434,7 @@
     {
       "path": "runtime/native-conversation-intake-preflight.ts",
       "baselineTuiLines": 24,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
@@ -1429,7 +1446,7 @@
     {
       "path": "runtime/native-work-execution.ts",
       "baselineTuiLines": 161,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1453,25 +1470,25 @@
     {
       "path": "runtime/native-work-submission-journal.ts",
       "baselineTuiLines": 198,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "runtime/native-work-submission-preflight.ts",
       "baselineTuiLines": 24,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "runtime/native-work-submission-source.ts",
       "baselineTuiLines": 55,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "runtime/native-work-submission.ts",
       "baselineTuiLines": 206,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
@@ -1496,7 +1513,7 @@
       "path": "runtime/onboarding/markers.ts",
       "baselineTuiLines": 140,
       "baselineSimilarity": 0.5443,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/onboarding/snapshot.ts",
@@ -1508,13 +1525,24 @@
       "path": "runtime/onboarding/state.ts",
       "baselineTuiLines": 218,
       "baselineSimilarity": 0.4624,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "runtime/onboarding/types.ts",
       "baselineTuiLines": 465,
       "baselineSimilarity": 0.8032,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "OnboardingMode",
+        "OnboardingAcknowledgementTarget",
+        "OnboardingStateScope",
+        "OnboardingCheckMarkerSource",
+        "OnboardingAcknowledgementRuntimeState",
+        "OnboardingCheckMarkerPayload",
+        "OnboardingCheckMarkerState",
+        "OnboardingCheckMarkersState",
+        "WriteOnboardingCheckMarkerOptions"
+      ]
     },
     {
       "path": "runtime/onboarding/verify.ts",
@@ -1543,7 +1571,7 @@
     {
       "path": "runtime/store/domains/index.ts",
       "baselineTuiLines": 1,
-      "baselineSimilarity": 0.0,
+      "baselineSimilarity": 0,
       "status": "platform-forwarder"
     },
     {
@@ -1561,7 +1589,7 @@
     {
       "path": "runtime/store/state.ts",
       "baselineTuiLines": 1,
-      "baselineSimilarity": 0.0,
+      "baselineSimilarity": 0,
       "status": "platform-forwarder"
     },
     {
@@ -1633,13 +1661,13 @@
     {
       "path": "utils/format-elapsed.ts",
       "baselineTuiLines": 30,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {
       "path": "utils/format-number.ts",
       "baselineTuiLines": 71,
-      "baselineSimilarity": 1.0,
+      "baselineSimilarity": 1,
       "status": "platform-forwarder"
     },
     {

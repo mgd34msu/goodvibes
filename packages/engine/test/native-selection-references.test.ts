@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -186,8 +187,21 @@ async function planning() {
   await service.upsertState({ projectId: 'proj', state });
   const first = await service.getState({ projectId: 'proj' });
   if (!first.source) throw new Error('Planning fixture lost its native source');
-  // Fixed safe metadata produces a card-shaped SHA of the complete actual native row.
-  await store.upsertSource({ ...first.source, metadata: { ...first.source.metadata, diagnosticSalt: 'safe-fixture-910' } });
+  // Find a card-shaped SHA from the actual complete row. A fixed salt stops
+  // working when the stored format changes, even though the boundary is sound.
+  const raw = store.getSourceSnapshot({ id: first.source.id }).raw;
+  if (!raw || typeof raw.metadata !== 'string') throw new Error('Planning fixture lost its raw metadata');
+  const metadata = JSON.parse(raw.metadata) as Record<string, unknown>;
+  let diagnosticSalt: string | undefined;
+  for (let candidate = 0; candidate < 20_000; candidate++) {
+    const salt = `safe-fixture-${candidate}`;
+    const entries = Object.entries({ ...raw, metadata: JSON.stringify({ ...metadata, diagnosticSalt: salt }) })
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    const generation = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+    if (findCardNumberShapes(generation, 1).length) { diagnosticSalt = salt; break; }
+  }
+  if (!diagnosticSalt) throw new Error('Could not construct the card-shaped native fingerprint fixture');
+  await store.upsertSource({ ...first.source, metadata: { ...first.source.metadata, diagnosticSalt } });
   const selected = await service.getState({ projectId: 'proj' });
   if (!selected.source || !selected.revision) throw new Error('Planning fixture lost its native revision');
   expect(findCardNumberShapes(selected.revision.generation, 1)).toHaveLength(1);

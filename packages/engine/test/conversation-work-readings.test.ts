@@ -126,7 +126,7 @@ test('same ID and content cannot replace the pending proposal incarnation', asyn
   const h = harness(); let target = h.proposal(); answer = 'approve';
   pause = async () => { target = { ...target }; };
   try {
-    await expect(tryResolveWorkProposalReplyFromChannel(h.input, { ...h.replyDeps, proposals: { listPending: () => [target], resolve: h.store.resolve.bind(h.store) } })).rejects.toThrow('the judgment request was rejected');
+    await expect(tryResolveWorkProposalReplyFromChannel(h.input, { ...h.replyDeps, proposals: { listPending: () => [target], resolve: h.store.resolve.bind(h.store) } })).rejects.toThrow('Work proposal source is no longer current');
     expect(h.spawns).toEqual([]);
   } finally { h.store.dispose(); }
 });
@@ -134,7 +134,7 @@ test('expiry during reading invalidates the answer before start', async () => {
   let now = 1; const h = harness(); h.store.dispose(); const store = new WorkProposalStore({ now: () => now });
   const p = store.create({ surfaceKind: 'ntfy', userId: 'owner', channelId: 'channel', task: 'Fix login', summary: 'Fix login', ttlMs: 100 }); store.markDelivered(p.id);
   answer = 'approve'; pause = async () => { now = 102; };
-  try { await expect(tryResolveWorkProposalReplyFromChannel(h.input, { ...h.replyDeps, proposals: store })).rejects.toThrow('the judgment request was rejected'); expect(h.spawns).toEqual([]); }
+  try { await expect(tryResolveWorkProposalReplyFromChannel(h.input, { ...h.replyDeps, proposals: store })).rejects.toThrow('Work proposal source is no longer current'); expect(h.spawns).toEqual([]); }
   finally { store.dispose(); }
 });
 test('userless non-topic surfaces cannot claim work', async () => {

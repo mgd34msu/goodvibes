@@ -5,10 +5,9 @@ import {
   type CallOptions, type ChoiceResponse, type EntryType, type JudgmentPort,
   type NamedDecision, type NoulResponse, type Question,
 } from '@goodvibes-jev/judgment/decisions';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import type { CalendarProviderId } from '../oauth-types.js';
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 const SITE = 'calendar.api.missing-permission';
 const UNRESOLVED = 'unresolved';

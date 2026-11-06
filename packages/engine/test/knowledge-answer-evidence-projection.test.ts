@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { reviewKnowledgeNodeRecord } from '../sdk/src/platform/knowledge/service-node-admin.js';
+import { createKnowledgeNodeOperatorMutation } from '../sdk/src/platform/knowledge/store-node-authority.js';
 import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { prepareAnswerEvidence } from '../sdk/src/platform/knowledge/semantic/answer-verification/evidence.js';
 import { withAnswerVerificationBudget } from '../sdk/src/platform/knowledge/semantic/answer-verification/budget.js';
@@ -57,7 +58,8 @@ describe('answer extraction evidence and local provenance', () => {
   test('source, extraction and operator content changes invalidate a prepared read set', async () => {
     const { input, store, fact, extraction } = await fixture();
     const prepared = prepareAnswerEvidence(input);
-    await store.upsertNode({ ...fact, status: 'draft', summary: 'Concurrent corrected claim.' });
+    await store.upsertNode({ ...fact, summary: 'Concurrent corrected claim.' },
+      createKnowledgeNodeOperatorMutation(fact, { action: 'revise', reviewer: 'fixture owner' }));
     expect(() => prepared.assertCurrent()).toThrow(KnowledgeAnswerQualityHeldError);
     const next = prepareAnswerEvidence({ ...input, facts: [store.getNode(fact.id)!] });
     await store.upsertExtraction({ ...extraction, excerpt: 'AC-7 has two ports.' });

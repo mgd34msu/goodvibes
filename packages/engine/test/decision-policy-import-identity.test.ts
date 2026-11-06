@@ -36,7 +36,7 @@ test('source and published policy entrypoints share Classic, Preferred fallback,
     finally { retire(); }
     assert.equal(source.isClassicOperation(), false);
   `;
-  const child = Bun.spawn([process.execPath, '-e', script], { cwd: resolve(import.meta.dir, '../../..'), stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, '-e', script], { cwd: resolve(import.meta.dir, '..'), stdout: 'pipe', stderr: 'pipe' });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   expect(code, `${stdout}\n${stderr}`).toBe(0);
 }, 30_000);

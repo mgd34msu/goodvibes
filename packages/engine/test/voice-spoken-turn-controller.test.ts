@@ -101,6 +101,10 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s spoken turns preserve nat
     await h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'classic-speech', prompt: 'speak this answer' }));
     await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
       content: 'The first spoken sentence should remain available. ', accumulated: '' }));
+    // Speech seams admit four candidates concurrently. Those already in flight
+    // may fail together; fallback must prevent every subsequent batch.
+    const requestsAtFallback = fake.requests.length;
+    expect(requestsAtFallback).toBe(policy === 'Classic - Off' ? 0 : 4);
     await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
       content: 'The second spoken sentence should remain available.', accumulated: '' }));
     await h.controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'classic-speech', response: '', stopReason: 'completed' }));
@@ -109,7 +113,7 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s spoken turns preserve nat
     expect(spoken.match(/The first spoken sentence/g)).toHaveLength(1);
     expect(spoken.match(/The second spoken sentence/g)).toHaveLength(1);
     expect(metadata).toBe(0);
-    expect(fake.requests.length).toBe(policy === 'Classic - Off' ? 0 : 1);
+    expect(fake.requests.length).toBe(requestsAtFallback);
   } finally { h.controller.stop(); retirePolicy(); }
 });
 

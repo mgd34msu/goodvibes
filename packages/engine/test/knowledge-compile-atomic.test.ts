@@ -205,7 +205,9 @@ describe('atomic knowledge compilation', () => {
       const record = original(id); return changed && id === artifact.id && record ? { ...record, sha256: 'changed' } : record;
     });
     installJudgmentPort(fakePort((name) => { if (name === 'serve') changed = true; return noulAnswer(0.99); }).port);
-    try { await expect(run()).rejects.toMatchObject({ name: 'KnowledgeUriCanonicalizationHeldError', reason: 'stale' }); }
+    // The artifact changes during the activation reading; that boundary owns
+    // the hold. The complete graph must still remain unchanged below.
+    try { await expect(run()).rejects.toMatchObject({ name: 'KnowledgeNodeActivationHeldError', reason: 'stale' }); }
     finally { read.mockRestore(); }
     expect(changed).toBe(true); expect(state(ctx.store)).toEqual(before); expect(await reopen()).toEqual(before);
   });

@@ -1,3 +1,4 @@
+import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { randomUUID } from 'node:crypto';
 import type { AgentModelCompareArtifactStore, AgentModelCompareModelCatalog, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { MODEL_REASON_THEME_LABELS } from './agent-model-compare-types.ts';
@@ -540,6 +541,10 @@ export async function formatComparisonSynthesis(input: {
   readonly filters: ComparisonAnalyticsFilters;
   readonly storeAvailable: boolean;
 }): Promise<string> {
+  return withConfiguredDecisionModelPolicy(() => formatOwnedComparisonSynthesis(input));
+}
+
+async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatComparisonSynthesis>[0]): Promise<string> {
   if (!input.storeAvailable) {
     return 'Saved comparison synthesis is unavailable because the artifact store does not expose listing and content reads in this runtime.';
   }
@@ -555,6 +560,7 @@ export async function formatComparisonSynthesis(input: {
   const taskCounts = new Map<string, number>();
   const documentCounts = new Map<string, number>();
   const themes = new Map<string, LoadedComparisonJudgment[]>();
+  let notEvaluated = 0;
   let revealed = 0;
   for (const judgment of input.judgments) {
     comparisonIds.add(judgment.comparisonId);
@@ -567,7 +573,10 @@ export async function formatComparisonSynthesis(input: {
     }
     const reading = await readComparisonReasonThemes(judgment, input.artifactStore,
       { request: input.request ?? null, limit: input.limit, includeReasons: input.includeReasons, filters: input.filters, storeAvailable: input.storeAvailable }, input.readingOptions);
-    if (reading.status === 'held') {
+    if (reading.status === 'not-evaluated') {
+      notEvaluated++;
+      pushSynthesisTheme(themes, 'Unassessed preference themes (Classic)', judgment);
+    } else if (reading.status === 'held') {
       pushSynthesisTheme(themes, 'Unresolved preference signal', judgment);
     } else if (reading.themes.length === 0) {
       pushSynthesisTheme(themes, 'Uncategorized preference signal', judgment);
@@ -597,6 +606,7 @@ export async function formatComparisonSynthesis(input: {
 
   lines.push('');
   lines.push('Cross-session reason themes');
+  if (notEvaluated) lines.push(`  Classic operation: ${countPhrase(notEvaluated, 'judgment')} not categorized; saved winner counts and authored reasons remain available.`);
   for (const [label, judgments] of themeCounts) {
     lines.push(`  ${label}: ${countPhrase(judgments.length, 'judgment')}`);
     if (!input.includeReasons) continue;

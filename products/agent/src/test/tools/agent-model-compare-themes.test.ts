@@ -1,3 +1,6 @@
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -245,4 +248,56 @@ test('mutating the registered definition while an answer is pending holds the re
     expect(await reading).toEqual({ status: 'held' });
   } finally { Object.defineProperty(modelReasonTheme, 'version', descriptor); }
   expect(routingRegistry.get(modelReasonTheme.name)).toBe(modelReasonTheme);
+});
+
+test('Classic keeps saved winner analytics without loading original artifacts for optional semantic themes', async () => {
+  const f = fixture(); let asks = 0, loads = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('must not ask'); } });
+  const store: AgentModelCompareArtifactStore = { ...f.store, async readContent() { loads++; throw new Error('optional theme reader must not load originals'); } };
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    expect(await readComparisonReasonThemes(f.judgment, store, f.report, {})).toEqual({ status: 'not-evaluated', provenance: 'classic' });
+    const text = await formatComparisonSynthesis({ artifactStore: store, judgments: [f.judgment], limit: 20,
+      includeReasons: true, filters: {}, storeAvailable: true, readingOptions: {} });
+    expect(text).toContain('judgments 1; revealed 0; hidden 1; compared comparisons 1');
+    expect(text).toContain('Unassessed preference themes (Classic): 1 judgment');
+    expect(text).toContain('not categorized; saved winner counts');
+    expect(text).not.toContain('Uncategorized preference signal');
+    expect(text).not.toContain('Unresolved preference signal');
+    expect(text).toContain('No selected model was changed.');
+    expect(asks).toBe(0); expect(loads).toBe(0);
+  });
+});
+
+test('Preferred actual theme exhaustion switches the whole synthesis without reloading or reclassifying later judgments', async () => {
+  const f = fixture(); let asks = 0, loads = 0;
+  installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new JudgmentError('unavailable', 'fixture exhausted'); } });
+  const load = f.store.readContent;
+  if (!load) throw new Error('Fixture lacks artifact reads');
+  const store: AgentModelCompareArtifactStore = { ...f.store, async readContent(id) { loads++; return load.call(f.store, id); } };
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const text = await formatComparisonSynthesis({ artifactStore: store, judgments: [f.judgment, { ...f.judgment, judgmentId: 'another-saved-judgment' }],
+      limit: 20, includeReasons: true, filters: {}, storeAvailable: true, readingOptions: { sourceOwner: ordinaryResearchOwner() } });
+    expect(text).toContain('Unassessed preference themes (Classic): 2 judgments');
+    expect(text).not.toContain('Uncategorized preference signal');
+    expect(asks).toBe(1); expect(loads).toBe(3);
+    expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+  });
+});
+
+for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'] as const) test(`theme ${kind} stays held rather than activating Classic`, async () => {
+  const f = fixture();
+  installJudgmentPort({ model: 'fixture', async ask() { throw new JudgmentError(kind, 'fixture failure'); } });
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    expect(await readComparisonReasonThemes(f.judgment, f.store, f.report, { sourceOwner: ordinaryResearchOwner() })).toEqual({ status: 'held' });
+    expect(decisionModelPolicyState().operation).toBe('decision');
+  });
+});
+
+test('Classic theme omission still enforces cancellation and synchronous native ownership', async () => {
+  const f = fixture(); const abort = new AbortController(); abort.abort();
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { signal: abort.signal })).rejects.toThrow();
+    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { assertCurrent: () => Promise.resolve() })).rejects.toThrow();
+    await expect(readComparisonReasonThemes(f.judgment, f.store, f.report, { assertCurrent() { throw new Error('native owner retired'); } })).rejects.toThrow();
+  });
 });

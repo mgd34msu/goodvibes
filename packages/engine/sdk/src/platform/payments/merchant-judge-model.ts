@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * merchant-judge-model.ts, the judgement, read by Jev.
  *
@@ -60,6 +61,7 @@ const MARKETPLACE_KINDS: Readonly<Record<RecourseKind, MarketplaceKind>> = {
 
 /** Judge one validated registrable domain through the installed judgment port. */
 export async function judgeMerchant(input: MerchantJudgeInput): Promise<MerchantJudgement> {
+  requireDecisionFeature('merchant reputation and recourse assessment');
   const domain = input.registrableDomain.trim().toLowerCase();
   if (domain.length === 0) {
     return { qualifies: false, confident: false, recourse: 'I could not establish which domain this checkout is on' };

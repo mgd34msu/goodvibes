@@ -3,6 +3,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { maskDigits } from '../security/batteries/card-talk.js';
 import { cardShapeKinds, detectCardShapes, type CardShapeKind } from '../security/card-shapes.js';
 import { securityCodeReply } from './batteries/security-code-reply.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 import { mayEnterCardDetails, describeCardEntryRefusal } from './entry-policy.js';
 
@@ -60,10 +61,13 @@ export interface CardDetailScan {
 export async function scanForCardDetails(text: string, options: { readonly expectingCvv?: boolean } = {}): Promise<CardDetailScan> {
   const found = new Set(cardShapeKinds(await detectCardShapes(text)).map((kind) => SHAPE_NAMES[kind]));
   if (options.expectingCvv === true && !found.has('cvv') && SHORT_DIGIT_RUN.test(text)) {
-    const run = await securityCodeReply.run(judgmentPort(SECURITY_CODE_REPLY_SITE), maskDigits(text), { site: SECURITY_CODE_REPLY_SITE });
-    const reading = run.readings.gives_code;
-    const givesCode = !(reading.verdict === 'no' && reading.outcome === 'act');
-    run.recordAction(givesCode ? 'treated as the security code' : 'not the security code');
+    const givesCode = await decisionOrClassic(async () => {
+      const run = await securityCodeReply.run(judgmentPort(SECURITY_CODE_REPLY_SITE), maskDigits(text), { site: SECURITY_CODE_REPLY_SITE });
+      const reading = run.readings.gives_code;
+      const result = !(reading.verdict === 'no' && reading.outcome === 'act');
+      run.recordAction(result ? 'treated as the security code' : 'not the security code');
+      return result;
+    }, () => true); // Host is expecting a code: conservatively protect the short digit run.
     if (givesCode) found.add('cvv');
   }
   const order: readonly ('card-number' | 'expiry' | 'cvv')[] = ['card-number', 'expiry', 'cvv'];

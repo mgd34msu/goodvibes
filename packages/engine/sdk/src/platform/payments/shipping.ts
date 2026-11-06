@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * shipping.ts, the tier preference, and the ladder that steps down one rung.
  *
@@ -86,6 +87,7 @@ async function pick(
  * `currency` is what their costs are in.
  */
 export async function readShippingTiers(options: readonly ShippingOption[], currency: string): Promise<ShippingTiers> {
+  requireDecisionFeature('semantic checkout shipping-tier selection');
   const tiers = new Map<ShippingTier, ShippingOption>();
   const only = options.length === 1 ? options[0] : undefined;
   if (only !== undefined) {

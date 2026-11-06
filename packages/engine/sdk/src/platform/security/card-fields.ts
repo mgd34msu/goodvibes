@@ -30,6 +30,7 @@
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { cardField } from './batteries/card-field.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /**
  * Everything about one control the classification may look at.
@@ -88,17 +89,24 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor): Pro
   const tokens = text(control.autocomplete).toLowerCase().split(/\s+/).filter((token) => token.length > 0);
   if (tokens.some((token) => CARD_AUTOCOMPLETE_TOKENS.has(token))) return true;
 
-  const run = await cardField.run(judgmentPort(CARD_FIELD_SITE), {
-    tag,
-    type: text(control.type),
-    name: text(control.name),
-    id: text(control.id),
-    placeholder: text(control.placeholder),
-    ariaLabel: text(control.ariaLabel),
-    label: text(control.label),
-  }, { site: CARD_FIELD_SITE });
-  const reading = run.readings.card_field;
-  const ordinary = reading.verdict === 'no' && reading.outcome === 'act';
-  run.recordAction(ordinary ? 'value reported' : 'value suppressed');
-  return !ordinary;
+  return decisionOrClassic(async () => {
+    const run = await cardField.run(judgmentPort(CARD_FIELD_SITE), {
+      tag,
+      type: text(control.type),
+      name: text(control.name),
+      id: text(control.id),
+      placeholder: text(control.placeholder),
+      ariaLabel: text(control.ariaLabel),
+      label: text(control.label),
+    }, { site: CARD_FIELD_SITE });
+    const reading = run.readings.card_field;
+    const ordinary = reading.verdict === 'no' && reading.outcome === 'act';
+    run.recordAction(ordinary ? 'value reported' : 'value suppressed');
+    return !ordinary;
+  }, () => {
+    // This boolean governs value retention, not a claim that the control is a
+    // payment field. With no semantic assessment, omit every form value;
+    // selectors, labels, checked state and owner-authorized actions remain usable.
+    return true;
+  });
 }

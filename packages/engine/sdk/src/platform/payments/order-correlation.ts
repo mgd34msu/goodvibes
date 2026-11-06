@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { requireActingReading } from '../types/judgment-held.js';
 /**
  * order-correlation.ts, recognising the store's confirmation when it arrives.
@@ -168,6 +169,7 @@ export async function correlatePurchaseMail(
   mail: InboundMailFacts,
   records: readonly PurchaseRecord[],
 ): Promise<CorrelationResult> {
+  requireDecisionFeature('semantic purchase-mail correlation');
   const senderDomain = senderRegistrableDomain(mail.senderAddress);
   if (senderDomain === null) {
     return { kind: 'unrelated', reason: 'The sender address has no registrable domain to compare.' };
@@ -282,6 +284,7 @@ const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
  * "arriving tomorrow".
  */
 export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'subject' | 'body' | 'receivedAtMs'>): Promise<ConfirmationFacts> {
+  requireDecisionFeature('semantic purchase confirmation extraction');
   const { subject, body } = await redactedMail({ ...mail, senderAddress: '' });
   const candidates = identifierCandidates(body);
   const context = { subject, body, source: 'a shop\'s mail about an order' };

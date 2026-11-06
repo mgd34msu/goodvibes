@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * cart.ts, the cart must contain what the owner asked for and nothing else.
  *
@@ -93,6 +94,7 @@ export async function assertCartMatchesRequest(
   cart: readonly CartLine[],
   requested: readonly RequestedLine[],
 ): Promise<CartCheck> {
+  requireDecisionFeature('automated checkout cart comparison');
   const matches = requested.length === 0
     ? cart.map(() => null)
     : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested));
@@ -155,6 +157,7 @@ export interface RecurringCheck {
  * anything but a confident no refuses.
  */
 export async function detectRecurringCharge(orderSummaryText: string): Promise<RecurringCheck> {
+  requireDecisionFeature('checkout recurring-charge interpretation');
   const state = orderSummaryView(orderSummaryText);
   const run = await recurringCharge.run(judgmentPort(RECURRING_CHARGE_SITE), state, { site: RECURRING_CHARGE_SITE });
   const reading = run.readings.recurring;

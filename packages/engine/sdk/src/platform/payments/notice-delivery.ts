@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * notice-delivery.ts, actually sending the notice, and reporting what happened.
  *
@@ -132,6 +133,7 @@ export async function readPaymentReply(
   kind: 'approval' | 'veto',
   notice: string,
 ): Promise<PaymentAnswer | null> {
+  requireDecisionFeature('interpreting a purchase approval or veto reply');
   if (reply.trim().length === 0) return null;
   const port = judgmentPort(PAYMENT_REPLY_SITE);
   if (kind === 'approval') {

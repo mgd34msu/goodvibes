@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
@@ -589,11 +590,14 @@ async function main() {
     notify: (message) => systemMessageRouter.high(message),
   });
 
-  commandContext.submitInput = submitInput;
-  commandContext.submitSpokenInput = (text, content) =>
-    submitInput(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) });
-  commandContext.stopSpokenOutput = () => spokenTurns.stop();
-  commandContext.pasteFromClipboard = () => input.handlePaste();
+  Object.assign(
+    commandContext,
+    createShellSubmissionPorts(
+      submitInput,
+      () => spokenTurns.stop(),
+      () => input.handlePaste(),
+    ),
+  );
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
   commandContext.beginPlainInput = (request) => input.beginPlainInput(request);
@@ -834,10 +838,12 @@ async function main() {
     };
     const throbber = throbberSource.state({ ...thinkingDeps, width, pendingApproval: mainPermissionAsk(pendingPermission) }); // what main is doing: the row above the input area
     const runningAgentCount = activeAgents.length;
-    const runningProcessCount = processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length;
-    const cw = getPromptContentWidth();
-    const promptInfo = input.getWrappedPromptInfo(cw);
-    const commandArgsHint = buildCommandArgsHint(input.prompt, commandRegistry);
+    const { runningProcessCount, cw, promptInfo, commandArgsHint } = readShellFrameFacts(
+      processManager,
+      input,
+      getPromptContentWidth,
+      (prompt) => buildCommandArgsHint(prompt, commandRegistry),
+    );
     const composerState = deriveComposerState({
       text: input.prompt,
       commandMode: input.commandMode,

@@ -1,3 +1,4 @@
+import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { getLocalNetworkIp } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
@@ -54,19 +55,7 @@ import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import '../utils/browser.ts';
 
 export function exitCodeForText(output: string): number {
-  if (output.startsWith('Usage:') || output.startsWith('Invalid ')) return 2;
-  if (output.startsWith('Session not found:') || output.startsWith('Unknown task:') || output.startsWith('Task submit failed ')) return 1;
-  if (
-    output.startsWith('No stored ') ||
-    output.startsWith('No pending ') ||
-    output.startsWith('No model ') ||
-    output.startsWith('No provider ') ||
-    output.startsWith('No auth ')
-  )
-    return 1;
-  if (output.startsWith('Unknown ')) return 1;
-  if (output === 'Bundle has no config object to import.') return 1;
-  return 0;
+  return commandTextExitCode(output, ['Usage:', 'Invalid '], ['Session not found:', 'Unknown task:', 'Task submit failed ']);
 }
 
 export function readPassword(args: readonly string[]): string | null {

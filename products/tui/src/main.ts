@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/sdk/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
@@ -11,34 +12,40 @@ import { captureNativeConversationInput, type ProductInputContext } from './runt
 import { dispatchNativeConversationTurn } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/sdk/platform/config';
-import { Compositor } from './renderer/compositor.ts';
-import { type Line } from '@goodvibes-jev/engine/sdk/platform/types';
+import './renderer/compositor.ts';
+
 import { UIFactory } from './renderer/ui-factory.ts';
 import { resolveThrobberActivity } from './renderer/throbber.ts';
 import { SPINNER_FRAMES } from './renderer/ui-primitives.ts';
 import { ActivityAnimation } from './core/activity-animation.ts';
-import { Orchestrator } from '@goodvibes-jev/engine/sdk/platform/core';
+import '@goodvibes-jev/engine/sdk/platform/core';
 import { InputHandler } from './input/handler.ts';
-import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
+import '@goodvibes-jev/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { registerAllTools } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
-import { PermissionManager } from '@goodvibes-jev/engine/sdk/platform/permissions';
-import { AcpManager } from '@goodvibes-jev/engine/sdk/platform/acp';
+import '@goodvibes-jev/engine/sdk/platform/tools';
+import '@goodvibes-jev/engine/sdk/platform/tools';
+import '@goodvibes-jev/engine/sdk/platform/state';
+import '@goodvibes-jev/engine/sdk/platform/permissions';
+import '@goodvibes-jev/engine/sdk/platform/acp';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
-import { handleBrokerApprovalChange, buildFixSessionAffordance, buildFixSessionErrorNotice, handleFixSessionAttachKey, refreshFixSessionsFromApprovals } from './permissions/broker-approval-card.ts';
-import { CommandRegistry } from './input/command-registry.ts';
-import type { CommandContext } from './input/command-registry.ts';
+import {
+  handleBrokerApprovalChange,
+  buildFixSessionAffordance,
+  buildFixSessionErrorNotice,
+  handleFixSessionAttachKey,
+  refreshFixSessionsFromApprovals,
+} from './permissions/broker-approval-card.ts';
+import './input/command-registry.ts';
+
 import { requestedEffortLevel } from './providers/reasoning-effort-surface.ts';
 import { wireWorkTree } from './core/work-tree-wiring.ts';
 import { createSessionContractViews } from './core/session-contract-views.ts';
-import { registerBuiltinCommands } from './input/commands.ts';
-import { ScheduleManager } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { InputHistory } from './input/input-history.ts';
+import './input/commands.ts';
+import '@goodvibes-jev/engine/sdk/platform/tools';
+import './input/input-history.ts';
 import { describeContextWindowSource } from '@goodvibes-jev/engine/sdk/platform/providers';
-import { GitStatusProvider } from './renderer/git-status.ts';
-import type { GitHeaderInfo } from './renderer/git-status.ts';
+import './renderer/git-status.ts';
+
 import { createShellLayout } from './renderer/layout-engine.ts';
 import { buildShellFooter, estimateShellFooterHeight, promptCursorOffset, statusCostText } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
@@ -64,14 +71,19 @@ import { createStartupTypeaheadGate } from './runtime/startup-typeahead-gate.ts'
 import { buildRecoveryOfferWiring } from './runtime/recovery-offer-wiring.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import { handleErrorAffordanceKey } from './shell/recovery-input-helpers.ts';
-import { createRetryAffordanceState, disarmRetryAffordance, retryAffordanceHint, wireRetryAffordanceOnError } from './shell/retry-affordance.ts';
+import {
+  createRetryAffordanceState,
+  disarmRetryAffordance,
+  retryAffordanceHint,
+  wireRetryAffordanceOnError,
+} from './shell/retry-affordance.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { resolveFoldedBookmarkLine } from './core/bookmark-navigation.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
 import { applyInitialTuiCliState, reportFatalStartupError } from './cli/tui-startup.ts';
-import { applyConfiguredHitlMode, applyRuntimeConfigValue, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
+import { applyConfiguredHitlMode, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
 import { allowTerminalWrite, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { installProcessLifecycle } from './runtime/process-lifecycle.ts';
@@ -98,7 +110,21 @@ import { createDeferredRender } from './renderer/deferred-render.ts';
 import { wireSessionAmbience } from './runtime/session-ambience-wiring.ts';
 import { createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
 
-import { ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, MOUSE_ENABLE, MOUSE_DISABLE, CURSOR_HIDE, CURSOR_SHOW, CLEAR_SCREEN, KEYBOARD_EXT_ENABLE, KEYBOARD_EXT_DISABLE, PASTE_ENABLE, PASTE_DISABLE, FOCUS_ENABLE, FOCUS_DISABLE } from './renderer/terminal-escapes.ts';
+import {
+  ALT_SCREEN_ENTER,
+  ALT_SCREEN_EXIT,
+  MOUSE_ENABLE,
+  MOUSE_DISABLE,
+  CURSOR_HIDE,
+  CURSOR_SHOW,
+  CLEAR_SCREEN,
+  KEYBOARD_EXT_ENABLE,
+  KEYBOARD_EXT_DISABLE,
+  PASTE_ENABLE,
+  PASTE_DISABLE,
+  FOCUS_ENABLE,
+  FOCUS_DISABLE,
+} from './renderer/terminal-escapes.ts';
 import { installBackgroundThemeProbe } from './renderer/terminal-bg-probe.ts';
 import { registerThemeRefresh } from './renderer/theme.ts';
 import { VERSION } from './version.ts';
@@ -112,10 +138,14 @@ async function main() {
   // Both roots come from the one resolver the daemon CLI also uses. This line
   // called homedir() unconditionally, so a harness that redirected the tree got
   // a client that wrote the real one, secret store included.
-  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = await prepareShellCliRuntime(process.argv.slice(2), {
-    defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
-    homeDirectory: resolveGoodVibesHome(),
-  }, 'goodvibes');
+  const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = await prepareShellCliRuntime(
+    process.argv.slice(2),
+    {
+      defaultWorkingDirectory: process.env['GOODVIBES_WORKING_DIR'] ?? process.cwd(),
+      homeDirectory: resolveGoodVibesHome(),
+    },
+    'goodvibes',
+  );
 
   // Between binary start and the first frame, boot used to be silent (config
   // load, trust manager, memory init, hooks). One honest pre-alt-screen line,
@@ -130,7 +160,10 @@ async function main() {
   const herdrSession = createHerdrSessionReporter();
   let refreshHerdr: () => void = () => {};
   let unsubscribeHerdrHooks: () => void = () => {};
-  const closeHerdr = () => { unsubscribeHerdrHooks(); return herdrSession.close(); };
+  const closeHerdr = () => {
+    unsubscribeHerdrHooks();
+    return herdrSession.close();
+  };
   releaseFailedStartupSession = closeHerdr;
 
   const ctx: BootstrapContext = await bootstrapRuntime(stdout, {
@@ -140,10 +173,15 @@ async function main() {
     // Named, so GOODVIBES_DAEMON_HOME on its own moves the client's daemon tier.
     daemonHomeDirectory: resolveGoodVibesDaemonHome(bootstrapHomeDirectory),
     onHookDispatcherReady: ({ runtime: activeRuntime, surface, hookDispatcher: dispatcher }) => {
-      refreshHerdr = () => { void herdrSession.update({ sessionId: activeRuntime.sessionId,
-        sessionPath: join(surface.sessionsDir, `${sanitizeSessionName(activeRuntime.sessionId)}.jsonl`),
-        busy: dispatcher.activeInvocationCount > 0, waitingForOwner: false,
-        resumeArgv: ['goodvibes', '--working-dir', bootstrapWorkingDir, '--resume', activeRuntime.sessionId] }); };
+      refreshHerdr = () => {
+        void herdrSession.update({
+          sessionId: activeRuntime.sessionId,
+          sessionPath: join(surface.sessionsDir, `${sanitizeSessionName(activeRuntime.sessionId)}.jsonl`),
+          busy: dispatcher.activeInvocationCount > 0,
+          waitingForOwner: false,
+          resumeArgv: ['goodvibes', '--working-dir', bootstrapWorkingDir, '--resume', activeRuntime.sessionId],
+        });
+      };
       unsubscribeHerdrHooks = dispatcher.onActivity(() => refreshHerdr());
     },
   });
@@ -165,14 +203,21 @@ async function main() {
     agentStatusIntervalRef,
     orchestratorRefs,
     setRenderRequest,
-    permissionPromptRef, trustPromptRef,
+    permissionPromptRef,
+    trustPromptRef,
     _writeLastSessionPointer: writeLastSessionPointer,
     systemMessageRouter,
   } = ctx;
   const workingDir = ctx.services.workingDirectory;
   const homeDirectory = ctx.services.homeDirectory;
   const { approvalBroker, agentManager, modeManager, processManager, providerRegistry, secretsManager, subscriptionManager } = ctx.services;
-  void herdrSession.update({ sessionId: runtime.sessionId, sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`), busy: orchestrator.isBusy || hookDispatcher.activeInvocationCount > 0, waitingForOwner: false, resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId] });
+  void herdrSession.update({
+    sessionId: runtime.sessionId,
+    sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`),
+    busy: orchestrator.isBusy || hookDispatcher.activeInvocationCount > 0,
+    waitingForOwner: false,
+    resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId],
+  });
   conversation.setSessionMemoryStore(ctx.services.sessionMemoryStore);
   conversation.setSessionLineageTracker(ctx.services.sessionLineageTracker);
   // Shared payload (single source of truth, includes the memoryRegistry,
@@ -207,19 +252,38 @@ async function main() {
   let hostPairing: HostPairingController | null = null;
   // One-key jump/attach to a spawned CI fix-session: the affordance ARMS the id; the next 'j' runs the resume so the user never retypes it.
   let fixSessionAttachArmed: string | null = null;
-  const attachToFixSession = (fixSessionId: string) => { void commandContext.executeCommand?.('session', ['resume', fixSessionId]); };
+  const attachToFixSession = (fixSessionId: string) => {
+    void commandContext.executeCommand?.('session', ['resume', fixSessionId]);
+  };
   const onFixSessionStarted = buildFixSessionAffordance({
-    notify: (message) => { systemMessageRouter.high(message); render(); },
-    arm: (fixSessionId) => { fixSessionAttachArmed = fixSessionId; },
+    notify: (message) => {
+      systemMessageRouter.high(message);
+      render();
+    },
+    arm: (fixSessionId) => {
+      fixSessionAttachArmed = fixSessionId;
+    },
   });
   // A failed fix-session spawn stamps an error instead of a dead id: render it honestly, no jump armed.
-  const onFixSessionError = buildFixSessionErrorNotice((message) => { systemMessageRouter.high(message); render(); });
+  const onFixSessionError = buildFixSessionErrorNotice((message) => {
+    systemMessageRouter.high(message);
+    render();
+  });
   commandContext.armFixSessionAttach = onFixSessionStarted;
-  approvalBroker.subscribe((approval) => handleBrokerApprovalChange({
-    approval, broker: approvalBroker, render, onFixSessionStarted, onFixSessionError,
-    getPending: () => pendingPermission,
-    setPending: (next) => { if (next) hostPairing?.cancelForTakeover(); pendingPermission = next; },
-  }));
+  approvalBroker.subscribe((approval) =>
+    handleBrokerApprovalChange({
+      approval,
+      broker: approvalBroker,
+      render,
+      onFixSessionStarted,
+      onFixSessionError,
+      getPending: () => pendingPermission,
+      setPending: (next) => {
+        if (next) hostPairing?.cancelForTakeover();
+        pendingPermission = next;
+      },
+    }),
+  );
   refreshFixSessionsFromApprovals(() => approvalBroker.listApprovals(), onFixSessionStarted, onFixSessionError); // catch pre-subscription stamps
 
   // Where the main transcript is scrolled to; each frame's overlay-aware clamp (conversation-layout) is fed back so a scroll clamps against exactly what is displayed (shell/transcript-scroll.ts).
@@ -247,7 +311,10 @@ async function main() {
   };
 
   const scroll = (delta: number) => {
-    if (sessionViews?.active) { sessionViews.scroll(-delta); return; } // a view scrolls its own lines (up is positive there)
+    if (sessionViews?.active) {
+      sessionViews.scroll(-delta);
+      return;
+    } // a view scrolls its own lines (up is positive there)
     // The footer estimate is only a fallback for the pre-first-render frame; reaching the bottom re-locks.
     transcript.scrollBy(delta, () => Math.max(0, conversation.history.getLineCount() - getViewportHeight()));
   };
@@ -269,23 +336,44 @@ async function main() {
   // Controls still act through the registry and revalidate their live targets.
   type FleetNodes = ReturnType<typeof ctx.services.processRegistry.query>['nodes'];
   let currentFleet: FleetNodes = ctx.services.processRegistry.query().nodes;
-  unsubs.push(ctx.services.processRegistry.subscribe(snapshot => {
-    currentFleet = snapshot.nodes;
-    render();
-  }));
+  unsubs.push(
+    ctx.services.processRegistry.subscribe((snapshot) => {
+      currentFleet = snapshot.nodes;
+      render();
+    }),
+  );
   const fleetNodes = (): FleetNodes => currentFleet;
   const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId);
   unsubs.push(sessionContractViews.dispose);
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
-  unsubs.push(...wireWorkTree({ conversation, events: uiServices.events, agentManager, listContracts: sessionContractViews.read, onContractsChanged: (listener) => ctx.services.contractRunner.on(listener), fleetNodes, pendingCallId: () => pendingPermission?.callId, turnActive: () => orchestrator.isThinking, sessionsDir: ctx.services.surface.sessionsDir, sessionId: () => runtime.sessionId, requestRender: () => render() }).unsubs);
+  unsubs.push(
+    ...wireWorkTree({
+      conversation,
+      events: uiServices.events,
+      agentManager,
+      listContracts: sessionContractViews.read,
+      onContractsChanged: (listener) => ctx.services.contractRunner.on(listener),
+      fleetNodes,
+      pendingCallId: () => pendingPermission?.callId,
+      turnActive: () => orchestrator.isThinking,
+      sessionsDir: ctx.services.surface.sessionsDir,
+      sessionId: () => runtime.sessionId,
+      requestRender: () => render(),
+    }).unsubs,
+  );
   let recoveryInterval: ReturnType<typeof setInterval> | null = null;
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // The optional "used N memories" provenance chip (default OFF), see interaction-seams.ts.
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
   // Topology-aware keep-awake: the chip renders the DAEMON's state in adopted-external mode (power-chip-source.ts) and every toggle is forwarded to that daemon (power-keepawake-remote.ts) so keep-awake survives the TUI closing in BOTH topologies.
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
-  const powerChipSource = createPowerChipSource({ powerManager: ctx.services.powerManager, render: () => render(), isExternalDaemon,
-    onPowerEvent: (cb) => uiServices.events.ops.on('OPS_POWER_STATE_CHANGED', cb as never), fetchDaemonPowerState: () => fetchDaemonPowerState({ configManager, homeDirectory, isExternalDaemon }) });
+  const powerChipSource = createPowerChipSource({
+    powerManager: ctx.services.powerManager,
+    render: () => render(),
+    isExternalDaemon,
+    onPowerEvent: (cb) => uiServices.events.ops.on('OPS_POWER_STATE_CHANGED', cb as never),
+    fetchDaemonPowerState: () => fetchDaemonPowerState({ configManager, homeDirectory, isExternalDaemon }),
+  });
   unsubs.push(powerChipSource.stop, installKeepAwakeRemoteForward({ configManager, homeDirectory, isExternalDaemon }));
   const lifecycle = installProcessLifecycle({
     stdin,
@@ -300,19 +388,41 @@ async function main() {
     buildSessionContinuityHints,
     unsubs,
     getRecoveryInterval: () => recoveryInterval,
-    setRecoveryInterval: (value) => { recoveryInterval = value; },
+    setRecoveryInterval: (value) => {
+      recoveryInterval = value;
+    },
     getStopSpokenOutputForExit: () => stopSpokenOutputForExit,
     releaseSession: closeHerdr,
   });
-  const { exitApp, resizeHandler, sigintHandler, unhandledRejectionHandler, uncaughtExceptionHandler, terminationSignalHandler, exitListener } = lifecycle;
+  const {
+    exitApp,
+    resizeHandler,
+    sigintHandler,
+    unhandledRejectionHandler,
+    uncaughtExceptionHandler,
+    terminationSignalHandler,
+    exitListener,
+  } = lifecycle;
   commandContext.exit = exitApp;
-  const scheduleReading = new ScheduleReadingLifetime(() => runtime.sessionId, () => !lifecycle.isTerminalRestored());
+  const scheduleReading = new ScheduleReadingLifetime(
+    () => runtime.sessionId,
+    () => !lifecycle.isTerminalRestored(),
+  );
   commandContext.scheduleReading = scheduleReading;
-  const shareReading = new ScheduleReadingLifetime(() => runtime.sessionId, () => !lifecycle.isTerminalRestored());
+  const shareReading = new ScheduleReadingLifetime(
+    () => runtime.sessionId,
+    () => !lifecycle.isTerminalRestored(),
+  );
   commandContext.shareReading = shareReading;
-  const teamworkReading = new ScheduleReadingLifetime(() => runtime.sessionId, () => !lifecycle.isTerminalRestored());
+  const teamworkReading = new ScheduleReadingLifetime(
+    () => runtime.sessionId,
+    () => !lifecycle.isTerminalRestored(),
+  );
   commandContext.teamworkReading = teamworkReading;
-  const planningReading = new ScheduleReadingLifetime(() => runtime.sessionId, () => !lifecycle.isTerminalRestored());
+  const planningReading = new ScheduleReadingLifetime(
+    () => runtime.sessionId,
+    () => !lifecycle.isTerminalRestored(),
+  );
   commandContext.planningReading = planningReading;
   unsubs.push(() => teamworkReading.dispose());
   unsubs.push(() => planningReading.dispose());
@@ -322,21 +432,35 @@ async function main() {
   // In-terminal (OSC 9) notifier (approval-wait/turn-end/agent-blocked); writes
   // are restore-gated so no escape sequence lands after the shell resumes.
   const terminalNotifier = createTerminalNotifier({
-    stdout, focusTracker: ctx.services.focusTracker, isReleased: () => lifecycle.isTerminalRestored(),
+    stdout,
+    focusTracker: ctx.services.focusTracker,
+    isReleased: () => lifecycle.isTerminalRestored(),
     configGet: (k: string) => readTuiConfigValue(configManager, k),
   });
 
   // Spoken output, scriptable statusline, auto-titling, spoken-turn routing.
   const ambience = wireSessionAmbience({
-    voiceService: ctx.services.voiceService, configManager, events: uiServices.events,
-    conversation, toolLLM: ctx.services.toolLLM, orchestrator, providerRegistry, workingDir,
-    getSessionId: () => runtime.sessionId, isActive: () => !lifecycle.isTerminalRestored(),
-    notify: (message) => systemMessageRouter.high(message), render,
+    voiceService: ctx.services.voiceService,
+    configManager,
+    events: uiServices.events,
+    conversation,
+    toolLLM: ctx.services.toolLLM,
+    orchestrator,
+    providerRegistry,
+    workingDir,
+    getSessionId: () => runtime.sessionId,
+    isActive: () => !lifecycle.isTerminalRestored(),
+    notify: (message) => systemMessageRouter.high(message),
+    render,
   });
   stopSpokenOutputForExit = ambience.stopSpokenOutputForExit;
   const { spokenTurns, scriptableStatusline } = ambience;
   unsubs.push(...ambience.unsubs);
-  const dispatchNativeTurn = async (state: NativeConversationIntakeState, spokenOutput = false, current: () => boolean = () => true): Promise<void> => {
+  const dispatchNativeTurn = async (
+    state: NativeConversationIntakeState,
+    spokenOutput = false,
+    current: () => boolean = () => true,
+  ): Promise<void> => {
     if (!state.turnReady || !state.turnPermit || state.result?.kind !== 'turn') return;
     const inputOptions = { ...(spokenOutput ? createSpokenTurnInputOptions() : {}), nativeConversationTurnPermit: state.turnPermit };
     if (spokenOutput) spokenTurns.submitNextTurn(state.result.text);
@@ -356,7 +480,7 @@ async function main() {
       render();
     }
   };
-  commandContext.dispatchNativeIntakeTurn = state => dispatchNativeTurn(state);
+  commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
   const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
     scheduleReading.cancel();
@@ -368,7 +492,10 @@ async function main() {
     transcript.toBottom(); // Re-lock on any user input
     conversation.dismissSplash(); // owner rule: any submission retires the splash for the run
     let processedText = applyAtModelDirective(text, {
-      providerRegistry, runtime, configManager, notify: (m) => systemMessageRouter.high(m),
+      providerRegistry,
+      runtime,
+      configManager,
+      notify: (m) => systemMessageRouter.high(m),
     });
     // Composer capture markers: `!#` pins + sends; `#` saves a note without sending.
     processedText = applyComposerCapture(processedText, {
@@ -387,18 +514,25 @@ async function main() {
       // explicit work submission, never to deciding whether a model may see it.
       // Optional memory refresh must not delay displaying or sending the prompt.
       void refreshMemoryRecallSnapshot(ctx.services);
-      void orchestrator.handleUserInput(processedText, content, inputOptions).catch(error => {
-        if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
-      }).finally(render);
+      void orchestrator
+        .handleUserInput(processedText, content, inputOptions)
+        .catch((error) => {
+          if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
+        })
+        .finally(render);
       render();
     } else {
       render();
     }
   };
 
-  const cancelGeneration = planningReading.withCancellation(teamworkReading.withCancellation(shareReading.withCancellation(scheduleReading.withCancellation(
-    createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery()),
-  ))));
+  const cancelGeneration = planningReading.withCancellation(
+    teamworkReading.withCancellation(
+      shareReading.withCancellation(
+        scheduleReading.withCancellation(createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery())),
+      ),
+    ),
+  );
 
   const jumpToBookmark = (key: string) => {
     conversation.getDisplayBlocks();
@@ -420,8 +554,14 @@ async function main() {
     render();
   };
 
-  commandContext.submitInput = submitInput; commandContext.submitSpokenInput = (text, content) => submitInput(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) });
-  commandContext.stopSpokenOutput = () => spokenTurns.stop(); commandContext.pasteFromClipboard = () => input.handlePaste();
+  Object.assign(
+    commandContext,
+    createShellSubmissionPorts(
+      submitInput,
+      () => spokenTurns.stop(),
+      () => input.handlePaste(),
+    ),
+  );
   // Read-only view of pending [TEXT: pN, M lines] fold markers, so /pastes
   // can preview a folded paste's actual content before the user submits it.
   commandContext.getPendingPastes = () => input.pasteRegistry;
@@ -429,28 +569,53 @@ async function main() {
   // Late-patched: bootstrap.ts populates uiServices.platform.externalServices AFTER commandContext is built.
   commandContext.platform.externalServices = uiServices.platform.externalServices;
   commandContext.cancelGeneration = cancelGeneration;
-  commandContext.cancelPendingRecovery = () => { scheduleReading.cancel(); shareReading.cancel(); teamworkReading.cancel(); planningReading.cancel(); return streamResult.cancelPendingRecovery(); };
+  commandContext.cancelPendingRecovery = () => {
+    scheduleReading.cancel();
+    shareReading.cancel();
+    teamworkReading.cancel();
+    planningReading.cancel();
+    return streamResult.cancelPendingRecovery();
+  };
   wireInteractionSeams(commandContext, {
-    orchestrator, powerManager: ctx.services.powerManager, readPowerSurface: () => powerChipSource.get(), render: () => render(), notify: (m) => systemMessageRouter.high(m),
-    getActiveToolCallId: () => streamMetrics.activeToolCallId, toggleMemoryProvenance: () => memoryProvenanceUi.toggle(),
+    orchestrator,
+    powerManager: ctx.services.powerManager,
+    readPowerSurface: () => powerChipSource.get(),
+    render: () => render(),
+    notify: (m) => systemMessageRouter.high(m),
+    getActiveToolCallId: () => streamMetrics.activeToolCallId,
+    toggleMemoryProvenance: () => memoryProvenanceUi.toggle(),
   });
   commandContext.isGenerating = () => orchestrator.isBusy;
-  commandContext.jumpToBookmark = jumpToBookmark; commandContext.scrollToLine = scrollToLine;
+  commandContext.jumpToBookmark = jumpToBookmark;
+  commandContext.scrollToLine = scrollToLine;
   commandContext.clearScreen = () => {
     compositor.resetDiff();
     allowTerminalWrite(() => stdout.write(CLEAR_SCREEN));
     render();
   };
-  commandContext.requestFullRepaint = () => { compositor.resetDiff(); render(); }; commandContext.beginConcealedInput = (req) => input.beginConcealedInput(req);
-  permissionPromptRef.requestPermission = wrapRequestPermissionWithAlert((request) =>
-    new Promise((resolve) => {
-      hostPairing?.cancelForTakeover();
-      pendingPermission = {
-        ...request,
-        ...buildPendingPermissionExtras(request, resolve, approvalBroker),
-      };
-      render();
-    }), { focusTracker: ctx.services.focusTracker, configGet: (k: string) => readTuiConfigValue(configManager, k), webhookNotifier: ctx.services.webhookNotifier, terminalNotifier, conversation });
+  commandContext.requestFullRepaint = () => {
+    compositor.resetDiff();
+    render();
+  };
+  commandContext.beginConcealedInput = (req) => input.beginConcealedInput(req);
+  permissionPromptRef.requestPermission = wrapRequestPermissionWithAlert(
+    (request) =>
+      new Promise((resolve) => {
+        hostPairing?.cancelForTakeover();
+        pendingPermission = {
+          ...request,
+          ...buildPendingPermissionExtras(request, resolve, approvalBroker),
+        };
+        render();
+      }),
+    {
+      focusTracker: ctx.services.focusTracker,
+      configGet: (k: string) => readTuiConfigValue(configManager, k),
+      webhookNotifier: ctx.services.webhookNotifier,
+      terminalNotifier,
+      conversation,
+    },
+  );
 
   const input: InputHandler = new InputHandler(
     () => render(),
@@ -479,11 +644,13 @@ async function main() {
         surfaceRegistry: ctx.services.surfaceRegistry,
         subscriptionManager: ctx.services.subscriptionManager,
         secretsManager: ctx.services.secretsManager,
-        pairingTokens: ctx.services.pairingTokens, tokenAuditor: ctx.services.tokenAuditor,
+        pairingTokens: ctx.services.pairingTokens,
+        tokenAuditor: ctx.services.tokenAuditor,
         replayEngine: ctx.services.replayEngine,
         webhookNotifier: ctx.services.webhookNotifier,
         policyRuntimeState: ctx.services.policyRuntimeState,
-        externalServices: uiServices.platform.externalServices, focusTracker: ctx.services.focusTracker,
+        externalServices: uiServices.platform.externalServices,
+        focusTracker: ctx.services.focusTracker,
       },
       shell: {
         bookmarkManager: ctx.services.bookmarkManager,
@@ -505,35 +672,91 @@ async function main() {
     },
   );
 
-  orchestratorRefs.getViewportHeight = getViewportHeight; orchestratorRefs.scrollToEnd = scrollToEnd;
+  orchestratorRefs.getViewportHeight = getViewportHeight;
+  orchestratorRefs.scrollToEnd = scrollToEnd;
   const views = new SessionViews({
     contractRunner: ctx.services.contractRunner,
-    conversation, agentManager, processManager, fleetNodes,
-    steer: (id, text) => ctx.views.fleet.actions.steer(id, text), killAgent: (id) => ctx.views.fleet.actions.kill(id, { cascade: true }),
-    mainBusy: () => orchestrator.isThinking || orchestrator.isTurnInFlight, mainModel: () => lastHeaderModel, promptText: () => input.prompt, requestRender: () => render(),
+    conversation,
+    agentManager,
+    processManager,
+    fleetNodes,
+    steer: (id, text) => ctx.views.fleet.actions.steer(id, text),
+    killAgent: (id) => ctx.views.fleet.actions.kill(id, { cascade: true }),
+    mainBusy: () => orchestrator.isThinking || orchestrator.isTurnInFlight,
+    mainModel: () => lastHeaderModel,
+    promptText: () => input.prompt,
+    requestRender: () => render(),
   });
-  sessionViews = views; input.sessionView = views; unsubs.push(() => views.dispose());
+  sessionViews = views;
+  input.sessionView = views;
+  unsubs.push(() => views.dispose());
   // Esc while the main transcript is scrolled back returns to the live bottom and never interrupts the turn (handler-modal-stack.ts).
   input.transcriptScroll = { scrolledBack: () => transcript.scrolledBack && !views.active, toBottom: scrollToLiveBottom };
   commandContext.openSessionView = (target) => views.open(target);
 
-  hostPairing = wireHostPairingShell({ configManager, homeDirectory, input, commandRegistry, commandContext, conversation,
+  hostPairing = wireHostPairingShell({
+    configManager,
+    homeDirectory,
+    input,
+    commandRegistry,
+    commandContext,
+    conversation,
     canPresent: () => !lifecycle.isTerminalRestored() && pendingPermission === null && !views.active,
-    render, scroll, toBottom: () => transcript.toBottom(),
+    render,
+    scroll,
+    toBottom: () => transcript.toBottom(),
   });
   unsubs.push(() => hostPairing?.dispose());
   input.setCommandRegistry(commandRegistry, commandContext);
-  commandContext.openComposerEditor = makeComposerEditorOpener({ buffer: input, stdin, stdout, writeGuard: allowTerminalWrite, repaint: () => { compositor.resetDiff(); render(); }, cwd: workingDir, env: process.env, notify: (m) => systemMessageRouter.high(m) });
-  commandContext.openFileInEditor = makeFileEditorOpener({ stdin, stdout, writeGuard: allowTerminalWrite, repaint: () => { compositor.resetDiff(); render(); }, cwd: workingDir, env: process.env, notify: (m) => systemMessageRouter.high(m) });
+  commandContext.openComposerEditor = makeComposerEditorOpener({
+    buffer: input,
+    stdin,
+    stdout,
+    writeGuard: allowTerminalWrite,
+    repaint: () => {
+      compositor.resetDiff();
+      render();
+    },
+    cwd: workingDir,
+    env: process.env,
+    notify: (m) => systemMessageRouter.high(m),
+  });
+  commandContext.openFileInEditor = makeFileEditorOpener({
+    stdin,
+    stdout,
+    writeGuard: allowTerminalWrite,
+    repaint: () => {
+      compositor.resetDiff();
+      render();
+    },
+    cwd: workingDir,
+    env: process.env,
+    notify: (m) => systemMessageRouter.high(m),
+  });
   input.setConversationManager(conversation);
-  input.setContentWidth(getPromptContentWidth()); input.filePicker.setOnUpdate(() => render());
+  input.setContentWidth(getPromptContentWidth());
+  input.filePicker.setOnUpdate(() => render());
   // retirement: agentDetailModal/processModal setOnRefresh wiring removed,
   // those modals were deleted (Fleet subsumes the live process tree via F2).
 
   // Model picker callback is handled in bootstrap.ts, do not duplicate here.
   input.setHistory(inputHistory);
   // ONE microphone path, shared by push-to-talk voice input (Alt+V) and wake-word detection; opens no device by itself (shell/voice-capture-shell.ts).
-  voiceCaptureStatus = installVoiceCapture({ configManager, shellPaths: ctx.services.shellPaths, homeDirectory, sessionId: ctx.runtime.sessionId, commandContext, unsubs, buffer: input, submitInput: text => submitInput(text, undefined, { source: captureNativeConversationInput(text) }), notify: (m) => { systemMessageRouter.high(m); render(); }, render: () => render() });
+  voiceCaptureStatus = installVoiceCapture({
+    configManager,
+    shellPaths: ctx.services.shellPaths,
+    homeDirectory,
+    sessionId: ctx.runtime.sessionId,
+    commandContext,
+    unsubs,
+    buffer: input,
+    submitInput: (text) => submitInput(text, undefined, { source: captureNativeConversationInput(text) }),
+    notify: (m) => {
+      systemMessageRouter.high(m);
+      render();
+    },
+    render: () => render(),
+  });
 
   const toolCount = toolRegistry.list().length;
   conversation.splashOptions = {
@@ -560,50 +783,87 @@ async function main() {
     const sessionSnapshot = uiServices.readModels.session.getSnapshot();
     const agentSnapshot = uiServices.readModels.agents.getSnapshot();
 
-    const activeModel = resolveActiveModelDisplay({ serving: currentModel, configuredRegistryKey: configManager.get('provider.model') as string, configuredLabel: runtime.model, configuredProvider: runtime.provider, failover: failoverState.current() });
+    const activeModel = resolveActiveModelDisplay({
+      serving: currentModel,
+      configuredRegistryKey: configManager.get('provider.model') as string,
+      configuredLabel: runtime.model,
+      configuredProvider: runtime.provider,
+      failover: failoverState.current(),
+    });
     lastHeaderModel = activeModel.headerModel;
     const viewFrame = views.frame(width); // an agent or process open full screen, or null in main
-    const headerLines = viewFrame ? [viewFrame.header] : UIFactory.createHeader(width, activeModel.headerModel, conversation.title || undefined, lastGitInfoRef.value, undefined, activeModel.divergenceNote);
+    const headerLines = viewFrame
+      ? [viewFrame.header]
+      : UIFactory.createHeader(
+          width,
+          activeModel.headerModel,
+          conversation.title || undefined,
+          lastGitInfoRef.value,
+          undefined,
+          activeModel.divergenceNote,
+        );
     const chipsRow = views.chips(width);
     if (chipsRow) headerLines.push(chipsRow);
     // Scrolled away from the live bottom: the back-to-bottom pill, with the esc keycap only while the next Esc goes there.
     const promptEmpty = input.prompt.length === 0 && !input.commandMode;
     const backToBottom = viewFrame
-      ? (views.scrolledBack() ? { escKey: views.escGoesToBottom() } : null)
-      : (transcript.scrolledBack && !conversation.isSplashShowing() ? { escKey: promptEmpty && !conversation.workTree.focused && !input.indicatorFocused } : null);
+      ? views.scrolledBack()
+        ? { escKey: views.escGoesToBottom() }
+        : null
+      : transcript.scrolledBack && !conversation.isSplashShowing()
+        ? { escKey: promptEmpty && !conversation.workTree.focused && !input.indicatorFocused }
+        : null;
     const managerAgents = agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending');
     const runtimeAgents = agentSnapshot.active;
     const sessionContracts = sessionContractViews.read();
     void herdrSession.update({
       sessionId: runtime.sessionId,
       sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`),
-      busy: orchestrator.isBusy || hookDispatcher.activeInvocationCount > 0
-        || sessionContracts.some(contract => !['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contract.status))
-        || currentFleet.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
-          && ['thinking', 'executing-tool', 'streaming', 'stalled', 'retrying', 'queued'].includes(node.state)),
-      waitingForOwner: pendingPermission !== null || input.waitingForOwner || hostPairing?.waitingForOwner === true
-        || currentFleet.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
-          && node.state === 'awaiting-approval')
-        || sessionContracts.some(contract => contract.status === 'awaiting-owner'
-          || contract.groups.some(group => group.status === 'awaiting-owner')
-          || contract.units.some(unit => unit.status === 'awaiting-owner')),
+      busy:
+        orchestrator.isBusy ||
+        hookDispatcher.activeInvocationCount > 0 ||
+        sessionContracts.some((contract) => !['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contract.status)) ||
+        currentFleet.some(
+          (node) =>
+            node.kind === 'agent' &&
+            node.sessionRef?.sessionId === runtime.sessionId &&
+            ['thinking', 'executing-tool', 'streaming', 'stalled', 'retrying', 'queued'].includes(node.state),
+        ),
+      waitingForOwner:
+        pendingPermission !== null ||
+        input.waitingForOwner ||
+        hostPairing?.waitingForOwner === true ||
+        currentFleet.some(
+          (node) => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId && node.state === 'awaiting-approval',
+        ) ||
+        sessionContracts.some(
+          (contract) =>
+            contract.status === 'awaiting-owner' ||
+            contract.groups.some((group) => group.status === 'awaiting-owner') ||
+            contract.units.some((unit) => unit.status === 'awaiting-owner'),
+        ),
       resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId],
     });
     const runningAgentSummary = summarizeRunningAgents(managerAgents, runtimeAgents, sessionContracts);
     const runningAgentCount = runningAgentSummary.count;
-    const runningProcessCount = processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length;
-    const cw = getPromptContentWidth();
-    const promptInfo = input.getWrappedPromptInfo(cw);
-    const commandArgsHint = buildCommandArgsHint(input.prompt, commandRegistry);
+    const { runningProcessCount, cw, promptInfo, commandArgsHint } = readShellFrameFacts(
+      processManager,
+      input,
+      getPromptContentWidth,
+      (prompt) => buildCommandArgsHint(prompt, commandRegistry),
+    );
     const composerState = deriveComposerState({
       text: input.prompt,
       commandMode: input.commandMode,
       pendingApproval: pendingPermission !== null,
-      hasAttachments: input.getImageAttachments().size > 0, turnState: sessionSnapshot.turnState,
+      hasAttachments: input.getImageAttachments().size > 0,
+      turnState: sessionSnapshot.turnState,
     });
     const contextStatusHint = resolveContextStatusHint({
-      evaluate: (args) => evaluateSessionMaintenance({ configManager, ...args, sessionMemoryCount: ctx.services.sessionMemoryStore.list().length }),
-      currentTokens: orchestrator.lastInputTokens, contextWindow,
+      evaluate: (args) =>
+        evaluateSessionMaintenance({ configManager, ...args, sessionMemoryCount: ctx.services.sessionMemoryStore.list().length }),
+      currentTokens: orchestrator.lastInputTokens,
+      contextWindow,
     });
     // Main's turn, contracts and agents share the activity row above the input.
     const compacting = ctx.services.contextAccountingHolder.getSource()?.getCompactionState().isCompacting === true;
@@ -623,10 +883,20 @@ async function main() {
       compacting,
       compactingSinceMs,
       pendingApproval: mainApproval ? { name: mainApproval.tool, args: mainApproval.args } : null,
-      activeTool: streamMetrics.activeToolName !== undefined
-        ? { name: streamMetrics.activeToolName, args: activeToolCallId !== undefined ? streamMetrics.toolArgsByCallId.get(activeToolCallId) : undefined, startedAtMs: streamMetrics.activeToolStartedAtMs }
-        : null,
-      modelPhrase: UIFactory.busyPhrase(orchestrator.thinkingFrame, orchestrator.streamingOutputTokens, UIFactory.computeRenderStallInfo(streamMetrics, throbberNow), mainApproval !== null),
+      activeTool:
+        streamMetrics.activeToolName !== undefined
+          ? {
+              name: streamMetrics.activeToolName,
+              args: activeToolCallId !== undefined ? streamMetrics.toolArgsByCallId.get(activeToolCallId) : undefined,
+              startedAtMs: streamMetrics.activeToolStartedAtMs,
+            }
+          : null,
+      modelPhrase: UIFactory.busyPhrase(
+        orchestrator.thinkingFrame,
+        orchestrator.streamingOutputTokens,
+        UIFactory.computeRenderStallInfo(streamMetrics, throbberNow),
+        mainApproval !== null,
+      ),
       turnStartMs: streamMetrics.startTime,
       ttftMs: streamMetrics.ttftMs,
       tokenSpeed: (configManager.get('display.showTokenSpeed') as boolean) ? streamMetrics.tokenSpeed : undefined,
@@ -634,17 +904,28 @@ async function main() {
     });
     activityAnimation.setActive(throbberActivity !== null && !orchestrator.isThinking);
     const activityFrame = orchestrator.isThinking ? orchestrator.thinkingFrame : activityAnimation.frame;
-    const throbber = throbberActivity ? { spinner: SPINNER_FRAMES[activityFrame % SPINNER_FRAMES.length]!, frame: activityFrame, activity: throbberActivity } : null;
+    const throbber = throbberActivity
+      ? { spinner: SPINNER_FRAMES[activityFrame % SPINNER_FRAMES.length]!, frame: activityFrame, activity: throbberActivity }
+      : null;
     const footerLines = buildShellFooter({
       width,
       promptText: promptInfo.visibleLines.join('\n'),
       promptLineCount: promptInfo.visibleLines.length,
       promptCursorPos: promptCursorOffset(promptInfo),
-      usage: { available: isConversationUsageAvailable(orchestrator.usage), up: orchestrator.usage.input, down: orchestrator.usage.output, cacheRead: orchestrator.usage.cacheRead, cacheWrite: orchestrator.usage.cacheWrite, fleetCostUsd: footerFleetCost(fleetNodes, runningAgentCount > 0) },
+      usage: {
+        available: isConversationUsageAvailable(orchestrator.usage),
+        up: orchestrator.usage.input,
+        down: orchestrator.usage.output,
+        cacheRead: orchestrator.usage.cacheRead,
+        cacheWrite: orchestrator.usage.cacheWrite,
+        fleetCostUsd: footerFleetCost(fleetNodes, runningAgentCount > 0),
+      },
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
       model: activeModel.footerModel, // prices the cost; the header names the model
-      workingDir, homeDirectory, view: viewFrame?.footer ?? null,
+      workingDir,
+      homeDirectory,
+      view: viewFrame?.footer ?? null,
       branch: lastGitInfoRef.value?.branch,
       contextWindow: knownContextWindow,
       contextStatusHint,
@@ -658,16 +939,22 @@ async function main() {
       lastInputTokens: orchestrator.lastInputTokens,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),
       commandArgsHint,
-      runningAgentCount, runningProcessCount,
+      runningAgentCount,
+      runningProcessCount,
       // Always-visible "sleep disabled" chip, topology-aware: the DAEMON's state in adopted-external mode, the in-process manager otherwise (power-chip-source.ts).
       powerKeepAwake: powerChipSource.get().keepAwake,
       // Composer must not read as focused while the process indicator owns keyboard focus.
-      promptFocused: !input.indicatorFocused && !conversation.workTree.focused && viewFrame?.footer.disabledReason === undefined, workTreeFocused: conversation.workTree.focused && !viewFrame,
+      promptFocused: !input.indicatorFocused && !conversation.workTree.focused && viewFrame?.footer.disabledReason === undefined,
+      workTreeFocused: conversation.workTree.focused && !viewFrame,
       indicatorFocused: input.indicatorFocused,
       runningAgentProgress: runningAgentSummary.progress,
       composerFlags: composerState.flags,
-      composerPendingRisk: composerState.pendingRisk, permissionMode: configManager.get('permissions.mode') as string, voiceCapture: voiceCaptureStatus(),
-      throbber, turnRunning: turnActive, backToBottom,
+      composerPendingRisk: composerState.pendingRisk,
+      permissionMode: configManager.get('permissions.mode') as string,
+      voiceCapture: voiceCaptureStatus(),
+      throbber,
+      turnRunning: turnActive,
+      backToBottom,
     }).lines;
 
     const onboardingOwnsScreen = input.onboardingWizard.active;
@@ -703,21 +990,31 @@ async function main() {
       overlayRows += 1;
     }
 
-    const conversationViewport = viewFrame ? null : buildConversationViewport({
-      conversation,
-      width: conversationWidth,
-      viewportHeight: vHeight,
-      scrollTop: transcript.top,
-      scrollLocked: transcript.locked,
-      overlayRows,
-    });
+    const conversationViewport = viewFrame
+      ? null
+      : buildConversationViewport({
+          conversation,
+          width: conversationWidth,
+          viewportHeight: vHeight,
+          scrollTop: transcript.top,
+          scrollLocked: transcript.locked,
+          overlayRows,
+        });
     // Unlocked but already at the bottom (a jump that landed there, output that
     // shrank) is the live bottom: it follows again, and the pill drawn this frame goes.
-    if (conversationViewport && transcript.settle(conversationViewport.nextScrollTop, conversationViewport.maxScroll) && backToBottom && !viewFrame) render();
+    if (
+      conversationViewport &&
+      transcript.settle(conversationViewport.nextScrollTop, conversationViewport.maxScroll) &&
+      backToBottom &&
+      !viewFrame
+    )
+      render();
     const scrollTop = transcript.top;
-    let viewport = viewFrame ? viewFrame.body(vHeight) : conversation.isSplashShowing()
-      ? centerViewportContent(conversationViewport!.viewport, conversationViewport!.effectiveHeight, conversationWidth)
-      : conversationViewport!.viewport;
+    let viewport = viewFrame
+      ? viewFrame.body(vHeight)
+      : conversation.isSplashShowing()
+        ? centerViewportContent(conversationViewport!.viewport, conversationViewport!.effectiveHeight, conversationWidth)
+        : conversationViewport!.viewport;
 
     if (orchestrator.isThinking && !viewFrame) {
       // The spinner and phrase are the throbber's (above the input area); the
@@ -726,30 +1023,51 @@ async function main() {
       if (partialToolPreview) viewport.push(UIFactory.createToolPreviewRow(conversationWidth, partialToolPreview));
     }
 
-    if (!viewFrame) viewport.push(...UIFactory.createQueuedMessageList(conversationWidth, orchestrator.listQueuedMessages()), ...memoryProvenanceUi.renderChip(conversationWidth, configManager));
+    if (!viewFrame)
+      viewport.push(
+        ...UIFactory.createQueuedMessageList(conversationWidth, orchestrator.listQueuedMessages()),
+        ...memoryProvenanceUi.renderChip(conversationWidth, configManager),
+      );
 
     const overlayContext = { input, conversation, commandRegistry, keybindingsManager: ctx.services.keybindingsManager, contextWindow };
     viewport = applyConversationOverlays(viewport, { ...overlayContext, conversationWidth, viewportHeight: vHeight });
 
-    const layers = buildConversationLayers({ ...overlayContext, screenWidth: width, screenHeight: height, headerRows: shellHeaderLines.length, footerRows: shellFooterLines.length, permission: pendingPermission ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker) : null });
+    const layers = buildConversationLayers({
+      ...overlayContext,
+      screenWidth: width,
+      screenHeight: height,
+      headerRows: shellHeaderLines.length,
+      footerRows: shellFooterLines.length,
+      permission: pendingPermission
+        ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker)
+        : null,
+    });
     input.surfacePointer.layers = layers;
     compositor.composite({
-      width, height,
+      width,
+      height,
       header: shellHeaderLines,
       viewport,
       footer: shellFooterLines,
-      selection: onboardingOwnsScreen || viewFrame ? undefined : {
-        isCellSelected: (col, row) => selection.isCellSelected(col, row),
-        scrollTop,
-        lineCount: conversation.history.getLineCount(),
-      },
-      search: !onboardingOwnsScreen && !viewFrame && input.searchManager.active ? {
-        manager: input.searchManager,
-        scrollTop,
-        viewportStartY: shellHeaderLines.length,
-      } : undefined,
+      selection:
+        onboardingOwnsScreen || viewFrame
+          ? undefined
+          : {
+              isCellSelected: (col, row) => selection.isCellSelected(col, row),
+              scrollTop,
+              lineCount: conversation.history.getLineCount(),
+            },
+      search:
+        !onboardingOwnsScreen && !viewFrame && input.searchManager.active
+          ? {
+              manager: input.searchManager,
+              scrollTop,
+              viewportStartY: shellHeaderLines.length,
+            }
+          : undefined,
       layers,
-    }); typeahead.framePainted(); // a startup modal counts as seen from its first painted frame
+    });
+    typeahead.framePainted(); // a startup modal counts as seen from its first painted frame
   };
   let renderRequested = false;
   const renderNow = () => {
@@ -757,9 +1075,25 @@ async function main() {
     renderFrame();
   };
   // Yield to input and daemon I/O between coalesced frames during agent fan-out.
-  const renderScheduler = createRenderScheduler(renderNow, (flush) => { setTimeout(flush, 16); }, () => lifecycle.isTerminalRestored()); // coalescer; no frames after terminal restore
-  deferredRender.set(() => { renderRequested = true; renderScheduler.schedule(); });
-  const terminalOutputGuard = installFullScreenTerminalOutputGuard({ stdout, stderr: process.stderr, onCapture: (total) => { commandContext.session.runtime.terminalWritesIntercepted = total; render(); } });
+  const renderScheduler = createRenderScheduler(
+    renderNow,
+    (flush) => {
+      setTimeout(flush, 16);
+    },
+    () => lifecycle.isTerminalRestored(),
+  ); // coalescer; no frames after terminal restore
+  deferredRender.set(() => {
+    renderRequested = true;
+    renderScheduler.schedule();
+  });
+  const terminalOutputGuard = installFullScreenTerminalOutputGuard({
+    stdout,
+    stderr: process.stderr,
+    onCapture: (total) => {
+      commandContext.session.runtime.terminalWritesIntercepted = total;
+      render();
+    },
+  });
 
   setRenderRequest(() => renderScheduler.flushNow()); // bootstrap's 16ms coalescer composites via the (restore-gated) scheduler
   orchestratorRefs.requestRender = render;
@@ -767,22 +1101,50 @@ async function main() {
   // /status: what the footer rows used to show, from the same sources (shell/status-report.ts).
   commandContext.describeStatus = () => {
     const serving = providerRegistry.getCurrentModel();
-    const active = resolveActiveModelDisplay({ serving, configuredRegistryKey: configManager.get('provider.model') as string, configuredLabel: runtime.model, configuredProvider: runtime.provider, failover: failoverState.current() });
+    const active = resolveActiveModelDisplay({
+      serving,
+      configuredRegistryKey: configManager.get('provider.model') as string,
+      configuredLabel: runtime.model,
+      configuredProvider: runtime.provider,
+      failover: failoverState.current(),
+    });
     const spine = uiServices.platform.externalServices?.inspect();
     const voice = voiceCaptureStatus();
     const git = lastGitInfoRef.value;
     return formatStatusReport({
-      workingDirectory: workingDir, branch: git?.branch, dirty: git?.dirty,
-      model: active.footerModel, provider: active.footerProvider, modelNote: active.divergenceNote,
-      permissionMode: configManager.get('permissions.mode') as string, toolCount: toolRegistry.list().length, notifyMode: modeManager.getHITLMode(),
+      workingDirectory: workingDir,
+      branch: git?.branch,
+      dirty: git?.dirty,
+      model: active.footerModel,
+      provider: active.footerProvider,
+      modelNote: active.divergenceNote,
+      permissionMode: configManager.get('permissions.mode') as string,
+      toolCount: toolRegistry.list().length,
+      notifyMode: modeManager.getHITLMode(),
       usage: orchestrator.usage,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),
-      cost: statusCostText({ available: isConversationUsageAvailable(orchestrator.usage), up: orchestrator.usage.input, down: orchestrator.usage.output, cacheRead: orchestrator.usage.cacheRead, cacheWrite: orchestrator.usage.cacheWrite, fleetCostUsd: footerFleetCost(() => ctx.services.processRegistry.query().nodes, true) }, active.footerModel),
-      contextTokens: orchestrator.lastInputTokens, contextWindow: providerRegistry.getKnownContextWindowForModel(serving) ?? 0, contextWindowSource: describeContextWindowSource(serving),
+      cost: statusCostText(
+        {
+          available: isConversationUsageAvailable(orchestrator.usage),
+          up: orchestrator.usage.input,
+          down: orchestrator.usage.output,
+          cacheRead: orchestrator.usage.cacheRead,
+          cacheWrite: orchestrator.usage.cacheWrite,
+          fleetCostUsd: footerFleetCost(() => ctx.services.processRegistry.query().nodes, true),
+        },
+        active.footerModel,
+      ),
+      contextTokens: orchestrator.lastInputTokens,
+      contextWindow: providerRegistry.getKnownContextWindowForModel(serving) ?? 0,
+      contextWindowSource: describeContextWindowSource(serving),
       compactFraction: Math.min(1, Math.max(0, (configManager.get('behavior.autoCompactThreshold') as number) / 100)),
-      sessionSpine: spine?.sessionSpineActive && spine.sessionSpineStatus && spine.sessionSpineStatus !== 'unknown' ? spine.sessionSpineStatus : undefined,
+      sessionSpine:
+        spine?.sessionSpineActive && spine.sessionSpineStatus && spine.sessionSpineStatus !== 'unknown'
+          ? spine.sessionSpineStatus
+          : undefined,
       webSurfaceUrl: configManager.get('web.enabled') ? resolveWebSurfaceUrl(configManager) : undefined,
-      autoApprove: isEffectiveDangerMode(configManager), keepAwake: powerChipSource.get().keepAwake,
+      autoApprove: isEffectiveDangerMode(configManager),
+      keepAwake: powerChipSource.get().keepAwake,
       microphone: voice && voiceCaptureRowVisible(voice) ? voiceCaptureDescription(voice) : null,
       runningAgents: agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending').length,
       runningProcesses: processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length,
@@ -808,10 +1170,16 @@ async function main() {
     homeDirectory,
     getConfiguredProviderIds: ctx._getConfiguredProviderIds,
     getPinned: ctx._getPinned,
-    render, trustPromptRef,
+    render,
+    trustPromptRef,
   });
 
-  const { refreshGit, unsubs: turnUnsubs, continueTurnAfterFailover, beginFailoverNotice } = wireTurnEventHandlers({
+  const {
+    refreshGit,
+    unsubs: turnUnsubs,
+    continueTurnAfterFailover,
+    beginFailoverNotice,
+  } = wireTurnEventHandlers({
     events: uiServices.events,
     conversation,
     runtime,
@@ -827,14 +1195,19 @@ async function main() {
     gitStatusProvider,
     lastGitInfoRef,
     buildSessionContinuityHints,
-    render, webhookNotifier: ctx.services.webhookNotifier, focusTracker: ctx.services.focusTracker, terminalNotifier, runtimeBus: uiServices.runtime.runtimeBus,
+    render,
+    webhookNotifier: ctx.services.webhookNotifier,
+    focusTracker: ctx.services.focusTracker,
+    terminalNotifier,
+    runtimeBus: uiServices.runtime.runtimeBus,
   });
   unsubs.push(...turnUnsubs);
 
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', (evt) => memoryProvenanceUi.onTurnCompleted(evt)));
 
   // Stable turn context for failover retry, set in submitInput, read by retryTurn.
-  let retryCtx: { count: number; text: string; content?: ContentPart[]; opts?: Parameters<typeof orchestrator.handleUserInput>[2] } | null = null;
+  let retryCtx: { count: number; text: string; content?: ContentPart[]; opts?: Parameters<typeof orchestrator.handleUserInput>[2] } | null =
+    null;
   // One-key retry affordance, active right after a user-visible TURN_ERROR: 'r' re-submits on the
   // current provider, 'm' opens the model picker, any other character clears it and routes normally.
   // Surfaced as a transient FOOTER hint (see retryAffordanceHint below), not a transcript message.
@@ -845,8 +1218,11 @@ async function main() {
     if (!retryCtx) return false; // nothing to roll back to; the caller narrates instead
     const { count, text, content: rContent, opts: rOpts } = retryCtx;
     if (rOpts?.nativeConversationTurnPermit && !orchestrator.canRetryNativeConversationTurn(rOpts.nativeConversationTurnPermit)) {
-      systemMessageRouter.high('Native turn recovery is required before another model attempt. Its transcript and original source were retained.');
-      render(); return false;
+      systemMessageRouter.high(
+        'Native turn recovery is required before another model attempt. Its transcript and original source were retained.',
+      );
+      render();
+      return false;
     }
     // Roll back to pre-submission count, then re-submit. SDK gap, no retry-in-place (see handoff).
     // The rollback erases the failed turn's transcript, the failover notice included, which is how
@@ -855,17 +1231,30 @@ async function main() {
     conversation.removeMessagesAfter(count);
     if (notice) systemMessageRouter.userReceipt(notice);
     void runOwnedTurnRetry({
-      prepare: () => refreshMemoryRecallSnapshot(ctx.services), submit: () => orchestrator.handleUserInput(text, rContent, rOpts),
-      abort: () => orchestrator.abort(), isCurrent, signal: recoverySignal,
+      prepare: () => refreshMemoryRecallSnapshot(ctx.services),
+      submit: () => orchestrator.handleUserInput(text, rContent, rOpts),
+      abort: () => orchestrator.abort(),
+      isCurrent,
+      signal: recoverySignal,
     }).catch((e: unknown) => logger.debug('retryTurn', { error: summarizeError(e) }));
     return true;
   };
   const streamResult: WireStreamEventMetricsResult = wireStreamEventMetrics({
-    events: uiServices.events, orchestrator, providerRegistry,
-    systemMessageRouter, render, metrics: streamMetrics,
-    getSessionId: () => runtime.sessionId, isActive: () => !lifecycle.isTerminalRestored(), beginFailoverNotice,
-    providerOptimizer: ctx.services.providerOptimizer, costLookup: providerRegistry, retryTurn, onFailoverRetry: continueTurnAfterFailover,
-    failoverState, getConfiguredRegistryKey: () => configManager.get('provider.model') as string | undefined,
+    events: uiServices.events,
+    orchestrator,
+    providerRegistry,
+    systemMessageRouter,
+    render,
+    metrics: streamMetrics,
+    getSessionId: () => runtime.sessionId,
+    isActive: () => !lifecycle.isTerminalRestored(),
+    beginFailoverNotice,
+    providerOptimizer: ctx.services.providerOptimizer,
+    costLookup: providerRegistry,
+    retryTurn,
+    onFailoverRetry: continueTurnAfterFailover,
+    failoverState,
+    getConfiguredRegistryKey: () => configManager.get('provider.model') as string | undefined,
     // The REQUESTED level, through the one helper every remap site reads from.
     getConfiguredReasoningEffort: () => requestedEffortLevel(configManager),
     isApprovalPending: () => pendingPermission !== null,
@@ -882,24 +1271,74 @@ async function main() {
   process.on('exit', exitListener);
 
   // --- Terminal setup ---
-  stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
-  allowTerminalWrite(() => stdout.write((cli.flags.noAltScreen ? '' : ALT_SCREEN_ENTER) + CLEAR_SCREEN + CURSOR_HIDE + MOUSE_ENABLE + KEYBOARD_EXT_ENABLE + PASTE_ENABLE + FOCUS_ENABLE));
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding('utf8');
+  allowTerminalWrite(() =>
+    stdout.write(
+      (cli.flags.noAltScreen ? '' : ALT_SCREEN_ENTER) +
+        CLEAR_SCREEN +
+        CURSOR_HIDE +
+        MOUSE_ENABLE +
+        KEYBOARD_EXT_ENABLE +
+        PASTE_ENABLE +
+        FOCUS_ENABLE,
+    ),
+  );
   // forced dark/light applies before first paint; auto (TTY only) repaints once if the OSC 11 probe says light. probePalette adds OSC 10 + OSC 4;0..15
   // and retries until the terminal answers (terminal-palette-reader.ts); the `system` theme re-themes when it arrives. filterInput strips replies from stdin.
   registerThemeRefresh(() => conversation.clearLineCache()); // theme/mode change: cached transcript lines re-render in the new colours
-  const themeProbe = installBackgroundThemeProbe({ configManager, isTTY: Boolean(stdout.isTTY), writeQuery: (b) => allowTerminalWrite(() => stdout.write(b)), requestRepaint: () => { compositor.resetDiff(); render(); }, probePalette: true, forwardInput: (b) => routeInput(b), subscribeResize: (l) => { stdout.on('resize', l); } });
+  const themeProbe = installBackgroundThemeProbe({
+    configManager,
+    isTTY: Boolean(stdout.isTTY),
+    writeQuery: (b) => allowTerminalWrite(() => stdout.write(b)),
+    requestRepaint: () => {
+      compositor.resetDiff();
+      render();
+    },
+    probePalette: true,
+    forwardInput: (b) => routeInput(b),
+    subscribeResize: (l) => {
+      stdout.on('resize', l);
+    },
+  });
 
   // continueRecovery lets --continue/bare --resume check the target session for a live crash snapshot newer than its store before resuming (see tui-startup.ts).
-  const typeaheadHooks = { onModalShown: () => typeahead.arm(), onFlowSettled: () => { const held = typeahead.release(); if (held.length > 0) routeInput(held); } };
-  applyInitialTuiCliState({ cli, input, commandRegistry, commandContext, shellPaths: ctx.services.shellPaths, surface: ctx.services.surface, render, continueRecovery: { sessionManager: ctx.services.sessionManager, runtime, conversation, writeLastSessionPointer, receipt: (line) => systemMessageRouter.userReceipt(line), typeahead: typeaheadHooks } });
+  const typeaheadHooks = {
+    onModalShown: () => typeahead.arm(),
+    onFlowSettled: () => {
+      const held = typeahead.release();
+      if (held.length > 0) routeInput(held);
+    },
+  };
+  applyInitialTuiCliState({
+    cli,
+    input,
+    commandRegistry,
+    commandContext,
+    shellPaths: ctx.services.shellPaths,
+    surface: ctx.services.surface,
+    render,
+    continueRecovery: {
+      sessionManager: ctx.services.sessionManager,
+      runtime,
+      conversation,
+      writeLastSessionPointer,
+      receipt: (line) => systemMessageRouter.userReceipt(line),
+      typeahead: typeaheadHooks,
+    },
+  });
 
   const dispatchInput = (data: string): void => {
     if (hostPairing?.ownsInput) {
       if (pendingPermission) hostPairing.cancelForTakeover();
-      input.feed(data); return;
+      input.feed(data);
+      return;
     }
     const blocking = handleBlockingShellInput({
-      data, pendingPermission, render,
+      data,
+      pendingPermission,
+      render,
       abortTurn: () => orchestrator.abort(),
     });
     pendingPermission = blocking.pendingPermission;
@@ -909,7 +1348,15 @@ async function main() {
     // One-key retry affordance: armed after a user-visible TURN_ERROR; any key other than r/m dismisses it and routes normally.
     if (retryAffordance.armed) {
       disarmRetryAffordance(retryAffordance);
-      if (handleErrorAffordanceKey(data, { retryArmed: retryCtx !== null, retry: retryTurn, openModelPicker: () => commandContext.openModelPicker?.(), render })) return;
+      if (
+        handleErrorAffordanceKey(data, {
+          retryArmed: retryCtx !== null,
+          retry: retryTurn,
+          openModelPicker: () => commandContext.openModelPicker?.(),
+          render,
+        })
+      )
+        return;
       render(); // disarm must repaint immediately so the footer hint clears even when the key fell through
     }
     // One-key jump to a spawned CI fix-session: 'j' attaches, any other key dismisses and routes normally.
@@ -927,10 +1374,21 @@ async function main() {
     // before unrelated background work runs; only streaming waits for a frame.
     if (renderRequested) renderScheduler.flushNow();
   };
-  stdin.on('data', (raw: string) => { const data = typeahead.filter(themeProbe.filterInput(raw)); if (data.length > 0) routeInput(data); });
-  stdin.on('end', () => { hostPairing?.dispose(); void exitApp(); });
-  stdin.on('close', () => { hostPairing?.dispose(); void exitApp(); });
-  process.on('SIGINT', sigintHandler); process.on('unhandledRejection', unhandledRejectionHandler); stdout.on('resize', resizeHandler);
+  stdin.on('data', (raw: string) => {
+    const data = typeahead.filter(themeProbe.filterInput(raw));
+    if (data.length > 0) routeInput(data);
+  });
+  stdin.on('end', () => {
+    hostPairing?.dispose();
+    void exitApp();
+  });
+  stdin.on('close', () => {
+    hostPairing?.dispose();
+    void exitApp();
+  });
+  process.on('SIGINT', sigintHandler);
+  process.on('unhandledRejection', unhandledRejectionHandler);
+  stdout.on('resize', resizeHandler);
 
   // State restores happen ONLY when the user explicitly asks, a CLI flag
   // (--continue/--resume/--fork), a slash command (/session resume,
@@ -940,11 +1398,21 @@ async function main() {
 
   // Crash-recovery snapshot: asked, never assumed, and opened before the first frame so the composer is never live under it;
   // keys typed before it was painted are held and replayed into the composer once it is answered (startup-typeahead-gate.ts).
-  void startRecoveryOffer(buildRecoveryOfferWiring({
-    surface: ctx.services.surface, sessionManager: ctx.services.sessionManager, runtime, conversation, commandContext,
-    writeLastSessionPointer, receipt: (line) => systemMessageRouter.userReceipt(line), render, typeahead: typeaheadHooks,
-  }));
-  conversation.rebuildHistory(); render(); // initial render
+  void startRecoveryOffer(
+    buildRecoveryOfferWiring({
+      surface: ctx.services.surface,
+      sessionManager: ctx.services.sessionManager,
+      runtime,
+      conversation,
+      commandContext,
+      writeLastSessionPointer,
+      receipt: (line) => systemMessageRouter.userReceipt(line),
+      render,
+      typeahead: typeaheadHooks,
+    }),
+  );
+  conversation.rebuildHistory();
+  render(); // initial render
 
   // Auto-save to recovery file every 60s + multi-instance liveness-marker
   // refresh, see runtime/recovery-autosave.ts.

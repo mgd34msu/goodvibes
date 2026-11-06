@@ -3098,6 +3098,11 @@
       "bun": "./terminal-shell/src/native/work-command.ts",
       "types": "./terminal-shell/dist/native/work-command.d.ts",
       "import": "./terminal-shell/dist/native/work-command.js"
+    },
+    "./terminal-shell/shell-frame-facts": {
+      "bun": "./terminal-shell/src/shell-frame-facts.ts",
+      "types": "./terminal-shell/dist/shell-frame-facts.d.ts",
+      "import": "./terminal-shell/dist/shell-frame-facts.js"
     }
   },
   "publishConfig": {

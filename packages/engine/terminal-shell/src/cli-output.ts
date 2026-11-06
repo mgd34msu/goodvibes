@@ -7,3 +7,12 @@ export function formatJsonOrText(cli: {
 }): (value: unknown, text: string) => string {
   return (value, text) => formatOutput({ cli }, value, text);
 }
+
+/** Legacy text-command status mapping, with product-specific prefixes supplied at construction. */
+export function commandTextExitCode(output: string, usagePrefixes: readonly string[], failurePrefixes: readonly string[]): number {
+  if (usagePrefixes.some((prefix) => output.startsWith(prefix))) return 2;
+  if (failurePrefixes.some((prefix) => output.startsWith(prefix))) return 1;
+  if (['No stored ', 'No pending ', 'No model ', 'No provider ', 'No auth ', 'Unknown '].some((prefix) => output.startsWith(prefix)))
+    return 1;
+  return output === 'Bundle has no config object to import.' ? 1 : 0;
+}

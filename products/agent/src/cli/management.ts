@@ -1,3 +1,4 @@
+import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
@@ -72,19 +73,7 @@ interface CliCommandResult {
 }
 
 function exitCodeForText(output: string): number {
-  if (output.startsWith('Usage:') || output.startsWith('Invalid ') || output.startsWith('Unsupported')) return 2;
-  if (output.startsWith('Session not found') || output.startsWith('Unknown task') || output.startsWith('Task submit failed ')) return 1;
-  if (
-    output.startsWith('No stored ') ||
-    output.startsWith('No pending ') ||
-    output.startsWith('No model ') ||
-    output.startsWith('No provider ') ||
-    output.startsWith('No auth ')
-  )
-    return 1;
-  if (output.startsWith('Unknown ')) return 1;
-  if (output === 'Bundle has no config object to import.') return 1;
-  return 0;
+  return commandTextExitCode(output, ['Usage:', 'Invalid ', 'Unsupported'], ['Session not found', 'Unknown task', 'Task submit failed ']);
 }
 
 export function getNestedValue(source: unknown, key: string): unknown {

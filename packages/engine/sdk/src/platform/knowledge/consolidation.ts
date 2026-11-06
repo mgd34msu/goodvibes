@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { consolidationReading } from './batteries/consolidation.js';
 import type { MemoryClass, MemoryRegistry, MemoryScope } from '../state/index.js';
@@ -132,6 +133,11 @@ export async function refreshKnowledgeConsolidationCandidates(
   context: KnowledgeConsolidationContext,
   limit = 24,
 ): Promise<KnowledgeConsolidationCandidateRecord[]> {
+  return decisionOrClassic(() => refreshDecisionKnowledgeConsolidationCandidates(context, limit), () => {
+    throw new DecisionModelsDisabledError('generate semantic knowledge-consolidation proposals');
+  });
+}
+async function refreshDecisionKnowledgeConsolidationCandidates(context: KnowledgeConsolidationContext, limit: number): Promise<KnowledgeConsolidationCandidateRecord[]> {
   await context.store.init();
   await context.syncReviewedMemory();
   const usageStats = await buildUsageStats(context);
@@ -232,6 +238,13 @@ export async function runKnowledgeConsolidation(
   kind: Extract<KnowledgeConsolidationReportRecord['kind'], 'light-consolidation' | 'deep-consolidation'>,
   input: { readonly limit?: number | undefined; readonly autoPromote: boolean },
 ): Promise<KnowledgeConsolidationReportRecord> {
+  return decisionOrClassic(() => runDecisionKnowledgeConsolidation(context, kind, input), () => {
+    throw new DecisionModelsDisabledError('automatic semantic knowledge consolidation');
+  });
+}
+async function runDecisionKnowledgeConsolidation(context: KnowledgeConsolidationContext,
+  kind: Extract<KnowledgeConsolidationReportRecord['kind'], 'light-consolidation' | 'deep-consolidation'>,
+  input: { readonly limit?: number | undefined; readonly autoPromote: boolean }): Promise<KnowledgeConsolidationReportRecord> {
   const limit = Math.max(1, input.limit ?? 24);
   const candidates = await refreshKnowledgeConsolidationCandidates(context, limit);
   let accepted = 0;

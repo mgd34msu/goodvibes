@@ -28,6 +28,7 @@ import { mapLimit } from '@goodvibes-jev/judgment';
 import { agreementContent, alignmentContent, memoryAgreement, memoryAlignment, type MemoryReplacement } from './batteries/memory-alignment.js';
 import type { MemoryRecord, MemoryReviewPatch, MemoryScope } from './memory-store.js';
 import type { ResolvedMemoryConsolidationConfig } from './memory-consolidation-config.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /** Honest per-memory usage signal consumed by the decay ordering. */
 export interface MemoryConsolidationUsageSignal {
@@ -97,6 +98,8 @@ export interface MemoryConsolidationProposal {
 }
 
 export interface MemoryConsolidationRunReceipt {
+  readonly provenance?: 'classic';
+  readonly disposition?: 'skipped';
   readonly runId: string;
   readonly ranAt: string;
   readonly trigger: MemoryConsolidationTrigger;
@@ -415,6 +418,17 @@ function planStaleDeleteProposals(
 }
 
 export async function runMemoryConsolidation(input: MemoryConsolidationInput): Promise<MemoryConsolidationRunReceipt> {
+  return decisionOrClassic(() => runDecisionMemoryConsolidation(input), () => {
+    const suffix = input.randomSuffix ? input.randomSuffix() : Math.random().toString(36).slice(2, 8);
+    return {
+      runId: `mcon-${input.now.toString(36)}-${suffix}`, ranAt: new Date(input.now).toISOString(),
+      trigger: input.trigger, idle: input.idle, provenance: 'classic' as const, disposition: 'skipped' as const,
+      scanned: 0, merged: [], archived: [], decayed: [], proposed: [], usageSignalAvailable: input.usageLookup !== undefined,
+      note: 'Classic skipped semantic memory consolidation. No memories were merged, archived or decayed. Review and update individual memories explicitly.',
+    };
+  });
+}
+async function runDecisionMemoryConsolidation(input: MemoryConsolidationInput): Promise<MemoryConsolidationRunReceipt> {
   const all = input.memoryRegistry.getAll();
   const active = all.filter(isActive);
 

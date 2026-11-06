@@ -23,6 +23,7 @@ import { mapLimit } from '@goodvibes-jev/judgment';
 import { memoryUsage } from './batteries/memory-usage.js';
 import { retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 export type MemoryReferenceTier = 'referenced' | 'present';
 
@@ -33,6 +34,7 @@ export interface MemoryReferenceInput {
 }
 
 export interface MemoryReferenceResult {
+  readonly provenance?: 'classic';
   readonly referenced: readonly string[];
   readonly present: readonly string[];
   readonly perId: ReadonlyMap<string, MemoryReferenceTier>;
@@ -49,6 +51,26 @@ export async function detectReferencedMemoryIds(
   records: readonly MemoryReferenceInput[],
   options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {},
 ): Promise<MemoryReferenceResult> {
+  return decisionOrClassic(() => detectDecisionReferencedMemoryIds(responseText, records, options), () => {
+    const original = retainOwnedJson({ responseText, records });
+    const signal = options.signal, callerCurrent = options.assertCurrent;
+    const current = () => {
+      signal?.throwIfAborted(); original.assertCurrent();
+      if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Memory usage owner changed.');
+      const restriction: unknown = callerCurrent?.();
+      if (restriction !== undefined) { drainOwned(restriction); throw new Error('Memory usage guard must be synchronous.'); }
+      signal?.throwIfAborted(); original.assertCurrent();
+    };
+    current();
+    // These records were injected by the host. Their use in the answer was
+    // not assessed, so presence must never earn a reference credit.
+    const present = original.snapshot.records.map(record => record.id);
+    return { provenance: 'classic' as const, referenced: [], present,
+      perId: new Map(present.map(id => [id, 'present' as const])), assertCurrent: current };
+  });
+}
+async function detectDecisionReferencedMemoryIds(responseText: string, records: readonly MemoryReferenceInput[],
+  options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<MemoryReferenceResult> {
   const original = retainOwnedJson({ responseText, records });
   const input = snapshotJudgmentInput(original.snapshot) as { responseText: string; records: readonly MemoryReferenceInput[] };
   const current = () => { original.assertCurrent(); options.signal?.throwIfAborted();

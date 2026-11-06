@@ -156,6 +156,13 @@ original source/currentness checks without acquiring an unused decision owner.
 Cluster joins accept an unambiguous exact declared group name or ID in Classic;
 description-based selection does not authorize a join.
 
+Post-response memory bookkeeping records only the host's actual prompt presence
+in Classic. It cannot credit a memory as referenced without assessing that use.
+Idle semantic consolidation produces an explicit skipped receipt and makes no
+merge, decay or archive writes. Automatic semantic knowledge-consolidation
+features report their decision-model requirement before starting a Classic pass;
+existing memory retrieval and explicit owner review remain available.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

@@ -54,10 +54,11 @@
       "path": "audio/wake-runtime.ts",
       "baselineTuiLines": 364,
       "baselineSimilarity": 0.5932,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "retainWakeClip"
-      ]
+      ],
+      "notes": "Platform owns listener startup/stop, transcription lifetime, retained clips, engine wiring, refresh joining, diagnostics and enablement subscriptions. Product policies retain read-only TUI provisioning versus automatic Agent provisioning and phase versus live capture-truth indicators. Both fence cancelled or replaced listeners and late transcriptions."
     },
     {
       "path": "cli-flags.ts",

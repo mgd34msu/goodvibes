@@ -2703,6 +2703,11 @@
       "bun": "./terminal-shell/src/renderer/settings-layout.ts",
       "types": "./terminal-shell/dist/renderer/settings-layout.d.ts",
       "import": "./terminal-shell/dist/renderer/settings-layout.js"
+    },
+    "./terminal-shell/audio/wake-runtime": {
+      "bun": "./terminal-shell/src/audio/wake-runtime.ts",
+      "types": "./terminal-shell/dist/audio/wake-runtime.d.ts",
+      "import": "./terminal-shell/dist/audio/wake-runtime.js"
     }
   },
   "publishConfig": {

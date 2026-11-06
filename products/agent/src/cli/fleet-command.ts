@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type {
   AttemptCandidate,
   AttemptJudgment,
@@ -5,10 +6,7 @@ import type {
   HeldMergeGroup,
 } from '@goodvibes-jev/engine/sdk/platform/orchestration';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import {
-  operatorFlagValue,
-  parseOperatorCommandArgs,
-} from './operator-command-args.ts';
+import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import { withRuntimeServices } from './management.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -19,11 +17,8 @@ import type { CliCommandRuntime } from './management.ts';
 
 const FLEET_ATTEMPTS_PICK_USAGE = 'Usage: goodvibes-agent fleet attempts pick <groupId> <winnerItemId> --yes';
 const FLEET_ATTEMPTS_JUDGE_USAGE = 'Usage: goodvibes-agent fleet attempts judge <groupId>';
-const FLEET_USAGE = 'Usage: goodvibes-agent fleet attempts [list [--workstream <workstreamId>]|pick <groupId> <winnerItemId> --yes|judge <groupId>]';
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
+const FLEET_USAGE =
+  'Usage: goodvibes-agent fleet attempts [list [--workstream <workstreamId>]|pick <groupId> <winnerItemId> --yes|judge <groupId>]';
 
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
@@ -53,9 +48,7 @@ function renderJudgment(judgment: AttemptJudgment | null): readonly string[] {
 }
 
 function renderCandidate(candidate: AttemptCandidate): readonly string[] {
-  const lines = [
-    `    ${candidate.itemId}  attempt #${candidate.attemptIndex}  ${candidate.state}  ${candidate.title}`,
-  ];
+  const lines = [`    ${candidate.itemId}  attempt #${candidate.attemptIndex}  ${candidate.state}  ${candidate.title}`];
   if (candidate.state === 'failed' && candidate.failureReason) {
     lines.push(`      failure: ${candidate.failureReason}`);
   }
@@ -79,10 +72,7 @@ function renderGroup(group: HeldMergeGroup): string {
 
 function renderGroupList(groups: readonly HeldMergeGroup[]): string {
   if (groups.length === 0) {
-    return [
-      'Best-of-N held-merge groups',
-      '  No groups are currently held for a winner pick.',
-    ].join('\n');
+    return ['Best-of-N held-merge groups', '  No groups are currently held for a winner pick.'].join('\n');
   }
   return [`Best-of-N held-merge groups (${groups.length})`, ...groups.map(renderGroup)].join('\n\n');
 }
@@ -91,7 +81,11 @@ async function handleFleetAttemptsList(runtime: CliCommandRuntime, args: readonl
   const parsed = parseOperatorCommandArgs(args, ['workstream']);
   const workstreamId = operatorFlagValue(parsed, 'workstream');
   try {
-    const groups = await withRuntimeServices(runtime, (services) => services.contractRunner.fleetControls().listHeldMergeGroups(workstreamId), { modelData: 'skip' });
+    const groups = await withRuntimeServices(
+      runtime,
+      (services) => services.contractRunner.fleetControls().listHeldMergeGroups(workstreamId),
+      { modelData: 'skip' },
+    );
     return { output: jsonOrText(runtime, { ok: true, groups }, renderGroupList(groups)), exitCode: 0 };
   } catch (error) {
     return errorFailure(runtime, error);
@@ -104,10 +98,17 @@ async function handleFleetAttemptsPick(runtime: CliCommandRuntime, args: readonl
   const winnerItemId = parsed.positionals[1];
   if (!groupId || !winnerItemId) return usageFailure(runtime, FLEET_ATTEMPTS_PICK_USAGE);
   if (!parsed.yes) {
-    return { output: `Refusing to pick a winner for group ${groupId} without --yes. Losing siblings' worktrees are cleaned on pick.`, exitCode: 2 };
+    return {
+      output: `Refusing to pick a winner for group ${groupId} without --yes. Losing siblings' worktrees are cleaned on pick.`,
+      exitCode: 2,
+    };
   }
   try {
-    const result: AttemptPickResult = await withRuntimeServices(runtime, (services) => services.contractRunner.fleetControls().pickAttemptWinner(groupId, winnerItemId), { modelData: 'skip' });
+    const result: AttemptPickResult = await withRuntimeServices(
+      runtime,
+      (services) => services.contractRunner.fleetControls().pickAttemptWinner(groupId, winnerItemId),
+      { modelData: 'skip' },
+    );
     const text = [
       `Picked winner ${result.winnerItemId} for group ${result.groupId}`,
       `  losers cleaned: ${result.loserItemIds.length === 0 ? 'none' : result.loserItemIds.join(', ')}`,
@@ -124,7 +125,11 @@ async function handleFleetAttemptsJudge(runtime: CliCommandRuntime, args: readon
   const groupId = parsed.positionals[0];
   if (!groupId) return usageFailure(runtime, FLEET_ATTEMPTS_JUDGE_USAGE);
   try {
-    const judgment: AttemptJudgment = await withRuntimeServices(runtime, (services) => services.contractRunner.fleetControls().proposeAttemptWinner(groupId), { modelData: 'skip' });
+    const judgment: AttemptJudgment = await withRuntimeServices(
+      runtime,
+      (services) => services.contractRunner.fleetControls().proposeAttemptWinner(groupId),
+      { modelData: 'skip' },
+    );
     const text = [
       `Judge proposal for group ${groupId}`,
       ...renderJudgment(judgment),

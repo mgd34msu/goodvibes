@@ -1,7 +1,8 @@
+import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
-import { join } from 'node:path';
+import 'node:path';
 import { readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import type { ConversationManager } from '../core/conversation';
@@ -212,12 +213,10 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     },
   });
 
-  const systemMessageRouter = createSystemMessageRouter(conversation, (kind) => {
-    const ui = getConfigSnapshot(configManager).ui;
-    if (kind === 'contract') return ui.contractMessages;
-    if (kind === 'operational') return ui.operationalMessages;
-    return ui.systemMessages;
-  });
+  const systemMessageRouter = createSystemMessageRouter(
+    conversation,
+    configuredSystemMessageTarget(() => getConfigSnapshot(configManager).ui),
+  );
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 
   const commandRegistry = new CommandRegistry();

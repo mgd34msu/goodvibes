@@ -1,3 +1,4 @@
+import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
 import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
@@ -25,7 +26,7 @@ import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/ter
  * where you are. Changes to the theme preview live (see theme-settings-actions).
  */
 
-import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
+import type { SettingsModal, SettingEntry } from '../input/settings-modal.ts';
 import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
 import { isFeatureValueEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import { CATEGORY_LABELS, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
@@ -47,10 +48,7 @@ import './surface-kit-parts.ts';
  * draft longer than that keeps its end (where the cursor is) in view.
  */
 
-function categoryOf(entry: SettingEntry): string {
-  const prefix = entry.setting.key.split('.')[0] ?? '';
-  return CATEGORY_LABELS[prefix as SettingsCategory] ?? prefix;
-}
+const categoryOf = (entry: SettingEntry): string => settingCategoryLabel(entry.setting.key, CATEGORY_LABELS);
 
 /** The rows of the right-hand list for the current view, and which one is selected. */
 

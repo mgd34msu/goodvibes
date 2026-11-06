@@ -1,3 +1,4 @@
+import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
 import {
   createPluginCommandAdapter,
   wireTerminalMcpReload,
@@ -75,13 +76,6 @@ import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[4]>;
-
-function joinPromptParts(...parts: Array<string | null | undefined>): string {
-  return parts
-    .map((part) => part?.trim())
-    .filter((part): part is string => Boolean(part))
-    .join('\n\n');
-}
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 

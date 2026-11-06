@@ -760,11 +760,6 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.editBuffer += char;
   }
 
-  editBackspace(): void {
-    if (!this.editingMode) return;
-    this.editBuffer = this.editBuffer.slice(0, -1);
-  }
-
   // ── Private helpers ────────────────────────────────────────────────────────────────
 
   /** Reload mcp/subscription entries when the active tab changes. */

@@ -1,3 +1,4 @@
+import { parseMarkdownFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertNoSecretLikeText } from './persona-registry.ts';
@@ -13,19 +14,8 @@ export interface SkillStandardParseError {
   readonly error: string;
 }
 
-function parseStandardFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    const colonIndex = line.indexOf(':');
-    if (colonIndex < 1) continue;
-    const key = line.slice(0, colonIndex).trim();
-    const value = line.slice(colonIndex + 1).trim();
-    if (key) result[key] = value;
-  }
-  return result;
-}
+const parseStandardFrontmatter = (content: string): Record<string, string> =>
+  Object.fromEntries(Object.entries(parseMarkdownFrontmatter(content)).filter(([key]) => key.length > 0));
 
 /**
  * Parse a SKILL.md in the open skill standard format.
@@ -57,13 +47,14 @@ export function parseSkillStandardMarkdown(content: string): SkillStandardParsed
  * Produces `---\nname: ...\ndescription: ...\n---\n<body>\n`
  * Round-trip safe: parse(render(skill)) recovers name, description, body.
  */
-export function renderSkillStandardMarkdown(
-  skill: Pick<AgentSkillRecord, 'name' | 'description' | 'procedure'>,
-): string {
+export function renderSkillStandardMarkdown(skill: Pick<AgentSkillRecord, 'name' | 'description' | 'procedure'>): string {
   const nameLine = `name: ${skill.name}`;
   // Collapse any embedded newlines/runs of whitespace so the description
   // never spans more than one line and cannot break YAML frontmatter.
-  const safeDescription = skill.description.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const safeDescription = skill.description
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const descLine = `description: ${safeDescription}`;
   const body = skill.procedure.trimEnd();
   return `---\n${nameLine}\n${descLine}\n---\n${body}\n`;

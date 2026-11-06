@@ -1,3 +1,4 @@
+import '@goodvibes-jev/engine/terminal-shell/skill-discovery';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -79,7 +80,9 @@ async function scanRoutineDirectory(root: string, origin: RoutineOrigin): Promis
   return records;
 }
 
-export async function discoverRoutines(shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>): Promise<DiscoveredRoutineRecord[]> {
+export async function discoverRoutines(
+  shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>,
+): Promise<DiscoveredRoutineRecord[]> {
   const seen = new Set<string>();
   const records: DiscoveredRoutineRecord[] = [];
 
@@ -93,11 +96,7 @@ export async function discoverRoutines(shellPaths: Pick<ShellPathService, 'worki
   }
 
   return records.sort((a, b) => {
-    const originRank = a.origin === b.origin
-      ? 0
-      : a.origin === 'project-local'
-        ? -1
-        : 1;
+    const originRank = a.origin === b.origin ? 0 : a.origin === 'project-local' ? -1 : 1;
     return originRank || a.name.localeCompare(b.name);
   });
 }

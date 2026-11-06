@@ -1,3 +1,5 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+export { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
@@ -44,10 +46,6 @@ export const LOCAL_LIBRARY_VALUE_OPTIONS = [
   'skills',
   'provenance',
 ] as const;
-
-export function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
 
 export function success<TData>(runtime: CliCommandRuntime, kind: string, data: TData, text: string): CliCommandOutput {
   const value: CommandSuccess<TData> = { ok: true, kind, data };
@@ -111,7 +109,10 @@ export function requiredOption(options: ParsedOptions, name: string, usage: stri
 export function csvOption(options: ParsedOptions, name: string): readonly string[] | undefined {
   const value = optionValue(options, name);
   if (value === undefined) return undefined;
-  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 export function hasFlag(options: ParsedOptions, name: string): boolean {
@@ -119,17 +120,21 @@ export function hasFlag(options: ParsedOptions, name: string): boolean {
 }
 
 export function personaRegistry(runtime: CliCommandRuntime): AgentPersonaRegistry {
-  return AgentPersonaRegistry.fromShellPaths(createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  }));
+  return AgentPersonaRegistry.fromShellPaths(
+    createShellPathService({
+      workingDirectory: runtime.workingDirectory,
+      homeDirectory: runtime.homeDirectory,
+    }),
+  );
 }
 
 export function skillRegistry(runtime: CliCommandRuntime): AgentSkillRegistry {
-  return AgentSkillRegistry.fromShellPaths(createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  }));
+  return AgentSkillRegistry.fromShellPaths(
+    createShellPathService({
+      workingDirectory: runtime.workingDirectory,
+      homeDirectory: runtime.homeDirectory,
+    }),
+  );
 }
 
 export function shellPaths(runtime: CliCommandRuntime): ReturnType<typeof createShellPathService> {

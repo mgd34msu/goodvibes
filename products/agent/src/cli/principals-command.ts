@@ -1,15 +1,8 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
-import {
-  formatOperatorGatewayFailure,
-  invokeOperatorGatewayMethod,
-} from '../agent/operator-gateway-call.ts';
+import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import {
-  operatorFlagValue,
-  operatorRequiredFlag,
-  parseIdentityPairs,
-  parseOperatorCommandArgs,
-} from './operator-command-args.ts';
+import { operatorFlagValue, operatorRequiredFlag, parseIdentityPairs, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
@@ -19,20 +12,19 @@ const PRINCIPAL_ROUTE = '/api/principals/{principalId}';
 const PRINCIPALS_RESOLVE_ROUTE = '/api/principals/resolve';
 
 const PRINCIPALS_GET_USAGE = 'Usage: goodvibes-agent principals get <id>';
-const PRINCIPALS_CREATE_USAGE = 'Usage: goodvibes-agent principals create --name <name> --kind <user|bot|service|token> [--identity channel:value,channel:value] --yes';
-const PRINCIPALS_UPDATE_USAGE = 'Usage: goodvibes-agent principals update <id> [--name <name>] [--kind <user|bot|service|token>] [--identity channel:value,channel:value] --yes';
+const PRINCIPALS_CREATE_USAGE =
+  'Usage: goodvibes-agent principals create --name <name> --kind <user|bot|service|token> [--identity channel:value,channel:value] --yes';
+const PRINCIPALS_UPDATE_USAGE =
+  'Usage: goodvibes-agent principals update <id> [--name <name>] [--kind <user|bot|service|token>] [--identity channel:value,channel:value] --yes';
 const PRINCIPALS_DELETE_USAGE = 'Usage: goodvibes-agent principals delete <id> --yes';
 const PRINCIPALS_RESOLVE_USAGE = 'Usage: goodvibes-agent principals resolve --channel <channel> --value <value>';
-const PRINCIPALS_USAGE = 'Usage: goodvibes-agent principals [list|get <id>|create --name <name> --kind <user|bot|service|token> --yes|update <id> [--name ..] [--kind ..] --yes|delete <id> --yes|resolve --channel <channel> --value <value>]';
+const PRINCIPALS_USAGE =
+  'Usage: goodvibes-agent principals [list|get <id>|create --name <name> --kind <user|bot|service|token> --yes|update <id> [--name ..] [--kind ..] --yes|delete <id> --yes|resolve --channel <channel> --value <value>]';
 
 const PRINCIPAL_KINDS = new Set(['user', 'bot', 'service', 'token']);
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = OperatorMethodInput<'principals.create'>['kind'];
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
 
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
@@ -48,9 +40,8 @@ function requirePrincipalKind(value: string, usage: string): PrincipalKind {
 }
 
 function renderPrincipal(principal: Principal): string {
-  const identities = principal.identities.length > 0
-    ? principal.identities.map((identity) => `${identity.channel}:${identity.value}`).join(', ')
-    : '(none)';
+  const identities =
+    principal.identities.length > 0 ? principal.identities.map((identity) => `${identity.channel}:${identity.value}`).join(', ') : '(none)';
   return [
     `Principal ${principal.id}`,
     `  name ${principal.name}`,
@@ -62,9 +53,8 @@ function renderPrincipal(principal: Principal): string {
 }
 
 function renderPrincipalLine(principal: Principal): string {
-  const identities = principal.identities.length > 0
-    ? principal.identities.map((identity) => `${identity.channel}:${identity.value}`).join(', ')
-    : '(none)';
+  const identities =
+    principal.identities.length > 0 ? principal.identities.map((identity) => `${identity.channel}:${identity.value}`).join(', ') : '(none)';
   return `  ${principal.id}  ${principal.kind.padEnd(8)} ${principal.name}  identities ${identities}`;
 }
 
@@ -127,7 +117,11 @@ async function handlePrincipalsCreate(runtime: CliCommandRuntime, args: readonly
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   return {
-    output: jsonOrText(runtime, result, [`Created principal ${result.data.principal.id}`, renderPrincipal(result.data.principal)].join('\n')),
+    output: jsonOrText(
+      runtime,
+      result,
+      [`Created principal ${result.data.principal.id}`, renderPrincipal(result.data.principal)].join('\n'),
+    ),
     exitCode: 0,
   };
 }
@@ -160,7 +154,11 @@ async function handlePrincipalsUpdate(runtime: CliCommandRuntime, args: readonly
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   return {
-    output: jsonOrText(runtime, result, [`Updated principal ${result.data.principal.id}`, renderPrincipal(result.data.principal)].join('\n')),
+    output: jsonOrText(
+      runtime,
+      result,
+      [`Updated principal ${result.data.principal.id}`, renderPrincipal(result.data.principal)].join('\n'),
+    ),
     exitCode: 0,
   };
 }

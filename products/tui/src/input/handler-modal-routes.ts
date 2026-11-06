@@ -1,3 +1,4 @@
+import { sessionPickerDeleteNamedKey, sessionPickerDeleteTextAction } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
@@ -67,14 +68,8 @@ export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionP
     if (resume) void state.sessionPickerModal.resumeSelected(resume, state.handleEscape).then(state.requestRender, state.requestRender);
   },
 
-  namedKey(state, key, ctrl) {
-    if (key === 'd' && !ctrl && !state.sessionPickerModal.query.length) state.sessionPickerModal.deleteSelected();
-  },
-  textAction(state, value) {
-    if (value !== 'd' || state.sessionPickerModal.query.length) return false;
-    state.sessionPickerModal.deleteSelected();
-    return true;
-  },
+  namedKey: sessionPickerDeleteNamedKey,
+  textAction: sessionPickerDeleteTextAction,
 });
 
 /**

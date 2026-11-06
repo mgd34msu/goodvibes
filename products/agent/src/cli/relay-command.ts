@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -30,10 +31,6 @@ import type { CliCommandRuntime } from './management.ts';
 
 const RELAY_USAGE = 'Usage: goodvibes-agent relay [status|pair]';
 
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
-
 function relayConnectFlagSummary(): { readonly id: string; readonly name: string; readonly defaultState: string } {
   const feature = FEATURE_SETTINGS.find((entry) => entry.id === 'relay-connect');
   return {
@@ -58,7 +55,7 @@ function handleRelayStatus(runtime: CliCommandRuntime): CliCommandOutput {
     liveVerified: false,
     config: { enabled, url, rendezvousId, label, requireStepUpForMutations },
     flag,
-    note: 'This reflects goodvibes-agent\'s own imported copy of relay.* settings, not a live check of the connected GoodVibes daemon\'s actual relay registration, Agent hosts no daemon and the SDK has no remote relay-status route yet.',
+    note: "This reflects goodvibes-agent's own imported copy of relay.* settings, not a live check of the connected GoodVibes daemon's actual relay registration, Agent hosts no daemon and the SDK has no remote relay-status route yet.",
   };
 
   const lines = [
@@ -82,10 +79,10 @@ function handleRelayPair(runtime: CliCommandRuntime): CliCommandOutput {
   const message = [
     'GoodVibes Agent cannot mint a relay pairing payload.',
     'A pairing payload (relay URL + rendezvous id + pinned daemon public key) is minted',
-    'in-process by the daemon that holds the relay identity\'s private key, Agent never',
+    "in-process by the daemon that holds the relay identity's private key, Agent never",
     'holds that key material because it does not host the daemon (see "goodvibes-agent',
     'relay status"). Run the pairing step on the machine hosting the connected GoodVibes',
-    'daemon, or use that host\'s own relay pairing surface once it ships one.',
+    "daemon, or use that host's own relay pairing surface once it ships one.",
   ].join('\n');
   const payload = { ok: false, available: false, reason: 'relay-identity-not-hosted-here', error: message };
   return { output: jsonOrText(runtime, payload, message), exitCode: 1 };

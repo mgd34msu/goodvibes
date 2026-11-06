@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
@@ -25,7 +26,17 @@ import type { CliCommandRuntime } from './management.ts';
 import { tryWireMemoryCommand } from './memory-command-wire.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
-const VALID_CLASSES: readonly MemoryClass[] = ['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership'];
+const VALID_CLASSES: readonly MemoryClass[] = [
+  'decision',
+  'constraint',
+  'incident',
+  'pattern',
+  'fact',
+  'risk',
+  'runbook',
+  'architecture',
+  'ownership',
+];
 const VALID_SCOPES: readonly MemoryScope[] = ['session', 'project', 'team'];
 export const VALID_REVIEW_STATES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
 const VALID_PROVENANCE_KINDS: readonly ProvenanceLinkKind[] = ['session', 'turn', 'task', 'event', 'file'];
@@ -78,10 +89,6 @@ export interface MemoryListData {
 export interface MemorySearchData extends MemoryListData {
   readonly semantic: boolean;
   readonly semanticResults: readonly MemorySemanticSearchResult[];
-}
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
 }
 
 export function success<TData>(runtime: CliCommandRuntime, kind: string, data: TData, text: string): CliCommandOutput {
@@ -142,7 +149,10 @@ export function hasFlag(options: ParsedOptions, name: string): boolean {
 export function csvOption(options: ParsedOptions, name: string): readonly string[] | undefined {
   const value = optionValue(options, name);
   if (value === undefined) return undefined;
-  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function parseLimit(value: string | undefined, fallback: number): number {
@@ -230,7 +240,12 @@ function renderRecordLine(record: MemoryRecord, semanticEntry?: MemorySemanticSe
   return `  ${record.id}  ${record.scope}/${record.cls}  ${formatAgentRecordReviewState(record.reviewState)}  ${record.confidence}%${score}${tags}  ${record.summary}`;
 }
 
-export function renderRecordList(title: string, path: string, records: readonly MemoryRecord[], semanticResults: readonly MemorySemanticSearchResult[] = []): string {
+export function renderRecordList(
+  title: string,
+  path: string,
+  records: readonly MemoryRecord[],
+  semanticResults: readonly MemorySemanticSearchResult[] = [],
+): string {
   if (records.length === 0) {
     return [
       title,
@@ -242,7 +257,12 @@ export function renderRecordList(title: string, path: string, records: readonly 
   return [
     `${title} (${records.length})`,
     `  store ${path}`,
-    ...records.map((record) => renderRecordLine(record, semanticResults.find((entry) => entry.record.id === record.id))),
+    ...records.map((record) =>
+      renderRecordLine(
+        record,
+        semanticResults.find((entry) => entry.record.id === record.id),
+      ),
+    ),
   ].join('\n');
 }
 
@@ -256,7 +276,9 @@ export function renderRecord(record: MemoryRecord, links: readonly MemoryLink[])
     `  tags: ${record.tags.join(', ') || '(none)'}`,
     `  created: ${appendTemporalLabel(timestamp(record.createdAt), record.createdAt)}`,
     `  updated: ${appendTemporalLabel(timestamp(record.updatedAt), record.updatedAt)}`,
-    record.reviewedAt ? `  reviewed: ${appendTemporalLabel(timestamp(record.reviewedAt), record.reviewedAt)}${record.reviewedBy ? ` by ${record.reviewedBy}` : ''}` : '',
+    record.reviewedAt
+      ? `  reviewed: ${appendTemporalLabel(timestamp(record.reviewedAt), record.reviewedAt)}${record.reviewedBy ? ` by ${record.reviewedBy}` : ''}`
+      : '',
     record.staleReason ? `  stale reason: ${record.staleReason}` : '',
     '',
     record.summary,
@@ -265,7 +287,9 @@ export function renderRecord(record: MemoryRecord, links: readonly MemoryLink[])
     ...record.provenance.map((entry) => `  ${formatAgentRecordReference(entry)}`),
     links.length > 0 ? '\nLinks' : '',
     ...links.map((link) => `  ${link.fromId} -> ${link.toId} [${link.relation}]`),
-  ].filter((line): line is string => Boolean(line)).join('\n');
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
 }
 
 export function filterFromOptions(options: ParsedOptions, defaultLimit: number): MemorySearchFilter {
@@ -334,43 +358,47 @@ function isProvenanceLink(value: unknown): value is ProvenanceLink {
 function isMemoryRecord(value: unknown): value is MemoryRecord {
   if (!isRecord(value)) return false;
   return (
-    typeof value.id === 'string'
-    && typeof value.scope === 'string'
-    && isMemoryScope(value.scope)
-    && typeof value.cls === 'string'
-    && isMemoryClass(value.cls)
-    && typeof value.summary === 'string'
-    && (value.detail === undefined || typeof value.detail === 'string')
-    && isStringArray(value.tags)
-    && Array.isArray(value.provenance)
-    && value.provenance.every(isProvenanceLink)
-    && typeof value.reviewState === 'string'
-    && isReviewState(value.reviewState)
-    && typeof value.confidence === 'number'
-    && typeof value.createdAt === 'number'
-    && typeof value.updatedAt === 'number'
+    typeof value.id === 'string' &&
+    typeof value.scope === 'string' &&
+    isMemoryScope(value.scope) &&
+    typeof value.cls === 'string' &&
+    isMemoryClass(value.cls) &&
+    typeof value.summary === 'string' &&
+    (value.detail === undefined || typeof value.detail === 'string') &&
+    isStringArray(value.tags) &&
+    Array.isArray(value.provenance) &&
+    value.provenance.every(isProvenanceLink) &&
+    typeof value.reviewState === 'string' &&
+    isReviewState(value.reviewState) &&
+    typeof value.confidence === 'number' &&
+    typeof value.createdAt === 'number' &&
+    typeof value.updatedAt === 'number'
   );
 }
 
 function isMemoryLink(value: unknown): value is MemoryLink {
   if (!isRecord(value)) return false;
-  return typeof value.fromId === 'string'
-    && typeof value.toId === 'string'
-    && typeof value.relation === 'string'
-    && typeof value.createdAt === 'number';
+  return (
+    typeof value.fromId === 'string' &&
+    typeof value.toId === 'string' &&
+    typeof value.relation === 'string' &&
+    typeof value.createdAt === 'number'
+  );
 }
 
 function isMemoryBundle(value: unknown): value is MemoryBundle {
   if (!isRecord(value)) return false;
-  return value.schemaVersion === 'v1'
-    && typeof value.exportedAt === 'number'
-    && (value.scope === 'all' || (typeof value.scope === 'string' && isMemoryScope(value.scope)))
-    && typeof value.recordCount === 'number'
-    && typeof value.linkCount === 'number'
-    && Array.isArray(value.records)
-    && value.records.every(isMemoryRecord)
-    && Array.isArray(value.links)
-    && value.links.every(isMemoryLink);
+  return (
+    value.schemaVersion === 'v1' &&
+    typeof value.exportedAt === 'number' &&
+    (value.scope === 'all' || (typeof value.scope === 'string' && isMemoryScope(value.scope))) &&
+    typeof value.recordCount === 'number' &&
+    typeof value.linkCount === 'number' &&
+    Array.isArray(value.records) &&
+    value.records.every(isMemoryRecord) &&
+    Array.isArray(value.links) &&
+    value.links.every(isMemoryLink)
+  );
 }
 
 export function readBundle(path: string): MemoryBundle {
@@ -403,9 +431,15 @@ function renderBundleInspection(path: string, bundle: MemoryBundle): string {
     `  scope ${bundle.scope}`,
     `  records ${bundle.recordCount}`,
     `  links ${bundle.linkCount}`,
-    ...bundle.records.slice(0, 20).map((record) => `  ${record.id} ${record.scope}/${record.cls} ${formatAgentRecordReviewState(record.reviewState)} ${record.summary}`),
+    ...bundle.records
+      .slice(0, 20)
+      .map(
+        (record) => `  ${record.id} ${record.scope}/${record.cls} ${formatAgentRecordReviewState(record.reviewState)} ${record.summary}`,
+      ),
     bundle.records.length > 20 ? `  ... ${bundle.records.length - 20} more` : '',
-  ].filter((line): line is string => Boolean(line)).join('\n');
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
 }
 
 function errorOutput(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
@@ -427,7 +461,13 @@ async function handleList(runtime: CliCommandRuntime, context: MemoryContext, ar
 async function handleSearch(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const query = options.positionals.join(' ').trim();
-  if (!query) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]', 2);
+  if (!query)
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      'Usage: goodvibes-agent memory search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]',
+      2,
+    );
   const filter = filterFromOptions(options, 20);
   filter.query = query;
   const semantic = hasFlag(options, 'semantic') || hasFlag(options, 'vector');
@@ -435,7 +475,12 @@ async function handleSearch(runtime: CliCommandRuntime, context: MemoryContext, 
   const semanticResults = semantic ? await context.registry.searchSemantic(filter) : [];
   const records = semantic ? semanticResults.map((entry) => entry.record) : await context.registry.search(filter);
   const data: MemorySearchData = { path: context.path, records, filter, semantic, semanticResults };
-  return success(runtime, 'agent.memory.search', data, renderRecordList(`Agent memory matching "${query}"`, context.path, records, semanticResults));
+  return success(
+    runtime,
+    'agent.memory.search',
+    data,
+    renderRecordList(`Agent memory matching "${query}"`, context.path, records, semanticResults),
+  );
 }
 
 async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
@@ -443,13 +488,24 @@ async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, arg
   const [classRaw, ...summaryParts] = options.positionals;
   const cls = requireClass(classRaw);
   const summary = summaryParts.join(' ').trim();
-  if (!summary) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b]', 2);
+  if (!summary)
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      'Usage: goodvibes-agent memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b]',
+      2,
+    );
   const detail = optionValue(options, 'detail');
   const tags = csvOption(options, 'tags');
   assertNoSecretLikeMemoryText([summary, detail ?? '', ...(tags ?? [])]);
   const reviewState = optionValue(options, 'review-state');
   if (reviewState !== undefined && !isReviewState(reviewState)) {
-    return failure(runtime, 'invalid_memory_command', `Invalid review state "${reviewState}". Valid values ${VALID_REVIEW_STATES.join(', ')}`, 2);
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      `Invalid review state "${reviewState}". Valid values ${VALID_REVIEW_STATES.join(', ')}`,
+      2,
+    );
   }
   const record = await context.registry.add({
     scope: optionalScope(optionValue(options, 'scope')) ?? 'project',
@@ -464,10 +520,7 @@ async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, arg
       reviewedBy: optionValue(options, 'by'),
     },
   });
-  return success(runtime, 'agent.memory.add', record, [
-    'Agent memory added',
-    `  id ${record.id}`,
-  ].join('\n'));
+  return success(runtime, 'agent.memory.add', record, ['Agent memory added', `  id ${record.id}`].join('\n'));
 }
 
 async function handleShow(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
@@ -475,20 +528,35 @@ async function handleShow(runtime: CliCommandRuntime, context: MemoryContext, ar
   if (!id) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory show <id>', 2);
   const record = context.registry.get(id);
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(runtime, 'agent.memory.show', { record, links: context.registry.linksFor(id) }, renderRecord(record, context.registry.linksFor(id)));
+  return success(
+    runtime,
+    'agent.memory.show',
+    { record, links: context.registry.linksFor(id) },
+    renderRecord(record, context.registry.linksFor(id)),
+  );
 }
 
 async function handleQueue(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const limit = parseLimit(args[0], 10);
   const records = await context.registry.reviewQueue(limit);
-  return success(runtime, 'agent.memory.queue', { path: context.path, records, limit }, renderRecordList('Agent memory review queue', context.path, records));
+  return success(
+    runtime,
+    'agent.memory.queue',
+    { path: context.path, records, limit },
+    renderRecordList('Agent memory review queue', context.path, records),
+  );
 }
 
 async function handleReview(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [id, stateRaw] = options.positionals;
   if (!id || !stateRaw || !isReviewState(stateRaw)) {
-    return failure(runtime, 'invalid_memory_command', `Usage: goodvibes-agent memory review <id> <${VALID_REVIEW_STATES.join('|')}> [--confidence <0-100>]`, 2);
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      `Usage: goodvibes-agent memory review <id> <${VALID_REVIEW_STATES.join('|')}> [--confidence <0-100>]`,
+      2,
+    );
   }
   const record = context.registry.review(id, {
     state: stateRaw,
@@ -497,18 +565,33 @@ async function handleReview(runtime: CliCommandRuntime, context: MemoryContext, 
     staleReason: optionValue(options, 'reason'),
   });
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(runtime, 'agent.memory.review', record, [
-    'Agent memory reviewed',
-    `  id ${record.id}`,
-    `  review ${formatAgentRecordReviewState(record.reviewState)}`,
-    `  confidence ${record.confidence}%`,
-  ].join('\n'));
+  return success(
+    runtime,
+    'agent.memory.review',
+    record,
+    [
+      'Agent memory reviewed',
+      `  id ${record.id}`,
+      `  review ${formatAgentRecordReviewState(record.reviewState)}`,
+      `  confidence ${record.confidence}%`,
+    ].join('\n'),
+  );
 }
 
-async function handleReviewShortcut(runtime: CliCommandRuntime, context: MemoryContext, state: Extract<MemoryReviewState, 'stale' | 'contradicted'>, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleReviewShortcut(
+  runtime: CliCommandRuntime,
+  context: MemoryContext,
+  state: Extract<MemoryReviewState, 'stale' | 'contradicted'>,
+  args: readonly string[],
+): Promise<CliCommandOutput> {
   const [id, ...reasonParts] = args;
   if (!id || reasonParts.length === 0) {
-    return failure(runtime, 'invalid_memory_command', `Usage: goodvibes-agent memory ${state === 'stale' ? 'stale' : 'contradict'} <id> <reason>`, 2);
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      `Usage: goodvibes-agent memory ${state === 'stale' ? 'stale' : 'contradict'} <id> <reason>`,
+      2,
+    );
   }
   const record = context.registry.review(id, {
     state,
@@ -516,84 +599,97 @@ async function handleReviewShortcut(runtime: CliCommandRuntime, context: MemoryC
     staleReason: reasonParts.join(' '),
   });
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(runtime, `agent.memory.${state}`, record, [
-    `Agent memory marked ${state}`,
-    `  id ${record.id}`,
-  ].join('\n'));
+  return success(runtime, `agent.memory.${state}`, record, [`Agent memory marked ${state}`, `  id ${record.id}`].join('\n'));
 }
 
 async function handlePromote(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [id, scopeRaw] = options.positionals;
-  if (!id || !scopeRaw) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory promote <id> <session|project|team> --yes', 2);
-  if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to promote memory record ${id} without --yes.`, 2);
+  if (!id || !scopeRaw)
+    return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory promote <id> <session|project|team> --yes', 2);
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to promote memory record ${id} without --yes.`, 2);
   const record = context.registry.update(id, { scope: requireScope(scopeRaw) });
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(runtime, 'agent.memory.promote', record, [
-    'Agent memory promoted',
-    `  id ${record.id}`,
-    `  scope ${record.scope}`,
-  ].join('\n'));
+  return success(
+    runtime,
+    'agent.memory.promote',
+    record,
+    ['Agent memory promoted', `  id ${record.id}`, `  scope ${record.scope}`].join('\n'),
+  );
 }
 
 async function handleLink(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [fromId, toId, relation] = options.positionals;
-  if (!fromId || !toId || !relation) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory link <fromId> <toId> <relation> --yes', 2);
-  if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to link memory records ${fromId} and ${toId} without --yes.`, 2);
+  if (!fromId || !toId || !relation)
+    return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory link <fromId> <toId> <relation> --yes', 2);
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to link memory records ${fromId} and ${toId} without --yes.`, 2);
   const link = await context.registry.link(fromId, toId, relation);
   if (!link) return failure(runtime, 'memory_link_failed', 'Memory link failed; check that both records exist.', 1);
-  return success(runtime, 'agent.memory.link', link, [
-    'Agent memory linked',
-    `  from ${fromId}`,
-    `  to ${toId}`,
-    `  relation ${relation}`,
-  ].join('\n'));
+  return success(
+    runtime,
+    'agent.memory.link',
+    link,
+    ['Agent memory linked', `  from ${fromId}`, `  to ${toId}`, `  relation ${relation}`].join('\n'),
+  );
 }
 
 async function handleDelete(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const id = options.positionals[0];
   if (!id) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory delete <id> --yes', 2);
-  if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to delete memory record ${id} without --yes.`, 2);
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to delete memory record ${id} without --yes.`, 2);
   if (!context.registry.delete(id)) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(runtime, 'agent.memory.delete', { id }, [
-    `Agent memory deleted: ${id}`,
-    `  id ${id}`,
-  ].join('\n'));
+  return success(runtime, 'agent.memory.delete', { id }, [`Agent memory deleted: ${id}`, `  id ${id}`].join('\n'));
 }
 
 async function handleExport(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const pathArg = options.positionals[0];
-  if (!pathArg) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory export <path> [--scope <scope>] [--cls <class>] --yes', 2);
-  if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to export Agent memory bundle to ${pathArg} without --yes.`, 2);
+  if (!pathArg)
+    return failure(
+      runtime,
+      'invalid_memory_command',
+      'Usage: goodvibes-agent memory export <path> [--scope <scope>] [--cls <class>] --yes',
+      2,
+    );
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to export Agent memory bundle to ${pathArg} without --yes.`, 2);
   const filter = filterFromOptions(options, 200);
   const path = resolvePath(runtime, pathArg);
   const bundle = context.registry.exportBundle(filter);
   writeBundle(path, bundle);
-  return success(runtime, 'agent.memory.export', { path, bundle }, [
-    'Agent memory exported',
-    `  records ${bundle.recordCount}`,
-    `  links ${bundle.linkCount}`,
-    `  path ${path}`,
-  ].join('\n'));
+  return success(
+    runtime,
+    'agent.memory.export',
+    { path, bundle },
+    ['Agent memory exported', `  records ${bundle.recordCount}`, `  links ${bundle.linkCount}`, `  path ${path}`].join('\n'),
+  );
 }
 
 async function handleImport(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const pathArg = options.positionals[0];
   if (!pathArg) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory import <path> --yes', 2);
-  if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to import Agent memory bundle from ${pathArg} without --yes.`, 2);
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to import Agent memory bundle from ${pathArg} without --yes.`, 2);
   const path = resolvePath(runtime, pathArg);
   const bundle = readBundle(path);
   const result = await context.registry.importBundle(bundle);
-  return success(runtime, 'agent.memory.import', { path, result }, [
-    `Agent memory imported: ${result.importedRecords} record${result.importedRecords === 1 ? '' : 's'}`,
-    `  records: ${result.importedRecords}`,
-    `  links: ${result.importedLinks}`,
-    `  skipped: ${result.skippedRecords}`,
-  ].join('\n'));
+  return success(
+    runtime,
+    'agent.memory.import',
+    { path, result },
+    [
+      `Agent memory imported: ${result.importedRecords} record${result.importedRecords === 1 ? '' : 's'}`,
+      `  records: ${result.importedRecords}`,
+      `  links: ${result.importedLinks}`,
+      `  skipped: ${result.skippedRecords}`,
+    ].join('\n'),
+  );
 }
 
 async function handleInspect(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
@@ -608,37 +704,52 @@ async function handleVector(runtime: CliCommandRuntime, context: MemoryContext, 
   const sub = (args[0] ?? 'status').toLowerCase();
   if (sub === 'status') {
     const stats = context.registry.vectorStats();
-    return success(runtime, 'agent.memory.vector.status', stats, [
-      'Agent memory vector index',
-      `  backend: ${stats.backend}`,
-      `  enabled: ${stats.enabled ? 'yes' : 'no'}`,
-      `  available: ${stats.available ? 'yes' : 'no'}`,
-      `  dimensions: ${stats.dimensions}`,
-      `  indexed records: ${stats.indexedRecords}`,
-      ...(stats.path ? [`  path: ${stats.path}`] : []),
-      ...(stats.error ? [`  error: ${stats.error}`] : []),
-    ].join('\n'));
+    return success(
+      runtime,
+      'agent.memory.vector.status',
+      stats,
+      [
+        'Agent memory vector index',
+        `  backend: ${stats.backend}`,
+        `  enabled: ${stats.enabled ? 'yes' : 'no'}`,
+        `  available: ${stats.available ? 'yes' : 'no'}`,
+        `  dimensions: ${stats.dimensions}`,
+        `  indexed records: ${stats.indexedRecords}`,
+        ...(stats.path ? [`  path: ${stats.path}`] : []),
+        ...(stats.error ? [`  error: ${stats.error}`] : []),
+      ].join('\n'),
+    );
   }
   if (sub === 'doctor') {
     const report = await context.registry.doctor();
-    return success(runtime, 'agent.memory.vector.doctor', report, [
-      'Agent memory vector doctor',
-      `  vector backend: ${report.vector.backend}`,
-      `  vector available: ${report.vector.available ? 'yes' : 'no'}`,
-      `  indexed records: ${report.vector.indexedRecords}`,
-      `  active embedding provider: ${report.embeddings.activeProviderId || '(none)'}`,
-      `  embedding providers: ${report.embeddings.providers.length}`,
-      ...report.embeddings.warnings.map((warning) => `  warning: ${warning}`),
-    ].join('\n'));
+    return success(
+      runtime,
+      'agent.memory.vector.doctor',
+      report,
+      [
+        'Agent memory vector doctor',
+        `  vector backend: ${report.vector.backend}`,
+        `  vector available: ${report.vector.available ? 'yes' : 'no'}`,
+        `  indexed records: ${report.vector.indexedRecords}`,
+        `  active embedding provider: ${report.embeddings.activeProviderId || '(none)'}`,
+        `  embedding providers: ${report.embeddings.providers.length}`,
+        ...report.embeddings.warnings.map((warning) => `  warning: ${warning}`),
+      ].join('\n'),
+    );
   }
   if (sub === 'rebuild') {
     const stats = await context.registry.rebuildVectorsAsync();
-    return success(runtime, 'agent.memory.vector.rebuild', stats, [
-      'Agent memory vector rebuild complete',
-      `  backend: ${stats.backend}`,
-      `  indexed records: ${stats.indexedRecords}`,
-      ...(stats.error ? [`  error: ${stats.error}`] : []),
-    ].join('\n'));
+    return success(
+      runtime,
+      'agent.memory.vector.rebuild',
+      stats,
+      [
+        'Agent memory vector rebuild complete',
+        `  backend: ${stats.backend}`,
+        `  indexed records: ${stats.indexedRecords}`,
+        ...(stats.error ? [`  error: ${stats.error}`] : []),
+      ].join('\n'),
+    );
   }
   return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory vector [status|doctor|rebuild]', 2);
 }

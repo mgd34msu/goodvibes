@@ -1,3 +1,4 @@
+import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
 import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
@@ -24,7 +25,7 @@ import { createSettingsDocumentation } from '@goodvibes-jev/engine/terminal-shel
  * default, type and source. The breadcrumb in the title says where you are.
  */
 
-import type { SettingsModal, SettingEntry, FlagEntry, SettingsCategory } from '../input/settings-modal.ts';
+import type { SettingsModal, SettingEntry, FlagEntry } from '../input/settings-modal.ts';
 import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
 import { CATEGORY_LABELS, flagStateColor, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
 import {
@@ -66,10 +67,7 @@ function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow 
   };
 }
 
-function categoryOf(entry: SettingEntry): string {
-  const prefix = entry.setting.key.split('.')[0] ?? '';
-  return CATEGORY_LABELS[prefix as SettingsCategory] ?? prefix;
-}
+const categoryOf = (entry: SettingEntry): string => settingCategoryLabel(entry.setting.key, CATEGORY_LABELS);
 
 /** The rows of the right-hand list for the current view, and which one is selected. */
 

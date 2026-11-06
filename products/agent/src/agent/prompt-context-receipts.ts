@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { writeStoreFile } from '@/utils/store-file.ts';
@@ -10,16 +11,27 @@ import type { CapabilityIndexReport } from '../capabilities/capability-types.ts'
 import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.ts';
 import {
   formatReceiptJournal,
-  isReceipt,
   readReceiptJournal,
   selectReceiptJournalSurvivors,
   type ReceiptJournalSurvivors,
 } from './prompt-context-receipt-journal.ts';
-import { renderReviewedMemoryPrompt, type MemoryTurnRankingResult, describeMemoryPromptEligibility, isPromptActiveMemory, rankMemoryForTurn, relevanceBand } from './memory-prompt.ts';
+import {
+  renderReviewedMemoryPrompt,
+  type MemoryTurnRankingResult,
+  describeMemoryPromptEligibility,
+  isPromptActiveMemory,
+  rankMemoryForTurn,
+  relevanceBand,
+} from './memory-prompt.ts';
 import { AgentPersonaRegistry, buildActivePersonaPrompt } from './persona-registry.ts';
 import { buildProjectContextPrompt, discoverProjectContextFiles } from './project-context-files.ts';
 import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.ts';
-import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness } from './skill-registry.ts';
+import {
+  AgentSkillRegistry,
+  buildEnabledSkillsPrompt,
+  evaluateAgentSkillBundleReadiness,
+  evaluateAgentSkillReadiness,
+} from './skill-registry.ts';
 import { buildVibeProjectionPrompt, discoverVibeFiles } from './vibe-file.ts';
 
 export type PromptContextReceiptStatus = 'active' | 'attention' | 'empty' | 'unavailable';
@@ -161,10 +173,6 @@ function compactOutcomeDetail(value: string | undefined): string | undefined {
   return trimmed.length > OUTCOME_DETAIL_LIMIT ? `${trimmed.slice(0, OUTCOME_DETAIL_LIMIT - 3)}...` : trimmed;
 }
 
-function joinPromptParts(...parts: Array<string | null | undefined>): string {
-  return parts.map((part) => part?.trim()).filter((part): part is string => Boolean(part)).join('\n\n');
-}
-
 /**
  * The honest freshness note for the 'memory' receipt segment, sourced from the
  * memory spine's own recall snapshot (see RuntimePromptCompositionInput.
@@ -205,7 +213,9 @@ function statusFor(active: number, suppressed: number): PromptContextReceiptStat
   return 'empty';
 }
 
-function receiptSegment(input: Omit<PromptContextReceiptSegment, 'approxTokens'> & { readonly promptText?: string }): PromptContextReceiptSegment {
+function receiptSegment(
+  input: Omit<PromptContextReceiptSegment, 'approxTokens'> & { readonly promptText?: string },
+): PromptContextReceiptSegment {
   const promptChars = input.promptText?.length ?? input.promptChars;
   return {
     id: input.id,
@@ -234,7 +244,12 @@ function resolveMemoryRecords(input: RuntimePromptCompositionInput): readonly Me
   return input.memoryRecallSnapshot ? input.memoryRecallSnapshot.records : input.memoryRegistry.getAll();
 }
 
-function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput, memoryRecords: readonly MemoryRecord[], memoryRanking: MemoryTurnRankingResult, memoryPrompt: string): readonly PromptContextReceiptSegment[] {
+function buildRuntimePromptReceiptSegments(
+  input: RuntimePromptCompositionInput,
+  memoryRecords: readonly MemoryRecord[],
+  memoryRanking: MemoryTurnRankingResult,
+  memoryPrompt: string,
+): readonly PromptContextReceiptSegment[] {
   const vibe = discoverVibeFiles(input.shellPaths);
   // The VIBE prompt is a PROJECTION of persona/constraint records, not a
   // re-read of the files (discoverVibeFiles above stays for the file-discovery receipt).
@@ -245,8 +260,12 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
   const activeMemoryIds = new Set(activeMemory.map((record) => record.id));
   const suppressedMemory = memoryRecords.filter((record) => !activeMemoryIds.has(record.id));
   const routineSnapshot = AgentRoutineRegistry.fromShellPaths(input.shellPaths).snapshot();
-  const activeRoutines = routineSnapshot.enabledRoutines.filter((routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready);
-  const suppressedRoutines = routineSnapshot.enabledRoutines.filter((routine) => !activeRoutines.some((active) => active.id === routine.id));
+  const activeRoutines = routineSnapshot.enabledRoutines.filter(
+    (routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready,
+  );
+  const suppressedRoutines = routineSnapshot.enabledRoutines.filter(
+    (routine) => !activeRoutines.some((active) => active.id === routine.id),
+  );
   const routinePrompt = buildEnabledRoutinesPrompt(input.shellPaths) ?? '';
   const skillSnapshot = AgentSkillRegistry.fromShellPaths(input.shellPaths).snapshot();
   const activeBundles = skillSnapshot.enabledBundles.filter((bundle) => {
@@ -258,12 +277,16 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
     ...activeBundles.flatMap((bundle) => bundle.skillIds),
   ]);
-  const activeSkills = skillSnapshot.skills.filter((skill) => activeSkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready);
+  const activeSkills = skillSnapshot.skills.filter(
+    (skill) => activeSkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready,
+  );
   const candidateSkillIds = new Set([
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
     ...skillSnapshot.enabledBundles.flatMap((bundle) => bundle.skillIds),
   ]);
-  const suppressedSkills = skillSnapshot.skills.filter((skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id));
+  const suppressedSkills = skillSnapshot.skills.filter(
+    (skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id),
+  );
   const suppressedBundles = skillSnapshot.enabledBundles.filter((bundle) => !activeBundles.some((active) => active.id === bundle.id));
   const skillPrompt = buildEnabledSkillsPrompt(input.shellPaths) ?? '';
   const personaSnapshot = AgentPersonaRegistry.fromShellPaths(input.shellPaths).snapshot();
@@ -299,7 +322,10 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
       id: 'project_context',
       label: 'Project context files',
       order: 3,
-      status: statusFor(projectContext.files.length, projectContext.blocked.length + projectContext.files.filter((file) => file.truncated).length),
+      status: statusFor(
+        projectContext.files.length,
+        projectContext.blocked.length + projectContext.files.filter((file) => file.truncated).length,
+      ),
       activeCount: projectContext.files.length,
       suppressedCount: projectContext.blocked.length,
       promptChars: projectContextPrompt.length,
@@ -349,7 +375,11 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
         // Per-turn relevance: honest wording, only present when actually scored.
         // F7a: the raw percent is paired with a qualitative band (see relevanceBand)
         // so a genuinely-lower-but-real score like "28%" doesn't read as noise.
-        ...(memoryRanking.scored ? { relevance: `relevance to this turn: ${memoryRanking.relevanceById.get(record.id) ?? 0}% (${relevanceBand(memoryRanking.relevanceById.get(record.id) ?? 0)})` } : {}),
+        ...(memoryRanking.scored
+          ? {
+              relevance: `relevance to this turn: ${memoryRanking.relevanceById.get(record.id) ?? 0}% (${relevanceBand(memoryRanking.relevanceById.get(record.id) ?? 0)})`,
+            }
+          : {}),
       })),
       suppressed: suppressedMemory.slice(0, 12).map((record) => {
         // Honest, per-record reason (confidence + reviewState + provenance), never a
@@ -422,7 +452,10 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
       promptChars: personaPrompt.length,
       promptText: personaPrompt,
       selected: activePersona?.reviewState === 'reviewed' ? [{ id: activePersona.id, name: activePersona.name }] : [],
-      suppressed: activePersona && activePersona.reviewState !== 'reviewed' ? [{ id: activePersona.id, name: activePersona.name, reviewState: activePersona.reviewState }] : [],
+      suppressed:
+        activePersona && activePersona.reviewState !== 'reviewed'
+          ? [{ id: activePersona.id, name: activePersona.name, reviewState: activePersona.reviewState }]
+          : [],
     }),
     receiptSegment({
       id: 'capabilities',
@@ -446,14 +479,17 @@ function buildRuntimePromptReceiptSegments(input: RuntimePromptCompositionInput,
       suppressedCount: 0,
       promptChars: tierPrompt.length,
       promptText: tierPrompt,
-      note: input.contextWindow === null
-        ? `Model ${modelLabel(input.model)} has an unknown context window; guidance comes from the registered model-tier reading.`
-        : `Model ${modelLabel(input.model)} has context window ${input.contextWindow}; guidance comes from the registered model-tier reading.`,
+      note:
+        input.contextWindow === null
+          ? `Model ${modelLabel(input.model)} has an unknown context window; guidance comes from the registered model-tier reading.`
+          : `Model ${modelLabel(input.model)} has context window ${input.contextWindow}; guidance comes from the registered model-tier reading.`,
     }),
   ];
 }
 
-export async function composeRuntimePromptWithReceipt(input: RuntimePromptCompositionInput): Promise<{ readonly prompt: string; readonly receipt: PromptContextReceiptDraft }> {
+export async function composeRuntimePromptWithReceipt(
+  input: RuntimePromptCompositionInput,
+): Promise<{ readonly prompt: string; readonly receipt: PromptContextReceiptDraft }> {
   const memoryRecords = resolveMemoryRecords(input);
   // Bound to one arg: Array.filter passes (element, index, array), and
   // isPromptActiveMemory's second param is `now`, passing the callback bare
@@ -500,9 +536,6 @@ export async function composeRuntimePromptWithReceipt(input: RuntimePromptCompos
   };
 }
 
-
-
-
 export interface PromptContextTurnOutcomeInput {
   readonly turnId: string;
   readonly status: PromptContextTurnOutcomeStatus;
@@ -517,7 +550,8 @@ export interface PromptContextReceiptCompaction {
   readonly path: string;
   readonly reason: 'load' | 'append-threshold';
   /** Receipts dropped for aging past the TTL, and for falling outside the count cap. */
-  readonly expiredReceipts: number; readonly overflowReceipts: number;
+  readonly expiredReceipts: number;
+  readonly overflowReceipts: number;
   /** Turn-outcome lines retired because the receipt/turn they describe is gone. */
   readonly droppedOutcomes: number;
   /** Unparseable lines (torn tails, zero-filled blocks) dropped by the rewrite. */
@@ -530,11 +564,6 @@ export interface PromptContextReceiptCompaction {
   /** False when nothing needed dropping, so the file was left untouched. */
   readonly rewritten: boolean;
 }
-
-
-
-
-
 
 export class AgentPromptContextReceiptStore {
   private readonly receipts: PromptContextReceipt[] = [];
@@ -598,9 +627,7 @@ export class AgentPromptContextReceiptStore {
     const turnId = input.turnId.trim();
     if (!turnId) return null;
     const detail = compactOutcomeDetail(input.detail);
-    const matchingReceiptIds = this.receipts
-      .filter((receipt) => receipt.turnId === turnId)
-      .map((receipt) => receipt.receiptId);
+    const matchingReceiptIds = this.receipts.filter((receipt) => receipt.turnId === turnId).map((receipt) => receipt.receiptId);
     const outcome: PromptContextTurnOutcome = {
       turnId,
       status: input.status,

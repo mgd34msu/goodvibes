@@ -130,3 +130,19 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     this.feed = feed;
   }
 }
+
+/** Resolve targets from the live configuration rather than freezing it at bootstrap. */
+export function configuredSystemMessageTarget(
+  readUi: () => {
+    readonly contractMessages: SystemMessageTarget;
+    readonly operationalMessages: SystemMessageTarget;
+    readonly systemMessages: SystemMessageTarget;
+  },
+) {
+  return (kind: SystemMessageKind): SystemMessageTarget => {
+    const ui = readUi();
+    if (kind === 'contract') return ui.contractMessages;
+    if (kind === 'operational') return ui.operationalMessages;
+    return ui.systemMessages;
+  };
+}

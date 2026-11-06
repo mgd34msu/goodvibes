@@ -77,3 +77,15 @@ export function createProfilePickerTokenRoute<Config>(cancelDeleteConfirmation: 
     },
   });
 }
+
+interface SessionPickerDeleteState {
+  readonly sessionPickerModal: { readonly query: string; deleteSelected(): void };
+}
+export function sessionPickerDeleteNamedKey(state: SessionPickerDeleteState, key: string, ctrl: boolean): void {
+  if (key === 'd' && !ctrl && !state.sessionPickerModal.query.length) state.sessionPickerModal.deleteSelected();
+}
+export function sessionPickerDeleteTextAction(state: SessionPickerDeleteState, value: string): boolean {
+  if (value !== 'd' || state.sessionPickerModal.query.length) return false;
+  state.sessionPickerModal.deleteSelected();
+  return true;
+}

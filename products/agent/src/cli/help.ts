@@ -1,23 +1,14 @@
+import { productVersionFromModule } from '@goodvibes-jev/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes-jev/engine/terminal-shell/cli-help';
-import {
-  readProductPackageVersion,
-  renderDetailedCommandHelp,
-  COMMON_COMMAND_HELP,
-  type TerminalCommandHelp,
-} from '@goodvibes-jev/engine/terminal-shell/cli-help';
+import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes-jev/engine/terminal-shell/cli-help';
 import 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import 'node:url';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
 import { detectInstallKind } from '../runtime/update-check.ts';
 
-const readJsonVersion = (path: string) => readProductPackageVersion(path, '@goodvibes-jev/agent');
-
-export function getPackageVersion(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return readJsonVersion(join(here, '..', '..', 'package.json')) ?? VERSION;
-}
+export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes-jev/agent', VERSION);
 
 /**
  * The version line, plus a plain statement when this binary replaced itself.

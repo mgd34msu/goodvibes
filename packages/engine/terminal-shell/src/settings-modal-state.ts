@@ -21,6 +21,9 @@ export class TerminalSettingsModalState<Category extends string, Entry, Target e
   public searchResults: Entry[] = [];
   public lastSettingEffectMessage: string | null = null;
   public pendingSecretWrite: Promise<boolean> | null = null;
+  editBackspace(): void {
+    if (this.editingMode) this.editBuffer = this.editBuffer.slice(0, -1);
+  }
   protected resetSettingsInteraction(): void {
     this.editingMode = false;
     this.editBuffer = '';

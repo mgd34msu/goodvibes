@@ -3118,6 +3118,11 @@
       "bun": "./terminal-shell/src/knowledge-mutation-command.ts",
       "types": "./terminal-shell/dist/knowledge-mutation-command.d.ts",
       "import": "./terminal-shell/dist/knowledge-mutation-command.js"
+    },
+    "./terminal-shell/prompt-parts": {
+      "bun": "./terminal-shell/src/prompt-parts.ts",
+      "types": "./terminal-shell/dist/prompt-parts.d.ts",
+      "import": "./terminal-shell/dist/prompt-parts.js"
     }
   },
   "publishConfig": {

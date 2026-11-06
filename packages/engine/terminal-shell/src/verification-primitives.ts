@@ -290,3 +290,10 @@ export function resolveVerificationHostUrl(
   }
   return `http://127.0.0.1:${port}`;
 }
+
+export function createVerificationCompactor(redact: (text: string) => string) {
+  return (text: string, maxLength = 900): string => {
+    const trimmed = redact(text.trim());
+    return trimmed.length <= maxLength ? trimmed : `${trimmed.slice(0, maxLength - 16)}... [truncated]`;
+  };
+}

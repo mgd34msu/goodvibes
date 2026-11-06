@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -55,10 +56,6 @@ function commandValues(args: readonly string[]): readonly string[] {
   return values;
 }
 
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
-
 function usage(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   const message = `${error}\nUsage: goodvibes-agent workspaces [list|register [path] [--label <label>] --yes|unregister [path] --yes]`;
   return { output: jsonOrText(runtime, { ok: false, error: message }, message), exitCode: 2 };
@@ -92,12 +89,15 @@ export async function handleWorkspacesCommand(runtime: CliCommandRuntime): Promi
         exitCode: 0,
       };
     }
-    const lines = snapshot.workspaces.length === 0
-      ? ['No registered workspaces', '  automatic checkpoints are off everywhere until a workspace is registered']
-      : [
-        `Registered workspaces (${snapshot.workspaces.length})`,
-        ...snapshot.workspaces.map((entry) => `  ${entry.root}${entry.label ? ` (${entry.label})` : ''}, registered ${entry.registeredAt}`),
-      ];
+    const lines =
+      snapshot.workspaces.length === 0
+        ? ['No registered workspaces', '  automatic checkpoints are off everywhere until a workspace is registered']
+        : [
+            `Registered workspaces (${snapshot.workspaces.length})`,
+            ...snapshot.workspaces.map(
+              (entry) => `  ${entry.root}${entry.label ? ` (${entry.label})` : ''}, registered ${entry.registeredAt}`,
+            ),
+          ];
     lines.push('', `current workspace ${current}`, `  registered ${currentWorkspaceRegistered ? 'yes' : 'no'}`);
     return { output: lines.join('\n'), exitCode: 0 };
   }

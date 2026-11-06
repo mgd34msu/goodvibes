@@ -1,3 +1,5 @@
+import { parseMarkdownFrontmatter as parseFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
+import { compareLocalLibraryRecords } from '@goodvibes-jev/engine/terminal-shell/skill-discovery';
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow } from './modal-surface-helpers.ts';
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -26,17 +28,6 @@ export interface SkillsModalDeps {
   readonly ecosystemPaths?: EcosystemCatalogPathOptions;
 }
 
-function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    const [key, ...rest] = line.split(':');
-    if (key && rest.length > 0) result[key.trim()] = rest.join(':').trim();
-  }
-  return result;
-}
-
 function getSkillDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: SkillOrigin }> {
   return [
     { root: join(cwd, '.goodvibes', 'skills'), origin: 'project-local' },
@@ -48,13 +39,20 @@ function getSkillDirectories(cwd: string, homeDir: string): Array<{ root: string
 
 function readSkillFileSync(path: string, origin: SkillOrigin): SkillRecord | null {
   let content = '';
-  try { content = readFileSync(path, 'utf-8'); } catch { return null; }
+  try {
+    content = readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
   const frontmatter = parseFrontmatter(content);
   const body = content.replace(/^---\n[\s\S]*?\n---\n?/, '');
   const name = frontmatter.name ?? path.split(/[\\/]/).pop()?.replace(/\.md$/, '') ?? 'skill';
   const description = frontmatter.description ?? frontmatter.summary ?? '';
   const dependencies = frontmatter.depends_on
-    ? frontmatter.depends_on.split(',').map((item) => item.trim()).filter(Boolean)
+    ? frontmatter.depends_on
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
     : [];
   const includes: string[] = [];
   const includeRegex = /^@([\w/-]+)/gm;
@@ -65,7 +63,11 @@ function readSkillFileSync(path: string, origin: SkillOrigin): SkillRecord | nul
 
 function scanSkillDirectorySync(root: string, origin: SkillOrigin): SkillRecord[] {
   let entries: string[] = [];
-  try { entries = readdirSync(root); } catch { return []; }
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return [];
+  }
   const records: SkillRecord[] = [];
   for (const entry of entries.sort((a, b) => a.localeCompare(b))) {
     if (entry.endsWith('.md')) {
@@ -81,10 +83,16 @@ function scanSkillDirectorySync(root: string, origin: SkillOrigin): SkillRecord[
 
 function applyMarketplaceProvenance(records: SkillRecord[], ecosystemPaths: EcosystemCatalogPathOptions): SkillRecord[] {
   let receipts: ReturnType<typeof listInstalledEcosystemEntries>;
-  try { receipts = listInstalledEcosystemEntries('skill', ecosystemPaths); } catch { return records; }
+  try {
+    receipts = listInstalledEcosystemEntries('skill', ecosystemPaths);
+  } catch {
+    return records;
+  }
   if (receipts.length === 0) return records;
   return records.map((record) => {
-    const receipt = receipts.find((candidate) => record.path === candidate.targetPath || record.path.startsWith(`${candidate.targetPath}${sep}`));
+    const receipt = receipts.find(
+      (candidate) => record.path === candidate.targetPath || record.path.startsWith(`${candidate.targetPath}${sep}`),
+    );
     if (!receipt) return record;
     return { ...record, marketplaceProvenance: receipt.provenanceSummary };
   });
@@ -104,17 +112,17 @@ function discoverSkillsSync(
     }
   }
   const tagged = ecosystemPaths ? applyMarketplaceProvenance(records, ecosystemPaths) : records;
-  return tagged.sort((a, b) => {
-    const originRank = a.origin === b.origin ? 0 : a.origin === 'project-local' ? -1 : 1;
-    return originRank || a.name.localeCompare(b.name);
-  });
+  return tagged.sort(compareLocalLibraryRecords);
 }
 
 function originLabel(origin: SkillOrigin): string {
   switch (origin) {
-    case 'project-local': return 'project';
-    case 'global': return 'global';
-    case 'custom': return 'custom';
+    case 'project-local':
+      return 'project';
+    case 'global':
+      return 'global';
+    case 'custom':
+      return 'custom';
   }
 }
 
@@ -128,17 +136,28 @@ class SkillsModalSurface implements ConfigModalSurface {
 
   readonly actions = [{ key: 'r', id: 'refresh', label: 'refresh' }];
 
-  onOpen(requestRender: () => void): void { this.requestRender = requestRender; this.refresh(); }
+  onOpen(requestRender: () => void): void {
+    this.requestRender = requestRender;
+    this.refresh();
+  }
 
-  private refresh(): void { this.cached = discoverSkillsSync(this.deps.shellPaths, this.deps.ecosystemPaths); }
+  private refresh(): void {
+    this.cached = discoverSkillsSync(this.deps.shellPaths, this.deps.ecosystemPaths);
+  }
 
   buildView(): ConfigModalView {
     const rows: ConfigModalRow[] = [];
     if (this.cached.length === 0) {
       rows.push(infoRow('empty:0', 'No skills discovered.'));
       rows.push(headerRow('empty:title', 'Next steps'));
-      rows.push(infoRow('empty:dir', '.goodvibes/skills       — place skill .md files here (project-local) or ~/.goodvibes/skills (global)', { fg: MODAL_TONES.dim }));
-      rows.push(infoRow('empty:registry', '/registry search skills — inspect the same skill directories from the shell', { fg: MODAL_TONES.dim }));
+      rows.push(
+        infoRow('empty:dir', '.goodvibes/skills       — place skill .md files here (project-local) or ~/.goodvibes/skills (global)', {
+          fg: MODAL_TONES.dim,
+        }),
+      );
+      rows.push(
+        infoRow('empty:registry', '/registry search skills — inspect the same skill directories from the shell', { fg: MODAL_TONES.dim }),
+      );
       return { title: 'Skills', tabs: [{ id: 'skills', label: 'Skills', rows, emptyText: '' }] };
     }
 
@@ -155,7 +174,9 @@ class SkillsModalSurface implements ConfigModalSurface {
         skill.dependencies.length > 0 ? `deps ${skill.dependencies.length}` : null,
         skill.includes.length > 0 ? `inc ${skill.includes.length}` : null,
         skill.marketplaceProvenance ?? null,
-      ].filter((s): s is string => s !== null).join(' · ');
+      ]
+        .filter((s): s is string => s !== null)
+        .join(' · ');
       rows.push({
         id: skill.path,
         label: `${dot} ${badge} ${skill.name.padEnd(24)} ${detail}`,
@@ -167,7 +188,10 @@ class SkillsModalSurface implements ConfigModalSurface {
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    if (id === 'refresh') { this.refresh(); ctx.setStatus('Rescanned skill directories.'); }
+    if (id === 'refresh') {
+      this.refresh();
+      ctx.setStatus('Rescanned skill directories.');
+    }
   }
 }
 

@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 export interface TerminalCommandHelp {
   readonly usage: readonly string[];
@@ -78,4 +80,8 @@ export const COMMON_COMMAND_HELP = {
 export function normalizeHelpTopic(topic: string, aliases: Readonly<Partial<Record<string, string>>>): string {
   const normalized = topic.trim().toLowerCase();
   return (Object.hasOwn(aliases, normalized) ? aliases[normalized] : undefined) ?? normalized;
+}
+
+export function productVersionFromModule(moduleUrl: string, expectedName: string, fallback: string): string {
+  return readProductPackageVersion(join(dirname(fileURLToPath(moduleUrl)), '..', '..', 'package.json'), expectedName) ?? fallback;
 }

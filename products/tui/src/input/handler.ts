@@ -1,3 +1,4 @@
+import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
@@ -453,10 +454,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     return openProviderModelPickerWithTargetForHandler(this, target, source);
   }
   public openMcpWorkspace(context: CommandContext): void {
-    this.indicatorFocused = false;
-    this.modalOpened('mcpWorkspace');
-    this.mcpWorkspace.open(context);
-    this.requestRender();
+    openHandlerMcpWorkspace(this, context);
   }
   public handleModelPickerCommit(): boolean {
     return handleModelPickerCommitForHandler(this);

@@ -16,3 +16,11 @@ export function commandTextExitCode(output: string, usagePrefixes: readonly stri
     return 1;
   return output === 'Bundle has no config object to import.' ? 1 : 0;
 }
+
+export function commandJsonOrText(
+  runtime: { readonly cli: { readonly flags: { readonly outputFormat?: string | undefined } } },
+  value: unknown,
+  text: string,
+): string {
+  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
+}

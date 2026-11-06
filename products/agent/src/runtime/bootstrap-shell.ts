@@ -1,3 +1,4 @@
+import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
 import type { ConversationManager } from '../core/conversation';
@@ -132,12 +133,11 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
 
   let commandContextRef: CommandContext | null = null;
 
-  const systemMessageRouter = createSystemMessageRouter(conversation, activityFeed, (kind) => {
-    const ui = getConfigSnapshot(configManager).ui;
-    if (kind === 'contract') return ui.contractMessages;
-    if (kind === 'operational') return ui.operationalMessages;
-    return ui.systemMessages;
-  });
+  const systemMessageRouter = createSystemMessageRouter(
+    conversation,
+    activityFeed,
+    configuredSystemMessageTarget(() => getConfigSnapshot(configManager).ui),
+  );
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 
   const commandRegistry = new CommandRegistry();

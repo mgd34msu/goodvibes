@@ -111,3 +111,8 @@ export const SHARED_SETTING_ENUM_DESCRIPTIONS = {
     'meta-cloud': 'Use Meta Cloud API credentials and identifiers.',
   },
 } as const;
+
+export function settingCategoryLabel(key: string, labels: Readonly<Record<string, string>>): string {
+  const prefix = key.split('.')[0] ?? '';
+  return labels[prefix] ?? prefix;
+}

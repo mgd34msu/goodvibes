@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../agent/record-labels.ts';
 import { discoverRoutines, type DiscoveredRoutineRecord } from '../agent/routine-discovery.ts';
@@ -18,10 +19,7 @@ import {
   formatRoutineScheduleReceipts,
   formatRoutineScheduleSuccess,
 } from '../agent/routine-schedule-format.ts';
-import {
-  reconcileRoutineScheduleReceipts,
-  RoutineScheduleReceiptStore,
-} from '../agent/routine-schedule-receipts.ts';
+import { reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -43,12 +41,18 @@ interface ParsedRoutineOptions {
   readonly yes: boolean;
 }
 
-const ROUTINE_CREATE_USAGE = 'Usage: goodvibes-agent routines create --name <name> --description <summary> --steps <steps> [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq] [--enabled]';
-const ROUTINE_VALUE_OPTIONS = ['name', 'description', 'steps', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands'] as const;
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
+const ROUTINE_CREATE_USAGE =
+  'Usage: goodvibes-agent routines create --name <name> --description <summary> --steps <steps> [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq] [--enabled]';
+const ROUTINE_VALUE_OPTIONS = [
+  'name',
+  'description',
+  'steps',
+  'tags',
+  'triggers',
+  'requires-env',
+  'requires-command',
+  'requires-commands',
+] as const;
 
 function commandFailure(runtime: CliCommandRuntime, kind: string, error: string, exitCode: number): CliCommandOutput {
   const failure: RoutinesCommandFailure = { ok: false, kind, error };
@@ -59,10 +63,12 @@ function commandFailure(runtime: CliCommandRuntime, kind: string, error: string,
 }
 
 function routineRegistry(runtime: CliCommandRuntime): AgentRoutineRegistry {
-  return AgentRoutineRegistry.fromShellPaths(createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  }));
+  return AgentRoutineRegistry.fromShellPaths(
+    createShellPathService({
+      workingDirectory: runtime.workingDirectory,
+      homeDirectory: runtime.homeDirectory,
+    }),
+  );
 }
 
 function shellPaths(runtime: CliCommandRuntime): ReturnType<typeof createShellPathService> {
@@ -73,15 +79,20 @@ function shellPaths(runtime: CliCommandRuntime): ReturnType<typeof createShellPa
 }
 
 function routineReceiptStore(runtime: CliCommandRuntime): RoutineScheduleReceiptStore {
-  return RoutineScheduleReceiptStore.fromShellPaths(createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  }));
+  return RoutineScheduleReceiptStore.fromShellPaths(
+    createShellPathService({
+      workingDirectory: runtime.workingDirectory,
+      homeDirectory: runtime.homeDirectory,
+    }),
+  );
 }
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];
-  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function parseRoutineOptions(args: readonly string[]): ParsedRoutineOptions {
@@ -168,10 +179,7 @@ function summarizeRoutine(routine: AgentRoutineRecord): string {
 
 function summarizeDiscoveredRoutine(routine: DiscoveredRoutineRecord): string {
   const description = routine.description ? ` - ${routine.description}` : '';
-  return [
-    `  ${routine.name}  ${routine.origin}${description}`,
-    `    path ${routine.path}`,
-  ].join('\n');
+  return [`  ${routine.name}  ${routine.origin}${description}`, `    path ${routine.path}`].join('\n');
 }
 
 function renderDiscoveredRoutineList(routines: readonly DiscoveredRoutineRecord[]): string {
@@ -191,11 +199,13 @@ function renderDiscoveredRoutineList(routines: readonly DiscoveredRoutineRecord[
 }
 
 function discoveredRoutineLookupValues(routine: DiscoveredRoutineRecord): readonly string[] {
-  const slug = routine.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const slug = routine.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   const basename = routine.path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') ?? '';
-  return [routine.name, slug, routine.path, basename]
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
+  return [routine.name, slug, routine.path, basename].map((value) => value.trim().toLowerCase()).filter(Boolean);
 }
 
 function findDiscoveredRoutine(routines: readonly DiscoveredRoutineRecord[], idOrName: string): DiscoveredRoutineRecord | null {
@@ -224,13 +234,11 @@ function renderRoutineList(title: string, path: string, routines: readonly Agent
       title,
       `  ${emptyMessage ?? 'No Agent-local routines yet.'}`,
       emptyMessage ? '' : '  Open /agent routines in the TUI, or use goodvibes-agent routines create for scripted setup.',
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
-  return [
-    `${title} (${routines.length})`,
-    `  store ${path}`,
-    ...routines.map(summarizeRoutine),
-  ].join('\n');
+  return [`${title} (${routines.length})`, `  store ${path}`, ...routines.map(summarizeRoutine)].join('\n');
 }
 
 function renderRoutine(routine: AgentRoutineRecord): string {
@@ -254,7 +262,9 @@ function renderRoutine(routine: AgentRoutineRecord): string {
     routine.description,
     '',
     routine.steps,
-  ].filter((line): line is string => Boolean(line)).join('\n');
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
 }
 
 async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
@@ -267,10 +277,12 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
       error: parsed.errors.join(' '),
     };
     return {
-      output: json ? JSON.stringify(failure, null, 2) : [
-        'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
-        ...parsed.errors.map((error) => `  ${error}`),
-      ].join('\n'),
+      output: json
+        ? JSON.stringify(failure, null, 2)
+        : [
+            'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+            ...parsed.errors.map((error) => `  ${error}`),
+          ].join('\n'),
       exitCode: 2,
     };
   }
@@ -321,22 +333,24 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
   const snapshot = registry.snapshot();
   const normalized = sub.toLowerCase();
   if (normalized === 'list' || normalized === 'enabled' || normalized === 'attention' || normalized === 'needs-setup') {
-    const routines = normalized === 'enabled'
-      ? snapshot.enabledRoutines
-      : normalized === 'attention' || normalized === 'needs-setup'
-        ? snapshot.routines.filter((routine) => !evaluateAgentRoutineReadiness(routine).ready)
-        : snapshot.routines;
+    const routines =
+      normalized === 'enabled'
+        ? snapshot.enabledRoutines
+        : normalized === 'attention' || normalized === 'needs-setup'
+          ? snapshot.routines.filter((routine) => !evaluateAgentRoutineReadiness(routine).ready)
+          : snapshot.routines;
     const value: RoutinesCommandSuccess<{
       readonly path: string;
       readonly routines: readonly AgentRoutineRecord[];
       readonly enabledCount: number;
     }> = {
       ok: true,
-      kind: normalized === 'enabled'
-        ? 'agent.routines.enabled'
-        : normalized === 'attention' || normalized === 'needs-setup'
-          ? 'agent.routines.attention'
-          : 'agent.routines.list',
+      kind:
+        normalized === 'enabled'
+          ? 'agent.routines.enabled'
+          : normalized === 'attention' || normalized === 'needs-setup'
+            ? 'agent.routines.attention'
+            : 'agent.routines.list',
       data: {
         path: snapshot.path,
         routines,
@@ -344,16 +358,20 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       },
     };
     return {
-      output: jsonOrText(runtime, value, renderRoutineList(
-        normalized === 'enabled'
-          ? 'Enabled Agent routines'
-          : normalized === 'attention' || normalized === 'needs-setup'
-            ? 'Agent routines needing setup'
-            : 'Agent routines',
-        snapshot.path,
-        routines,
-        normalized === 'attention' || normalized === 'needs-setup' ? 'No Agent-local routines need setup.' : undefined,
-      )),
+      output: jsonOrText(
+        runtime,
+        value,
+        renderRoutineList(
+          normalized === 'enabled'
+            ? 'Enabled Agent routines'
+            : normalized === 'attention' || normalized === 'needs-setup'
+              ? 'Agent routines needing setup'
+              : 'Agent routines',
+          snapshot.path,
+          routines,
+          normalized === 'attention' || normalized === 'needs-setup' ? 'No Agent-local routines need setup.' : undefined,
+        ),
+      ),
       exitCode: 0,
     };
   }
@@ -401,15 +419,19 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
         data: { routine: discovered },
       };
       return {
-        output: jsonOrText(runtime, value, [
-          'Agent routine import preview',
-          `  name ${discovered.name}`,
-          `  origin ${discovered.origin}`,
-          `  path ${discovered.path}`,
-          `  description ${discovered.description || '(none)'}`,
-          `  steps characters ${discovered.steps.length}`,
-          '  next rerun with --yes to import into the Agent-local routine registry',
-        ].join('\n')),
+        output: jsonOrText(
+          runtime,
+          value,
+          [
+            'Agent routine import preview',
+            `  name ${discovered.name}`,
+            `  origin ${discovered.origin}`,
+            `  path ${discovered.path}`,
+            `  description ${discovered.description || '(none)'}`,
+            `  steps characters ${discovered.steps.length}`,
+            '  next rerun with --yes to import into the Agent-local routine registry',
+          ].join('\n'),
+        ),
         exitCode: 0,
       };
     }
@@ -421,7 +443,12 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       triggers: discoveredRoutineFrontmatterList(discovered, 'triggers'),
       requirements: buildAgentSkillRequirements({
         env: discoveredRoutineFrontmatterAnyList(discovered, ['requiresEnv', 'requires-env', 'requires_env']),
-        commands: discoveredRoutineFrontmatterAnyList(discovered, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
+        commands: discoveredRoutineFrontmatterAnyList(discovered, [
+          'requiresCommands',
+          'requires-commands',
+          'requires_commands',
+          'commands',
+        ]),
       }),
       enabled: parsed.enabled,
       source: 'imported',
@@ -433,11 +460,15 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       data: routine,
     };
     return {
-      output: jsonOrText(runtime, value, [
-        `Imported Agent routine ${routine.id}: ${routine.name}${routine.enabled ? ' (enabled)' : ''}`,
-        `  name ${routine.name}`,
-        `  enabled ${routine.enabled ? 'yes' : 'no'}`,
-      ].join('\n')),
+      output: jsonOrText(
+        runtime,
+        value,
+        [
+          `Imported Agent routine ${routine.id}: ${routine.name}${routine.enabled ? ' (enabled)' : ''}`,
+          `  name ${routine.name}`,
+          `  enabled ${routine.enabled ? 'yes' : 'no'}`,
+        ].join('\n'),
+      ),
       exitCode: 0,
     };
   }
@@ -464,11 +495,15 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
         data: routine,
       };
       return {
-        output: jsonOrText(runtime, value, [
-          `Created Agent routine ${routine.id}: ${routine.name}${routine.enabled ? ' (enabled)' : ''}`,
-          `  name ${routine.name}`,
-          `  enabled ${routine.enabled ? 'yes' : 'no'}`,
-        ].join('\n')),
+        output: jsonOrText(
+          runtime,
+          value,
+          [
+            `Created Agent routine ${routine.id}: ${routine.name}${routine.enabled ? ' (enabled)' : ''}`,
+            `  name ${routine.name}`,
+            `  enabled ${routine.enabled ? 'yes' : 'no'}`,
+          ].join('\n'),
+        ),
         exitCode: 0,
       };
     } catch (error) {
@@ -512,12 +547,7 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
         exitCode: 0,
       };
     } catch (error) {
-      return commandFailure(
-        runtime,
-        'routine_not_found',
-        error instanceof Error ? error.message : String(error),
-        1,
-      );
+      return commandFailure(runtime, 'routine_not_found', error instanceof Error ? error.message : String(error), 1);
     }
   }
   if (normalized === 'receipts' || normalized === 'history') {
@@ -548,7 +578,11 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
     if (!id) return { output: 'Usage: goodvibes-agent routines receipt <receipt-id>', exitCode: 2 };
     const receipt = routineReceiptStore(runtime).get(id);
     if (!receipt) {
-      const failure: RoutinesCommandFailure = { ok: false, kind: 'routine_schedule_receipt_not_found', error: `Unknown routine schedule receipt ${id}` };
+      const failure: RoutinesCommandFailure = {
+        ok: false,
+        kind: 'routine_schedule_receipt_not_found',
+        error: `Unknown routine schedule receipt ${id}`,
+      };
       return {
         output: runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(failure, null, 2) : failure.error,
         exitCode: 1,

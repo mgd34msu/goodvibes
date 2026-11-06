@@ -1,8 +1,6 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
-import {
-  formatOperatorGatewayFailure,
-  invokeOperatorGatewayMethod,
-} from '../agent/operator-gateway-call.ts';
+import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
 import {
   operatorFlagValue,
@@ -21,17 +19,15 @@ const CI_WATCH_ROUTE = '/api/ci/watches/{watchId}';
 const CI_WATCH_RUN_ROUTE = '/api/ci/watches/{watchId}/run';
 
 const CI_STATUS_USAGE = 'Usage: goodvibes-agent ci status <repo> [--ref <ref>] [--pr <number>]';
-const CI_WATCHES_CREATE_USAGE = 'Usage: goodvibes-agent ci watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes';
+const CI_WATCHES_CREATE_USAGE =
+  'Usage: goodvibes-agent ci watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes';
 const CI_WATCHES_DELETE_USAGE = 'Usage: goodvibes-agent ci watches delete <watchId> --yes';
 const CI_WATCHES_RUN_USAGE = 'Usage: goodvibes-agent ci watches run <watchId>';
-const CI_USAGE = 'Usage: goodvibes-agent ci [status <repo> [--ref <ref>] [--pr <number>]|watches list|watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes|watches delete <watchId> --yes|watches run <watchId>]';
+const CI_USAGE =
+  'Usage: goodvibes-agent ci [status <repo> [--ref <ref>] [--pr <number>]|watches list|watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes|watches delete <watchId> --yes|watches run <watchId>]';
 
 type CiReport = OperatorMethodOutput<'ci.status'>['report'];
 type CiWatch = OperatorMethodOutput<'ci.watches.list'>['watches'][number];
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
 
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
@@ -175,11 +171,15 @@ async function handleCiWatchesRun(runtime: CliCommandRuntime, args: readonly str
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   return {
-    output: jsonOrText(runtime, result, [
-      renderCiReport(result.data.report),
-      `  notified ${result.data.notified ? 'yes' : 'no'}${result.data.notificationId ? ` (${result.data.notificationId})` : ''}`,
-      `  fix session triggered ${result.data.fixSessionTriggered ? 'yes' : 'no'}${result.data.fixSessionId ? ` (${result.data.fixSessionId})` : ''}`,
-    ].join('\n')),
+    output: jsonOrText(
+      runtime,
+      result,
+      [
+        renderCiReport(result.data.report),
+        `  notified ${result.data.notified ? 'yes' : 'no'}${result.data.notificationId ? ` (${result.data.notificationId})` : ''}`,
+        `  fix session triggered ${result.data.fixSessionTriggered ? 'yes' : 'no'}${result.data.fixSessionId ? ` (${result.data.fixSessionId})` : ''}`,
+      ].join('\n'),
+    ),
     exitCode: 0,
   };
 }

@@ -1,3 +1,4 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 /**
  * owner-profile-command.ts, `goodvibes-agent owner-profile` over the daemon's
  * `profile.*` control-plane verbs (docs/owner-profile.md §11.1).
@@ -17,10 +18,7 @@
  *   this file logs a value, and `status` prints counts and field names only.
  */
 
-import {
-  createProfileGatewayInvoke,
-  type ProfileGatewayInvoke,
-} from '../agent/owner-profile-gateway.ts';
+import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
 import {
   narrowProfileGet,
   narrowProfilePerson,
@@ -69,10 +67,6 @@ const CLI_EDIT_SAID = '(edited from the command line)';
 /** The section holding facts about other people. Counted, never listed (§10). */
 const PEOPLE_SECTION = 'people';
 
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
-
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
     output: jsonOrText(runtime, { ok: false, kind: 'invalid_owner_profile_command', error }, error),
@@ -99,10 +93,7 @@ async function handleRead(
   const response = narrowProfileRead(result.data);
   if (!response) return { output: jsonOrText(runtime, result, PROFILE_RESPONSE_UNREADABLE), exitCode: 1 };
   if (response.state.kind === 'unavailable') {
-    const text = [
-      `Your profile could not be read: ${response.state.reason ?? 'no reason given'}`,
-      `  ${response.state.path}`,
-    ].join('\n');
+    const text = [`Your profile could not be read: ${response.state.reason ?? 'no reason given'}`, `  ${response.state.path}`].join('\n');
     return { output: jsonOrText(runtime, response, text), exitCode: 1 };
   }
   if (response.state.kind === 'disabled') {
@@ -192,11 +183,7 @@ async function handleProvenance(
   return { output: jsonOrText(runtime, response, lines.join('\n')), exitCode: 0 };
 }
 
-async function handleGet(
-  runtime: CliCommandRuntime,
-  invoke: ProfileGatewayInvoke,
-  args: readonly string[],
-): Promise<CliCommandOutput> {
+async function handleGet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args);
   const fieldId = parsed.positionals[0];
   if (!fieldId) return usageFailure(runtime, GET_USAGE);
@@ -213,20 +200,18 @@ async function handleGet(
   const field = response.field;
   const lines = [`${field.label}: ${field.value}`];
   if (!field.valid) lines.push(`  did not parse: ${field.invalidReason ?? 'no reason given'}, kept as written, treated as unset`);
-  lines.push(field.provenance
-    ? `  from ${field.provenance.surface} on ${field.provenance.date}, you said: "${field.provenance.said}"`
-    : '  no provenance recorded; you wrote or edited this line by hand.');
+  lines.push(
+    field.provenance
+      ? `  from ${field.provenance.surface} on ${field.provenance.date}, you said: "${field.provenance.said}"`
+      : '  no provenance recorded; you wrote or edited this line by hand.',
+  );
   // Non-empty only for a closed-tier field: the daemon decides which reads need
   // a receipt, and this relays rather than judging.
   if (response.disclosure) lines.push(response.disclosure);
   return { output: jsonOrText(runtime, response, lines.join('\n')), exitCode: 0 };
 }
 
-async function handlePerson(
-  runtime: CliCommandRuntime,
-  invoke: ProfileGatewayInvoke,
-  args: readonly string[],
-): Promise<CliCommandOutput> {
+async function handlePerson(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args, ['named-by']);
   const name = parsed.positionals.join(' ').trim();
   if (!name) return usageFailure(runtime, PERSON_USAGE);
@@ -251,11 +236,7 @@ async function handlePerson(
   return { output: jsonOrText(runtime, response, lines.join('\n')), exitCode: 0 };
 }
 
-async function handleSet(
-  runtime: CliCommandRuntime,
-  invoke: ProfileGatewayInvoke,
-  args: readonly string[],
-): Promise<CliCommandOutput> {
+async function handleSet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args, ['said']);
   const fieldId = parsed.positionals[0];
   const value = parsed.positionals.slice(1).join(' ').trim();
@@ -291,11 +272,7 @@ async function handleSet(
  * runs, and a stale index is well-formed, so nothing could catch it. Content
  * re-resolves against the document as it is now.
  */
-async function handleForget(
-  runtime: CliCommandRuntime,
-  invoke: ProfileGatewayInvoke,
-  args: readonly string[],
-): Promise<CliCommandOutput> {
+async function handleForget(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args, ['section', 'text']);
   const fieldId = parsed.positionals[0];
   const section = operatorFlagValue(parsed, 'section');

@@ -1,3 +1,4 @@
+import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { readVerificationHostToken, resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
@@ -47,11 +48,7 @@ function redact(text: string): string {
   return text.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted]').replace(/"token"\s*:\s*"[^"]+"/g, '"token":"[redacted]"');
 }
 
-function compact(text: string, maxLength = 900): string {
-  const trimmed = redact(text.trim());
-  if (trimmed.length <= maxLength) return trimmed;
-  return `${trimmed.slice(0, maxLength - 16)}... [truncated]`;
-}
+const compact = createVerificationCompactor(redact);
 
 function readDaemonToken(homeDir: string): string | undefined {
   return readVerificationHostToken(homeDir, ['GOODVIBES_DAEMON_TOKEN'], readJsonFile);

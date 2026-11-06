@@ -1,14 +1,9 @@
+import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
-import {
-  formatOperatorGatewayFailure,
-  invokeOperatorGatewayMethod,
-} from '../agent/operator-gateway-call.ts';
+import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import {
-  operatorFlagValue,
-  parseOperatorCommandArgs,
-} from './operator-command-args.ts';
+import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
@@ -17,17 +12,14 @@ const CHANNEL_PROFILES_ROUTE = '/api/channels/profiles';
 const CHANNEL_PROFILE_ROUTE = '/api/channels/profiles/{surfaceKind}';
 
 const CHANNEL_PROFILES_GET_USAGE = 'Usage: goodvibes-agent channel-profiles get <surfaceKind> [--channel-id <id>]';
-const CHANNEL_PROFILES_SET_USAGE = 'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <safe-owner|safe-jev|yolo|plan>] --yes';
+const CHANNEL_PROFILES_SET_USAGE =
+  'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <safe-owner|safe-jev|yolo|plan>] --yes';
 const CHANNEL_PROFILES_DELETE_USAGE = 'Usage: goodvibes-agent channel-profiles delete <surfaceKind> [--channel-id <id>] --yes';
-const CHANNEL_PROFILES_USAGE = 'Usage: goodvibes-agent channel-profiles [list|get <surfaceKind> [--channel-id <id>]|set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes|delete <surfaceKind> [--channel-id <id>] --yes]';
-
+const CHANNEL_PROFILES_USAGE =
+  'Usage: goodvibes-agent channel-profiles [list|get <surfaceKind> [--channel-id <id>]|set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes|delete <surfaceKind> [--channel-id <id>] --yes]';
 
 type ChannelProfile = OperatorMethodOutput<'channels.profiles.list'>['bindings'][number];
 type PermissionMode = NonNullable<OperatorMethodInput<'channels.profiles.set'>['permissionMode']>;
-
-function jsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
 
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
@@ -39,7 +31,8 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
 function parsePermissionMode(value: string | undefined, usage: string): PermissionMode | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim().toLowerCase();
-  if (!isSettableGatePresetName(normalized)) throw new Error(`${usage}\n--permission-mode must be one of: ${SESSION_GATE_PRESET_NAMES.join(', ')}.`);
+  if (!isSettableGatePresetName(normalized))
+    throw new Error(`${usage}\n--permission-mode must be one of: ${SESSION_GATE_PRESET_NAMES.join(', ')}.`);
   return normalized;
 }
 
@@ -121,7 +114,11 @@ async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readon
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   return {
-    output: jsonOrText(runtime, result, [`Set channel profile ${result.data.binding.id}`, renderChannelProfile(result.data.binding)].join('\n')),
+    output: jsonOrText(
+      runtime,
+      result,
+      [`Set channel profile ${result.data.binding.id}`, renderChannelProfile(result.data.binding)].join('\n'),
+    ),
     exitCode: 0,
   };
 }
@@ -143,7 +140,11 @@ async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: rea
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   return {
-    output: jsonOrText(runtime, result, `Deleted channel profile ${result.data.surfaceKind}${result.data.channelId ? `:${result.data.channelId}` : ''}: ${result.data.deleted ? 'ok' : 'not found'}`),
+    output: jsonOrText(
+      runtime,
+      result,
+      `Deleted channel profile ${result.data.surfaceKind}${result.data.channelId ? `:${result.data.channelId}` : ''}: ${result.data.deleted ? 'ok' : 'not found'}`,
+    ),
     exitCode: result.data.deleted ? 0 : 1,
   };
 }

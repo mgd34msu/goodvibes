@@ -1,3 +1,4 @@
+import { createVerificationCompactor } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { readVerificationHostToken, resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
@@ -181,11 +182,7 @@ function redactForReleaseArtifact(text: string, context: LiveVerificationRedacti
   return result;
 }
 
-function compact(text: string, maxLength = 900): string {
-  const trimmed = redact(text.trim());
-  if (trimmed.length <= maxLength) return trimmed;
-  return `${trimmed.slice(0, maxLength - 16)}... [truncated]`;
-}
+const compact = createVerificationCompactor(redact);
 
 function readConnectedHostToken(homeDir: string): string | undefined {
   return readVerificationHostToken(homeDir, ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'], readJsonFile);

@@ -1,3 +1,4 @@
+import { commandJsonOrText as formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -55,10 +56,6 @@ function writeInstalledBundles(runtime: CliCommandRuntime, records: readonly Ins
   writeFileSync(path, `${JSON.stringify(records, null, 2)}\n`, 'utf-8');
 }
 
-function formatJsonOrText(runtime: CliCommandRuntime, value: unknown, text: string): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
-}
-
 /** file:// / bare-path vs http(s)://, the only two source kinds this CLI surface accepts (no git ref flag exists yet). */
 function inferSourceKind(ref: string): 'file' | 'url' {
   return ref.startsWith('http://') || ref.startsWith('https://') ? 'url' : 'file';
@@ -74,7 +71,12 @@ async function readIndexBytes(ref: string): Promise<string> {
 }
 
 function summarizeCapabilities(summary: PinnedMarketplaceIndexEntry['capabilities']): string {
-  const parts = [`tools:${summary.toolCount}`, `hooks:${summary.hookCount}`, `configDomains:${summary.configDomainCount}`, `channels:${summary.channelCount}`];
+  const parts = [
+    `tools:${summary.toolCount}`,
+    `hooks:${summary.hookCount}`,
+    `configDomains:${summary.configDomainCount}`,
+    `channels:${summary.channelCount}`,
+  ];
   if (summary.runtime.length > 0) parts.push(`runtime:${summary.runtime.join('+')}`);
   if (summary.highRisk) parts.push('HIGH-RISK');
   return parts.join(' ');
@@ -97,10 +99,14 @@ async function handleBrowse(runtime: CliCommandRuntime, ref: string | undefined)
   const result = parseMarketplaceIndex(value);
   if (!result.ok) {
     return {
-      output: formatJsonOrText(runtime, result, [
-        `Marketplace index at '${ref}' was refused (a governed index requires a SHA-256 pin + capability summary on every entry):`,
-        ...result.errors.map((e) => `  - ${e}`),
-      ].join('\n')),
+      output: formatJsonOrText(
+        runtime,
+        result,
+        [
+          `Marketplace index at '${ref}' was refused (a governed index requires a SHA-256 pin + capability summary on every entry):`,
+          ...result.errors.map((e) => `  - ${e}`),
+        ].join('\n'),
+      ),
       exitCode: 1,
     };
   }
@@ -145,7 +151,10 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
 
 async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined, sha256: string | undefined): Promise<CliCommandOutput> {
   if (!ref || !sha256) {
-    return { output: 'Usage: goodvibes plugin bundles install <ref> --sha256 <pin>  (the pin is required; there is no unpinned install path)', exitCode: 2 };
+    return {
+      output: 'Usage: goodvibes plugin bundles install <ref> --sha256 <pin>  (the pin is required; there is no unpinned install path)',
+      exitCode: 2,
+    };
   }
   const kind = inferSourceKind(ref);
   const source = { kind, location: ref, sha256 } as const;
@@ -171,10 +180,11 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
   const validation = validateCapabilityBundleManifest(parsed);
   if (!validation.ok) {
     return {
-      output: formatJsonOrText(runtime, validation, [
-        `Bundle manifest at '${ref}' was refused:`,
-        ...validation.errors.map((e) => `  - ${e}`),
-      ].join('\n')),
+      output: formatJsonOrText(
+        runtime,
+        validation,
+        [`Bundle manifest at '${ref}' was refused:`, ...validation.errors.map((e) => `  - ${e}`)].join('\n'),
+      ),
       exitCode: 1,
     };
   }

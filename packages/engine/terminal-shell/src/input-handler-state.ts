@@ -35,3 +35,18 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public pathCompletionStart = 0;
   public contentWidth = 76;
 }
+
+export function openHandlerMcpWorkspace<Context>(
+  host: {
+    indicatorFocused: boolean;
+    modalOpened(name: 'mcpWorkspace'): void;
+    readonly mcpWorkspace: { open(context: Context): void };
+    requestRender(): void;
+  },
+  context: Context,
+): void {
+  host.indicatorFocused = false;
+  host.modalOpened('mcpWorkspace');
+  host.mcpWorkspace.open(context);
+  host.requestRender();
+}

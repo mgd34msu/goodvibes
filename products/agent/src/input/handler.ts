@@ -1,3 +1,4 @@
+import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
@@ -408,10 +409,7 @@ export class InputHandler {
     return true;
   }
   public openMcpWorkspace(context: CommandContext): void {
-    this.indicatorFocused = false;
-    this.modalOpened('mcpWorkspace');
-    this.mcpWorkspace.open(context);
-    this.requestRender();
+    openHandlerMcpWorkspace(this, context);
   }
   public openAgentWorkspace(context: CommandContext, categoryId?: string, onlyGroup?: string): void {
     this.indicatorFocused = false;

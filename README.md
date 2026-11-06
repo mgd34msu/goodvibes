@@ -1,6 +1,6 @@
 # goodvibes-jev
 
-goodvibes-jev is a Bun and TypeScript monorepo for the GoodVibes platform: a shared engine, the Jev judgment foundation, a daemon, a terminal UI, an operator agent and a browser UI. Jev (TypeSafe's System One judgment model) handles semantic interpretation and work verification; code handles explicit permissions, formats, identity and execution bookkeeping.
+goodvibes-jev is a Bun and TypeScript monorepo for the GoodVibes platform: a shared engine, the judgment foundation, a daemon, a terminal UI, an operator agent and a browser UI. Configured decision models handle semantic interpretation and work verification; code handles explicit permissions, formats, identity and execution bookkeeping. Classic operation supports ordinary work without decision models.
 
 The suite builds and installs from this checkout. Integration and product acceptance remain in progress; an installed build or passing focused checks do not certify full product readiness.
 
@@ -18,6 +18,28 @@ The scope of record is [`goodvibes-jev-intent.md`](goodvibes-jev-intent.md).
 
 ## Current decision contract
 
+`judgment.policy` controls decision-model use independently of execution permissions:
+
+| Policy | Behavior |
+| --- | --- |
+| **Default - On** | Use the configured hosted/local decision chain and halt on exhaustion. This remains the default for existing installations. |
+| **Preferred** | Use that chain; continue the current operation in Classic only when available targets are exhausted. |
+| **Classic - Off** | Use Classic from startup, with zero decision-model requests. Ordinary answering models remain available. |
+
+Classic supports chat, native tools, editing, commands, test results, final answers
+and conversation recovery. Tools retain deterministic permission rules and owner
+approvals. `safe-jev` uses owner approval handling during Classic; explicit YOLO
+retains its meaning. Classic results identify their provenance and do not claim
+independent semantic verification. The Decision Router uses its configured General
+target without categorization. Inherently semantic features report their limitation.
+
+A genuine refusal, malformed response, privacy rejection, cancellation or stale
+authority cannot select Preferred fallback. Completed actions and conversation
+history survive fallback; actions are not replayed. See the
+[policy and capability guide](docs/design/decision-model-policy.md) and
+[source inventory](docs/design/decision-model-policy-inventory.json).
+End-to-end qualification of this implementation remains pending.
+
 Execution uses one of three modes across local, hosted and channel sessions:
 
 | Mode | Behavior |
@@ -30,7 +52,7 @@ Execution uses one of three modes across local, hosted and channel sessions:
 replaces the legacy automatic-approval override. Background work uses its
 session's current mode. A mode change invalidates pending execution authority.
 
-Jev handles interpretation, planning, repair and task verification. Its
+When decision models are enabled, they handle interpretation, planning, repair and task verification. Their
 [autonomous receipts](docs/design/autonomous-jev-decisions.md) carry actual
 recorded decisions; owner approval and YOLO do not fabricate Jev receipts.
 Authentication, supported input formats, cancellation, exact invocation identity

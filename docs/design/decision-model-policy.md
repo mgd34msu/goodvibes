@@ -2,8 +2,16 @@
 
 Status: implementation in progress. End-to-end qualification and release remain pending.
 
+The [source inventory](decision-model-policy-inventory.json) records concrete
+port access sites and their Classic dispositions. It indexes source review;
+it is not a passing workflow result or a semantic-accuracy certificate.
+
 The platform owns `judgment.policy`, independently of `permissions.mode`.
 Existing installations retain **Default - On** when the setting is absent.
+
+Choose the policy in the ordinary settings UI or set `judgment.policy` through
+the existing configuration command/API. The exact persisted values are the
+labels in the table; `permissions.mode` remains a separate setting.
 
 | Policy | Contract |
 | --- | --- |
@@ -215,8 +223,8 @@ Manual semantic job starts are refused before queuing or creating a run record.
 Existing semantic schedules keep their saved cadence while Classic pauses their
 execution; local lint and projection rendering remain available. Automatic
 semantic enrichment is omitted during Classic. Knowledge ingestion and Home
-Graph callers remain under implementation review; this document does not certify
-end-to-end qualification.
+Graph paths retain native source ingestion and explicit owner review as described
+below. This document does not certify end-to-end qualification.
 
 Classic schedule input accepts a complete zoned ISO timestamp, five-field cron,
 `every 30m` or `in 2h`, with ordinary calendar/quantity validation and the supplied
@@ -270,7 +278,9 @@ and omits inferred links without replaying ingestion. Automatic enrichment queue
 are not started during Classic. Verified Home Graph answers, semantic reindex,
 triage, refinement and generated sharing/device pages name their decision-model
 requirement before starting those operations. Existing stored content remains
-readable; import/revalidation and other remaining callers are still under review.
+readable. Import stores new inferred content as untrusted drafts requiring explicit
+review; it does not mint semantic activation receipts or silently replace active
+knowledge with changed, unassessed content.
 
 Classic model diagnostics use shared platform parsing of exact declared stack,
 boolean, status and resource-pressure values. Free-form publisher descriptions
@@ -282,3 +292,34 @@ Native catalog, publisher, privacy and cancellation restrictions remain live;
 semantic backend observations alone stop blocking local presentation after an
 eligible Preferred fallback. No server probe or route change follows from viewing
 these diagnostics.
+
+## Remaining semantic boundaries and native results
+
+| Surface | Classic behavior | Semantic limit |
+| --- | --- | --- |
+| Project planning | Retain the goal, questions, tasks, verification instructions and explicit execution approval; manual question actions remain available. | Structural readiness does not certify goal clarity or recommend inferred answers. |
+| Knowledge activation/import | Keep native observations, source declarations, explicit links and manual review; store new inferred content as drafts. | No automatic activation, independently verified answer, usefulness verdict or inferred support claim. |
+| Autonomous contracts | Inspect existing receipts and pending work. Restart reports contracts held for policy before resuming or restoring effects. | No automatic semantic correction, best-of-N acceptance or autonomous execution in Classic. |
+| Browser snapshots | Retain controls, labels, selectors and owner-authorized actions; omit form values without semantic clearance. | A suppressed value does not mean the control was semantically classified as a payment field. |
+| Card entry | Preserve declared entry surfaces, native card shapes and conservative protection of a short digit run when the host is expecting a security code. | Classic protection is native handling, not a Jev reading. |
+| Payments | Preserve stored records, native budget arithmetic and the independent spending/entry contract. | Automated checkout, merchant/recurring-charge interpretation and semantic purchase-mail correlation require decision models. |
+| Error/forensic reports | Keep structured status, errno, cancellation, permission, phase and causal evidence. Unknown prose stays unknown. | Slow-phase assessments and compaction quality grades are absent or explicitly not evaluated. |
+| Permission lint | Report duplicate IDs, unconstrained tool wildcards and other structural findings. | Pattern breadth is explicitly unassessed; this does not relax runtime permission checks. |
+| Config inspection | Keep public declared settings readable and apply native credential/protected-value masking. | Unknown roles do not receive a fabricated safe-value exemption. |
+| Retry guidance | Honor structured provider/header waits and native retry policy. | An unassessed number in error prose does not become a retry delay. |
+| Spoken output | Use native punctuation/size/latency boundaries and retain the original turn/configuration/cancellation lifetime across events. | Native chunking is not semantic sentence verification. |
+| Managed voice proof | Run local synthesis/transcription once and compare the complete ordered Unicode word tokens; label `classic-exact-match` or `classic-mismatch` and `native-word-sequence`. | No synonym, number-word or paraphrase interpretation; `semanticAssessment` remains `not-evaluated`, including in persisted diagnostics. |
+| Support export | Keep native diagnostics and redaction, validate the original source before publication and stamp Classic provenance even if fallback occurs during final redaction. | No independent semantic screening certificate is claimed. |
+| Marketplace | Browse, search literal catalog words, inspect native source/compatibility facts and explicitly install an entry. | Semantic trust-note review and automatic recommendations are unavailable; the read model explains their omission. |
+| Build smoke | Check the real exit status, clean version protocol, current binary and native eager-namespace rules. | Extra diagnostic output holds qualification with an explicit semantic-assessment limit; a binary is never rerun because its interpretation failed. |
+
+A Preferred voice-comparison outage reuses the actual captured transcript. A
+terminal failure or a settled semantic no/uncertain result cannot turn into a
+native positive. A separate event-driven speech turn retains its policy scope:
+fallback persists through later events, while a policy change retires the old
+operation. Native source and cancellation checks survive both paths.
+
+Developer commands explicitly named `proof`, `calibrate`, `probe` or semantic
+source preparation are opt-in model consumers. They are separate from ordinary
+application startup and completion. Model calibration is not a prerequisite for
+using decision models or for releasing this feature.

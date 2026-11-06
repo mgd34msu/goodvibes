@@ -1,3 +1,4 @@
+import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 /**
  * services.ts, the terminal app's composition root, as a CLIENT.
@@ -53,7 +54,12 @@ import { createKnowledgeServices } from './knowledge-services.ts';
 import { cancelAllAgentRuns } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/sdk/platform/media';
 import { MultimodalService } from '@goodvibes-jev/engine/sdk/platform/multimodal';
-import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/sdk/platform/state';
+import {
+  MemoryEmbeddingProviderRegistry,
+  MemoryRegistry,
+  MemoryStore,
+  resolveCanonicalMemoryDbPath,
+} from '@goodvibes-jev/engine/sdk/platform/state';
 import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
@@ -61,10 +67,18 @@ import { createDurabilityServices } from '@goodvibes-jev/engine/sdk/platform/run
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createDomainDispatch } from './store/index.ts';
-import { DistributedRuntimeManager, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, createFeatureFlagManager, createShellPathService } from '@/runtime/index.ts';
+import {
+  DistributedRuntimeManager,
+  IntegrationHelperService,
+  IdempotencyStore,
+  ComponentHealthMonitor,
+  WorktreeRegistry,
+  createFeatureFlagManager,
+  createShellPathService,
+} from '@/runtime/index.ts';
 import { createSessionStorageServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
-import { CacheRegistry, PauseController } from '@goodvibes-jev/engine/sdk/platform/runtime/memory';
+import '@goodvibes-jev/engine/sdk/platform/runtime/memory';
 import { wireMemoryGovernance } from './memory-governance-services.ts';
 import { wireVoiceSetup } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
@@ -76,12 +90,23 @@ import { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations
 import { createRemoteExecutionServices } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { createContractIntake, createContractOperatorService } from '@goodvibes-jev/engine/sdk/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
-import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/sdk/platform/core';
+import {
+  AdaptivePlanner,
+  DeterministicReplayEngine,
+  ExecutionPlanManager,
+  SessionLineageTracker,
+  SessionMemoryStore,
+} from '@goodvibes-jev/engine/sdk/platform/core';
 import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
 import { createChannelComposition } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { applyProviderOptimizerConfigMode, bindProviderOptimizerFeatureFlag } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { createFleetServices } from '@goodvibes-jev/engine/terminal-shell';
-import { codeIndexDbPath, createCodeIndexServices, createStoreRerooter, isCodeInjectionSettingEnabled } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import {
+  codeIndexDbPath,
+  createCodeIndexServices,
+  createStoreRerooter,
+  isCodeInjectionSettingEnabled,
+} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { WorkspaceTrustManager } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
@@ -115,7 +140,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   // Built before anything that touches session state, see session-storage-services.ts.
-  const { surface, sessionManager } = createSessionStorageServices({ workingDirectory, homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT });
+  const { surface, sessionManager } = createSessionStorageServices({
+    workingDirectory,
+    homeDirectory,
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+  });
   const configManager = options.configManager;
   const featureFlags = options.featureFlags ?? createFeatureFlagManager();
   if (options.featureFlags === undefined) {
@@ -162,11 +191,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // The "local prompt" is this surface's own broker plus the terminal ask:
     // that is what puts the ask on the approval card and in the modal while the
     // daemon holds the record every other surface reads.
-    localPrompt: () => (request) => approvalBroker.requestApproval({
-      request,
-      ...(liveSessionIdRef.value ? { sessionId: liveSessionIdRef.value } : {}),
-      localPrompt: (prompt) => localPromptRef.requestPermission(prompt),
-    }),
+    localPrompt: () => (request) =>
+      approvalBroker.requestApproval({
+        request,
+        ...(liveSessionIdRef.value ? { sessionId: liveSessionIdRef.value } : {}),
+        localPrompt: (prompt) => localPromptRef.requestPermission(prompt),
+      }),
     // The push channel for a decision made on another surface. Without it the
     // raiser learns by re-reading the record on an interval; with it a phone's
     // answer reaches this terminal in the time one SSE frame takes. The interval
@@ -191,16 +221,43 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const runtimeDispatch = createDomainDispatch(options.runtimeStore);
   const {
-    agentManager, agentMessageBus, agentOrchestrator, archetypeLoader, contractRunner,
-    contextAccountingHolder, providerRegistry, providerCapabilityRegistry, cacheHitTracker,
-    favoritesStore, benchmarkStore, modelLimitsService, toolLLM,
-    secretsManager, serviceRegistry, subscriptionManager, hookDispatcher, hookActivityTracker,
-    hookWorkbench, pluginManager, workflow, artifactStore, webSearchProviders, webSearchService,
-    mcpRegistry: clientMcpRegistry, sandboxSessionRegistry: clientSandboxRegistry,
-    processManager, modeManager, fileUndoManager, overflowHandler, policyRuntimeState,
-    fileCache, projectIndex, sessionOrchestration,
+    agentManager,
+    agentMessageBus,
+    agentOrchestrator,
+    archetypeLoader,
+    contractRunner,
+    contextAccountingHolder,
+    providerRegistry,
+    providerCapabilityRegistry,
+    cacheHitTracker,
+    favoritesStore,
+    benchmarkStore,
+    modelLimitsService,
+    toolLLM,
+    secretsManager,
+    serviceRegistry,
+    subscriptionManager,
+    hookDispatcher,
+    hookActivityTracker,
+    hookWorkbench,
+    pluginManager,
+    workflow,
+    artifactStore,
+    webSearchProviders,
+    webSearchService,
+    mcpRegistry: clientMcpRegistry,
+    sandboxSessionRegistry: clientSandboxRegistry,
+    processManager,
+    modeManager,
+    fileUndoManager,
+    overflowHandler,
+    policyRuntimeState,
+    fileCache,
+    projectIndex,
+    sessionOrchestration,
   } = client;
-  void clientMcpRegistry; void clientSandboxRegistry;
+  void clientMcpRegistry;
+  void clientSandboxRegistry;
   disposalScope.registry.add('client runtime services', () => client.close());
   disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
   disposalScope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
@@ -223,13 +280,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // Memory governance seams built EARLY so the scheduler gates and the knowledge
   // background jobs can consult the pause controller before the MemoryGovernor
   // (constructed at the composition tail) drives it.
-  const cacheRegistry = new CacheRegistry();
-  const pauseController = new PauseController();
-  const MEMORY_BACKGROUND_JOB_IDS = ['knowledge-self-improvement', 'memory-consolidation', 'code-index-reindex'];
-  const admitExpensiveWorkRef: { current: ((label: string) => { allowed: boolean; reason?: string | undefined }) | null } = { current: null };
-  const admitExpensiveWork = (label: string): { allowed: boolean; reason?: string | undefined } =>
-    admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
-  const isKnowledgeBackgroundPaused = (): boolean => pauseController.isPaused('knowledge-self-improvement');
+  const {
+    cacheRegistry,
+    pauseController,
+    MEMORY_BACKGROUND_JOB_IDS,
+    admitExpensiveWorkRef,
+    admitExpensiveWork,
+    isKnowledgeBackgroundPaused,
+  } = createTerminalMemoryAdmission();
   // The operator API's panels.list / panels.open, answered by the modal views.
   const viewPanelAdapter = createViewPanelAdapter();
   const keybindingsManager = new KeybindingsManager({
@@ -251,14 +309,18 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // The credential/identity seam (credential-composition.ts), this
   // installation's own pairing tokens and step-up service.
   const { stepUpService, pairingTokens } = composeCredentialServices({
-    workingDirectory, homeDirectory, configManager,
+    workingDirectory,
+    homeDirectory,
+    configManager,
     ...(options.daemonHomeDirectory === undefined ? {} : { daemonHomeDirectory: options.daemonHomeDirectory }),
     pairingTokenPath: shellPaths.resolveUserPath('control-plane', 'pairing-tokens.json'),
   });
-  const localUserAuthManager = options.localUserAuthManager ?? new UserAuthManager({
-    bootstrapFilePath: shellPaths.resolveUserPath('tui', 'auth-users.json'),
-    bootstrapCredentialPath: shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt'),
-  });
+  const localUserAuthManager =
+    options.localUserAuthManager ??
+    new UserAuthManager({
+      bootstrapFilePath: shellPaths.resolveUserPath('tui', 'auth-users.json'),
+      bootstrapCredentialPath: shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt'),
+    });
   const profileManager = new ProfileManager(shellPaths.resolveUserPath('tui', 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath('tui', 'bookmarks'));
   // The watcher framework is the daemon's to RUN; this registry is the surface's
@@ -388,21 +450,43 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   // Knowledge/wiki + home-graph stack (governor backpressure wired in), see knowledge-services.ts.
   const {
-    knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore,
-    knowledgeSemanticService, homeGraphSemanticService, agentKnowledgeSemanticService,
-    knowledgeService, agentKnowledgeService, homeGraphService,
-    projectPlanningService, projectPlanningProjectId, workPlanStore,
-  } = createKnowledgeServices({ configManager, providerRegistry, artifactStore, memoryRegistry, runtimeBus: options.runtimeBus, workingDirectory, homeDirectory, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
+    knowledgeStore,
+    agentKnowledgeStore,
+    homeGraphKnowledgeStore,
+    knowledgeSemanticService,
+    homeGraphSemanticService,
+    agentKnowledgeSemanticService,
+    knowledgeService,
+    agentKnowledgeService,
+    homeGraphService,
+    projectPlanningService,
+    projectPlanningProjectId,
+    workPlanStore,
+  } = createKnowledgeServices({
+    configManager,
+    providerRegistry,
+    artifactStore,
+    memoryRegistry,
+    runtimeBus: options.runtimeBus,
+    workingDirectory,
+    homeDirectory,
+    isBackgroundPaused: isKnowledgeBackgroundPaused,
+    admitExpensiveWork,
+  });
   // Voice: the PROVIDERS are local (a spoken turn plays out of this terminal's
   // own speaker), synthesis reaches `voice.tts.stream` when a daemon serves it
   // and falls back to a local provider otherwise; see audio/spoken-turn-wiring.ts.
   const voiceProviders = new VoiceProviderRegistry();
   ensureBuiltinVoiceProviders(voiceProviders, {
-      readConfig: (key) => configManager.get(key as Parameters<typeof configManager.get>[0]),
-      readConfigIncarnation: () => configManager.getConfigurationIncarnation(),
-    });
+    readConfig: (key) => configManager.get(key as Parameters<typeof configManager.get>[0]),
+    readConfigIncarnation: () => configManager.getConfigurationIncarnation(),
+  });
   const voiceService = new VoiceService(voiceProviders);
-  for (const [semantic, ingest] of [[knowledgeSemanticService, knowledgeService], [agentKnowledgeSemanticService, agentKnowledgeService], [homeGraphSemanticService, homeGraphService]] as const) {
+  for (const [semantic, ingest] of [
+    [knowledgeSemanticService, knowledgeService],
+    [agentKnowledgeSemanticService, agentKnowledgeService],
+    [homeGraphSemanticService, homeGraphService],
+  ] as const) {
     semantic.setGapRepairer(createWebKnowledgeGapRepairer({ searchService: webSearchService, ingestService: ingest }));
   }
   const mediaProviders = new MediaProviderRegistry();
@@ -411,9 +495,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const channelPolicy = new ChannelPolicyManager({
     storePath: shellPaths.resolveProjectPath('tui', 'channels', 'policies.json'),
   });
-  const distributedRuntime = new DistributedRuntimeManager(
-    shellPaths.resolveProjectPath('tui', 'remote', 'distributed-runtime.json'),
-  );
+  const distributedRuntime = new DistributedRuntimeManager(shellPaths.resolveProjectPath('tui', 'remote', 'distributed-runtime.json'));
   distributedRuntime.attachRuntime({
     sessionBridge: sessionBroker,
     approvalBridge: approvalBroker,
@@ -422,10 +504,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
 
   // Remote runners and the sandboxes tool calls are confined to; see
   // remote-execution-composition.ts for why the four are built as one.
-  const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry }
-    = createRemoteExecutionServices({
-      agentManager, workingDirectory, hookDispatcher, configManager, runtimeBus: options.runtimeBus,
-    });
+  const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry } = createRemoteExecutionServices({
+    agentManager,
+    workingDirectory,
+    hookDispatcher,
+    configManager,
+    runtimeBus: options.runtimeBus,
+  });
   const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags });
   const componentHealthMonitor = new ComponentHealthMonitor();
   const worktreeRegistry = new WorktreeRegistry(workingDirectory);
@@ -438,7 +523,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   bindProviderOptimizerFeatureFlag(featureFlags, providerOptimizer);
   applyProviderOptimizerConfigMode(configManager, providerOptimizer);
   const sessionMemoryStore = new SessionMemoryStore();
-  const sessionLineageTracker = new SessionLineageTracker(); const sessionChangeTracker = new SessionChangeTracker();
+  const sessionLineageTracker = new SessionLineageTracker();
+  const sessionChangeTracker = new SessionChangeTracker();
   const planManager = new ExecutionPlanManager(workingDirectory);
   const adaptivePlanner = new AdaptivePlanner();
   const idempotencyStore = new IdempotencyStore();
@@ -450,17 +536,41 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // RuntimeServices contract requires the field; it now names the real router.
   const channelDeliveryRouter = deliveryManager.getDeliveryRouter();
   // Repo source-tree code index, sharing memoryEmbeddingRegistry with MemoryStore.
-  const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({ workingDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, configManager, memoryEmbeddingRegistry, isReindexPaused: () => pauseController.isPaused('code-index-reindex'), admitExpensiveWork });
-  const codeInjectionOrchestratorDeps = { codeIndex: codeIndexStore, isCodeInjectionSettingEnabled: () => isCodeInjectionSettingEnabled(configManager), codeIndexReindexScheduler };
-  // Store snapshots, the periodic append-only sweep, durable remembered-approval rules + the live credential chain.
-  const { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch } = createDurabilityServices({
-    configManager, secretsManager, providerRegistry, memoryDbPath, codeIndexDbPath: codeIndexDbPath(workingDirectory, GOODVIBES_TUI_SURFACE_ROOT), surface, shellPaths,
-    ...(options.currentSessionId ? { currentSessionId: options.currentSessionId } : {}),
+  const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({
+    workingDirectory,
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+    configManager,
+    memoryEmbeddingRegistry,
+    isReindexPaused: () => pauseController.isPaused('code-index-reindex'),
+    admitExpensiveWork,
   });
-  const { processRegistry } = createFleetServices({ // Shared archive-aware fleet registry, see fleet-services.ts
-    agentManager, contractRunner,
+  const codeInjectionOrchestratorDeps = {
+    codeIndex: codeIndexStore,
+    isCodeInjectionSettingEnabled: () => isCodeInjectionSettingEnabled(configManager),
+    codeIndexReindexScheduler,
+  };
+  // Store snapshots, the periodic append-only sweep, durable remembered-approval rules + the live credential chain.
+  const { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch } =
+    createDurabilityServices({
+      configManager,
+      secretsManager,
+      providerRegistry,
+      memoryDbPath,
+      codeIndexDbPath: codeIndexDbPath(workingDirectory, GOODVIBES_TUI_SURFACE_ROOT),
+      surface,
+      shellPaths,
+      ...(options.currentSessionId ? { currentSessionId: options.currentSessionId } : {}),
+    });
+  const { processRegistry } = createFleetServices({
+    // Shared archive-aware fleet registry, see fleet-services.ts
+    agentManager,
+    contractRunner,
     codeIndexService: codeIndexStore,
-    processManager, watcherRegistry, workflow, approvalBroker, sessionBroker,
+    processManager,
+    watcherRegistry,
+    workflow,
+    approvalBroker,
+    sessionBroker,
     messageBus: agentMessageBus,
     automationManager,
     runtimeBus: options.runtimeBus,
@@ -490,8 +600,26 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     conversationRewindClosing = conversationRewindHost.stop();
     void conversationRewindClosing.catch(() => {});
   });
-  const workspaceCheckpointManager = createWorkspaceCheckpointing({ workspaceRoot: workingDirectory, surface, runtimeBus: options.runtimeBus, configManager });
-  const { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({ configManager, memoryRegistry, runtimeBus: options.runtimeBus, isIdle: () => sessionBroker.countBusySessions() === 0 && !pauseController.isPaused('memory-consolidation') && admitExpensiveWork('memory consolidation').allowed, snapshotTick: () => storeSnapshotScheduler.tick(), heartbeat: async () => { await automationManager.triggerHeartbeat({ source: 'wake-catchup' }); }, powerSeam: options.powerSeam });
+  const workspaceCheckpointManager = createWorkspaceCheckpointing({
+    workspaceRoot: workingDirectory,
+    surface,
+    runtimeBus: options.runtimeBus,
+    configManager,
+  });
+  const { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({
+    configManager,
+    memoryRegistry,
+    runtimeBus: options.runtimeBus,
+    isIdle: () =>
+      sessionBroker.countBusySessions() === 0 &&
+      !pauseController.isPaused('memory-consolidation') &&
+      admitExpensiveWork('memory consolidation').allowed,
+    snapshotTick: () => storeSnapshotScheduler.tick(),
+    heartbeat: async () => {
+      await automationManager.triggerHeartbeat({ source: 'wake-catchup' });
+    },
+    powerSeam: options.powerSeam,
+  });
 
   const { memoryGovernor } = wireMemoryGovernance({
     configManager,
@@ -502,27 +630,52 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     receiptPath: shellPaths.resolveProjectPath('tui', 'memory', 'tripwire-receipt.json'),
     knowledgeStores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore],
     sessionBroker,
-    onTripwireShutdown: async () => { await storeSnapshotScheduler.snapshotAllAsync('tripwire'); },
+    onTripwireShutdown: async () => {
+      await storeSnapshotScheduler.snapshotAllAsync('tripwire');
+    },
   });
   admitExpensiveWorkRef.current = (label) => memoryGovernor.admitExpensiveWork(label);
 
   // Managed local-voice provisioning (voice.local.status/install), single-flight
   // one-act install + no-network status; see voice-setup-services.ts.
-  const { voiceSetup, stopWakeHousekeeping } = wireVoiceSetup({ configManager, shellPaths, voiceProviders, admitExpensiveWork,
-    provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true });
+  const { voiceSetup, stopWakeHousekeeping } = wireVoiceSetup({
+    configManager,
+    shellPaths,
+    voiceProviders,
+    admitExpensiveWork,
+    provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true,
+  });
   void voiceSetup;
 
   const integrationHelpers = new IntegrationHelperService({
-    surface, configManager, automationManager, approvalBroker, sessionBroker, distributedRuntime,
-    remoteRunnerRegistry, remoteSupervisor, panelManager: viewPanelAdapter, localUserAuthManager, providerRegistry,
-    serviceRegistry, subscriptionManager, secretsManager,
-    runtimeStore: options.runtimeStore, runtimeBus: options.runtimeBus,
+    surface,
+    configManager,
+    automationManager,
+    approvalBroker,
+    sessionBroker,
+    distributedRuntime,
+    remoteRunnerRegistry,
+    remoteSupervisor,
+    panelManager: viewPanelAdapter,
+    localUserAuthManager,
+    providerRegistry,
+    serviceRegistry,
+    subscriptionManager,
+    secretsManager,
+    runtimeStore: options.runtimeStore,
+    runtimeBus: options.runtimeBus,
     getConversationTitle: options.getConversationTitle,
   });
   const promptLifetime = new AbortController();
   disposalScope.registry.add('autonomous tool prompt lifetime', () => promptLifetime.abort());
   const approvalHandlers = createApprovalDerivedHandlers({
-    autonomousHost: { port: client.judgment.port, permissionManager: client.permissionManager, config: configManager, signal: promptLifetime.signal, workspaceTrust: workspaceTrustManager },
+    autonomousHost: {
+      port: client.judgment.port,
+      permissionManager: client.permissionManager,
+      config: configManager,
+      signal: promptLifetime.signal,
+      workspaceTrust: workspaceTrustManager,
+    },
     requestApproval,
     configManager,
     featureFlags,
@@ -680,11 +833,17 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     contractOperator,
     contractIntake,
     judgment: client.judgment,
-    sessionSnapshot: (sessionId, conversation) => ({ ...conversation, contracts: contractRunner.list({ sessionId, includeTerminal: true }) }),
+    sessionSnapshot: (sessionId, conversation) => ({
+      ...conversation,
+      contracts: contractRunner.list({ sessionId, includeTerminal: true }),
+    }),
     processManager,
     codeIndexStore,
     codeIndexReindexScheduler,
-    storeSnapshotScheduler, appendOnlyRetentionScheduler, stopDurabilityHousekeeping, stopWakeHousekeeping,
+    storeSnapshotScheduler,
+    appendOnlyRetentionScheduler,
+    stopDurabilityHousekeeping,
+    stopWakeHousekeeping,
     memoryConsolidationScheduler,
     powerManager,
     memoryGovernor,
@@ -702,12 +861,18 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     dispose: (): void => disposalScope.dispose(),
     close: (): Promise<void> => disposalScope.close(),
   };
-  registerSurfaceRuntimePollers(disposalScope.registry, {
-    ...services,
-    homeGraphService: { dispose: () => {
-      homeGraphClosing = homeGraphService.dispose();
-      void homeGraphClosing.catch(() => {});
-    } },
-  }, { stopConfigWatch });
+  registerSurfaceRuntimePollers(
+    disposalScope.registry,
+    {
+      ...services,
+      homeGraphService: {
+        dispose: () => {
+          homeGraphClosing = homeGraphService.dispose();
+          void homeGraphClosing.catch(() => {});
+        },
+      },
+    },
+    { stopConfigWatch },
+  );
   return services;
 }

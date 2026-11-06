@@ -1,3 +1,4 @@
+import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
 import { StepUpService } from '@goodvibes-jev/engine/sdk/daemon';
 import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
@@ -13,12 +14,21 @@ import { applyRawSecretLiteralHandling, type SecretsManager } from '../config/se
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from './research-source-screening.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
-import { backfillCheckpointEligibilityIfNeeded, createWorkspaceRegistrationLiveChecker, migrateLegacyWorkspaceRegistryIfNeeded } from '../config/workspace-registration.ts';
+import {
+  backfillCheckpointEligibilityIfNeeded,
+  createWorkspaceRegistrationLiveChecker,
+  migrateLegacyWorkspaceRegistryIfNeeded,
+} from '../config/workspace-registration.ts';
 import { FocusTracker } from '@/runtime/index.ts';
 import { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
 import { SubscriptionManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { AutomationDeliveryManager, AutomationManager, AutomationRouteStore } from '@goodvibes-jev/engine/sdk/platform/automation';
-import { ChannelPluginRegistry, ChannelPolicyManager, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/sdk/platform/channels';
+import {
+  ChannelPluginRegistry,
+  ChannelPolicyManager,
+  RouteBindingManager,
+  SurfaceRegistry,
+} from '@goodvibes-jev/engine/sdk/platform/channels';
 import { ChannelDeliveryRouter } from '@goodvibes-jev/engine/sdk/platform/channels';
 import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { createArchivableFleetRegistry } from '@goodvibes-jev/engine/terminal-shell';
@@ -58,7 +68,7 @@ import type {
 import { createAgentDaemonVerbCaller, resolveConnectedHostConnection } from './client/daemon-verbs.ts';
 import { createApprovalsView, type ApprovalsView } from './client/approvals-view.ts';
 import { createAgentFleetUnion, type AgentFleetUnion } from './client/fleet-union.ts';
-import { createAgentSessionInputsClient } from './client/session-inputs.ts';
+import './client/session-inputs.ts';
 import { createHostedSessionRegistry, type HostedSessionRegistry } from './client/hosted-sessions.ts';
 import { createHostedConversationHandoff, type HostedConversationHandoff } from './client/hosted-handoff.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
@@ -75,7 +85,7 @@ import {
   ensureConfiguredModelIsRoutable,
 } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { buildSharedSessionAgentSpawnRoutingInput } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { logger, singleFlight, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
 // SDK-owned memory governance (public since sdk 4d5e247b published the
 // composition surface): the same CacheRegistry/PauseController/MemoryGovernor
 // wiring the SDK's own daemon composition constructs and starts.
@@ -134,7 +144,7 @@ import { CodeIndexReindexScheduler } from '@goodvibes-jev/engine/sdk/platform/st
 // barrel (re-exported there since sdk a03bf218).
 import { MemoryConsolidationScheduler } from '@goodvibes-jev/engine/sdk/platform/state';
 import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/sdk/platform/state';
-import type { SessionLiveTurnControlsHolder } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+
 // Sleep ownership (SDK round: power/*): work inhibition, sleep-edge honesty,
 // the keep-awake toggle. Constructed exactly as the SDK composition root does
 // (wireRuntimePower binds runtimeBus work signals and starts the manager).
@@ -145,7 +155,11 @@ import { AgentDaemonReceiptFeed } from './daemon-receipts.ts';
 import { WorkspaceCheckpointManager, type CheckpointSessionResolver } from '@goodvibes-jev/engine/sdk/platform/workspace';
 import { ProcessManager } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers';
-import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '@goodvibes-jev/engine/sdk/platform/triggers';
+import {
+  createBunStreamHost,
+  createProcessManagerTriggerHost,
+  createTriggerActionExecutor,
+} from '@goodvibes-jev/engine/sdk/platform/triggers';
 import { ModeManager } from '@goodvibes-jev/engine/sdk/platform/state';
 import { FileUndoManager } from '@goodvibes-jev/engine/sdk/platform/state';
 import { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
@@ -158,11 +172,7 @@ import type { DomainDispatch, RuntimeStore } from './store/index.ts';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry, RemoteSupervisor } from '@/runtime/index.ts';
 import { IntegrationHelperService } from '@/runtime/index.ts';
-import {
-  VoiceProviderRegistry,
-  VoiceService,
-  ensureBuiltinVoiceProviders,
-} from '@goodvibes-jev/engine/sdk/platform/voice';
+import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/sdk/platform/voice';
 import { createVoiceSetupService, type VoiceSetupService } from '@goodvibes-jev/engine/sdk/platform/runtime/voice-setup';
 import { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/sdk/platform/web-search';
 import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
@@ -180,7 +190,7 @@ import { McpRegistry } from '@goodvibes-jev/engine/sdk/platform/mcp';
 import { DeterministicReplayEngine } from '@goodvibes-jev/engine/sdk/platform/core';
 import { ProviderOptimizer } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
+
 import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { CacheHitTracker } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { FavoritesStore } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -196,7 +206,7 @@ import { FileStateCache } from '@goodvibes-jev/engine/sdk/platform/state';
 import { ProjectIndex } from '@goodvibes-jev/engine/sdk/platform/state';
 import { IdempotencyStore } from '@/runtime/index.ts';
 import { OverflowHandler } from '@goodvibes-jev/engine/sdk/platform/tools';
-import type { ContextAccountingHolder } from '@goodvibes-jev/engine/sdk/platform/tools';
+
 import { ToolLLM } from '@goodvibes-jev/engine/sdk/platform/config';
 import { ComponentHealthMonitor } from '@/runtime/index.ts';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
@@ -206,13 +216,8 @@ import { createLazyMcpRegistry } from './mcp-lazy-start.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { createFeatureFlagManager, deriveFeatureStates, bindFeatureSettingsBridge } from '@/runtime/index.ts';
-import {
-  FeatureAnnouncementStore,
-  featureAnnouncementsPath,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
-import {
-  type LocalhostFetchApproval,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/localhost-fetch-approval';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
+import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/localhost-fetch-approval';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { WorkflowServices } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { WorkPlanStore } from '@goodvibes-jev/engine/sdk/platform/workflow';
@@ -220,11 +225,7 @@ import { AgentExecutionLedger } from '@goodvibes-jev/engine/sdk/platform/gate/po
 import { attachAgentSessionWriteLedger, clearAgentSessionWrites } from '../tools/agent-session-write-ledger.ts';
 import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
-import {
-  AGENT_DAEMON_BUILD_FLOOR,
-  DaemonBuildGuard,
-  readDaemonStatusPayload,
-} from './daemon-build-compatibility.ts';
+import { AGENT_DAEMON_BUILD_FLOOR, DaemonBuildGuard, readDaemonStatusPayload } from './daemon-build-compatibility.ts';
 
 type WorktreeRegistry = RuntimeShell.WorktreeRegistry;
 // The SDK's FULL runtime-services shape. This graph deliberately is not that
@@ -242,14 +243,11 @@ type AssertTrue<T extends true> = T;
 // because this graph, unlike a daemon's, DOES carry the client-only members:
 // surfaceRoot, permissionManager, requestApproval, the two spine clients, and
 // the file-tool caches.
-type _ClientRuntimeServicesPin = AssertTrue<
-  RuntimeServices extends RuntimeBootstrap.ClientRuntimeServices ? true : false
->;
+type _ClientRuntimeServicesPin = AssertTrue<RuntimeServices extends RuntimeBootstrap.ClientRuntimeServices ? true : false>;
 type SdkCompanionGraphService = NonNullable<SdkRuntimeServices>['homeGraphService'];
 // Compile-pin: the real HomeGraphService constructed below must remain
 // assignable to the SDK's own RuntimeServices#homeGraphService slot.
 type _HomeGraphServicePin = AssertTrue<HomeGraphService extends SdkCompanionGraphService ? true : false>;
-
 
 class DisabledAgentWorktreeRegistry extends runtimeShell.WorktreeRegistry {
   public override async list(): Promise<Awaited<ReturnType<WorktreeRegistry['list']>>> {
@@ -540,7 +538,10 @@ export interface RuntimeServices extends Omit<SdkRuntimeServices, 'sessionBroker
    * `create`. The raw {@link workspaceCheckpointManager} sits beside it for the
    * read/restore paths that were never gated.
    */
-  readonly guardedCheckpoints: Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'>;
+  readonly guardedCheckpoints: Pick<
+    WorkspaceCheckpointManager,
+    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'
+  >;
   /** Every client seam's one plug into the connected host. */
   readonly daemonVerbs: DaemonVerbCaller;
   /**
@@ -1034,10 +1035,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const surfaceRegistry = new SurfaceRegistry(configManager, options.runtimeStore);
   const channelPlugins = new ChannelPluginRegistry();
   surfaceRegistry.attachPluginRegistry(channelPlugins);
-  const localUserAuthManager = options.localUserAuthManager ?? new UserAuthManager({
-    bootstrapFilePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json'),
-    bootstrapCredentialPath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt'),
-  });
+  const localUserAuthManager =
+    options.localUserAuthManager ??
+    new UserAuthManager({
+      bootstrapFilePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json'),
+      bootstrapCredentialPath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt'),
+    });
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'bookmarks'));
   // featureFlags is REQUIRED here in practice, even though the SDK types it
@@ -1129,11 +1132,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // and built lazily so nothing exists unless one of those three SDK entry
   // points someday asks. None of them dereferences it today.
   let surfaceScopedPairingTokens: PairingTokenManager | null = null;
-  const pairingTokensForDaemonGradeView = (): PairingTokenManager => (
-    surfaceScopedPairingTokens ??= new PairingTokenManager(
+  const pairingTokensForDaemonGradeView = (): PairingTokenManager =>
+    (surfaceScopedPairingTokens ??= new PairingTokenManager(
       shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'pairing-tokens.json'),
-    )
-  );
+    ));
   // AGENT-LOCAL DUTY: the register this product's automation runs its jobs on.
   //
   // `AutomationManager` takes a concrete `SharedSessionBroker` and drives seven
@@ -1400,10 +1402,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         ...(input.template ? { template: input.template } : {}),
         ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
         ...(input.toolAllowlist ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
-        context: [
-          'automation-manager:visible-agent',
-          input.context,
-        ].filter((part): part is string => Boolean(part?.trim())).join('\n\n'),
+        context: ['automation-manager:visible-agent', input.context].filter((part): part is string => Boolean(part?.trim())).join('\n\n'),
       });
       return record.id;
     },
@@ -1424,17 +1423,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // wireDaemonMemoryGovernance) drives them. `admitExpensiveWork` is a
   // late-bound closure: until the governor exists, everything is admitted
   // (the process is still booting).
-  const cacheRegistry = new CacheRegistry();
-  const pauseController = new PauseController();
-  // Same job ids as the SDK composition. This fork runs the first two for
-  // real; 'code-index-reindex' is registered for contract parity even though
-  // this fork's reindex scheduler is permanently disabled (isEnabled: () =>
-  // false below), a registered-but-never-scheduled job pauses as a no-op.
-  const MEMORY_BACKGROUND_JOB_IDS = ['knowledge-self-improvement', 'memory-consolidation', 'code-index-reindex'];
-  const admitExpensiveWorkRef: { current: ((label: string) => { allowed: boolean; reason?: string | undefined }) | null } = { current: null };
-  const admitExpensiveWork = (label: string): { allowed: boolean; reason?: string | undefined } =>
-    admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
-  const isKnowledgeBackgroundPaused = (): boolean => pauseController.isPaused('knowledge-self-improvement');
+  const {
+    cacheRegistry,
+    pauseController,
+    MEMORY_BACKGROUND_JOB_IDS,
+    admitExpensiveWorkRef,
+    admitExpensiveWork,
+    isKnowledgeBackgroundPaused,
+  } = createTerminalMemoryAdmission();
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, {
     timeoutMs: 20_000,
     maxConcurrent: 1,
@@ -1463,9 +1459,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     semanticService: homeGraphSemanticService,
     admitExpensiveWork,
   });
-  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(agentKnowledgeStore, configManager, workingDirectory, {
-    waitForStartup: () => agentKnowledgeService.whenReady(),
-  });
+  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(
+    agentKnowledgeStore,
+    configManager,
+    workingDirectory,
+    {
+      waitForStartup: () => agentKnowledgeService.whenReady(),
+    },
+  );
   const workPlanStore = new WorkPlanStore({
     homeDirectory,
     // This product's storage scope: the plan lands beside the rest of the
@@ -1493,18 +1494,24 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     managedVoiceRoot,
     getConfig: (key) => String(configManager.get(key as never) ?? ''),
     setConfig: (key, value) => configManager.setDynamic(key as never, value),
-    resetLocalEngineFailureState: () => { voiceProviders.get('local')?.resetEngineFailureState?.(); },
+    resetLocalEngineFailureState: () => {
+      voiceProviders.get('local')?.resetEngineFailureState?.();
+    },
     admitExpensiveWork,
   });
 
-  agentKnowledgeSemanticService.setGapRepairer(createWebKnowledgeGapRepairer({
-    searchService: webSearchService,
-    ingestService: agentKnowledgeService,
-  }));
-  homeGraphSemanticService.setGapRepairer(createWebKnowledgeGapRepairer({
-    searchService: webSearchService,
-    ingestService: homeGraphService,
-  }));
+  agentKnowledgeSemanticService.setGapRepairer(
+    createWebKnowledgeGapRepairer({
+      searchService: webSearchService,
+      ingestService: agentKnowledgeService,
+    }),
+  );
+  homeGraphSemanticService.setGapRepairer(
+    createWebKnowledgeGapRepairer({
+      searchService: webSearchService,
+      ingestService: homeGraphService,
+    }),
+  );
   const mediaProviders = new MediaProviderRegistry();
   ensureBuiltinMediaProviders(mediaProviders, artifactStore, providerRegistry);
   const multimodalService = new MultimodalService(artifactStore, mediaProviders, voiceService, agentKnowledgeService);
@@ -1615,8 +1622,19 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const announcementStore = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
   const promptLifetime = new AbortController();
   disposalScope.registry.add('autonomous tool prompt lifetime', () => promptLifetime.abort());
-  const approvalHandlers = createApprovalDerivedHandlers({ requestApproval, configManager, featureFlags, announcementStore,
-    autonomousHost: { port: clientFloor.judgment.port, permissionManager, config: configManager, signal: promptLifetime.signal, workspaceTrust: null } });
+  const approvalHandlers = createApprovalDerivedHandlers({
+    requestApproval,
+    configManager,
+    featureFlags,
+    announcementStore,
+    autonomousHost: {
+      port: clientFloor.judgment.port,
+      permissionManager,
+      config: configManager,
+      signal: promptLifetime.signal,
+      workspaceTrust: null,
+    },
+  });
   const { execPromptAnswerHandler, localhostFetchApproval, onSandboxedRun, sandboxEscalationHandler } = approvalHandlers;
   agentOrchestrator.setDependencies({
     ...approvalHandlers,
@@ -1679,7 +1697,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // resolvable model). Unknown/subscription yields null (costState
   // 'unpriced'), never $0. SHARED by fleet + orchestration so totals never
   // double-count, mirrors the SDK composition root.
-  const priceUsage = (model: string | undefined, usage: { inputTokens: number; outputTokens: number }): number | null => (model ? computeUsageCostUsd(providerRegistry.resolveModelPricing(model), usage) : null);
+  const priceUsage = (model: string | undefined, usage: { inputTokens: number; outputTokens: number }): number | null =>
+    model ? computeUsageCostUsd(providerRegistry.resolveModelPricing(model), usage) : null;
 
   const codeIndexStore = new CodeIndexStore(
     workingDirectory,
@@ -1752,7 +1771,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // `() => stopWatchingConfigFiles()`, so this is the same stop, reached
   // through the manager's public method rather than through a handle this
   // composition does not take.
-  const stopConfigWatch = (): void => { configManager.stopWatchingConfigFiles(); };
+  const stopConfigWatch = (): void => {
+    configManager.stopWatchingConfigFiles();
+  };
   const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
     target: codeIndexStore,
     workingDirectory,
@@ -1872,7 +1893,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // ruled stays explicit.
   const eligibilityBackfill = backfillCheckpointEligibilityIfNeeded(shellPaths);
   if (eligibilityBackfill && eligibilityBackfill.recordsStamped > 0) {
-    logger.info('Marked the agent\'s explicitly-registered workspaces checkpoint-eligible', { ...eligibilityBackfill });
+    logger.info("Marked the agent's explicitly-registered workspaces checkpoint-eligible", { ...eligibilityBackfill });
   }
   const checkpointsRegistrationStatus = createWorkspaceRegistrationLiveChecker(shellPaths, workingDirectory);
   const checkpointsCurrentlyAllowed = (): boolean =>
@@ -1944,7 +1965,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // tool, which refuses an unregistered workspace with an actionable message
   // rather than registering it on the caller's behalf. Exposed on the graph so
   // those callers reach the GATED create rather than the raw manager beside it.
-  const checkpointsGatewayManager: Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'> = {
+  const checkpointsGatewayManager: Pick<
+    WorkspaceCheckpointManager,
+    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'
+  > = {
     workspaceRoot: workspaceCheckpointManager.workspaceRoot,
     list: workspaceCheckpointManager.list.bind(workspaceCheckpointManager),
     diff: workspaceCheckpointManager.diff.bind(workspaceCheckpointManager),
@@ -1958,9 +1982,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // gate above, for automatic snapshots too, without a restart either way.
       if (!checkpointsCurrentlyAllowed()) {
         throw new Error(
-          `Checkpoints are off for this workspace: ${workingDirectory} is not registered. `
-          + 'Register it first, then retry: goodvibes-agent workspaces register --yes '
-          + '(or set checkpoints.unregisteredWorkspaces to "guarded" to opt this workspace out of the registration gate).',
+          `Checkpoints are off for this workspace: ${workingDirectory} is not registered. ` +
+            'Register it first, then retry: goodvibes-agent workspaces register --yes ' +
+            '(or set checkpoints.unregisteredWorkspaces to "guarded" to opt this workspace out of the registration gate).',
         );
       }
       // Default the session stamp from the live resolver when the caller omits it
@@ -1989,9 +2013,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // Idle AND not paused by the governor AND admitted at the current memory
     // tier, memory pressure defers consolidation (mirrors the SDK's own
     // daemon composition of this same scheduler).
-    isIdle: () => hostedSessions.countBusySessions() === 0
-      && !pauseController.isPaused('memory-consolidation')
-      && admitExpensiveWork('memory consolidation').allowed,
+    isIdle: () =>
+      hostedSessions.countBusySessions() === 0 &&
+      !pauseController.isPaused('memory-consolidation') &&
+      admitExpensiveWork('memory consolidation').allowed,
     onReceipt: (receipt: MemoryConsolidationRunReceipt) => {
       const summary = describeMemoryConsolidationReceipt(receipt);
       if (summary) memoryConsolidationReceiptFeed.push([{ id: receipt.runId, text: summary, at: Date.now() }]);
@@ -2030,10 +2055,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     subscribeConfig: (key, cb) => configManager.subscribe(key as never, (newValue) => cb(newValue)),
     runtimeBus: options.runtimeBus,
     sleepCheckpoint: () => storeSnapshotScheduler.tick(),
-    wakeCatchUp: [
-      () => memoryConsolidationScheduler.tick(),
-      () => storeSnapshotScheduler.tick(),
-    ],
+    wakeCatchUp: [() => memoryConsolidationScheduler.tick(), () => storeSnapshotScheduler.tick()],
   });
   // DAEMON-held reach: this process's own PowerManager above holds a LOCAL
   // inhibitor that releases the moment this agent exits, the opposite of
@@ -2051,13 +2073,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     void forwardKeepAwakeToAdoptedDaemon(newValue, {
       probeReachability: () => sessionSpineClient.probeReachability(),
       resolveConnection: spineResolveConnection,
-    }).then((outcome) => {
-      if (outcome.attempted && !outcome.result.ok) {
-        logger.warn('[power] keep-awake daemon forward failed', { error: outcome.result.error, kind: outcome.result.kind });
-      }
-    }).catch((error) => {
-      logger.warn('[power] keep-awake daemon forward failed', { error: summarizeError(error) });
-    });
+    })
+      .then((outcome) => {
+        if (outcome.attempted && !outcome.result.ok) {
+          logger.warn('[power] keep-awake daemon forward failed', { error: outcome.result.error, kind: outcome.result.kind });
+        }
+      })
+      .catch((error) => {
+        logger.warn('[power] keep-awake daemon forward failed', { error: summarizeError(error) });
+      });
   });
 
   // Memory governance: construct + START the MemoryGovernor (default ON, it
@@ -2096,7 +2120,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // snapshots, same as the SDK composition: sync copies on a stalled disk
     // would block the event loop and defeat the governor's 10s shutdown
     // ceiling.
-    onTripwireShutdown: async () => { await storeSnapshotScheduler.snapshotAllAsync('tripwire'); },
+    onTripwireShutdown: async () => {
+      await storeSnapshotScheduler.snapshotAllAsync('tripwire');
+    },
   });
   // Late-bind the admission gate now that the governor exists: the expensive
   // entry points (knowledge services, consolidation scheduler, voice install)
@@ -2151,26 +2177,41 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // caller-supplied graph alone, so dispose() below is the ONLY thing that
   // stops these, and the shutdown paths (runtime/bootstrap-shutdown.ts,
   // cli/management.ts, cli/bundle-command.ts) are the ones that must call it.
-  const disposeSessionWriteLedgerOnce = (): void => { detachSessionWriteLedger(); clearAgentSessionWrites(); };
+  const disposeSessionWriteLedgerOnce = (): void => {
+    detachSessionWriteLedger();
+    clearAgentSessionWrites();
+  };
   registerRuntimePollers(disposalScope.registry, {
-    stopConfigWatch, watcherRegistry, storeSnapshotScheduler, appendOnlyRetentionScheduler,
-    memoryConsolidationScheduler, codeIndexReindexScheduler, sessionOrchestration,
+    stopConfigWatch,
+    watcherRegistry,
+    storeSnapshotScheduler,
+    appendOnlyRetentionScheduler,
+    memoryConsolidationScheduler,
+    codeIndexReindexScheduler,
+    sessionOrchestration,
     // This fork has no separate regular knowledge store: the `knowledgeService`
     // compatibility alias points at isolated Agent Knowledge (pinned by
     // scripts/check-architecture.ts), so both slots are the same instance.
     // KnowledgeService.dispose() clears its schedule-timer map, disposing it
     // twice is a no-op, not a double-free.
-    knowledgeService: agentKnowledgeService, agentKnowledgeService,
-    contractRunner, processRegistry, memoryGovernor, triggerManager,
+    knowledgeService: agentKnowledgeService,
+    agentKnowledgeService,
+    contractRunner,
+    processRegistry,
+    memoryGovernor,
+    triggerManager,
     // Named here rather than registered separately below: RuntimePollerOwners
     // is all-required precisely so a poller cannot be forgotten, and this fork
     // had been registering the home-graph service by hand where the contract
     // could not see it.
-    homeGraphService: { dispose: () => {
-      homeGraphClosing = homeGraphService.dispose();
-      // The scope observes the same rejection when its drain entry runs.
-      void homeGraphClosing.catch(() => {});
-    } }, agentOrchestrator,
+    homeGraphService: {
+      dispose: () => {
+        homeGraphClosing = homeGraphService.dispose();
+        // The scope observes the same rejection when its drain entry runs.
+        void homeGraphClosing.catch(() => {});
+      },
+    },
+    agentOrchestrator,
     // By dispose() time the registries and bus these runs report through are
     // already down, so a run still described as "running" is orphaned rather
     // than preserved, and this is the only shutdown-reachable way to abort its
@@ -2211,7 +2252,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // store over the same file, a second writer of one file is how two
       // answers to the same question start.
       userPermissionRuleStore: userPermissionRuleStore as ReturnType<typeof runtimeComposition.createUserPermissionRuleStore>,
-      get pairingTokens(): PairingTokenManager { return pairingTokensForDaemonGradeView(); },
+      get pairingTokens(): PairingTokenManager {
+        return pairingTokensForDaemonGradeView();
+      },
     }),
     // The REAL SDK memory-governance instances composed above (governor
     // constructed + started by wireDaemonMemoryGovernance). The SDK's
@@ -2357,7 +2400,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     contractOperator,
     contractIntake,
     judgment: clientFloor.judgment,
-    sessionSnapshot: (sessionId, conversation) => ({ ...conversation, contracts: contractRunner.list({ sessionId, includeTerminal: true }) }),
+    sessionSnapshot: (sessionId, conversation) => ({
+      ...conversation,
+      contracts: contractRunner.list({ sessionId, includeTerminal: true }),
+    }),
     processManager,
     modeManager,
     fileUndoManager,
@@ -2368,8 +2414,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // mechanism rather than two: whichever runs first does the work, the other
     // is a no-op.
     disposeSessionWriteLedger: disposeSessionWriteLedgerOnce,
-    dispose: (): void => { researchScreeningLifetime.abort(); disposalScope.dispose(); },
-    close: (): Promise<void> => { researchScreeningLifetime.abort(); return disposalScope.close(); },
+    dispose: (): void => {
+      researchScreeningLifetime.abort();
+      disposalScope.dispose();
+    },
+    close: (): Promise<void> => {
+      researchScreeningLifetime.abort();
+      return disposalScope.close();
+    },
     integrationHelpers,
     async rerootStores(newWorkingDir: string): Promise<void> {
       await projectIndex.reroot(newWorkingDir);
@@ -2391,8 +2443,6 @@ export async function foldAgentLegacyMemory(
   shellPaths: ShellPathService,
 ): Promise<MemoryFoldReport> {
   const legacyAgentGlobal = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite');
-  const sources: LegacyMemorySource[] = [
-    { label: 'agent-global (pre-E6)', dbPath: legacyAgentGlobal },
-  ];
+  const sources: LegacyMemorySource[] = [{ label: 'agent-global (pre-E6)', dbPath: legacyAgentGlobal }];
   return foldMemoryStores(memoryStore, sources, { embeddingRegistry: memoryEmbeddingRegistry });
 }

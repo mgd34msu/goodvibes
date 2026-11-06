@@ -3083,6 +3083,11 @@
       "bun": "./terminal-shell/src/bootstrap-orchestrator.ts",
       "types": "./terminal-shell/dist/bootstrap-orchestrator.d.ts",
       "import": "./terminal-shell/dist/bootstrap-orchestrator.js"
+    },
+    "./terminal-shell/bootstrap-lifecycle": {
+      "bun": "./terminal-shell/src/bootstrap-lifecycle.ts",
+      "types": "./terminal-shell/dist/bootstrap-lifecycle.d.ts",
+      "import": "./terminal-shell/dist/bootstrap-lifecycle.js"
     }
   },
   "publishConfig": {

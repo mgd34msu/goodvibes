@@ -228,3 +228,39 @@ export function projectFeedContextClosures<
     bodyTopRow: () => host.bodyTopRow,
   };
 }
+
+/** Render requests coalesce only while the feed owns its synchronous edit window. */
+export function createFeedRenderBuffer(immediate: () => void) {
+  let requested = false;
+  let feeding = true;
+  return {
+    requestRender(): void {
+      if (feeding) requested = true;
+      else immediate();
+    },
+    release(): void {
+      feeding = false;
+    },
+    flush(): void {
+      if (requested) immediate();
+    },
+  };
+}
+export function syncFeedContextLiveReferences<
+  Host extends {
+    commandRegistry: unknown;
+    commandContext: unknown;
+    autocomplete: unknown;
+    inputHistory: unknown;
+    conversationManager: unknown;
+  },
+>(
+  host: Host,
+  context: { [Key in 'commandRegistry' | 'commandContext' | 'autocomplete' | 'inputHistory' | 'conversationManager']: Host[Key] },
+): void {
+  context.commandRegistry = host.commandRegistry;
+  context.commandContext = host.commandContext;
+  context.autocomplete = host.autocomplete;
+  context.inputHistory = host.inputHistory;
+  context.conversationManager = host.conversationManager;
+}

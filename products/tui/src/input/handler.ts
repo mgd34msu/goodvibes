@@ -1,3 +1,4 @@
+import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
   captureFeedContextMutable,
@@ -503,15 +504,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
    */
   public feed(data: string): void {
     const immediateRequestRender = this.requestRender;
-    let renderRequested = false;
-    let isFeeding = true;
-    const bufferedRequestRender = (): void => {
-      if (isFeeding) {
-        renderRequested = true;
-        return;
-      }
-      immediateRequestRender();
-    };
+    const renderBuffer = createFeedRenderBuffer(immediateRequestRender);
+    const bufferedRequestRender = renderBuffer.requestRender;
 
     this.requestRender = bufferedRequestRender;
     // Snapshot the overlay flags before the feed: command handlers executed
@@ -525,28 +519,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     const shortcutsScrollOffsetBefore = this.shortcutsScrollOffset;
     try {
       const context = this.feedContext;
-      // Sync mutable scalars from handler into the reused context.
-      context.prompt = this.prompt;
-      context.cursorPos = this.cursorPos;
-      context.inputScrollTop = this.inputScrollTop;
-      context.commandMode = this.commandMode;
-      context.indicatorFocused = this.indicatorFocused;
-      context.helpOverlayActive = this.helpOverlayActive;
-      context.helpScrollOffset = this.helpScrollOffset;
-      context.shortcutsOverlayActive = this.shortcutsOverlayActive;
-      context.shortcutsScrollOffset = this.shortcutsScrollOffset;
-      context.selectionCallback = this.selectionCallback;
-      context.nextPasteId = this.nextPasteId;
-      context.nextImageId = this.nextImageId;
-      context.mouseDownRow = this.mouseDownRow;
-      context.mouseDownCol = this.mouseDownCol;
-      context.contentWidth = this.contentWidth;
-      // Sync semi-stable refs that may be wired after construction.
-      context.commandRegistry = this.commandRegistry;
-      context.commandContext = this.commandContext;
-      context.autocomplete = this.autocomplete;
-      context.inputHistory = this.inputHistory;
-      context.conversationManager = this.conversationManager;
+      syncFeedContextMutableFields(this, context);
+      syncFeedContextLiveReferences(this, context);
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
       this.syncFeedSelectionCallback = (callback) => {
@@ -590,13 +564,11 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       this.mouseDownCol = context.mouseDownCol;
     } finally {
       this.syncFeedSelectionCallback = null;
-      isFeeding = false;
+      renderBuffer.release();
       this.requestRender = immediateRequestRender;
     }
 
-    if (renderRequested) {
-      immediateRequestRender();
-    }
+    renderBuffer.flush();
   }
 
   /**

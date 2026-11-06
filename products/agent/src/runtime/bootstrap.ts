@@ -1,4 +1,9 @@
 import {
+  createPluginCommandAdapter,
+  wireTerminalMcpReload,
+  announceTerminalSessionStarted,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
+import {
   createTerminalOrchestrator,
   terminalCompanionInputHandler,
   projectOrchestratorCoreServices,
@@ -28,10 +33,10 @@ import type { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
-import { fireSessionStart } from '@/runtime/index.ts';
+import '@/runtime/index.ts';
 import { createTaskManager } from '@/runtime/index.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import { emitSessionReady, emitSessionStarted } from '@/runtime/index.ts';
+import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@/runtime/index.ts';
 import { scheduleMcpSuggestionScanOnFirstUse } from './mcp-suggestion-scan.ts';
@@ -47,7 +52,7 @@ import { ensureBootModelResolvable } from './provider-boot.ts';
 import { bindOrchestratorContextAccounting } from './context-accounting-source.ts';
 import { createBootstrapShell } from './bootstrap-shell.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { startMcpConfigAutoReload } from '@goodvibes-jev/engine/terminal-shell';
+import '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
 import { foldLegacySpineStore } from '@goodvibes-jev/engine/sdk/platform/runtime/session-spine';
@@ -475,24 +480,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     services,
     getSessionId: () => runtimeSessionIdRef.value,
   });
-  const pluginCommandRegistry = {
-    register(command: {
-      readonly name: string;
-      readonly aliases?: readonly string[];
-      readonly description: string;
-      readonly usage?: string;
-      readonly argsHint?: string;
-      readonly handler: (args: string[]) => void | Promise<void>;
-    }): void {
-      commandRegistry.register({
-        ...command,
-        aliases: command.aliases ? [...command.aliases] : undefined,
-      });
-    },
-    unregister(name: string): void {
-      commandRegistry.unregister(name);
-    },
-  };
+  const pluginCommandRegistry = createPluginCommandAdapter(commandRegistry);
 
   // ── Phase 7: Connected-host posture + deferred startup ────────────────
 
@@ -669,22 +657,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     shellPaths: services.shellPaths,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
   });
-  bootstrapUnsubs.push(() => mcpDiscovery.stop());
-  const mcpAutoReload = startMcpConfigAutoReload({
-    roots: services.shellPaths,
-    registry: services.mcpRegistry,
-    onReload: ({ connected, total }) => {
-      systemMessageRouter.low(`[MCP] Reloaded config: ${connected}/${total} server(s) connected.`);
-      requestRender();
-    },
-    onError: (error) => {
-      const message = summarizeError(error);
-      logger.warn('MCP config auto-reload failed', { error: message });
-      systemMessageRouter.high(`[MCP] Config reload failed: ${message}`);
-      requestRender();
-    },
-  });
-  bootstrapUnsubs.push(() => mcpAutoReload.stop());
+  wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
   // The reclaim half of what the anchors above write. The live session id is
   // read at sweep time, so a resume repointing it is respected.
   bootstrapUnsubs.push(
@@ -702,31 +675,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 
-  fireSessionStart(runtime.sessionId, services.hookDispatcher);
-  emitSessionStarted(
-    runtimeBus,
-    {
-      sessionId: runtime.sessionId,
-      traceId: `${runtime.sessionId}:session-start`,
-      source: 'bootstrap',
-    },
-    {
-      sessionId: runtime.sessionId,
-      profileId: 'default',
-      workingDir,
-    },
-  );
-  emitSessionReady(
-    runtimeBus,
-    {
-      sessionId: runtime.sessionId,
-      traceId: `${runtime.sessionId}:session-ready`,
-      source: 'bootstrap',
-    },
-    {
-      sessionId: runtime.sessionId,
-    },
-  );
+  announceTerminalSessionStarted(runtime.sessionId, workingDir, services.hookDispatcher, runtimeBus);
 
   // ── Compose RuntimeContext ────────────────────────────────────────────────
 

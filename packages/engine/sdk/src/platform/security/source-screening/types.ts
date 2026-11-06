@@ -42,11 +42,15 @@ declare const referenceBrand: unique symbol;
 declare const referenceReceiptBrand: unique symbol;
 /** Opaque process-local identity; the immutable original remains privately owned. */
 export interface ProtectedSource { readonly [sourceBrand]: true; }
-export interface SourceScreeningReceipt { readonly [receiptBrand]: true; }
+export interface SourceScreeningReceipt {
+  readonly [receiptBrand]: true;
+  /** Classic receipts attest only local declared-literal screening, never a semantic privacy reading. */
+  readonly provenance?: 'classic';
+}
 /** A complete declared reference; not an unbound prose span or display-preview source. */
 export interface ProtectedResearchReference { readonly [referenceBrand]: true; }
 /** Query-name role authority only, never a complete content-privacy receipt. */
-export interface ResearchReferenceScreeningReceipt { readonly [referenceReceiptBrand]: true; }
+export interface ResearchReferenceScreeningReceipt { readonly [referenceReceiptBrand]: true; readonly provenance?: 'classic'; }
 export type SourceScreeningHold = 'route-unavailable' | 'protected-input' | 'malformed' | 'unsettled' | 'cancelled' | 'stale' | 'capacity' | 'busy';
 export type SourceScreeningResult =
   | { readonly status: 'settled'; readonly receipt: SourceScreeningReceipt }

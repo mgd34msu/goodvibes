@@ -26,13 +26,17 @@ interface PolicyScope {
   revision: number;
 }
 const scopes = new AsyncLocalStorage<PolicyScope>();
-let configured: () => unknown = () => undefined;
+const configurations: { readonly read: () => unknown; active: boolean }[] = [];
+const configured = (): unknown => configurations.findLast(source => source.active)?.read();
 
 /** A composition owns the default; retiring it cannot replace a newer composition. */
 export function configureDecisionModelPolicy(read: () => unknown): () => void {
-  const previous = configured;
-  configured = read;
-  return () => { if (configured === read) configured = previous; };
+  const source = { read, active: true };
+  configurations.push(source);
+  return () => {
+    source.active = false;
+    while (configurations.at(-1)?.active === false) configurations.pop();
+  };
 }
 
 function observe(): DecisionModelPolicyState {

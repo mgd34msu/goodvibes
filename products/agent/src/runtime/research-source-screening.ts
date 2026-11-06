@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
 import { types as nodeTypes } from 'node:util';
 import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createProtectedSourceOwner, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference,
@@ -169,6 +171,16 @@ function acquire(config: ConfigOwner, secrets: CredentialOwner, hostSignal: Abor
     subscriptions.push(config.onDidInvalidate(retire));
     subscriptions.push(secrets.onDidInvalidateCredentials(retire));
     const incarnation = config.getConfigurationIncarnation();
+    if (decisionModelPolicyState().operation === 'classic') {
+      const assertCurrent = () => {
+        assertHost(); signal.throwIfAborted();
+        if (closed || config.getConfigurationIncarnation() !== incarnation) return unavailable();
+      };
+      owner = createClassicProtectedSourceOwner(Object.freeze({ ownerId: `classic-agent-source-${randomUUID()}`,
+        revision: randomUUID(), signal, assertCurrent }));
+      assertCurrent();
+      return Object.freeze({ owner, assertCurrent, close });
+    }
     const assertCredentials = secrets.captureLocalCredentialReadset();
     const consent = config.getHostBooleanSetting(AGENT_HOSTED_RESEARCH_SCREENING_KEY);
     let durableIncarnation: string | undefined;

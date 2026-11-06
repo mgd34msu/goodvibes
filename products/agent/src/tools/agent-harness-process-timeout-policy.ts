@@ -7,6 +7,7 @@
  * "when does this process stop, and what do we call the way it stopped".
  */
 import type { BackgroundProcess } from '@goodvibes-jev/engine/sdk/platform/tools';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { withLongLivedProcessReading, type ProcessClassificationOptions } from './agent-harness-process-classification.ts';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
@@ -52,9 +53,10 @@ export async function withBackgroundProcessClass<T>(
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const captured = snapshotJudgmentInput(args) as AgentHarnessBackgroundProcessArgs;
   const explicit = readString(captured.processClass) || readField(captured, 'processClass');
-  if (explicit === 'long_lived' || explicit === 'command') {
+  if (explicit === 'long_lived' || explicit === 'command' || decisionModelPolicyState().operation === 'classic') {
     const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-    assertCurrent(); return await consume(explicit, assertCurrent);
+    // An omitted Classic class is the bounded ordinary-command default, never an inferred daemon lifetime.
+    assertCurrent(); return await consume(explicit === 'long_lived' ? 'long_lived' : 'command', assertCurrent);
   }
   return withLongLivedProcessReading(command, options, (longLived, assertCurrent) => consume(longLived ? 'long_lived' : 'command', assertCurrent));
 }

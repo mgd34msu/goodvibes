@@ -1,5 +1,6 @@
 /** SDK-owned platform module. This implementation is maintained in goodvibes-sdk. */
 import { FieldKindReader } from './field-kind-reading.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { FieldKind } from './batteries/field-kind.js';
 import { assertRedactionCurrent, ProfileDistinctiveReader, readCredentialProjection, readResidualProjection, type ProfileRedactionRole } from './redaction-reading.js';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -282,6 +283,7 @@ export function registerProfileRedactionValues(
 
 /** Prepare safe role readings without disclosing any registered local value. */
 export async function prepareProfileRedactionRoles(options: JudgmentReadingOptions = {}): Promise<void> {
+  if (isClassicOperation()) { options.signal?.throwIfAborted(); options.assertCurrent?.(); return; }
   const source = captureRedactionSource();
   const signal = options.signal, ownerCurrent = options.assertCurrent;
   const assertCurrent = () => {
@@ -385,6 +387,7 @@ function applyPatterns(
  */
 export function redactSensitiveData(text: string): string {
   if (text.length === 0) return text;
+  if (isClassicOperation()) return redactClassicText(text);
   const settled = settledText.get(text);
   if (settled !== undefined) {
     try { settled.assertCurrent(); return settled.value; }
@@ -519,7 +522,48 @@ function operationFieldReadings(options: JudgmentReadingOptions): OperationField
 
 /** Captures the complete source locally, then reads only its protected projection. */
 export function redactSensitiveDataAsync(text: string, options: RedactionOptions = {}): Promise<string> {
+  if (isClassicOperation()) {
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    const result = redactClassicText(text, options.secretValues);
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    return Promise.resolve(result);
+  }
   return redactTextSource(text, options);
+}
+
+/** Conservative local egress masking. No semantic scores, cached Jev result or asynchronous background classification. */
+function redactClassicText(text: string, secrets: readonly string[] = []): string {
+  const source = captureRedactionSource();
+  let protectedText = applyPatterns(text, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
+  const profile = profileValueReader?.();
+  const values = [...secrets, ...(profile?.guarded ?? []), ...(profile?.absolute ?? []), ...(profile?.guardedFields?.map(field => field.value) ?? [])];
+  for (const secret of values.filter(value => value.length > 0).sort((a, b) => b.length - a.length))
+    protectedText = protectedText.split(secret).join('[REDACTED]');
+  const result = replaceSpans(protectedText, outgoingSpans(protectedText)
+    .filter(span => span.field === undefined || judgmentInputProblem({ [span.field]: span.value }) !== undefined)
+    .map(span => ({ ...span, replacement: span.marker })));
+  source.assertCurrent();
+  return judgmentInputProblem(result) === undefined ? result : '[REDACTED]';
+}
+
+function redactClassicStructure(value: unknown, options: StructuredRedactionOptions): unknown {
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const retained = retainOwnedJson(value);
+  const visit = (entry: unknown): unknown => {
+    if (typeof entry === 'string') return redactClassicText(entry, options.secretValues);
+    if (Array.isArray(entry)) return entry.map(visit);
+    if (!entry || typeof entry !== 'object') return entry;
+    const result: Record<string, unknown> = Object.create(null);
+    for (const [key, child] of Object.entries(entry)) {
+      const safeKey = redactClassicText(key, options.secretValues);
+      const protectedField = judgmentInputProblem({ [key]: child }) !== undefined;
+      result[safeKey] = protectedField ? '[REDACTED]' : visit(child);
+    }
+    return result;
+  };
+  const result = visit(retained.snapshot);
+  retained.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
+  return result;
 }
 
 async function redactTextSource(text: string, options: RedactionOptions,
@@ -650,11 +694,13 @@ export function redactIssuerCredentials(text: string): string {
 }
 
 export function redactStructuredData(value: unknown): unknown {
+  if (isClassicOperation()) return redactClassicStructure(value, {});
   return redactStructuredDataInternal(value, undefined, new WeakSet<object>());
 }
 
 /** Shared asynchronous egress recursion. Field values never enter field-role readings. */
 export async function redactStructuredDataAsync(value: unknown, options: StructuredRedactionOptions = {}): Promise<unknown> {
+  if (isClassicOperation()) return redactClassicStructure(value, options);
   const signal = options.signal, ownerCurrent = options.assertCurrent;
   let source: ReturnType<typeof captureRedactionSource>, snapshot: unknown, retainedValue: ReturnType<typeof retainOwnedJson>;
   const purpose = options.purpose, originalSecrets = options.secretValues;

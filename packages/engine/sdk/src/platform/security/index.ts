@@ -82,6 +82,7 @@ export {
 } from './owner-identity.js';
 export type { OwnerConfigReader } from './owner-identity.js';
 export { createProtectedSourceOwner } from './source-screening/owner.js';
+export { createClassicProtectedSourceOwner } from './source-screening/classic-owner.js';
 export { createFramedResearchReferenceProjector, resolveFramedResearchReference } from './source-screening/framed-references.js';
 export { SOURCE_SCREENING_LIMITS } from './source-screening/types.js';
 export type {

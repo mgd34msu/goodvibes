@@ -38,6 +38,7 @@
  *     default; retention generous but bounded) into a resolved policy.
  */
 import { createHash } from 'node:crypto';
+import { isClassicOperation } from './decision-policy.js';
 import { statSync, existsSync, unlinkSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { mapLimit } from '@goodvibes-jev/judgment';
@@ -294,6 +295,8 @@ async function readAdmittedLines(lines: readonly AdmittedLine[], site: string, a
  * make it pass admission. This does not certify arbitrary unknown tokens safe.
  */
 export async function readAtRestCredentialSpans(lines: readonly string[], site: string): Promise<void> {
+  // Classic keeps issuer and candidate masking; it never asks for a semantic exemption.
+  if (isClassicOperation()) return;
   try {
     // Capture the complete array structurally. Its elements are independent
     // complete sources; each JSONL payload is admitted intact, never per window.

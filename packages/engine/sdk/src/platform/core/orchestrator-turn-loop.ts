@@ -11,6 +11,7 @@ import type { ConversationManager } from './conversation.js';
 import type { ExecutionPlan } from './execution-plan.js';
 import { ConsecutiveErrorBreaker } from './circuit-breaker.js';
 import { collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates, waitForTaskRecovery } from './response-completion.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { createVerificationWriter } from './verification/writer.js';
 import { VerificationStore } from './verification/store.js';
 import type { CacheHitTracker } from '../providers/cache-strategy.js';
@@ -967,6 +968,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         context.requestRender();
         continue;
       }
+      const decisionPolicy = decisionModelPolicyState();
+      if (decisionPolicy.operation === 'classic') enrichedResponse.decisionPolicy = decisionPolicy;
       assertCompletionCurrent = completionGuard.beginFinalization(enrichedResponse);
     }
     continueLoop = await handleFinalResponseOutcome({

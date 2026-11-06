@@ -1,5 +1,7 @@
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
 import { hashState } from '@goodvibes-jev/judgment';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
@@ -178,7 +180,11 @@ async function executeToolCallsInMode(
     let inputProjection: ProjectedToolCall | undefined;
     let choiceProjection: AutonomousChoiceProjection | undefined;
     let settledResult: ToolResult | undefined;
-    const appendResult = (result: ToolResult) => { settledResult = { ...result }; results.push(result); };
+    let resultPolicy = decisionModelPolicyState();
+    const appendResult = (result: ToolResult) => {
+      const recorded = { ...result, ...(resultPolicy.operation === 'classic' ? { decisionPolicy: resultPolicy } : {}) };
+      settledResult = { ...recorded }; results.push(recorded);
+    };
     // Production managers/registries use the migrated path. The boolean seam is
     // retained only for pre-existing duck-typed test/embedding implementations.
     const autonomous = typeof deps.permissionManager.admitAutonomous === 'function'
@@ -208,7 +214,7 @@ async function executeToolCallsInMode(
               { signal: admissionSignal, assertCurrent: () => { assertTurnActive(); originalPreparation.assertCurrent(); } });
             call = { id: inputProjection.callId, name: inputProjection.name, arguments: inputProjection.args };
           }
-          if (!isYoloExecution() && deps.permissionManager.projectAutonomousChoices && deps.permissionManager.releaseAutonomousChoices) {
+          if (!isYoloExecution() && !isClassicOperation() && deps.permissionManager.projectAutonomousChoices && deps.permissionManager.releaseAutonomousChoices) {
             choiceProjection = await deps.permissionManager.projectAutonomousChoices(sourceId, call.id, sourceOf!, deps.toolRegistry, admissionSignal);
           }
           originalPreparation.assertCurrent();
@@ -271,6 +277,7 @@ async function executeToolCallsInMode(
         checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner);
       }
       assertTurnActive();
+      if (checkResult.decisionPolicy) resultPolicy = checkResult.decisionPolicy;
       const approved = checkResult.approved;
       if (deps.runtimeBus) {
         emitToolPermissioned(deps.runtimeBus, deps.emitterContext(turnId), {

@@ -25,7 +25,7 @@
  */
 import { decideSandboxedExec, readCommandNeeds } from '@goodvibes-jev/engine/sdk/platform/runtime/permissions/sandbox-policy';
 import { detectSandboxAvailability, probeSandboxHost, type SandboxAvailability } from '@goodvibes-jev/engine/sdk/platform/tools/exec/sandbox';
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type {
   PermissionPromptRequest,
   PermissionRequestHandler,
@@ -114,6 +114,8 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
   };
 
   return async (request, options) => {
+    // Classic keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
+    if (decisionModelPolicyState().operation === 'classic') return ask(request, options);
     if (!isExecRequest(request)) return ask(request, options);
     const commands = extractExecCommands(request);
     if (commands.length === 0) return ask(request, options);

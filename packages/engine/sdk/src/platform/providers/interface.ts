@@ -1,4 +1,5 @@
 import type { DecisionRoutingContext } from './decision-router-context.js';
+import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type { DecisionRouterRouteInfo } from './decision-router.js';
 import type { ToolDefinition, ToolCall } from '../types/tools.js';
 import type { ProviderCapability } from './capabilities.js';
@@ -395,6 +396,8 @@ export interface ProviderResponseIdentity {
 }
 
 export interface ChatResponse {
+  /** Host provenance when independent decision-model checking was disabled or unavailable. */
+  decisionPolicy?: DecisionModelPolicyState;
   /** Actual selected answer route, distinct from provider-reported identity. */
   decisionRoute?: DecisionRouterRouteInfo | undefined;
   /** Optional bounded response provenance. Absence means the adapter did not capture it. */

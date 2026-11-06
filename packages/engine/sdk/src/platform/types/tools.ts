@@ -1,4 +1,5 @@
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
+import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 /** SDK-owned platform module. This implementation is maintained in goodvibes-sdk. */
 
 /** Represents a tool the LLM can invoke. Parameters follow JSON Schema. */
@@ -56,6 +57,8 @@ export interface ToolDenial {
 
 /** The outcome of executing a tool. */
 export interface ToolResult {
+  /** Host execution policy, never a decision-model receipt or semantic completion claim. */
+  decisionPolicy?: DecisionModelPolicyState;
   readonly autonomousDecision?: JevDecision | undefined;
   callId: string;
   success: boolean;

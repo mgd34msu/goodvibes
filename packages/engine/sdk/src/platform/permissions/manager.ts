@@ -1,6 +1,6 @@
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
 import { hashState, JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -1225,8 +1225,7 @@ export class PermissionManager {
       rules,
       defaultEffect: 'deny',
     });
-    const decision = isClassicOperation() ? evaluator.evaluate(toolName, args, classification)
-      : await evaluator.evaluateAsync(toolName, args, classification, { ...options, assertCurrent: current });
+    const decision = await evaluator.evaluateAsync(toolName, args, classification, { ...options, assertCurrent: current });
     current(); evaluator.assertCurrent(decision);
     this.exportDecisionRecords(evaluator, mode);
     current(); evaluator.assertCurrent(decision);

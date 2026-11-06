@@ -1,3 +1,7 @@
+import { assertScreeningOperation, captureScreeningOperation as captureOperation } from './operation.js';
+import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { createSystemOnePort, DEFAULT_MODEL, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
@@ -28,23 +32,6 @@ const held = (reason: Extract<SourceScreeningResult, { status: 'held' }>['reason
 const invalid = (): never => { throw new Error('Protected source owner is unavailable or the handle is not current'); };
 const apply = Reflect.apply;
 const signalAborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')!.get!;
-const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-function captureOperation(value: ResearchReferenceOperation | undefined): ResearchReferenceOperation | undefined {
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== 'object' || nodeTypes.isProxy(value)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return invalid();
-  const fields = Object.getOwnPropertyDescriptors(value);
-  if (Reflect.ownKeys(fields).some(key => key !== 'signal' && key !== 'assertCurrent')
-    || Object.values(fields).some(field => !('value' in field))) return invalid();
-  const signal = fields.signal?.value as unknown;
-  const assertCurrent = fields.assertCurrent?.value as unknown;
-  if (signal !== undefined) {
-    if (!signal || typeof signal !== 'object' || nodeTypes.isProxy(signal)) return invalid();
-    try { apply(signalAborted, signal, []); } catch { return invalid(); }
-  }
-  if (assertCurrent !== undefined && (typeof assertCurrent !== 'function' || nodeTypes.isProxy(assertCurrent))) return invalid();
-  return Object.freeze({ signal: signal as AbortSignal | undefined, assertCurrent: assertCurrent as (() => void) | undefined });
-}
 function reference(value: unknown): value is string { return typeof value === 'string' && /^[\x21-\x7e]{1,128}$/.test(value); }
 function dataFields(value: unknown, allowed: readonly string[]): Record<string, PropertyDescriptor> {
   if (!value || typeof value !== 'object' || nodeTypes.isProxy(value)
@@ -85,6 +72,7 @@ function project(source: ScreeningSource, spans: readonly ScreeningSpan[]): read
  * distinct. No settings/env discovery, fallback, persistent source, or raw log.
  */
 export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions): ProtectedSourceOwner {
+  if (isClassicOperation()) return createClassicProtectedSourceOwner(options.authority);
   const isHosted = hostedOptions(options);
   const { authority } = options;
   const ownerId = authority.ownerId, authorityRevision = authority.revision;
@@ -138,22 +126,27 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const current = (source: OwnedSource) => { active(); if (source.released || source.lifetime.signal.aborted) return invalid(); };
   const operationCurrent = (source: OwnedSource, operation?: ResearchReferenceOperation) => {
     current(source);
-    if (operation?.signal) apply(throwIfAborted, operation.signal, []);
-    let result: unknown;
-    try { result = operation?.assertCurrent?.(); } catch { return invalid(); }
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      return invalid();
-    }
-    if (operation?.signal) apply(throwIfAborted, operation.signal, []);
+    assertScreeningOperation(operation);
     current(source);
   };
   const run = async (source: OwnedSource, operation?: ResearchReferenceOperation): Promise<Result> => {
     const requestSignal = AbortSignal.any([signal, source.lifetime.signal, ...(operation?.signal ? [operation.signal] : [])]);
-    const assertCurrent = () => operationCurrent(source, operation);
+    const policy = decisionModelPolicyState();
+    const assertCurrent = () => {
+      operationCurrent(source, operation);
+      const now = decisionModelPolicyState();
+      if (now.policy !== policy.policy || now.operation !== policy.operation || now.revision !== policy.revision) return invalid();
+    };
     let transport: ReturnType<typeof createScreeningTransport> | undefined;
     try {
       assertCurrent();
+      if (isClassicOperation()) {
+        const parts = classicScreeningParts(source.source, source.reference);
+        assertCurrent();
+        const receipt = Object.freeze({ provenance: 'classic' }) as Receipt;
+        projections.set(receipt, { source, parts });
+        return source.result = Object.freeze({ status: 'settled', receipt });
+      }
       transport = createScreeningTransport({ ...(credentials ? { kind: 'hosted', credentials } : {
         endpoints: [`${proposal.endpoint}/v1/chat/completions`, `${judgment.endpoint}/v1/systemone`] }),
         signal: requestSignal, assertCurrent, timeoutMs });

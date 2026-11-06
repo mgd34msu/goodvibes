@@ -32,6 +32,7 @@ import type { Tool, ToolDefinition, ToolExecuteOptions, ToolResult } from '../ty
 import { UnknownPreparedToolError } from './preparation-error.js';
 import { ToolError } from '../types/errors.js';
 import { repairToolCall } from './auto-repair.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
 import type { ContractVerificationResult, ContractVerifierOptions } from '../runtime/tools/contract-verifier.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -755,7 +756,10 @@ export class ToolRegistry {
     const ids: string[] = [];
     try {
       this.assertPreparationCurrent(record);
-      const repair = await repairToolCall(name, projection.args, record.definition, signal, this.repairPort(record, ids, port));
+      const repair = await decisionOrClassic(
+        () => repairToolCall(name, projection.args, record.definition, signal, this.repairPort(record, ids, port)),
+        () => ({ repaired: false, original: projection.args, fixed: projection.args, repairs: [], warnings: [] }),
+      );
       assertProjectionSignal(signal);
       const effective = captureProjectionArgs(repair.repaired ? repair.fixed : projection.args, name);
       this.repairProjection(record, effective);

@@ -1,3 +1,4 @@
+import { formRows } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
 import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/sdk/platform/runtime';
 /**
  * renderMcpWorkspace, the MCP server workspace as a kit modal with a list and a detail side:
@@ -104,22 +105,7 @@ function detailLines(workspace: McpWorkspace): TextLine[] {
   return lines;
 }
 
-function formRows(workspace: McpWorkspace): KitRow[] {
-  const t = activeTokens();
-  return workspace.formFields.map((field, index) => {
-    const selected = index === workspace.formIndex;
-    const isAction = field.id === 'save' || field.id === 'cancel';
-    const value = isAction ? undefined : field.value.length > 0 ? field.value : '(empty)';
-    return {
-      label: field.label,
-      desc: value !== undefined && selected && field.editable ? `${field.value}▏` : value,
-      right: !isAction && !field.editable ? '←→' : undefined,
-      labelFg: field.id === 'save' ? t.success : field.id === 'cancel' ? t.warning : undefined,
-      bold: isAction,
-      selected,
-    };
-  });
-}
+
 
 function formLines(workspace: McpWorkspace): TextLine[] {
   const t = activeTokens();

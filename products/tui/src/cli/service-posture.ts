@@ -1,8 +1,8 @@
+import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { spawnSync } from 'node:child_process';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
-import net from 'node:net';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -121,20 +121,7 @@ function connectHostForBindHost(host: string): string {
   return host || '127.0.0.1';
 }
 
-async function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const socket = net.createConnection({ host: connectHostForBindHost(host), port });
-    const finish = (value: boolean) => {
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(value);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once('connect', () => finish(true));
-    socket.once('timeout', () => finish(false));
-    socket.once('error', () => finish(false));
-  });
-}
+function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
 
 function isExecutable(path: string): boolean {
   try {

@@ -2348,6 +2348,46 @@
       "bun": "./terminal-shell/src/profile-picker-state.ts",
       "types": "./terminal-shell/dist/profile-picker-state.d.ts",
       "import": "./terminal-shell/dist/profile-picker-state.js"
+    },
+    "./terminal-shell/onboarding-data-types": {
+      "bun": "./terminal-shell/src/onboarding-data-types.ts",
+      "types": "./terminal-shell/dist/onboarding-data-types.d.ts",
+      "import": "./terminal-shell/dist/onboarding-data-types.js"
+    },
+    "./terminal-shell/onboarding-signals": {
+      "bun": "./terminal-shell/src/onboarding-signals.ts",
+      "types": "./terminal-shell/dist/onboarding-signals.d.ts",
+      "import": "./terminal-shell/dist/onboarding-signals.js"
+    },
+    "./terminal-shell/renderer/settings-documentation": {
+      "bun": "./terminal-shell/src/renderer/settings-documentation.ts",
+      "types": "./terminal-shell/dist/renderer/settings-documentation.d.ts",
+      "import": "./terminal-shell/dist/renderer/settings-documentation.js"
+    },
+    "./terminal-shell/renderer/mcp-trust-context": {
+      "bun": "./terminal-shell/src/renderer/mcp-trust-context.ts",
+      "types": "./terminal-shell/dist/renderer/mcp-trust-context.d.ts",
+      "import": "./terminal-shell/dist/renderer/mcp-trust-context.js"
+    },
+    "./terminal-shell/renderer/mcp-form-rows": {
+      "bun": "./terminal-shell/src/renderer/mcp-form-rows.ts",
+      "types": "./terminal-shell/dist/renderer/mcp-form-rows.d.ts",
+      "import": "./terminal-shell/dist/renderer/mcp-form-rows.js"
+    },
+    "./terminal-shell/settings-secret-writes": {
+      "bun": "./terminal-shell/src/settings-secret-writes.ts",
+      "types": "./terminal-shell/dist/settings-secret-writes.d.ts",
+      "import": "./terminal-shell/dist/settings-secret-writes.js"
+    },
+    "./terminal-shell/service-io": {
+      "bun": "./terminal-shell/src/service-io.ts",
+      "types": "./terminal-shell/dist/service-io.d.ts",
+      "import": "./terminal-shell/dist/service-io.js"
+    },
+    "./terminal-shell/card-field-prompts": {
+      "bun": "./terminal-shell/src/card-field-prompts.ts",
+      "types": "./terminal-shell/dist/card-field-prompts.d.ts",
+      "import": "./terminal-shell/dist/card-field-prompts.js"
     }
   },
   "publishConfig": {

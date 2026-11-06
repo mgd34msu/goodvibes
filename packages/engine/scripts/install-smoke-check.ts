@@ -102,6 +102,75 @@ const judgmentDecisions = await import('${JUDGMENT_PACKAGE_NAME}/decisions');
 const judgmentRoot = await import('${JUDGMENT_PACKAGE_NAME}');
 const engineErrors = await import('${ERRORS_PACKAGE_NAME}');
 
+// Exercise the installed adapters and failure lifecycle rather than only their exports.
+const profiles = judgmentRoot.DECISION_MODEL_PROFILES;
+if (profiles.length !== 6) throw new Error('packaged decision model profiles are incomplete');
+const requestState = { task: 'Locate the declared fixture', files: ['fixture.ts'] };
+const requestQuestions = { yes: judgmentRoot.noul('Does the fixture exist?') };
+const targets = profiles.map(profile => ({
+  endpoint: profile.adapter === 'cloudflare-workers-ai'
+    ? { kind: 'hosted', baseURL: 'https://api.cloudflare.com/client/v4/accounts/fixture/ai/run/@cf/cloudflare/' + profile.model,
+        apiKey: 'installed-artifact-fixture-key', adapter: profile.adapter }
+    : { kind: 'local', baseURL: 'http://127.0.0.1:1/' + profile.id, apiKey: '', authentication: 'none', adapter: profile.adapter,
+        ...(profile.responseModels ? { responseModels: profile.responseModels } : {}) },
+  model: profile.model,
+}));
+function installedDecisionPort(selected, fetchImpl) {
+  return judgmentRoot.createSystemOnePort({ ...selected[0], fallbacks: selected.slice(1),
+    signal: new AbortController().signal, timeoutMs: 250, retry: {}, fetch: fetchImpl });
+}
+function installedAnswer(profile, score) {
+  const result = { model: profile.responseModels?.[0] ?? profile.model, answers: { yes: { type: 'noul', noul: score } },
+    usage: { input_tokens: 7, output_tokens: 1, ...(profile.adapter === 'laya' ? { truncated: false } : {}) } };
+  return Response.json(profile.adapter === 'cloudflare-workers-ai' ? { success: true, result } : result);
+}
+for (const [index, profile] of profiles.entries()) {
+  let attempts = 0;
+  const port = installedDecisionPort([targets[index]], async (_url, init) => {
+    attempts++;
+    const body = JSON.parse(String(init?.body));
+    if (JSON.stringify(body.state) !== JSON.stringify(requestState) || JSON.stringify(body.questions) !== JSON.stringify(requestQuestions)) {
+      throw new Error('packaged adapter lost decision evidence');
+    }
+    return installedAnswer(profile, 0.9);
+  });
+  const result = await port.ask({ state: requestState, questions: requestQuestions });
+  if (attempts !== 1 || result.usage.inputTokens !== 7 || result.answers.yes.noul !== 0.9) {
+    throw new Error('packaged decision adapter failed: ' + profile.id);
+  }
+}
+for (const failure of ['authentication', 'connection', 'protocol', 'timeout']) {
+  let attempts = 0;
+  const port = installedDecisionPort([targets[0], targets[5]], async () => {
+    attempts++;
+    if (attempts === 1) {
+      if (failure === 'connection') throw new Error('synthetic network outage');
+      if (failure === 'timeout') return new Promise(() => {}); // Deliberately ignores cancellation.
+      return failure === 'authentication' ? Response.json({ error: 'synthetic auth refusal' }, { status: 401 }) : Response.json({ broken: true });
+    }
+    return installedAnswer(profiles[5], 0.9);
+  });
+  await port.ask({ state: requestState, questions: requestQuestions });
+  if (attempts !== 2) throw new Error('packaged decision failover failed: ' + failure);
+}
+let outageAttempts = 0, effects = 0;
+const unavailable = installedDecisionPort(targets, async () => {
+  outageAttempts++;
+  return Response.json({ error: 'synthetic outage' }, { status: 503, headers: { 'retry-after': '86400' } });
+});
+try {
+  await unavailable.ask({ state: requestState, questions: requestQuestions });
+  effects++;
+} catch (error) {
+  if (!(error instanceof judgmentRoot.JudgmentError) || error.kind !== 'unavailable' || !error.message.includes('No decision models are currently available')) throw error;
+}
+if (outageAttempts !== profiles.length || effects !== 0) throw new Error('packaged outage did not halt after exhausting configured decision models');
+let refusalAttempts = 0;
+const refusal = installedDecisionPort(targets, async () => { refusalAttempts++; return installedAnswer(profiles[0], 0.01); });
+await refusal.ask({ state: requestState, questions: requestQuestions });
+if (refusalAttempts !== 1) throw new Error('packaged decision refusal incorrectly tried another model');
+console.log('packaged decision adapters, finite failover, refusal and zero-effect outage checks passed');
+
 const sdk = root.createGoodVibesSdk({ baseUrl: 'http://127.0.0.1:3210' });
 if (!sdk?.operator || !sdk?.peer || !sdk?.realtime) throw new Error('sdk entrypoint missing expected surfaces');
 if (typeof auth.createMemoryTokenStore !== 'function') throw new Error('auth entrypoint missing token helpers');

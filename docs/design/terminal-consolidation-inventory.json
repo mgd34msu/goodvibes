@@ -103,7 +103,11 @@
       "path": "cli/launch-auto-update.ts",
       "baselineTuiLines": 327,
       "baselineSimilarity": 0.6608,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "withTimeout",
+        "restartOntoUpdatedBinary"
+      ]
     },
     {
       "path": "cli/management-commands.ts",
@@ -115,7 +119,10 @@
       "path": "cli/management.ts",
       "baselineTuiLines": 512,
       "baselineSimilarity": 0.4207,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "probeTcp"
+      ]
     },
     {
       "path": "cli/native-headless-command.ts",
@@ -166,7 +173,10 @@
       "path": "cli/service-posture.ts",
       "baselineTuiLines": 533,
       "baselineSimilarity": 0.4293,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "probeTcp"
+      ]
     },
     {
       "path": "cli/status.ts",
@@ -515,7 +525,12 @@
       "path": "input/commands/payment-card-intake.ts",
       "baselineTuiLines": 213,
       "baselineSimilarity": 0.4682,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "CardField",
+        "CARD_SECRET_FIELDS",
+        "createCardFieldPrompter"
+      ]
     },
     {
       "path": "input/commands/platform-access-runtime.ts",
@@ -919,7 +934,8 @@
       "path": "input/settings-modal-secrets.ts",
       "baselineTuiLines": 81,
       "baselineSimilarity": 0.7329,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "One store-before-reference sequence with host-policy rechecks and value-free errors; Agent supplies connected-owner routing/reporting, TUI supplies adopted daemon writer."
     },
     {
       "path": "input/settings-modal-subscriptions.ts",
@@ -1159,7 +1175,10 @@
       "path": "renderer/mcp-workspace.ts",
       "baselineTuiLines": 202,
       "baselineSimilarity": 0.719,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "formRows"
+      ]
     },
     {
       "path": "renderer/modal-utils.ts",
@@ -1225,19 +1244,31 @@
       "path": "renderer/settings-modal-context.ts",
       "baselineTuiLines": 372,
       "baselineSimilarity": 0.4867,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "buildMcpContext"
+      ]
     },
     {
       "path": "renderer/settings-modal-helpers.ts",
       "baselineTuiLines": 278,
       "baselineSimilarity": 0.4127,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "inferSubscriptionRouteReason"
+      ]
     },
     {
       "path": "renderer/settings-modal.ts",
       "baselineTuiLines": 384,
       "baselineSimilarity": 0.7419,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "fitValue",
+        "docLines",
+        "windowDoc",
+        "settingsDocumentation"
+      ]
     },
     {
       "path": "renderer/shell-surface.ts",
@@ -1587,7 +1618,24 @@
       "baselineSimilarity": 0.7476,
       "status": "pending-convergence",
       "platformFunctions": [
-        "isDeepEqual"
+        "isDeepEqual",
+        "countPermissionToolOverrides",
+        "hasCustomizedProviderRouting",
+        "getProviderAccountSignalIds",
+        "getServiceCredentialProviderIds",
+        "getSecretBackedProviderIds",
+        "getConfiguredProviderSignalIds",
+        "hasConfiguredProviderState",
+        "getConfiguredSurfaceKinds",
+        "countConfiguredSurfaceKinds",
+        "hasInboundEventSurface",
+        "hasCustomizedWorkspaceDefaults",
+        "getProviderIdentityIds",
+        "getExternalIntegrationServiceIds",
+        "hasExternalIntegrations",
+        "getAcknowledgementAccepted",
+        "buildNotNeededAcknowledgement",
+        "buildRequiredAcknowledgement"
       ]
     },
     {
@@ -1638,7 +1686,20 @@
         "OnboardingCheckMarkerState",
         "OnboardingCheckMarkersState",
         "WriteOnboardingCheckMarkerOptions",
-        "OnboardingAcknowledgementSnapshot"
+        "OnboardingAcknowledgementSnapshot",
+        "OnboardingNetworkMode",
+        "OnboardingAcknowledgementReason",
+        "OnboardingProviderRoutingSnapshot",
+        "OnboardingServiceState",
+        "OnboardingServicesSnapshot",
+        "OnboardingSubscriptionsSnapshot",
+        "OnboardingSecretsSnapshot",
+        "OnboardingAuthSnapshot",
+        "OnboardingSurfaceRecord",
+        "OnboardingSurfacesSnapshot",
+        "OnboardingRuntimeDefaultsSnapshot",
+        "OnboardingAcknowledgementState",
+        "OnboardingReopenEditAcknowledgementState"
       ]
     },
     {

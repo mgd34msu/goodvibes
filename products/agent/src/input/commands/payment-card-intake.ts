@@ -1,3 +1,4 @@
+import { createCardFieldPrompter, CARD_SECRET_FIELDS, type CardField } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
  * /payments, enter the payment instrument and the two addresses at the
  * agent's own terminal.
@@ -87,19 +88,10 @@ import {
  */
 export const CARD_ENTRY_SURFACE = 'agent-terminal';
 
-interface CardField {
-  readonly key: ConfigKey;
-  readonly label: string;
-  readonly placeholder: string;
-}
+
 
 /** Order matters only for the guided prompt sequence, not for storage. */
-const CARD_SECRET_FIELDS: readonly CardField[] = [
-  { key: PAYMENTS_CARD_NUMBER_CONFIG_KEY, label: 'Card number', placeholder: '4242424242424242' },
-  { key: PAYMENTS_CARD_EXPIRY_CONFIG_KEY, label: 'Expiry (MM/YY)', placeholder: '12/34' },
-  { key: PAYMENTS_CARD_CVV_CONFIG_KEY, label: 'CVV', placeholder: '123' },
-  { key: PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY, label: 'Cardholder name', placeholder: 'as printed on the card' },
-];
+
 
 interface AddressField {
   readonly key: ConfigKey;
@@ -167,60 +159,7 @@ function renderStatus(ctx: CommandContext): string[] {
 }
 
 /** Chain a masked prompt for each card secret field, storing each at daemon scope. */
-function promptCardFields(ctx: CommandContext, fields: readonly CardField[], index: number): void {
-  if (index >= fields.length) {
-    ctx.print('\n[payments] Card stored. Run /payments address billing and /payments address shipping if those are not set yet.');
-    ctx.renderRequest();
-    return;
-  }
-  const field = fields[index]!;
-  if (!ctx.beginConcealedInput) {
-    ctx.print('[payments] Concealed input is unavailable on this surface; card entry requires it and cannot fall back to plaintext.');
-    return;
-  }
-  ctx.print(`[payments] Enter ${field.label} (e.g. ${field.placeholder}), masked; Enter to store, Esc to stop.`);
-  let cancelled = false;
-  let finished = false;
-  let submitted = false;
-  ctx.beginConcealedInput({
-    label: field.label,
-    onSubmit: async (value) => {
-      if (submitted || cancelled) return;
-      submitted = true;
-      if (value.length === 0) {
-        finished = true;
-        ctx.print(`[payments] ${field.label} left unset.`);
-        promptCardFields(ctx, fields, index + 1);
-        return;
-      }
-      try {
-        await persistSecretBackedConfigValue(
-          ctx.platform.configManager,
-          ctx.platform.secretsManager,
-          field.key,
-          value,
-          { scope: 'daemon' },
-        );
-        if (cancelled) return;
-        ctx.print(`[payments] ${field.label} stored securely (hidden).`);
-      } catch {
-        if (cancelled) return;
-        // Store failures may quote the input. Only the field label is safe.
-        ctx.print(`[payments] Failed to store ${field.label}. Try again.`);
-        finished = true;
-        promptCardFields(ctx, fields, index);
-        return;
-      }
-      finished = true;
-      promptCardFields(ctx, fields, index + 1);
-    },
-    onCancel: () => {
-      if (finished || cancelled) return;
-      cancelled = true;
-      ctx.print('[payments] Stopped. Re-run /payments card to finish the remaining fields.');
-    },
-  });
-}
+
 
 /**
  * Start the card-entry flow, gated on the SDK's own entry-surface allowlist
@@ -366,3 +305,8 @@ export function registerPaymentCardCommands(registry: CommandRegistry): void {
     },
   });
 }
+
+const promptCardFields = createCardFieldPrompter<CommandContext>((ctx, field, value) => persistSecretBackedConfigValue(ctx.platform.configManager, ctx.platform.secretsManager, field.key, value, { scope: 'daemon' }), {
+ completed: "\n[payments] Card stored. Run /payments address billing and /payments address shipping if those are not set yet.",
+ prompt: field => `[payments] Enter ${field.label} (e.g. ${field.placeholder}), masked; Enter to store, Esc to stop.`,
+});

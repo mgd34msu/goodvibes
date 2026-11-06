@@ -39,7 +39,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/judgment/test/retry.test.ts](../judgment/test/retry.test.ts) |
 | [packages/judgment/test/truth.test.ts](../judgment/test/truth.test.ts) |
 
-## Engine platform (1919 files)
+## Engine platform (1922 files)
 
 | File |
 | --- |
@@ -983,6 +983,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/judgment-settings-snapshot.test.ts](test/judgment-settings-snapshot.test.ts) |
 | [packages/engine/test/judgment-snapshot-reuse.test.ts](test/judgment-snapshot-reuse.test.ts) |
 | [packages/engine/test/judgment-tool-evidence-completeness.test.ts](test/judgment-tool-evidence-completeness.test.ts) |
+| [packages/engine/test/judgment-volume-monitor.test.ts](test/judgment-volume-monitor.test.ts) |
 | [packages/engine/test/keyless-default.test.ts](test/keyless-default.test.ts) |
 | [packages/engine/test/knowledge-activation-hold-propagation.test.ts](test/knowledge-activation-hold-propagation.test.ts) |
 | [packages/engine/test/knowledge-admission-coverage.test.ts](test/knowledge-admission-coverage.test.ts) |
@@ -1729,6 +1730,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/subpath-declared.test.ts](test/subpath-declared.test.ts) |
 | [packages/engine/test/subpath-export-coverage.test.ts](test/subpath-export-coverage.test.ts) |
 | [packages/engine/test/subscriptions-shared-tier.test.ts](test/subscriptions-shared-tier.test.ts) |
+| [packages/engine/test/support-bundle-inspection.test.ts](test/support-bundle-inspection.test.ts) |
 | [packages/engine/test/surface-card-gate.test.ts](test/surface-card-gate.test.ts) |
 | [packages/engine/test/surface-layout.test.ts](test/surface-layout.test.ts) |
 | [packages/engine/test/surface-notice-delivery.test.ts](test/surface-notice-delivery.test.ts) |
@@ -1750,6 +1752,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/temp-cleanup.test.ts](test/temp-cleanup.test.ts) |
 | [packages/engine/test/templates-manager.test.ts](test/templates-manager.test.ts) |
 | [packages/engine/test/term-caps.test.ts](test/term-caps.test.ts) |
+| [packages/engine/test/terminal-command-registry.test.ts](test/terminal-command-registry.test.ts) |
 | [packages/engine/test/terminal-output-guard-counter.test.ts](test/terminal-output-guard-counter.test.ts) |
 | [packages/engine/test/terminal-output-guard-double-install.test.ts](test/terminal-output-guard-double-install.test.ts) |
 | [packages/engine/test/terminal-output-guard-notify.test.ts](test/terminal-output-guard-notify.test.ts) |

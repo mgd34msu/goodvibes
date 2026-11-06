@@ -1,3 +1,4 @@
+export { inferSubscriptionRouteReason } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 /**
  * Pure formatting, label, and color helpers for renderSettingsModal.
  * Extracted from settings-modal.ts to keep the renderer under the 800-line
@@ -69,16 +70,7 @@ export function subscriptionStateColor(state: SubscriptionEntry['state']): strin
   }
 }
 
-export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string | undefined {
-  if (entry.routeReason?.trim()) return entry.routeReason;
-  if (entry.state === 'active' && entry.oauthConfigured) {
-    return 'ambient key override enabled for this provider.';
-  }
-  if (entry.state === 'pending' && entry.oauthConfigured) {
-    return 'oauth configuration present; ambient key override will apply after activation.';
-  }
-  return undefined;
-}
+
 
 export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], string> = {
   display: 'Display',

@@ -1,3 +1,5 @@
+import type { OnboardingNetworkMode, OnboardingAcknowledgementReason, OnboardingProviderRoutingSnapshot, OnboardingServiceState, OnboardingServicesSnapshot, OnboardingSubscriptionsSnapshot, OnboardingSecretsSnapshot, OnboardingAuthSnapshot, OnboardingSurfaceRecord, OnboardingSurfacesSnapshot, OnboardingRuntimeDefaultsSnapshot, OnboardingAcknowledgementState, OnboardingReopenEditAcknowledgementState } from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
+export type { OnboardingNetworkMode, OnboardingAcknowledgementReason, OnboardingProviderRoutingSnapshot, OnboardingServiceState, OnboardingServicesSnapshot, OnboardingSubscriptionsSnapshot, OnboardingSecretsSnapshot, OnboardingAuthSnapshot, OnboardingSurfaceRecord, OnboardingSurfacesSnapshot, OnboardingRuntimeDefaultsSnapshot, OnboardingAcknowledgementState, OnboardingReopenEditAcknowledgementState } from '@goodvibes-jev/engine/terminal-shell/onboarding-data-types';
 export type { OnboardingVerificationStatus, OnboardingVerificationItem, OnboardingVerificationResult } from '@goodvibes-jev/engine/terminal-shell/onboarding-verification';
 import type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
 export type { OnboardingAcknowledgementSnapshot } from '@goodvibes-jev/engine/terminal-shell/onboarding-state-types';
@@ -13,17 +15,9 @@ import type {
   SubscriptionAccessQuery,
 } from '@/runtime/index.ts';
 
-export type OnboardingNetworkMode = 'local-network-default' | 'custom';
 
-export type OnboardingAcknowledgementReason =
-  | 'not-needed'
-  | 'configured-routing'
-  | 'customized-config'
-  | 'subscription-state'
-  | 'pending-login'
-  | 'auth-state'
-  | 'bootstrap-credential'
-  | 'active-sessions';
+
+
 
 
 
@@ -46,56 +40,17 @@ export interface OnboardingConfigSnapshot {
   readonly cloudflare: GoodVibesConfig['cloudflare'];
 }
 
-export interface OnboardingProviderRoutingSnapshot {
-  readonly primaryProviderId: string;
-  readonly primaryModelId: string;
-  readonly primaryReasoningEffort: GoodVibesConfig['provider']['reasoningEffort'];
-  readonly embeddingProviderId: string;
-  readonly systemPromptFile: string;
-  readonly helperEnabled: boolean;
-  readonly helperProviderId: string;
-  readonly helperModelId: string;
-  readonly toolLlmEnabled: boolean;
-  readonly toolProviderId: string;
-  readonly toolModelId: string;
-}
 
-export interface OnboardingServiceState {
-  readonly name: string;
-  readonly providerId: string;
-  readonly baseUrl: string | null;
-  readonly authType: 'bearer' | 'basic' | 'api-key' | 'oauth';
-  readonly tokenKey: string;
-  readonly oauthConfigured: boolean;
-  readonly hasPrimaryCredential: boolean;
-  readonly hasPasswordCredential: boolean;
-  readonly hasWebhookUrl: boolean;
-  readonly hasSigningSecret: boolean;
-  readonly hasPublicKey: boolean;
-  readonly hasAppToken: boolean;
-}
 
-export interface OnboardingServicesSnapshot {
-  readonly total: number;
-  readonly oauthProviderIds: readonly string[];
-  readonly services: readonly OnboardingServiceState[];
-}
 
-export interface OnboardingSubscriptionsSnapshot {
-  readonly active: ReturnType<SubscriptionAccessQuery['list']>;
-  readonly pending: ReturnType<SubscriptionAccessQuery['listPending']>;
-  readonly activeProviderIds: readonly string[];
-  readonly pendingProviderIds: readonly string[];
-}
 
-export interface OnboardingSecretsSnapshot {
-  readonly review: SecretStorageReview;
-  readonly records: readonly SecretRecord[];
-}
 
-export interface OnboardingAuthSnapshot {
-  readonly snapshot: LocalAuthSnapshot;
-}
+
+
+
+
+
+
 
 export interface OnboardingBindSettingsSnapshot {
   readonly daemonEnabled: boolean;
@@ -105,20 +60,9 @@ export interface OnboardingBindSettingsSnapshot {
   readonly web: GoodVibesConfig['web'];
 }
 
-export interface OnboardingSurfaceRecord {
-  readonly id: string;
-  readonly kind: string;
-  readonly label: string;
-  readonly enabled: boolean;
-  readonly state: string;
-  readonly capabilities: readonly string[];
-  readonly metadata: Readonly<Record<string, unknown>>;
-}
 
-export interface OnboardingSurfacesSnapshot {
-  readonly configuredEnabledKinds: readonly string[];
-  readonly records: readonly OnboardingSurfaceRecord[];
-}
+
+
 
 /**
  * Wizard wiring: read-only detection of a legacy `goodvibes-daemon.service`
@@ -169,13 +113,7 @@ export interface OnboardingProviderAccountsSnapshot {
   readonly providers: readonly OnboardingProviderAccountRecord[];
 }
 
-export interface OnboardingRuntimeDefaultsSnapshot {
-  readonly providerReasoningEffort: GoodVibesConfig['provider']['reasoningEffort'];
-  readonly permissionsMode: GoodVibesConfig['permissions']['mode'];
-  readonly behavior: GoodVibesConfig['behavior'];
-  readonly display: GoodVibesConfig['display'];
-  readonly secretStoragePolicy: GoodVibesConfig['storage']['secretPolicy'];
-}
+
 
 
 
@@ -240,18 +178,9 @@ export interface OnboardingStep1CapabilityFlags {
   readonly cloudflare: boolean;
 }
 
-export interface OnboardingAcknowledgementState {
-  readonly required: boolean;
-  readonly accepted: boolean;
-  readonly reason: OnboardingAcknowledgementReason;
-  readonly detail: string;
-}
 
-export interface OnboardingReopenEditAcknowledgementState {
-  readonly providers: OnboardingAcknowledgementState;
-  readonly subscriptions: OnboardingAcknowledgementState;
-  readonly auth: OnboardingAcknowledgementState;
-}
+
+
 
 export interface OnboardingStepDerivationState {
   readonly step1Capabilities: readonly OnboardingStep1CapabilityItem[];

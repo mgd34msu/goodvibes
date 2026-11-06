@@ -131,6 +131,67 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Show partial tool call preview while streaming"
   },
   {
+    "key": "provider.decisionRouter",
+    "type": "object",
+    "default": {
+      "categories": {
+        "lookup-navigation": {
+          "label": "Lookup / navigation",
+          "description": "Find a definition, locate a file or setting, or answer a narrow question about existing work.",
+          "target": null
+        },
+        "coding-implementation": {
+          "label": "Coding / implementation",
+          "description": "Implement, modify or refactor code and configuration.",
+          "target": null
+        },
+        "analysis-decisions": {
+          "label": "Analysis / decisions",
+          "description": "Reason through a problem, compare options, plan an approach or make a decision.",
+          "target": null
+        },
+        "documentation-writing": {
+          "label": "Documentation / writing",
+          "description": "Write or edit documentation, explanations and other prose.",
+          "target": null
+        },
+        "summarization-extraction": {
+          "label": "Summarization / extraction",
+          "description": "Summarize supplied material or extract its facts into a requested form.",
+          "target": null
+        },
+        "general": {
+          "label": "General",
+          "description": "Catch-all for conversation and requests that do not fit a more specific category.",
+          "target": null
+        },
+        "debugging-diagnosis": {
+          "label": "Debugging / diagnosis",
+          "description": "Identify the cause of an error, failing test, crash or unexpected behavior.",
+          "target": null
+        },
+        "review-verification": {
+          "label": "Review / verification",
+          "description": "Review a change or verify claims, correctness, behavior or test evidence.",
+          "target": null
+        },
+        "research": {
+          "label": "Research",
+          "description": "Find and synthesize information from external sources.",
+          "target": null
+        },
+        "data-analysis": {
+          "label": "Data analysis",
+          "description": "Analyze datasets, calculate metrics, or interpret quantitative results.",
+          "target": null
+        }
+      },
+      "initialContextChars": 3000,
+      "expandedContextChars": 10000
+    },
+    "description": "Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials."
+  },
+  {
     "key": "provider.reasoningEffort",
     "type": "string",
     "default": "medium",
@@ -3765,11 +3826,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "judgment.keySource",
     "type": "enum",
     "default": "env",
-    "description": "Which place the judgment API key is read from, env (TYPESAFE_API_KEY in the process environment) or secret (TYPESAFE_API_KEY in the secret store); the setting names the place, not the key",
+    "description": "Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference",
     "enumValues": [
       "env",
-      "secret"
+      "secret",
+      "none"
     ]
+  },
+  {
+    "key": "judgment.keyName",
+    "type": "string",
+    "default": "TYPESAFE_API_KEY",
+    "description": "Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none",
+    "validationHint": "a credential reference name"
   },
   {
     "key": "judgment.model",
@@ -3778,17 +3847,24 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest"
   },
   {
+    "key": "judgment.backend",
+    "type": "object",
+    "default": {},
+    "description": "Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically",
+    "validationHint": "data object with optional adapter, positive maxInputBytes/maxQuestions and explicit responseModels"
+  },
+  {
     "key": "judgment.fallbacks",
     "type": "object",
     "default": [],
-    "description": "Ordered array of compatible System One fallback objects. Each object has exactly endpoint, model, keySource and keyName. endpoint is an HTTP or HTTPS URL without embedded credentials, query or fragment. model is a Jev model name or alias such as jev-latest; it must match the requested primary model. keySource is env or secret; keyName names the environment variable or native secret-store entry from which the runtime privately resolves the API key. This setting accepts only that reference name, never a credential value or an inline apiKey field. An empty array disables fallbacks, including inherited fallbacks.",
+    "description": "Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted once with a finite deadline; exhaustion halts the operation",
     "validationHint": "array of { endpoint, model, keySource: \"env\" | \"secret\", keyName }; no credentials in URLs or inline keys"
   },
   {
     "key": "judgment.timeoutMs",
     "type": "number",
-    "default": 0,
-    "description": "Optional timeout per judgment attempt in milliseconds; 0 waits until completion or cancellation",
+    "default": 30000,
+    "description": "Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner",
     "validationHint": "integer in [0, 2147483647]"
   },
   {

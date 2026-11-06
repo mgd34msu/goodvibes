@@ -1,9 +1,9 @@
+import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { runSetupPairingCommand } from './setup-pair-command.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import type { ConfigManager, ConfigKey, GoodVibesConfig } from '../config/index.ts';
@@ -164,20 +164,7 @@ export function openBrowser(url: string): string {
   }
 }
 
-export async function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const socket = net.createConnection({ host: connectHostForBindHost(host), port });
-    const finish = (value: boolean) => {
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(value);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once('connect', () => finish(true));
-    socket.once('timeout', () => finish(false));
-    socket.once('error', () => finish(false));
-  });
-}
+export function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
 
 export async function withRuntimeServices<T>(
   runtime: CliCommandRuntime,

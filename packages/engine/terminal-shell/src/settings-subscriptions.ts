@@ -107,3 +107,14 @@ function determineFreshness(expiresAt?: number | undefined): ProviderAuthFreshne
         return 'expiring';
     return 'healthy';
 }
+
+export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string | undefined {
+  if (entry.routeReason?.trim()) return entry.routeReason;
+  if (entry.state === 'active' && entry.oauthConfigured) {
+    return 'ambient key override enabled for this provider.';
+  }
+  if (entry.state === 'pending' && entry.oauthConfigured) {
+    return 'oauth configuration present; ambient key override will apply after activation.';
+  }
+  return undefined;
+}

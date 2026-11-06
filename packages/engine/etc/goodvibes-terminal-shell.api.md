@@ -114,14 +114,17 @@ export class BookmarkModal {
     moveUp(): void;
     open(): void;
     openSelectedFile(): string | null;
+    query: string;
     removeSelected(): BookmarkEntry | null;
     scrollOffset: number;
     // (undocumented)
     selectedIndex: number;
+    setQuery(query: string): void;
     // (undocumented)
     setVisibleRows(rows: number): void;
     // (undocumented)
     static readonly VISIBLE_ROWS = 8;
+    get visibleEntries(): BookmarkEntry[];
     visibleRows: number;
 }
 

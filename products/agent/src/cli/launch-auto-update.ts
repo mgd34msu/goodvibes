@@ -1,3 +1,5 @@
+import { withTimeout, restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
+export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
 /**
  * Launch-time self-update, the agent lands on the newest release at startup
@@ -33,7 +35,6 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * stubbed fetch, a stubbed apply, and pinned fixture versions, never the
  * live build VERSION and never the real network.
  */
-import { spawnSync } from 'node:child_process';
 import { detectInstallKind, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
 import { readUpdateSettings, type UpdateSettings } from '../config/update-settings.ts';
@@ -82,20 +83,7 @@ export interface RunLaunchAutoUpdateOptions {
 }
 
 /** Resolves to 'timeout' when `promise` does not settle within `ms`; the timer never keeps the process alive. */
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<'timeout'>((resolve) => {
-        timer = setTimeout(() => resolve('timeout'), ms);
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+
 
 /**
  * The launch-time decision: receipt-and-continue (restarted process), skip
@@ -213,15 +201,7 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
   return lines;
 }
 
-export interface RestartOntoUpdatedBinaryOptions {
-  readonly execPath: string;
-  readonly argv: readonly string[];
-  readonly env: NodeJS.ProcessEnv;
-  /** The version that performed the update, the restarted process prints it in its receipt line. */
-  readonly fromVersion: string;
-  /** Injectable so tests observe the restart instead of spawning a process. */
-  readonly spawn?: (execPath: string, argv: readonly string[], env: NodeJS.ProcessEnv) => number | null;
-}
+
 
 /**
  * Runs the (just-swapped) binary at execPath with the original CLI arguments
@@ -229,14 +209,6 @@ export interface RestartOntoUpdatedBinaryOptions {
  * code for the caller to process.exit with. The receipt marker travels in the
  * child's environment, never on the command line.
  */
-export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {
-  const spawn =
-    options.spawn ??
-    ((execPath: string, argv: readonly string[], env: NodeJS.ProcessEnv) =>
-      spawnSync(execPath, [...argv], { stdio: 'inherit', env }).status);
-  const status = spawn(options.execPath, options.argv, {
-    ...options.env,
-    [LAUNCH_UPDATED_FROM_ENV]: options.fromVersion,
-  });
-  return status ?? 0;
-}
+
+
+export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number { return restart(options, LAUNCH_UPDATED_FROM_ENV); }

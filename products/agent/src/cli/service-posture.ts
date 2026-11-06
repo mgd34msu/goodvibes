@@ -1,6 +1,6 @@
+import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
-import net from 'node:net';
 import { isAbsolute, join } from 'node:path';
 import { resolveConnectedHostDialEnabled, resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ConfigKey, ConfigManager } from '../config/index.ts';
@@ -96,20 +96,7 @@ interface CliServicePostureOptions extends JudgmentReadingOptions {
 /** A TCP probe from this process, so a wildcard bind resolves to loopback. */
 const connectHostForBindHost = dialHostForConfiguredHost;
 
-async function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const socket = net.createConnection({ host: connectHostForBindHost(host), port });
-    const finish = (value: boolean) => {
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(value);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once('connect', () => finish(true));
-    socket.once('timeout', () => finish(false));
-    socket.once('error', () => finish(false));
-  });
-}
+function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> { return probe(host, port, timeoutMs, connectHostForBindHost); }
 
 async function readLogPosture(path: string | undefined, tailBytes: number, options: JudgmentReadingOptions, captureOwner: () => void): Promise<CliServiceLogPosture> {
   if (!path) return { path: null, exists: false, size: 0, modifiedAt: null };

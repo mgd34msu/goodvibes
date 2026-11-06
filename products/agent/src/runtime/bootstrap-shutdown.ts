@@ -1,3 +1,4 @@
+import { createOrderedShutdown, drainShutdownRegistry, clearIntervalSlot } from '@goodvibes-jev/engine/terminal-shell/ordered-shutdown';
 /**
  * bootstrap-shutdown.ts, how a session lets go of everything it took.
  *
@@ -65,16 +66,7 @@ export function createRuntimeShutdown(
   // close. Repeated callers share the same completion and failure result.
   // Collaborators must not await this owner's shutdown from inside their own
   // disposal: that is a dependency cycle, including indirectly wrapped waits.
-  let closing: Promise<void> | undefined;
-  return (sessionData) => closing ??= Promise.resolve().then(async () => {
-    const failures: unknown[] = [];
-    const attempt = async (dispose: () => unknown): Promise<void> => {
-      try {
-        const result = dispose();
-        if (result === closing) throw new Error('A shutdown callback cannot await its own shutdown');
-        await result;
-      } catch (error) { failures.push(error); }
-    };
+  return createOrderedShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt) => {
     await attempt(() => deps.sessionSpineClient.close(deps.sessionId));
     await attempt(() => deps.sessionSpineClient.dispose());
     await attempt(() => {
@@ -84,36 +76,34 @@ export function createRuntimeShutdown(
 
     // Take subscriptions out of the live arrays before invoking callbacks. One
     // broken unsubscribe must neither retain itself nor strand its siblings.
-    for (const unsubscribe of deps.bootstrapUnsubs.splice(0)) await attempt(unsubscribe);
-    for (const unsubscribe of deps.runtimeUnsubs.splice(0)) await attempt(unsubscribe);
+    await drainShutdownRegistry(deps.bootstrapUnsubs, attempt);
+    await drainShutdownRegistry(deps.runtimeUnsubs, attempt);
     await attempt(() => deps.forensicsCollector.dispose());
     await attempt(() => deps.executionLedger.dispose());
     await attempt(() => deps.disposeSessionWriteLedger());
     await attempt(() => shutdownAgentBrowserSessions());
     await attempt(() => deps.deferredStartup.drain(100));
     await attempt(() => deps.agentExternalServices.stop());
-    await attempt(() => {
-      const timer = deps.agentStatusIntervalRef.value;
-      deps.agentStatusIntervalRef.value = null;
-      if (timer !== null) clearInterval(timer);
-    });
+    await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
     let title = '';
-    await attempt(() => { title = deps.conversationTitle(); });
-    await attempt(() => shutdownRuntime(
-      deps.sessionId,
-      sessionData,
-      deps.model,
-      deps.provider,
-      title,
-      deps.scheduleManager,
-      deps.hookDispatcher,
-      deps.providerRegistry,
-      deps.sessionOrchestration,
-      deps.shutdownOptions,
-    ));
+    await attempt(() => {
+      title = deps.conversationTitle();
+    });
+    await attempt(() =>
+      shutdownRuntime(
+        deps.sessionId,
+        sessionData,
+        deps.model,
+        deps.provider,
+        title,
+        deps.scheduleManager,
+        deps.hookDispatcher,
+        deps.providerRegistry,
+        deps.sessionOrchestration,
+        deps.shutdownOptions,
+      ),
+    );
     // Always last: final persistence and SDK shutdown still need the graph.
     await attempt(() => deps.disposeRuntimeGraph());
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, 'Agent shutdown failed to release one or more owned resources');
-  });
+  }, 'Agent shutdown failed to release one or more owned resources');
 }

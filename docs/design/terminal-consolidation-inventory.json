@@ -1626,7 +1626,8 @@
       "path": "runtime/bootstrap-shutdown.ts",
       "baselineTuiLines": 87,
       "baselineSimilarity": 0.2913,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns shutdown latching, repeated-caller identity, direct self-wait rejection, best-effort cleanup with deterministic aggregate failures, subscription taking and interval retirement. Products declare their resource-specific release order, admitted external-start settling and final durable-save/graph-close callbacks."
     },
     {
       "path": "runtime/bootstrap.ts",

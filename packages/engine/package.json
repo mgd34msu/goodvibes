@@ -2863,6 +2863,11 @@
       "bun": "./terminal-shell/src/context-accounting-source.ts",
       "types": "./terminal-shell/dist/context-accounting-source.d.ts",
       "import": "./terminal-shell/dist/context-accounting-source.js"
+    },
+    "./terminal-shell/ordered-shutdown": {
+      "bun": "./terminal-shell/src/ordered-shutdown.ts",
+      "types": "./terminal-shell/dist/ordered-shutdown.d.ts",
+      "import": "./terminal-shell/dist/ordered-shutdown.js"
     }
   },
   "publishConfig": {

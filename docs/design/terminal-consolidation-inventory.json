@@ -1385,7 +1385,8 @@
       "path": "renderer/session-picker-modal.ts",
       "baselineTuiLines": 323,
       "baselineSimilarity": 0.3589,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter",
+      "notes": "Platform owns recency grouping, saved-session rows, armed-delete presentation, viewport allocation, scrolling, search/counts and status footer. Product policies supply labels, deletion/mouse affordances and TUI-only pinned hosted/cross-surface rosters."
     },
     {
       "path": "renderer/settings-modal-context.ts",

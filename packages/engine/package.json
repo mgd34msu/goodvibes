@@ -2838,6 +2838,11 @@
       "bun": "./terminal-shell/src/provider-account-actions.ts",
       "types": "./terminal-shell/dist/provider-account-actions.d.ts",
       "import": "./terminal-shell/dist/provider-account-actions.js"
+    },
+    "./terminal-shell/renderer/session-picker": {
+      "bun": "./terminal-shell/src/renderer/session-picker.ts",
+      "types": "./terminal-shell/dist/renderer/session-picker.d.ts",
+      "import": "./terminal-shell/dist/renderer/session-picker.js"
     }
   },
   "publishConfig": {

@@ -131,6 +131,22 @@ retaining explicit owner strategy choices. Archetypes remain listable with
 unclassified families; prose-based orchestration selection reports its decision
 model requirement before creating a task.
 
+Classic registry discovery uses local query terms without selecting or executing
+a discovered tool. Project inspection retains manifest, lockfile and declared
+test-runner facts; inferred entry points remain explicitly unassessed. Env audit
+can compare a single conventionally named example/sample/template file. Test
+discovery can name an importing file with an explicit test filename convention,
+and marks that source rather than claiming semantic verification. Security
+inspection reports redacted local credential-pattern candidates, actual env file
+presence and filesystem mode bits. It does not claim complete semantic coverage.
+
+Semantic diff and compatibility modes expose the actual diff with an unassessed
+risk/compatibility result during Classic. Semantic dangerous-call assessment,
+frontend issue assessment and inferred API-registration verification report their
+decision-model requirement; they cannot return an apparently clean scan or write
+an inferred API artifact. Summary formatting preserves these limitations and
+Classic provenance.
+
 ## Completion evidence required
 
 All four products, daemon-hosted and headless sessions, and background work must

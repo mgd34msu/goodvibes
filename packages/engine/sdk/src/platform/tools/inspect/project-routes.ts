@@ -11,7 +11,8 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
  */
 import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { apiRoutes, HANDLER_METHODS, handlerView, routeLineView, servesQuestion } from '../batteries/api-routes.js';
@@ -171,6 +172,11 @@ async function routesFor(root: string, framework: ConcreteFramework, unavailable
  * preferred.
  */
 export async function inspectApi(root: string, framework: ApiFramework, unavailable: string[] = []): Promise<ApiRoute[]> {
+  return decisionOrClassic(() => inspectDecisionApi(root, framework, unavailable), () => {
+    throw new DecisionModelsDisabledError('infer and verify API registrations from source code');
+  });
+}
+async function inspectDecisionApi(root: string, framework: ApiFramework, unavailable: string[]): Promise<ApiRoute[]> {
   if (framework !== 'auto') return routesFor(root, framework, unavailable);
   const declared = await declaredApiFrameworks(root, unavailable);
   const frameworks = declared.length > 0 ? declared : FRAMEWORK_PACKAGES.map(([, fw]) => fw);

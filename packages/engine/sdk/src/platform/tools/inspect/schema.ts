@@ -131,6 +131,8 @@ export interface InspectInput {
 // ---------------------------------------------------------------------------
 
 export interface ProjectInfo {
+  readonly provenance?: 'classic';
+  readonly entryPointsSource?: 'manifest' | 'unassessed';
   type: 'nodejs' | 'rust' | 'python' | 'go' | 'make' | 'unknown';
   name?: string | undefined;
   version?: string | undefined;

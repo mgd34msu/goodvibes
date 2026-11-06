@@ -84,6 +84,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
   switch (mode) {
     case 'project':
       return {
+        ...(record.provenance === 'classic' ? { provenance: 'classic', entryPointsSource: record.entryPointsSource } : {}),
         type: record.type ?? null,
         name: record.name ?? null,
         packageManager: record.packageManager ?? null,

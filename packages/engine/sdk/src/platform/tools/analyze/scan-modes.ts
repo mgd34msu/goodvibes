@@ -15,6 +15,7 @@ import {
   testOfSourceContext,
 } from '../batteries/test-of-source.js';
 import type { AnalyzeInput, ExportedSymbol } from './types.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 export { runPermissions, runSecurity } from './scan-findings.js';
 import {
@@ -551,14 +552,22 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
 
   // Which file, if any, is the template listing every expected variable is read by `engine.tools.env-template`.
   await assertCapturedToolAccessCurrent();
-  const selection = await envTemplate.select(
-    judgmentPort(ENV_TEMPLATE_SITE),
-    envTemplateContext(found.map(({ name }) => name)),
-    found.map(({ name, variables }) => envTemplateCandidate(name, variables)),
-    { site: ENV_TEMPLATE_SITE },
-  );
-  const reference = selection.outcome !== 'act' ? undefined : found.find((f) => f.name === selection.chosen);
-  selection.recordAction(reference ? `compared against ${reference.name}` : 'compared nothing');
+  const selected = await decisionOrClassic(async () => {
+    const selection = await envTemplate.select(
+      judgmentPort(ENV_TEMPLATE_SITE),
+      envTemplateContext(found.map(({ name }) => name)),
+      found.map(({ name, variables }) => envTemplateCandidate(name, variables)),
+      { site: ENV_TEMPLATE_SITE },
+    );
+    const reference = selection.outcome !== 'act' ? undefined : found.find((f) => f.name === selection.chosen);
+    selection.recordAction(reference ? `compared against ${reference.name}` : 'compared nothing');
+    return { reference, uncertain: selection.outcome !== 'act', provenance: undefined as 'classic' | undefined };
+  }, async () => {
+    await assertCapturedToolAccessCurrent();
+    const declared = found.filter(file => file.name === '.env.example' || file.name === '.env.sample' || file.name === '.env.template');
+    return { reference: declared.length === 1 ? declared[0] : undefined, uncertain: false, provenance: 'classic' as const };
+  });
+  const { reference } = selected;
   const files = found.map((f) => ({ name: f.name, key_count: f.keys.length }));
   if (!reference) {
     return {
@@ -566,8 +575,10 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
       reference: null,
       missing: [],
       extra: [],
-      uncertain: selection.outcome !== 'act',
-      message: selection.outcome === 'act' ? 'No env file reads as a template of the expected variables; nothing to compare against' : 'The env template reading is unsettled; no comparison was made',
+      uncertain: selected.uncertain,
+      ...(selected.provenance ? { provenance: selected.provenance } : {}),
+      message: selected.provenance ? 'Classic found no single conventionally named env template; no comparison was made'
+        : !selected.uncertain ? 'No env file reads as a template of the expected variables; nothing to compare against' : 'The env template reading is unsettled; no comparison was made',
     };
   }
 
@@ -597,7 +608,7 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
     }
   }
 
-  return { files, reference: reference.name, missing, extra };
+  return { files, reference: reference.name, missing, extra, ...(selected.provenance ? { provenance: selected.provenance, reference_source: 'filename-convention' } : {}) };
 }
 
 /** Each project file's relative imports, resolved to the files they name. */
@@ -627,7 +638,14 @@ async function resolvedImports(
 async function pickTestOf(
   source: string,
   candidates: readonly Candidate[],
-): Promise<{ test: string | null; uncertain: boolean }> {
+): Promise<{ test: string | null; uncertain: boolean; provenance?: 'classic' }> {
+  return decisionOrClassic(() => pickDecisionTestOf(source, candidates), async () => {
+    await assertCapturedToolAccessCurrent();
+    const namedTests = candidates.filter(candidate => /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)__tests__\/)/.test(candidate.id));
+    return { test: namedTests.length === 1 ? namedTests[0]?.id ?? null : null, uncertain: namedTests.length !== 1, provenance: 'classic' as const };
+  });
+}
+async function pickDecisionTestOf(source: string, candidates: readonly Candidate[]): Promise<{ test: string | null; uncertain: boolean; provenance?: 'classic' }> {
   let round = [...candidates];
   for (;;) {
     const groups: Candidate[][] = [];
@@ -667,7 +685,8 @@ export async function runTestFind(input: AnalyzeInput, projectRoot: string, walk
     test: string | null;
     exists: boolean;
     candidates_checked: number;
-    reading?: 'uncertain';
+    reading?: 'uncertain' | 'not-evaluated';
+    provenance?: 'classic';
   }> = [];
 
   for (const srcFile of sourceFiles) {
@@ -678,16 +697,16 @@ export async function runTestFind(input: AnalyzeInput, projectRoot: string, walk
         ? [testOfSourceCandidate(relative(projectRoot, file), importLines, lines)]
         : [];
     });
-    const { test, uncertain } =
+    const { test, uncertain, provenance } =
       candidates.length === 0
-        ? { test: null, uncertain: false }
+        ? { test: null, uncertain: false, provenance: undefined }
         : await pickTestOf(relative(projectRoot, source), candidates);
     mappings.push({
       source: srcFile,
       test,
       exists: test !== null,
       candidates_checked: candidates.length,
-      ...(uncertain ? { reading: 'uncertain' as const } : {}),
+      ...(provenance ? { provenance, reading: 'not-evaluated' as const } : uncertain ? { reading: 'uncertain' as const } : {}),
     });
   }
 

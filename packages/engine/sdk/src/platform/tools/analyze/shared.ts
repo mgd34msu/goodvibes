@@ -133,6 +133,19 @@ export function summarizeAnalyzeResult(
   mode: AnalyzeInput['mode'],
   result: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (result.provenance === 'classic' && result.assessment === 'unavailable') return {
+    mode, provenance: 'classic', assessment: 'unavailable', reason: result.reason, message: result.message,
+  };
+  const summary = summarizeAnalyzeDetails(mode, result);
+  if (result.provenance === 'classic') {
+    summary.provenance = 'classic';
+    if (result.assessment !== undefined) summary.assessment = result.assessment;
+    if (result.message !== undefined) summary.message = result.message;
+    if (mode === 'security') summary.secret_assessment = (result.secrets as Record<string, unknown> | undefined)?.assessment ?? null;
+  }
+  return summary;
+}
+function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<string, unknown>): Record<string, unknown> {
   switch (mode) {
     case 'dependencies':
       return {

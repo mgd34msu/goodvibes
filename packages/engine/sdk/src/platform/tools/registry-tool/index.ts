@@ -19,6 +19,8 @@ import { summarizeError } from '../../utils/error-display.js';
 import type { ContractInputAuthority } from '../../contract/input-authority.js';
 import { liveRegistrySource, registryMarkdown, materializeRegistryMarkdown, type RegistryToolSource } from './source.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
 
 const capturedTools = new WeakMap<Tool, ContractInputAuthority>();
 export function isCapturedRegistryTool(tool: Tool, authority: ContractInputAuthority): boolean {
@@ -143,6 +145,17 @@ async function rankAgainst(
   query: string,
   source: RegistryToolSource,
 ): Promise<{ matching: RegistryMatch[]; rest: RegistryMatch[] }> {
+  return decisionOrClassic(() => rankDecisionAgainst(items, query, source), async () => {
+    source.signal?.throwIfAborted(); await source.assertCurrent();
+    const original = retainStrictJudgmentJson({ query, items });
+    assertJudgmentInput(original.snapshot);
+    const matching = rankClassicCatalog(items, query, item => ({ id: `${item.type}:${item.name}`, description: item.description })).map(match => match.entry);
+    const selected = new Set(matching);
+    original.assertCurrent(); source.signal?.throwIfAborted(); await source.assertCurrent();
+    return { matching, rest: items.filter(item => !selected.has(item)).sort((a, b) => a.name.localeCompare(b.name)) };
+  });
+}
+async function rankDecisionAgainst(items: readonly RegistryMatch[], query: string, source: RegistryToolSource): Promise<{ matching: RegistryMatch[]; rest: RegistryMatch[] }> {
   if (items.length === 0) return { matching: [], rest: [] };
   const byId = new Map(items.map((item) => [`${item.type}:${item.name}`, item]));
   const candidates = Array.from(byId, ([id, item]) => ({ id, content: registryCandidateView({ ...item, preview: registryEvidence.get(item) ?? item.preview }) }));
@@ -244,6 +257,9 @@ export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryTo
     args: Record<string, unknown>,
     options?: ToolExecuteOptions,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
+    return withConfiguredDecisionModelPolicy(() => executeUnderPolicy(args, options));
+  }
+  async function executeUnderPolicy(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
     const signal = options?.signal;
     const source = captured?.source(signal) ?? liveRegistrySource;
     try {
@@ -314,6 +330,7 @@ async function runSearch(
     success: true,
     output: JSON.stringify({
       mode: 'search',
+      ...(isClassicOperation() ? { provenance: 'classic', match_source: 'literal-token-overlap' } : {}),
       query,
       count: results.length,
       results,
@@ -355,6 +372,7 @@ async function runRecommend(
     success: true,
     output: JSON.stringify({
       mode: 'recommend',
+      ...(isClassicOperation() ? { provenance: 'classic', match_source: 'literal-token-overlap' } : {}),
       task,
       scope,
       count: sorted.length,

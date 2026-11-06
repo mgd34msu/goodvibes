@@ -25,6 +25,8 @@ import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { findScanLines, scanBlocks } from './scan-lines.js';
 import type { AnalyzeInput } from './types.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { containsIssuerCredential, findCredentialCandidates } from '../../utils/redaction.js';
 import {
   MAX_SCAN_FILES,
   MAX_SCAN_MS,
@@ -88,6 +90,30 @@ const matchText = (candidate: ScanCandidate, max: number): string =>
   (candidate.lines[candidate.index] ?? '').trim().slice(0, max);
 
 export async function runSecurity(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
+  return decisionOrClassic(() => runDecisionSecurity(input, projectRoot, walkOptions), async () => {
+    const scope = input.securityScope ?? 'all';
+    const result: Record<string, unknown> = { provenance: 'classic' };
+    if (scope === 'env' || scope === 'all') Object.assign(result, await runDecisionSecurity({ ...input, securityScope: 'env' }, projectRoot, walkOptions));
+    if (scope === 'permissions' || scope === 'all') Object.assign(result, await runDecisionSecurity({ ...input, securityScope: 'permissions' }, projectRoot, walkOptions));
+    if (scope === 'secrets' || scope === 'all') {
+      const findings: { file: string; line: number; match: string; reading: 'local-pattern-candidate' }[] = [];
+      const root = resolveScanRoot(input, projectRoot);
+      for (const file of await collectTextFiles(root, MAX_SCAN_FILES, undefined, walkOptions)) {
+        const text = await readTextFile(file);
+        if (text === null) continue;
+        const lines = text.split('\n');
+        for (const [index, line] of lines.entries()) if (containsIssuerCredential(line) || findCredentialCandidates(line).length > 0) {
+          findings.push({ file: relative(projectRoot, file), line: index + 1, match: '[redacted local credential candidate]', reading: 'local-pattern-candidate' });
+        }
+        await assertCapturedToolAccessCurrent();
+      }
+      result.secrets = { findings, count: findings.length, assessment: 'local-patterns-only', semanticVerification: false };
+    }
+    await assertCapturedToolAccessCurrent();
+    return result;
+  });
+}
+async function runDecisionSecurity(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions): Promise<Record<string, unknown>> {
   const scope = input.securityScope ?? 'all';
   const results: Record<string, unknown> = {};
   const scanRoot = resolveScanRoot(input, projectRoot);
@@ -149,6 +175,13 @@ export async function runSecurity(input: AnalyzeInput, projectRoot: string, walk
 }
 
 export async function runPermissions(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
+  return decisionOrClassic(() => runDecisionPermissions(input, projectRoot, walkOptions), async () => {
+    await assertCapturedToolAccessCurrent();
+    return { provenance: 'classic', assessment: 'unavailable', reason: 'decision-model-required',
+      message: 'Semantic classification of dangerous calls requires a decision model. Local filesystem permission checks remain available through the security permissions scope.' };
+  });
+}
+async function runDecisionPermissions(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions): Promise<Record<string, unknown>> {
   const scanRoot = resolveScanRoot(input, projectRoot);
   const deadline = Date.now() + MAX_SCAN_MS;
   const files = await collectTextFiles(scanRoot, MAX_SCAN_FILES, deadline, walkOptions);

@@ -9,7 +9,8 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
  * whether it is an issue. A candidate is reported unless the reading is a
  * no, so an uncertain one is shown with `reading: 'uncertain'`.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, isClassicOperation } from '../../runtime/decision-policy.js';
 import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import {
@@ -50,6 +51,11 @@ function findingReading(reading: YesNoReading): FindingReading | 'dismissed' {
 }
 
 async function read(question: Question, state: Record<string, unknown>): Promise<FindingReading | 'dismissed'> {
+  return decisionOrClassic(() => readDecisionFinding(question, state), () => {
+    throw new DecisionModelsDisabledError('semantic frontend issue assessment');
+  });
+}
+async function readDecisionFinding(question: Question, state: Record<string, unknown>): Promise<FindingReading | 'dismissed'> {
   await assertCapturedToolAccessCurrent();
   const run = await frontendFinding.run(judgmentPort(SITE), state as never, { site: SITE, only: [question] });
   const reading = findingReading(run.readings[question]);
@@ -280,6 +286,7 @@ export async function inspectStacking(content: string, file: string): Promise<St
 const serverOnlyReadings = new Map<string, Promise<FindingReading | 'dismissed'>>();
 
 function readServerOnly(module: string): Promise<FindingReading | 'dismissed'> {
+  if (isClassicOperation()) return read('server_only', { module });
   const known = serverOnlyReadings.get(module);
   if (known !== undefined) return known;
   const reading = read('server_only', { module });

@@ -20,6 +20,7 @@ import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { semanticDiff, semanticDiffView } from '../batteries/semantic-diff.js';
 import { exportBreak, exportBreakView } from '../batteries/export-break.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 const SEMANTIC_DIFF_SITE = 'tools.analyze.semantic-diff';
 const EXPORT_BREAK_SITE = 'tools.analyze.export-break';
@@ -195,6 +196,12 @@ export async function runBreaking(
   input: AnalyzeInput,
   projectRoot: string,
 ): Promise<Record<string, unknown>> {
+  return decisionOrClassic(() => runDecisionBreaking(input, projectRoot), async () => ({
+    ...await runDiff(input, projectRoot), provenance: 'classic', assessment: 'unassessed',
+    message: 'Classic exposes the actual diff. Semantic compatibility assessment requires a decision model.',
+  }));
+}
+async function runDecisionBreaking(input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
   const before = input.before ?? 'HEAD~1';
   const after = input.after ?? 'HEAD';
 
@@ -267,6 +274,12 @@ export async function runSemanticDiff(
   projectRoot: string,
   toolLLM: Pick<ToolLLM, 'chat'>,
 ): Promise<Record<string, unknown>> {
+  return decisionOrClassic(() => runDecisionSemanticDiff(input, projectRoot, toolLLM), async () => ({
+    ...await runDiff(input, projectRoot), provenance: 'classic', risk: 'unassessed', summary_source: 'classic',
+    message: 'Classic exposes the actual diff. Semantic behavior and risk assessment require a decision model.',
+  }));
+}
+async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string, toolLLM: Pick<ToolLLM, 'chat'>): Promise<Record<string, unknown>> {
   const before = input.before ?? 'HEAD~1';
   const after = input.after ?? 'HEAD';
 

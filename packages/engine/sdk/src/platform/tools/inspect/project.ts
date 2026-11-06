@@ -7,6 +7,7 @@ import { declaredTestRunner } from '../../utils/project-test-runner.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { entryPointView, projectTooling } from '../batteries/project-tooling.js';
 import { inspectApi } from './project-routes.js';
+import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import type {
   ApiFramework,
   ProjectInfo,
@@ -122,6 +123,9 @@ function declaredEntryPoints(pkg: Record<string, unknown>): string[] {
  * read by `entry_point` and listed on a yes that acts.
  */
 async function readEntryPoints(root: string, scripts: Record<string, string>): Promise<string[]> {
+  return decisionOrClassic(() => readDecisionEntryPoints(root, scripts), async () => { await assertCapturedToolAccessCurrent(); return []; });
+}
+async function readDecisionEntryPoints(root: string, scripts: Record<string, string>): Promise<string[]> {
   const isFile = (file: string): boolean => {
     try {
       return statSync(join(root, file)).isFile();
@@ -174,6 +178,9 @@ const TEST_FRAMEWORK_LABELS: Readonly<Record<string, string | undefined>> = {
  * none declared, each candidate file is read (readEntryPoints).
  */
 export async function detectProject(root: string): Promise<ProjectInfo> {
+  return withConfiguredDecisionModelPolicy(() => detectProjectUnderPolicy(root));
+}
+async function detectProjectUnderPolicy(root: string): Promise<ProjectInfo> {
   const has = (f: string) => existsSync(join(root, f));
 
   const manifests = MANIFESTS.filter(([file]) => has(file));
@@ -229,7 +236,7 @@ export async function detectProject(root: string): Promise<ProjectInfo> {
 
   if (asked.length > 0) {
     await assertCapturedToolAccessCurrent();
-    const run = await projectTooling.run(
+    const run = await decisionOrClassic(() => projectTooling.run(
       judgmentPort(PROJECT_TOOLING_SITE),
       {
         manifests: manifests.map(([file]) => file),
@@ -239,25 +246,28 @@ export async function detectProject(root: string): Promise<ProjectInfo> {
         ...(asked.includes('project_type') ? { sourceFiles: countSourceFiles(root) } : {}),
       },
       { site: PROJECT_TOOLING_SITE, only: asked },
-    );
-    const r = run.readings;
-    if (r.project_type?.outcome === 'act') type = r.project_type.choice;
-    if (type === 'nodejs') {
-      testFramework = declaredFramework;
-      if (settledManager) packageManager = settledManager;
-      else if (r.package_manager?.outcome === 'act') packageManager = r.package_manager.choice;
-      if (r.test_framework?.outcome === 'act') {
-        const choice = r.test_framework.choice;
-        testFramework = choice in TEST_FRAMEWORK_LABELS ? TEST_FRAMEWORK_LABELS[choice] : choice;
+    ), () => undefined);
+    const r = run?.readings;
+    if (run && r) {
+      if (r.project_type?.outcome === 'act') type = r.project_type.choice;
+      if (type === 'nodejs') {
+        testFramework = declaredFramework;
+        if (settledManager) packageManager = settledManager;
+        else if (r.package_manager?.outcome === 'act') packageManager = r.package_manager.choice;
+        if (r.test_framework?.outcome === 'act') {
+          const choice = r.test_framework.choice;
+          testFramework = choice in TEST_FRAMEWORK_LABELS ? TEST_FRAMEWORK_LABELS[choice] : choice;
+        }
       }
+      run.recordAction(`type ${type}, package manager ${packageManager}, test framework ${testFramework ?? 'none'}`);
     }
-    run.recordAction(`type ${type}, package manager ${packageManager}, test framework ${testFramework ?? 'none'}`);
   }
 
   const hasTypeScript = has('tsconfig.json') || has('tsconfig.base.json');
   const entryPoints = declaredEntries.length > 0 ? declaredEntries : await readEntryPoints(root, scripts);
 
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' as const, entryPointsSource: declaredEntries.length > 0 ? 'manifest' as const : 'unassessed' as const } : {}),
     type,
     name,
     version,

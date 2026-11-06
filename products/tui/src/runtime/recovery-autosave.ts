@@ -1,3 +1,4 @@
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 /**
  * recovery-autosave.ts, periodic recovery-file autosave + liveness-marker
  * refresh, extracted out of main.ts to keep it under the architecture
@@ -12,7 +13,7 @@
  * the interval) so a second instance checking soon after this one launches
  * sees it promptly rather than waiting up to a minute.
  */
-import { buildPersistedSessionContext, writeRecoveryFile } from '@/runtime/index.ts';
+import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { writeLivenessMarker } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
@@ -26,7 +27,7 @@ export interface StartRecoveryAutosaveOptions {
    * reads through the same handle, looks in the directory this writer used.
    */
   readonly surface: SessionSurface;
-  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContext>[2];
+  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
   /** Overridable for tests. Defaults to 60s. */
   readonly intervalMs?: number;
 }
@@ -36,13 +37,12 @@ export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): Re
   writeLivenessMarker(surface, runtime.sessionId);
   return setInterval(() => {
     const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
-    const persisted = buildPersistedSessionContext(snapshot.messages, conversation.getTitleSource(), buildSessionContinuityHints());
-    writeRecoveryFile(
-      { ...snapshot, ...persisted },
-      runtime.sessionId,
-      conversation.title ?? '',
-      { surface },
+    const persisted = buildPersistedSessionContextFromFacts(
+      snapshot.messages,
+      conversation.getTitleSource(),
+      buildSessionContinuityHints(),
     );
+    writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
     writeLivenessMarker(surface, runtime.sessionId);
   }, intervalMs);
 }

@@ -82,9 +82,7 @@ async function countPendingApprovals(messages: readonly ConversationMessageSnaps
     .filter((message) => message.role === 'system')
     .map((message) => textContent(message).trim())
     .filter((text) => text.length > 0);
-  const readings = await Promise.all(
-    texts.map((text) => reportsPendingApproval(text, 'runtime.session-return-context.pending-approvals')),
-  );
+  const readings = await Promise.all(texts.map((text) => reportsPendingApproval(text, 'runtime.session-return-context.pending-approvals')));
   return readings.filter(Boolean).length;
 }
 
@@ -97,10 +95,19 @@ export async function buildLocalReturnContextSummary(
   messages: readonly ConversationMessageSnapshot[],
   hints?: SessionContinuityHints,
 ): Promise<SessionReturnContextSummary> {
+  const pendingApprovals = hints?.pendingApprovals ?? (await countPendingApprovals(messages));
+  return buildReturnContextFromFacts(messages, { ...hints, pendingApprovals });
+}
+
+/** A host-provided pending count is a recorded fact and needs no asynchronous interpretation. */
+export function buildReturnContextFromFacts(
+  messages: readonly ConversationMessageSnapshot[],
+  hints: SessionContinuityHints & { readonly pendingApprovals: number },
+): SessionReturnContextSummary {
   const userMessages = messages.filter((message) => message.role === 'user');
   const assistantMessages = messages.filter((message) => message.role === 'assistant');
   const toolMessages = messages.filter((message) => message.role === 'tool');
-  const pendingApprovals = hints?.pendingApprovals ?? await countPendingApprovals(messages);
+  const pendingApprovals = hints.pendingApprovals;
   const lastUser = [...messages].reverse().find((message) => message.role === 'user');
   const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
   const lastMessage = messages[messages.length - 1];
@@ -167,6 +174,14 @@ export async function buildLocalReturnContextSummary(
     lines,
   };
 }
+/** Synchronous persistence for callbacks that already capture structured host facts. */
+export function buildPersistedSessionContextFromFacts(
+  messages: readonly ConversationMessageSnapshot[],
+  titleSource: ConversationTitleSource | undefined,
+  hints: SessionContinuityHints & { readonly pendingApprovals: number },
+): PersistedSessionContext {
+  return { titleSource, returnContext: buildReturnContextFromFacts(messages, hints) };
+}
 
 /**
  * Migrate a loaded return-context record without rewriting unrelated legacy
@@ -207,7 +222,7 @@ export async function maybeAssistReturnContextSummary(
     `Tool results: ${summary.toolResultCount}`,
   ].join('\n');
 
-  const response = (await helperModel.chat('tool_summarize', prompt, { maxTokens: 80, helperOnly: true }) ?? '').trim();
+  const response = ((await helperModel.chat('tool_summarize', prompt, { maxTokens: 80, helperOnly: true })) ?? '').trim();
   if (!response) return summary;
   return {
     ...summary,

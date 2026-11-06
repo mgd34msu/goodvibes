@@ -1,3 +1,4 @@
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
@@ -6,7 +7,7 @@ import { executeAdmittedHeadlessTurn } from './native-headless-turn.ts';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 
 import { resolveConnectedHostConnection } from '../runtime/client/daemon-verbs.ts';
-import { buildPersistedSessionContext, type SessionSnapshot } from '@/runtime/index.ts';
+import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
@@ -36,7 +37,9 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               messages: conversationMessagesAsSessionRecords(messages),
               timestamp: Date.now(),
               title: ctx.conversation.title,
-              ...buildPersistedSessionContext(messages, ctx.conversation.getTitleSource()),
+              ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
+                pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
+              }),
             };
             await ctx.shutdown(snapshot);
           }

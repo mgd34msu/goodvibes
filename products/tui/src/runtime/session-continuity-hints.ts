@@ -1,3 +1,4 @@
+import type { SessionContinuityHints } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 /**
  * session-continuity-hints, the recovery snapshot's continuity summary.
  *
@@ -16,7 +17,7 @@ import type { UiReadModels } from './ui-read-models.ts';
  */
 export function createSessionContinuityHintsBuilder(deps: {
   readonly readModels: UiReadModels;
-}): () => Record<string, unknown> {
+}): () => SessionContinuityHints & { readonly pendingApprovals: number } {
   return () => {
     const sessionSnapshot = deps.readModels.session.getSnapshot();
     const tasksSnapshot = deps.readModels.tasks.getSnapshot();

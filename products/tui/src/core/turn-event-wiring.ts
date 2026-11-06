@@ -1,5 +1,6 @@
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
-import { buildPersistedSessionContext, persistConversation } from '@/runtime/index.ts';
+import { persistConversation } from '@/runtime/index.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
 import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/sdk/platform/rewind';
@@ -88,7 +89,7 @@ export interface WireTurnEventHandlersOptions {
   readonly surface: SessionSurface;
   readonly gitStatusProvider: { refresh(): Promise<unknown> };
   readonly lastGitInfoRef: { value: unknown };
-  readonly buildSessionContinuityHints: () => Record<string, unknown>;
+  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
   readonly render: () => void;
   /**
    * Outbound webhook notifier. When provided and URLs are configured,
@@ -158,10 +159,21 @@ function wrapJournalWithSessionRebind(
     }
   };
   return {
-    get path(): string { return journal.path; },
-    appendRecord: (type, messages) => { ensureBoundToCurrentSession(); journal.appendRecord(type, messages); },
-    rotate: () => { ensureBoundToCurrentSession(); journal.rotate(); },
-    rebind: (path, sessionId) => { boundSessionId = sessionId; journal.rebind(path, sessionId); },
+    get path(): string {
+      return journal.path;
+    },
+    appendRecord: (type, messages) => {
+      ensureBoundToCurrentSession();
+      journal.appendRecord(type, messages);
+    },
+    rotate: () => {
+      ensureBoundToCurrentSession();
+      journal.rotate();
+    },
+    rebind: (path, sessionId) => {
+      boundSessionId = sessionId;
+      journal.rebind(path, sessionId);
+    },
   };
 }
 
@@ -238,16 +250,29 @@ export interface WireTurnEventHandlersResult {
  *
  * Returns refreshGit (callable externally) and unsubs (push into parent unsubs).
  */
-export function wireTurnEventHandlers(
-  options: WireTurnEventHandlersOptions,
-): WireTurnEventHandlersResult {
+export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): WireTurnEventHandlersResult {
   const {
-    events, conversation, runtime, configManager, hookDispatcher, orchestrator, providerRegistry,
-    surface, gitStatusProvider,
-    lastGitInfoRef, buildSessionContinuityHints, render, webhookNotifier, focusTracker,
-    terminalNotifier, runtimeBus, systemMessageRouter,
+    events,
+    conversation,
+    runtime,
+    configManager,
+    hookDispatcher,
+    orchestrator,
+    providerRegistry,
+    surface,
+    gitStatusProvider,
+    lastGitInfoRef,
+    buildSessionContinuityHints,
+    render,
+    webhookNotifier,
+    focusTracker,
+    terminalNotifier,
+    runtimeBus,
+    systemMessageRouter,
     notifyDesktop = notifyCompletion,
-    ringBell = () => { process.stdout.write('\x07'); },
+    ringBell = () => {
+      process.stdout.write('\x07');
+    },
     _failoverRetryGraceMs = FAILOVER_RETRY_GRACE_MS,
     _clock = Date.now,
   } = options;
@@ -290,11 +315,12 @@ export function wireTurnEventHandlers(
   let lastTurnName: string | null = null;
   let lastEndedTurnId: string | null = null;
   const tally = new TurnActivityTally();
-  const nameCurrentTurn = (): string | null => resolveTurnName({
-    title: conversation.title,
-    titleSource: normalizeTitleSource(conversation.getTitleSource()),
-    turnText: readTurnText?.(),
-  });
+  const nameCurrentTurn = (): string | null =>
+    resolveTurnName({
+      title: conversation.title,
+      titleSource: normalizeTitleSource(conversation.getTitleSource()),
+      turnText: readTurnText?.(),
+    });
 
   // Task text for agents and workstreams, from their opening events; the
   // terminal events carry only the id. Bounded, dropped at the terminal event.
@@ -306,9 +332,13 @@ export function wireTurnEventHandlers(
   // notification below rather than adding a second TURN_COMPLETED subscription.
   const budgetBreachNotifier: BudgetBreachNotifier | null = focusTracker
     ? createBudgetBreachNotifier({
-      focusTracker, configGet, webhookNotifier: webhookNotifier ?? null, sessionId: runtime.sessionId,
-      getTurnName: () => lastTurnName, notifyDesktop,
-    })
+        focusTracker,
+        configGet,
+        webhookNotifier: webhookNotifier ?? null,
+        sessionId: runtime.sessionId,
+        getTurnName: () => lastTurnName,
+        notifyDesktop,
+      })
     : null;
 
   // Provider failover (stream-event-wiring.ts) re-submits a failed turn on
@@ -381,9 +411,21 @@ export function wireTurnEventHandlers(
     const name = metadataOnly ? null : nameCurrentTurn();
     lastTurnName = name;
     const activity = tally.snapshot();
-    terminalNotifier?.notify('turn-end', buildTurnNotificationLine({
-      outcome, elapsedMs: turnElapsedMs, name, reason, sessionId: runtime.sessionId, ...activity,
-    }, { metadataOnly }, NOTIFICATION_TEXT_LIMITS.terminal));
+    terminalNotifier?.notify(
+      'turn-end',
+      buildTurnNotificationLine(
+        {
+          outcome,
+          elapsedMs: turnElapsedMs,
+          name,
+          reason,
+          sessionId: runtime.sessionId,
+          ...activity,
+        },
+        { metadataOnly },
+        NOTIFICATION_TEXT_LIMITS.terminal,
+      ),
+    );
     const notifyOnComplete = configGet('behavior.notifyOnComplete') !== false;
     const popped = maybeNotifyLongTask({
       elapsedMs: turnElapsedMs,
@@ -408,7 +450,11 @@ export function wireTurnEventHandlers(
     // The popup rings the bell itself; a shorter turn still gets the bell the
     // Orchestrator's own popup gave it (behavior.notifyOnComplete).
     if (!popped && notifyOnComplete && turnElapsedMs > TURN_BELL_AFTER_MS) {
-      try { ringBell(); } catch { /* stdout may already be torn down */ }
+      try {
+        ringBell();
+      } catch {
+        /* stdout may already be torn down */
+      }
     }
   };
 
@@ -438,186 +484,267 @@ export function wireTurnEventHandlers(
       withheldFailure = { turnId, reason, timer };
     });
   };
-  unsubs.push(() => { turnGeneration++; pendingFailoverRead?.abort.abort(); pendingFailoverRead = undefined; clearWithheldFailure(); });
+  unsubs.push(() => {
+    turnGeneration++;
+    pendingFailoverRead?.abort.abort();
+    pendingFailoverRead = undefined;
+    clearWithheldFailure();
+  });
 
   const refreshGit = (): void => {
-    gitStatusProvider.refresh().then((info) => { lastGitInfoRef.value = info; render(); }).catch(() => { /* non-fatal */ });
+    gitStatusProvider
+      .refresh()
+      .then((info) => {
+        lastGitInfoRef.value = info;
+        render();
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
   };
 
   // Journal user message immediately on TURN_SUBMITTED so a SIGKILL during
   // the subsequent stream loses at most the in-flight token chunk.
-  unsubs.push(events.turns.on('TURN_SUBMITTED', (evt) => {
-    const sameSession = activeTurnSessionId === runtime.sessionId;
-    activeTurnId = evt.turnId;
-    activeTurnSessionId = runtime.sessionId;
-    const continuesFailover = sameSession && failoverRetryPending && (withheldFailure !== null || pendingFailoverRead !== undefined);
-    turnGeneration++;
-    pendingFailoverRead = undefined;
-    if (continuesFailover) {
-      // The failover's re-submission: the same user turn goes on.
-      clearWithheldFailure();
-      failoverRetryPending = false;
-    } else {
-      clearWithheldFailure();
-      failoverRetryPending = false;
-      turnStartTime = _clock();
-      readTurnText = () => typeof evt.prompt === 'string' ? evt.prompt : null;
-      tally.reset();
-    }
-    try {
-      const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
-      transcriptJournal.appendRecord('user_message', snap.messages);
-    } catch { /* best-effort */ }
-  }));
+  unsubs.push(
+    events.turns.on('TURN_SUBMITTED', (evt) => {
+      const sameSession = activeTurnSessionId === runtime.sessionId;
+      activeTurnId = evt.turnId;
+      activeTurnSessionId = runtime.sessionId;
+      const continuesFailover = sameSession && failoverRetryPending && (withheldFailure !== null || pendingFailoverRead !== undefined);
+      turnGeneration++;
+      pendingFailoverRead = undefined;
+      if (continuesFailover) {
+        // The failover's re-submission: the same user turn goes on.
+        clearWithheldFailure();
+        failoverRetryPending = false;
+      } else {
+        clearWithheldFailure();
+        failoverRetryPending = false;
+        turnStartTime = _clock();
+        readTurnText = () => (typeof evt.prompt === 'string' ? evt.prompt : null);
+        tally.reset();
+      }
+      try {
+        const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
+        transcriptJournal.appendRecord('user_message', snap.messages);
+      } catch {
+        /* best-effort */
+      }
+    }),
+  );
 
   // A turn that failed or was cancelled ends without TURN_COMPLETED; it is
   // named and told the same way.
-  unsubs.push(events.turns.on('TURN_ERROR', (evt) => {
-    onTurnError(evt.turnId, readNotificationsMetadataOnly(configGet) ? null : evt.error);
-  }));
-  unsubs.push(events.turns.on('PREFLIGHT_FAIL', (evt) => {
-    notifyTurnEnd(evt.turnId, 'failed', readNotificationsMetadataOnly(configGet) ? null : evt.reason);
-  }));
-  unsubs.push(events.turns.on('TURN_CANCEL', (evt) => {
-    notifyTurnEnd(evt.turnId, 'cancelled', readNotificationsMetadataOnly(configGet) ? null : evt.reason ?? null);
-  }));
+  unsubs.push(
+    events.turns.on('TURN_ERROR', (evt) => {
+      onTurnError(evt.turnId, readNotificationsMetadataOnly(configGet) ? null : evt.error);
+    }),
+  );
+  unsubs.push(
+    events.turns.on('PREFLIGHT_FAIL', (evt) => {
+      notifyTurnEnd(evt.turnId, 'failed', readNotificationsMetadataOnly(configGet) ? null : evt.reason);
+    }),
+  );
+  unsubs.push(
+    events.turns.on('TURN_CANCEL', (evt) => {
+      notifyTurnEnd(evt.turnId, 'cancelled', readNotificationsMetadataOnly(configGet) ? null : (evt.reason ?? null));
+    }),
+  );
 
-  unsubs.push(events.turns.on('TURN_COMPLETED', (evt) => {
-    // stopReason 'empty_response' signals a non-successful completion.
-    notifyTurnEnd(
-      evt.turnId,
-      evt.stopReason === 'completed' ? 'completed' : 'failed',
-      evt.stopReason === 'completed' ? null : 'The model returned an empty response',
-    );
-    // Budget-breach alert: edge-triggered, piggybacks on this same
-    // TURN_COMPLETED handler rather than a second subscription.
-    if (budgetBreachNotifier) {
-      const sessionModel = providerRegistry.getCurrentModel().id ?? 'unknown';
-      budgetBreachNotifier.check(orchestrator.usage, sessionModel, readBudgetAlertUsd(configGet));
-    }
-    // Auto-save after every LLM turn so kills don't lose the session
-    try {
-      const snapshot = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot>; timestamp?: number };
-      const persisted = buildPersistedSessionContext(snapshot.messages, conversation.getTitleSource(), buildSessionContinuityHints());
-      persistConversation(
-        runtime.sessionId,
-        { ...snapshot, ...persisted },
-        runtime.model,
-        runtime.provider,
-        conversation.title || '',
-        { surface },
-        // Turn-completion persistence is machinery, not a user act: stated
-        // explicitly so the retention sweep can tell it apart from a session
-        // the user asked to keep via /session save.
-        'auto',
+  unsubs.push(
+    events.turns.on('TURN_COMPLETED', (evt) => {
+      // stopReason 'empty_response' signals a non-successful completion.
+      notifyTurnEnd(
+        evt.turnId,
+        evt.stopReason === 'completed' ? 'completed' : 'failed',
+        evt.stopReason === 'completed' ? null : 'The model returned an empty response',
       );
-      hookDispatcher.fire({ path: 'Lifecycle:session:save' as HookEventPath, phase: 'Lifecycle' as HookPhase, category: 'session' as HookCategory, specific: 'save', sessionId: runtime.sessionId, timestamp: Date.now(), payload: { sessionId: runtime.sessionId } }).catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
-      // Snapshot succeeded, rotate the journal (gap-filler no longer needed).
-      transcriptJournal.rotate();
-    } catch (e) {
-      // Snapshot failed, append the turn to the journal so recovery can
-      // reconstruct it. Best-effort; never crash the TUI.
+      // Budget-breach alert: edge-triggered, piggybacks on this same
+      // TURN_COMPLETED handler rather than a second subscription.
+      if (budgetBreachNotifier) {
+        const sessionModel = providerRegistry.getCurrentModel().id ?? 'unknown';
+        budgetBreachNotifier.check(orchestrator.usage, sessionModel, readBudgetAlertUsd(configGet));
+      }
+      // Auto-save after every LLM turn so kills don't lose the session
       try {
-        const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
-        transcriptJournal.appendRecord('assistant_turn', snap.messages);
-      } catch { /* best-effort */ }
-      logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) });
-    }
-    // Record this turn's rewind anchor: pair the turnId (shared with the
-    // workspace checkpoint the turn engine snapshots for this same turn) with
-    // the live conversation message count, so a later message-anchored /rewind
-    // can truncate the conversation to exactly this boundary, the join key
-    // between conversation and files rewind (see core/rewind-turn-anchors.ts).
-    try {
-      recordTurnAnchor(runtime.sessionId, {
-        turnId: evt.turnId,
-        label: summarizeTurnLabel(conversation.getLastUserMessage()),
-        messageCount: conversation.getMessageCount(),
-        at: _clock(),
-      });
-      // Mirror the anchors to the session's sidecar so message-anchored /rewind
-      // survives a resume (the in-memory registry alone is process-local).
-      persistTurnAnchors(runtime.sessionId, surface);
-    } catch { /* best-effort; a rewind-anchor miss must never break the turn */ }
-    // Auto-compaction is owned by the SDK Orchestrator's post-turn maintenance
-    // (handlePostTurnContextMaintenance), which runs on every turn against the
-    // resolved context window (getContextWindowForModel) via the SDK's
-    // getAutoCompactDecision (percentage threshold + 15k safety buffer +
-    // small-window handling). The TUI must not independently re-trigger it.
-    refreshGit();
-  }));
+        const snapshot = conversation.toJSON() as {
+          messages: Array<import('./conversation.ts').ConversationMessageSnapshot>;
+          timestamp?: number;
+        };
+        const persisted = buildPersistedSessionContextFromFacts(
+          snapshot.messages,
+          conversation.getTitleSource(),
+          buildSessionContinuityHints(),
+        );
+        persistConversation(
+          runtime.sessionId,
+          { ...snapshot, ...persisted },
+          runtime.model,
+          runtime.provider,
+          conversation.title || '',
+          { surface },
+          // Turn-completion persistence is machinery, not a user act: stated
+          // explicitly so the retention sweep can tell it apart from a session
+          // the user asked to keep via /session save.
+          'auto',
+        );
+        hookDispatcher
+          .fire({
+            path: 'Lifecycle:session:save' as HookEventPath,
+            phase: 'Lifecycle' as HookPhase,
+            category: 'session' as HookCategory,
+            specific: 'save',
+            sessionId: runtime.sessionId,
+            timestamp: Date.now(),
+            payload: { sessionId: runtime.sessionId },
+          })
+          .catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
+        // Snapshot succeeded, rotate the journal (gap-filler no longer needed).
+        transcriptJournal.rotate();
+      } catch (e) {
+        // Snapshot failed, append the turn to the journal so recovery can
+        // reconstruct it. Best-effort; never crash the TUI.
+        try {
+          const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
+          transcriptJournal.appendRecord('assistant_turn', snap.messages);
+        } catch {
+          /* best-effort */
+        }
+        logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) });
+      }
+      // Record this turn's rewind anchor: pair the turnId (shared with the
+      // workspace checkpoint the turn engine snapshots for this same turn) with
+      // the live conversation message count, so a later message-anchored /rewind
+      // can truncate the conversation to exactly this boundary, the join key
+      // between conversation and files rewind (see core/rewind-turn-anchors.ts).
+      try {
+        recordTurnAnchor(runtime.sessionId, {
+          turnId: evt.turnId,
+          label: summarizeTurnLabel(conversation.getLastUserMessage()),
+          messageCount: conversation.getMessageCount(),
+          at: _clock(),
+        });
+        // Mirror the anchors to the session's sidecar so message-anchored /rewind
+        // survives a resume (the in-memory registry alone is process-local).
+        persistTurnAnchors(runtime.sessionId, surface);
+      } catch {
+        /* best-effort; a rewind-anchor miss must never break the turn */
+      }
+      // Auto-compaction is owned by the SDK Orchestrator's post-turn maintenance
+      // (handlePostTurnContextMaintenance), which runs on every turn against the
+      // resolved context window (getContextWindowForModel) via the SDK's
+      // getAutoCompactDecision (percentage threshold + 15k safety buffer +
+      // small-window handling). The TUI must not independently re-trigger it.
+      refreshGit();
+    }),
+  );
 
   // Activity for the end-of-turn notice, counted only while a turn runs.
-  unsubs.push(events.tools.on('TOOL_RECEIVED', (payload) => {
-    if (turnStartTime !== null) tally.noteToolReceived(payload.callId, payload.tool, payload.args);
-  }));
-  unsubs.push(events.tools.on('TOOL_CANCELLED', (payload) => {
-    if (turnStartTime !== null) tally.noteToolFailed(payload.callId);
-  }));
-  unsubs.push(events.agents.on('AGENT_SPAWNING', (payload) => {
-    if (turnStartTime !== null) tally.noteAgentStarted();
-    rememberBounded(agentTasks, payload.agentId, () => payload.task);
-  }));
-  unsubs.push(events.agents.on('AGENT_COMPLETED', (payload) => { agentTasks.delete(payload.agentId); }));
-  unsubs.push(events.agents.on('AGENT_CANCELLED', (payload) => { agentTasks.delete(payload.agentId); }));
-  unsubs.push(events.contracts.on('CONTRACT_CREATED', (payload) => {
-    rememberBounded(workstreams, payload.contractId, () => payload.ask);
-  }));
+  unsubs.push(
+    events.tools.on('TOOL_RECEIVED', (payload) => {
+      if (turnStartTime !== null) tally.noteToolReceived(payload.callId, payload.tool, payload.args);
+    }),
+  );
+  unsubs.push(
+    events.tools.on('TOOL_CANCELLED', (payload) => {
+      if (turnStartTime !== null) tally.noteToolFailed(payload.callId);
+    }),
+  );
+  unsubs.push(
+    events.agents.on('AGENT_SPAWNING', (payload) => {
+      if (turnStartTime !== null) tally.noteAgentStarted();
+      rememberBounded(agentTasks, payload.agentId, () => payload.task);
+    }),
+  );
+  unsubs.push(
+    events.agents.on('AGENT_COMPLETED', (payload) => {
+      agentTasks.delete(payload.agentId);
+    }),
+  );
+  unsubs.push(
+    events.agents.on('AGENT_CANCELLED', (payload) => {
+      agentTasks.delete(payload.agentId);
+    }),
+  );
+  unsubs.push(
+    events.contracts.on('CONTRACT_CREATED', (payload) => {
+      rememberBounded(workstreams, payload.contractId, () => payload.ask);
+    }),
+  );
   // Contract checks expose criterion verdicts, not a numeric review score.
   // Do not manufacture an old workflow score from those verdicts.
-  unsubs.push(events.contracts.on('CONTRACT_PASSED', (payload) => { workstreams.delete(payload.contractId); }));
+  unsubs.push(
+    events.contracts.on('CONTRACT_PASSED', (payload) => {
+      workstreams.delete(payload.contractId);
+    }),
+  );
 
   // In-terminal (OSC 9) agent-blocked notification: a delegated agent parked
   // waiting for a human message (AGENT_AWAITING_MESSAGE) is "blocked on you".
   // Gated by the notifier's own per-signal config + focus rule. Names the
   // agent's task unless behavior.notificationsMetadataOnly is on.
   if (terminalNotifier) {
-    unsubs.push(events.agents.on('AGENT_AWAITING_MESSAGE', (payload) => {
-      const task = readNotificationsMetadataOnly(configGet) ? null : agentTasks.get(payload.agentId)?.();
-      terminalNotifier.notify('agent-blocked', task
-        ? trimAtWordBoundary(`Agent waiting for your input: ${task}`, NOTIFICATION_TEXT_LIMITS.terminal)
-        : 'An agent is waiting for your input');
-    }));
+    unsubs.push(
+      events.agents.on('AGENT_AWAITING_MESSAGE', (payload) => {
+        const task = readNotificationsMetadataOnly(configGet) ? null : agentTasks.get(payload.agentId)?.();
+        terminalNotifier.notify(
+          'agent-blocked',
+          task
+            ? trimAtWordBoundary(`Agent waiting for your input: ${task}`, NOTIFICATION_TEXT_LIMITS.terminal)
+            : 'An agent is waiting for your input',
+        );
+      }),
+    );
   }
 
-  unsubs.push(events.tools.on('TOOL_SUCCEEDED', (payload) => {
-    if (turnStartTime !== null) tally.noteToolSucceeded(payload.callId);
-    refreshGit();
-  }));
-  unsubs.push(events.tools.on('TOOL_FAILED', (payload) => {
-    if (turnStartTime !== null) tally.noteToolFailed(payload.callId);
-    refreshGit();
-  }));
+  unsubs.push(
+    events.tools.on('TOOL_SUCCEEDED', (payload) => {
+      if (turnStartTime !== null) tally.noteToolSucceeded(payload.callId);
+      refreshGit();
+    }),
+  );
+  unsubs.push(
+    events.tools.on('TOOL_FAILED', (payload) => {
+      if (turnStartTime !== null) tally.noteToolFailed(payload.callId);
+      refreshGit();
+    }),
+  );
 
   // Desktop-only agent/contract alerts. Bootstrap owns typed webhook and
   // Slack/Discord delivery for these events, independently of terminal focus.
   // Keeping outbound delivery there avoids a duplicate from this local notice.
   if (focusTracker) {
-    unsubs.push(events.agents.on('AGENT_FAILED', (payload) => {
-      const task = agentTasks.get(payload.agentId);
-      agentTasks.delete(payload.agentId);
-      if (!shouldFireAlert(focusTracker, configGet, 'behavior.notifyOnAgentFailure')) return;
-      try {
-        const metadataOnly = readNotificationsMetadataOnly(configGet);
-        const name = metadataOnly ? '' : trimAtWordBoundary(task?.() ?? '', NOTIFICATION_TEXT_LIMITS.desktopTitle - 'Agent failed: '.length);
-        notifyDesktop(
-          name ? `Agent failed: ${name}` : 'GoodVibes: agent failed',
-          metadataOnly
-            ? 'An agent failed'
-            : trimAtWordBoundary(`Agent failed: ${payload.error}`, NOTIFICATION_TEXT_LIMITS.desktopBody),
-          FORCE_NOTIFY_DURATION_MS,
-        );
-      } catch (err) {
-        logger.debug('turn-event-wiring: agent-failure notify error', { error: String(err) });
-      }
-    }));
-    const notifyWorkstreamEnd = (payload: import('./workstream-notification.ts').WorkstreamFailureNarrationInput & { contractId: string }): void => {
+    unsubs.push(
+      events.agents.on('AGENT_FAILED', (payload) => {
+        const task = agentTasks.get(payload.agentId);
+        agentTasks.delete(payload.agentId);
+        if (!shouldFireAlert(focusTracker, configGet, 'behavior.notifyOnAgentFailure')) return;
+        try {
+          const metadataOnly = readNotificationsMetadataOnly(configGet);
+          const name = metadataOnly
+            ? ''
+            : trimAtWordBoundary(task?.() ?? '', NOTIFICATION_TEXT_LIMITS.desktopTitle - 'Agent failed: '.length);
+          notifyDesktop(
+            name ? `Agent failed: ${name}` : 'GoodVibes: agent failed',
+            metadataOnly ? 'An agent failed' : trimAtWordBoundary(`Agent failed: ${payload.error}`, NOTIFICATION_TEXT_LIMITS.desktopBody),
+            FORCE_NOTIFY_DURATION_MS,
+          );
+        } catch (err) {
+          logger.debug('turn-event-wiring: agent-failure notify error', { error: String(err) });
+        }
+      }),
+    );
+    const notifyWorkstreamEnd = (
+      payload: import('./workstream-notification.ts').WorkstreamFailureNarrationInput & { contractId: string },
+    ): void => {
       const task = workstreams.get(payload.contractId);
       workstreams.delete(payload.contractId);
       if (!shouldFireAlert(focusTracker, configGet, 'behavior.notifyOnChainFailure')) return;
       try {
         const notice = workstreamFailureNotification(payload, {
-          get task() { return task?.(); },
+          get task() {
+            return task?.();
+          },
           metadataOnly: readNotificationsMetadataOnly(configGet),
         });
         notifyDesktop(notice.title, notice.body, FORCE_NOTIFY_DURATION_MS);
@@ -635,7 +762,11 @@ export function wireTurnEventHandlers(
   // PermissionManager reads), so this covers our own Shift+Tab / /plan toggles
   // as well as any other in-process writer. No polling.
   if (typeof configManager.subscribe === 'function') {
-    unsubs.push(configManager.subscribe('permissions.mode', () => { render(); }));
+    unsubs.push(
+      configManager.subscribe('permissions.mode', () => {
+        render();
+      }),
+    );
   }
 
   // Post-compaction receipt (never-silent): the SDK emits a mandatory
@@ -645,18 +776,24 @@ export function wireTurnEventHandlers(
   // [Compaction] block. Automatic compaction previously left no transcript
   // trace; this makes the audit visible.
   if (runtimeBus) {
-    unsubs.push(runtimeBus.on('COMPACTION_RECEIPT', (envelope) => {
-      try {
-        const payload = envelope.payload;
-        if (payload.type !== 'COMPACTION_RECEIPT') return;
-        systemMessageRouter.high(buildCompactionReceiptBlock(payload));
-        render();
-      } catch (err) {
-        logger.debug('turn-event-wiring: compaction-receipt render error', { error: String(err) });
-      }
-    }));
+    unsubs.push(
+      runtimeBus.on('COMPACTION_RECEIPT', (envelope) => {
+        try {
+          const payload = envelope.payload;
+          if (payload.type !== 'COMPACTION_RECEIPT') return;
+          systemMessageRouter.high(buildCompactionReceiptBlock(payload));
+          render();
+        } catch (err) {
+          logger.debug('turn-event-wiring: compaction-receipt render error', { error: String(err) });
+        }
+      }),
+    );
   }
 
-  unsubs.push(() => { agentTasks.clear(); workstreams.clear(); readTurnText = null; });
+  unsubs.push(() => {
+    agentTasks.clear();
+    workstreams.clear();
+    readTurnText = null;
+  });
   return { refreshGit, unsubs, transcriptJournal, continueTurnAfterFailover, beginFailoverNotice };
 }

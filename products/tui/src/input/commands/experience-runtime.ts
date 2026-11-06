@@ -1,17 +1,23 @@
-import { inspectVoiceBundle, type VoiceBundle } from '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import type { CommandRegistry } from '../command-registry.ts';
+import {
+  createApprovalMatrixCommand,
+  COMMON_APPROVAL_SUMMARIES,
+  createVoiceExperienceCommand,
+} from '@goodvibes-jev/engine/terminal-shell/experience-commands';
+import '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
+import 'node:fs';
+import 'node:path';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { createVoiceProvisionGateway, renderVoiceProvision, runVoiceSetupWithProgress, VOICE_SETUP_ANNOUNCEMENT } from '../../core/voice-provision-gateway.ts';
+import {
+  createVoiceProvisionGateway,
+  renderVoiceProvision,
+  runVoiceSetupWithProgress,
+  VOICE_SETUP_ANNOUNCEMENT,
+} from '../../core/voice-provision-gateway.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/sdk/platform/voice/wake/runtime';
 import { terminalWakeCapabilities } from '../../core/wake-provision-status.ts';
 import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
 import { wakeProvisionStatus } from '@goodvibes-jev/engine/sdk/platform/voice';
-
-
-
-
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -139,53 +145,7 @@ export function registerExperienceRuntimeCommands(registry: CommandRegistry): vo
     },
   });
 
-  registry.register({
-    name: 'approval',
-    aliases: ['approvals'],
-    description: 'Review action-specific approval classes and the specialized security UX matrix',
-    usage: '[matrix|review <kind>]',
-    handler(args, ctx) {
-      const sub = (args[0] ?? 'matrix').toLowerCase();
-      if (sub === 'open' || sub === 'panel') {
-        // Approvals waiting on you are rows in the Agents view (b jumps to them).
-        if (!ctx.openView?.('approval')) ctx.print('The Agents view is not available in this session.');
-        return;
-      }
-      const matrix = [
-        ['shell', 'Shell execution approval with side-effect and credential review.'],
-        ['file', 'File mutation approval with config/notebook differentiation.'],
-        ['network', 'Network access approval with host/scope review.'],
-        ['delegate', 'Agent spawn/delegation approval with recursion ceilings.'],
-        ['mcp', 'MCP trust escalation approval with host/path review.'],
-        ['remote', 'Remote dispatch approval with trust/artifact review.'],
-        ['hook', 'Hook execution approval with deny/mutate authority review.'],
-        ['plugin', 'Plugin lifecycle approval with provenance and capability review.'],
-        ['sandbox', 'Sandbox isolation/policy change approval with WSL/VM review.'],
-      ] as const;
-      if (sub === 'matrix') {
-        ctx.print([
-          'Approval Matrix',
-          ...matrix.map(([kind, summary]) => `  ${kind.padEnd(10)} ${summary}`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'review') {
-        const kind = (args[1] ?? '').toLowerCase();
-        const entry = matrix.find(([id]) => id === kind);
-        if (!entry) {
-          ctx.print('Usage: /approval review <shell|file|network|delegate|mcp|remote|hook|plugin|sandbox>');
-          return;
-        }
-        ctx.print([
-          `Approval Review: ${entry[0]}`,
-          `  ${entry[1]}`,
-          '  Related surfaces: /security, /policy preflight, /trust, /sandbox, /mcp',
-        ].join('\n'));
-        return;
-      }
-      ctx.print('Usage: /approval [open|matrix|review <kind>]');
-    },
-  });
+  registry.register(approvalMatrixCommand);
 
   registry.register({
     name: 'memory-review',
@@ -210,110 +170,99 @@ export function registerExperienceRuntimeCommands(registry: CommandRegistry): vo
     },
   });
 
-  registry.register({
-    name: 'voice',
-    description: 'Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and package portable voice metadata',
-    usage: '[review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>]',
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const sub = (args[0] ?? 'review').toLowerCase();
-      if (sub === 'wake') {
-        // The wake models are provisioned locally by the SDK (checksum-pinned
-        // download), not through a daemon verb, so this path needs no gateway.
-        // Installation already provisions them and a daemon retries at boot;
-        // `setup` here is the recovery act, and nothing downloads unless the user
-        // typed it, see wake-provision-runner.ts.
-        const wakeSub = (args[1] ?? 'status').toLowerCase();
-        const managedRoot = shellPaths.resolveUserPath('voice');
-        const runner = {
-          managedRoot,
-          settings: resolveWakeRuntimeSettings(
-            (key: string) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
-            'tui',
-            // Read from disk, so `/voice wake status` reports the speech gate as
-            // available exactly when its artifact is there and verified.
-            terminalWakeCapabilities(wakeProvisionStatus({ managedRoot })),
-          ),
-          print: (block: string) => ctx.print(block),
-        };
-        if (wakeSub === 'setup') {
-          await runWakeProvision(runner);
-          return;
-        }
-        if (wakeSub === 'status') {
-          printWakeStatus(runner);
-          return;
-        }
-        ctx.print('Usage: /voice wake [status|setup]');
-        return;
-      }
-      if (sub === 'status' || sub === 'setup') {
-        // The one-act managed install returns a final receipt (no per-phase
-        // streaming over the verb), so the announcement block prints first and
-        // the receipt/failure block follows once the (possibly long,
-        // multi-hundred-MB) install resolves.
-        const resolution = createVoiceProvisionGateway({
-          configManager: ctx.platform.configManager,
-          // Lazy: the daemon-disabled / no-base-URL refusals resolve before shell paths.
-          homeDirectory: () => requireShellPaths(ctx).homeDirectory,
-        });
-        if (sub === 'setup') {
-          // Print the up-front announcement, then drive the install with live
-          // per-component progress polled from voice.local.status.
-          if (resolution.available) ctx.print(VOICE_SETUP_ANNOUNCEMENT);
-          await runVoiceSetupWithProgress(resolution, { print: (block) => ctx.print(block) });
-          return;
-        }
-        ctx.print(await renderVoiceProvision(sub, resolution));
-        return;
-      }
-      if (sub === 'review') {
-        const enabled = Boolean(ctx.platform.configManager.get('ui.voiceEnabled') ?? false);
-        ctx.print([
-          'Voice Review',
-          `  always-speak: ${enabled ? 'on' : 'off'}`,
-          '  config key: ui.voiceEnabled (same as /tts on|off)',
-          '  posture: optional local TTS output; disabled by default',
-          '  note: voice remains an optional operator convenience, not a required SaaS dependency',
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'enable' || sub === 'disable') {
-        const next = sub === 'enable';
-        ctx.platform.configManager.setDynamic('ui.voiceEnabled', next);
-        ctx.print(`Always-speak mode ${next ? 'enabled' : 'disabled'}. ${next ? 'Every submitted turn will be played through live TTS.' : 'Use /tts <prompt> to speak individual turns.'}`);
-        return;
-      }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /voice bundle ${mode} <path>`);
-          return;
-        }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
-        if (mode === 'export') {
-          const bundle: VoiceBundle = {
-            version: 1,
-            exportedAt: Date.now(),
-            enabled: Boolean(ctx.platform.configManager.get('ui.voiceEnabled')),
-            notes: [
-              'Voice is optional and local-first.',
-              'Secure sandbox mode and operator review remain the primary control surfaces.',
-            ],
-          };
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
-          ctx.print(`Voice bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as VoiceBundle;
-          ctx.print(inspectVoiceBundle(bundle));
-          return;
-        }
-      }
-      ctx.print('Usage: /voice [review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>]');
-    },
-  });
+  registry.register(voiceExperienceCommand);
 }
+
+const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
+  usage: '[matrix|review <kind>]',
+  help: 'Usage: /approval [open|matrix|review <kind>]',
+  hidden: false,
+  matrix: [
+    ['shell', COMMON_APPROVAL_SUMMARIES.shell],
+    ['file', COMMON_APPROVAL_SUMMARIES.file],
+    ['network', COMMON_APPROVAL_SUMMARIES.network],
+    ['delegate', 'Agent spawn/delegation approval with recursion ceilings.'],
+    ['mcp', COMMON_APPROVAL_SUMMARIES.mcp],
+    ['remote', COMMON_APPROVAL_SUMMARIES.remote],
+    ['hook', COMMON_APPROVAL_SUMMARIES.hook],
+    ['plugin', COMMON_APPROVAL_SUMMARIES.plugin],
+    ['sandbox', 'Sandbox isolation/policy change approval with WSL/VM review.'],
+  ] as const,
+  related: '  Related surfaces: /security, /policy preflight, /trust, /sandbox, /mcp',
+  open(ctx) {
+    // Approvals waiting on you are rows in the Agents view (b jumps to them).
+    if (!ctx.openView?.('approval')) ctx.print('The Agents view is not available in this session.');
+    return;
+  },
+});
+const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
+  description:
+    'Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and package portable voice metadata',
+  usage: '[review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>]',
+  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>]',
+  confirmMutations: false,
+  reportFailure: false,
+  paths: requireShellPaths,
+  async wake(args, ctx, shellPaths, _yes) {
+    // The wake models are provisioned locally by the SDK (checksum-pinned
+    // download), not through a daemon verb, so this path needs no gateway.
+    // Installation already provisions them and a daemon retries at boot;
+    // `setup` here is the recovery act, and nothing downloads unless the user
+    // typed it, see wake-provision-runner.ts.
+    const wakeSub = (args[1] ?? 'status').toLowerCase();
+    const managedRoot = shellPaths.resolveUserPath('voice');
+    const runner = {
+      managedRoot,
+      settings: resolveWakeRuntimeSettings(
+        (key: string) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
+        'tui',
+        // Read from disk, so `/voice wake status` reports the speech gate as
+        // available exactly when its artifact is there and verified.
+        terminalWakeCapabilities(wakeProvisionStatus({ managedRoot })),
+      ),
+      print: (block: string) => ctx.print(block),
+    };
+    if (wakeSub === 'setup') {
+      await runWakeProvision(runner);
+      return;
+    }
+    if (wakeSub === 'status') {
+      printWakeStatus(runner);
+      return;
+    }
+    ctx.print('Usage: /voice wake [status|setup]');
+    return;
+  },
+  async provision(sub, _args, ctx, _shellPaths, _yes) {
+    // The one-act managed install returns a final receipt (no per-phase
+    // streaming over the verb), so the announcement block prints first and
+    // the receipt/failure block follows once the (possibly long,
+    // multi-hundred-MB) install resolves.
+    const resolution = createVoiceProvisionGateway({
+      configManager: ctx.platform.configManager,
+      // Lazy: the daemon-disabled / no-base-URL refusals resolve before shell paths.
+      homeDirectory: () => requireShellPaths(ctx).homeDirectory,
+    });
+    if (sub === 'setup') {
+      // Print the up-front announcement, then drive the install with live
+      // per-component progress polled from voice.local.status.
+      if (resolution.available) ctx.print(VOICE_SETUP_ANNOUNCEMENT);
+      await runVoiceSetupWithProgress(resolution, { print: (block) => ctx.print(block) });
+      return;
+    }
+    ctx.print(await renderVoiceProvision(sub, resolution));
+    return;
+  },
+  review: (enabled) => [
+    'Voice Review',
+    `  always-speak: ${enabled ? 'on' : 'off'}`,
+    '  config key: ui.voiceEnabled (same as /tts on|off)',
+    '  posture: optional local TTS output; disabled by default',
+    '  note: voice remains an optional operator convenience, not a required SaaS dependency',
+  ],
+  toggled: (next) =>
+    `Always-speak mode ${next ? 'enabled' : 'disabled'}. ${next ? 'Every submitted turn will be played through live TTS.' : 'Use /tts <prompt> to speak individual turns.'}`,
+  notes: ['Voice is optional and local-first.', 'Secure sandbox mode and operator review remain the primary control surfaces.'],
+  inspectMissingFile: false,
+  reportReadFailure: false,
+});

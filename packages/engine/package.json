@@ -2953,6 +2953,11 @@
       "bun": "./terminal-shell/src/entry-workspace-commands.ts",
       "types": "./terminal-shell/dist/entry-workspace-commands.d.ts",
       "import": "./terminal-shell/dist/entry-workspace-commands.js"
+    },
+    "./terminal-shell/experience-commands": {
+      "bun": "./terminal-shell/src/experience-commands.ts",
+      "types": "./terminal-shell/dist/experience-commands.d.ts",
+      "import": "./terminal-shell/dist/experience-commands.js"
     }
   },
   "publishConfig": {

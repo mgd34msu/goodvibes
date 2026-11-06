@@ -465,11 +465,12 @@
       "path": "input/commands/experience-runtime.ts",
       "baselineTuiLines": 330,
       "baselineSimilarity": 0.3573,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "VoiceBundle",
         "inspectVoiceBundle"
-      ]
+      ],
+      "notes": "Platform owns approval matrix/review dispatch and shared descriptions, and voice review/toggle/bundle/confirmation dispatch. Product adapters retain TUI remote-workflow aliases and daemon voice provisioning versus Agent confirmed local managed runtime/progress and external-host work policy."
     },
     {
       "path": "input/commands/fresh-conversation.ts",

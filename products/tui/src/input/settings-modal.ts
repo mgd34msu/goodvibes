@@ -129,6 +129,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   ModelPickerTarget,
   'tts-provider' | 'tts-voice' | 'theme'
 > {
+  public searchFocused = false;
   /** Index into SETTINGS_CATEGORIES. */
 
   /** Selected setting index within the current category. */

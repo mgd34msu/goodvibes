@@ -4,16 +4,12 @@ import { writeVerificationReportFiles } from '@goodvibes-jev/engine/terminal-she
 import {
   createVerificationPrimitives,
   renderVerificationTables,
+  validateDaemonHealth,
   type LiveVerificationStatus,
   type LiveVerificationCheck,
 } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
-  compact,
-  error: (error) => (error instanceof Error ? error.message : String(error)),
-  missingBearer: 'No connected-host bearer token was available.',
-  validateJsonOnNonZero: true,
-});
+
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { findAgentKnowledgeScopeContamination } from '../cli/agent-knowledge-runtime.ts';
@@ -183,6 +179,12 @@ function redactForReleaseArtifact(text: string, context: LiveVerificationRedacti
 }
 
 const compact = createVerificationCompactor(redact);
+const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
+  compact,
+  error: (error) => (error instanceof Error ? error.message : String(error)),
+  missingBearer: 'No connected-host bearer token was available.',
+  validateJsonOnNonZero: true,
+});
 
 function readConnectedHostToken(homeDir: string): string | undefined {
   return readVerificationHostToken(homeDir, ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'], readJsonFile);

@@ -27,7 +27,8 @@ export function roundToPrecision(value: number, precision: number): number {
   const factor = 10 ** precision;
   return Math.round(value * factor) / factor;
 }
-export function getNumericAdjustmentMeta(setting: ConfigSetting): {
+type AdjustableSetting = Pick<ConfigSetting, 'type' | 'enumValues' | 'validate'> & { readonly key: string };
+export function getNumericAdjustmentMeta(setting: AdjustableSetting): {
   step: number;
   min?: number | undefined;
   max?: number | undefined;
@@ -59,7 +60,7 @@ export function cycleSettingChoice<Value>(values: readonly Value[], current: Val
   return values[(index + (direction === 'right' ? 1 : -1) + values.length) % values.length];
 }
 export function adjustedSettingValue(
-  setting: ConfigSetting,
+  setting: AdjustableSetting,
   current: unknown,
   direction: 'left' | 'right',
   step: number,

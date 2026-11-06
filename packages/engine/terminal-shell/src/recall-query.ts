@@ -48,8 +48,8 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     const limitIdx = args.indexOf('--limit');
     const semantic = args.includes('--semantic') || args.includes('--vector');
     const filter: MemorySearchFilter = {};
-    if (clsIdx !== -1 && args[clsIdx + 1]) {
-      const cls = args[clsIdx + 1];
+    const cls = clsIdx !== -1 ? args[clsIdx + 1] : undefined;
+    if (cls) {
       if (isValidClass(cls)) filter.cls = cls;
       else {
         context.print(
@@ -59,8 +59,8 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       }
     }
     const scopeIdx = args.indexOf('--scope');
-    if (scopeIdx !== -1 && args[scopeIdx + 1]) {
-      const scope = args[scopeIdx + 1];
+    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
+    if (scope) {
       if (isValidScope(scope)) filter.scope = scope;
       else {
         context.print(
@@ -69,8 +69,9 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
         return;
       }
     }
-    if (limitIdx !== -1 && args[limitIdx + 1]) {
-      filter.limit = parseInt(args[limitIdx + 1], 10) || 20;
+    const limit = limitIdx !== -1 ? args[limitIdx + 1] : undefined;
+    if (limit) {
+      filter.limit = parseInt(limit, 10) || 20;
     }
     const queryTokens = args.filter((token, index) => {
       if (token.startsWith('--')) return false;
@@ -138,8 +139,8 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     const filter: MemorySearchFilter = { limit: 50 };
     if (cls && isValidClass(cls)) filter.cls = cls;
     const scopeIdx = args.indexOf('--scope');
-    if (scopeIdx !== -1 && args[scopeIdx + 1]) {
-      const scope = args[scopeIdx + 1];
+    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
+    if (scope) {
       if (!isValidScope(scope)) {
         context.print(
           `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,

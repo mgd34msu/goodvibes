@@ -1,5 +1,10 @@
 import { createOnboardingConfigApply } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-apply';
-import { createOnboardingApplyPipeline, orderOnboardingOperations, prevalidateOnboardingOperations } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
+import {
+  createOnboardingApplyPipeline,
+  onboardingVerificationFailureKind,
+  orderOnboardingOperations,
+  prevalidateOnboardingOperations,
+} from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-pipeline';
 import { createOnboardingConfigValidator } from '@goodvibes-jev/engine/terminal-shell/onboarding-config-validation';
 const { validateConfigValue } = createOnboardingConfigValidator<Extract<OnboardingApplyOperation, { kind: 'set-config' }>>({
   separator: ': ',
@@ -244,7 +249,7 @@ function prevalidateApplyRequest(deps: OnboardingApplyDependencies, request: Onb
   );
 }
 
-function getVerificationFailureKind(itemId: string): OnboardingApplyOperation['kind'] {}
+const getVerificationFailureKind = onboardingVerificationFailureKind;
 
 export const { applyOnboardingRequest } = createOnboardingApplyPipeline<
   OnboardingApplyDependencies,

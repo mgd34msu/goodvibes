@@ -40,7 +40,7 @@ export interface TerminalOnboardingSnapshotSources {
   readonly secrets: Pick<SecretsManager, 'inspect' | 'listDetailed'>;
   readonly surfaces?:
     | {
-        list(): readonly OnboardingSurfaceRecord[];
+        list(): readonly OnboardingSurfaceRecord[] | Promise<readonly OnboardingSurfaceRecord[]>;
       }
     | undefined;
   readonly providerAccounts?:

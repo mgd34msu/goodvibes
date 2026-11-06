@@ -6,6 +6,7 @@ import {
   toEffortModel,
   type RequestedEffortReader,
 } from '@goodvibes-jev/engine/sdk/platform/providers/reasoning-effort-surface';
+import type { ModelDefinition } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { ModelPickerModal } from './model-picker.js';
 import type { CapabilityFilter, CategoryFilter } from './model-picker-types.js';
 import { isTextBackspace } from './delete-key-policy.js';
@@ -30,7 +31,7 @@ export interface ModelPickerTokenState<Context, Picker extends ModelPickerModal>
   onModelPickerCommit?: (() => boolean) | undefined;
 }
 export interface PickerSelection<Picker extends ModelPickerModal> {
-  readonly model: NonNullable<ReturnType<Picker['getSelected']>>;
+  readonly model: ModelDefinition;
   readonly effort: string;
   readonly target: Picker['target'];
   readonly contextCap?: number | null | undefined;

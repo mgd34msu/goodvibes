@@ -131,7 +131,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         const readModels = requireReadModels(ctx);
 
         if (sub === 'host' || sub === 'services') {
-          const { configured, issues } = collectServiceReadiness(requireServiceRegistry(ctx), ' ');
+          const { configured, issues } = await collectServiceReadiness(requireServiceRegistry(ctx), ' ');
           ctx.print(
             [
               'Health Review Connected Host Integrations',

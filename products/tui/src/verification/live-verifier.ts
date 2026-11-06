@@ -9,12 +9,7 @@ import {
   type LiveVerificationCheck,
 } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
-const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
-  compact,
-  error: summarizeError,
-  missingBearer: 'No daemon bearer token was available.',
-  validateJsonOnNonZero: false,
-});
+
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { auditGoodVibesHome } from '../config/goodvibes-home-audit.ts';
@@ -49,6 +44,12 @@ function redact(text: string): string {
 }
 
 const compact = createVerificationCompactor(redact);
+const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificationPrimitives({
+  compact,
+  error: summarizeError,
+  missingBearer: 'No daemon bearer token was available.',
+  validateJsonOnNonZero: false,
+});
 
 function readDaemonToken(homeDir: string): string | undefined {
   return readVerificationHostToken(homeDir, ['GOODVIBES_DAEMON_TOKEN'], readJsonFile);

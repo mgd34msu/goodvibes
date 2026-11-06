@@ -1,12 +1,12 @@
 import type { ServiceRegistry } from '@goodvibes-jev/engine/sdk/platform/config';
 /** Shared deterministic health findings; products supply labels and repair authority. */
-export function collectServiceReadiness(
+export async function collectServiceReadiness(
   registry: Pick<ServiceRegistry, 'getAll' | 'inspect'>,
   separator: string,
-): { readonly configured: number; readonly issues: string[] } {
+): Promise<{ readonly configured: number; readonly issues: string[] }> {
   const keys = Object.keys(registry.getAll());
-  const issues = keys
-    .map((key) => registry.inspect(key))
+  const inspections = await Promise.all(keys.map((key) => registry.inspect(key)));
+  const issues = inspections
     .filter((inspection) => inspection !== null)
     .flatMap((inspection) => {
       const lines: string[] = [];

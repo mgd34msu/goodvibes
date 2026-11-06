@@ -11,7 +11,7 @@ export type NativeWorkLedgerState =
       readonly snapshot: WorkLedgerReadSnapshot;
       readonly history: readonly WorkLedgerReadEvent[];
       readonly cursor: number;
-      readonly execution?: NativeWorkExecutionState;
+      readonly execution?: NativeWorkExecutionState | undefined;
     };
 
 /** One view owns one reader and its durable history cursor. It never owns a store. */
@@ -123,7 +123,12 @@ export class BoundWorkLedgerModel {
           // The reader can notify a newer projection before an older snapshot's
           // promise continuation runs. Keep that notification's provenance while
           // still accepting durable snapshot contents through the cursor fence.
-          this.accept(projectionEpoch === this.projectionEpoch ? snapshot : { ...snapshot, provenance: this.provenance }, epoch);
+          this.accept(
+            projectionEpoch === this.projectionEpoch || this.provenance === undefined
+              ? snapshot
+              : { ...snapshot, provenance: this.provenance },
+            epoch,
+          );
         },
         (error) => this.fail(error, epoch),
       );

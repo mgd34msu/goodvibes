@@ -56,7 +56,10 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       this.feed?.push(message, priority);
     }
     if (delivery.toConversation || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix))) {
-      if (this.presentation.typedConversation) this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);
+      if (this.presentation.typedConversation) {
+        if (runtimeEvent === undefined) this.conversation.addTypedSystemMessage(message, kind);
+        else this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);
+      } else if (runtimeEvent === undefined) this.conversation.addSystemMessage(message);
       else this.conversation.addSystemMessage(message, runtimeEvent);
     }
   }

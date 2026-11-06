@@ -198,8 +198,6 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
       this.context && this.ports.requestRender(this.context);
     }
   }
-  abstract openAddForm(): void;
-  abstract openEditForm(serverName: string): void;
   abstract saveForm(): Promise<void>;
   abstract confirmDelete(): Promise<void>;
   cancelForm(): void {

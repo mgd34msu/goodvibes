@@ -167,7 +167,7 @@ export function projectFeedContextStable<
     };
   },
 >(host: Host) {
-  const fields = {} as Pick<Host, (typeof STABLE_HOST_KEYS)[number]>;
+  const fields = {} as { -readonly [Key in (typeof STABLE_HOST_KEYS)[number]]: Host[Key] };
   for (const key of STABLE_HOST_KEYS) fields[key] = host[key];
   return {
     ...fields,
@@ -207,7 +207,7 @@ export function projectFeedContextClosures<
     syncFeedContextMutableFields(): void;
   },
 >(host: Host) {
-  const forwards = {} as Pick<Host, (typeof FEED_FORWARD_KEYS)[number]>;
+  const forwards = {} as { -readonly [Key in (typeof FEED_FORWARD_KEYS)[number]]: Host[Key] };
   const bind = <Key extends (typeof FEED_FORWARD_KEYS)[number]>(key: Key): Host[Key] =>
     ((...args: Parameters<Host[Key]>) => {
       const result: unknown = Reflect.apply(host[key], host, args);

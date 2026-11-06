@@ -1,6 +1,6 @@
 import '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 import { createPaymentCardCommands } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
-import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardFieldPrompter, CARD_SECRET_FIELDS, cardFieldConfigured } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
  * /payments, enter the payment instrument and the two addresses at the
  * agent's own terminal.
@@ -128,7 +128,7 @@ function readConfigString(ctx: CommandContext, key: ConfigKey): string {
 function renderStatus(ctx: CommandContext): string[] {
   const lines = ['Payment card on file:'];
   for (const field of CARD_SECRET_FIELDS) {
-    lines.push(`  ${field.label.padEnd(20)} ${fieldConfigured(ctx, field.key) ? 'set' : 'not set'}`);
+    lines.push(`  ${field.label.padEnd(20)} ${cardFieldConfigured(ctx.platform.configManager, field) ? 'set' : 'not set'}`);
   }
   for (const kind of ['billing', 'shipping'] as const) {
     lines.push('');

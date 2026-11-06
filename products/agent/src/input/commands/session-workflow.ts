@@ -126,7 +126,7 @@ async function printSessionExport(
   const formatted = formatSessionExport(sessionId, title, messages, format, {
     role: (message) => message.role,
     content: conversationMessageContentText,
-    tool: (message) => message.toolName ?? 'tool',
+    tool: (message) => (message.role === 'tool' ? (message.toolName ?? 'tool') : 'tool'),
   });
   // A transcript is the one place a value the model was handed becomes a
   // durable document. The canonical redactor carries the platform's credential

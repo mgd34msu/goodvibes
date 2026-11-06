@@ -13,7 +13,9 @@ export function createSecurityCommand<Context extends { print(text: string): voi
     };
     readonly policy: (
       context: Context,
-    ) => { readonly lintFindings: readonly unknown[]; readonly lastPreflightReview?: { readonly status: string } | undefined } | undefined;
+    ) =>
+      | { readonly lintFindings: readonly unknown[]; readonly lastPreflightReview?: { readonly status: string } | null | undefined }
+      | undefined;
     readonly plugins: (context: Context) => readonly { readonly quarantined?: boolean | undefined; readonly trustTier: string }[];
     readonly subscriptions: (context: Context) => { list(): readonly unknown[]; listPending(): readonly unknown[] };
   },

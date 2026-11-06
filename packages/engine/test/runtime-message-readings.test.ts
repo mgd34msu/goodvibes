@@ -12,6 +12,7 @@ import type { ConversationMessageSnapshot } from '../sdk/src/platform/core/conve
 import {
   buildLocalReturnContextSummary,
   buildPersistedSessionContext,
+  buildPersistedSessionContextFromFacts,
 } from '../sdk/src/platform/runtime/session-return-context.ts';
 import { mentionsUserTypedCommand } from '../sdk/src/platform/runtime/setup-contract.ts';
 import { setupReplyCommand } from '../sdk/src/platform/runtime/batteries/setup-reply-command.ts';
@@ -31,13 +32,15 @@ afterEach(() => {
   installJudgmentPort(previous);
 });
 
-const system = (content: string): ConversationMessageSnapshot => ({ role: 'system', content } as ConversationMessageSnapshot);
-const user = (content: string): ConversationMessageSnapshot => ({ role: 'user', content } as ConversationMessageSnapshot);
+const system = (content: string): ConversationMessageSnapshot => ({ role: 'system', content }) as ConversationMessageSnapshot;
+const user = (content: string): ConversationMessageSnapshot => ({ role: 'user', content }) as ConversationMessageSnapshot;
 
 describe('pending approvals in the return summary', () => {
   /** Reads a message as pending when it contains `waiting`, with the given strength. */
   function approvalsPort(strength = 0.95) {
-    return fakePort((_name: string, _question: Question, state: unknown) => noulAnswer(String(state).includes('waiting') ? strength : 0.03));
+    return fakePort((_name: string, _question: Question, state: unknown) =>
+      noulAnswer(String(state).includes('waiting') ? strength : 0.03),
+    );
   }
 
   test('each system message is read once and the yes readings are counted', async () => {
@@ -73,6 +76,22 @@ describe('pending approvals in the return summary', () => {
     expect(requests).toHaveLength(0);
   });
 
+  test('synchronous save callbacks serialize host facts without dropping return context or asking a model', () => {
+    const { port, requests } = approvalsPort();
+    installJudgmentPort(port);
+    const messages = [user('Resume the previous task'), system('[Approval] waiting')];
+    for (const pendingApprovals of [0, 4]) {
+      const persisted = buildPersistedSessionContextFromFacts(messages, 'user', { pendingApprovals, activeTasks: 2 });
+      expect(persisted).not.toBeInstanceOf(Promise);
+      const saved: unknown = JSON.parse(JSON.stringify({ messages, ...persisted }));
+      expect(saved).toMatchObject({
+        titleSource: 'user',
+        returnContext: { pendingApprovals, activeTasks: 2, lastUserPrompt: 'Resume the previous task' },
+      });
+    }
+    expect(requests).toHaveLength(0);
+  });
+
   test('reading with no port installed throws', async () => {
     await expect(buildLocalReturnContextSummary([system('[Approval] waiting')])).rejects.toBeInstanceOf(JudgmentPortMissingError);
   });
@@ -103,7 +122,9 @@ describe('setup replies that hand over a command', () => {
   });
 
   test('the shapes that actually shipped are calibrated fixtures with their answers', () => {
-    const calibrated = new Map(setupReplyCommand.fixtures.map((fixture) => [(fixture.state as { reply: string }).reply, fixture.expect.instructs]));
+    const calibrated = new Map(
+      setupReplyCommand.fixtures.map((fixture) => [(fixture.state as { reply: string }).reply, fixture.expect.instructs]),
+    );
     expect(calibrated.get('Run /voice setup to provision the managed local runtime.')).toBe('yes');
     expect(calibrated.get('set voice.wake.surfaces.agent to true')).toBe('yes');
     expect(calibrated.get('/voice wake setup')).toBe('yes');
@@ -136,7 +157,10 @@ describe('system message priority', () => {
 
   test('a weak high reading is held instead of being classified as routine', async () => {
     installJudgmentPort(priorityPort('high', 0.4).port);
-    await expect(classifySystemMessagePriority('[Session] Saved session abc123')).rejects.toMatchObject({ name: 'JudgmentHeldError', outcome: 'held' });
+    await expect(classifySystemMessagePriority('[Session] Saved session abc123')).rejects.toMatchObject({
+      name: 'JudgmentHeldError',
+      outcome: 'held',
+    });
   });
 
   test('reading with no port installed throws', async () => {

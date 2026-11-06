@@ -1,6 +1,6 @@
 import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import '@goodvibes-jev/engine/terminal-shell/input-handler-state';
+import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
   captureFeedContextMutable,
   projectFeedContextStable,
@@ -96,7 +96,7 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
  * InputHandler - Owns prompt text, paste registry, and keyboard/mouse handling.
  * Extracted from main.ts and StateManager.
  */
-export class InputHandler {
+export class InputHandler extends TerminalInputHandlerState {
   public setupPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean } | null = null;
   public prompt = '';
 

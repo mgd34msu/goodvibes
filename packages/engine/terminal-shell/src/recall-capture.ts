@@ -109,9 +109,12 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
       return;
     }
     const provenance: ProvenanceLink[] = [];
-    if (sessionIdx !== -1 && flagArgs[sessionIdx + 1]) provenance.push({ kind: 'session', ref: flagArgs[sessionIdx + 1] });
-    if (taskIdx !== -1 && flagArgs[taskIdx + 1]) provenance.push({ kind: 'task', ref: flagArgs[taskIdx + 1] });
-    if (fileIdx !== -1 && flagArgs[fileIdx + 1]) provenance.push({ kind: 'file', ref: flagArgs[fileIdx + 1] });
+    const sessionRef = sessionIdx !== -1 ? flagArgs[sessionIdx + 1] : undefined;
+    if (sessionRef) provenance.push({ kind: 'session', ref: sessionRef });
+    const taskRef = taskIdx !== -1 ? flagArgs[taskIdx + 1] : undefined;
+    if (taskRef) provenance.push({ kind: 'task', ref: taskRef });
+    const fileRef = fileIdx !== -1 ? flagArgs[fileIdx + 1] : undefined;
+    if (fileRef) provenance.push({ kind: 'file', ref: fileRef });
     if (!provenance.some((entry) => entry.kind === 'session') && context.session.runtime.sessionId) {
       provenance.push({ kind: 'session', ref: context.session.runtime.sessionId });
     }

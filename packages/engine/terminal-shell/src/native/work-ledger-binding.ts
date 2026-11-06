@@ -3,7 +3,7 @@ import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/pl
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';
 export function createNativeWorkLedgerReadBinding(
-  operator: Pick<OperatorRemoteClient, 'invoke' | 'dispose'>,
+  operator: Pick<OperatorRemoteClient, 'invoke'> & { dispose(): void },
   projectId: string,
   ports: {
     readonly onUnavailable: (error: Error) => void;

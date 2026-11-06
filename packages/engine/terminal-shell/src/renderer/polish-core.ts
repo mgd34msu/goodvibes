@@ -34,7 +34,8 @@ export interface ViewPalette {
 // active-mode runtime note. This refresher is registered before any view's
 // extendPalette() runs (views import polish → polish-core first), so on a mode
 // flip the base is rebuilt before the extended palettes re-merge from it.
-function buildViewPalette(): Required<ViewPalette> {
+type ResolvedViewPalette = { [Key in keyof ViewPalette]-?: Exclude<ViewPalette[Key], undefined> };
+function buildViewPalette(): ResolvedViewPalette {
   const t = activeUiTones();
   return {
     header: t.fg.primary,
@@ -55,8 +56,8 @@ function buildViewPalette(): Required<ViewPalette> {
     selectBg: t.bg.selected,
   };
 }
-export const DEFAULT_VIEW_PALETTE: Readonly<Required<ViewPalette>> = buildViewPalette();
-registerThemeRefresh(() => Object.assign(DEFAULT_VIEW_PALETTE as Required<ViewPalette>, buildViewPalette()));
+export const DEFAULT_VIEW_PALETTE: Readonly<ResolvedViewPalette> = buildViewPalette();
+registerThemeRefresh(() => Object.assign(DEFAULT_VIEW_PALETTE as ResolvedViewPalette, buildViewPalette()));
 /**
  * Extend the base view palette with domain-specific colors.
  *

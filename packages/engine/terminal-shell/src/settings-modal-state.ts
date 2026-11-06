@@ -16,7 +16,6 @@ export class TerminalSettingsModalState<Category extends string, Entry, Target e
   public groups: Map<Category, Entry[]> = new Map();
   public mcpEntries: McpEntry[] = [];
   public subscriptionEntries: SubscriptionEntry[] = [];
-  public searchFocused = false;
   public searchQuery = '';
   public searchResults: Entry[] = [];
   public lastSettingEffectMessage: string | null = null;

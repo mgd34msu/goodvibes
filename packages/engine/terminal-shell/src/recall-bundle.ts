@@ -46,8 +46,8 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     }
     const filter: MemorySearchFilter = {};
     const scopeIdx = args.indexOf('--scope');
-    if (scopeIdx !== -1 && args[scopeIdx + 1]) {
-      const scope = args[scopeIdx + 1];
+    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
+    if (scope) {
       if (!isValidScope(scope)) {
         context.print(
           `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
@@ -57,8 +57,8 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       filter.scope = scope;
     }
     const clsIdx = args.indexOf('--cls');
-    if (clsIdx !== -1 && args[clsIdx + 1]) {
-      const cls = args[clsIdx + 1];
+    const cls = clsIdx !== -1 ? args[clsIdx + 1] : undefined;
+    if (cls) {
       if (!isValidClass(cls)) {
         context.print(
           `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,

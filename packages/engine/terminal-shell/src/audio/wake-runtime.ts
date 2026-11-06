@@ -311,6 +311,9 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     const stop = async (): Promise<void> => {
       const active = listener;
       epoch++;
+      // Retired model loads may ignore cancellation. They keep their own cleanup,
+      // but must not block a replacement listener from starting.
+      starting = null;
       lifetime?.abort();
       lifetime = null;
       listener = null;

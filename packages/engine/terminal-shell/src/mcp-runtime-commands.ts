@@ -5,6 +5,7 @@ import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from '.
 import { quoteSlashCommandArg } from './slash-command-parser.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 export interface McpCommandContext extends CommandConfirmationContext {
+  readonly renderRequest: () => void;
   readonly openMcpWorkspace?: (() => void) | undefined;
   readonly openSettingsModal?: (() => void) | undefined;
 }

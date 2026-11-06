@@ -133,7 +133,8 @@ export const recallCommand: SlashCommand = {
       return;
     }
 
-    if (await dispatchRecall(sub, rest, context)) return;
+    const dispatched = dispatchRecall(sub, rest, context);
+    if (dispatched instanceof Promise ? await dispatched : dispatched) return;
 
     switch (sub) {
       case 'report':

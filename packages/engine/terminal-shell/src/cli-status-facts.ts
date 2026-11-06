@@ -10,7 +10,7 @@ export function secretPolicyLabel(policy: unknown): string {
 /** Shared observed facts; products add their own authority/readiness assessments. */
 export function captureCliStatusFacts<Lifecycle>(
   config: Pick<ConfigManager, 'get'>,
-  marker: OnboardingCheckMarkerState | undefined,
+  marker: OnboardingCheckMarkerState | null | undefined,
   lifecycle: Lifecycle | undefined,
   providerFromModel: (model: unknown) => string,
 ) {

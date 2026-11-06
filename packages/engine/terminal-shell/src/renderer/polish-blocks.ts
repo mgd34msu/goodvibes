@@ -160,7 +160,7 @@ export function createTerminalPolishBlocks(presentation: TerminalPolishPresentat
             : DEFAULT_VIEW_PALETTE.info;
     const bg = opts?.bg;
     const text = opts?.count !== undefined ? `${glyph} ${label} (${opts.count})` : `${glyph} ${label}`;
-    return [{ text, fg: color, bg }];
+    return [{ text, fg: color, ...(bg === undefined ? {} : { bg }) }];
   }
   function buildStatPill(label: string, value: string, labelColor: string, valueColor: string, bg = ''): Array<[string, string, string?]> {
     return [
@@ -248,7 +248,7 @@ export function createTerminalPolishBlocks(presentation: TerminalPolishPresentat
             ? cell
             : createStyledCell(cell.char, {
                 fg: cell.fg,
-                bg: palette.surfaceBg,
+                ...(palette.surfaceBg === undefined ? {} : { bg: palette.surfaceBg }),
                 bold: cell.bold,
                 dim: cell.dim,
                 underline: cell.underline,

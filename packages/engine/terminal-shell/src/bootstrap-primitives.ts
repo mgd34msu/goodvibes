@@ -1,3 +1,4 @@
+import type { SessionEvent } from '@goodvibes-jev/engine/sdk/events';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import {
   createFeatureFlagManager,
@@ -8,8 +9,7 @@ import {
   RuntimeEventBus,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
-  type SessionEvent,
-} from '@goodvibes-jev/engine/sdk/platform/runtime/events';
+} from '@goodvibes-jev/engine/sdk/platform/runtime/state';
 import { createRuntimeStore, createDomainDispatch, type DomainDispatch } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { Notifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
@@ -44,7 +44,7 @@ export function attachTerminalCompanionInput(
   handler: { value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null },
   conversation: { addUserMessage(text: string): unknown },
   render: () => void,
-  narrate?: (payload: Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>['payload']) => void,
+  narrate?: (payload: Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>) => void,
 ): () => void {
   return bus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
     narrate?.(payload);

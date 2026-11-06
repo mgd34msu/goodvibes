@@ -210,7 +210,8 @@ function resolveColumnWidths(width: number, columns: ReadonlyArray<TableColumn>,
   const widths = columns.map((c) => c.width ?? each);
   if (autoIdx.length > 0) {
     const used = each * autoIdx.length;
-    widths[autoIdx[autoIdx.length - 1]!] += autoBudget - used; // remainder to last auto col
+    const lastAuto = autoIdx.at(-1);
+    if (lastAuto !== undefined) widths[lastAuto] = (widths[lastAuto] ?? 0) + autoBudget - used; // remainder to last auto col
   }
   return widths;
 }

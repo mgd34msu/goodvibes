@@ -1,4 +1,5 @@
-import type { RuntimeEventBus, TurnEvent } from '@goodvibes-jev/engine/sdk/platform/runtime/events';
+import type { RuntimeEventBus } from '@goodvibes-jev/engine/sdk/platform/runtime/state';
+import type { TurnEvent } from '@goodvibes-jev/engine/sdk/events';
 import type { NativeHeadlessTurnResult } from './native-headless.js';
 /** One event observer shared by ordinary and permit-bound one-shot turns. */
 export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: string, initialStopReason: string) {

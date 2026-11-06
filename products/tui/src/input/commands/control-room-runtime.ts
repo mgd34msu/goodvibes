@@ -1,5 +1,5 @@
 import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
 import { buildKnowledgeInjectionPrompt, selectKnowledgeForTask } from '@goodvibes-jev/engine/sdk/platform/state';
 import '@goodvibes-jev/engine/sdk/platform/config';

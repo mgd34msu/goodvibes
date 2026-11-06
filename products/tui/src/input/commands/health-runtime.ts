@@ -60,7 +60,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
       }
 
       if (sub === 'services') {
-        const { configured, issues } = collectServiceReadiness(requireServiceRegistry(ctx), ': ');
+        const { configured, issues } = await collectServiceReadiness(requireServiceRegistry(ctx), ': ');
         ctx.print(
           [
             'Health Review: Services',

@@ -1,4 +1,4 @@
-import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/settings-metadata';
+import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
 import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';

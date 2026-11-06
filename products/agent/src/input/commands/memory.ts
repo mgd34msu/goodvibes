@@ -65,7 +65,8 @@ export const recallCommand: SlashCommand = {
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 
-    if (await dispatchRecall(sub, rest, context)) return;
+    const dispatched = dispatchRecall(sub, rest, context);
+    if (dispatched instanceof Promise ? await dispatched : dispatched) return;
 
     switch (sub) {
       default: {

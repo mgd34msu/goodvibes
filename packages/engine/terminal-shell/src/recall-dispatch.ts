@@ -18,76 +18,38 @@ export function createRecallDispatch<Context>(ports: {
   readonly handoffInspect: (args: string[], context: Context) => unknown;
   readonly handoffImport: (args: string[], context: Context) => unknown;
 }) {
-  return async (sub: string | undefined, rest: string[], context: Context): Promise<boolean> => {
-    switch (sub) {
-      case 'add':
-        await ports.add(rest, context);
-        break;
-      case 'search':
-      case 'find':
-        await ports.search(rest, context);
-        break;
-      case 'vector':
-      case 'vectors':
-        ports.vector(rest, context);
-        break;
-      case 'capture':
-        await ports.capture(rest, context);
-        break;
-      case 'get':
-      case 'show':
-        await ports.get(rest, context);
-        break;
-      case 'queue':
-        await ports.queue(rest, context);
-        break;
-      case 'review':
-        await ports.review(rest, context);
-        break;
-      case 'stale':
-        await ports.review([rest[0] ?? '', 'stale', '--reason', ...rest.slice(1)], context);
-        break;
-      case 'contradict':
-      case 'contradicted':
-        await ports.review([rest[0] ?? '', 'contradicted', '--reason', ...rest.slice(1)], context);
-        break;
-      case 'explain':
-        await ports.explain(rest, context);
-        break;
-      case 'promote':
-        await ports.promote(rest, context);
-        break;
-      case 'link':
-        await ports.link(rest, context);
-        break;
-      case 'list':
-      case 'ls':
-        await ports.list(rest, context);
-        break;
-      case 'remove':
-      case 'delete':
-      case 'rm':
-        await ports.remove(rest, context);
-        break;
-      case 'export':
-        await ports.export(rest, context);
-        break;
-      case 'import':
-        await ports.import(rest, context);
-        break;
-      case 'handoff-export':
-      case 'share':
-        await ports.handoffExport(rest, context);
-        break;
-      case 'handoff-inspect':
-        ports.handoffInspect(rest, context);
-        break;
-      case 'handoff-import':
-        await ports.handoffImport(rest, context);
-        break;
-      default:
-        return false;
-    }
-    return true;
+  const handlers = new Map<string, (args: string[], context: Context) => unknown>([
+    ['add', ports.add],
+    ['search', ports.search],
+    ['find', ports.search],
+    ['vector', ports.vector],
+    ['vectors', ports.vector],
+    ['capture', ports.capture],
+    ['get', ports.get],
+    ['show', ports.get],
+    ['queue', ports.queue],
+    ['review', ports.review],
+    ['stale', (args, context) => ports.review([args[0] ?? '', 'stale', '--reason', ...args.slice(1)], context)],
+    ['contradict', (args, context) => ports.review([args[0] ?? '', 'contradicted', '--reason', ...args.slice(1)], context)],
+    ['explain', ports.explain],
+    ['promote', ports.promote],
+    ['link', ports.link],
+    ['list', ports.list],
+    ['ls', ports.list],
+    ['remove', ports.remove],
+    ['delete', ports.remove],
+    ['rm', ports.remove],
+    ['export', ports.export],
+    ['import', ports.import],
+    ['handoff-export', ports.handoffExport],
+    ['share', ports.handoffExport],
+    ['handoff-inspect', ports.handoffInspect],
+    ['handoff-import', ports.handoffImport],
+  ]);
+  return (sub: string | undefined, rest: string[], context: Context): boolean | Promise<boolean> => {
+    const handler = sub === undefined ? undefined : handlers.get(sub === 'contradicted' ? 'contradict' : sub);
+    if (!handler) return false;
+    const result = handler(rest, context);
+    return result instanceof Promise ? result.then(() => true) : true;
   };
 }

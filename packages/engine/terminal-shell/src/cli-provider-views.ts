@@ -10,7 +10,7 @@ import {
   type CanonicalModel,
 } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
-import type { formatProviderAuthRoute } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
+import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes-jev/engine/sdk/platform/providers/auth-route-presentation';
 
 export interface CliProviderRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
@@ -61,7 +61,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
     readonly syntheticCatalog: boolean;
     readonly inlineReceipts: boolean;
     readonly binary: (runtime: Runtime) => string;
-    readonly formatProviderAuthRoute: typeof formatProviderAuthRoute;
+    readonly formatProviderAuthRoute: typeof ProviderAuthRouteFormatter;
   },
 ) {
   const formatProviderAuthRoute = policy.formatProviderAuthRoute;

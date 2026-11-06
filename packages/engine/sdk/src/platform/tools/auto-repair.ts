@@ -6,6 +6,7 @@ import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { paramFill, paramFillCandidate, paramFillContext } from './batteries/param-fill.js';
 import { booleanValue, booleanValueView } from './batteries/boolean-value.js';
+import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 const PARAM_FILL_SITE = 'tools.auto-repair.param-fill';
 const BOOLEAN_VALUE_SITE = 'tools.auto-repair.boolean-value';
@@ -19,6 +20,8 @@ export interface RepairResult {
   repairs: string[];
   /** Repair failures callers can surface as warning metadata. */
   warnings?: string[] | undefined;
+  /** Operation provenance; individual repairs describe only changes actually made. */
+  provenance?: 'classic';
 }
 
 /**
@@ -32,7 +35,10 @@ export interface RepairResult {
  * original arguments with a warning. Reading which boolean a non-literal
  * string means (`engine.tools.boolean-value`) and filling a missing required
  * parameter from a spare argument (`engine.tools.param-fill`) are readings,
- * and a JudgmentError from either propagates. Calls that are already correct
+ * and a JudgmentError from either propagates unless Preferred exhausts its
+ * configured chain. Classic keeps format repairs and leaves unresolved values
+ * for ordinary schema validation, even when the caller supplies its own port.
+ * Calls that are already correct
  * pass through unchanged, and a call with no such string and no missing
  * required string parameter asks nothing.
  *
@@ -46,6 +52,13 @@ export async function repairToolCall(
   schema: ToolDefinition,
   signal?: AbortSignal,
   scopedPort?: JudgmentPort,
+): Promise<RepairResult> {
+  return withConfiguredDecisionModelPolicy(() => repairOwnedToolCall(toolName, args, schema, signal, scopedPort));
+}
+
+async function repairOwnedToolCall(
+  toolName: string, args: Record<string, unknown>, schema: ToolDefinition,
+  signal?: AbortSignal, scopedPort?: JudgmentPort,
 ): Promise<RepairResult> {
   assertRepairActive(signal);
   let fixed: Record<string, unknown>;
@@ -130,40 +143,51 @@ export async function repairToolCall(
     return { repaired: false, original: args, fixed: args, repairs: [], warnings: [warning] };
   }
 
-  // --- Rule 4, read: which boolean, if any, a non-literal string means ---
-  for (const { key, value } of booleanStrings) {
-    const description = properties[key]?.['description'];
-    const run = await booleanValue.run(
-      repairPort(BOOLEAN_VALUE_SITE, signal, scopedPort),
-      booleanValueView(toolName, key, typeof description === 'string' ? description : undefined, value),
-      { site: BOOLEAN_VALUE_SITE, ...(signal === undefined ? {} : { signal }) },
-    );
+  const warnings: string[] = [];
+  const classic = () => {
     assertRepairActive(signal);
-    const reading = run.readings.boolean_value;
-    const meant = reading.outcome === 'act' && reading.choice !== 'neither' ? reading.choice === 'true' : undefined;
-    run.recordAction(meant === undefined ? `left ${key} as sent` : `coerced ${key} to ${meant}`);
-    assertRepairActive(signal);
-    if (meant !== undefined) {
-      fixed[key] = meant;
-      repairs.push(`coerced ${key} from '${value}' to boolean ${meant}`);
+    if (booleanStrings.length || required.some(key => !(key in fixed) && properties[key]?.['type'] === 'string')) {
+      warnings.push('During Classic operation, only local format repairs are available. Supply exact boolean values and required parameters; unresolved values are left unchanged.');
     }
-  }
-
-  // --- Rule 2: Missing required string params, filled from a spare argument Jev picks ---
-  for (const requiredKey of required) {
-    if (requiredKey in fixed) continue;
-    const targetSchema = properties[requiredKey];
-    if (targetSchema?.['type'] !== 'string') continue; // only string params
-    const candidate = await _pickStringCandidate(toolName, schema, requiredKey, fixed, properties, required, signal, scopedPort);
-    assertRepairActive(signal);
-    if (candidate !== null) {
-      fixed[requiredKey] = candidate.value;
-      delete fixed[candidate.sourceKey];
-      repairs.push(
-        `filled missing required param '${requiredKey}' from non-required param '${candidate.sourceKey}'`,
+  };
+  // Only the pure interpretation phase can fall back. No tool executes here.
+  await decisionOrClassic(async () => {
+    // --- Rule 4, read: which boolean, if any, a non-literal string means ---
+    for (const { key, value } of booleanStrings) {
+      const description = properties[key]?.['description'];
+      const run = await booleanValue.run(
+        repairPort(BOOLEAN_VALUE_SITE, signal, scopedPort),
+        booleanValueView(toolName, key, typeof description === 'string' ? description : undefined, value),
+        { site: BOOLEAN_VALUE_SITE, ...(signal === undefined ? {} : { signal }) },
       );
+      assertRepairActive(signal);
+      const reading = run.readings.boolean_value;
+      const meant = reading.outcome === 'act' && reading.choice !== 'neither' ? reading.choice === 'true' : undefined;
+      run.recordAction(meant === undefined ? `left ${key} as sent` : `coerced ${key} to ${meant}`);
+      assertRepairActive(signal);
+      if (meant !== undefined) {
+        fixed[key] = meant;
+        repairs.push(`coerced ${key} from '${value}' to boolean ${meant}`);
+      }
     }
-  }
+
+    // --- Rule 2: Missing required string params, filled from a spare argument Jev picks ---
+    for (const requiredKey of required) {
+      if (requiredKey in fixed) continue;
+      const targetSchema = properties[requiredKey];
+      if (targetSchema?.['type'] !== 'string') continue; // only string params
+      const candidate = await _pickStringCandidate(toolName, schema, requiredKey, fixed, properties, required, signal, scopedPort);
+      assertRepairActive(signal);
+      if (candidate !== null) {
+        fixed[requiredKey] = candidate.value;
+        delete fixed[candidate.sourceKey];
+        repairs.push(
+          `filled missing required param '${requiredKey}' from non-required param '${candidate.sourceKey}'`,
+        );
+      }
+    }
+
+  }, classic, () => { assertRepairActive(signal); return true; });
 
   assertRepairActive(signal);
   const repaired = repairs.length > 0;
@@ -175,7 +199,10 @@ export async function repairToolCall(
     });
   }
 
-  return { repaired, original: args, fixed, repairs };
+  return { repaired, original: args, fixed, repairs,
+    ...(warnings.length ? { warnings } : {}),
+    ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -194,21 +221,22 @@ function assertRepairActive(signal?: AbortSignal): void {
  * caller's listener; it never cancels another caller's reading.
  */
 function repairPort(site: string, signal?: AbortSignal, scopedPort?: JudgmentPort): JudgmentPort {
-  assertRepairActive(signal);
+  const current = () => { assertRepairActive(signal); requireDecisionFeature('semantic tool argument repair; supply exact schema parameters'); };
+  current();
   const port = scopedPort ?? judgmentPort(site);
-  if (!signal) return port;
   const recorder = port.recorder;
   return {
     get model() { return port.model; },
     ...(recorder === undefined ? {} : { recorder: {
-      recordReadings(id, readings) { assertRepairActive(signal); recorder.recordReadings(id, readings); },
-      recordAction(id, action) { assertRepairActive(signal); recorder.recordAction(id, action); },
+      recordReadings(id, readings) { current(); recorder.recordReadings(id, readings); current(); },
+      recordAction(id, action) { current(); recorder.recordAction(id, action); current(); },
     } satisfies JudgmentPort['recorder'] }),
     ...(port.health === undefined ? {} : { health: () => port.health!() }),
     async ask(request) {
       try {
-        const result = await executePolicyCheck(() => port.ask(request), signal);
-        assertRepairActive(signal);
+        current();
+        const result = await executePolicyCheck(() => { current(); return port.ask(request); }, signal);
+        current();
         return result;
       } catch (error) {
         assertRepairActive(signal);

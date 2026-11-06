@@ -2938,6 +2938,16 @@
       "bun": "./terminal-shell/src/bootstrap-primitives.ts",
       "types": "./terminal-shell/dist/bootstrap-primitives.d.ts",
       "import": "./terminal-shell/dist/bootstrap-primitives.js"
+    },
+    "./terminal-shell/interaction-mode-command": {
+      "bun": "./terminal-shell/src/interaction-mode-command.ts",
+      "types": "./terminal-shell/dist/interaction-mode-command.d.ts",
+      "import": "./terminal-shell/dist/interaction-mode-command.js"
+    },
+    "./terminal-shell/context-inspection-command": {
+      "bun": "./terminal-shell/src/context-inspection-command.ts",
+      "types": "./terminal-shell/dist/context-inspection-command.d.ts",
+      "import": "./terminal-shell/dist/context-inspection-command.js"
     }
   },
   "publishConfig": {

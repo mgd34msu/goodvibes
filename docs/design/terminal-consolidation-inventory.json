@@ -558,7 +558,8 @@
       "path": "input/commands/operator-runtime.ts",
       "baselineTuiLines": 399,
       "baselineSimilarity": 0.339,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "notes": "Platform owns HITL preset/domain control with product confirmation policy, context inspection/window dispatch and error navigation. Product adapters retain token-estimate conventions and actual surfaces: TUI operations/forensics/profiles versus Agent exact native settings handler identity, protected-research source checks and host-routed harness settings."
     },
     {
       "path": "input/commands/payment-card-intake.ts",

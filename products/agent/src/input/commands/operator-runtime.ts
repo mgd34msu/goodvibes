@@ -1,9 +1,14 @@
+import {
+  createContextInspectionCommand,
+  createErrorNavigationCommands,
+} from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
+import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { agentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { captureTranscriptSource } from './transcript-reading.ts';
-import type { CommandRegistry, SlashCommand } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/sdk/platform/utils';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';
@@ -59,8 +64,9 @@ function parseSettingListArgs(args: readonly string[]): {
   const category = readValuedFlag(args, '--category');
   const prefix = readValuedFlag(args, '--prefix');
   const limitText = readValuedFlag(args, '--limit');
-  const remaining = stripValuedFlag(stripValuedFlag(stripValuedFlag(args, '--category'), '--prefix'), '--limit')
-    .filter((arg) => arg !== '--include-hidden');
+  const remaining = stripValuedFlag(stripValuedFlag(stripValuedFlag(args, '--category'), '--prefix'), '--limit').filter(
+    (arg) => arg !== '--include-hidden',
+  );
   const query = remaining.join(' ').trim();
   return {
     ...(category ? { category } : {}),
@@ -74,7 +80,10 @@ function parseSettingListArgs(args: readonly string[]): {
 const nativeSettingsCommands = new WeakMap<SlashCommand, SlashCommand['handler']>();
 
 /** Only the actual registered settings command has this typed mutation route. */
-export function nativeSettingsCommandMutation(command: SlashCommand, args: readonly string[]):
+export function nativeSettingsCommandMutation(
+  command: SlashCommand,
+  args: readonly string[],
+):
   | { readonly action: 'set'; readonly key: string; readonly value: string | boolean }
   | { readonly action: 'reset'; readonly key: string }
   | undefined {
@@ -89,8 +98,7 @@ export function nativeSettingsCommandMutation(command: SlashCommand, args: reado
   if (tokens[0] !== 'set') return undefined;
   const rawValue = tokens.slice(2).join(' ');
   if (!rawValue) return undefined;
-  const value = isAgentHostSettingKey(key) && (rawValue === 'true' || rawValue === 'false')
-    ? rawValue === 'true' : rawValue;
+  const value = isAgentHostSettingKey(key) && (rawValue === 'true' || rawValue === 'false') ? rawValue === 'true' : rawValue;
   return { action: 'set', key, value };
 }
 
@@ -122,11 +130,18 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         const guards: (() => void)[] = [];
         const assertCurrent = () => {
           source?.assertPublishable();
-          if (ctx.platform.configManager !== config || agentResearchSourceOwner(ctx.extensions.toolRegistry) !== owner) throw new Error('Settings source changed.');
+          if (ctx.platform.configManager !== config || agentResearchSourceOwner(ctx.extensions.toolRegistry) !== owner)
+            throw new Error('Settings source changed.');
         };
-        const page = await listEffectiveHarnessSettingsPage(config, listFilters, { sourceOwner: owner, assertCurrent,
-          retainCurrent: guard => { guards.push(guard); } });
-        assertCurrent(); for (const guard of guards) guard();
+        const page = await listEffectiveHarnessSettingsPage(config, listFilters, {
+          sourceOwner: owner,
+          assertCurrent,
+          retainCurrent: (guard) => {
+            guards.push(guard);
+          },
+        });
+        assertCurrent();
+        for (const guard of guards) guard();
         ctx.print(formatHarnessSettingList(page.settings, page.matched));
         return;
       }
@@ -156,8 +171,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           // Text commands supply tokens; only the exact host boolean literals
           // become booleans. JSON-string values and friendly aliases are not
           // permission to include private notification details or screen raw research.
-          const value = isAgentHostSettingKey(key)
-            && (rawValue === 'true' || rawValue === 'false') ? rawValue === 'true' : rawValue;
+          const value = isAgentHostSettingKey(key) && (rawValue === 'true' || rawValue === 'false') ? rawValue === 'true' : rawValue;
           const result = await setHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key, value);
           ctx.print(formatHarnessMutation(result));
           ctx.renderRequest();
@@ -199,164 +213,45 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
   nativeSettingsCommands.set(settingsCommand, settingsCommand.handler);
   registry.register(settingsCommand);
 
-  registry.register({
-    name: 'context',
-    aliases: ['ctx'],
-    description: 'Inspect context window usage (token breakdown per message), or show, set or clear the current model\'s context window',
-    usage: '[window [<size>|clear]]',
-    argsHint: '[window <size|clear>]',
-    hidden: true,
-    handler: (args, ctx) => {
-      if (args[0]?.toLowerCase() === 'window') {
-        handleContextWindowSubcommand(args.slice(1), ctx);
-        return;
-      }
-      if (ctx.openContextInspector) {
-        ctx.openContextInspector();
-      } else {
-        const msgs = ctx.session.conversationManager.getMessagesForLLM();
-        if (msgs.length === 0) {
-          ctx.print('[context] No messages in conversation.');
-          return;
-        }
-        const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
-        let total = 0;
-        const lines: string[] = ['Context breakdown:'];
-        for (const m of msgs) {
-          const text = typeof m.content === 'string'
-            ? m.content
-            : (m.content as Array<{ type: string; text?: string }>)
-              .filter((p) => p.type === 'text')
-              .map((p) => p.text ?? '')
-              .join('');
-          const t = estimateTokens(text);
-          total += t;
-          lines.push(`  ${m.role.padEnd(12)} ~${t.toLocaleString()} tokens`);
-        }
-        lines.push(`  ${'Total'.padEnd(12)} ~${total.toLocaleString()} tokens (${msgs.length} messages)`);
-        ctx.print(lines.join('\n'));
-      }
-    },
-  });
+  registry.register(contextInspectionCommand);
 
-  registry.register({
-    name: 'next-error',
-    aliases: ['ne'],
-    description: 'Jump to the next error message in the conversation',
-    hidden: true,
-    handler(_args, ctx) {
-      const nextLine = ctx.session.conversationManager.nextErrorLine(ctx.getScrollTop?.() ?? 0);
-      if (nextLine < 0) ctx.print('[No error messages found in conversation]');
-      else ctx.scrollToLine?.(nextLine);
-    },
-  });
-  registry.register({
-    name: 'prev-error',
-    aliases: ['pe'],
-    description: 'Jump to the previous error message in the conversation',
-    hidden: true,
-    handler(_args, ctx) {
-      const prevLine = ctx.session.conversationManager.prevErrorLine(ctx.getScrollTop?.() ?? 0);
-      if (prevLine < 0) ctx.print('[No error messages found in conversation]');
-      else ctx.scrollToLine?.(prevLine);
-    },
-  });
+  registry.register(errorNavigationCommands.nextError);
+  registry.register(errorNavigationCommands.prevError);
 
-  registry.register({
-    name: 'mode',
-    aliases: ['hitl'],
-    description: 'Manage HITL UX notification mode (quiet/balanced/operator)',
-    usage: '[quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]',
-    argsHint: '[preset|show|set-domain]',
-    handler(args, ctx) {
-      const mgr = ctx.ops.modeManager;
-      if (!mgr) {
-        ctx.print('Interaction mode manager is not available in this runtime.');
-        return;
-      }
-      const parsed = stripYesFlag(args);
-      const commandArgs = [...parsed.rest];
-      const sub = commandArgs[0] ?? 'show';
-
-      if (sub === 'quiet' || sub === 'balanced' || sub === 'operator') {
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `set HITL mode to ${sub}`, '/mode <quiet|balanced|operator> --yes');
-          return;
-        }
-        const newMode = sub as 'quiet' | 'balanced' | 'operator';
-        mgr.setHITLMode(newMode);
-        try {
-          ctx.platform.configManager.setDynamic('behavior.hitlMode' as import('@goodvibes-jev/engine/sdk/platform/config').ConfigKey, newMode);
-        } catch (e) {
-          logger.warn('[/mode] Failed to persist mode', { error: summarizeError(e) });
-        }
-        const preset = mgr.getHITLPreset();
-        ctx.print(`HITL mode set to: ${preset.name}\n${preset.description}`);
-        ctx.renderRequest();
-        return;
-      }
-
-      if (sub === 'show') {
-        const current = mgr.getHITLMode();
-        const preset = mgr.getHITLPreset();
-        const overrides = mgr.getDomainOverrides();
-        const lines: string[] = [
-          `HITL mode: ${current}`,
-          `  ${preset.description}`,
-          `  Default domain verbosity: ${preset.defaultDomainVerbosity}`,
-          `  Quiet-while-typing: ${preset.quietWhileTyping}`,
-          `  Batch window: ${preset.batchWindowMs}ms`,
-        ];
-        const overrideEntries = Object.entries(overrides);
-        if (overrideEntries.length > 0) {
-          lines.push('  Per-domain overrides:');
-          for (const [domain, verbosity] of overrideEntries) lines.push(`    ${domain}: ${verbosity}`);
-        } else {
-          lines.push('  No per-domain overrides.');
-        }
-        lines.push('');
-        lines.push('Available presets:');
-        for (const p of mgr.listHITLPresets()) {
-          const marker = p.name === current ? '\u25b6' : ' ';
-          lines.push(`  ${marker} ${p.name.padEnd(10)} ${p.description}`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
-
-      if (sub === 'set-domain') {
-        const domain = commandArgs[1];
-        const verbosity = commandArgs[2];
-        if (!domain || !verbosity) {
-          ctx.print('Usage: /mode set-domain <domain> <minimal|normal|verbose> --yes');
-          return;
-        }
-        if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
-          ctx.print(`Invalid verbosity "${verbosity}". Valid values minimal, normal, verbose.`);
-          return;
-        }
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `set HITL verbosity for ${domain}`, '/mode set-domain <domain> <minimal|normal|verbose> --yes');
-          return;
-        }
-        mgr.setDomainVerbosity(domain, verbosity as 'minimal' | 'normal' | 'verbose');
-        ctx.print([
-          'Domain verbosity set',
-          `  domain ${domain}`,
-          `  verbosity ${verbosity}`,
-        ].join('\n'));
-        return;
-      }
-
-      ctx.print(
-        'Usage: /mode [quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]\n'
-        + '  /mode                         , show current mode and settings\n'
-        + '  /mode show                    , show current mode and settings\n'
-        + '  /mode quiet --yes             , suppress all non-critical notifications\n'
-        + '  /mode balanced --yes          , show warnings, batch info noise (default)\n'
-        + '  /mode operator --yes          , full verbosity, no suppression\n'
-        + '  /mode set-domain <d> <v> --yes, per-domain verbosity override (minimal|normal|verbose)'
-      );
-    },
-  });
+  registry.register(interactionModeCommand);
 }
+
+const interactionModeCommand = createInteractionModeCommand<CommandContext>({
+  description: 'Manage HITL UX notification mode (quiet/balanced/operator)',
+  usage: '[quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]',
+  argsHint: '[preset|show|set-domain]',
+  confirmMutations: true,
+  help:
+    'Usage: /mode [quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]\n' +
+    '  /mode                         , show current mode and settings\n' +
+    '  /mode show                    , show current mode and settings\n' +
+    '  /mode quiet --yes             , suppress all non-critical notifications\n' +
+    '  /mode balanced --yes          , show warnings, batch info noise (default)\n' +
+    '  /mode operator --yes          , full verbosity, no suppression\n' +
+    '  /mode set-domain <d> <v> --yes, per-domain verbosity override (minimal|normal|verbose)',
+  invalidVerbosity: (verbosity) => `Invalid verbosity "${verbosity}". Valid values minimal, normal, verbose.`,
+  domainSet: (domain, verbosity) => ['Domain verbosity set', `  domain ${domain}`, `  verbosity ${verbosity}`].join('\n'),
+});
+
+const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
+  description: "Inspect context window usage (token breakdown per message), or show, set or clear the current model's context window",
+  hidden: true,
+  window: handleContextWindowSubcommand,
+  estimate: (message) => {
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text ?? '')
+            .join('\n');
+    return Math.ceil(text.length / 4);
+  },
+  total: (_messages, estimates) => estimates.reduce((sum, value) => sum + value, 0),
+});
+const errorNavigationCommands = createErrorNavigationCommands<CommandContext>(true);

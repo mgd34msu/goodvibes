@@ -1,7 +1,12 @@
-import type { CommandRegistry } from '../command-registry.ts';
+import {
+  createContextInspectionCommand,
+  createErrorNavigationCommands,
+} from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
+import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { ToolContractVerifier } from '@/runtime/index.ts';
 import type { ReplaySnapshotInput } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
+import '@goodvibes-jev/engine/sdk/platform/utils';
 import { registerLegacyPanelCommand } from './legacy-panel-command.ts';
 import { requireOpsApi, requireProfileManager, requireReplayEngine } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -21,47 +26,9 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     },
   });
 
-  registry.register({
-    name: 'context',
-    aliases: ['ctx'],
-    description: 'Inspect context usage, or set/clear a custom context window for the current model',
-    usage: '[window [<size>|clear]]',
-    argsHint: '[window <size|clear>]',
-    handler: (args, ctx) => {
-      if (args[0]?.toLowerCase() === 'window') {
-        handleContextWindowSubcommand(args.slice(1), ctx);
-        return;
-      }
-      if (ctx.openContextInspector) {
-        ctx.openContextInspector();
-      } else {
-        const msgs = ctx.session.conversationManager.getMessagesForLLM();
-        if (msgs.length === 0) {
-          ctx.print('[context] No messages in conversation.');
-          return;
-        }
-        const total = estimateConversationTokens(msgs);
-        const lines: string[] = ['Context breakdown:'];
-        for (const m of msgs) {
-          const t = estimateConversationTokens([m]);
-          lines.push(`  ${m.role.padEnd(12)} ~${t.toLocaleString()} tokens`);
-        }
-        lines.push(`  ${'Total'.padEnd(12)} ~${total.toLocaleString()} tokens (${msgs.length} messages)`);
-        ctx.print(lines.join('\n'));
-      }
-    },
-  });
+  registry.register(contextInspectionCommand);
 
-  registry.register({
-    name: 'next-error',
-    aliases: ['ne'],
-    description: 'Jump to the next error message in the conversation',
-    handler(_args, ctx) {
-      const nextLine = ctx.session.conversationManager.nextErrorLine(ctx.getScrollTop?.() ?? 0);
-      if (nextLine < 0) ctx.print('[No error messages found in conversation]');
-      else ctx.scrollToLine?.(nextLine);
-    },
-  });
+  registry.register(errorNavigationCommands.nextError);
 
   registry.register({
     name: 'profiles',
@@ -78,105 +45,14 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       } else {
         const profiles = requireProfileManager(ctx).list();
         if (profiles.length === 0) ctx.print('No profiles saved. Open /profiles and press s to save the current settings as a profile.');
-        else ctx.print(['Saved profiles:', ...profiles.map(p => `  ${p.name}`)].join('\n'));
+        else ctx.print(['Saved profiles:', ...profiles.map((p) => `  ${p.name}`)].join('\n'));
       }
     },
   });
 
-  registry.register({
-    name: 'prev-error',
-    aliases: ['pe'],
-    description: 'Jump to the previous error message in the conversation',
-    handler(_args, ctx) {
-      const prevLine = ctx.session.conversationManager.prevErrorLine(ctx.getScrollTop?.() ?? 0);
-      if (prevLine < 0) ctx.print('[No error messages found in conversation]');
-      else ctx.scrollToLine?.(prevLine);
-    },
-  });
+  registry.register(errorNavigationCommands.prevError);
 
-  registry.register({
-    name: 'mode',
-    aliases: ['hitl'],
-    description: 'Manage HITL UX notification mode (quiet/balanced/operator)',
-    usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
-    argsHint: '[preset|show|set-domain]',
-    handler(args, ctx) {
-      const mgr = ctx.ops.modeManager;
-      if (!mgr) {
-        ctx.print('Interaction mode manager is not available in this runtime.');
-        return;
-      }
-      const sub = args[0] ?? 'show';
-
-      if (sub === 'quiet' || sub === 'balanced' || sub === 'operator') {
-        const newMode = sub as 'quiet' | 'balanced' | 'operator';
-        mgr.setHITLMode(newMode);
-        try {
-          ctx.platform.configManager.setDynamic('behavior.hitlMode' as import('@goodvibes-jev/engine/sdk/platform/config').ConfigKey, newMode);
-        } catch (e) {
-          logger.warn('[/mode] Failed to persist mode', { error: summarizeError(e) });
-        }
-        const preset = mgr.getHITLPreset();
-        ctx.print(`HITL mode set to: ${preset.name}\n${preset.description}`);
-        ctx.renderRequest();
-        return;
-      }
-
-      if (sub === 'show') {
-        const current = mgr.getHITLMode();
-        const preset = mgr.getHITLPreset();
-        const overrides = mgr.getDomainOverrides();
-        const lines: string[] = [
-          `HITL mode: ${current}`,
-          `  ${preset.description}`,
-          `  Default domain verbosity: ${preset.defaultDomainVerbosity}`,
-          `  Quiet-while-typing: ${preset.quietWhileTyping}`,
-          `  Batch window: ${preset.batchWindowMs}ms`,
-        ];
-        const overrideEntries = Object.entries(overrides);
-        if (overrideEntries.length > 0) {
-          lines.push('  Per-domain overrides:');
-          for (const [domain, verbosity] of overrideEntries) lines.push(`    ${domain}: ${verbosity}`);
-        } else {
-          lines.push('  No per-domain overrides.');
-        }
-        lines.push('');
-        lines.push('Available presets:');
-        for (const p of mgr.listHITLPresets()) {
-          const marker = p.name === current ? '\u25b6' : ' ';
-          lines.push(`  ${marker} ${p.name.padEnd(10)} ${p.description}`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
-
-      if (sub === 'set-domain') {
-        const domain = args[1];
-        const verbosity = args[2];
-        if (!domain || !verbosity) {
-          ctx.print('Usage: /mode set-domain <domain> <minimal|normal|verbose>');
-          return;
-        }
-        if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
-          ctx.print(`Invalid verbosity "${verbosity}". Valid values: minimal, normal, verbose`);
-          return;
-        }
-        mgr.setDomainVerbosity(domain, verbosity as 'minimal' | 'normal' | 'verbose');
-        ctx.print(`Domain "${domain}" verbosity set to: ${verbosity}`);
-        return;
-      }
-
-      ctx.print(
-        'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n'
-        + '  /mode                          — show current mode and settings\n'
-        + '  /mode show                     — show current mode and settings\n'
-        + '  /mode quiet                    — suppress all non-critical notifications\n'
-        + '  /mode balanced                 — surface warnings, batch info noise (default)\n'
-        + '  /mode operator                 — full verbosity, no suppression\n'
-        + '  /mode set-domain <d> <v>       — per-domain verbosity override (minimal|normal|verbose)'
-      );
-    },
-  });
+  registry.register(interactionModeCommand);
 
   registry.register({
     name: 'ops',
@@ -205,10 +81,18 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         const opsApi = requireOpsApi(ctx);
         try {
           switch (action) {
-            case 'cancel': opsApi.tasks.cancel(taskId, note); break;
-            case 'pause': opsApi.tasks.pause(taskId, note); break;
-            case 'resume': opsApi.tasks.resume(taskId, note); break;
-            case 'retry': opsApi.tasks.retry(taskId, note); break;
+            case 'cancel':
+              opsApi.tasks.cancel(taskId, note);
+              break;
+            case 'pause':
+              opsApi.tasks.pause(taskId, note);
+              break;
+            case 'resume':
+              opsApi.tasks.resume(taskId, note);
+              break;
+            case 'retry':
+              opsApi.tasks.retry(taskId, note);
+              break;
             default:
               ctx.print(`Unknown task action "${action}". Use: cancel, pause, resume, retry`);
               return;
@@ -239,13 +123,13 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       }
 
       ctx.print(
-        'Usage: /ops <subcommand>\n'
-        + '  /ops view                              — open Agents (F2 or Ctrl+O)\n'
-        + '  /ops task cancel <id> [note]           — cancel a task\n'
-        + '  /ops task pause  <id> [note]           — pause a task\n'
-        + '  /ops task resume <id> [note]           — resume a blocked task\n'
-        + '  /ops task retry  <id> [note]           — retry a failed task\n'
-        + '  /ops agent cancel <id> [note]          — cancel a running agent'
+        'Usage: /ops <subcommand>\n' +
+          '  /ops view                              — open Agents (F2 or Ctrl+O)\n' +
+          '  /ops task cancel <id> [note]           — cancel a task\n' +
+          '  /ops task pause  <id> [note]           — pause a task\n' +
+          '  /ops task resume <id> [note]           — resume a blocked task\n' +
+          '  /ops task retry  <id> [note]           — retry a failed task\n' +
+          '  /ops agent cancel <id> [note]          — cancel a running agent',
       );
     },
   });
@@ -291,10 +175,10 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       }
 
       ctx.print(
-        'Usage: /tool <subcommand>\n'
-        + '  /tool verify <name>             — verify contract for a specific registered tool\n'
-        + '  /tool verify-all                — verify contracts for all registered tools\n'
-        + '  /tool contract show <name>      — show full contract details for a tool'
+        'Usage: /tool <subcommand>\n' +
+          '  /tool verify <name>             — verify contract for a specific registered tool\n' +
+          '  /tool verify-all                — verify contracts for all registered tools\n' +
+          '  /tool contract show <name>      — show full contract details for a tool',
       );
     },
   });
@@ -388,12 +272,37 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         return;
       }
       ctx.print(
-        'Usage: /forensics <subcommand>\n'
-        + '  /forensics             — open Agents on forensics\n'
-        + '  /forensics latest      — print the most recent failure report summary\n'
-        + '  /forensics show <id>   — show full JSON for a specific report\n'
-        + '  /forensics export <id> — export incident bundle JSON to the conversation'
+        'Usage: /forensics <subcommand>\n' +
+          '  /forensics             — open Agents on forensics\n' +
+          '  /forensics latest      — print the most recent failure report summary\n' +
+          '  /forensics show <id>   — show full JSON for a specific report\n' +
+          '  /forensics export <id> — export incident bundle JSON to the conversation',
       );
     },
   });
 }
+
+const interactionModeCommand = createInteractionModeCommand<CommandContext>({
+  description: 'Manage HITL UX notification mode (quiet/balanced/operator)',
+  usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
+  argsHint: '[preset|show|set-domain]',
+  confirmMutations: false,
+  help:
+    'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n' +
+    '  /mode                          — show current mode and settings\n' +
+    '  /mode show                     — show current mode and settings\n' +
+    '  /mode quiet                    — suppress all non-critical notifications\n' +
+    '  /mode balanced                 — surface warnings, batch info noise (default)\n' +
+    '  /mode operator                 — full verbosity, no suppression\n' +
+    '  /mode set-domain <d> <v>       — per-domain verbosity override (minimal|normal|verbose)',
+  invalidVerbosity: (verbosity) => `Invalid verbosity "${verbosity}". Valid values: minimal, normal, verbose`,
+  domainSet: (domain, verbosity) => `Domain "${domain}" verbosity set to: ${verbosity}`,
+});
+
+const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
+  description: 'Inspect context usage, or set/clear a custom context window for the current model',
+  window: handleContextWindowSubcommand,
+  estimate: (message) => estimateConversationTokens([message]),
+  total: (messages) => estimateConversationTokens(messages),
+});
+const errorNavigationCommands = createErrorNavigationCommands<CommandContext>(false);

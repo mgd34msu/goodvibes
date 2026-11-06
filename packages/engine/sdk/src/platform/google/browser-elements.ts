@@ -1,6 +1,7 @@
 /** Purpose-grounded Google setup controls. Readings are observations, not action authorization. */
 
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
+import { preserveGoogleDecisionFailure } from './decision-work.js';
 import { googleSetupControl, googleSignInPage, googleTwoStepPage, googleAppPasswordPage, googleControlSnapshot, admitGoogleControlMetadata, googleReadingOwner, GoogleReadingError, type GoogleReadingOptions } from './browser-readings.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -99,7 +100,7 @@ export async function findElement(
     current();
     selected.set(element, { browser, snapshot: before, url, assertCurrent: current, assertOwner: owner.assertCurrent, signal: owner.signal });
     return element;
-  } catch { throw new GoogleReadingError(); }
+  } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
 }
 
 /** Revalidate the full snapshot and original owner at the actual effect boundary. */
@@ -209,7 +210,7 @@ export async function looksLikeGoogleSignIn(url: string, elements: readonly Goog
     run.recordAction('returned settled Google sign-in page state');
     current();
     return reading.verdict === 'yes';
-  } catch { throw new GoogleReadingError(); }
+  } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
 }
 
 /** Capture and fence the complete setup page before interpreting its state. */
@@ -248,7 +249,7 @@ export async function readGoogleTwoStepState(browser: GoogleBrowserPort, options
     run.recordAction('Report the observed 2-Step Verification setting; no account setting was changed.');
     page.current();
     return setting;
-  } catch { return 'unknown'; }
+  } catch (error) { preserveGoogleDecisionFailure(error, options); return 'unknown'; }
 }
 
 export async function readGoogleAppPasswordState(browser: GoogleBrowserPort, label: string, options: GoogleReadingOptions = {}) {

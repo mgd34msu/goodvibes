@@ -1,3 +1,4 @@
+import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/sdk/platform/security';
 /**
@@ -364,6 +365,12 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       const action = GOOGLE_ACTIONS.find((candidate) => candidate.toLowerCase() === requested.toLowerCase());
       if (action === undefined) {
         return failure(`Unknown google action "${requested}". Use one of: ${GOOGLE_ACTIONS.join(', ')}.`);
+      }
+
+      if (action === 'mail.verification') {
+        executionOptions?.signal?.throwIfAborted();
+        executionOptions?.assertCurrent?.();
+        assertDecisionModelsEnabled('automatic verification artifact selection; use mail.read to inspect the message and complete verification manually');
       }
 
       // Registration runs BEFORE the connection is opened, because a machine

@@ -1,3 +1,4 @@
+import { withGoogleDecisionWork } from './decision-work.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
@@ -18,14 +19,16 @@ export const consoleStatus = defineBattery({
   ],
 });
 export async function readConsoleStatus(text: string, options: JudgmentReadingOptions = {}) {
-  assertJudgmentInput({ text });
-  if (text.length > 160_000) throw new JudgmentInputError('unsupported-input');
-  const owner = captureJudgmentPort(consoleStatus.name, { ...options, prepareResultCapture: prepareJudgmentResult });
-  const port = owner.port, current = owner.assertCurrent;
-  const run = await consoleStatus.run(port, { text }, { site: consoleStatus.name, beforeAttempt: current, signal: owner.signal });
-  current();
-  const projectMissing = requireActingReading(run.readings.projectMissing).verdict === 'yes';
-  const status = requireActingReading(run.readings.status).choice;
-  run.recordAction('Read console state; browser action and post-action verification remain separate.');
-  return { projectMissing, status };
+  return withGoogleDecisionWork(options, async () => {
+    assertJudgmentInput({ text });
+    if (text.length > 160_000) throw new JudgmentInputError('unsupported-input');
+    const owner = captureJudgmentPort(consoleStatus.name, { ...options, prepareResultCapture: prepareJudgmentResult });
+    const port = owner.port, current = owner.assertCurrent;
+    const run = await consoleStatus.run(port, { text }, { site: consoleStatus.name, beforeAttempt: current, signal: owner.signal });
+    current();
+    const projectMissing = requireActingReading(run.readings.projectMissing).verdict === 'yes';
+    const status = requireActingReading(run.readings.status).choice;
+    run.recordAction('Read console state; browser action and post-action verification remain separate.');
+    return { projectMissing, status };
+  });
 }

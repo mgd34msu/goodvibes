@@ -5,6 +5,8 @@ import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { googleCallerCurrent } from './decision-work.js';
 
 // Match findElement's eligible control descriptors, including structural evidence.
 const control = (id: string, name: string) => ({ id, content: { role: 'button', name, tag: 'button' } });
@@ -100,6 +102,7 @@ export interface GoogleReadingOptions extends JudgmentReadingOptions {
   readonly browser?: GoogleBrowserPort | undefined;
 }
 export function googleReadingOwner(site: string, options: GoogleReadingOptions) {
+  requireDecisionFeature('automatic Google page interpretation; complete the step manually in Google settings');
   const owner = captureJudgmentPort(site, { signal: options.signal, assertCurrent: options.assertCurrent });
   const port: JudgmentPort = { ...owner.port, async ask(request) {
     owner.assertCurrent();
@@ -113,7 +116,17 @@ export function googleReadingOwner(site: string, options: GoogleReadingOptions) 
 
 /** Carry the first observation owner through browser awaits and later writes. */
 export function ownGoogleBrowser(browser: GoogleBrowserPort, options: JudgmentReadingOptions = {}): { browser: GoogleBrowserPort; assertCurrent: () => void; consumeObservation: () => { readonly assertCurrent: () => void } } {
-  const owner = googleReadingOwner('google.setup.flow', options);
+  return wrapGoogleBrowser(browser, googleReadingOwner('google.setup.flow', options));
+}
+
+/** Native browser ownership for an explicit manual consent URL; no page interpretation or decision receipt. */
+export function ownGoogleManualBrowser(browser: GoogleBrowserPort, options: JudgmentReadingOptions = {}): ReturnType<typeof ownGoogleBrowser> {
+  const current = googleCallerCurrent(options);
+  current();
+  return wrapGoogleBrowser(browser, { signal: options.signal, assertCurrent: current, consumeObservation: () => { current(); return { assertCurrent: current }; } });
+}
+
+function wrapGoogleBrowser(browser: GoogleBrowserPort, owner: { readonly signal: AbortSignal | undefined; readonly assertCurrent: () => void; readonly consumeObservation: () => { readonly assertCurrent: () => void } }): ReturnType<typeof ownGoogleBrowser> {
   const methods = { navigate: browser.navigate, currentUrl: browser.currentUrl, snapshot: browser.snapshot, verifySnapshot: browser.verifySnapshot, click: browser.click, type: browser.type, readText: browser.readText, captureAuthority: browser.captureAuthority };
   const methodsCurrent = () => {
     for (const key of Object.keys(methods) as (keyof typeof methods)[]) if (browser[key] !== methods[key]) throw new GoogleReadingError();

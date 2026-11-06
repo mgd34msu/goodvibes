@@ -120,6 +120,7 @@ export type GoogleStepId =
 
 /** Result of executing one step. */
 export interface GoogleStepResult {
+  readonly provenance?: 'classic';
   readonly id: GoogleStepId;
   readonly outcome: GoogleStepOutcome;
   /** Human-readable statement of what actually happened. Never a secret. */
@@ -138,6 +139,7 @@ export interface GoogleStepResult {
 
 /** Overall result of a flow run. */
 export interface GoogleSetupReport {
+  readonly provenance?: 'classic';
   readonly path: GoogleSetupPath;
   readonly ok: boolean;
   readonly steps: readonly GoogleStepResult[];

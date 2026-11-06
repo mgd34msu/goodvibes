@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { ownGoogleSetupDeps, ownGoogleSetupRunners } from './setup-reading-scope.js';
 /** Binds Google setup steps to their implementations through injected ports.
  * Steps requiring a person report needs-human. Credentials go to the encrypted
@@ -102,6 +103,7 @@ function browserReadyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  */
 function signedInRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async (spec) => {
+    requireDecisionFeature('automatic Google account page interpretation; complete this step manually in Google settings');
     const browser = await deps.browser();
     const url = spec.url;
     if (url !== undefined) await browser.navigate(url);
@@ -120,6 +122,7 @@ function signedInRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
 
 function twoStepRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async (spec) => {
+    requireDecisionFeature('automatic Google account page interpretation; complete this step manually in Google settings');
     const browser = await deps.browser();
     if (spec.url !== undefined) await browser.navigate(spec.url);
     const state = await readGoogleTwoStepState(browser, { signal: deps.signal, assertCurrent: deps.assertCurrent });
@@ -147,6 +150,7 @@ function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
     if (await secretPresent(deps.secrets, GOOGLE_SECRET_KEYS.appPassword)) {
       return alreadyDone(`An app password labelled ${APP_PASSWORD_LABEL} is already in the encrypted store.`);
     }
+    requireDecisionFeature('automatic Google app-password creation; create and store the credential through secure manual setup');
     const browser = await deps.browser();
     const result = await createAppPassword(browser, { label: APP_PASSWORD_LABEL });
     if (result.kind === 'needs-human') {
@@ -285,6 +289,7 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps): Promise<Goo
     return readClientCredentialsFromJson(collected.file.contents);
   }
 
+  requireDecisionFeature('automatic OAuth client creation; use manual entry or an exact downloaded client JSON file');
   const browser = await deps.browser();
   const created = await createDesktopOAuthClient(browser, { name: 'goodvibes agent' });
   if (created.kind === 'needs-human') return { ok: false, problem: created.problem, fix: created.fix };

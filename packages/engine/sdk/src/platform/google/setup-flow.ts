@@ -1,3 +1,4 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 /**
  * The flow executor.
  *
@@ -72,6 +73,10 @@ export async function runGoogleSetupFlow(
   path: GoogleSetupPath,
   deps: GoogleSetupFlowDeps,
 ): Promise<GoogleSetupReport> {
+  return withConfiguredDecisionModelPolicy(() => runOwnedGoogleSetupFlow(path, deps));
+}
+
+async function runOwnedGoogleSetupFlow(path: GoogleSetupPath, deps: GoogleSetupFlowDeps): Promise<GoogleSetupReport> {
   const now = deps.now ?? ((): number => Date.now());
   const specs = stepsForPath(path);
   const results: GoogleStepResult[] = [];
@@ -128,6 +133,7 @@ export async function runGoogleSetupFlow(
 
     const result: GoogleStepResult = {
       id: spec.id,
+      ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
       outcome: outcome.outcome,
       detail: outcome.detail,
       ...(outcome.problem === undefined ? {} : { problem: outcome.problem }),
@@ -154,6 +160,7 @@ export async function runGoogleSetupFlow(
 
   const ok = results.every((result) => satisfied(result.outcome));
   return {
+    ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
     path,
     ok,
     steps: results,
@@ -197,6 +204,7 @@ function summarize(
 export function renderGoogleSetupReport(report: GoogleSetupReport): string {
   const lines: string[] = [];
   lines.push(report.summary);
+  if (report.provenance === 'classic') lines.push('Classic operation: native setup results only; automatic semantic page interpretation is unavailable.');
   lines.push('');
 
   for (const step of report.steps) {

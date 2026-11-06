@@ -1,7 +1,10 @@
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /** Original setup request ownership survives every outer await and storage call. */
-import { assertGoogleReadingCurrent, ownGoogleBrowser, GoogleReadingError } from './browser-readings.js';
+import { assertGoogleReadingCurrent, ownGoogleBrowser, ownGoogleManualBrowser, GoogleReadingError } from './browser-readings.js';
 import { GoogleSetupWriteCommittedError, type GoogleMutationOwnership } from './setup-effect.js';
 import type { GoogleSetupActionDeps } from './setup-action-deps.js';
+import type { GoogleSetupStepSpec } from './types.js';
 
 export function ownGoogleSetupDeps(deps: GoogleSetupActionDeps): GoogleSetupActionDeps {
   const config = deps.config, secrets = deps.secrets, factory = deps.browser;
@@ -44,12 +47,13 @@ export function ownGoogleSetupDeps(deps: GoogleSetupActionDeps): GoogleSetupActi
       if (originalBrowser && originalBrowser !== raw) throw new GoogleReadingError();
       originalBrowser = raw;
       const epoch = observationEpoch;
-      const owned = ownGoogleBrowser(raw, { signal: options.signal, assertCurrent: () => {
+      const own = isClassicOperation() ? ownGoogleManualBrowser : ownGoogleBrowser;
+      const owned = own(raw, { signal: options.signal, assertCurrent: () => {
         if (epoch !== observationEpoch) throw new GoogleReadingError(); current();
       } });
       // Do not recurse through current: each browser's owner carries the
       // request guard, while later writes keep the first installed authority.
-      if (!observation) observation = ownGoogleBrowser(raw, options);
+      if (!observation) observation = own(raw, options);
       current(); return owned.browser;
     },
     config: { get: key => { current(); const value = configGet.call(config, key); current(); return value; },
@@ -66,16 +70,21 @@ export function ownGoogleSetupRunners(
   runners: ReadonlyMap<import('./types.js').GoogleStepId, import('./setup-flow.js').GoogleStepRunner>,
   deps: GoogleSetupActionDeps,
 ): ReadonlyMap<import('./types.js').GoogleStepId, import('./setup-flow.js').GoogleStepRunner> {
-  return new Map([...runners].map(([id, runner]) => [id, async spec => {
+  return new Map([...runners].map(([id, runner]) => [id, (spec: GoogleSetupStepSpec) => withConfiguredDecisionModelPolicy(async () => {
     assertGoogleReadingCurrent(deps);
     try {
       const result = await runner(spec);
       assertGoogleReadingCurrent(deps);
       return result;
     } catch (error) {
+      if (error instanceof DecisionModelsDisabledError) {
+        assertGoogleReadingCurrent(deps);
+        return { outcome: 'needs-human' as const, detail: 'Automatic interpretation is unavailable during Classic operation.',
+          problem: error.message, fix: spec.manualSteps.join(' ') };
+      }
       if (error instanceof GoogleSetupWriteCommittedError) return { outcome: 'failed' as const,
         detail: error.message, problem: 'Further setup work was stopped; the committed write was preserved.', fix: 'Review the current setup state before continuing.' };
       throw error;
     }
-  }]));
+  })]));
 }

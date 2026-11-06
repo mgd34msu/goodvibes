@@ -1,3 +1,4 @@
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * The Cloud-project half of the OAuth path: gcloud and the console pages.
  *
@@ -152,6 +153,7 @@ function brandingRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  */
 function audienceProductionRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
+    requireDecisionFeature('automatic publishing-status interpretation; check and publish the app manually in Google settings');
     const browser = await deps.browser();
     const status = await readPublishingStatus(browser);
     if (status.kind === 'needs-human') {

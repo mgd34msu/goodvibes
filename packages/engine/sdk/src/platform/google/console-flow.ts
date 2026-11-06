@@ -1,3 +1,4 @@
+import { withGoogleDecisionWork } from './decision-work.js';
 import { readConsoleStatus } from './console-reading.js';
 /**
  * Drives the Google Auth Platform console
@@ -122,38 +123,40 @@ export async function readPublishingStatus(
   browser: GoogleBrowserPort,
   options: ReadPublishingStatusOptions = {},
 ): Promise<ReadPublishingStatusResult> {
-  browser = ownGoogleBrowser(browser, options).browser;
-  const pageUrl = options.pageUrl ?? AUTH_AUDIENCE_URL;
-  await browser.navigate(pageUrl);
-  const url = await browser.currentUrl();
-  const elements = await browser.snapshot();
+  return withGoogleDecisionWork<ReadPublishingStatusResult>(options, async () => {
+    browser = ownGoogleBrowser(browser, options).browser;
+    const pageUrl = options.pageUrl ?? AUTH_AUDIENCE_URL;
+    await browser.navigate(pageUrl);
+    const url = await browser.currentUrl();
+    const elements = await browser.snapshot();
 
-  if (await looksLikeGoogleSignIn(url, elements, { browser })) {
-    return signInNeeded(url);
-  }
+    if (await looksLikeGoogleSignIn(url, elements, { browser })) {
+      return signInNeeded(url);
+    }
 
-  const text = await browser.readText();
-  const reading = await readConsoleStatus(text, options);
-  if (await browser.currentUrl() !== url || await browser.readText() !== text) throw new Error('Console page changed during its publishing status reading.');
-  if (reading.projectMissing) {
-    return projectNotSelectedNeeded();
-  }
+    const text = await browser.readText();
+    const reading = await readConsoleStatus(text, options);
+    if (await browser.currentUrl() !== url || await browser.readText() !== text) throw new Error('Console page changed during its publishing status reading.');
+    if (reading.projectMissing) {
+      return projectNotSelectedNeeded();
+    }
 
-  const status = reading.status;
-  if (status === 'unknown') {
+    const status = reading.status;
+    if (status === 'unknown') {
+      return {
+        kind: 'failed',
+        reason: 'status-not-found',
+        problem: 'Looked for the "Publishing status" text ("Testing" or "In production") on the audience page, but could not find either.',
+        fix: `Open ${pageUrl} by hand and read the "Publishing status" box.`,
+      };
+    }
+
     return {
-      kind: 'failed',
-      reason: 'status-not-found',
-      problem: 'Looked for the "Publishing status" text ("Testing" or "In production") on the audience page, but could not find either.',
-      fix: `Open ${pageUrl} by hand and read the "Publishing status" box.`,
+      kind: 'ok',
+      detail: `Publishing status reads "${status === 'in-production' ? 'In production' : 'Testing'}".`,
+      status,
     };
-  }
-
-  return {
-    kind: 'ok',
-    detail: `Publishing status reads "${status === 'in-production' ? 'In production' : 'Testing'}".`,
-    status,
-  };
+  });
 }
 
 /**
@@ -165,69 +168,71 @@ export async function publishApp(
   browser: GoogleBrowserPort,
   options: ReadPublishingStatusOptions = {},
 ): Promise<PublishAppResult> {
-  browser = ownGoogleBrowser(browser, options).browser;
-  const pageUrl = options.pageUrl ?? AUTH_AUDIENCE_URL;
-  const before = await readPublishingStatus(browser, options);
-  if (before.kind !== 'ok') return before;
-  if (before.status === 'in-production') {
-    return { kind: 'ok', detail: 'Publishing status was already "In production"; nothing to change.', status: 'in-production' };
-  }
+  return withGoogleDecisionWork<PublishAppResult>(options, async () => {
+    browser = ownGoogleBrowser(browser, options).browser;
+    const pageUrl = options.pageUrl ?? AUTH_AUDIENCE_URL;
+    const before = await readPublishingStatus(browser, options);
+    if (before.kind !== 'ok') return before;
+    if (before.status === 'in-production') {
+      return { kind: 'ok', detail: 'Publishing status was already "In production"; nothing to change.', status: 'in-production' };
+    }
 
-  const elements = await browser.snapshot();
-  const publishLookup = await requireElement(elements, { role: 'button', purpose: 'Publish this OAuth app to production', nameIncludes: 'publish app' }, { browser });
-  if (!publishLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'publish-button-not-found',
-      problem: publishLookup.message,
-      fix: `Open ${pageUrl} by hand and click "PUBLISH APP".`,
-    };
-  }
-  await consumeGoogleElement(browser, publishLookup.element);
+    const elements = await browser.snapshot();
+    const publishLookup = await requireElement(elements, { role: 'button', purpose: 'Publish this OAuth app to production', nameIncludes: 'publish app' }, { browser });
+    if (!publishLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'publish-button-not-found',
+        problem: publishLookup.message,
+        fix: `Open ${pageUrl} by hand and click "PUBLISH APP".`,
+      };
+    }
+    await consumeGoogleElement(browser, publishLookup.element);
 
-  const confirmElements = await browser.snapshot();
-  const confirmLookup = await requireElement(confirmElements, { role: 'button', purpose: 'Confirm publishing this OAuth app to production in the confirmation dialog', nameIncludes: 'confirm' }, { browser });
-  if (!confirmLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'confirm-dialog-not-found',
-      problem: confirmLookup.message,
-      fix: 'Click "PUBLISH APP" by hand and confirm the dialog that asks to push the app to production.',
-    };
-  }
-  await consumeGoogleElement(browser, confirmLookup.element);
+    const confirmElements = await browser.snapshot();
+    const confirmLookup = await requireElement(confirmElements, { role: 'button', purpose: 'Confirm publishing this OAuth app to production in the confirmation dialog', nameIncludes: 'confirm' }, { browser });
+    if (!confirmLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'confirm-dialog-not-found',
+        problem: confirmLookup.message,
+        fix: 'Click "PUBLISH APP" by hand and confirm the dialog that asks to push the app to production.',
+      };
+    }
+    await consumeGoogleElement(browser, confirmLookup.element);
 
-  const after = await readPublishingStatus(browser, options);
-  if (after.kind === 'ok' && after.status === 'in-production') {
-    return {
-      kind: 'ok',
-      detail: 'Clicked "PUBLISH APP", confirmed the dialog, and the re-read status now shows "In production".',
-      status: 'in-production',
-    };
-  }
-  if (after.kind === 'ok' && after.status === 'testing') {
-    return {
-      kind: 'failed',
-      reason: 'publish-did-not-take',
-      problem: 'Clicked "PUBLISH APP" and confirmed the dialog, but re-reading the publishing status afterward still shows "Testing". Credentials created while the app stays in Testing will expire after seven days.',
-      fix: `Open ${pageUrl} by hand, click "PUBLISH APP" again, confirm the dialog, and check the status box afterward.`,
-    };
-  }
-  if (after.kind === 'ok') {
-    // Status read back as neither "In production" nor "Testing", the page
-    // rendered something this flow does not recognise. Reporting the publish
-    // as successful here would be exactly the silent lie this step exists to
-    // prevent, since an app left in Testing expires its credentials in seven
-    // days without ever saying so.
-    return {
-      kind: 'failed',
-      reason: 'publish-status-unreadable',
-      problem:
-        'Clicked "PUBLISH APP" and confirmed the dialog, but the publishing status could not be read back afterward, so there is no evidence the change took effect.',
-      fix: `Open ${pageUrl} by hand and check that the "Publishing status" box reads "In production". If it still reads "Testing", click "PUBLISH APP" and confirm.`,
-    };
-  }
-  return after;
+    const after = await readPublishingStatus(browser, options);
+    if (after.kind === 'ok' && after.status === 'in-production') {
+      return {
+        kind: 'ok',
+        detail: 'Clicked "PUBLISH APP", confirmed the dialog, and the re-read status now shows "In production".',
+        status: 'in-production',
+      };
+    }
+    if (after.kind === 'ok' && after.status === 'testing') {
+      return {
+        kind: 'failed',
+        reason: 'publish-did-not-take',
+        problem: 'Clicked "PUBLISH APP" and confirmed the dialog, but re-reading the publishing status afterward still shows "Testing". Credentials created while the app stays in Testing will expire after seven days.',
+        fix: `Open ${pageUrl} by hand, click "PUBLISH APP" again, confirm the dialog, and check the status box afterward.`,
+      };
+    }
+    if (after.kind === 'ok') {
+      // Status read back as neither "In production" nor "Testing", the page
+      // rendered something this flow does not recognise. Reporting the publish
+      // as successful here would be exactly the silent lie this step exists to
+      // prevent, since an app left in Testing expires its credentials in seven
+      // days without ever saying so.
+      return {
+        kind: 'failed',
+        reason: 'publish-status-unreadable',
+        problem:
+          'Clicked "PUBLISH APP" and confirmed the dialog, but the publishing status could not be read back afterward, so there is no evidence the change took effect.',
+        fix: `Open ${pageUrl} by hand and check that the "Publishing status" box reads "In production". If it still reads "Testing", click "PUBLISH APP" and confirm.`,
+      };
+    }
+    return after;
+  });
 }
 
 const CLIENT_ID_PATTERN = /[\w-]+\.apps\.googleusercontent\.com/;
@@ -249,100 +254,102 @@ export async function createDesktopOAuthClient(
   browser: GoogleBrowserPort,
   options: CreateDesktopOAuthClientOptions,
 ): Promise<CreateDesktopOAuthClientResult> {
-  browser = ownGoogleBrowser(browser, options).browser;
-  const name = options.name;
-  await browser.navigate(AUTH_CLIENTS_URL);
-  const url = await browser.currentUrl();
-  let elements = await browser.snapshot();
+  return withGoogleDecisionWork<CreateDesktopOAuthClientResult>(options, async () => {
+    browser = ownGoogleBrowser(browser, options).browser;
+    const name = options.name;
+    await browser.navigate(AUTH_CLIENTS_URL);
+    const url = await browser.currentUrl();
+    let elements = await browser.snapshot();
 
-  if (await looksLikeGoogleSignIn(url, elements, { browser })) {
-    return signInNeeded(url);
-  }
+    if (await looksLikeGoogleSignIn(url, elements, { browser })) {
+      return signInNeeded(url);
+    }
 
-  const existing = await findElement(elements, { purpose: `Find an existing OAuth client named exactly ${name}`, nameIncludes: name }, { browser });
-  if (existing) {
+    const existing = await findElement(elements, { purpose: `Find an existing OAuth client named exactly ${name}`, nameIncludes: name }, { browser });
+    if (existing) {
+      return {
+        kind: 'needs-human',
+        reason: 'client-already-exists',
+        problem: `An OAuth client named "${name}" is already listed on the clients page.`,
+        fix: 'Reuse the client id and secret already stored for it, or delete that client on the clients page and re-run this step.',
+      };
+    }
+
+    const createClientLookup = await requireElement(elements, { role: 'button', purpose: 'Open the new OAuth client creation form', nameIncludes: 'create client' }, { browser });
+    if (!createClientLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'create-client-button-not-found',
+        problem: createClientLookup.message,
+        fix: `Open ${AUTH_CLIENTS_URL} by hand and click "CREATE CLIENT".`,
+      };
+    }
+    await consumeGoogleElement(browser, createClientLookup.element);
+
+    elements = await browser.snapshot();
+    const typeLookup = await requireElement(elements, { purpose: 'Open the application type selector for the new OAuth client', nameIncludes: 'application type' }, { browser });
+    if (!typeLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'application-type-not-found',
+        problem: typeLookup.message,
+        fix: 'Click "CREATE CLIENT" by hand and choose "Desktop app" as the application type.',
+      };
+    }
+    await consumeGoogleElement(browser, typeLookup.element);
+
+    elements = await browser.snapshot();
+    const desktopOptionLookup = await requireElement(elements, { purpose: 'Choose Desktop app as the OAuth application type', nameIncludes: 'desktop app' }, { browser });
+    if (!desktopOptionLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'application-type-not-found',
+        problem: desktopOptionLookup.message,
+        fix: 'Open the "Application type" dropdown by hand and choose "Desktop app".',
+      };
+    }
+    await consumeGoogleElement(browser, desktopOptionLookup.element);
+
+    elements = await browser.snapshot();
+    const nameLookup = await requireElement(elements, { role: 'textbox', purpose: 'Name the new Desktop OAuth client', nameIncludes: 'name' }, { browser });
+    if (!nameLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'name-field-not-found',
+        problem: nameLookup.message,
+        fix: `Type "${name}" into the client "Name" field by hand.`,
+      };
+    }
+    await consumeGoogleElement(browser, nameLookup.element, name);
+
+    elements = await browser.snapshot();
+    const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Submit the completed Desktop OAuth client creation form', nameIncludes: 'create' }, { browser });
+    if (!createButtonLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'create-button-not-found',
+        problem: createButtonLookup.message,
+        fix: 'Click "Create" by hand to finish creating the OAuth client.',
+      };
+    }
+    await consumeGoogleElement(browser, createButtonLookup.element);
+
+    const resultText = await browser.readText();
+    const credentials = extractClientCredentials(resultText);
+    if (!credentials) {
+      return {
+        kind: 'failed',
+        reason: 'credentials-not-readable',
+        problem: 'Clicked "Create" but the client ID and client secret could not be read back from the result dialog.',
+        fix: `Open ${AUTH_CLIENTS_URL} by hand, open the newly created client, and copy the client ID and client secret.`,
+      };
+    }
+
     return {
-      kind: 'needs-human',
-      reason: 'client-already-exists',
-      problem: `An OAuth client named "${name}" is already listed on the clients page.`,
-      fix: 'Reuse the client id and secret already stored for it, or delete that client on the clients page and re-run this step.',
+      kind: 'ok',
+      detail: `Created a Desktop app OAuth client named "${name}".`,
+      clientId: credentials.clientId,
+      clientSecret: credentials.clientSecret,
     };
-  }
-
-  const createClientLookup = await requireElement(elements, { role: 'button', purpose: 'Open the new OAuth client creation form', nameIncludes: 'create client' }, { browser });
-  if (!createClientLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'create-client-button-not-found',
-      problem: createClientLookup.message,
-      fix: `Open ${AUTH_CLIENTS_URL} by hand and click "CREATE CLIENT".`,
-    };
-  }
-  await consumeGoogleElement(browser, createClientLookup.element);
-
-  elements = await browser.snapshot();
-  const typeLookup = await requireElement(elements, { purpose: 'Open the application type selector for the new OAuth client', nameIncludes: 'application type' }, { browser });
-  if (!typeLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'application-type-not-found',
-      problem: typeLookup.message,
-      fix: 'Click "CREATE CLIENT" by hand and choose "Desktop app" as the application type.',
-    };
-  }
-  await consumeGoogleElement(browser, typeLookup.element);
-
-  elements = await browser.snapshot();
-  const desktopOptionLookup = await requireElement(elements, { purpose: 'Choose Desktop app as the OAuth application type', nameIncludes: 'desktop app' }, { browser });
-  if (!desktopOptionLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'application-type-not-found',
-      problem: desktopOptionLookup.message,
-      fix: 'Open the "Application type" dropdown by hand and choose "Desktop app".',
-    };
-  }
-  await consumeGoogleElement(browser, desktopOptionLookup.element);
-
-  elements = await browser.snapshot();
-  const nameLookup = await requireElement(elements, { role: 'textbox', purpose: 'Name the new Desktop OAuth client', nameIncludes: 'name' }, { browser });
-  if (!nameLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'name-field-not-found',
-      problem: nameLookup.message,
-      fix: `Type "${name}" into the client "Name" field by hand.`,
-    };
-  }
-  await consumeGoogleElement(browser, nameLookup.element, name);
-
-  elements = await browser.snapshot();
-  const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Submit the completed Desktop OAuth client creation form', nameIncludes: 'create' }, { browser });
-  if (!createButtonLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'create-button-not-found',
-      problem: createButtonLookup.message,
-      fix: 'Click "Create" by hand to finish creating the OAuth client.',
-    };
-  }
-  await consumeGoogleElement(browser, createButtonLookup.element);
-
-  const resultText = await browser.readText();
-  const credentials = extractClientCredentials(resultText);
-  if (!credentials) {
-    return {
-      kind: 'failed',
-      reason: 'credentials-not-readable',
-      problem: 'Clicked "Create" but the client ID and client secret could not be read back from the result dialog.',
-      fix: `Open ${AUTH_CLIENTS_URL} by hand, open the newly created client, and copy the client ID and client secret.`,
-    };
-  }
-
-  return {
-    kind: 'ok',
-    detail: `Created a Desktop app OAuth client named "${name}".`,
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-  };
+  });
 }

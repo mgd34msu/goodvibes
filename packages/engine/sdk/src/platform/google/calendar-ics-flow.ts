@@ -1,3 +1,4 @@
+import { withGoogleDecisionWork } from './decision-work.js';
 /**
  * Drives Google Calendar's settings page
  * (https://calendar.google.com/calendar/u/0/r/settings) to capture a
@@ -94,65 +95,67 @@ export async function captureIcsAddress(
   browser: GoogleBrowserPort,
   options: CaptureIcsAddressOptions = {},
 ): Promise<CaptureIcsAddressResult> {
-  browser = ownGoogleBrowser(browser, options).browser;
-  const calendarName = options.calendarName;
-  await browser.navigate(CALENDAR_SETTINGS_URL);
-  const url = await browser.currentUrl();
-  let elements = await browser.snapshot();
+  return withGoogleDecisionWork<CaptureIcsAddressResult>(options, async () => {
+    browser = ownGoogleBrowser(browser, options).browser;
+    const calendarName = options.calendarName;
+    await browser.navigate(CALENDAR_SETTINGS_URL);
+    const url = await browser.currentUrl();
+    let elements = await browser.snapshot();
 
-  if (await looksLikeGoogleSignIn(url, elements, { browser })) {
-    return signInNeeded(url);
-  }
+    if (await looksLikeGoogleSignIn(url, elements, { browser })) {
+      return signInNeeded(url);
+    }
 
-  const calendarLookup = await requireElement(elements, {
-    purpose: calendarName ? `Open the calendar requested as ${calendarName} in calendar settings` : 'Open the primary calendar under Settings for my calendars',
-  }, { browser });
-  const calendarElement = calendarLookup.found ? calendarLookup.element : null;
+    const calendarLookup = await requireElement(elements, {
+      purpose: calendarName ? `Open the calendar requested as ${calendarName} in calendar settings` : 'Open the primary calendar under Settings for my calendars',
+    }, { browser });
+    const calendarElement = calendarLookup.found ? calendarLookup.element : null;
 
-  if (!calendarElement) {
+    if (!calendarElement) {
+      return {
+        kind: 'failed',
+        reason: 'calendar-not-found',
+        problem: calendarName
+          ? `Looked for a calendar named "${calendarName}" in the settings panel, but the page showed ${describeElements(elements)}.`
+          : `Could not find any calendar entry in the settings panel. The page showed ${describeElements(elements)}.`,
+        fix: `Open ${CALENDAR_SETTINGS_URL} by hand, click the calendar you want under "Settings for my calendars", click "Integrate calendar", and copy the address under "Secret address in iCal format".`,
+      };
+    }
+
+    await consumeGoogleElement(browser, calendarElement);
+    elements = await browser.snapshot();
+
+    const integrateLookup = await requireElement(elements, { purpose: 'Open the selected calendar integration settings', nameIncludes: 'integrate calendar' }, { browser });
+    if (!integrateLookup.found) {
+      return {
+        kind: 'failed',
+        reason: 'integrate-panel-not-found',
+        problem: integrateLookup.message,
+        fix: 'Open that calendar\'s settings by hand and click "Integrate calendar".',
+      };
+    }
+
+    await consumeGoogleElement(browser, integrateLookup.element);
+    elements = await browser.snapshot();
+    const text = await browser.readText();
+
+    const icsUrl = findIcsUrl(text, elements);
+    if (icsUrl) {
+      return {
+        kind: 'ok',
+        detail: "Captured the calendar's private iCal address from the \"Integrate calendar\" panel.",
+        icsUrl,
+      };
+    }
+
+    const addressLike = ADDRESS_LIKE_PATTERN.test(text) || elements.some((element) => ADDRESS_LIKE_PATTERN.test(element.name) || (element.value ? ADDRESS_LIKE_PATTERN.test(element.value) : false));
     return {
       kind: 'failed',
-      reason: 'calendar-not-found',
-      problem: calendarName
-        ? `Looked for a calendar named "${calendarName}" in the settings panel, but the page showed ${describeElements(elements)}.`
-        : `Could not find any calendar entry in the settings panel. The page showed ${describeElements(elements)}.`,
-      fix: `Open ${CALENDAR_SETTINGS_URL} by hand, click the calendar you want under "Settings for my calendars", click "Integrate calendar", and copy the address under "Secret address in iCal format".`,
+      reason: addressLike ? 'ics-address-malformed' : 'ics-address-not-found',
+      problem: addressLike
+        ? "Found a calendar.google.com/calendar/ical/ value on the page, but it did not match Google's expected private iCal URL shape (…/private-<token>/basic.ics)."
+        : 'Could not find the "Secret address in iCal format" value on the "Integrate calendar" panel.',
+      fix: 'Open "Integrate calendar" for this calendar by hand and copy the address under "Secret address in iCal format".',
     };
-  }
-
-  await consumeGoogleElement(browser, calendarElement);
-  elements = await browser.snapshot();
-
-  const integrateLookup = await requireElement(elements, { purpose: 'Open the selected calendar integration settings', nameIncludes: 'integrate calendar' }, { browser });
-  if (!integrateLookup.found) {
-    return {
-      kind: 'failed',
-      reason: 'integrate-panel-not-found',
-      problem: integrateLookup.message,
-      fix: 'Open that calendar\'s settings by hand and click "Integrate calendar".',
-    };
-  }
-
-  await consumeGoogleElement(browser, integrateLookup.element);
-  elements = await browser.snapshot();
-  const text = await browser.readText();
-
-  const icsUrl = findIcsUrl(text, elements);
-  if (icsUrl) {
-    return {
-      kind: 'ok',
-      detail: "Captured the calendar's private iCal address from the \"Integrate calendar\" panel.",
-      icsUrl,
-    };
-  }
-
-  const addressLike = ADDRESS_LIKE_PATTERN.test(text) || elements.some((element) => ADDRESS_LIKE_PATTERN.test(element.name) || (element.value ? ADDRESS_LIKE_PATTERN.test(element.value) : false));
-  return {
-    kind: 'failed',
-    reason: addressLike ? 'ics-address-malformed' : 'ics-address-not-found',
-    problem: addressLike
-      ? "Found a calendar.google.com/calendar/ical/ value on the page, but it did not match Google's expected private iCal URL shape (…/private-<token>/basic.ics)."
-      : 'Could not find the "Secret address in iCal format" value on the "Integrate calendar" panel.',
-    fix: 'Open "Integrate calendar" for this calendar by hand and copy the address under "Secret address in iCal format".',
-  };
+  });
 }

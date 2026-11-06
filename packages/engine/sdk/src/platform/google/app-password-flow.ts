@@ -1,3 +1,4 @@
+import { withGoogleDecisionWork } from './decision-work.js';
 /**
  * Drives Google's app-password page (https://myaccount.google.com/apppasswords)
  * to create a 16-character app password with a known label.
@@ -122,60 +123,62 @@ export async function createAppPassword(
   browser: GoogleBrowserPort,
   options: CreateAppPasswordOptions = {},
 ): Promise<CreateAppPasswordResult> {
-  browser = ownGoogleBrowser(browser, options).browser;
-  const label = options.label ?? APP_PASSWORD_LABEL;
-  const pageUrl = options.pageUrl ?? APP_PASSWORD_URL;
+  return withGoogleDecisionWork<CreateAppPasswordResult>(options, async () => {
+    browser = ownGoogleBrowser(browser, options).browser;
+    const label = options.label ?? APP_PASSWORD_LABEL;
+    const pageUrl = options.pageUrl ?? APP_PASSWORD_URL;
 
-  await browser.navigate(pageUrl);
-  const url = await browser.currentUrl();
-  let elements = await browser.snapshot();
+    await browser.navigate(pageUrl);
+    const url = await browser.currentUrl();
+    let elements = await browser.snapshot();
 
-  if (await looksLikeGoogleSignIn(url, elements, { browser })) {
-    return signInNeeded(url);
-  }
+    if (await looksLikeGoogleSignIn(url, elements, { browser })) {
+      return signInNeeded(url);
+    }
 
-  const page = await readGoogleAppPasswordState(browser, label);
-  if (page.twoStepRequired) return twoStepNeeded();
-  if (page.labelExists) return alreadyExists(label, pageUrl);
+    const page = await readGoogleAppPasswordState(browser, label);
+    if (page.twoStepRequired) return twoStepNeeded();
+    if (page.labelExists) return alreadyExists(label, pageUrl);
 
-  const nameFieldLookup = await requireElement(elements, { role: 'textbox', purpose: 'Name the new Google app password', nameIncludes: 'app name' }, { browser });
-  if (!nameFieldLookup.found) {
-    const createLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
-    if (!createLookup.found) return { kind: 'needs-human', reason: 'create-form-not-found', problem: 'The app-password creation form is unavailable; the page does not establish why.', fix: `Open ${pageUrl} and review the account’s app-password availability.` };
-    return {
-      kind: 'failed', reason: 'create-form-not-found', problem: nameFieldLookup.message,
-      fix: `Open ${pageUrl} by hand, type "${label}" into the "App name" field, and click "Create".`,
-    };
-  }
+    const nameFieldLookup = await requireElement(elements, { role: 'textbox', purpose: 'Name the new Google app password', nameIncludes: 'app name' }, { browser });
+    if (!nameFieldLookup.found) {
+      const createLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
+      if (!createLookup.found) return { kind: 'needs-human', reason: 'create-form-not-found', problem: 'The app-password creation form is unavailable; the page does not establish why.', fix: `Open ${pageUrl} and review the account’s app-password availability.` };
+      return {
+        kind: 'failed', reason: 'create-form-not-found', problem: nameFieldLookup.message,
+        fix: `Open ${pageUrl} by hand, type "${label}" into the "App name" field, and click "Create".`,
+      };
+    }
 
-  await consumeGoogleElement(browser, nameFieldLookup.element, label);
-  elements = await browser.snapshot();
-  const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
-  if (!createButtonLookup.found) return { kind: 'failed', reason: 'create-form-not-found', problem: createButtonLookup.message, fix: 'Review the app-password form by hand.' };
-  await consumeGoogleElement(browser, createButtonLookup.element);
-
-  let passwordText: string | null = null;
-  for (let attempt = 0; attempt < WAIT_ATTEMPTS && !passwordText; attempt += 1) {
-    if (attempt > 0) await delay(WAIT_DELAY_MS);
-    const text = await browser.readText();
-    passwordText = extractPassword(text);
-  }
-
-  if (!passwordText) {
+    await consumeGoogleElement(browser, nameFieldLookup.element, label);
     elements = await browser.snapshot();
-    return {
-      kind: 'failed',
-      reason: 'result-dialog-not-found',
-      problem: `Clicked "Create" but no 16-character app password could be read back afterward. The page showed ${describeElements(elements)}.`,
-      fix: `Open ${pageUrl} by hand, check whether an app password named "${label}" was created, and store it manually if so.`,
-    };
-  }
+    const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
+    if (!createButtonLookup.found) return { kind: 'failed', reason: 'create-form-not-found', problem: createButtonLookup.message, fix: 'Review the app-password form by hand.' };
+    await consumeGoogleElement(browser, createButtonLookup.element);
 
-  return {
-    kind: 'ok',
-    detail: `Created an app password labeled "${label}".`,
-    password: passwordText,
-  };
+    let passwordText: string | null = null;
+    for (let attempt = 0; attempt < WAIT_ATTEMPTS && !passwordText; attempt += 1) {
+      if (attempt > 0) await delay(WAIT_DELAY_MS);
+      const text = await browser.readText();
+      passwordText = extractPassword(text);
+    }
+
+    if (!passwordText) {
+      elements = await browser.snapshot();
+      return {
+        kind: 'failed',
+        reason: 'result-dialog-not-found',
+        problem: `Clicked "Create" but no 16-character app password could be read back afterward. The page showed ${describeElements(elements)}.`,
+        fix: `Open ${pageUrl} by hand, check whether an app password named "${label}" was created, and store it manually if so.`,
+      };
+    }
+
+    return {
+      kind: 'ok',
+      detail: `Created an app password labeled "${label}".`,
+      password: passwordText,
+    };
+  });
 }
 
 // Re-exported so tests and other flow modules can build fake snapshots that

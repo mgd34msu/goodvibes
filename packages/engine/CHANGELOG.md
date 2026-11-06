@@ -5,7 +5,7 @@
 Development version: `3.0.0-dev.0`, shared by every monorepo workspace.
 Six decision-backend profiles, finite hosted/local failover, the opt-in Decision
 Router, bounded routing previews, dispatch-aware call budgets and platform-owned
-terminal consolidation are being integrated. See the [draft release notes](../../docs/releases/3.0.0.md)
+terminal consolidation are implemented; integrated qualification is in progress. See the [draft release notes](../../docs/releases/3.0.0.md)
 and [work scope](../../docs/design/decision-platform-v3.md) for implementation and
 qualification status. No release readiness is asserted by this entry.
 

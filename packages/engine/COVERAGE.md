@@ -39,7 +39,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/judgment/test/retry.test.ts](../judgment/test/retry.test.ts) |
 | [packages/judgment/test/truth.test.ts](../judgment/test/truth.test.ts) |
 
-## Engine platform (1922 files)
+## Engine platform (1923 files)
 
 | File |
 | --- |
@@ -1760,6 +1760,7 @@ bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md
 | [packages/engine/test/terminal-shell-bottom-bar.test.ts](test/terminal-shell-bottom-bar.test.ts) |
 | [packages/engine/test/terminal-shell-conformance.test.ts](test/terminal-shell-conformance.test.ts) |
 | [packages/engine/test/terminal-shell-herdr-session-reporter.test.ts](test/terminal-shell-herdr-session-reporter.test.ts) |
+| [packages/engine/test/terminal-shell-service-readiness.test.ts](test/terminal-shell-service-readiness.test.ts) |
 | [packages/engine/test/terminal-shell-text-selection-copy.test.ts](test/terminal-shell-text-selection-copy.test.ts) |
 | [packages/engine/test/test-discovery.test.ts](test/test-discovery.test.ts) |
 | [packages/engine/test/test-helper-teardown-guard.test.ts](test/test-helper-teardown-guard.test.ts) |

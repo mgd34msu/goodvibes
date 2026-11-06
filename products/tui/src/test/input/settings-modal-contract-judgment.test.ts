@@ -20,17 +20,19 @@ describe('contract and judgment settings workspace', () => {
     modal = new SettingsModal();
     modal.open(cm, createFeatureFlagManager(), new SubscriptionManager(join(root, 'subscriptions.json')), { getAll: () => ({}) });
   });
-  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
 
   for (const [category, label, group] of [
     ['contract', 'Contracts', 'Automation'],
     ['judgment', 'Judgment', 'AI Routing'],
   ] as const) {
     test(`${category} exposes every schema key with unchanged metadata and defaults`, () => {
-      expect(SETTINGS_CATEGORY_GROUPS.find(item => item.label === group)?.categories).toContain(category);
-      const settings = CONFIG_SCHEMA.filter(setting => setting.key.startsWith(`${category}.`));
+      expect(SETTINGS_CATEGORY_GROUPS.find((item) => item.label === group)?.categories).toContain(category);
+      const settings = CONFIG_SCHEMA.filter((setting) => setting.key.startsWith(`${category}.`));
       expect(settings.length).toBeGreaterThan(0);
-      expect(modal.groups.get(category)?.map(entry => entry.setting.key)).toEqual(settings.map(setting => setting.key));
+      expect(modal.groups.get(category)?.map((entry) => entry.setting.key)).toEqual(settings.map((setting) => setting.key));
       modal.selectTarget(category);
       expect(modal.currentCategory).toBe(category);
       for (const setting of settings) {
@@ -75,7 +77,7 @@ describe('contract and judgment settings workspace', () => {
     modal.activateSelected();
     modal.editBuffer = '-1';
     expect(modal.commitEdit()).toBe(false);
-    expect(cm.get('judgment.timeoutMs')).toBe(0);
+    expect(cm.get('judgment.timeoutMs')).toBe(30_000);
     modal.activateSelected();
     modal.editBuffer = '20000';
     expect(modal.commitEdit()).toBe(true);

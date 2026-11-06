@@ -27,7 +27,9 @@ async function captureGoodVibesCliCommand(args: readonly string[], configManager
   const logs: string[] = [];
   const originalLog = console.log;
   try {
-    console.log = (value?: unknown) => { logs.push(String(value)); };
+    console.log = (value?: unknown) => {
+      logs.push(String(value));
+    };
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: root, workingDirectory: root });
     const result = await handleGoodVibesCliCommand({
       cli: parseGoodVibesCli(args),
@@ -62,10 +64,7 @@ describe('parseCliFlags', () => {
   });
 
   test('parses both --daemon-home and --working-dir together', () => {
-    const flags = parseCliFlags([
-      '--daemon-home=/home/daemon',
-      '--working-dir=/home/workspace',
-    ]);
+    const flags = parseCliFlags(['--daemon-home=/home/daemon', '--working-dir=/home/workspace']);
     expect(flags.daemonHome).toBe('/home/daemon');
     expect(flags.workingDir).toBe('/home/workspace');
   });
@@ -157,12 +156,7 @@ describe('parseCliFlags', () => {
   // ---------------------------------------------------------------------------
 
   test('parses --provider and --model alongside new flags', () => {
-    const flags = parseCliFlags([
-      '--provider', 'openai',
-      '--model', 'gpt-4o',
-      '--daemon-home=/tmp/dh',
-      '--working-dir=/tmp/wd',
-    ]);
+    const flags = parseCliFlags(['--provider', 'openai', '--model', 'gpt-4o', '--daemon-home=/tmp/dh', '--working-dir=/tmp/wd']);
     expect(flags.provider).toBe('openai');
     expect(flags.model).toBe('gpt-4o');
     expect(flags.daemonHome).toBe('/tmp/dh');
@@ -221,16 +215,7 @@ describe('parseCliFlags', () => {
   });
 
   test('parses --cd, --no-alt-screen, completion, and port flags', () => {
-    const flags = parseGoodVibesCli([
-      'serve',
-      '--cd',
-      '/workspace',
-      '--no-alt-screen',
-      '--hostname',
-      '0.0.0.0',
-      '--port',
-      '3421',
-    ]);
+    const flags = parseGoodVibesCli(['serve', '--cd', '/workspace', '--no-alt-screen', '--hostname', '0.0.0.0', '--port', '3421']);
 
     expect(flags.command).toBe('serve');
     expect(flags.flags.workingDir).toBe('/workspace');
@@ -259,10 +244,7 @@ describe('parseCliFlags', () => {
     const configDir = join(root, '.goodvibes', 'tui');
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir: root });
 
-    const errors = applyRuntimeConfigOverrides(configManager, [
-      'controlPlane.port=4567',
-      'behavior.autoApprove=true',
-    ]);
+    const errors = applyRuntimeConfigOverrides(configManager, ['controlPlane.port=4567', 'behavior.autoApprove=true']);
     applyRuntimeConfigValue(configManager, 'provider.model', 'openai:gpt-5.2');
     const featureErrors = applyRuntimeFeatureFlagOverrides(configManager, {
       enableFeatures: ['output-schema-fingerprint'],
@@ -445,7 +427,11 @@ describe('parseCliFlags', () => {
 
     const json = await captureGoodVibesCliCommand(['listener', 'test', '--json'], configManager, root);
     expect(json.result).toEqual({ handled: true, exitCode: 1 });
-    const parsed = JSON.parse(json.output) as { issues: string[]; posture: { kind: string }; surfaces: Array<{ id: string; ready: boolean }> };
+    const parsed = JSON.parse(json.output) as {
+      issues: string[];
+      posture: { kind: string };
+      surfaces: Array<{ id: string; ready: boolean }>;
+    };
     expect(parsed.posture.kind).toBe('local-network');
     expect(parsed.issues).toContain('HTTP listener is enabled but service mode is off.');
     expect(parsed.surfaces.find((surface) => surface.id === 'slack')?.ready).toBe(false);
@@ -514,17 +500,23 @@ describe('parseCliFlags', () => {
       workingDir: root,
     });
     const bundlePath = join(root, 'support-bundle.json');
-    writeFileSync(bundlePath, JSON.stringify({
-      type: 'goodvibes.setup',
-      version: 1,
-      capturedAt: 0,
-      config: { web: { enabled: true } },
-    }), 'utf-8');
+    writeFileSync(
+      bundlePath,
+      JSON.stringify({
+        type: 'goodvibes.setup',
+        version: 1,
+        capturedAt: 0,
+        config: { web: { enabled: true } },
+      }),
+      'utf-8',
+    );
     const cli = parseGoodVibesCli(['bundle', 'inspect', 'support-bundle.json']);
     const logs: string[] = [];
     const originalLog = console.log;
     try {
-      console.log = (value?: unknown) => { logs.push(String(value)); };
+      console.log = (value?: unknown) => {
+        logs.push(String(value));
+      };
       seedProviderMetadataCacheFixture({ configManager, homeDirectory: root, workingDirectory: root });
       const result = await handleGoodVibesCliCommand({
         cli,
@@ -542,16 +534,74 @@ describe('parseCliFlags', () => {
 
   test('bundle export redacts secret config values and import skips redacted sentinels', async () => {
     // Container paths of declared settings are synthetic config structure, not credential leaves.
-    const containers = new Set(CONFIG_SCHEMA.flatMap(setting => {
-      const parts = setting.key.split('.');
-      return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('.'));
-    }));
+    const containers = new Set(
+      CONFIG_SCHEMA.flatMap((setting) => {
+        const parts = setting.key.split('.');
+        return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('.'));
+      }),
+    );
     const secretPaths = new Set(['surfaces.slack.signingSecret', 'surfaces.slack.botToken']);
-    const ordinaryPaths = new Set(['surfaces.slack.defaultChannel', 'service.logPath', 'sandbox.egressAllowlist', 'sandbox.workspaceWritable',
-      'notifications.webhookUrls', 'cluster.peers', 'contract.gates',
-      ...Array.from({ length: 3 }, (_, index) => ['', '.name', '.command', '.enabled'].map(suffix => `contract.gates.${index}${suffix}`)).flat(),
-      'worktree', 'worktree.setup', 'worktree.setup.commands', 'worktree.setup.carryOverGlobs',
-      'conversationGate.gatedSurfaces', ...Array.from({ length: 14 }, (_, index) => `conversationGate.gatedSurfaces.${index}`)]);
+    const ordinaryPaths = new Set([
+      'provider.decisionRouter.initialContextChars',
+      'provider.decisionRouter.expandedContextChars',
+      'provider.decisionRouter.categories',
+      'provider.decisionRouter.categories.lookup-navigation',
+      'provider.decisionRouter.categories.lookup-navigation.label',
+      'provider.decisionRouter.categories.lookup-navigation.description',
+      'provider.decisionRouter.categories.lookup-navigation.target',
+      'provider.decisionRouter.categories.coding-implementation',
+      'provider.decisionRouter.categories.coding-implementation.label',
+      'provider.decisionRouter.categories.coding-implementation.description',
+      'provider.decisionRouter.categories.coding-implementation.target',
+      'provider.decisionRouter.categories.analysis-decisions',
+      'provider.decisionRouter.categories.analysis-decisions.label',
+      'provider.decisionRouter.categories.analysis-decisions.description',
+      'provider.decisionRouter.categories.analysis-decisions.target',
+      'provider.decisionRouter.categories.documentation-writing',
+      'provider.decisionRouter.categories.documentation-writing.label',
+      'provider.decisionRouter.categories.documentation-writing.description',
+      'provider.decisionRouter.categories.documentation-writing.target',
+      'provider.decisionRouter.categories.summarization-extraction',
+      'provider.decisionRouter.categories.summarization-extraction.label',
+      'provider.decisionRouter.categories.summarization-extraction.description',
+      'provider.decisionRouter.categories.summarization-extraction.target',
+      'provider.decisionRouter.categories.general',
+      'provider.decisionRouter.categories.general.label',
+      'provider.decisionRouter.categories.general.description',
+      'provider.decisionRouter.categories.general.target',
+      'provider.decisionRouter.categories.debugging-diagnosis',
+      'provider.decisionRouter.categories.debugging-diagnosis.label',
+      'provider.decisionRouter.categories.debugging-diagnosis.description',
+      'provider.decisionRouter.categories.debugging-diagnosis.target',
+      'provider.decisionRouter.categories.review-verification',
+      'provider.decisionRouter.categories.review-verification.label',
+      'provider.decisionRouter.categories.review-verification.description',
+      'provider.decisionRouter.categories.review-verification.target',
+      'provider.decisionRouter.categories.research',
+      'provider.decisionRouter.categories.research.label',
+      'provider.decisionRouter.categories.research.description',
+      'provider.decisionRouter.categories.research.target',
+      'provider.decisionRouter.categories.data-analysis',
+      'provider.decisionRouter.categories.data-analysis.label',
+      'provider.decisionRouter.categories.data-analysis.description',
+      'provider.decisionRouter.categories.data-analysis.target',
+      'surfaces.slack.defaultChannel',
+      'service.logPath',
+      'sandbox.egressAllowlist',
+      'sandbox.workspaceWritable',
+      'notifications.webhookUrls',
+      'cluster.peers',
+      'contract.gates',
+      ...Array.from({ length: 3 }, (_, index) =>
+        ['', '.name', '.command', '.enabled'].map((suffix) => `contract.gates.${index}${suffix}`),
+      ).flat(),
+      'worktree',
+      'worktree.setup',
+      'worktree.setup.commands',
+      'worktree.setup.carryOverGlobs',
+      'conversationGate.gatedSurfaces',
+      ...Array.from({ length: 14 }, (_, index) => `conversationGate.gatedSurfaces.${index}`),
+    ]);
     const readingFor = (name: string, key: string | undefined): number => {
       if (name === 'credential' && key !== undefined) {
         if (secretPaths.has(key)) return 0.99;
@@ -561,18 +611,29 @@ describe('parseCliFlags', () => {
     };
     expect(() => readingFor('credential', 'surfaces.slack.unlistedValue')).toThrow();
     expect(() => readingFor('unlisted-question', 'provider')).toThrow();
-    const publicFields = new Set(['config', 'surfaces', 'slack', 'defaultChannel', 'redaction', 'redactedConfigPaths', 'diagnostics', 'service', 'issues']);
+    const publicFields = new Set([
+      'config',
+      'surfaces',
+      'slack',
+      'defaultChannel',
+      'redaction',
+      'redactedConfigPaths',
+      'diagnostics',
+      'service',
+      'issues',
+    ]);
     const publicLines = ['goodvibes-alerts', 'surfaces.slack.signingSecret', 'surfaces.slack.botToken'];
     const fake = fakePort((name, question, state) => {
       const diagnostic = publicErrorTextAnswer(publicLines, name, question, state);
       if (diagnostic !== undefined) return diagnostic;
       if (state === null || typeof state !== 'object' || Array.isArray(state)) throw new Error('Expected authored config or bundle field');
-      if (name === 'kind' && Object.keys(state).length === 1 && typeof state.field === 'string' && publicFields.has(state.field)) return choiceAnswer(question, 'other', 0.99);
+      if (name === 'kind' && Object.keys(state).length === 1 && typeof state.field === 'string' && publicFields.has(state.field))
+        return choiceAnswer(question, 'other', 0.99);
       return noulAnswer(readingFor(name, typeof state.key === 'string' ? state.key : undefined));
     });
     const previousJudgment = installJudgmentPort(fake.port);
     const createRuntimeServices = runtimeComposition.createRuntimeServices;
-    const composition = spyOn(runtimeComposition, 'createRuntimeServices').mockImplementation(options => {
+    const composition = spyOn(runtimeComposition, 'createRuntimeServices').mockImplementation((options) => {
       const services = createRuntimeServices(options);
       // The real composition owns its settings-driven port. Install the authored
       // egress fixture after that graph exists, preserving its actual closure.
@@ -617,13 +678,20 @@ describe('parseCliFlags', () => {
         configDir: join(importRoot, '.goodvibes', 'tui'),
         workingDir: importRoot,
       });
-      const imported = await captureGoodVibesCliCommand(['bundle', 'import', join(root, 'support-bundle.json')], importedConfig, importRoot);
+      const imported = await captureGoodVibesCliCommand(
+        ['bundle', 'import', join(root, 'support-bundle.json')],
+        importedConfig,
+        importRoot,
+      );
       expect(imported.result).toEqual({ handled: true, exitCode: 0 });
       expect(imported.output).toContain('redacted values skipped');
       expect(importedConfig.get('surfaces.slack.signingSecret')).toBe('');
       expect(importedConfig.get('surfaces.slack.botToken')).toBe('');
       expect(importedConfig.get('surfaces.slack.defaultChannel')).toBe('goodvibes-alerts');
-    } finally { composition.mockRestore(); installJudgmentPort(previousJudgment); }
+    } finally {
+      composition.mockRestore();
+      installJudgmentPort(previousJudgment);
+    }
   });
 
   test('service check reports lifecycle posture with failing readiness exit code', async () => {
@@ -689,16 +757,23 @@ describe('parseCliFlags', () => {
 
     const requests: Array<{ state: unknown; questions: Questions }> = [];
     let unavailable = false;
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-      if (new URL(request.url).pathname !== '/v1/systemone') return new Response('not found', { status: 404 });
-      const body = await request.json() as { model: string; state: unknown; questions: Questions };
-      requests.push(body);
-      if (unavailable) return new Response('fixture unavailable', { status: 503 });
-      const answers = Object.fromEntries(Object.keys(body.questions).map(name => [name, noulAnswer(
-        name === 'subscription' && String(body.state).includes('stored ChatGPT/Codex subscription session') ? 0.99 : 0.01,
-      )]));
-      return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
-    } });
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        if (new URL(request.url).pathname !== '/v1/systemone') return new Response('not found', { status: 404 });
+        const body = (await request.json()) as { model: string; state: unknown; questions: Questions };
+        requests.push(body);
+        if (unavailable) return new Response('fixture unavailable', { status: 503 });
+        const answers = Object.fromEntries(
+          Object.keys(body.questions).map((name) => [
+            name,
+            noulAnswer(name === 'subscription' && String(body.state).includes('stored ChatGPT/Codex subscription session') ? 0.99 : 0.01),
+          ]),
+        );
+        return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
+      },
+    });
     const previousKey = process.env.TYPESAFE_API_KEY;
     const previousJudgment = installJudgmentPort(undefined);
     try {
@@ -722,12 +797,18 @@ describe('parseCliFlags', () => {
       expect(modelsJson.result).toEqual({ handled: true, exitCode: 0 });
       expect((JSON.parse(modelsJson.output) as { setup: { setupClass: string } }).setup.setupClass).toBeString();
 
-      const setupRequests = requests.filter(request => 'subscription' in request.questions);
+      const setupRequests = requests.filter((request) => 'subscription' in request.questions);
       expect(setupRequests.length).toBeGreaterThanOrEqual(4);
-      expect(setupRequests.slice(0, 2).every(request => String(request.state).includes('stored ChatGPT/Codex subscription session'))).toBe(true);
+      expect(
+        setupRequests.slice(0, 2).every((request) => String(request.state).includes('stored ChatGPT/Codex subscription session')),
+      ).toBe(true);
 
       unavailable = true;
-      const unavailableResult = await captureGoodVibesCliCommand(['providers', 'inspect', 'openai-subscriber', '--json'], configManager, root);
+      const unavailableResult = await captureGoodVibesCliCommand(
+        ['providers', 'inspect', 'openai-subscriber', '--json'],
+        configManager,
+        root,
+      );
       expect(unavailableResult.result).toEqual({ handled: true, exitCode: 0 });
       expect((JSON.parse(unavailableResult.output) as { setup: { setupClass: string } }).setup.setupClass).toBe('unknown');
     } finally {
@@ -750,12 +831,20 @@ describe('parseCliFlags', () => {
     process.env.GV_CLI_SECRET_REDACTION = secretValue;
 
     try {
-      const text = await captureGoodVibesCliCommand(['secrets', 'test', 'goodvibes://secrets/env/GV_CLI_SECRET_REDACTION'], configManager, root);
+      const text = await captureGoodVibesCliCommand(
+        ['secrets', 'test', 'goodvibes://secrets/env/GV_CLI_SECRET_REDACTION'],
+        configManager,
+        root,
+      );
       expect(text.result).toEqual({ handled: true, exitCode: 0 });
       expect(text.output).toContain('resolved <redacted>');
       expect(text.output).not.toContain(secretValue);
 
-      const json = await captureGoodVibesCliCommand(['secrets', 'test', 'goodvibes://secrets/env/GV_CLI_SECRET_REDACTION', '--json'], configManager, root);
+      const json = await captureGoodVibesCliCommand(
+        ['secrets', 'test', 'goodvibes://secrets/env/GV_CLI_SECRET_REDACTION', '--json'],
+        configManager,
+        root,
+      );
       expect(json.result).toEqual({ handled: true, exitCode: 0 });
       expect(json.output).not.toContain(secretValue);
       expect(JSON.parse(json.output)).toEqual({
@@ -776,10 +865,7 @@ describe('parseCliFlags', () => {
       workingDir: root,
     });
 
-    const errors = applyRuntimeConfigOverrides(configManager, [
-      'controlPlane.port=99999',
-      'not.real=true',
-    ]);
+    const errors = applyRuntimeConfigOverrides(configManager, ['controlPlane.port=99999', 'not.real=true']);
 
     expect(errors).toHaveLength(2);
     expect(errors[0]).toContain('Invalid runtime value for controlPlane.port');

@@ -1,7 +1,8 @@
 # Release policy
 
-This document describes the public release quality policy for the GoodVibes SDK
-workspace. Historical release narratives live in `CHANGELOG.md`.
+Status: current release policy for the GoodVibes JEV monorepo.
+
+This document describes the release quality policy for the platform and products. Historical release narratives live in `CHANGELOG.md`.
 
 ## Platform support
 
@@ -11,8 +12,9 @@ use POSIX process management and filesystem behavior.
 
 ## Release rules
 
-- Root, Engine, Judgment and Daemon versions must be aligned. Agent and TUI
-  retain their independent product versions.
+- Root, Engine, Judgment, Daemon, TUI, Agent and WebUI share one package
+  version. Development uses `3.0.0-dev.0`; the qualified major release is
+  `3.0.0`. Protocol and persisted schema versions remain independent.
 - `CHANGELOG.md` must contain the release narrative for the package version.
 - Generated contracts and generated docs must match source.
 - Validation must pass before a release is cut.
@@ -23,9 +25,10 @@ use POSIX process management and filesystem behavior.
   variable is deliberately set to `true`; leaving it unset holds every green
   push on `main` without tagging or publishing.
 
-The SDK targets Bun for daemon/platform surfaces and browser, Hermes, and
-Workers for companion-safe surfaces. Node.js is not a documented consumer
-runtime target; see [Runtime surfaces](./surfaces.md).
+The engine targets Bun for daemon/platform surfaces and browser, Hermes, and
+Workers for companion-safe surfaces. The judgment port and portable package
+surfaces also have installed Node checks; Bun-specific APIs retain their runtime
+boundaries. See [Runtime surfaces](./surfaces.md) and the judgment package README.
 
 ## By-reference release flow
 

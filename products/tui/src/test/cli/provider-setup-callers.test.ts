@@ -41,7 +41,8 @@ const configContainers = new Set(CONFIG_SCHEMA.flatMap(setting => {
   const parts = setting.key.split('.');
   return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('.'));
 }));
-const configOrdinaryPaths = new Set(['service.logPath', 'sandbox.egressAllowlist', 'sandbox.workspaceWritable', 'notifications.webhookUrls', 'cluster.peers', 'contract.gates',
+const configOrdinaryPaths = new Set(['provider.decisionRouter.initialContextChars', 'provider.decisionRouter.expandedContextChars', 'provider.decisionRouter.categories', 'provider.decisionRouter.categories.lookup-navigation', 'provider.decisionRouter.categories.lookup-navigation.label', 'provider.decisionRouter.categories.lookup-navigation.description', 'provider.decisionRouter.categories.lookup-navigation.target', 'provider.decisionRouter.categories.coding-implementation', 'provider.decisionRouter.categories.coding-implementation.label', 'provider.decisionRouter.categories.coding-implementation.description', 'provider.decisionRouter.categories.coding-implementation.target', 'provider.decisionRouter.categories.analysis-decisions', 'provider.decisionRouter.categories.analysis-decisions.label', 'provider.decisionRouter.categories.analysis-decisions.description', 'provider.decisionRouter.categories.analysis-decisions.target', 'provider.decisionRouter.categories.documentation-writing', 'provider.decisionRouter.categories.documentation-writing.label', 'provider.decisionRouter.categories.documentation-writing.description', 'provider.decisionRouter.categories.documentation-writing.target', 'provider.decisionRouter.categories.summarization-extraction', 'provider.decisionRouter.categories.summarization-extraction.label', 'provider.decisionRouter.categories.summarization-extraction.description', 'provider.decisionRouter.categories.summarization-extraction.target', 'provider.decisionRouter.categories.general', 'provider.decisionRouter.categories.general.label', 'provider.decisionRouter.categories.general.description', 'provider.decisionRouter.categories.general.target', 'provider.decisionRouter.categories.debugging-diagnosis', 'provider.decisionRouter.categories.debugging-diagnosis.label', 'provider.decisionRouter.categories.debugging-diagnosis.description', 'provider.decisionRouter.categories.debugging-diagnosis.target', 'provider.decisionRouter.categories.review-verification', 'provider.decisionRouter.categories.review-verification.label', 'provider.decisionRouter.categories.review-verification.description', 'provider.decisionRouter.categories.review-verification.target', 'provider.decisionRouter.categories.research', 'provider.decisionRouter.categories.research.label', 'provider.decisionRouter.categories.research.description', 'provider.decisionRouter.categories.research.target', 'provider.decisionRouter.categories.data-analysis', 'provider.decisionRouter.categories.data-analysis.label', 'provider.decisionRouter.categories.data-analysis.description', 'provider.decisionRouter.categories.data-analysis.target',
+      'service.logPath', 'sandbox.egressAllowlist', 'sandbox.workspaceWritable', 'notifications.webhookUrls', 'cluster.peers', 'contract.gates',
   ...Array.from({length:3}, (_,i) => ['', '.name', '.command', '.enabled'].map(suffix => 'contract.gates.'+i+suffix)).flat(),
   'worktree', 'worktree.setup', 'worktree.setup.commands', 'worktree.setup.carryOverGlobs', 'conversationGate.gatedSurfaces',
   ...Array.from({length:14}, (_,i) => 'conversationGate.gatedSurfaces.'+i)]);
@@ -103,20 +104,37 @@ test('actual providers, models and support-bundle callers await shared setup fac
   const home = mkdtempSync(join(tmpdir(), 'provider-setup-callers-'));
   try {
     const child = Bun.spawnSync([process.execPath, '--eval', source], {
-      cwd: productRoot, env: { ...process.env, HOME: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: join(home, 'daemon') },
-      stdout: 'pipe', stderr: 'pipe', timeout: 15000,
+      cwd: productRoot,
+      env: { ...process.env, HOME: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: join(home, 'daemon') },
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 15000,
     });
     expect(child.exitCode, child.stderr.toString()).toBe(0);
     const output = JSON.parse(child.stdout.toString().trim().split('\n').at(-1)!);
     expect(output.providers.map((row: { setupClass: string }) => row.setupClass)).toEqual(['self-hosted', 'cloud-account', 'unknown']);
     expect(output.inspect.setup.setupClass).toBe('cloud-account');
     expect(output.current.setup.setupClass).toBe('self-hosted');
-    expect(output.models.map((row: { setupClass: string }) => row.setupClass)).toEqual(['self-hosted', 'self-hosted', 'cloud-account', 'cloud-account', 'unknown', 'unknown']);
+    expect(output.models.map((row: { setupClass: string }) => row.setupClass)).toEqual([
+      'self-hosted',
+      'self-hosted',
+      'cloud-account',
+      'cloud-account',
+      'unknown',
+      'unknown',
+    ]);
     expect(output.modelReads.sort()).toEqual(['cloud', 'gateway', 'missing']);
-    expect(output.bundle.map((row: { setup: { setupClass: string } }) => row.setup.setupClass)).toEqual(['self-hosted', 'cloud-account', 'unknown']);
+    expect(output.bundle.map((row: { setup: { setupClass: string } }) => row.setup.setupClass)).toEqual([
+      'self-hosted',
+      'cloud-account',
+      'unknown',
+    ]);
     expect(output.bundleCredentialKeys.length).toBeGreaterThan(0);
     expect(new Set(output.bundleCredentialKeys).size).toBe(output.bundleCredentialKeys.length);
     expect(output.unavailable.setup.setupClass).toBe('unknown');
-    expect(output.disposed).toBe(6); expect(output.stopped).toBe(6);
-  } finally { rmSync(home, { recursive: true, force: true }); }
+    expect(output.disposed).toBe(6);
+    expect(output.stopped).toBe(6);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }, 20000);

@@ -763,7 +763,7 @@
       "path": "input/keybindings.ts",
       "baselineTuiLines": 362,
       "baselineSimilarity": 0.7323,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-presentation-adapter"
     },
     {
       "path": "input/mcp-workspace.ts",

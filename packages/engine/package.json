@@ -2218,6 +2218,16 @@
       "bun": "./terminal-shell/src/input-feed-context.ts",
       "types": "./terminal-shell/dist/input-feed-context.d.ts",
       "import": "./terminal-shell/dist/input-feed-context.js"
+    },
+    "./terminal-shell/keybindings": {
+      "bun": "./terminal-shell/src/keybindings.ts",
+      "types": "./terminal-shell/dist/keybindings.d.ts",
+      "import": "./terminal-shell/dist/keybindings.js"
+    },
+    "./terminal-shell/keybinding-catalog": {
+      "bun": "./terminal-shell/src/keybinding-catalog.ts",
+      "types": "./terminal-shell/dist/keybinding-catalog.d.ts",
+      "import": "./terminal-shell/dist/keybinding-catalog.js"
     }
   },
   "publishConfig": {

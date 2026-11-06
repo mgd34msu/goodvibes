@@ -19,6 +19,14 @@ function makeKm(): KeybindingsManager {
 }
 
 describe('KeybindingsManager.lookup()', () => {
+  it('matches Alt as reported by the terminal tokenizer through meta', () => {
+    const km = makeKm();
+    const token = { logicalName: 'up', meta: true };
+    expect(km.lookup(token)).toBe('focus-work-tree');
+    expect(km.matches('focus-work-tree', token)).toBe(true);
+    expect(km.matches('focus-work-tree', { ...token, alt: false })).toBe(false);
+  });
+
   it('returns the correct action for every default combo', () => {
     const km = makeKm();
     for (const [action, combos] of Object.entries(DEFAULT_KEYBINDINGS) as [KeyAction, typeof DEFAULT_KEYBINDINGS[KeyAction]][]) {

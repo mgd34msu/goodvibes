@@ -63,7 +63,8 @@
       "path": "cli-flags.ts",
       "baselineTuiLines": 22,
       "baselineSimilarity": 0.7727,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "reason": "Shared flags entry point and parser engine; product command catalogs and compatibility re-export lists remain explicit."
     },
     {
       "path": "cli/bundle-command.ts",

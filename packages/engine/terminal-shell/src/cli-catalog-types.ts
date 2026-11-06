@@ -48,6 +48,8 @@ export interface CommandFlagSpec<TField extends string> {
   readonly enumDefault?: string | undefined;
   /** Pushed to `warnings` whenever this spec is matched, a deprecated alias's notice. */
   readonly warning?: string | undefined;
+  /** Compatibility for a vocabulary whose boolean flags accept an ignored inline suffix. */
+  readonly allowInlineValue?: boolean | undefined;
 }
 
 export interface CommandSpec<TCommand extends string, TField extends string> {
@@ -107,6 +109,10 @@ export interface CliCatalog<TCommand extends string, TField extends string, TFla
   /** The command reported in the parse result when `unmatchedFirstToken` is `'reject'`. Defaults to `defaultCommand`. */
   readonly unresolvedCommandSentinel?: TCommand | undefined;
   readonly createDefaultFlags: () => TFlags;
+  /** Product copy for an unknown option; parsing and ownership remain in the engine. */
+  readonly unknownOptionError?: ((name: string) => string) | undefined;
+  /** Apply a declared field rule immediately, preserving repeated-flag order. */
+  readonly postFlag?: ((flags: TFlags, spec: CommandFlagSpec<TField>) => TFlags) | undefined;
   /**
    * Final, whole-parse adjustments a catalog's own domain rules need, e.g.
    * folding leftover positionals into a prompt field, inferring one field

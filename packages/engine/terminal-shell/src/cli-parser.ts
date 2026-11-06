@@ -11,9 +11,11 @@ import { parseWithCatalog } from './cli-parser-engine.js';
 import { GOODVIBES_CLI_CATALOG } from './cli-command-catalog.js';
 import type { GoodVibesCliParseResult } from './cli-types.js';
 
-export function parseGoodVibesCli(
-  argv: readonly string[],
-  binary = 'goodvibes',
-): GoodVibesCliParseResult {
+export function parseGoodVibesCli(argv: readonly string[], binary = 'goodvibes'): GoodVibesCliParseResult {
   return parseWithCatalog(argv, GOODVIBES_CLI_CATALOG, binary);
+}
+
+/** Bind a product vocabulary once; the compatibility flags entry point stays uniform. */
+export function createCliFlagParser<Flags>(parse: (argv: readonly string[], binary: string) => { readonly flags: Flags }) {
+  return (argv: readonly string[], binary = 'goodvibes'): Flags => parse(argv, binary).flags;
 }

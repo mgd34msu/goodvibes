@@ -216,7 +216,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   const warnings: string[] = [];
   const commandArgs: string[] = [];
   const positionals: string[] = [];
-  const flags = catalog.createDefaultFlags();
+  let flags = catalog.createDefaultFlags();
 
   const arity = catalogFlagArity(catalog);
   const rejects = catalog.unmatchedFirstToken === 'reject';
@@ -316,7 +316,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
         commandArgs.push(token);
         continue;
       }
-      errors.push(unacceptedOptionError(catalog, spec, arity, name));
+      errors.push(catalog.unknownOptionError?.(name) ?? unacceptedOptionError(catalog, spec, arity, name));
       const kind = arity.get(name);
       if (inlineValue === undefined && kind !== undefined && kindConsumesNextValue(kind, argv, index)) index += 1;
       continue;
@@ -324,12 +324,12 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
 
     switch (flagSpec.kind) {
       case 'boolean': {
-        if (inlineValue !== undefined) { errors.push(`${name} takes no value.`); break; }
+        if (inlineValue !== undefined && !flagSpec.allowInlineValue) { errors.push(`${name} takes no value.`); break; }
         setField(flags, flagSpec.field, true);
         break;
       }
       case 'const': {
-        if (inlineValue !== undefined) { errors.push(`${name} takes no value.`); break; }
+        if (inlineValue !== undefined && !flagSpec.allowInlineValue) { errors.push(`${name} takes no value.`); break; }
         setField(flags, flagSpec.field, flagSpec.constValue);
         break;
       }
@@ -390,6 +390,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
         break;
       }
     }
+    if (catalog.postFlag) flags=catalog.postFlag(flags,flagSpec);
     if (flagSpec.warning) warnings.push(flagSpec.warning);
   }
 

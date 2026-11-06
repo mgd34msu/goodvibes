@@ -156,7 +156,7 @@ export {
   type GoodVibesCliFlagField,
 } from './cli-command-catalog.js';
 
-export { parseGoodVibesCli } from './cli-parser.js';
+export { parseGoodVibesCli, createCliFlagParser } from './cli-parser.js';
 
 export {
   REDACTED_VALUE,

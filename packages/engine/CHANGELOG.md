@@ -1,5 +1,38 @@
 # Changelog
 
+## [3.1.0] - 2026-11-06
+
+Status: candidate preparation; complete workflow qualification and publication pending.
+
+### Added
+
+- Persisted decision-model policies **Default - On**, **Preferred** and
+  **Classic - Off**, independent of execution permission mode. Classic supports
+  ordinary conversation, tools, edits, commands, final answers and session recovery
+  without decision-model requests; the Decision Router uses General directly.
+- Native Classic knowledge ingestion/search, explicit review and links, structural
+  planning, diagnostics, credential masking, speech, support export and catalog browsing.
+  Results identify their basis and do not claim independent semantic verification.
+- Explicit Classic limits for inherently semantic capabilities, including autonomous
+  contract execution, semantic knowledge verification, automated checkout interpretation
+  and semantic recommendations or quality grading.
+
+### Changed
+
+- Preferred continues only after actual decision-chain availability exhaustion,
+  preserving completed work and history without replaying effects. Refusal,
+  malformed responses, privacy rejection, cancellation and stale authority remain terminal.
+- Classic uses owner approval handling for `safe-jev` while retaining explicit YOLO,
+  deterministic permissions, workspace/secret boundaries and independent spending rules.
+- Local voice proof distinguishes native ordered-word matches from semantic verdicts;
+  persisted diagnostics retain that basis. Native build smoke remains available while
+  extra diagnostic output reports an explicit semantic-assessment limit.
+- Align all workspace and runtime release identities at 3.1.0; keep protocol and storage
+  schema identities independent and retain the existing v3.0.0 tag.
+
+See the [release guide](https://github.com/mgd34msu/goodvibes-jev/blob/v3.1.0/docs/releases/3.1.0.md)
+for policy behavior, limits and qualification requirements.
+
 ## [3.0.0] - 2026-11-06
 
 ### Changed

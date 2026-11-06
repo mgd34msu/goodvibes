@@ -72,6 +72,22 @@ const RUNTIME_STATUS_SCHEMA = objectSchema({
 }, ['platform', 'state', 'tts', 'stt', 'offerBytes']);
 
 const INSTALL_RESULT_SCHEMA = objectSchema({
+  operationProvenance: { type: 'string', enum: ['classic'] },
+  semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
+  proof: objectSchema({
+    proved: BOOLEAN_SCHEMA,
+    stage: { type: 'string', enum: ['synthesize', 'transcribe', 'compare'] },
+    phrase: STRING_SCHEMA,
+    transcript: STRING_SCHEMA,
+    wordOverlap: NUMBER_SCHEMA,
+    comparison: { type: 'string', enum: ['yes', 'no', 'uncertain', 'unavailable', 'classic-exact-match', 'classic-mismatch'] },
+    operationProvenance: { type: 'string', enum: ['classic'] },
+    semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
+    proofBasis: { type: 'string', enum: ['native-word-sequence'] },
+    error: STRING_SCHEMA,
+    summary: STRING_SCHEMA,
+  }, ['proved', 'stage', 'phrase', 'summary']),
+  notes: { type: 'array', items: STRING_SCHEMA },
   provisioned: BOOLEAN_SCHEMA,
   platform: NULLABLE_STRING,
   tts: objectSchema({
@@ -185,7 +201,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     id: 'voice.local.install',
     title: 'Install the Managed Local-Voice Runtime',
     description:
-      'One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). After this, local TTS works with zero further configuration. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
+      'One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
     category: 'health',
     scopes: ['write:config'],
     http: { method: 'POST', path: '/api/voice/local/install' },

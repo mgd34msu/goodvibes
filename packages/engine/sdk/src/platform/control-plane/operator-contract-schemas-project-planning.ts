@@ -10,6 +10,7 @@ import {
   JSON_RECORD_SCHEMA,
   METADATA_SCHEMA,
   STRING_LIST_SCHEMA,
+  enumSchema,
   nullableSchema,
 } from './operator-contract-schemas-shared.js';
 import { KNOWLEDGE_SOURCE_SCHEMA } from './operator-contract-schemas-knowledge.js';
@@ -60,6 +61,11 @@ const PROJECT_PLANNING_TASK_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['id', 'title'], { additionalProperties: true });
 
+const PROJECT_PLANNING_READINESS_ASSESSMENT_SCHEMA = objectSchema({
+  basis: enumSchema(['native-structure-and-owner-approval', 'semantic-and-native']),
+  semanticAssessment: enumSchema(['specified', 'ambiguous', 'unavailable', 'not-evaluated']),
+}, ['basis', 'semanticAssessment'], { additionalProperties: false });
+
 const PROJECT_PLANNING_STATE_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   projectId: STRING_SCHEMA,
@@ -78,6 +84,7 @@ const PROJECT_PLANNING_STATE_SCHEMA = objectSchema({
   verificationGates: GENERIC_LIST_SCHEMA,
   agentAssignments: GENERIC_LIST_SCHEMA,
   readiness: STRING_SCHEMA,
+  readinessAssessment: PROJECT_PLANNING_READINESS_ASSESSMENT_SCHEMA,
   executionApproved: BOOLEAN_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
@@ -211,6 +218,9 @@ export const PROJECT_PLANNING_STATE_OUTPUT_SCHEMA = objectSchema({
 }, ['ok', 'projectId', 'knowledgeSpaceId'], { additionalProperties: true });
 
 export const PROJECT_PLANNING_EVALUATION_SCHEMA = objectSchema({
+  operationProvenance: enumSchema(['classic']),
+  semanticAssessment: enumSchema(['not-evaluated']),
+  readinessAssessment: PROJECT_PLANNING_READINESS_ASSESSMENT_SCHEMA,
   ok: BOOLEAN_SCHEMA,
   projectId: STRING_SCHEMA,
   knowledgeSpaceId: STRING_SCHEMA,

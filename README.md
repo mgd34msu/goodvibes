@@ -89,7 +89,7 @@ A product holds its rendering, input capture, composition root and packaging. Pl
 
 ## Status
 
-As of October 30, 2026, all four products are executable workspaces included in
+As of November 6, 2026, all four products are executable workspaces included in
 the root build, typecheck and test commands. The products are private packages;
 install this suite from source using the repository installer. Product guides
 also retain labelled upstream history, which is not a registry-install or release
@@ -100,7 +100,7 @@ The upstream targets and implementation sequence are recorded in
 
 - **Judgment:** the shared port, autonomous receipt validation, decision log,
   patterns and calibration tooling are implemented. Configured decision targets use finite attempts and
-  cross-model failover; exhaustion halts the operation. Host authority, cancellation
+  cross-model failover; exhaustion halts Default - On or selects Classic under Preferred. Host authority, cancellation
   and decision-log failures remain terminal.
 - **Conversation and tools:** TUI composer input and `--prompt` reach the
   selected conversation model directly. Tool admission follows owner settings
@@ -109,7 +109,8 @@ The upstream targets and implementation sequence are recorded in
 - **Completion and reviews:** the engine decides whether task completion
   verification applies to the current request, retains private repair findings,
   and checks evidence before publication. Contract project reviews track native
-  file inventory, read observations and accepted assessments separately. See
+  file inventory, read observations and accepted assessments separately. Classic
+  completion uses native execution facts and does not require a semantic verdict. See
   [runtime orchestration](packages/engine/docs/runtime-orchestration.md#completion-verification)
   and [review inventory](packages/engine/docs/contract-criteria.md#project-review-inventory).
 - **Product integration:** daemon composition, native work controls, TUI, Agent

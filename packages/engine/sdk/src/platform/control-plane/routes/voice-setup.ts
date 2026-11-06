@@ -13,9 +13,14 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { readInvocationParams } from './invocation-params.js';
+import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
 
 /** One-act install outcome served by voice.local.install. */
 export interface VoiceLocalInstallResult {
+  readonly operationProvenance?: 'classic';
+  readonly semanticAssessment?: 'not-evaluated';
+  readonly proof?: VoiceRoundTripProof | undefined;
+  readonly notes?: readonly string[];
   readonly provisioned: boolean;
   readonly platform: string | null;
   readonly tts: {

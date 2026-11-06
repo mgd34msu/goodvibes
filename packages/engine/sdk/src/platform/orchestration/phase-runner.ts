@@ -429,13 +429,15 @@ async function commitPhaseWork(
 
 function failureOutcome(reading: BookkeepingFailureReading): PhaseCommitOutcome {
   return { status: 'failed', reason: reading.reason, classification: reading.classification,
+    ...(reading.provenance === undefined ? {} : { provenance: reading.provenance }),
     ...(reading.classification === 'held' ? {} : { negating: reading.classification === 'negating' }) };
 }
 
 function currentFailureOutcome(commit: PhaseCommitOutcome | undefined, reading: BookkeepingFailureReading | undefined): PhaseCommitOutcome | undefined {
   if (!reading || !commit) return commit;
   try { reading.assertCurrent(); return commit; }
-  catch { return { status: 'failed', reason: commit.reason, classification: 'held' }; }
+  catch { return { status: 'failed', reason: commit.reason, classification: 'held',
+    ...(commit.provenance === undefined ? {} : { provenance: commit.provenance }) }; }
 }
 
 async function readCommitFailure(error: unknown, item: WorkItem, phase: Phase, deps: PhaseRunnerDeps): Promise<BookkeepingFailureReading> {

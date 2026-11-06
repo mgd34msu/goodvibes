@@ -9,6 +9,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { classifyBookkeepingFailure, repositoryFailureReading } from '../sdk/src/platform/orchestration/bookkeeping.js';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { registry } from '../sdk/src/platform/orchestration/judgment-registry.js';
 import { createOrchestrationEngine } from '../sdk/src/platform/orchestration/engine.js';
 import { runPhase } from '../sdk/src/platform/orchestration/phase-runner.js';
@@ -248,4 +249,23 @@ test('actual contract group consumer cannot finish gate-passed units while engin
   expect(f.item.state).toBe('passed');
   groups.unitPassed(run, unit); await flushMicrotasks(80);
   expect(judgedGroups).toEqual(['g1']); expect(sharedReleases).toBe(1); expect(run.settledGroups.has('g1')).toBe(true);
+});
+
+test('Classic final phase publication preserves failed git effect and Classic provenance without semantic diagnosis or replay', async () => {
+  const fake = answer(.99);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = setup(new Error('The pre-commit hook rejected this change.'));
+    let attempts = 0;
+    f.h.worktree.commitWorkingTree = async () => { attempts++; throw new Error('The pre-commit hook rejected this change.'); };
+    await finish(f);
+    expect(attempts).toBe(1);
+    expect(f.engine.getPhaseResults(f.ws.id)[0]?.commit).toMatchObject({
+      status: 'failed', classification: 'held', provenance: 'classic', reason: 'The pre-commit hook rejected this change.',
+    });
+    expect(f.engine.getPhaseResults(f.ws.id)[0]?.commit?.negating).toBeUndefined();
+    expect(f.item.state).toBe('blocked-bookkeeping');
+    f.engine.start(f.ws.id); await flushMicrotasks(80);
+    expect(attempts).toBe(1); expect(f.h.spawnedRecords).toHaveLength(1);
+    expect(fake.requests).toHaveLength(0);
+  });
 });

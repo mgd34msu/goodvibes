@@ -487,7 +487,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       try { outcome.bookkeeping?.assertCurrent(); } catch { bookkeepingHeld = true; }
       if (bookkeepingHeld && phaseResult.commit) {
         // Retain the action failure, withdraw any retired semantic conclusion.
-        phaseResult = { ...phaseResult, commit: { status: 'failed', reason: phaseResult.commit.reason, classification: 'held' } };
+        phaseResult = { ...phaseResult, commit: { status: 'failed', reason: phaseResult.commit.reason, classification: 'held',
+          ...(phaseResult.commit.provenance === undefined ? {} : { provenance: phaseResult.commit.provenance }) } };
       }
     };
     fenceBookkeeping();

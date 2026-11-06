@@ -552,6 +552,8 @@ export interface CommitExclusion {
  * and a commit was therefore attempted or deliberately skipped.
  */
 export interface PhaseCommitOutcome {
+  /** Classic failure reporting is not a semantic repository diagnosis. */
+  readonly provenance?: 'classic';
   readonly status: 'committed' | 'skipped' | 'failed';
   /** The landed commit hash, present only for status 'committed'. */
   readonly hash?: string | undefined;

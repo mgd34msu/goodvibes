@@ -2778,6 +2778,11 @@
       "bun": "./terminal-shell/src/bootstrap-runtime-bindings.ts",
       "types": "./terminal-shell/dist/bootstrap-runtime-bindings.d.ts",
       "import": "./terminal-shell/dist/bootstrap-runtime-bindings.js"
+    },
+    "./terminal-shell/health-findings": {
+      "bun": "./terminal-shell/src/health-findings.ts",
+      "types": "./terminal-shell/dist/health-findings.d.ts",
+      "import": "./terminal-shell/dist/health-findings.js"
     }
   },
   "publishConfig": {

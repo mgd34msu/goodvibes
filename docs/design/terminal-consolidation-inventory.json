@@ -477,7 +477,10 @@
       "path": "input/commands/health-runtime.ts",
       "baselineTuiLines": 523,
       "baselineSimilarity": 0.4024,
-      "status": "pending-convergence"
+      "status": "pending-convergence",
+      "platformFunctions": [
+        "health-findings: services/settings/remote/MCP/continuity"
+      ]
     },
     {
       "path": "input/commands/knowledge.ts",

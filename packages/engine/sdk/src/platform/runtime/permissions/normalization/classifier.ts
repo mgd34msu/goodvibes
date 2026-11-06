@@ -23,10 +23,10 @@ import { decisionOrClassic } from '../../decision-policy.js';
 export interface CommandNeeds {
   /** No host-access assessment was taken; the sandbox policy must ask the owner. */
   readonly provenance?: 'classic';
-  /** It reaches the network (uncertain counts as yes). */
-  readonly needsNetwork: boolean;
-  /** It needs host administrator privileges (uncertain counts as yes). */
-  readonly needsPrivilege: boolean;
+  /** It reaches the network (uncertain readings count as yes); null means unassessed in Classic. */
+  readonly needsNetwork: boolean | null;
+  /** It needs host administrator privileges (uncertain readings count as yes); null means unassessed in Classic. */
+  readonly needsPrivilege: boolean | null;
 }
 
 interface CachedCommandNeeds {
@@ -51,7 +51,7 @@ export async function readCommandNeeds(
     const restriction: unknown = options.assertCurrent?.();
     if (restriction !== undefined) { drainOwned(restriction); throw new JudgmentAuthorityRetiredError(); }
     options.signal?.throwIfAborted();
-    return Object.freeze({ needsNetwork: false, needsPrivilege: false, provenance: 'classic' as const });
+    return Object.freeze({ needsNetwork: null, needsPrivilege: null, provenance: 'classic' as const });
   });
 }
 async function readDecisionCommandNeeds(command: string, workspace: string | undefined,

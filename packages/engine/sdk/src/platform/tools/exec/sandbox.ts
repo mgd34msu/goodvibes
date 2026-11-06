@@ -285,7 +285,7 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
     };
   }
 
-  const networkEnabled = input.needs.needsNetwork && egressAllowed(input.command, input.config.egressAllowlist);
+  const networkEnabled = input.needs.needsNetwork === true && egressAllowed(input.command, input.config.egressAllowlist);
 
   const escalationsGranted: string[] = [];
   if (networkEnabled) {

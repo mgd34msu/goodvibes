@@ -78,7 +78,7 @@ test('Classic sandbox checks retain owner approval even with advisory auto-appro
   const requests = outage();
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const needs = await readCommandNeeds('synthetic-command');
-    expect(needs.provenance).toBe('classic');
+    expect(needs).toEqual({ needsNetwork: null, needsPrivilege: null, provenance: 'classic' });
     expect(decideSandboxedExec({ command: 'synthetic-command', needs, sandboxActive: true, egressAllowlist: ['*'], baseEffectWhenNotSandboxed: 'ask' }).effect).toBe('ask');
     let approvals = 0, receipts = 0;
     const handler = createSandboxEscalationApprovalHandler(async ({ request }) => {

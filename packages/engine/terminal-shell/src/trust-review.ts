@@ -1,5 +1,6 @@
 /** Trust evidence construction is shared; product command authority remains in its registrar. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 export interface TrustReviewBundle {
   readonly version: 1;
   readonly capturedAt: number;
@@ -102,4 +103,52 @@ export function createTrustReviewTools<Context>(sources: TrustReviewSources<Cont
     ].join('\n');
   }
   return { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle };
+}
+
+/** Shared trust review/export/inspect flow; confirmation and inspection errors are product-owned policy. */
+export function createTrustCommandFlow<Context extends { print(text: string): void }, Bundle>(tools: {
+  readonly buildTrustReviewBundle: (context: Context) => Promise<Bundle>;
+  readonly formatTrustReview: (bundle: Bundle) => string;
+  readonly inspectTrustBundle: (path: string) => string;
+}) {
+  return async (
+    context: Context,
+    args: readonly string[],
+    ports: {
+      readonly resolvePath: (path: string) => string;
+      readonly allowExport: (path: string) => boolean;
+      readonly missingPathSuffix?: ((mode: string) => string) | undefined;
+      readonly inspectError?: ((error: unknown) => void) | undefined;
+    },
+  ): Promise<boolean> => {
+    const sub = args[0] ?? 'review';
+    if (sub === 'review') {
+      context.print(tools.formatTrustReview(await tools.buildTrustReviewBundle(context)));
+      return true;
+    }
+    if (sub !== 'bundle') return false;
+    const mode = args[1];
+    if (mode !== 'export' && mode !== 'inspect') return false;
+    const path = args[2];
+    if (!path) {
+      context.print(`Usage: /trust bundle ${mode} <path>${ports.missingPathSuffix?.(mode) ?? ''}`);
+      return true;
+    }
+    if (mode === 'export') {
+      if (!ports.allowExport(path)) return true;
+      const bundle = await tools.buildTrustReviewBundle(context);
+      const target = ports.resolvePath(path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+      context.print(`Trust bundle exported to ${target}`);
+      return true;
+    }
+    try {
+      context.print(tools.inspectTrustBundle(ports.resolvePath(path)));
+    } catch (error) {
+      if (ports.inspectError) ports.inspectError(error);
+      else throw error;
+    }
+    return true;
+  };
 }

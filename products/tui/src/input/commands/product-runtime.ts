@@ -1,10 +1,16 @@
-import { createTrustReviewTools } from '@goodvibes-jev/engine/terminal-shell/trust-review';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { createTrustReviewTools, createTrustCommandFlow } from '@goodvibes-jev/engine/terminal-shell/trust-review';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@/runtime/index.ts';
 import { BUILTIN_SUITES } from '@/runtime/index.ts';
-import { requireEcosystemCatalogPaths, requireReadModels, requireSecretsManager, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
+import {
+  requireEcosystemCatalogPaths,
+  requireReadModels,
+  requireSecretsManager,
+  requireServiceRegistry,
+  requireShellPaths,
+} from './runtime-services.ts';
 
 interface ReleaseBundle {
   readonly version: 1;
@@ -29,7 +35,9 @@ interface ReleaseBundle {
   };
 }
 
-function buildReleaseBundle(ctx: Parameters<NonNullable<CommandRegistry['register']>>[0]['handler'] extends (args: string[], context: infer C) => unknown ? C : never): ReleaseBundle {
+function buildReleaseBundle(
+  ctx: Parameters<NonNullable<CommandRegistry['register']>>[0]['handler'] extends (args: string[], context: infer C) => unknown ? C : never,
+): ReleaseBundle {
   const remoteRuntime = ctx.ops.remoteRuntime;
   const incidents = ctx.extensions.forensicsRegistry?.getAll() ?? [];
   const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
@@ -70,17 +78,23 @@ function inspectReleaseBundle(path: string): string {
 }
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
- listSecrets: ctx => requireSecretsManager(ctx).list(),
- serviceNames: ctx => Object.keys(requireServiceRegistry(ctx).getAll()),
- security: ctx => requireReadModels(ctx).security.getSnapshot(),
- permissionMode: ctx => ctx.platform.configManager.get('permissions.mode'),
- serviceLabel: 'services',
+  listSecrets: (ctx) => requireSecretsManager(ctx).list(),
+  serviceNames: (ctx) => Object.keys(requireServiceRegistry(ctx).getAll()),
+  security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
+  permissionMode: (ctx) => ctx.platform.configManager.get('permissions.mode'),
+  serviceLabel: 'services',
+});
+
+const runTrustCommand = createTrustCommandFlow<CommandContext, Awaited<ReturnType<typeof buildTrustReviewBundle>>>({
+  buildTrustReviewBundle,
+  formatTrustReview,
+  inspectTrustBundle,
 });
 
 export function registerProductRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'trust',
-    description: 'Review trust posture, set this workspace\'s trust level, or export trust bundles',
+    description: "Review trust posture, set this workspace's trust level, or export trust bundles",
     usage: '[review|workspace [trusted|restricted]|bundle export <path>|bundle inspect <path>]',
     async handler(args, ctx) {
       const sub = args[0] ?? 'review';
@@ -99,7 +113,9 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         }
         if (choice === 'restricted' || choice === 'restrict' || choice === 'readonly' || choice === 'read-only' || choice === 'no') {
           await manager.setLevel('restricted');
-          ctx.print('This workspace is now RESTRICTED; read-only exploration; write/execute/delegate tools are denied until you run `/trust workspace trusted`.');
+          ctx.print(
+            'This workspace is now RESTRICTED; read-only exploration; write/execute/delegate tools are denied until you run `/trust workspace trusted`.',
+          );
           ctx.renderRequest();
           return;
         }
@@ -109,8 +125,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         }
         const level = manager.getLevel();
         const lines = [
-          `Workspace trust: ${level.toUpperCase()}` +
-            (manager.wasGrandfathered() ? ' (grandfathered from prior GoodVibes state)' : ''),
+          `Workspace trust: ${level.toUpperCase()}` + (manager.wasGrandfathered() ? ' (grandfathered from prior GoodVibes state)' : ''),
           level === 'trusted'
             ? 'All tools may run, subject to your normal permission settings.'
             : 'Read-only exploration: write, execute, and delegate tools are denied until you trust this workspace.',
@@ -125,31 +140,13 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         return;
       }
       const shellPaths = requireShellPaths(ctx);
-      if (sub === 'review') {
-        const bundle = await buildTrustReviewBundle(ctx);
-        ctx.print(formatTrustReview(bundle));
+      if (
+        await runTrustCommand(ctx, args, {
+          resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
+          allowExport: () => true,
+        })
+      )
         return;
-      }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /trust bundle ${mode} <path>`);
-          return;
-        }
-        if (mode === 'export') {
-          const bundle = await buildTrustReviewBundle(ctx);
-          const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-          ctx.print(`Trust bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          ctx.print(inspectTrustBundle(shellPaths.resolveWorkspacePath(pathArg!)));
-          return;
-        }
-      }
       ctx.print('Usage: /trust [review|bundle export <path>|bundle inspect <path>]');
     },
   });
@@ -167,19 +164,25 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       const sub = args[0] ?? 'status';
       if (sub === 'status') {
         const remote = requireReadModels(ctx).remote.getSnapshot();
-        ctx.print([
-          'Bridge Status',
-          `  remote pools: ${remote.pools.length}`,
-          `  runner contracts: ${remote.contracts.length}`,
-          `  review artifacts: ${remote.artifacts.length}`,
-        ].join('\n'));
+        ctx.print(
+          [
+            'Bridge Status',
+            `  remote pools: ${remote.pools.length}`,
+            `  runner contracts: ${remote.contracts.length}`,
+            `  review artifacts: ${remote.artifacts.length}`,
+          ].join('\n'),
+        );
         return;
       }
       if (sub === 'pools') {
         const pools = remoteRegistry.listPools();
-        ctx.print(pools.length > 0
-          ? ['Bridge Pools', ...pools.map((pool) => `  ${pool.id}  runners=${pool.runnerIds.length}  trust=${pool.trustClass}`)].join('\n')
-          : 'Bridge Pools\n  No runner pools registered yet.');
+        ctx.print(
+          pools.length > 0
+            ? ['Bridge Pools', ...pools.map((pool) => `  ${pool.id}  runners=${pool.runnerIds.length}  trust=${pool.trustClass}`)].join(
+                '\n',
+              )
+            : 'Bridge Pools\n  No runner pools registered yet.',
+        );
         return;
       }
       if (sub === 'assign') {
@@ -208,14 +211,16 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
           ctx.print(`Unknown runner contract: ${runnerId}`);
           return;
         }
-        ctx.print([
-          `Bridge Runner ${runnerId}`,
-          `  template: ${contract.template}`,
-          `  trustClass: ${contract.trustClass}`,
-          `  transport: ${contract.sourceTransport}/${contract.transport.state}`,
-          `  tools: ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
-          `  pool: ${contract.poolId ?? '(unassigned)'}`,
-        ].join('\n'));
+        ctx.print(
+          [
+            `Bridge Runner ${runnerId}`,
+            `  template: ${contract.template}`,
+            `  trustClass: ${contract.trustClass}`,
+            `  transport: ${contract.sourceTransport}/${contract.transport.state}`,
+            `  tools: ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
+            `  pool: ${contract.poolId ?? '(unassigned)'}`,
+          ].join('\n'),
+        );
         return;
       }
       if (sub === 'review') {
@@ -234,10 +239,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
           ctx.print('Usage: /bridge export <artifactId> [path]');
           return;
         }
-        const exported = await remoteRegistry.exportArtifact(
-          artifactId,
-          args[2] ? shellPaths.resolveWorkspacePath(args[2]) : undefined,
-        );
+        const exported = await remoteRegistry.exportArtifact(artifactId, args[2] ? shellPaths.resolveWorkspacePath(args[2]) : undefined);
         if (!exported) {
           ctx.print(`Unknown remote artifact: ${artifactId}`);
           return;
@@ -255,7 +257,9 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         ctx.print(`Imported remote bridge artifact ${artifact.id} for runner ${artifact.runnerId}.`);
         return;
       }
-      ctx.print('Usage: /bridge [status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]');
+      ctx.print(
+        'Usage: /bridge [status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]',
+      );
     },
   });
 
@@ -268,27 +272,31 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       const sub = args[0] ?? 'review';
       if (sub === 'review') {
         const bundle = buildReleaseBundle(ctx);
-        ctx.print([
-          'Release Review',
-          `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
-          `  eval suites: ${bundle.evalSuites.length}`,
-          `  incidents: ${bundle.incidentCount}`,
-          `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
-          `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
-          `  installed plugins/skills: ${bundle.ecosystem.installedPlugins}/${bundle.ecosystem.installedSkills}`,
-        ].join('\n'));
+        ctx.print(
+          [
+            'Release Review',
+            `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
+            `  eval suites: ${bundle.evalSuites.length}`,
+            `  incidents: ${bundle.incidentCount}`,
+            `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
+            `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
+            `  installed plugins/skills: ${bundle.ecosystem.installedPlugins}/${bundle.ecosystem.installedSkills}`,
+          ].join('\n'),
+        );
         return;
       }
       if (sub === 'checklist') {
-        ctx.print([
-          'Release Checklist',
-          '  1. Run /setup review and /setup doctor',
-          '  2. Run /security review and /trust review',
-          '  3. Run /policy preflight and /policy simulate',
-          '  4. Run /eval gate <suite> for required certification suites',
-          '  5. Review /incident latest and /bridge status',
-          '  6. Export /release bundle export <path> for release evidence',
-        ].join('\n'));
+        ctx.print(
+          [
+            'Release Checklist',
+            '  1. Run /setup review and /setup doctor',
+            '  2. Run /security review and /trust review',
+            '  3. Run /policy preflight and /policy simulate',
+            '  4. Run /eval gate <suite> for required certification suites',
+            '  5. Review /incident latest and /bridge status',
+            '  6. Export /release bundle export <path> for release evidence',
+          ].join('\n'),
+        );
         return;
       }
       if (sub === 'bundle') {

@@ -590,13 +590,14 @@
       "path": "input/commands/product-runtime.ts",
       "baselineTuiLines": 391,
       "baselineSimilarity": 0.4242,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "TrustReviewBundle",
         "buildTrustReviewBundle",
         "formatTrustReview",
         "inspectTrustBundle"
-      ]
+      ],
+      "notes": "Shared trust evidence and review/export/inspection flow. TUI owns workspace trust and bridge/release workflows. Agent requires confirmation before export and reports inspection errors locally."
     },
     {
       "path": "input/commands/provider-accounts-runtime.ts",

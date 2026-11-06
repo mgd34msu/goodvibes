@@ -535,7 +535,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
   };
   const configRevision = configIncarnation();
   const assertSourceCurrent = () => {
-    signal?.throwIfAborted(); for (const guard of holderGuards) guard(); readSources.assertCurrent();
+    if (signal) applyNativeOperation(checkNativeSignal, signal, []); for (const guard of holderGuards) guard(); readSources.assertCurrent();
     if (agentResearchSourceOwner(registry) !== sourceOwner || path(context, ['session', 'runtime']) !== session || slot(session, 'sessionId') !== sessionId
       || path(context, ['clients', 'providerApi']) !== api || path(context, ['provider', 'providerRegistry']) !== provider || path(context, ['platform', 'config']) !== config
       || path(context, ['platform', 'configManager']) !== manager || path(context, ['platform', 'artifactStore']) !== artifact || path(context, ['platform', 'readModels']) !== readModels)
@@ -552,7 +552,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
   if (retainCurrent !== undefined && (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent))) throw new ToolInputProjectionError('held');
   assertReadingRestriction(retainCurrent ? () => retainCurrent(assertSourceCurrent, 'model-reading.native-source') : undefined);
   const options = { sourceOwner, signal, retainCurrent, assertCurrent() {
-    signal?.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent();
+    if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(assertExecution); assertSourceCurrent();
   } };
   setModelReadingSources(options, { context, source: readSources });
   return options;
@@ -619,7 +619,7 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
   consume: (context: CommandContext, options: ModelReadingOptions) => Promise<T>): Promise<T> {
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertCurrent = () => { assertOptions(); signal?.throwIfAborted(); assertReadingRestriction(callerCurrent); assertOptions(); signal?.throwIfAborted(); };
+  const assertCurrent = () => { assertOptions(); if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(callerCurrent); assertOptions(); if (signal) applyNativeOperation(checkNativeSignal, signal, []); };
   assertCurrent();
   const originalInvocation = captureModelReadingInput(invocation);
   const originalSources = getModelReadingSources(options);
@@ -697,10 +697,10 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
         getKnownContextWindowForModel: (model: unknown) => captured.contextWindows.find(entry => entry.registryKey === modelRegistryKey(model))?.value ?? null,
         getContextWindowForModel: (model: unknown) => captured.contextWindows.find(entry => entry.registryKey === modelRegistryKey(model))?.value ?? null } },
       platform: { readModels: {}, artifactStore: store ? { list: () => nativeArtifacts, ...(readContent ? { readContent: async (id: string) => {
-          scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent);
+          if (scoped.signal) applyNativeOperation(checkNativeSignal, scoped.signal, []); assertProjectionCurrent(scoped.assertCurrent);
           if (!captured.artifacts.some(artifact => artifact.id === id)) throw new ToolInputProjectionError('held');
           const content = await readContent.call(store, id);
-          scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); return content;
+          if (scoped.signal) applyNativeOperation(checkNativeSignal, scoped.signal, []); assertProjectionCurrent(scoped.assertCurrent); return content;
         } } : {}) } : undefined,
         configManager: { get: (key: string) => captured.config[key] } }, clients: { operator: {} } };
     for (const entry of captured.readModels) setPath(projected, entry.keys, entry.data);
@@ -1246,10 +1246,10 @@ export function catalogReadingOptions(context: CommandContext, registry: ToolReg
   }
   const sourceOwner = agentResearchSourceOwner(registry);
   const assertSourceCurrent = (): void => {
-    signal?.throwIfAborted(); for (const guard of guards) guard();
+    if (signal) applyNativeOperation(checkNativeSignal, signal, []); for (const guard of guards) guard();
     if (agentResearchSourceOwner(registry) !== sourceOwner) throw new ToolInputProjectionError('held');
   };
   if (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent)) throw new ToolInputProjectionError('held');
   assertSourceCurrent(); assertReadingRestriction(() => retainCurrent(assertSourceCurrent, 'agent.catalog.native-invocation-source')); assertSourceCurrent();
-  return { signal, sourceOwner, retainCurrent, assertCurrent() { signal?.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
+  return { signal, sourceOwner, retainCurrent, assertCurrent() { if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
 }

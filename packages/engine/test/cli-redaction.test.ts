@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   REDACTED_VALUE,
@@ -247,6 +248,24 @@ describe('collectSensitiveConfigValues', () => {
 });
 
 describe('redactSerializedSecrets', () => {
+  test('Classic masks JSON-shaped secret strings without rewriting the native envelope', async () => {
+    const fake = fakePort(() => { throw new Error('Unexpected decision request'); });
+    installJudgmentPort(fake.port);
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      const secret = 'quote"slash\\value';
+      const result = await redactSerializedSecrets(JSON.stringify({
+        version: 2, emptyList: [], emptyObject: {}, diagnostics: { message: `Values [] {} ${secret}` },
+      }), ['[]', '{}', secret]);
+      const parsed = JSON.parse(result) as { version: number; emptyList: unknown[]; emptyObject: object; diagnostics: { message: string } };
+      expect(parsed.version).toBe(2);
+      expect(parsed.emptyList).toEqual([]);
+      expect(parsed.emptyObject).toEqual({});
+      for (const value of ['[]', '{}', secret]) expect(parsed.diagnostics.message).not.toContain(value);
+      expect(parsed.diagnostics.message).toContain('[REDACTED]');
+    });
+    expect(fake.requests).toHaveLength(0);
+  });
+
   test('sweeps a credential out of a diagnostic blob it was copied into', async () => {
     const config = { surfaces: { calendar: { caldavPassword: 'caldav-pw-9times' } } };
     const values = await collectSensitiveConfigValues(config);

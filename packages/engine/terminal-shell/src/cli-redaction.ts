@@ -207,16 +207,12 @@ export async function collectSensitiveConfigValues(config: unknown, options: Jud
 }
 
 export async function redactSerializedSecrets(serialized: string, secretValues: readonly string[], options: JudgmentReadingOptions = {}): Promise<string> {
-  let output = serialized;
-  for (const secret of secretValues) {
-    if (!secret) continue;
-    const encoded = JSON.stringify(secret).slice(1, -1);
-    output = output.split(encoded).join(REDACTED_VALUE);
-    output = output.split(secret).join(REDACTED_VALUE);
-  }
   let parsed: unknown;
-  try { parsed = JSON.parse(output); }
-  catch { return redactSensitiveDataAsync(output, { ...options, secretValues }); }
+  try { parsed = JSON.parse(serialized); }
+  catch { return redactSensitiveDataAsync(serialized, { ...options, secretValues }); }
+  // Mask the parsed values and keys, never JSON punctuation. A protected value
+  // such as "[]" or "{}" can also be native JSON syntax; rewriting serialized
+  // bytes first can destroy the envelope and collapse all diagnostics to text.
   // This parse belongs solely to this export. Keep a native immutable snapshot
   // while the caller's owner continues to fence configuration and publication.
   const protectedValue = await redactStructuredDataAsync(captureOwnedJson(parsed), {

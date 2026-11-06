@@ -1,3 +1,4 @@
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /**
  * Minimal IMAP4rev1 client over an injected socket.
  *
@@ -702,7 +703,10 @@ export class ImapClient {
     const selection = await selectDraftsMailboxFrames(lines, reading);
     selection.assertCurrent();
     assertImapReadingCurrent(reading);
-    if (selection.value === null) throw new ImapReadingError();
+    if (selection.value === null) {
+      if (selection.provenance === 'classic') throw new DecisionModelsDisabledError('automatic Drafts discovery without a server-declared folder; select the mailbox explicitly');
+      throw new ImapReadingError();
+    }
     return imapReadingLease(selection.value, selection);
   }
 

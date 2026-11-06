@@ -1,3 +1,5 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { rankClassicCatalog } from '../runtime/classic-catalog.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
@@ -11,7 +13,10 @@ import type {
   HookSimulationResult,
 } from './workbench.js';
 
-export interface HookContractRecord extends HookPointContract {}
+export interface HookContractRecord extends HookPointContract {
+  readonly provenance?: 'classic';
+  readonly scoreSource?: 'literal-overlap';
+}
 
 export interface HookWorkbenchApi {
   getFilePath(): string;
@@ -60,7 +65,7 @@ export interface HookContractSource {
 export interface HookApi {
   /**
    * The hook point contracts, all of them for a blank filter; otherwise the
-   * ones Jev reads as matching what the filter asks for
+   * ones selected under the active decision policy for the filter
    * (`engine.hooks.contract-search`), in catalog order.
    */
   contracts(filter?: string): Promise<readonly HookContractRecord[]>;
@@ -93,17 +98,26 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
         original.assertCurrent();
         if (JSON.stringify(snapshotJudgmentInput(options.listContracts())) !== identity) throw new Error('Hook contract catalog changed during search.');
       };
-      const owner = captureJudgmentPort(HOOK_CONTRACT_SEARCH_SITE, { assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-      const { ranked } = await hookContractSearch.rerank(
-        owner.port,
-        query,
-        contracts.map(hookContractCandidate),
-        { site: HOOK_CONTRACT_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent },
-      );
-      owner.assertCurrent();
-      for (const entry of ranked) requireActingReading(entry.reading);
-      const matched = new Set(ranked.filter((entry) => entry.reading.verdict === 'yes').map((entry) => entry.id));
-      return contracts.filter((contract) => matched.has(contract.pattern));
+      return decisionOrClassic(async () => {
+        const owner = captureJudgmentPort(HOOK_CONTRACT_SEARCH_SITE, { assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
+        const { ranked } = await hookContractSearch.rerank(
+          owner.port,
+          query,
+          contracts.map(hookContractCandidate),
+          { site: HOOK_CONTRACT_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent },
+        );
+        owner.assertCurrent();
+        for (const entry of ranked) requireActingReading(entry.reading);
+        const matched = new Set(ranked.filter((entry) => entry.reading.verdict === 'yes').map((entry) => entry.id));
+        return contracts.filter((contract) => matched.has(contract.pattern));
+      }, () => {
+        current();
+        const matches = rankClassicCatalog(contracts, query, contract => ({ id: contract.pattern,
+          description: `${contract.description} ${contract.authority} ${contract.executionMode}` }))
+          .map(match => ({ ...match.entry, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
+        current();
+        return matches;
+      });
     },
     dispatcher: {
       listHooks(): Array<{ pattern: string; hook: HookDefinition }> {

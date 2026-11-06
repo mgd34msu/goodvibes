@@ -1,3 +1,5 @@
+import { decisionOrClassic } from '../decision-policy.js';
+import { rankClassicCatalog } from '../classic-catalog.js';
 /**
  * Operational runbook registry for the GoodVibes platform runtime.
  *
@@ -119,12 +121,14 @@ export const PLAYBOOK_SEARCH_SITE = 'runtime.ops.playbook-search';
  *
  * Each playbook is read against the query by Jev (`engine.ops.playbook-search`,
  * the rerank pattern, one request per playbook); a playbook is returned when
- * the reading is a confident yes.
+ * the reading is a confident yes. Classic instead lists literal token matches
+ * with Classic provenance; it never runs a check or remediation during search.
  *
  * @param query - The symptom in the operator's own words.
  * @returns Matching playbooks, best match first.
  */
-export async function findPlaybooksBySymptom(query: string, options: { signal?: AbortSignal } = {}): Promise<Playbook[]> {
+export type PlaybookSearchMatch = Playbook & { readonly provenance?: 'classic'; readonly scoreSource?: 'literal-overlap' };
+export async function findPlaybooksBySymptom(query: string, options: { signal?: AbortSignal } = {}): Promise<PlaybookSearchMatch[]> {
   const candidates = ALL_PLAYBOOKS.map(playbookCandidate);
   const original = retainStrictJudgmentJson({ query, candidates });
   snapshotJudgmentInput(original.snapshot);
@@ -133,11 +137,20 @@ export async function findPlaybooksBySymptom(query: string, options: { signal?: 
     original.assertCurrent(); options.signal?.throwIfAborted();
     if (JSON.stringify(snapshotJudgmentInput(ALL_PLAYBOOKS.map(playbookCandidate))) !== version) throw new Error('Playbook catalog changed during search.');
   };
-  const owner = captureJudgmentPort(PLAYBOOK_SEARCH_SITE, { signal: options.signal, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-  const { ranked } = await playbookSearch.rerank(owner.port, original.snapshot.query, original.snapshot.candidates,
-    { site: PLAYBOOK_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent });
-  owner.assertCurrent();
-  for (const entry of ranked) requireActingReading(entry.reading);
-  const byId = new Map(ALL_PLAYBOOKS.map((p) => [p.id, p]));
-  return ranked.filter((r) => r.reading.verdict === 'yes').map((r) => byId.get(r.id)!);
+  return decisionOrClassic(async () => {
+    const owner = captureJudgmentPort(PLAYBOOK_SEARCH_SITE, { signal: options.signal, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
+    const { ranked } = await playbookSearch.rerank(owner.port, original.snapshot.query, original.snapshot.candidates,
+      { site: PLAYBOOK_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent });
+    owner.assertCurrent();
+    for (const entry of ranked) requireActingReading(entry.reading);
+    const byId = new Map(ALL_PLAYBOOKS.map((p) => [p.id, p]));
+    return ranked.filter((r) => r.reading.verdict === 'yes').map((r) => byId.get(r.id)!);
+  }, () => {
+    current();
+    const matches = rankClassicCatalog(ALL_PLAYBOOKS, query, playbook => ({ id: playbook.id,
+      description: `${playbook.name} ${playbook.description} ${playbook.symptoms.join(' ')}` }))
+      .map(match => ({ ...match.entry, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
+    current();
+    return matches;
+  });
 }

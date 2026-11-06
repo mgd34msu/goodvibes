@@ -217,3 +217,18 @@ execution; local lint and projection rendering remain available. Automatic
 semantic enrichment is omitted during Classic. Knowledge ingestion and Home
 Graph callers remain under implementation review; this document does not certify
 end-to-end qualification.
+
+Classic schedule input accepts a complete zoned ISO timestamp, five-field cron,
+`every 30m` or `in 2h`, with ordinary calendar/quantity validation and the supplied
+source clock/timezone. It never extracts executable timing from quoted examples,
+negation or a larger paragraph. Unsupported prose names the decision-model
+limitation; accepted Classic schedules have no model confidence. Structured
+schedule APIs remain available independently.
+
+Hook-contract and operational-playbook searches use labelled literal catalog
+matching in Classic. Searching executes no hook, check or remediation. Email
+keeps IMAP response-code and server-declared folder facts, while unstructured
+refusal and cursor diagnostics remain explicitly unassessed. A Drafts folder
+without a server declaration requires an explicit mailbox choice before APPEND;
+Classic never guesses a destination from a folder name. Account/publication
+ownership and cancellation remain attached to these local results.

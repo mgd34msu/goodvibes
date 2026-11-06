@@ -1,3 +1,4 @@
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Semantic IMAP readings. Protocol atoms and session authority stay with callers. */
 import { checkAnswers, defineBattery, defineSelector, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -74,14 +75,28 @@ export function assertImapReadingCurrent(options: JudgmentReadingOptions): void 
 }
 
 /** The original account/policy/judgment owner follows a result through outer awaits. */
-export interface ImapReadingLease<T> extends JudgmentReadingOptions { readonly value: T; readonly assertCurrent: () => void }
+export interface ImapReadingLease<T> extends JudgmentReadingOptions { readonly value: T; readonly assertCurrent: () => void; readonly provenance?: 'classic' }
 export interface ImapReadingOptions extends JudgmentReadingOptions {
   /** A failed session may be closed after producing an error; account/policy ownership survives cleanup. */
   readonly publication?: JudgmentReadingOptions | undefined;
 }
-export function imapReadingLease<T>(value: T, owner: JudgmentReadingOptions): ImapReadingLease<T> {
+export function imapReadingLease<T>(value: T, owner: JudgmentReadingOptions & { readonly provenance?: 'classic' }): ImapReadingLease<T> {
   assertImapReadingCurrent(owner);
-  return Object.freeze({ value, signal: owner.signal, assertCurrent: () => assertImapReadingCurrent(owner) });
+  return Object.freeze({ value, ...(owner.provenance ? { provenance: owner.provenance } : {}), signal: owner.signal, assertCurrent: () => assertImapReadingCurrent(owner) });
+}
+
+/** Keep account/publication ownership without retaining a semantic port.
+ * A closed failed session may retire its read scope; publication ownership survives.
+ */
+function classicLease<T>(value: T, options: ImapReadingOptions): ImapReadingLease<T> {
+  assertImapReadingCurrent(options);
+  const publication = options.publication;
+  const owner = publication ?? options, signal = owner.signal, assertCurrent = owner.assertCurrent;
+  const current = () => {
+    if (options.publication !== publication || owner.signal !== signal || owner.assertCurrent !== assertCurrent) throw new ImapReadingError();
+    assertImapReadingCurrent({ signal, assertCurrent });
+  };
+  return imapReadingLease(value, { signal, assertCurrent: current, provenance: 'classic' });
 }
 
 /** One capture, fenced before attempts, retention, reading attachment and later consumption. */
@@ -107,34 +122,38 @@ function readingOwner(site: string, options: ImapReadingOptions) {
   return { owner, port, signal, current };
 }
 
-export async function readImapRefusal(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<'server' | 'credential' | 'mailbox' | 'none'>> {
+export async function readImapRefusal(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<'server' | 'credential' | 'mailbox' | 'none' | 'unknown'>> {
   try {
     assertImapReadingCurrent(options);
     const state = snapshotJudgmentInput({ message }) as { message: string };
-    const { owner, port, signal, current } = readingOwner('email.imap.refusal', options);
-    const run = await imapRefusalReading.run(port, state, { signal, site: 'email.imap.refusal' });
-    current();
-    const readings = run.readings;
-    if (Object.values(readings).some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new ImapReadingError();
-    const result = readings.server.verdict === 'yes' ? 'server' : readings.credential.verdict === 'yes' ? 'credential'
-      : readings.mailbox.verdict === 'yes' ? 'mailbox' : 'none';
-    run.recordAction('returned settled IMAP refusal facts');
-    current();
-    return imapReadingLease(result, owner);
+    return await decisionOrClassic<ImapReadingLease<'server' | 'credential' | 'mailbox' | 'none' | 'unknown'>>(async () => {
+      const { owner, port, signal, current } = readingOwner('email.imap.refusal', options);
+      const run = await imapRefusalReading.run(port, state, { signal, site: 'email.imap.refusal' });
+      current();
+      const readings = run.readings;
+      if (Object.values(readings).some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new ImapReadingError();
+      const result = readings.server.verdict === 'yes' ? 'server' : readings.credential.verdict === 'yes' ? 'credential'
+        : readings.mailbox.verdict === 'yes' ? 'mailbox' : 'none';
+      run.recordAction('returned settled IMAP refusal facts');
+      current();
+      return imapReadingLease(result, owner);
+    }, () => classicLease('unknown' as const, options));
   } catch { throw new ImapReadingError(); }
 }
 
-export async function readImapCursorFailure(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<boolean>> {
+export async function readImapCursorFailure(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<boolean | null>> {
   try {
     assertImapReadingCurrent(options);
     const state = snapshotJudgmentInput({ message }) as { message: string };
-    const { owner, port, signal, current } = readingOwner('email.imap.cursor-write-failure', options);
-    const run = await imapCursorFailureReading.run(port, state, { signal, site: 'email.imap.cursor-write-failure' });
-    current();
-    if (run.readings.write.outcome !== 'act' || run.readings.write.verdict === 'uncertain') throw new ImapReadingError();
-    run.recordAction('returned settled cursor write fact');
-    current();
-    return imapReadingLease(run.readings.write.verdict === 'yes', owner);
+    return await decisionOrClassic<ImapReadingLease<boolean | null>>(async () => {
+      const { owner, port, signal, current } = readingOwner('email.imap.cursor-write-failure', options);
+      const run = await imapCursorFailureReading.run(port, state, { signal, site: 'email.imap.cursor-write-failure' });
+      current();
+      if (run.readings.write.outcome !== 'act' || run.readings.write.verdict === 'uncertain') throw new ImapReadingError();
+      run.recordAction('returned settled cursor write fact');
+      current();
+      return imapReadingLease(run.readings.write.verdict === 'yes', owner);
+    }, () => classicLease(null, options));
   } catch { throw new ImapReadingError(); }
 }
 
@@ -145,16 +164,18 @@ export async function readImapDrafts(
   try {
     assertImapReadingCurrent(options);
     const captured = snapshotJudgmentInput(entries) as typeof entries;
-    if (!captured.length) return imapReadingLease(null, options);
-    const { owner, port, signal, current } = readingOwner('email.imap.drafts-mailbox', options);
-    const candidates = captured.map((entry, index) => ({ id: `mailbox_${index}`, content: { ...entry, attributes: [...entry.attributes] } }));
-    const selection = await imapDraftsReading.select(port, {}, candidates, { signal, site: 'email.imap.drafts-mailbox' });
-    current();
-    if (selection.outcome !== 'act') throw new ImapReadingError();
-    const index = candidates.findIndex(candidate => candidate.id === selection.chosen);
-    if (selection.chosen !== undefined && index < 0) throw new ImapReadingError();
-    selection.recordAction(index < 0 ? 'no drafts mailbox established' : 'selected an offered drafts mailbox');
-    current();
-    return imapReadingLease(index < 0 ? null : captured[index]!.name, owner);
+    return await decisionOrClassic<ImapReadingLease<string | null>>(async () => {
+      if (!captured.length) return imapReadingLease(null, options);
+      const { owner, port, signal, current } = readingOwner('email.imap.drafts-mailbox', options);
+      const candidates = captured.map((entry, index) => ({ id: `mailbox_${index}`, content: { ...entry, attributes: [...entry.attributes] } }));
+      const selection = await imapDraftsReading.select(port, {}, candidates, { signal, site: 'email.imap.drafts-mailbox' });
+      current();
+      if (selection.outcome !== 'act') throw new ImapReadingError();
+      const index = candidates.findIndex(candidate => candidate.id === selection.chosen);
+      if (selection.chosen !== undefined && index < 0) throw new ImapReadingError();
+      selection.recordAction(index < 0 ? 'no drafts mailbox established' : 'selected an offered drafts mailbox');
+      current();
+      return imapReadingLease(index < 0 ? null : captured[index]!.name, owner);
+    }, () => classicLease(null, options));
   } catch { throw new ImapReadingError(); }
 }

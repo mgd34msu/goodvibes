@@ -578,25 +578,26 @@
       "path": "input/commands/recall-bundle.ts",
       "baselineTuiLines": 132,
       "baselineSimilarity": 0.6386,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/recall-capture.ts",
       "baselineTuiLines": 152,
       "baselineSimilarity": 0.8301,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "note": "One memory-add/capture parser and provenance pipeline. Agent remains bound exclusively to its Agent Memory API; TUI remains bound to its memory spine. Product labels and record-reference presentation are explicit adapters."
     },
     {
       "path": "input/commands/recall-query.ts",
       "baselineTuiLines": 260,
       "baselineSimilarity": 0.7073,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/recall-review.ts",
       "baselineTuiLines": 157,
       "baselineSimilarity": 0.4964,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter"
     },
     {
       "path": "input/commands/recall-shared.ts",
@@ -744,7 +745,8 @@
       "path": "input/handler-feed-routes.ts",
       "baselineTuiLines": 591,
       "baselineSimilarity": 0.8574,
-      "status": "pending-convergence"
+      "status": "platform-implementation-with-product-policy-adapter",
+      "platformModule": "terminal-shell/feed-token-routes"
     },
     {
       "path": "input/handler-feed.ts",

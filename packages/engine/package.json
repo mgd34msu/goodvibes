@@ -2468,6 +2468,31 @@
       "bun": "./terminal-shell/src/audio/retained-wake-clip.ts",
       "types": "./terminal-shell/dist/audio/retained-wake-clip.d.ts",
       "import": "./terminal-shell/dist/audio/retained-wake-clip.js"
+    },
+    "./terminal-shell/recall-capture": {
+      "bun": "./terminal-shell/src/recall-capture.ts",
+      "types": "./terminal-shell/dist/recall-capture.d.ts",
+      "import": "./terminal-shell/dist/recall-capture.js"
+    },
+    "./terminal-shell/feed-token-routes": {
+      "bun": "./terminal-shell/src/feed-token-routes.ts",
+      "types": "./terminal-shell/dist/feed-token-routes.d.ts",
+      "import": "./terminal-shell/dist/feed-token-routes.js"
+    },
+    "./terminal-shell/recall-query": {
+      "bun": "./terminal-shell/src/recall-query.ts",
+      "types": "./terminal-shell/dist/recall-query.d.ts",
+      "import": "./terminal-shell/dist/recall-query.js"
+    },
+    "./terminal-shell/recall-bundle": {
+      "bun": "./terminal-shell/src/recall-bundle.ts",
+      "types": "./terminal-shell/dist/recall-bundle.d.ts",
+      "import": "./terminal-shell/dist/recall-bundle.js"
+    },
+    "./terminal-shell/recall-review": {
+      "bun": "./terminal-shell/src/recall-review.ts",
+      "types": "./terminal-shell/dist/recall-review.d.ts",
+      "import": "./terminal-shell/dist/recall-review.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,13 @@
+import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import {
+  createTerminalFeatureFlags,
+  createTerminalEventState,
+  initializeTerminalMemory,
+  attachTerminalCompanionInput,
+  seedTerminalSession,
+  syncTerminalNotifierQueues,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import {
   initializeTerminalCatalog,
   seedTerminalControlPlane,
@@ -27,10 +37,10 @@ import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/pla
 import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
-import { createFeatureFlagManager, deriveFeatureStates, bindFeatureSettingsBridge } from '@/runtime/index.ts';
-import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';
-import type { SessionEvent } from '@/runtime/index.ts';
-import { createRuntimeStore, createDomainDispatch, type RuntimeStore } from './store/index.ts';
+import '@/runtime/index.ts';
+import { RuntimeEventBus } from '@/runtime/index.ts';
+
+import { type RuntimeStore } from './store/index.ts';
 import { ForensicsCollector, ForensicsRegistry } from '@/runtime/index.ts';
 import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';
@@ -114,9 +124,7 @@ export async function initializeBootstrapCore(
   // Gate states derive from domain settings keys (behavior.*, sandbox.*, ...);
   // the featureFlags config category no longer exists. The live bridge keeps
   // config.set changes on those keys flowing into the manager afterwards.
-  const featureFlags = createFeatureFlagManager();
-  featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-  bindFeatureSettingsBridge(configManager, featureFlags);
+  const featureFlags = createTerminalFeatureFlags(configManager);
 
   const userSessionId = `user-${generateUserSessionId()}`;
   // Declared here, before createRuntimeServices, so the checkpoint manager can be
@@ -130,10 +138,7 @@ export async function initializeBootstrapCore(
   const runtimeSessionIdRef = { value: userSessionId };
   // Point the bus listener cap at runtime.eventBus.maxListeners before the
   // first bus exists, so every bus this process builds later uses it.
-  configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => configManager.get(key)));
-  const runtimeBus = new RuntimeEventBus();
-  const store = createRuntimeStore();
-  const domainDispatch = createDomainDispatch(store);
+  const { runtimeBus, store, domainDispatch } = createTerminalEventState(configManager);
   let getConversationTitle = (): string | undefined => undefined;
   const services = createRuntimeServices({
     configManager,
@@ -222,43 +227,11 @@ export async function initializeBootstrapCore(
   // toolDeps rather than merging, so a partial second call would silently drop
   // everything set here.
   const agentOrchestratorToolDeps = {
-    agentManager: services.agentManager,
-    contractRunner: services.contractRunner,
+    ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
     contractHooks: services.contractRunner.hooks(),
-    permissionManager: services.permissionManager,
-    execPromptAnswerHandler: services.execPromptAnswerHandler,
-    sandboxEscalationHandler: services.sandboxEscalationHandler,
-    contextAccountingHolder: services.contextAccountingHolder,
     secretsManager: services.secretsManager,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    // Same instances services.ts wired at construction, setDependencies()
-    // fully replaces, so the localhost fetch ask and the announce-once
-    // containment receipt must be replayed here or they silently vanish.
-    localhostFetchApproval: services.localhostFetchApproval,
-    onSandboxedRun: services.onSandboxedRun,
-    fileCache,
-    projectIndex,
-    workingDirectory: services.workingDirectory,
-    fileUndoManager: services.fileUndoManager,
-    modeManager: services.modeManager,
-    processManager: services.processManager,
-    agentMessageBus: services.agentMessageBus,
-    webSearchService: services.webSearchService,
-    channelRegistry: services.channelPlugins,
-    remoteRunnerRegistry: services.remoteRunnerRegistry,
     knowledgeService: services.agentKnowledgeService,
-    archetypeLoader: services.archetypeLoader,
-    configManager,
-    providerRegistry: services.providerRegistry,
-    providerOptimizer: services.providerOptimizer,
-    toolLLM: services.toolLLM,
-    serviceRegistry: services.serviceRegistry,
-    sessionOrchestration: services.sessionOrchestration,
-    featureFlags: services.featureFlags,
-    overflowHandler: services.overflowHandler,
-    memoryRegistry: services.memoryRegistry,
-    sandboxSessionRegistry: services.sandboxSessionRegistry,
-    workflowServices: services.workflow,
   };
   services.agentOrchestrator.setDependencies(agentOrchestratorToolDeps);
 
@@ -267,14 +240,7 @@ export async function initializeBootstrapCore(
   // D5 fix: stop the heartbeat watcher on shutdown so the setInterval is cleared.
   // Registered here (after declaration) rather than inside the watcher block above.
 
-  await memoryStore.init();
-  bootstrapUnsubs.push(async () => {
-    try {
-      await memoryStore.save();
-    } finally {
-      memoryStore.close();
-    }
-  });
+  await initializeTerminalMemory(memoryStore, bootstrapUnsubs);
 
   // Fold the agent's legacy per-surface memory into the canonical
   // cross-surface store (id-keyed, idempotent, never deletes the legacy file) and
@@ -345,20 +311,7 @@ export async function initializeBootstrapCore(
   const orchestratorHandleUserInputRef: {
     value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
   } = { value: null };
-  runtimeUnsubs.push(
-    runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
-      if (orchestratorHandleUserInputRef.value) {
-        // Delegate to the orchestrator: adds user message + fires a real LLM turn.
-        // Preserve surface origin metadata so the SDK can correlate replies back
-        // to the originating external channel, including ntfy chat topics.
-        orchestratorHandleUserInputRef.value(payload.body, companionMessageToOrchestratorInputOptions(payload));
-      } else {
-        // Fallback: render the user message immediately (orchestrator not yet ready).
-        conversation.addUserMessage(payload.body);
-        requestRender();
-      }
-    }),
-  );
+  runtimeUnsubs.push(attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender));
 
   providerRegistry.startWatching(runtimeBus);
 
@@ -385,33 +338,12 @@ export async function initializeBootstrapCore(
   }
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key));
-  const queueStatuses = notifier.getQueueStatus();
-  if (queueStatuses.length > 0) {
-    notifier.attachToRuntimeBus(runtimeBus);
-    for (const queueStatus of queueStatuses) {
-      domainDispatch.syncIntegration(
-        {
-          id: queueStatus.channel,
-          displayName: queueStatus.channel[0]!.toUpperCase() + queueStatus.channel.slice(1),
-          category: 'communication',
-          status: queueStatus.metrics.deadLettered > 0 ? 'degraded' : 'healthy',
-          enabled: true,
-          successCount: queueStatus.metrics.delivered,
-          errorCount: queueStatus.metrics.deadLettered,
-          ...(queueStatus.dlqEntries[0]?.deadAt ? { lastErrorAt: queueStatus.dlqEntries[0].deadAt } : {}),
-          ...(queueStatus.dlqEntries[0]?.finalError ? { lastError: queueStatus.dlqEntries[0].finalError } : {}),
-          meta: {
-            attempts: queueStatus.metrics.totalAttempts,
-            retrying: queueStatus.metrics.retrying,
-            deadLetters: queueStatus.metrics.deadLettered,
-            dlqSize: queueStatus.metrics.dlqSize,
-            sloEnforced: queueStatus.sloEnforced,
-          },
-        },
-        'bootstrap.notifier',
-      );
-    }
-  }
+  runtimeUnsubs.push(
+    syncTerminalNotifierQueues(notifier, domainDispatch, () => {
+      notifier.attachToRuntimeBus(runtimeBus);
+      return () => notifier.detach();
+    }),
+  );
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
@@ -434,11 +366,11 @@ export async function initializeBootstrapCore(
   await hookWorkbench.loadAndApplyManagedHooks();
 
   const runtime: MutableRuntimeState = {
-    model: configManager.get('provider.model') as string,
-    provider: getProviderIdFromModel(configManager.get('provider.model')),
-    debugMode: false,
-    systemPrompt: loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
-    reasoningEffort: (configManager.get('provider.reasoningEffort') as string | undefined) ?? '',
+    ...initialTerminalRuntimeFields(
+      configManager,
+      getProviderIdFromModel,
+      () => loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
+    ),
     sessionId: userSessionId,
   };
   runtimeSessionIdRef.value = runtime.sessionId;
@@ -515,20 +447,7 @@ export async function initializeBootstrapCore(
 
   // The public client runtime already publishes PRESET_CHANGED for live settings.
 
-  domainDispatch.syncSessionState(
-    {
-      id: userSessionId,
-      projectRoot: workingDir,
-      status: 'active',
-      startedAt: Date.now(),
-      recoveryState: 'ready',
-      isResumed: false,
-      wasRepaired: false,
-      lineageId: userSessionId,
-      lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
-    },
-    'bootstrap.session',
-  );
+  seedTerminalSession(domainDispatch, userSessionId, workingDir);
 
   runtimeUnsubs.push(
     ...registerBootstrapHookBridge({

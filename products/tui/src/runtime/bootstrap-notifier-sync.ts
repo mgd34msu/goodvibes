@@ -1,5 +1,10 @@
+import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
-import { readNotificationsMetadataOnly, type NotificationDelivery, type TurnNotificationFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
+import {
+  readNotificationsMetadataOnly,
+  type NotificationDelivery,
+  type TurnNotificationFacts,
+} from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { createUiRuntimeEvents } from '@goodvibes-jev/engine/sdk/platform/runtime/ui';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -14,35 +19,8 @@ type DomainDispatch = ReturnType<typeof createDomainDispatch>;
  * bus when any queue exists. Extracted from bootstrap-core to keep that file
  * within the module size budget.
  */
-export function syncNotifierQueueIntegrations(
-  notifier: Notifier,
-  runtimeBus: RuntimeEventBus,
-  domainDispatch: DomainDispatch,
-): () => void {
-  const queueStatuses = notifier.getQueueStatus();
-  if (queueStatuses.length === 0) return () => {};
-  const unsubscribe = attachTypedRuntimeNotifications(notifier, runtimeBus);
-  for (const queueStatus of queueStatuses) {
-    domainDispatch.syncIntegration({
-      id: queueStatus.channel,
-      displayName: queueStatus.channel[0]!.toUpperCase() + queueStatus.channel.slice(1),
-      category: 'communication',
-      status: queueStatus.metrics.deadLettered > 0 ? 'degraded' : 'healthy',
-      enabled: true,
-      successCount: queueStatus.metrics.delivered,
-      errorCount: queueStatus.metrics.deadLettered,
-      ...(queueStatus.dlqEntries[0]?.deadAt ? { lastErrorAt: queueStatus.dlqEntries[0].deadAt } : {}),
-      ...(queueStatus.dlqEntries[0]?.finalError ? { lastError: queueStatus.dlqEntries[0].finalError } : {}),
-      meta: {
-        attempts: queueStatus.metrics.totalAttempts,
-        retrying: queueStatus.metrics.retrying,
-        deadLetters: queueStatus.metrics.deadLettered,
-        dlqSize: queueStatus.metrics.dlqSize,
-        sloEnforced: queueStatus.sloEnforced,
-      },
-    }, 'bootstrap.notifier');
-  }
-  return unsubscribe;
+export function syncNotifierQueueIntegrations(notifier: Notifier, runtimeBus: RuntimeEventBus, domainDispatch: DomainDispatch): () => void {
+  return syncTerminalNotifierQueues(notifier, domainDispatch, () => attachTypedRuntimeNotifications(notifier, runtimeBus));
 }
 
 /**
@@ -90,53 +68,104 @@ export function attachTypedRuntimeNotifications(
   const send = (facts: TurnNotificationFacts): void => {
     if (!active) return;
     const delivery: NotificationDelivery = { kind: 'turn', facts };
-    const pending = 'notifyNotification' in notifier
-      ? notifier.notifyNotification(delivery) : notifier.sendNotification(delivery);
+    const pending = 'notifyNotification' in notifier ? notifier.notifyNotification(delivery) : notifier.sendNotification(delivery);
     void pending.catch(() => logger.debug('runtime notification delivery failed'));
   };
   const unsubs = [
     events.agents.on('AGENT_SPAWNING', (payload) => remember(`agent:${payload.agentId}`, () => payload.task)),
     events.agents.on('AGENT_COMPLETED', (payload) => {
       const work = take(`agent:${payload.agentId}`);
-      send({ outcome: 'completed', subject: 'agent', elapsedMs: payload.durationMs,
-        toolCalls: payload.toolCallsMade, get name() { return work?.name() ?? payload.output; } });
+      send({
+        outcome: 'completed',
+        subject: 'agent',
+        elapsedMs: payload.durationMs,
+        toolCalls: payload.toolCallsMade,
+        get name() {
+          return work?.name() ?? payload.output;
+        },
+      });
     }),
     events.agents.on('AGENT_FAILED', (payload) => {
       const work = take(`agent:${payload.agentId}`);
-      send({ outcome: 'failed', subject: 'agent', elapsedMs: payload.durationMs,
-        get name() { return work?.name(); }, get reason() { return payload.error; } });
+      send({
+        outcome: 'failed',
+        subject: 'agent',
+        elapsedMs: payload.durationMs,
+        get name() {
+          return work?.name();
+        },
+        get reason() {
+          return payload.error;
+        },
+      });
     }),
     events.agents.on('AGENT_CANCELLED', (payload) => {
       const work = take(`agent:${payload.agentId}`);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
-      send({ outcome: 'cancelled', subject: 'agent', elapsedMs: Math.max(0, clock() - work.started),
-        get name() { return work?.name(); }, get reason() { return payload.reason; } });
+      send({
+        outcome: 'cancelled',
+        subject: 'agent',
+        elapsedMs: Math.max(0, clock() - work.started),
+        get name() {
+          return work?.name();
+        },
+        get reason() {
+          return payload.reason;
+        },
+      });
     }),
     events.contracts.on('CONTRACT_CREATED', (payload) => remember(`contract:${payload.contractId}`, () => payload.ask)),
     events.contracts.on('CONTRACT_PASSED', (payload) => {
       const work = take(`contract:${payload.contractId}`);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
-      send({ outcome: 'completed', subject: 'contract', elapsedMs: Math.max(0, clock() - work.started),
-        get name() { return work?.name(); } });
+      send({
+        outcome: 'completed',
+        subject: 'contract',
+        elapsedMs: Math.max(0, clock() - work.started),
+        get name() {
+          return work?.name();
+        },
+      });
     }),
     events.contracts.on('CONTRACT_FAILED', (payload) => {
       const work = take(`contract:${payload.contractId}`);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
-      send({ outcome: 'failed', subject: 'contract', elapsedMs: Math.max(0, clock() - work.started),
-        get name() { return work?.name(); },
+      send({
+        outcome: 'failed',
+        subject: 'contract',
+        elapsedMs: Math.max(0, clock() - work.started),
+        get name() {
+          return work?.name();
+        },
         get reason() {
           return payload.failureKind === 'max_turns'
             ? formatTurnBudgetOutcome({ limit: payload.turnLimit, source: payload.turnLimitSource })
-            : payload.failureKind === 'transport' ? 'transient transport error' : payload.reason;
-        } });
+            : payload.failureKind === 'transport'
+              ? 'transient transport error'
+              : payload.reason;
+        },
+      });
     }),
     events.contracts.on('CONTRACT_CANCELLED', (payload) => {
       const work = take(`contract:${payload.contractId}`);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
-      send({ outcome: 'cancelled', subject: 'contract', elapsedMs: Math.max(0, clock() - work.started),
+      send({
+        outcome: 'cancelled',
+        subject: 'contract',
+        elapsedMs: Math.max(0, clock() - work.started),
         filesChanged: payload.filesModified,
-        get name() { return work?.name(); }, get reason() { return payload.reason; } });
+        get name() {
+          return work?.name();
+        },
+        get reason() {
+          return payload.reason;
+        },
+      });
     }),
   ];
-  return () => { active = false; for (const unsubscribe of unsubs) unsubscribe(); names.clear(); };
+  return () => {
+    active = false;
+    for (const unsubscribe of unsubs) unsubscribe();
+    names.clear();
+  };
 }

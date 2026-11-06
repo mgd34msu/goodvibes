@@ -1618,11 +1618,12 @@
       "path": "runtime/bootstrap-core.ts",
       "baselineTuiLines": 672,
       "baselineSimilarity": 0.4858,
-      "status": "pending-convergence",
+      "status": "platform-implementation-with-product-policy-adapter",
       "platformFunctions": [
         "bootstrap-runtime-bindings: catalog, control-plane seed, observer attachment and heartbeat cleanup",
         "createTerminalRenderScheduler: bounded frame coalescing and teardown"
-      ]
+      ],
+      "notes": "Platform owns feature/settings bridge and event/store allocation, retained memory init/save/close, common orchestrator tool-capability capture, companion-input forwarding, initial runtime/session fields, render scheduling, catalog/runtime bindings and notifier queue projection. Product adapters retain TUI trust/spine/union/inbound narration versus Agent private credential/config installation, isolated Knowledge and hosted-session adoption. Agent notifier teardown now owns detach; its legacy privacy adapter remains distinct from TUI typed notification delivery."
     },
     {
       "path": "runtime/bootstrap-hook-bridge.ts",

@@ -2933,6 +2933,11 @@
       "bun": "./terminal-shell/src/audio/wake-provision-presentation.ts",
       "types": "./terminal-shell/dist/audio/wake-provision-presentation.d.ts",
       "import": "./terminal-shell/dist/audio/wake-provision-presentation.js"
+    },
+    "./terminal-shell/bootstrap-primitives": {
+      "bun": "./terminal-shell/src/bootstrap-primitives.ts",
+      "types": "./terminal-shell/dist/bootstrap-primitives.d.ts",
+      "import": "./terminal-shell/dist/bootstrap-primitives.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,12 @@
+import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
+import {
+  createTerminalFeatureFlags,
+  createTerminalEventState,
+  initializeTerminalMemory,
+  attachTerminalCompanionInput,
+  seedTerminalSession,
+} from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import {
   initializeTerminalCatalog,
   seedTerminalControlPlane,
@@ -34,13 +43,9 @@ import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/sdk/platfor
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import type { BootstrapOptions } from './context.ts';
-import { createRuntimeStore, createDomainDispatch, type RuntimeStore } from './store/index.ts';
+import { type RuntimeStore } from './store/index.ts';
 import {
   type MutableRuntimeState,
-  type SessionEvent,
-  bindFeatureSettingsBridge,
-  createFeatureFlagManager,
-  deriveFeatureStates,
   RuntimeEventBus,
   ForensicsCollector,
   ForensicsRegistry,
@@ -49,8 +54,6 @@ import {
   syncConfiguredServices,
   registerBootstrapHookBridge,
   registerBootstrapRuntimeEvents,
-  configureRuntimeEventBusDefaults,
-  runtimeEventBusOptionsFrom,
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { registerClientPhoneTool } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
@@ -248,15 +251,10 @@ export async function initializeBootstrapCore(
   // Gate states derive from the domain settings keys; the bridge keeps live
   // config writes flowing (honest pending-restart markers for startup-gated
   // features). Mirrors the SDK composition root's owned-manager wiring.
-  const featureFlags = createFeatureFlagManager();
-  featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-  bindFeatureSettingsBridge(configManager, featureFlags);
+  const featureFlags = createTerminalFeatureFlags(configManager);
 
   const userSessionId = `user-${generateUserSessionId()}`;
-  configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => configManager.get(key)));
-  const runtimeBus = new RuntimeEventBus(); // cap from runtime.eventBus.maxListeners before the first bus exists
-  const store = createRuntimeStore();
-  const domainDispatch = createDomainDispatch(store);
+  const { runtimeBus, store, domainDispatch } = createTerminalEventState(configManager);
   let getConversationTitle = (): string | undefined => undefined;
   const services = createRuntimeServices({
     configManager,
@@ -323,53 +321,16 @@ export async function initializeBootstrapCore(
   });
   registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the SDK's client/phone-tool.ts)
   services.agentOrchestrator.setDependencies({
-    contractRunner: services.contractRunner,
+    ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
     contractHooks: services.contractRunner.hooks(),
-    permissionManager: services.permissionManager,
-    sandboxEscalationHandler: services.sandboxEscalationHandler,
-    onSandboxedRun: services.onSandboxedRun,
-    agentManager: services.agentManager,
     surfaceRoot: services.surface.surfaceRoot,
-    // setDependencies is a wholesale replace: re-install the prompt-answer handler and the loopback-fetch ask here or this rewire silently drops them.
-    execPromptAnswerHandler: services.execPromptAnswerHandler,
-    localhostFetchApproval: services.localhostFetchApproval,
-    fileCache,
-    projectIndex,
-    workingDirectory: services.workingDirectory,
-    fileUndoManager: services.fileUndoManager,
-    modeManager: services.modeManager,
-    processManager: services.processManager,
-    agentMessageBus: services.agentMessageBus,
-    webSearchService: services.webSearchService,
-    channelRegistry: services.channelPlugins,
-    remoteRunnerRegistry: services.remoteRunnerRegistry,
     knowledgeService: services.knowledgeService,
-    archetypeLoader: services.archetypeLoader,
-    configManager,
-    providerRegistry: services.providerRegistry,
-    providerOptimizer: services.providerOptimizer,
-    toolLLM: services.toolLLM,
-    serviceRegistry: services.serviceRegistry,
-    sessionOrchestration: services.sessionOrchestration,
-    featureFlags: services.featureFlags,
-    overflowHandler: services.overflowHandler,
-    memoryRegistry: services.memoryRegistry,
-    sandboxSessionRegistry: services.sandboxSessionRegistry,
-    workflowServices: services.workflow,
-    contextAccountingHolder: services.contextAccountingHolder,
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
   bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(() => conversation.setNoticeSink(null));
-  await memoryStore.init();
-  bootstrapUnsubs.push(async () => {
-    try {
-      await memoryStore.save();
-    } finally {
-      memoryStore.close();
-    }
-  });
+  await initializeTerminalMemory(memoryStore, bootstrapUnsubs);
   // Fold this project's legacy per-project TUI memory into the home-scoped canonical store, ONCE, AFTER init(). Idempotent and non-fatal.
   await runBootMemoryFold(memoryStore, services.memoryEmbeddingRegistry, workingDir, logger);
 
@@ -470,27 +431,9 @@ export async function initializeBootstrapCore(
     value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
   } = { value: null };
   runtimeUnsubs.push(
-    runtimeBus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
-      // Narrate inbound external events to the operator so they can observe
-      // which channel event triggered the agent turn.
-      const narration = narrateInboundEvent({
-        source: payload.source,
-        metadata: payload.metadata,
-      });
-      if (narration) {
-        routeOrBuffer(narration, 'low');
-      }
-
-      if (orchestratorHandleUserInputRef.value) {
-        // Delegate to the orchestrator: adds user message + fires a real LLM turn.
-        // Preserve surface origin metadata so the SDK can correlate replies back
-        // to the originating external channel, including ntfy chat topics.
-        orchestratorHandleUserInputRef.value(payload.body, companionMessageToOrchestratorInputOptions(payload));
-      } else {
-        // Fallback: render the user message immediately (orchestrator not yet ready).
-        conversation.addUserMessage(payload.body);
-        requestRender();
-      }
+    attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender, (payload) => {
+      const narration = narrateInboundEvent({ source: payload.source, metadata: payload.metadata });
+      if (narration) routeOrBuffer(narration, 'low');
     }),
   );
 
@@ -544,11 +487,11 @@ export async function initializeBootstrapCore(
   await hookWorkbench.loadAndApplyManagedHooks();
 
   const runtime: MutableRuntimeState = {
-    model: configManager.get('provider.model') as string,
-    provider: getProviderIdFromModel(configManager.get('provider.model')),
-    debugMode: false,
-    systemPrompt: loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
-    reasoningEffort: (configManager.get('provider.reasoningEffort') as string | undefined) ?? '',
+    ...initialTerminalRuntimeFields(
+      configManager,
+      getProviderIdFromModel,
+      () => loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
+    ),
     get sessionId() {
       return runtimeSessionIdRef.value;
     },
@@ -583,20 +526,7 @@ export async function initializeBootstrapCore(
   // until bootstrap.ts's deferred task activates it for an adopted 'external' daemon.
   sessionSpine.register({ sessionId: runtime.sessionId, project: services.workingDirectory, title: 'Terminal UI session' });
 
-  domainDispatch.syncSessionState(
-    {
-      id: userSessionId,
-      projectRoot: workingDir,
-      status: 'active',
-      startedAt: Date.now(),
-      recoveryState: 'ready',
-      isResumed: false,
-      wasRepaired: false,
-      lineageId: userSessionId,
-      lineage: [{ sessionId: userSessionId, createdAt: Date.now() }],
-    },
-    'bootstrap.session',
-  );
+  seedTerminalSession(domainDispatch, userSessionId, workingDir);
 
   runtimeUnsubs.push(...registerBootstrapHookBridge({ runtimeBus, hookDispatcher, runtime }));
 

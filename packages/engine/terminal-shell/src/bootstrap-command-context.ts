@@ -334,3 +334,105 @@ export function projectBootstrapShellCommandOptions<
     hydrateSessionUsage: Input['hydrateSessionUsage'];
   };
 }
+
+/** Common tool capabilities survive wholesale orchestrator dependency replacement. Private knowledge and surface identity are explicit product ports. */
+export function projectAgentToolDependencies<
+  Input extends {
+    readonly services: {
+      readonly contractRunner: unknown;
+      readonly permissionManager: unknown;
+      readonly sandboxEscalationHandler: unknown;
+      readonly onSandboxedRun: unknown;
+      readonly agentManager: unknown;
+      readonly execPromptAnswerHandler: unknown;
+      readonly localhostFetchApproval: unknown;
+      readonly workingDirectory: unknown;
+      readonly fileUndoManager: unknown;
+      readonly modeManager: unknown;
+      readonly processManager: unknown;
+      readonly agentMessageBus: unknown;
+      readonly webSearchService: unknown;
+      readonly channelPlugins: unknown;
+      readonly remoteRunnerRegistry: unknown;
+      readonly archetypeLoader: unknown;
+      readonly providerRegistry: unknown;
+      readonly providerOptimizer: unknown;
+      readonly toolLLM: unknown;
+      readonly serviceRegistry: unknown;
+      readonly sessionOrchestration: unknown;
+      readonly featureFlags: unknown;
+      readonly overflowHandler: unknown;
+      readonly memoryRegistry: unknown;
+      readonly sandboxSessionRegistry: unknown;
+      readonly workflow: unknown;
+      readonly contextAccountingHolder: unknown;
+    };
+    readonly fileCache: unknown;
+    readonly projectIndex: unknown;
+    readonly configManager: unknown;
+  },
+>(input: Input) {
+  return {
+    contractRunner: input.services.contractRunner,
+    permissionManager: input.services.permissionManager,
+    sandboxEscalationHandler: input.services.sandboxEscalationHandler,
+    onSandboxedRun: input.services.onSandboxedRun,
+    agentManager: input.services.agentManager,
+    execPromptAnswerHandler: input.services.execPromptAnswerHandler,
+    localhostFetchApproval: input.services.localhostFetchApproval,
+    fileCache: input.fileCache,
+    projectIndex: input.projectIndex,
+    workingDirectory: input.services.workingDirectory,
+    fileUndoManager: input.services.fileUndoManager,
+    modeManager: input.services.modeManager,
+    processManager: input.services.processManager,
+    agentMessageBus: input.services.agentMessageBus,
+    webSearchService: input.services.webSearchService,
+    channelRegistry: input.services.channelPlugins,
+    remoteRunnerRegistry: input.services.remoteRunnerRegistry,
+    archetypeLoader: input.services.archetypeLoader,
+    configManager: input.configManager,
+    providerRegistry: input.services.providerRegistry,
+    providerOptimizer: input.services.providerOptimizer,
+    toolLLM: input.services.toolLLM,
+    serviceRegistry: input.services.serviceRegistry,
+    sessionOrchestration: input.services.sessionOrchestration,
+    featureFlags: input.services.featureFlags,
+    overflowHandler: input.services.overflowHandler,
+    memoryRegistry: input.services.memoryRegistry,
+    sandboxSessionRegistry: input.services.sandboxSessionRegistry,
+    workflowServices: input.services.workflow,
+    contextAccountingHolder: input.services.contextAccountingHolder,
+  } as {
+    contractRunner: Input['services']['contractRunner'];
+    permissionManager: Input['services']['permissionManager'];
+    sandboxEscalationHandler: Input['services']['sandboxEscalationHandler'];
+    onSandboxedRun: Input['services']['onSandboxedRun'];
+    agentManager: Input['services']['agentManager'];
+    execPromptAnswerHandler: Input['services']['execPromptAnswerHandler'];
+    localhostFetchApproval: Input['services']['localhostFetchApproval'];
+    fileCache: Input['fileCache'];
+    projectIndex: Input['projectIndex'];
+    workingDirectory: Input['services']['workingDirectory'];
+    fileUndoManager: Input['services']['fileUndoManager'];
+    modeManager: Input['services']['modeManager'];
+    processManager: Input['services']['processManager'];
+    agentMessageBus: Input['services']['agentMessageBus'];
+    webSearchService: Input['services']['webSearchService'];
+    channelRegistry: Input['services']['channelPlugins'];
+    remoteRunnerRegistry: Input['services']['remoteRunnerRegistry'];
+    archetypeLoader: Input['services']['archetypeLoader'];
+    configManager: Input['configManager'];
+    providerRegistry: Input['services']['providerRegistry'];
+    providerOptimizer: Input['services']['providerOptimizer'];
+    toolLLM: Input['services']['toolLLM'];
+    serviceRegistry: Input['services']['serviceRegistry'];
+    sessionOrchestration: Input['services']['sessionOrchestration'];
+    featureFlags: Input['services']['featureFlags'];
+    overflowHandler: Input['services']['overflowHandler'];
+    memoryRegistry: Input['services']['memoryRegistry'];
+    sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
+    workflowServices: Input['services']['workflow'];
+    contextAccountingHolder: Input['services']['contextAccountingHolder'];
+  };
+}

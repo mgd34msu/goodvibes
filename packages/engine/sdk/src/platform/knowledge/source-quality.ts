@@ -12,7 +12,8 @@ import { KnowledgeRepairProfileHeldError } from './semantic/repair-profile/types
 import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeGeneratedFactSupportHeldError } from './semantic/verification/types.js';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
+import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { mapLimit, JudgmentError } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { sourceRankingContent } from './semantic/answer-source-ranking.js';
@@ -43,7 +44,7 @@ export class KnowledgeSourceQualityHeldError extends Error {
 
 /** These failures must not be swallowed before downstream knowledge writes. */
 export function isKnowledgeSourceQualityFailure(error: unknown): error is Error {
-  return error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeExtractionValueHeldError || error instanceof KnowledgeRepairFactScoringHeldError || error instanceof KnowledgeSelfImprovementAssessmentHeldError || error instanceof KnowledgeScopeSelectionHeldError || error instanceof KnowledgeWebGapRepairHeldError || error instanceof KnowledgeRepairSubjectSelectionHeldError || error instanceof KnowledgeRepairSourceAuthorityHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError || error instanceof KnowledgeRepairProfileHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeSourceQualityHeldError || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError;
+  return error instanceof DecisionModelsDisabledError || error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeExtractionValueHeldError || error instanceof KnowledgeRepairFactScoringHeldError || error instanceof KnowledgeSelfImprovementAssessmentHeldError || error instanceof KnowledgeScopeSelectionHeldError || error instanceof KnowledgeWebGapRepairHeldError || error instanceof KnowledgeRepairSubjectSelectionHeldError || error instanceof KnowledgeRepairSourceAuthorityHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError || error instanceof KnowledgeRepairProfileHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeSourceQualityHeldError || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError;
 }
 export interface KnowledgePageSourceCandidate {
   readonly source: KnowledgeSourceRecord;
@@ -70,6 +71,7 @@ export function createKnowledgePageSourceReader(policy: KnowledgePageSourceQuali
   async function read(source: KnowledgeSourceRecord, existing?: KnowledgeSourceRecord, status = source.status): Promise<KnowledgePageSourceReading> {
     throwIfAborted();
     if (excluded(source, status, existing)) return { source, useful: false, authority: 'unverified' };
+    requireDecisionFeature('semantic knowledge source quality and authority; use native source inspection or local search in Classic');
     const version = JSON.stringify(source);
     const earlier = sourceVersions.get(source.id);
     if (earlier !== undefined && earlier !== version) throw new KnowledgeSourceQualityHeldError('stale');

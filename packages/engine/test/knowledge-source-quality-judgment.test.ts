@@ -1,8 +1,10 @@
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.ts';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createKnowledgePageSourceReader, isUsefulKnowledgePageSource, knowledgePageSourceWeight, rankKnowledgePageSources, KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
+import { isKnowledgeSourceQualityFailure, createKnowledgePageSourceReader, isUsefulKnowledgePageSource, knowledgePageSourceWeight, rankKnowledgePageSources, KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
 import type { KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
@@ -83,4 +85,26 @@ describe('knowledge page source quality readings', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
+});
+
+
+test('Classic source inspection never borrows semantic metadata, and its limitation remains a propagated hold', async () => {
+  let metadata = 0, asks = 0;
+  installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic borrowed model'); }, async ask() { asks++; throw new Error('Classic must not ask'); } });
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const original = source('native-record'), before = JSON.stringify(original), reader = createKnowledgePageSourceReader();
+    await expect(reader.read(original)).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    await expect(reader.rank([original])).rejects.toBeInstanceOf(DecisionModelsDisabledError);
+    expect(isKnowledgeSourceQualityFailure(new DecisionModelsDisabledError('semantic source quality'))).toBe(true);
+    expect(JSON.stringify(original)).toBe(before); expect(asks).toBe(0); expect(metadata).toBe(0);
+    expect(await reader.read({ ...original, status: 'failed' })).toMatchObject({ useful: false, authority: 'unverified' });
+  });
+});
+
+test('a cached source-quality reading cannot become a new Classic semantic assessment', async () => {
+  const item = source('cached'); const fake = readings({ cached: { useful: 0.99 } }), reader = createKnowledgePageSourceReader();
+  await reader.read(item); const before = fake.requests.length;
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(reader.read(item)).rejects.toBeInstanceOf(DecisionModelsDisabledError); expect(fake.requests).toHaveLength(before);
+  });
 });

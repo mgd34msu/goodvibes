@@ -494,6 +494,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     });
 
 
+  // These cases traverse the complete protected catalog and orchestration
+  // evidence. Filtered/queue reads need more than one minute on CI.
   test.each(['summary', 'posture', 'detail', 'filtered', 'queue'] as const)('exposes visible Agent orchestration %s without spawning hidden work', async surface => {
     const capturedTime = Date.now();
     const timeBase = Math.floor(capturedTime / 10) * 10;
@@ -1057,7 +1059,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     } finally {
       fixture.cleanup();
     }
-  });
+  }, 120_000);
 
 
   test('saves redacted setup smoke evidence artifacts when user-run output is provided', async () => {

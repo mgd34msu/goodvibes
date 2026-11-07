@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { readdir, lstat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
 import { buildGlobMatcher } from '../utils/glob-to-regex.js';
 import type { ContractView, ContractUnitView } from './types.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
@@ -12,7 +11,6 @@ const runtimeDirectories = new Set(['.git', '.goodvibes', '.plat', 'node_modules
 
 export interface ReviewInventory {
   readonly paths: readonly string[];
-  readonly digest: string;
   readonly source: 'git' | 'filesystem';
   readonly errors: readonly string[];
 }
@@ -53,7 +51,7 @@ export async function captureReviewInventory(root: string, signal?: AbortSignal)
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') errors.push(`${path}: ${(error as NodeJS.ErrnoException).code ?? 'unavailable'}`); }
   }
   present.sort();
-  return { paths: present, digest: createHash('sha256').update(JSON.stringify(present)).digest('hex'), source, errors };
+  return { paths: present, source, errors };
 }
 
 /**
@@ -63,7 +61,7 @@ export async function captureReviewInventory(root: string, signal?: AbortSignal)
  * always compare exact paths, and repair messages name actual missed files.
  */
 export function reviewInventoryPlannerView(inventory: ReviewInventory, budget = 60_000): JsonValue {
-  const base = { digest: inventory.digest, source: inventory.source, errors: [...inventory.errors], totalFiles: inventory.paths.length };
+  const base = { source: inventory.source, errors: [...inventory.errors], totalFiles: inventory.paths.length };
   if (JSON.stringify(inventory.paths).length <= budget) return { ...base, paths: [...inventory.paths] };
   const group = (depth: number) => {
     const directories = new Map<string, { files: number; extensions: Map<string, number> }>();
@@ -142,7 +140,7 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
       assessment: assessments.some(assessment => assessment.state === 'current') ? 'reviewed'
         : assessments.some(assessment => assessment.state === 'version-unchecked') ? 'version-unchecked' : assessments.length ? 'changed' : 'unreviewed', assessments };
   });
-  return { inventoryDigest: inventory.digest, source: inventory.source, errors: [...inventory.errors],
+  return { source: inventory.source, errors: [...inventory.errors],
     totalFiles: files.length, inspectedFiles: files.filter(file => file.inspection === 'inspected').length,
     reviewedFiles: files.filter(file => file.assessment === 'reviewed').length,
     remainingFiles: files.filter(file => file.scope === 'included' && ['unreviewed', 'changed'].includes(file.assessment)).map(file => file.path),
@@ -154,10 +152,10 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
  * list, without sending all completed file records through every Jev request. */
 export function compactReviewInventory(observation: NonNullable<ReturnType<typeof reviewInventoryObservation>>) {
   const { files, ...summary } = observation;
-  return { ...summary, manifestDigest: createHash('sha256').update(JSON.stringify(files)).digest('hex'),
+  return { ...summary,
     excludedFiles: files.filter(file => file.scope === 'excluded').map(file => ({ path: file.path, reasons: file.exclusionReasons })),
     acceptedAssessments: [...new Map(files.flatMap(file => file.assessments.map(assessment => [assessment.checkId, {
       unitId: assessment.unitId, checkId: assessment.checkId, criteria: assessment.criteria,
     }] as const))).values()],
-    meaning: summary.meaning + ' This compact view preserves exact pending paths and explicit exclusions. Completed per-file records remain in the native inventory and unit checks under manifestDigest; counts and identity comparisons are computed by the host, never asserted by a model.' };
+    meaning: summary.meaning + ' This compact view preserves exact pending paths and explicit exclusions. Completed per-file records remain in the native contract reviewInventory and unit checks at the listed unitId/checkId references; counts and identity comparisons are computed by the host, never asserted by a model.' };
 }

@@ -64,7 +64,7 @@ export function buildUnitBrief(
   ];
   if (contract.reviewInventory) {
     const assigned = contract.units.find(candidate => candidate.id === unit.id);
-    sections.push('Native review inventory for this unit:\n' + JSON.stringify({ inventoryDigest: contract.reviewInventory.digest,
+    sections.push('Native review inventory for this unit:\n' + JSON.stringify({
       assignedFiles: assignedReviewPaths(contract.reviewInventory, assigned?.files ?? []),
       exclusions: contract.reviewExclusions ?? [],
       instruction: 'Assess every assigned in-scope file against this unit’s criteria. A read receipt alone is not a completed assessment. Retain concrete findings and their evidence. The host records accepted assessments per file/version and identifies remaining files; do not restart accepted unchanged work.' }));

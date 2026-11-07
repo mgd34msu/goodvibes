@@ -302,7 +302,7 @@ const DRAFT_PLAN_SCHEMA = objectSchema({
 export const CONTRACT_VIEW_SCHEMA = objectSchema({
   originalSource: objectSchema({ goal: STRING_SCHEMA, criteria: STRING_LIST_SCHEMA, conversationContext: arraySchema(toJSONSchema(nativeConversationContinuationMessageSchema)), selectedDiffContext: toJSONSchema(nativeSelectedDiffContextSchema) }, ['goal', 'criteria']),
   taskEvidence: STRING_SCHEMA,
-  reviewInventory: objectSchema({ paths: STRING_LIST_SCHEMA, digest: STRING_SCHEMA, source: enumSchema(['git', 'filesystem']), errors: STRING_LIST_SCHEMA }, ['paths', 'digest', 'source', 'errors']),
+  reviewInventory: objectSchema({ paths: STRING_LIST_SCHEMA, source: enumSchema(['git', 'filesystem']), errors: STRING_LIST_SCHEMA }, ['paths', 'source', 'errors']),
   reviewExclusions: arraySchema(objectSchema({ files: STRING_LIST_SCHEMA, reason: STRING_SCHEMA }, ['files', 'reason'])),
   nativeSource: CONTRACT_NATIVE_SOURCE_SCHEMA,
   nativeDecisions: CONTRACT_NATIVE_DECISIONS_SCHEMA,

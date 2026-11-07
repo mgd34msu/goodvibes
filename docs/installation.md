@@ -1,5 +1,27 @@
 # Install and uninstall GoodVibes Jev
 
+The root `install.sh` also works as a curl entry point:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
+```
+
+It clones **only `mgd34msu/goodvibes-jev`** and builds the daemon, TUI, Agent and
+WebUI together from that checkout. It does not install the former split
+GoodVibes repositories. The default source ref is `main`; set `GOODVIBES_REF`
+on the `sh` process to select another branch or tag. Source checkouts are kept
+under `${XDG_DATA_HOME:-$HOME/.local/share}/goodvibes-jev-source` because the
+installed service may use its checkout as the workspace.
+
+Pass normal installer options through `sh -s --`, for example:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
+```
+
+The website redirect is managed separately; this change does not update it.
+
+
 The installer builds the daemon, terminal UI, agent and WebUI from your current
 checkout of this repository. It supports Linux x64 and arm64 with glibc.
 Run it as your normal user, without `sudo`.

@@ -188,10 +188,21 @@ The runner is designed to run as a CLI and as the daemon's hosted-session host. 
 
 - **Bun:** 1.3.14.
 - **Node:** 22 or later, for the tooling that runs under Node.
-- **`TYPESAFE_API_KEY`:** needed for anything that calls Jev live: the proofs, calibration and a running engine.
+- **`TYPESAFE_API_KEY`:** needed for hosted Jev calls, including live proofs and calibration. Classic operation does not require decision-model credentials.
 - **`TYPESAFE_BASE_URL`:** optional. Set it to a loopback address to use a local System One model instead of the hosted endpoint.
 
 ## Install the application
+
+The curl installer fetches this monorepo only and builds all four products from
+one checkout:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
+```
+
+Use `sh -s -- --no-service --decision-policy 'Classic - Off'` after the pipe
+for a Classic installation without a service. The website redirect is managed
+separately.
 
 On Linux x64/arm64 with glibc, run the installer as your normal user from a
 checkout with no uncommitted changes to tracked files:

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { generateTraceId } from './ids.js';
+export { generateSpanId as createSpanId } from './ids.js';
 import { VERSION } from '../../version.js';
 import { getCorrelationContext } from '../correlation.js';
 import type { PlatformErrorSource } from '../../types/errors.js';
@@ -108,16 +110,12 @@ function hashHex(value: string, length: number): string {
 }
 
 export function normalizeTraceId(traceId: string | undefined): string {
-  if (!traceId || traceId.trim().length === 0) return hashHex('missing-trace-id', 32);
+  if (!traceId || traceId.trim().length === 0) return generateTraceId();
   const normalized = traceId.toLowerCase().replace(/[^0-9a-f]/g, '');
   if (normalized.length === 32) return normalized;
   if (normalized.length > 32) return normalized.slice(0, 32);
   if (normalized.length > 0) return normalized.padEnd(32, '0');
   return hashHex(traceId, 32);
-}
-
-export function buildSpanId(seed: string): string {
-  return hashHex(seed, 16);
 }
 
 export function appendBounded<T>(target: T[], value: T, limit: number): void {

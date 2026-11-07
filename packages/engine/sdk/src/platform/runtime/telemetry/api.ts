@@ -27,7 +27,7 @@ import {
   buildOtlpMetricDocumentFromState,
   buildOtlpTraceDocumentFromSpans,
   buildRecordId,
-  buildSpanId,
+  createSpanId,
   clampLimit,
   DEFAULT_ERROR_LIMIT,
   DEFAULT_EVENT_LIMIT,
@@ -484,7 +484,7 @@ export class TelemetryApiService {
     switch (record.type) {
       case 'TURN_SUBMITTED':
         if (record.turnId) {
-          const spanId = buildSpanId(`turn:${record.turnId}`);
+          const spanId = createSpanId();
           this.turnSpanIds.set(record.turnId, spanId);
           this.activeTurnSpans.set(record.turnId, {
             name: 'turn.lifecycle',
@@ -498,7 +498,7 @@ export class TelemetryApiService {
         return;
       case 'TASK_STARTED':
         if (record.taskId) {
-          const spanId = buildSpanId(`task:${record.taskId}`);
+          const spanId = createSpanId();
           this.taskSpanIds.set(record.taskId, spanId);
           this.activeTaskSpans.set(record.taskId, {
             name: 'task.lifecycle',
@@ -513,7 +513,7 @@ export class TelemetryApiService {
       case 'AGENT_SPAWNING':
       case 'AGENT_RUNNING':
         if (record.agentId && !this.activeAgentSpans.has(record.agentId)) {
-          const spanId = buildSpanId(`agent:${record.agentId}`);
+          const spanId = createSpanId();
           const parentSpanId = record.taskId ? this.taskSpanIds.get(record.taskId) : undefined;
           this.agentSpanIds.set(record.agentId, spanId);
           this.activeAgentSpans.set(record.agentId, {
@@ -530,7 +530,7 @@ export class TelemetryApiService {
       case 'TOOL_EXECUTING':
         if (typeof record.attributes.callId === 'string') {
           const callId = record.attributes.callId;
-          const spanId = buildSpanId(`tool:${callId}`);
+          const spanId = createSpanId();
           const parentSpanId = record.agentId
             ? this.agentSpanIds.get(record.agentId)
             : record.taskId
@@ -589,7 +589,7 @@ export class TelemetryApiService {
       name: defaultName,
       kind: SpanKinds.INTERNAL,
       traceId: record.traceId,
-      spanId: buildSpanId(`${defaultName}:${key ?? record.id}`),
+      spanId: createSpanId(),
       startTimeMs: durationMs !== undefined ? Math.max(0, record.timestamp - durationMs) : record.timestamp,
       attributes: this.buildSpanAttributes(record, { synthesized: true }),
     };
@@ -717,7 +717,6 @@ export class TelemetryApiService {
       spans: this.spans,
       recordEvent: (type, record) => this.recordIngestedEvent(type, record),
       nextSequence: () => this.seq++,
-      peekSequence: () => this.seq,
     });
   }
 

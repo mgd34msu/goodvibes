@@ -94,6 +94,33 @@ async function populate(fixture: ReturnType<typeof createFixture>): Promise<void
   await flush();
 }
 
+test('distinct native span lifetimes and untraced imported spans receive separate identities', async () => {
+  const fixture = createFixture(true);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    fixture.submit();
+    emitTurnError(fixture.bus, {
+      sessionId: 'telemetry-session', traceId: '0123456789abcdef0123456789abcdef', source: 'test',
+    }, { turnId: 'telemetry-turn', error: failure, stopReason: 'provider_error' });
+    await flush();
+  }
+  const turns = fixture.service.listSpans({}, 'raw').filter(span => span.name === 'turn.lifecycle');
+  expect(turns).toHaveLength(2);
+  expect(new Set(turns.map(span => span.spanContext.spanId)).size).toBe(2);
+  expect(turns.every(span => span.spanContext.traceId === '0123456789abcdef0123456789abcdef')).toBe(true);
+
+  fixture.service.ingestTraces({ resourceSpans: [{ scopeSpans: [{ spans: [{ name: 'first' }, { name: 'second' }] }] }] });
+  const imported = fixture.service.listSpans({}, 'raw').filter(span => span.instrumentationScope === 'otlp-ingest');
+  expect(imported).toHaveLength(2);
+  expect(new Set(imported.map(span => span.spanContext.spanId)).size).toBe(2);
+  expect(new Set(imported.map(span => span.spanContext.traceId)).size).toBe(2);
+  for (const span of [...turns, ...imported]) {
+    expect(span.spanContext.spanId).toMatch(/^[a-f0-9]{16}$/);
+    expect(span.spanContext.spanId).not.toBe('0'.repeat(16));
+    expect(span.spanContext.traceId).toMatch(/^[a-f0-9]{32}$/);
+    expect(span.spanContext.traceId).not.toBe('0'.repeat(32));
+  }
+});
+
 const rawMethods = [
   'getTelemetrySnapshot', 'getTelemetryEvents', 'getTelemetryErrors', 'getTelemetryTraces',
   'getTelemetryMetrics', 'createTelemetryEventStream', 'getTelemetryOtlpLogs', 'getTelemetryOtlpTraces',

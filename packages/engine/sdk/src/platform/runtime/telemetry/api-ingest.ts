@@ -4,7 +4,7 @@ import type { ReadableSpan } from './types.js';
 import { SpanKind as SpanKinds, SpanStatusCode } from './types.js';
 import {
   appendBounded,
-  buildSpanId,
+  createSpanId,
   normalizeTraceId,
 } from './api-helpers.js';
 
@@ -36,7 +36,6 @@ export function ingestExternalTelemetryTraces(
   input: IngestTelemetryBaseInput & {
     readonly spanLimit: number;
     readonly spans: ReadableSpan[];
-    readonly peekSequence: () => number;
   },
 ): void {
   const resourceSpans = Array.isArray(input.payload['resourceSpans']) ? input.payload['resourceSpans'] as unknown[] : [];
@@ -48,7 +47,7 @@ export function ingestExternalTelemetryTraces(
       for (const spanPayload of spans) {
         const entry = objectRecord(spanPayload);
         const traceId = typeof entry['traceId'] === 'string' ? entry['traceId'] : normalizeTraceId(undefined);
-        const spanId = typeof entry['spanId'] === 'string' ? entry['spanId'] : buildSpanId(`otlp:${input.peekSequence()}`);
+        const spanId = typeof entry['spanId'] === 'string' ? entry['spanId'] : createSpanId();
         const name = typeof entry['name'] === 'string' ? entry['name'] : 'otlp.span';
         const startMs = typeof entry['startTimeUnixNano'] === 'number'
           ? Math.floor(entry['startTimeUnixNano'] / 1_000_000)

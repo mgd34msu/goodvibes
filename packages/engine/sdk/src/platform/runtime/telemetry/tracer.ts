@@ -23,27 +23,9 @@ import type {
 import { SpanKind, SpanStatusCode } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
+import { generateSpanId, generateTraceId } from './ids.js';
 
 // ── ID generation ───────────────────────────────────────────────────────────────
-
-/** Generate a 128-bit trace ID (32-char lowercase hex). */
-function generateTraceId(): string {
-  return [
-    crypto.getRandomValues(new Uint8Array(16)),
-  ].map((bytes) =>
-    Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
-  )[0]!;
-}
-
-/** Generate a 64-bit span ID (16-char lowercase hex). */
-function generateSpanId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
 
 /** Check if a hex string is non-zero. */
 function isNonZeroHex(hex: string): boolean {

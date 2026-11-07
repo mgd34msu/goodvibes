@@ -114,9 +114,8 @@ const REMEMBERED_SPAN_LIMIT = 2048;
 
 /** Immutable original and its current local profile/issuer projection. Never logged. */
 interface AdmittedLine {
-  readonly original: string;
   readonly text: string;
-  readonly revision: string;
+  readonly cacheRevision: () => string;
   readonly redaction: ReturnType<typeof captureRedactionSource>;
 }
 interface SpanReading {
@@ -134,9 +133,19 @@ interface PendingSpan {
 const spanReadings = new Map<string, SpanReading>();
 const spanReadsInFlight = new Map<string, PendingSpan>();
 let readingGeneration = 0;
-const digest = (value: string): string => createHash('sha256').update(value).digest('hex');
 const spanKey = (line: AdmittedLine, candidate: CredentialCandidate): string =>
-  `${line.revision}:${candidate.start}:${candidate.end}`;
+  `${line.cacheRevision()}:${candidate.start}:${candidate.end}`;
+
+/** Only the bounded cross-write candidate cache needs a content commitment:
+ * retaining its complete source would retain possible credentials after the
+ * write ends. This private digest cannot clear a span without the same live
+ * port and redaction authority. Ordinary records and currentness checks never
+ * hash. One admitted immutable source computes this lazily, at most once.
+ */
+function candidateCacheRevision(original: string, text: string): () => string {
+  let revision: string | undefined;
+  return () => revision ??= createHash('sha256').update(JSON.stringify([original, text])).digest('hex');
+}
 const unavailable = (): Error => new Error('At-rest credential reading is unavailable; unread spans remain masked');
 
 /** Match issuer formats in strings/keys and nested JSON-string envelopes. */
@@ -193,7 +202,7 @@ function admitLine(original: string): AdmittedLine | undefined {
     }
     const text = redactIssuerCredentials(original);
     redaction.assertCurrent();
-    return Object.freeze({ original, text, revision: digest(JSON.stringify([original, text])), redaction });
+    return Object.freeze({ text, cacheRevision: candidateCacheRevision(original, text), redaction });
   } catch {
     // Never retain or inspect an upstream rejection, which may carry source text.
     return undefined;
@@ -246,7 +255,9 @@ function readSpan(candidate: CredentialCandidate, line: AdmittedLine, site: stri
   const assertCurrent = () => {
     authority.assertCurrent();
     line.redaction.assertCurrent();
-    if (generation !== readingGeneration || admitLine(line.original)?.revision !== line.revision) throw unavailable();
+    // Both strings are immutable, completely admitted inputs. The captured
+    // redaction owner above retires profile/identity changes, including ABA.
+    if (generation !== readingGeneration) throw unavailable();
     authority.assertCurrent();
   };
   const read = (async (): Promise<void> => {
@@ -314,15 +325,19 @@ export async function readAtRestCredentialSpans(lines: readonly string[], site: 
 }
 
 /** Project using only the caller's captured authority; a queued line cannot borrow a new runtime. */
-function projectAtRestLine(line: string, authority?: JudgmentPortCapture, redaction?: ReturnType<typeof captureRedactionSource>): string {
+function projectAtRestLine(line: string, authority?: JudgmentPortCapture, source?: AdmittedLine): string {
   let text: string;
   try { text = redactIssuerCredentials(line); } catch { throw unavailable(); }
-  const admitted = admitLine(line);
+  const candidates = findCredentialCandidates(text);
+  if (!candidates.length) return text;
   let currentAuthority = authority;
-  try { redaction?.assertCurrent(); } catch { currentAuthority = undefined; }
+  try { source?.redaction.assertCurrent(); } catch { currentAuthority = undefined; }
+  // With no live semantic authority every candidate stays masked. In
+  // particular, crash capture and Classic need no cache digest at all.
+  const admitted = currentAuthority ? source ?? admitLine(line) : undefined;
   let out = '';
   let cursor = 0;
-  for (const candidate of findCredentialCandidates(text)) {
+  for (const candidate of candidates) {
     if (admitted?.text === text && currentAuthority && remembered(admitted, candidate, currentAuthority) === true) continue;
     out += text.slice(cursor, candidate.start) + candidate.marker;
     cursor = candidate.end;
@@ -332,6 +347,7 @@ function projectAtRestLine(line: string, authority?: JudgmentPortCapture, redact
 
 /** Local issuer/profile protection plus candidate masking, retaining the JSONL schema. */
 export function redactAtRestLine(line: string): string {
+  if (isClassicOperation()) return projectAtRestLine(line);
   let authority: JudgmentPortCapture | undefined;
   try { authority = captureJudgmentPort('runtime.at-rest.cached-projection'); } catch { /* No live proof: mask. */ }
   return projectAtRestLine(line, authority);
@@ -352,14 +368,14 @@ export class AtRestLineWriter {
   constructor(site: string) { this.#site = site; }
 
   write(line: string, append: (redacted: string) => void): void {
-    const admitted = admitLine(line);
+    const admitted = isClassicOperation() ? undefined : admitLine(line);
     let authority: JudgmentPortCapture | undefined;
     if (admitted && findCredentialCandidates(admitted.text).length > 0) {
       try { authority = captureReadingAuthority(this.#site, [admitted.redaction]); } catch { /* Unavailable: keep unread spans masked. */ }
     }
     const needsReading = admitted !== undefined && authority !== undefined && unreadCandidates(admitted, authority).length > 0;
     if (this.#tail === null && !needsReading) {
-      append(projectAtRestLine(line, authority, admitted?.redaction));
+      append(projectAtRestLine(line, authority, admitted));
       return;
     }
     const previous = this.#tail ?? Promise.resolve();
@@ -371,7 +387,7 @@ export class AtRestLineWriter {
         // Value-free, nonrecursive failure: no error-display reading or borrowed error fields.
         try { logger.warn('[at-rest] credential span reading failed; unread spans are masked'); } catch { /* Diagnostics are best effort. */ }
       })
-      .then(() => append(projectAtRestLine(line, authority, admitted?.redaction)))
+      .then(() => append(projectAtRestLine(line, authority, admitted)))
       .catch(() => {
         try { logger.warn('[at-rest] writing a queued line failed'); } catch { /* Diagnostics are best effort. */ }
       });

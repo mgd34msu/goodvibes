@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 
@@ -13,7 +12,6 @@ export interface AgentHarnessNotificationArgs {
 interface NotificationTargetDescriptor {
   readonly id: string;
   readonly index: number;
-  readonly fingerprint: string;
   readonly validUrl: boolean;
   readonly protocol?: string;
   readonly host?: string;
@@ -47,10 +45,6 @@ function readConfiguredWebhookUrls(context: CommandContext): readonly string[] {
     .filter((url) => url.length > 0);
 }
 
-function fingerprint(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
 function pathDepth(pathname: string): number {
   return pathname
     .split('/')
@@ -66,7 +60,6 @@ function describeWebhookUrl(url: string, index: number): NotificationTargetDescr
     return {
       id,
       index: index + 1,
-      fingerprint: fingerprint(url),
       validUrl: true,
       protocol: parsed.protocol.replace(/:$/, ''),
       host: parsed.host,
@@ -77,7 +70,6 @@ function describeWebhookUrl(url: string, index: number): NotificationTargetDescr
     return {
       id,
       index: index + 1,
-      fingerprint: fingerprint(url),
       validUrl: false,
     };
   }
@@ -100,7 +92,6 @@ function targetSearchText(target: NotificationTargetDescriptor): string {
   return [
     target.id,
     String(target.index),
-    target.fingerprint,
     target.protocol ?? '',
     target.host ?? '',
     target.validUrl ? 'valid' : 'invalid',
@@ -112,7 +103,6 @@ function describeTargetCandidate(target: NotificationTargetDescriptor): Record<s
   return {
     notificationTargetId: target.id,
     index: target.index,
-    fingerprint: target.fingerprint,
     validUrl: target.validUrl,
     ...(target.host ? { host: target.host } : {}),
     modelRoute: notificationTargetModelRoute(),
@@ -130,7 +120,6 @@ function describeTarget(
   return {
     id: target.id,
     index: target.index,
-    fingerprint: target.fingerprint,
     validUrl: target.validUrl,
     ...(target.protocol ? { protocol: target.protocol } : {}),
     ...(target.host ? { host: target.host } : {}),
@@ -208,7 +197,7 @@ export function describeHarnessNotificationTarget(
   }
   const targets = notificationTargets(context);
   const normalized = lookup.input.toLowerCase();
-  const exact = targets.find((target) => target.id === lookup.input || String(target.index) === lookup.input || target.fingerprint === lookup.input);
+  const exact = targets.find((target) => target.id === lookup.input || String(target.index) === lookup.input);
   if (exact) return { status: 'found', target: describeTarget(exact, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'id-or-index' } }) };
   const searched = targets.filter((target) => targetSearchText(target).includes(normalized));
   if (searched.length === 1) {

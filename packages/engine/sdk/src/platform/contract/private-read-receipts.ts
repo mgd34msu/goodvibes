@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,6 +8,11 @@ import type { JsonValue } from '@goodvibes-jev/judgment';
 import { ownerEvidenceIdentity } from './owner-evidence.js';
 
 type ArchiveOwner = Pick<ContractView, 'id'> & Partial<Pick<ContractView, 'projectRoot' | 'inputSnapshot' | 'units' | 'groups'>>;
+interface ReceiptArchive {
+  readonly version: unknown; readonly kind: unknown; readonly contractId: unknown; readonly inputId: unknown;
+  readonly units: { id: string; latestCheckId: string | null; observations: NonNullable<ContractView['units'][number]['readEvidence']> }[];
+  readonly ownerObservations?: JsonValue[];
+}
 
 function archivePath(contract: ArchiveOwner): string | undefined {
   if (!contract.projectRoot || !/^ctr-[a-f0-9]{8}$/.test(contract.id)) return undefined;
@@ -32,8 +36,7 @@ export function preserveDeclaredReadReceipts(contract: ArchiveOwner, ownerEviden
   if (!path) return;
   let previous: { units: { id: string; latestCheckId: string | null; observations: NonNullable<ContractView['units'][number]['readEvidence']> }[]; ownerObservations?: JsonValue[] } | undefined;
   if (existsSync(path)) {
-    readPrivateReceiptArchives(contract);
-    previous = JSON.parse(readFileSync(path, 'utf8')) as NonNullable<typeof previous>;
+    previous = readPrivateReceiptArchive(contract)?.archive;
   }
   const accepted = contract.units.filter(unit => unit.status === 'passed' && (unit.readEvidence?.length ?? 0) > 0);
   if (accepted.length === 0) return;
@@ -56,43 +59,48 @@ export function preserveDeclaredReadReceipts(contract: ArchiveOwner, ownerEviden
   writeFileAtomic(path, JSON.stringify(archive, null, 2) + '\n', { mode: 0o600 });
 }
 
-/** Freshly read file metadata for both worker context and mandatory Jev checks.
- * Full archived source contents never enter this projection. */
-export function readPrivateReceiptArchives(contract: ArchiveOwner) {
-  if (!contract.units?.some(unit => unit.files.includes(`.goodvibes/reviews/${contract.id}/source-receipts.json`))) return [];
+/** One owned read supplies both the metadata projection and private native evidence. */
+function readPrivateReceiptArchive(contract: ArchiveOwner) {
+  if (!contract.units?.some(unit => unit.files.includes(`.goodvibes/reviews/${contract.id}/source-receipts.json`))) return undefined;
   const path = archivePath(contract);
-  if (!path || !existsSync(path)) return [];
+  if (!path || !existsSync(path)) return undefined;
+  const before = lstatSync(path, { bigint: true });
   const bytes = readFileSync(path);
-  const archive = JSON.parse(bytes.toString('utf8')) as { version?: unknown; kind?: unknown; contractId?: unknown; inputId?: unknown;
-    units?: { id: string; observations: { path: string; returnedRanges: string[]; returnedContent?: string; contentKind?: string }[] }[] };
+  const after = lstatSync(path, { bigint: true });
+  if (archivePath(contract) !== path || before.dev !== after.dev || before.ino !== after.ino || before.mode !== after.mode
+    || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error('Private receipt archive changed while reading');
+  const archive = JSON.parse(bytes.toString('utf8')) as ReceiptArchive;
   if (archive.version !== 1 || archive.kind !== 'contract-read-receipts' || archive.contractId !== contract.id
     || archive.inputId !== (contract.inputSnapshot?.id ?? null) || !Array.isArray(archive.units)) throw new Error('Private receipt archive has an unrecognized owner or format');
-  const digest = `sha256-base64url:${createHash('sha256').update(bytes).digest('base64url')}`;
-  return [{ kind: 'contract-read-receipts', path: `.goodvibes/reviews/${contract.id}/source-receipts.json`,
-    digest, bytes: bytes.length,
+  const receipt = { kind: 'contract-read-receipts', path: `.goodvibes/reviews/${contract.id}/source-receipts.json`,
+    bytes: bytes.length,
     hostFileRead: { operation: 'read-file', source: 'native-host-filesystem', success: true,
       ownerProjectRoot: contract.projectRoot!, absolutePath: path, bytes: bytes.length,
-      digest,
-      modifiedAt: new Date(lstatSync(path).mtimeMs).toISOString(), mode: (lstatSync(path).mode & 0o777).toString(8),
+      modifiedAt: new Date(Number(after.mtimeMs)).toISOString(), mode: (after.mode & 0o777n).toString(8),
       meaning: 'Actual successful host filesystem read of the private archive outside the disposable worker tree. The returned file passed owner/input binding validation. It establishes stored contents and file identity; it is not a worker write, test execution, native acceptance or permission to alter runtime state.',
     },
     archivedUnits: archive.units.map(unit => ({ id: unit.id, observations: unit.observations.length,
       retainedReferences: unit.observations.filter(read => read.contentKind === 'declared-reference' && read.returnedContent !== undefined).map(read => read.path) })),
     meaning: 'The native host has preserved these actual earlier read observations and complete retained reference contents in private storage outside the disposable worktree. Reserved .goodvibes writes and reads remain unavailable to captured workers. Use this storage receipt and the supplied host records to remove public raw ledgers; do not try to write reserved state. Substantive findings and citations remain public. This is not acceptance of this unit or final answer.',
-  }];
+  };
+  return { archive, receipt };
+}
+
+/** Worker metadata never includes the archived source contents. */
+export function readPrivateReceiptArchives(contract: ArchiveOwner) {
+  const read = readPrivateReceiptArchive(contract);
+  return read ? [read.receipt] : [];
 }
 
 /** Only a native check of the private-storage obligation receives relevant
  * primary contents. Worker prompts keep the metadata-only projection above. */
 export function readNativePrivateReceiptArchives(contract: ArchiveOwner, files: readonly string[]) {
-  const receipts = readPrivateReceiptArchives(contract);
-  if (!receipts.length || !files.includes(`.goodvibes/reviews/${contract.id}/source-receipts.json`)) return receipts;
-  const bytes = readFileSync(archivePath(contract)!);
-  const digest = `sha256-base64url:${createHash('sha256').update(bytes).digest('base64url')}`;
-  if (digest !== receipts[0]!.digest) throw new Error('Private receipt archive changed while preparing native evidence');
-  const archive = JSON.parse(bytes.toString('utf8')) as { units: { id: string; latestCheckId: string | null;
-    observations: { path: string; returnedRanges: string[]; returnedLines: number; contentKind?: string; returnedContent?: string }[] }[] };
-  const references = new Map<string, { unitId: string; checkedAt: string | null; path: string; returnedRanges: string[]; returnedLines: number; returnedContent: string }>();
+  const read = readPrivateReceiptArchive(contract);
+  if (!read) return [];
+  const receipts = [read.receipt];
+  if (!files.includes(`.goodvibes/reviews/${contract.id}/source-receipts.json`)) return receipts;
+  const archive = read.archive;
+  const references = new Map<string, { unitId: string; checkedAt: string | null; path: string; returnedRanges: readonly string[]; returnedLines: number; returnedContent: string }>();
   for (const unit of archive.units) for (const read of unit.observations) {
     if (read.contentKind !== 'declared-reference' || read.returnedContent === undefined) continue;
     const path = files.find(path => !path.startsWith('.goodvibes/') && (read.path === path || read.path.endsWith('/' + path)));
@@ -102,7 +110,7 @@ export function readNativePrivateReceiptArchives(contract: ArchiveOwner, files: 
   return receipts.map(receipt => ({ ...receipt, retainedPrivateReferences: [...references.values()],
     archivedReadObservations: archive.units.map(unit => ({ unitId: unit.id, checkedAt: unit.latestCheckId,
       observations: unit.observations.map(read => ({ path: read.path, returnedRanges: read.returnedRanges, returnedLines: read.returnedLines })) })),
-    nativeEvidenceMeaning: 'Actual primary reference contents freshly loaded from the private archive whose bytes match this storage receipt. Compare the removed public ledger and attribution with these retained snapshots. They establish what was preserved, not a new source inspection or approval of this candidate. These private contents are supplied only to this native check, never worker prompts or public delivery artifacts.',
+    nativeEvidenceMeaning: 'Actual primary reference contents and this storage receipt come from the same checked host read. Compare the removed public ledger and attribution with these retained snapshots. They establish what was preserved, not a new source inspection or approval of this candidate. These private contents are supplied only to this native check, never worker prompts or public delivery artifacts.',
   }));
 }
 
@@ -111,10 +119,10 @@ export function verifyPrivateReceiptPreservation(contract: ArchiveOwner, unit: P
   if (!unit.files.includes(`.goodvibes/reviews/${contract.id}/source-receipts.json`)) return undefined;
   const start = performance.now();
   try {
-    const receipt = readPrivateReceiptArchives(contract)[0];
-    if (!receipt) throw new Error('Declared private receipt archive is missing');
+    const read = readPrivateReceiptArchive(contract);
+    if (!read) throw new Error('Declared private receipt archive is missing');
+    const { receipt, archive } = read;
     if (receipt.hostFileRead.mode !== '600') throw new Error('Private receipt archive permissions are not owner-only');
-    const archive = JSON.parse(readFileSync(archivePath(contract)!, 'utf8')) as { units: { id: string; latestCheckId: string | null; observations: { path: string; contentKind?: string; returnedContent?: string }[] }[] };
     if (!archive.units.some(unit => unit.observations.length > 0)) throw new Error('Private archive contains no accepted read observations');
     for (const saved of archive.units) {
       const actual = contract.units?.find(unit => unit.id === saved.id);

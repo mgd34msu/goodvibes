@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { assertCurrentToolEffect, assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -12,7 +12,7 @@ function identity(stat: BigIntStats): string { return `${stat.dev}:${stat.ino}:$
 function revision(stat: BigIntStats): string { return `${identity(stat)}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.nlink}`; }
 function stale(): never { throw new ToolInputProjectionError('stale'); }
 
-function fileRevision(path: string, expected?: string): string | null {
+function fileRevision(path: string, expected?: string): { readonly revision: string; readonly bytes: Buffer } | null {
   const before = lstatSync(path, { bigint: true, throwIfNoEntry: false });
   if (!before) { if (expected !== undefined) stale(); return null; }
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > 4_000_000n) throw new ToolInputProjectionError('held');
@@ -23,7 +23,7 @@ function fileRevision(path: string, expected?: string): string | null {
     if (revision(fstatSync(fd, { bigint: true })) !== revision(before)
       || revision(lstatSync(path, { bigint: true })) !== revision(before)
       || (expected !== undefined && !bytes.equals(Buffer.from(expected)))) stale();
-    return `${revision(before)}:${createHash('sha256').update(bytes).digest('hex')}`;
+    return { revision: revision(before), bytes };
   } finally { closeSync(fd); }
 }
 
@@ -105,7 +105,7 @@ export function createAgentAccountsInputProjector(options: AgentAccountsToolOpti
       assertOwner();
       assertDirectories(directories, directoryRevisions(path));
       if (workspaceDirectories && workspace) assertDirectories(workspaceDirectories, directoryRevisions(resolve(workspace, 'account-workspace-fence')));
-      if (fileRevision(path) !== file) stale();
+      if (!isDeepStrictEqual(fileRevision(path), file)) stale();
     };
     const assertCurrent = () => { request.assertCurrent(); request.signal?.throwIfAborted(); assertTarget(); };
     assertCurrent();
@@ -117,7 +117,7 @@ export function createAgentAccountsInputProjector(options: AgentAccountsToolOpti
         const next = directoryRevisions(path);
         assertDirectories(directories, next, true);
         if (stage === 'store') file = fileRevision(path, content);
-        else if (fileRevision(path) !== file) stale();
+        else if (!isDeepStrictEqual(fileRevision(path), file)) stale();
         directories = next;
         if (workspaceDirectories && workspace) {
           const nextWorkspace = directoryRevisions(resolve(workspace, 'account-workspace-fence'));

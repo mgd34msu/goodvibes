@@ -36,8 +36,17 @@
   records, reuse unchanged originals, and prevent stale diagnostic cleanup from
   clearing newer work. Private observation values are not written to the journal.
 
+- Share terminal pairing response decoding and authority checks in the platform;
+  compare retained pairing state directly before confirmation and dispatch.
+- Bind browser code and speech readings to canonical message revisions and
+  refresh history after a stream reconnect, including error-state reconnects.
+
 ### SDK changes
 
+- Browser code-language and speech-seam requests use battery wire version 2 and
+  `contentRevision` from canonical chat history instead of `contentDigest`. Other
+  browser batteries retain wire version 1. Chat history exposes owner-issued
+  revisions, reissued on reload or replacement; they are not authorization grants.
 - Code chunks expose `fileRevision` in place of `fileHash` and no longer expose
   `contentHash`; index file lookup uses `getFileRevision`.
 - Remove the unused `autonomousRevision` helper and review-inventory digest

@@ -1,27 +1,19 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Default TTL for spawn tokens: 1 hour in milliseconds. */
 const DEFAULT_TOKEN_TTL_MS = 3_600_000;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
+/** A registered local spawn grant. The ID resolves to the issuer's saved record. */
 export interface SpawnToken {
+  id: string;
   type: 'orchestrator' | 'agent';
   sessionId: string;
-  issuedTo: string;         // agent ID or 'main'
-  issuedBy: string;         // 'system' for orchestrator, agent ID for agent tokens
-  depth: number;            // 0 for orchestrator, 1 for agent tokens
-  maxDepth: number;         // from config, always 0 or 1
-  canGenerate: boolean;     // true for orchestrator, false for agent
-  expiresAt: number;        // Unix ms timestamp, Date.now() + TTL
-  signature: string;        // HMAC-SHA256
+  issuedTo: string;
+  issuedBy: string;
+  depth: number;
+  maxDepth: number;
+  canGenerate: boolean;
+  expiresAt: number;
 }
 
 export interface OrchestrationPolicyConfig {
@@ -29,190 +21,69 @@ export interface OrchestrationPolicyConfig {
   maxDepth: number;
   maxActiveAgents: number;
 }
+interface ValidateResult { valid: boolean; reason?: string | undefined; }
+interface CanSpawnResult { allowed: boolean; reason?: string | undefined; }
+type ResolvedToken = { valid: true; token: Readonly<SpawnToken> } | { valid: false; reason: string };
+const TOKEN_FIELDS = ['id', 'type', 'sessionId', 'issuedTo', 'issuedBy', 'depth', 'maxDepth', 'canGenerate', 'expiresAt'] as const;
 
-interface ValidateResult {
-  valid: boolean;
-  reason?: string | undefined;
-}
-
-interface CanSpawnResult {
-  allowed: boolean;
-  reason?: string | undefined;
-}
-
-// ---------------------------------------------------------------------------
-// SpawnTokenManager
-// ---------------------------------------------------------------------------
-
-/**
- * Manages spawn tokens for the bounded recursive orchestration security model.
- *
- * Security model (3 layers):
- *   1. Policy gate  , recursionEnabled must be true
- *   2. Capacity gate, currentAgentCount < maxActiveAgents && depth <= maxDepth
- *   3. Token gate   , token must be valid, authentic, not expired, and canGenerate
- */
+/** Local ownership, revocation and expiry; callers retain their execution boundary. */
 export class SpawnTokenManager {
-  private secret: string;
-  private tokens = new Map<string, SpawnToken>();
+  private readonly tokens = new Map<string, Readonly<SpawnToken>>();
+  constructor(private readonly sessionId: string) {}
 
-  constructor(sessionId: string) {
-    // Per-session random secret, never shared outside this instance
-    this.secret = `${sessionId}:${randomBytes(32).toString('hex')}`;
+  private issue(fields: Omit<SpawnToken, 'id'>): SpawnToken {
+    const token = Object.freeze({ ...fields, id: randomUUID() });
+    this.tokens.set(token.id, token);
+    // A recipient may serialize/edit its copy; it cannot alter the issued grant.
+    return { ...token };
   }
 
-  // -------------------------------------------------------------------------
-  // Signing
-  // -------------------------------------------------------------------------
-
-  private sign(token: Omit<SpawnToken, 'signature'>): string {
-    const payload = JSON.stringify({
-      type: token.type,
-      sessionId: token.sessionId,
-      issuedTo: token.issuedTo,
-      issuedBy: token.issuedBy,
-      depth: token.depth,
-      maxDepth: token.maxDepth,
-      canGenerate: token.canGenerate,
-      expiresAt: token.expiresAt,
-    });
-    return createHmac('sha256', this.secret).update(payload).digest('hex');
+  private resolve(token: SpawnToken): ResolvedToken {
+    if (!token || typeof token !== 'object') return { valid: false, reason: 'token is not an object' };
+    try {
+      const id = Object.getOwnPropertyDescriptor(token, 'id');
+      if (!id || !('value' in id) || typeof id.value !== 'string') return { valid: false, reason: 'token has no registered ID' };
+      const issued = this.tokens.get(id.value);
+      if (!issued) return { valid: false, reason: 'token not registered (revoked or foreign)' };
+      for (const key of TOKEN_FIELDS) {
+        const field = Object.getOwnPropertyDescriptor(token, key);
+        if (!field || !('value' in field) || field.value !== issued[key]) return { valid: false, reason: 'token fields differ from the issued grant' };
+      }
+      if (this.tokens.get(issued.id) !== issued) return { valid: false, reason: 'token revoked while being inspected' };
+      if (Date.now() > issued.expiresAt) return { valid: false, reason: 'token expired' };
+      return { valid: true, token: issued };
+    } catch {
+      return { valid: false, reason: 'token cannot be inspected' };
+    }
   }
 
-  private verifySignature(token: SpawnToken): boolean {
-    const expected = this.sign(token);
-    const expectedBuf = Buffer.from(expected);
-    const actualBuf = Buffer.from(token.signature);
-    if (expectedBuf.length !== actualBuf.length) return false;
-    return timingSafeEqual(expectedBuf, actualBuf);
-  }
-
-  // -------------------------------------------------------------------------
-  // Public API
-  // -------------------------------------------------------------------------
-
-  /**
-   * Create the orchestrator token. Called once at session start.
-   * The orchestrator token can generate agent tokens.
-   */
   createOrchestratorToken(ttlMs: number = DEFAULT_TOKEN_TTL_MS): SpawnToken {
-    const partial: Omit<SpawnToken, 'signature'> = {
-      type: 'orchestrator',
-      sessionId: this.secret.split(':')[0]!,
-      issuedTo: 'main',
-      issuedBy: 'system',
-      depth: 0,
-      maxDepth: 1,
-      canGenerate: true,
-      expiresAt: Date.now() + ttlMs,
-    };
-    const token: SpawnToken = { ...partial, signature: this.sign(partial) };
-    this.tokens.set(token.signature, token);
-    return token;
+    return this.issue({ type: 'orchestrator', sessionId: this.sessionId, issuedTo: 'main', issuedBy: 'system',
+      depth: 0, maxDepth: 1, canGenerate: true, expiresAt: Date.now() + ttlMs });
   }
 
-  /**
-   * Generate an agent token from an orchestrator token.
-   * Returns null if the orchestrator token is invalid or cannot generate.
-   */
-  generateAgentToken(
-    orchestratorToken: SpawnToken,
-    agentId: string,
-    ttlMs: number = DEFAULT_TOKEN_TTL_MS,
-  ): SpawnToken | null {
-    const validation = this.validate(orchestratorToken);
-    if (!validation.valid) {
-      logger.info('generateAgentToken: orchestrator token invalid', { reason: validation.reason });
-      return null;
-    }
-    if (!orchestratorToken.canGenerate) {
-      logger.info('generateAgentToken: token does not have canGenerate=true', { issuedTo: orchestratorToken.issuedTo });
-      return null;
-    }
-    if (orchestratorToken.type !== 'orchestrator') {
-      logger.info('generateAgentToken: only orchestrator tokens can generate agent tokens');
-      return null;
-    }
-
-    const partial: Omit<SpawnToken, 'signature'> = {
-      type: 'agent',
-      sessionId: orchestratorToken.sessionId,
-      issuedTo: agentId,
-      issuedBy: 'main',
-      depth: 1,
-      maxDepth: orchestratorToken.maxDepth,
-      canGenerate: false,   // agents cannot generate further tokens
-      expiresAt: Date.now() + ttlMs,
-    };
-    const token: SpawnToken = { ...partial, signature: this.sign(partial) };
-    this.tokens.set(token.signature, token);
-    return token;
+  generateAgentToken(orchestratorToken: SpawnToken, agentId: string, ttlMs: number = DEFAULT_TOKEN_TTL_MS): SpawnToken | null {
+    const result = this.resolve(orchestratorToken);
+    if (!result.valid) { logger.info('generateAgentToken: invalid grant', { reason: result.reason }); return null; }
+    const owner = result.token;
+    if (!owner.canGenerate || owner.type !== 'orchestrator') return null;
+    return this.issue({ type: 'agent', sessionId: owner.sessionId, issuedTo: agentId, issuedBy: 'main',
+      depth: 1, maxDepth: owner.maxDepth, canGenerate: false, expiresAt: Date.now() + ttlMs });
   }
 
-  /**
-   * Validate a token is authentic (correct HMAC), registered, and not expired.
-   */
   validate(token: SpawnToken): ValidateResult {
-    if (!token || typeof token !== 'object') {
-      return { valid: false, reason: 'token is not an object' };
-    }
-    if (!token.signature) {
-      return { valid: false, reason: 'token has no signature' };
-    }
-    if (!this.tokens.has(token.signature)) {
-      return { valid: false, reason: 'token not registered (revoked or foreign)' };
-    }
-    if (!this.verifySignature(token)) {
-      return { valid: false, reason: 'signature mismatch, token tampered' };
-    }
-    if (Date.now() > token.expiresAt) {
-      return { valid: false, reason: 'token expired' };
-    }
-    return { valid: true };
+    const result = this.resolve(token);
+    return result.valid ? { valid: true } : { valid: false, reason: result.reason };
   }
 
-  /**
-   * Check if spawning is allowed given config constraints and token.
-   * 3-layer check: config gate → capacity gate → token gate.
-   */
-  canSpawn(
-    token: SpawnToken,
-    config: OrchestrationPolicyConfig,
-    currentAgentCount: number,
-  ): CanSpawnResult {
-    // Layer 1: policy gate
-    if (!config.recursionEnabled) {
-      return { allowed: false, reason: 'recursive orchestration is disabled in policy' };
-    }
-
-    // Layer 2: capacity checks
-    if (currentAgentCount >= config.maxActiveAgents) {
-      return {
-        allowed: false,
-        reason: `fleet.maxSize limit reached (${currentAgentCount}/${config.maxActiveAgents})`,
-      };
-    }
-    if (token.depth > config.maxDepth) {
-      return {
-        allowed: false,
-        reason: `depth ${token.depth} exceeds maxDepth ${config.maxDepth}`,
-      };
-    }
-
-    // Layer 3: token gate
-    const validation = this.validate(token);
-    if (!validation.valid) {
-      return { allowed: false, reason: `invalid token: ${validation.reason}` };
-    }
-
+  canSpawn(token: SpawnToken, config: OrchestrationPolicyConfig, currentAgentCount: number): CanSpawnResult {
+    if (!config.recursionEnabled) return { allowed: false, reason: 'recursive orchestration is disabled in policy' };
+    if (currentAgentCount >= config.maxActiveAgents) return { allowed: false, reason: `fleet.maxSize limit reached (${currentAgentCount}/${config.maxActiveAgents})` };
+    const result = this.resolve(token);
+    if (!result.valid) return { allowed: false, reason: `invalid token: ${result.reason}` };
+    if (result.token.depth > config.maxDepth) return { allowed: false, reason: `depth ${result.token.depth} exceeds maxDepth ${config.maxDepth}` };
     return { allowed: true };
   }
 
-  /**
-   * Revoke a token by its signature.
-   * Returns true if the token was found and revoked.
-   */
-  revoke(tokenSignature: string): boolean {
-    return this.tokens.delete(tokenSignature);
-  }
+  revoke(tokenId: string): boolean { return this.tokens.delete(tokenId); }
 }

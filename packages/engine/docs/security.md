@@ -92,10 +92,11 @@ The session cookie is set on login and cleared on logout by the daemon's interna
 
 ### Spawn tokens
 
-`SpawnTokenManager` governs sub-agent spawning. When the orchestrator spawns an agent, it issues a cryptographically signed `SpawnToken`:
+`SpawnTokenManager` is a local grant registry for callers implementing bounded sub-agent spawning. Each issued token names an immutable record retained by that manager:
 
 ```ts
 interface SpawnToken {
+  id: string;          // opaque registry lookup ID
   type: 'orchestrator' | 'agent';
   sessionId: string;
   issuedTo: string;     // agent ID
@@ -104,18 +105,17 @@ interface SpawnToken {
   maxDepth: number;     // configured depth limit
   canGenerate: boolean; // whether this token may generate child tokens
   expiresAt: number;    // epoch ms expiry
-  signature: string;    // HMAC-SHA256 over the token fields
 }
 ```
 
-Tokens are signed with a per-session HMAC secret. Before spawning, `canSpawn()` checks, in order:
+Before spawning, `canSpawn()` checks:
 1. Recursion is enabled in the `OrchestrationPolicyConfig`
 2. Total active agent count is within `maxActiveAgents`
-3. Nesting depth is within the configured `maxDepth`
-4. Token signature is valid, registered, and not revoked
-5. Token has not expired (default TTL: 1 hour)
+3. The ID belongs to this manager and has not been revoked
+4. Every supplied field matches the immutable issued grant, and it has not expired (default TTL: 1 hour)
+5. The issued nesting depth is within the configured `maxDepth`
 
-Tokens can be revoked by signature via `revoke(tokenSignature)`. Revoked tokens are rejected even if unexpired.
+Revoke a grant with `revoke(token.id)`. A token copied to another manager is unavailable there; editing the recipient’s copy cannot change the issuer’s grant. Callers still enforce their actual execution permissions.
 
 ### API token auditing
 

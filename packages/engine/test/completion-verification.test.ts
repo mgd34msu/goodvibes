@@ -2353,6 +2353,27 @@ test('unchanged evidence qualifications are reused only within the same current 
   expect(readFileSync(join(root, '.goodvibes/verification/session.jsonl'), 'utf8')).not.toContain('"approved"');
 });
 
+test('verification journal restores A after A B A at the same proposal key', () => {
+  const root = directory(), store = new VerificationStore(root, 'repeated-proposal');
+  store.rememberProposal('same-operation', 'proposal A');
+  store.rememberProposal('same-operation', 'proposal B');
+  store.rememberProposal('same-operation', 'proposal A');
+  expect(new VerificationStore(root, 'repeated-proposal').proposals.get('same-operation')).toBe('proposal A');
+  const path = join(root, '.goodvibes/verification/repeated-proposal.jsonl'), before = readFileSync(path);
+  store.rememberProposal('same-operation', 'proposal A');
+  expect(readFileSync(path)).toEqual(before);
+});
+
+test('verification journal owns a detached source snapshot and persists later source changes', () => {
+  const root = directory(), store = new VerificationStore(root, 'owned-source');
+  const source = { id: 'source', kind: 'observation' as const, reference: 'native observation', text: 'original bytes' };
+  store.rememberSource(source); source.text = 'changed bytes';
+  expect(store.sources.get(source.id)?.text).toBe('original bytes');
+  expect(Object.isFrozen(store.sources.get(source.id))).toBe(true);
+  store.rememberSource(source); source.text = 'original bytes'; store.rememberSource(source);
+  expect(new VerificationStore(root, 'owned-source').sources.get(source.id)?.text).toBe('original bytes');
+});
+
 test('equal queries with distinct executions survive A B A; archived replicas of the same execution do not', () => {
   const first = { role: 'tool', callId: 'A-1', content: 'query A' },
     middle = { role: 'tool', callId: 'B-1', content: 'query B' },

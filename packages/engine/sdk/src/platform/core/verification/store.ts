@@ -1,5 +1,6 @@
 import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import type { VerificationSource } from './types.js';
 import { verificationHash } from './source.js';
@@ -11,7 +12,7 @@ import { VerificationHeldError } from './types.js';
 export class VerificationStore {
   readonly sources = new Map<string, VerificationSource>();
   readonly proposals = new Map<string, string>();
-  private readonly written = new Set<string>();
+  private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly path: string | undefined;
   private readonly root: string | undefined;
@@ -32,7 +33,7 @@ export class VerificationStore {
         let record: unknown; try { record = JSON.parse(line); } catch { continue; }
         // Admissible bytes and matching local identities are still untrusted
         // proposals: every restored record needs a current Jev qualification.
-        try { snapshotJudgmentEvidence(record); } catch { continue; }
+        try { record = snapshotJudgmentEvidence(record); } catch { continue; }
         const value = record as { kind?: unknown; key?: unknown; value?: unknown };
         if (typeof value.key !== 'string') continue;
         if (value.kind === 'proposal' && typeof value.value === 'string') this.proposals.set(value.key, value.value);
@@ -60,7 +61,9 @@ export class VerificationStore {
             this.archives.set(this.archive.branch!, this.archive);
           }
         }
-        this.written.add(verificationHash(record));
+        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history') {
+          this.written.set(JSON.stringify([value.kind, value.key]), value.value);
+        }
       }
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
@@ -71,12 +74,14 @@ export class VerificationStore {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   }
-  private append(kind: 'source' | 'proposal' | 'archive' | 'history', key: string, value: unknown): void {
-    const record = { kind, key, value };
-    try { snapshotJudgmentEvidence(record); }
+  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history', key: string, value: T): T {
+    let record: { readonly kind: typeof kind; readonly key: string; readonly value: T };
+    try { record = snapshotJudgmentEvidence({ kind, key, value }) as typeof record; }
     catch (error) { throw new VerificationHeldError('generated verification record admission', { cause: error }); }
-    const hash = verificationHash(record);
-    if (kind !== 'archive' && this.written.has(hash)) return;
+    const slot = JSON.stringify([kind, key]);
+    if (kind !== 'archive' && this.written.has(slot) && isDeepStrictEqual(this.written.get(slot), record.value)) {
+      return this.written.get(slot) as T;
+    }
     if (this.path) {
       try {
       const directory = dirname(this.path);
@@ -91,18 +96,19 @@ export class VerificationStore {
       } finally { closeSync(fd); }
       } catch (error) { throw new VerificationHeldError('verification journal storage', { cause: error }); }
     }
-    this.written.add(hash);
+    if (kind !== 'archive') this.written.set(slot, record.value);
+    return record.value;
   }
   rememberSource(source: VerificationSource): void {
-    this.append('source', source.id, source); this.sources.set(source.id, source);
+    this.sources.set(source.id, this.append('source', source.id, source));
   }
   rememberProposal(key: string, proposal: string): void {
-    this.append('proposal', key, proposal); this.proposals.set(key, proposal);
+    this.proposals.set(key, this.append('proposal', key, proposal));
   }
   rememberArchive(value: VerificationArchive): void {
     for (const history of value.histories) {
       const key = verificationHash(history);
-      if (!this.histories.has(key)) { this.append('history', key, history); this.histories.set(key, history); }
+      if (!this.histories.has(key)) this.histories.set(key, this.append('history', key, history));
     }
     const branch = value.branch ?? 'main', previous = this.archives.get(branch);
     const position = { branch, historyKeys: value.histories.map(history => verificationHash(history)), derived: value.derived,

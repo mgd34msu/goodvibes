@@ -1,5 +1,5 @@
 import { isNativeCompletedWorkReceipt } from './response-completion-contracts.js';
-import { issueVerificationSource, verificationHash, verificationSources, verificationWireSource } from './verification/source.js';
+import { issueVerificationSource, verificationSources, verificationWireSource } from './verification/source.js';
 import type { VerificationSourceOwner } from './verification/types.js';
 
 /** A bounded view of already approved work and this turn's exact observations.
@@ -39,7 +39,6 @@ export function nativeWorkCheckpoint(original: readonly unknown[], admitted: rea
     originalInstructions: instructions.map(verificationWireSource),
     initial: { request: initial.request, meaning: 'Earlier observations remain in the retained original source. Native work receipts establish only their exact approved scopes.' },
     nativeWorkCheckpoint: {
-      sourceDigest: verificationHash(full),
       meaning: 'Actual native original-scope and saved-content approvals are supplied for the listed work, with the exact accepted answers and publication outcomes. This is a work checkpoint, NOT permission to publish this answer. Every original instruction is retained in original source order, including repeated requests and later corrections. The current turn observations and proposed response are exact. Do not infer that another obligation, unrecorded action or later change was fulfilled. An uncovered obligation, unsupported current claim, stale approval or invalidating observation requires original-source retrieval. Only fresh current final-response, consolidation and execution checks can allow publication.',
     },
   };

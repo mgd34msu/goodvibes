@@ -32,6 +32,9 @@
   worker evidence even when its reported summary is unchanged.
 - Report configured decision-provider access failures and exhausted fallback
   chains accurately without directing other providers' users to Jev billing.
+- Recover held drafts and final findings using branch-bound original message
+  records, reuse unchanged originals, and prevent stale diagnostic cleanup from
+  clearing newer work. Private observation values are not written to the journal.
 
 ### SDK changes
 
@@ -43,6 +46,9 @@
 - Verification source IDs are opaque. `readKind` identifies native receipt,
   ledger and citation projections locally. Session verification journals retain
   explicit message-provenance records; resume this format with 3.1.2 or newer.
+- Remove the generic `verificationHash` helper. Temporary diagnosis candidates
+  live only within the current verification case; final findings and held drafts
+  remain persisted and require fresh decision-model checks after recovery.
 
 ## [3.1.1] - 2026-11-07
 

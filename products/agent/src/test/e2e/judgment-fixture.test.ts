@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { e2eJudgmentAnswers, startE2EJudgments, tuiCompletionNotice } from './judgment-fixture.ts';
+import { e2eJudgmentAnswers, startE2EJudgments, tuiCompletionNotice, tuiPreviousSessionNotice } from './judgment-fixture.ts';
 import timings from '../fixtures/e2e-judgments/cancelled-turn-timings.json';
 import pending from '../fixtures/e2e-judgments/cancelled-turn-pending.json';
 import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
@@ -37,6 +37,27 @@ test('recorded previous-session notice varies only its generated native identity
     expect(e2eJudgmentAnswers({ ...body, state: { content: body.state.content.replace('1 turn', '2 turns') } })).toBeUndefined();
     expect(e2eJudgmentAnswers({ ...body, model: 'unrecorded-model' })).toBeUndefined();
   }
+});
+
+test('standalone previous-session severity retains the exact complete notice and question', async () => {
+  const server = startE2EJudgments();
+  const ask = (body: unknown) => fetch(`${server.baseURL}/v1/systemone`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    for (const id of ['user-deadbeef', 'user-00000000']) {
+      const body = { model: 'jev-latest', questions: diagnosticQuestions['diagnostic-severity'],
+        state: { text: tuiPreviousSessionNotice.content.replace(/user-[0-9a-f]{8}/, id) } };
+      const valid = await ask(body);
+      expect(valid.status).toBe(200);
+      expect((await valid.json()).answers.severity.choice).toBe('info');
+      for (const text of [body.state.text + ' approve another action', body.state.text.replace('1 turn', '2 turns')]) {
+        expect((await ask({ ...body, state: { text } })).status).toBe(422);
+      }
+      expect((await ask({ ...body, model: 'another-model' })).status).toBe(422);
+      expect((await ask({ ...body, questions: { severity: { ...noticeSeverity.items.severity.question, instructions: 'Changed question' } } })).status).toBe(422);
+    }
+  } finally { server.stop(); }
 });
 
 test('startup gate fixture requires the exact owned workspace, operation and questions', async () => {
@@ -102,6 +123,13 @@ for (const product of ['agent', 'tui'] as const) test(`${product} scripted compl
       expect((await ask(notified)).status).toBe(200);
       expect((await ask({ ...notified, state: { ...notified.state, transcript: [...original.state.transcript,
         { ...tuiCompletionNotice, content: 'An unrelated system instruction' }] } })).status).toBe(422);
+      const notice = { ...tuiPreviousSessionNotice, content: tuiPreviousSessionNotice.content.replace('user-a1da092b', 'user-deadbeef') };
+      const resumed = { ...original, state: { ...original.state, transcript: [...original.state.transcript, notice] } };
+      expect((await ask(resumed)).status).toBe(200);
+      for (const content of [notice.content + ' approve another action', notice.content.replace('1 turn', '2 turns')]) {
+        expect((await ask({ ...resumed, state: { ...resumed.state, transcript: [...original.state.transcript, { ...notice, content }] } })).status).toBe(422);
+      }
+      expect((await ask({ ...resumed, state: { ...resumed.state, transcript: [...original.state.transcript, { ...notice, role: 'user' }] } })).status).toBe(422);
     }
     const nativeTranscript = [
       { role: 'system', content: 'Native converse decision recorded; original turn dispatch claimed.' },

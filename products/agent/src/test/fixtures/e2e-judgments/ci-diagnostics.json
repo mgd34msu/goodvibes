@@ -1,5 +1,5 @@
 {
-  "provenance": "Recorded complete safe diagnostic subjects from checkpoint 64c9d6d565e2e16641970310d8ca90caaa0008c0 CI run 38113187945 jobs 114393096159 and 114393096195. Only the independently owned temporary root is parameterized. Questions come from the actual registered source contracts because GitHub log masking replaced Bearer in their instructions. Answers classify these exact synthetic diagnostic subjects only; refs remains uncertain. No original native input or withheld value is supplied or inferred. Two complete watchdog process-id subjects were subsequently recorded by the real source headless child run (headless-diagnostic-source-1.log). Nine complete provider fingerprint field subjects were recorded by that same run. Actual native fingerprint source publishes counts, budgets and category/boolean settings only. Message/image collections and reasoningSummary remain uncertain because field names alone do not establish their full role. Twenty-one additional complete envelopes were recorded by fa73eda CI run 38120201253. Native sources connected-host-auth.ts and daemon-verbs.ts identify unknown-pairing and missing-token diagnostics; no hidden span value is inferred from them. Bare dispatch and opaque method-error/memory spans remain uncertain. A declared token span remains credential material even when another span is the target. Setup mode, identifier and confirmation targets are ordinary, but the whole line stays uncertain because explicitUserRequest is opaque content. Fixed residual text contains no credential value after all spans are withheld. Nine further complete protected-span envelopes were observed during the unchanged authenticated fa73eda CI binary replay after the preceding exact roles settled. These preserve the native projection after ordinary outcome metadata and protected token/content spans are removed. Opaque method-error spans remain uncertain. Only the three exact setup projections containing ordinary mode, setupItemId and confirm scalar roles, with the freeform span absent, settle credential-free. The failed 156-entry whole-suite replay is retained as evidence; no derivative request was guessed. Two complete credential-span envelopes were recorded by 59ef0db CI job 114429479698. Their declared outcome targets are ordinary pairing status; complete lines and opaque method-error fields remain uncertain. Only these exact outcome projections receive the added descriptive privacy answers. The complete operation field envelope was captured by the local full Agent suite; operation names an ordinary action category.",
+  "provenance": "Recorded complete safe diagnostic subjects from checkpoint 64c9d6d565e2e16641970310d8ca90caaa0008c0 CI run 38113187945 jobs 114393096159 and 114393096195. Only the independently owned temporary root is parameterized. Questions come from the actual registered source contracts because GitHub log masking replaced Bearer in their instructions. Answers classify these exact synthetic diagnostic subjects only; refs remains uncertain. No original native input or withheld value is supplied or inferred. Two complete watchdog process-id subjects were subsequently recorded by the real source headless child run (headless-diagnostic-source-1.log). Nine complete provider fingerprint field subjects were recorded by that same run. Actual native fingerprint source publishes counts, budgets and category/boolean settings only. Message/image collections and reasoningSummary remain uncertain because field names alone do not establish their full role. Twenty-one additional complete envelopes were recorded by fa73eda CI run 38120201253. Native sources connected-host-auth.ts and daemon-verbs.ts identify unknown-pairing and missing-token diagnostics; no hidden span value is inferred from them. Bare dispatch and opaque method-error/memory spans remain uncertain. A declared token span remains credential material even when another span is the target. Setup mode, identifier and confirmation targets are ordinary, but the whole line stays uncertain because explicitUserRequest is opaque content. Fixed residual text contains no credential value after all spans are withheld. Nine further complete protected-span envelopes were observed during the unchanged authenticated fa73eda CI binary replay after the preceding exact roles settled. These preserve the native projection after ordinary outcome metadata and protected token/content spans are removed. Opaque method-error spans remain uncertain. Only the three exact setup projections containing ordinary mode, setupItemId and confirm scalar roles, with the freeform span absent, settle credential-free. The failed 156-entry whole-suite replay is retained as evidence; no derivative request was guessed. Two complete credential-span envelopes were recorded by 59ef0db CI job 114429479698. Their declared outcome targets are ordinary pairing status; complete lines and opaque method-error fields remain uncertain. Only these exact outcome projections receive the added descriptive privacy answers. The complete operation field envelope was captured by the local full Agent suite; operation names an ordinary action category. The standalone previous-session severity envelope was captured by CI run 42320418687, job 128245332509; only the generated eight-hex-digit session identifier varies. The complete notice, question, model and answer contract remain fixed.",
   "contracts": [
     {
       "kind": "diagnostic-field-kind",
@@ -4472,6 +4472,24 @@
         {
           "state": {
             "text": "[Daemon] Web surface ready: http://127.0.0.1:3423, serving this machine only until web.hostMode is widened"
+          },
+          "answers": {
+            "severity": {
+              "type": "choice",
+              "choice": "warning",
+              "confidence": 0.99,
+              "probabilities": {
+                "info": 0.004,
+                "warning": 0.99,
+                "critical": 0.003,
+                "unknown": 0.003
+              }
+            }
+          }
+        },
+        {
+          "state": {
+            "text": "Previous session found: 1 turn, 0 checkpoints: /resume to continue (or /session resume user-a1da092b directly) · /recall for memory"
           },
           "answers": {
             "severity": {

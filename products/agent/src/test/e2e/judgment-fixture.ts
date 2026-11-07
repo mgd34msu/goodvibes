@@ -21,8 +21,17 @@ const prompts = ['first words in a brand new workspace', 'please answer the e2e 
 // Native TUI startup may finish after the original turn-entry snapshot. Keep
 // only this recorded system notice as an alternate complete transcript.
 export const tuiCompletionNotice = { role: 'system', content: '[Daemon] Web surface ready: http://127.0.0.1:3423, serving this machine only until web.hostMode is widened' };
+export const tuiPreviousSessionNotice = { role: 'system', content: 'Previous session found: 1 turn, 0 checkpoints: /resume to continue (or /session resume user-a1da092b directly) · /recall for memory' };
 const stable = (value: unknown): string => JSON.stringify(value, (_key, entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
   ? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => a.localeCompare(b))) : entry);
+function previousSessionShape(wire: string, systemOnly = false): string {
+  // Preserve the complete recorded notice; only its generated session ID varies.
+  // Completion envelopes normalize system messages, never user/answer targets.
+  const pattern = systemOnly
+    ? /("content":"Previous session found: 1 turn, 0 checkpoints: \/resume to continue \(or \/session resume )user-[0-9a-f]{8}( directly\) · \/recall for memory","role":"system")/g
+    : /("Previous session found: 1 turn, 0 checkpoints: \/resume to continue \(or \/session resume )user-[0-9a-f]{8}( directly\) · \/recall for memory")/g;
+  return wire.replace(pattern, '$1<previous-session-id>$2');
+}
 const nativeDispatchNotices = [
   { role: 'system', content: 'Native converse decision recorded; original turn dispatch claimed.' },
   { role: 'system', content: 'requestId 00000000-0000-4000-8000-000000000001 · inputId 00000000-0000-4000-8000-000000000002' },
@@ -30,7 +39,7 @@ const nativeDispatchNotices = [
 function completionShape(value: unknown): string {
   const identities = new Map<string, string>();
   const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
-  return stable(value).replace(new RegExp(`"requestId ${uuid} · inputId ${uuid}"`, 'g'), text => text.replace(new RegExp(uuid, 'g'), id => {
+  return previousSessionShape(stable(value), true).replace(new RegExp(`"requestId ${uuid} · inputId ${uuid}"`, 'g'), text => text.replace(new RegExp(uuid, 'g'), id => {
     if (!identities.has(id)) identities.set(id, `<native-dispatch-${identities.size}>`);
     return identities.get(id)!;
   }));
@@ -73,14 +82,13 @@ export function e2eJudgmentAnswers(body: unknown, ownedRoot?: string): { kind: '
     // Only the two recorded native status formats parameterize their generated
     // UUIDs. Keep exact prose, complete questions and within-message equality.
     const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
-    return wire.replace(new RegExp(`"(?:requestId ${uuid} · inputId ${uuid}|Native session: hosted-${uuid})"`, 'g'), text => {
+    return previousSessionShape(wire.replace(new RegExp(`"(?:requestId ${uuid} · inputId ${uuid}|Native session: hosted-${uuid})"`, 'g'), text => {
       const ids = new Map<string, string>();
       return text.replace(new RegExp(uuid, 'g'), id => {
         if (!ids.has(id)) ids.set(id, `<native-uuid-${ids.size}>`);
         return ids.get(id)!;
       });
-    }).replace(/("Previous session found: 1 turn, 0 checkpoints: \/resume to continue \(or \/session resume )user-[0-9a-f]{8}( directly\) · \/recall for memory")/g,
-      '$1<previous-session-id>$2');
+    }));
   };
   if (presentationRequests.some(request => presentationShape(request) === presentationShape(body, ownedRoot))) {
     const answers = Object.fromEntries(Object.entries(presentationRequests[0]!.questions).map(([name, question]) => {
@@ -145,7 +153,10 @@ function diagnosticAnswer(body: unknown, ownedRoot: string | undefined): { kind:
     risk__weakensSecurity: { type: 'noul', noul: 0.01 }, edge__cardDetails: { type: 'noul', noul: 0.01 },
   } };
   for (const contract of diagnosticFixtures.contracts) for (const reading of contract.readings) {
-    if (serialized === stable({ model: contract.model, questions: contract.questions, state: reading.state })) return { kind: contract.kind, answers: reading.answers };
+    const recorded = stable({ model: contract.model, questions: contract.questions, state: reading.state });
+    const matches = contract.kind === 'diagnostic-severity'
+      ? previousSessionShape(serialized) === previousSessionShape(recorded) : serialized === recorded;
+    if (matches) return { kind: contract.kind, answers: reading.answers };
   }
   return undefined;
 }
@@ -232,8 +243,10 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
       expectedCompletions.add(completionShape({ ...completion, state: { ...completion.state,
         transcript: nativeTranscript, initial: { request, transcript: nativeTranscript },
       } }));
-      if (product === 'tui') expectedCompletions.add(completionShape({ ...completion,
-        state: { ...completion.state, transcript: [...transcript, tuiCompletionNotice] } }));
+      if (product === 'tui') for (const notice of [tuiCompletionNotice, tuiPreviousSessionNotice]) {
+        expectedCompletions.add(completionShape({ ...completion,
+          state: { ...completion.state, transcript: [...transcript, notice] } }));
+      }
     },
     rejectRecordedCancellationTimings() { rejectCancellationTimings = true; },
     assertNoUnexpected: () => { if (unexpected.length) throw new Error(`E2E encountered ${unexpected.length} unknown judgment request(s): ${JSON.stringify(unexpected)}`); },

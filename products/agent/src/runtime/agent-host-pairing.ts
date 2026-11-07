@@ -5,7 +5,7 @@ import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platf
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
-import { isNativePairedPrincipal } from './native-paired-principal.ts';
+import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, readHostPairingResponse } from './native-paired-principal.ts';
 import { beginAgentHostPairing, canonicalizePairingHost, completeAgentHostPairing, readAgentHostPairing } from './connected-host-pairing-store.ts';
 
 export interface AgentHostPairingResult {
@@ -30,21 +30,6 @@ const changed = (): AgentHostPairingResult => ({ status: 'changed', message: 'Th
 const cancelled = (): AgentHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
 const envOverride = (): boolean => Boolean(process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim());
 
-async function readPairingResponse(response: Response): Promise<unknown> {
-  if (!response.body) return null;
-  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read(); if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > 16384) { await reader.cancel(); return null; }
-      chunks.push(chunk.value);
-    }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(size); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-}
 
 /** Preview is read-only. The returned one-shot capability binds the exact host,
  * source credential, name and store state to a fresh terminal confirmation.
@@ -82,8 +67,7 @@ export async function previewAgentHostPairing(
     if (state.status === 'paired' || isNativePairedPrincipal(auth)) {
       return { result: { status: 'already-paired', host, message: 'An existing paired credential is present. This route will not mint or replace it; use setup status to verify the effective credential.' } };
     }
-    if (!auth.authenticated || !auth.admin || auth.principalKind !== 'token' || auth.principalId !== 'shared-token'
-      || !auth.scopes.some(scope => scope === '*' || scope === 'write:control-plane')) return { result: { status: 'blocked', host, message: 'Migration requires this host to verify the existing legacy shared operator token with write:control-plane. No credential was created.' } };
+    if (!isHostPairingBootstrapPrincipal(auth)) return { result: { status: 'blocked', host, message: 'Migration requires this host to verify the existing legacy shared operator token with write:control-plane. No credential was created.' } };
     const confirmation = `PAIR ${randomBytes(6).toString('hex')}`;
     let consumed = false;
     const result: AgentHostPairingResult = {
@@ -104,8 +88,7 @@ export async function previewAgentHostPairing(
         finally { verifier.dispose(); }
         if (actionSignal?.aborted) return cancelled();
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
-        if (!live.authenticated || !live.admin || live.principalKind !== 'token' || live.principalId !== 'shared-token'
-          || !live.scopes.some(scope => scope === '*' || scope === 'write:control-plane')) return changed();
+        if (!isHostPairingBootstrapPrincipal(live)) return changed();
         const attemptId = randomUUID();
         const begin = await beginAgentHostPairing(home, host, { attemptId, name, startedAt: Date.now() });
         if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : unavailable();
@@ -124,7 +107,7 @@ export async function previewAgentHostPairing(
           signal: AbortSignal.any([AbortSignal.timeout(5000), ...(actionSignal ? [actionSignal] : [])]),
         });
         if (!response.ok) return unknown(host);
-        const payload = await readPairingResponse(response);
+        const payload = await readHostPairingResponse(response);
         const minted = payload && typeof payload === 'object' && 'token' in payload ? payload.token : null;
         if (!minted || typeof minted !== 'object' || !('id' in minted) || typeof minted.id !== 'string' || !/^pair-[0-9a-f-]{36}$/i.test(minted.id)
           || !('token' in minted) || typeof minted.token !== 'string' || !/^gvp_[A-Za-z0-9_-]{32}$/.test(minted.token)

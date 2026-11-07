@@ -8,7 +8,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
 import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationOptions } from '../sdk/src/platform/knowledge/activation/types.js';
-import { KnowledgeRecordAdmissionHeldError } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
 import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { markPreparedNodeWritten, preparedNodeWrite, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from '../sdk/src/platform/knowledge/store-node-activation.js';
 
@@ -129,9 +128,13 @@ test('native replacement and restore during the exit callback cannot publish a b
     });
   } });
   collect = true;
-  expect(() => preparedNodeWrites(store, prepared, scope)).toThrow(KnowledgeRecordAdmissionHeldError);
+  // The prepared pass translates the original caller's snapshot hold into its
+  // own typed stale result. Native ABA still retires the complete bulk pass.
+  expect(() => preparedNodeWrites(store, prepared, scope)).toThrow(Held);
   expect(calls).toBe(2);
   expect(store.getSourceSnapshot({ id: 'source-later' }).source?.summary).toBeUndefined();
+  expect(store.listNodeRevisions('first')).toHaveLength(1);
+  expect(store.listNodeRevisions('later')).toHaveLength(1);
 });
 
 test('a protected later draft still holds the entire preparation before a request', async () => {

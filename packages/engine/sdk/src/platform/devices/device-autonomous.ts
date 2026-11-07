@@ -25,7 +25,13 @@ export interface DeviceAdmission {
 function hash(value: unknown): string { return createHash('sha256').update(canonicalJson(value as EntryType)).digest('hex'); }
 function grantEvidence(grant: DeviceCapabilityGrant | null): unknown {
   if (!grant) return null;
-  return { ...grant, grantedAt: new Date(grant.grantedAt).toISOString(), expiresAt: new Date(grant.expiresAt).toISOString(),
+  // Preserve every component of a canonical ledger UUID without presenting a
+  // hyphen-joined numeric run as card material. The native ledger ID and its
+  // ownership checks stay exact. Other IDs and every semantic field still pass
+  // through normal privacy screening; this is not an arbitrary ID exemption.
+  const id = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(grant.id)
+    ? grant.id.split('-') : grant.id;
+  return { ...grant, id, grantedAt: new Date(grant.grantedAt).toISOString(), expiresAt: new Date(grant.expiresAt).toISOString(),
     ...(grant.lastUsedAt === undefined ? {} : { lastUsedAt: new Date(grant.lastUsedAt).toISOString() }) };
 }
 /** Capture before the first store read, including already-pending invalidations. */

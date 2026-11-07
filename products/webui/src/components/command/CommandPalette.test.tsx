@@ -12,6 +12,7 @@ import { getCommands, registerCommand, unregisterCommand, type CommandDef } from
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
 import { clearStoredAuthToken, sdk, tokenStore } from '../../lib/goodvibes';
 import { setActiveRoute } from '../../lib/relay-connection';
+import { browserDecisionPolicy } from '../../lib/decision-policy';
 
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
@@ -265,9 +266,23 @@ describe('CommandPalette: pointer, filter, registry, focus', () => {
   });
 });
 
+// Admitted-search fixtures begin after this account's authenticated status
+// response. A replacement account requires its own observation; old commands
+// remain bound to the original client lifetime. Cold status has reader tests.
+function observeEnabledPolicy(): void {
+  browserDecisionPolicy.observe(new Headers({ 'x-goodvibes-decision-policy': JSON.stringify({
+    policy: 'Default - On', operation: 'decision', reason: null, revision: 0,
+  }) }));
+}
+async function admitAccount(token: string): Promise<void> {
+  await tokenStore.setToken(token);
+  observeEnabledPolicy();
+}
+
 describe('CommandPalette: admitted semantic search', () => {
   let ran: string[];
-  beforeEach(() => {
+  beforeEach(async () => {
+    await admitAccount('offline-palette-account');
     for (const c of getCommands()) unregisterCommand(c.id);
     ran = [];
     registerCommand(cmd('chat.new', { title: 'New Chat', group: 'chat', run: () => ran.push('chat.new') }));
@@ -275,7 +290,7 @@ describe('CommandPalette: admitted semantic search', () => {
   });
 
   for (const pending of [true, false]) test(`${pending ? 'pending' : 'settled'} query is never replayed under another account after command re-registration`, async () => {
-    await tokenStore.setToken('offline-account-a');
+    await admitAccount('offline-account-a');
     const requests: { input: RankRequest; authorization: string | null }[] = [];
     let finish!: (value: Response) => void;
     globalThis.fetch = ((_url, init) => {
@@ -287,7 +302,7 @@ describe('CommandPalette: admitted semantic search', () => {
     renderPalette(true); type('account A private query');
     await until(() => requests.length === 1);
     if (!pending) await until(() => options().length === 1);
-    await tokenStore.setToken('offline-account-b');
+    await admitAccount('offline-account-b');
     flushSync(() => registerCommand(cmd('chat.new', { title: 'New Chat', group: 'chat', run: () => ran.push('new-account') })));
     if (pending) finish(answer(requests[0]!.input));
     await new Promise((resolve) => setTimeout(resolve, 260));
@@ -305,6 +320,7 @@ describe('CommandPalette: admitted semantic search', () => {
     const clock = spyOn(Date, 'now').mockImplementation(() => now);
     try {
       await tokenStore.setTokenEntry('offline-account-a', now + 60_000);
+      observeEnabledPolicy();
       globalThis.fetch = (async (_url, init) => answer(JSON.parse(String(init?.body)) as RankRequest)) as typeof fetch;
       renderPalette(true); type('begin afresh');
       await until(() => options().length === 1);
@@ -318,9 +334,9 @@ describe('CommandPalette: admitted semantic search', () => {
 
   for (const [name, change] of [
     ['sign-out', () => clearStoredAuthToken()],
-    ['account replacement', () => tokenStore.setToken('offline-account-b')],
+    ['account replacement', () => admitAccount('offline-account-b')],
   ] as const) test(`${name} while the real authenticated request is pending cannot adopt or execute its answer`, async () => {
-    await tokenStore.setToken('offline-account-a');
+    await admitAccount('offline-account-a');
     let pending!: { request: RankRequest; finish: (response: Response) => void };
     globalThis.fetch = ((_url, init) => new Promise<Response>((finish) => {
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer offline-account-a');
@@ -338,12 +354,12 @@ describe('CommandPalette: admitted semantic search', () => {
 
   for (const [name, change] of [
     ['sign-out', () => clearStoredAuthToken()],
-    ['account switch', () => tokenStore.setToken('offline-account-b')],
-    ['account A to B to A', async () => { await tokenStore.setToken('offline-account-b'); await tokenStore.setToken('offline-account-a'); }],
+    ['account switch', () => admitAccount('offline-account-b')],
+    ['account A to B to A', async () => { await admitAccount('offline-account-b'); await admitAccount('offline-account-a'); }],
     ['route away and back', () => { setActiveRoute('relay'); setActiveRoute('direct'); }],
   ] as const) {
     test(`settled rows and even an already-bound click cannot execute after ${name}`, async () => {
-      await tokenStore.setToken('offline-account-a');
+      await admitAccount('offline-account-a');
       let calls = 0;
       globalThis.fetch = (async (_url, init) => { calls++; return answer(JSON.parse(String(init?.body)) as RankRequest); }) as typeof fetch;
       renderPalette(true); type('begin afresh');
@@ -363,7 +379,7 @@ describe('CommandPalette: admitted semantic search', () => {
   }
 
   test('an account switch permits a new explicit query while the old result stays unusable', async () => {
-    await tokenStore.setToken('offline-account-a');
+    await admitAccount('offline-account-a');
     const headers: (string | null)[] = [];
     globalThis.fetch = (async (_url, init) => {
       headers.push(new Headers(init?.headers).get('Authorization'));
@@ -372,6 +388,7 @@ describe('CommandPalette: admitted semantic search', () => {
     renderPalette(true); type('begin afresh');
     await until(() => options().length === 1);
     await sdk.auth.setToken('offline-account-b');
+    observeEnabledPolicy();
     key('Enter'); expect(ran).toEqual([]);
     type('new account request');
     await until(() => options().length === 1);

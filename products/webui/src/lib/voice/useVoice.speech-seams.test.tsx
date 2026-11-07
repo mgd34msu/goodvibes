@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -6,6 +6,7 @@ import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
 import { useTts, type UseTtsResult } from './useVoice';
 import { ttsEngine } from './tts-player';
 import { tokenStore } from '../goodvibes';
+import { browserDecisionPolicy } from '../decision-policy';
 const originalFetch = globalThis.fetch;
 const originalAudio = Object.getOwnPropertyDescriptor(window, 'AudioContext');
 type Request = BrowserJudgmentRequest<'webui.voice.speech-seams'>;
@@ -47,12 +48,20 @@ function idle() {
   if (ttsEngine.getState().id === null) return Promise.resolve(undefined);
   return new Promise<void>(resolve => { const unsubscribe = ttsEngine.subscribe(state => { if (state.id === null) { unsubscribe(); resolve(); } }); });
 }
+beforeEach(async () => {
+  await tokenStore.setToken('offline-hook-token');
+  // Account lifetime and authenticated host policy are both required before a
+  // speech reading. Changing the token later still retires this observation.
+  browserDecisionPolicy.observe(new Headers({ 'x-goodvibes-decision-policy': JSON.stringify({
+    policy: 'Default - On', operation: 'decision', reason: null, revision: 0,
+  }) }));
+});
 afterEach(async () => {
   globalThis.fetch = originalFetch; ttsEngine.stop(); await tokenStore.clearToken();
   if (originalAudio) Object.defineProperty(window, 'AudioContext', originalAudio); else Reflect.deleteProperty(window, 'AudioContext');
 });
 test.each(['stop', 'replace', 'session', 'token', 'unmount'] as const)('actual useTts %s cancels a started reader and rejects its valid late answer', async kind => {
-  await tokenStore.setToken('offline-hook-token'); Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+  Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
   const started = Promise.withResolvers<undefined>(); const answer = Promise.withResolvers<undefined>(); let judgments = 0; let synth = 0;
   globalThis.fetch = (async (url, init) => {
     if (String(url).includes('/judgment/')) { judgments++; const request = JSON.parse(String(init?.body)) as Request; started.resolve(undefined); await answer.promise; return validAnswer(request); }
@@ -72,7 +81,7 @@ test.each(['stop', 'replace', 'session', 'token', 'unmount'] as const)('actual u
   } finally { answer.resolve(undefined); harness.unmount(); }
 });
 test.each(['success', 'repeat', 'new-source'] as const)('actual useTts %s flows through authenticated judgment, coalescing and synthesis', async kind => {
-  await tokenStore.setToken('offline-hook-token'); Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+  Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
   const started = Promise.withResolvers<undefined>(); const oldAnswer = Promise.withResolvers<undefined>(); let judgments = 0; const spoken: string[] = [];
   globalThis.fetch = (async (url, init) => {
     if (String(url).includes('/judgment/')) {

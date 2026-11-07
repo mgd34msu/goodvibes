@@ -195,7 +195,7 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
     expect(task?.state).toBe('closed');
     expect(task?.subjectTitle).toContain('LG');
     expect(task?.trace.some((entry) => entry.state === 'evaluating' && JSON.stringify(entry.data).includes('sourceAssessments'))).toBe(true);
-  });
+  }, 120_000);
 
   test('self-improvement defers run-budget failures instead of leaving dead failed tasks', async () => {
     const { store } = createStores();

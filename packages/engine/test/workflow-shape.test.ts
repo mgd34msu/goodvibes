@@ -286,8 +286,9 @@ describe('ci.yml: build once, restore everywhere', () => {
     expect(manifest?.with).toMatchObject({ path: '/tmp/engine-test-manifest.json', 'if-no-files-found': 'error' });
     const include = platformTestMatrix(resolve(ROOT, 'packages/engine')).include;
     const bun = include.filter((row) => row.platform === 'bun');
-    for (const row of bun) {
-      expect(row['test-cmd']).toStartWith('GOODVIBES_TEST_CEILING_MS=900000 bun packages/engine/scripts/test.ts --partition=');
+    for (const [index, row] of bun.entries()) {
+      const stall = index === bun.length - 1 ? ' GOODVIBES_TEST_STALL_MS=270000' : '';
+      expect(row['test-cmd']).toStartWith(`GOODVIBES_TEST_CEILING_MS=900000${stall} bun packages/engine/scripts/test.ts --partition=`);
       expect(row['test-cmd']).toMatch(/ --manifest-sha256=[a-f0-9]{64}$/);
     }
     expect(include.filter((row) => row.foundation).map(row => row.name)).toEqual([bun[0]!.name]);

@@ -344,7 +344,11 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
   // function releases its privacy receipt. Retain data/cancellation ownership,
   // without retaining a receipt whose lifetime ends in the finally block.
   retainCurrent(() => {
-    assertOptions(); assertNoSerializer(); checkSignal(); assertSourceSnapshot(source);
+    assertOptions(); assertNoSerializer();
+    // Cleanup has finished using the borrowed listener/method slots. Their
+    // later replacement cannot hide cancellation or require invoking a getter.
+    if (signal) applyNativeOperation(checkNativeSignal, signal, []);
+    assertSourceSnapshot(source);
   }, 'model-reading.native-source');
   const owner = options.sourceOwner;
   if (!owner) throw new ToolInputProjectionError('unavailable');

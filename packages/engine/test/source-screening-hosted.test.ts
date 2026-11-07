@@ -206,7 +206,7 @@ test.each([0, 0.5, 0.97])('hosted coverage probability %s stays held without a l
 
 test('hosted model mismatch never grants calibrated source privacy authority', async () => {
   const f = fixture({ respond: call => call.url === routes.proposal ? proposal(sourceFrom(call.body).revision) : judgment(call.body, 1, 1, 'other-model') });
-  expect(await f.owner.screen(f.owner.capture(['Ordinary source.']))).toEqual({ status: 'held', reason: 'route-unavailable' });
+  expect(await f.owner.screen(f.owner.capture(['Ordinary source.']))).toEqual({ status: 'held', reason: 'malformed' });
   expect(f.calls).toHaveLength(2);
 });
 

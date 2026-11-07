@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-sdk';
 import { readSpeechSeams, readSpeechSeamsResponse } from './speech-seams';
 import { tokenStore } from '../goodvibes';
+import { browserDecisionPolicy } from '../decision-policy';
 const originalFetch = globalThis.fetch;
 type Request = BrowserJudgmentRequest<'webui.voice.speech-seams'>;
 const paragraph = 'Dr. Rivera paused… then said “Go.” Next came silence.';
@@ -16,7 +17,13 @@ function wire(request: Request, text = paragraph) {
   };
 }
 function response(request: Request, text = paragraph) { const body = wire(request, text); delete (body as { input?: unknown }).input; return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } }); }
-beforeEach(async () => { await tokenStore.setToken('offline-speech-token'); });
+beforeEach(async () => {
+  await tokenStore.setToken('offline-speech-token');
+  // These battery fixtures begin after the authenticated host status response.
+  browserDecisionPolicy.observe(new Headers({ 'x-goodvibes-decision-policy': JSON.stringify({
+    policy: 'Default - On', operation: 'decision', reason: null, revision: 0,
+  }) }));
+});
 afterEach(async () => { globalThis.fetch = originalFetch; await tokenStore.clearToken(); });
 test('real authenticated route sends bounded identities and digest, never the paragraph', async () => {
   let body = ''; let authorization: string | null = null;

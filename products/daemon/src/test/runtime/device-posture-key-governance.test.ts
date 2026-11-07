@@ -42,7 +42,7 @@
  * with `setSystemTime` rather than by waiting.
  */
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
@@ -393,6 +393,36 @@ describe('device.* posture: behaviour in this daemon', () => {
     expect(label(await ask.run(SCREEN))).toBe('ok:confirmed-once');
     expect(ask.grantEvaluations).toHaveLength(2);
   });
+
+  test.each(['01a10407-1f79-7006-8320-47790069cb8a', '4111111111111111'])(
+    'device grant identity preserves native ownership and privacy screening: %s', async id => {
+      const state = join(root, 'state-grant-identity');
+      const item = harness(freshConfig(), state);
+      await item.service.grants.record({ nodeId: 'phone-1', nodeKind: 'web-pwa', capabilityId: SCREEN,
+        scope: 'always', grantedBy: 'synthetic-owner' });
+      // Exercise an existing persisted grant, including UUIDs whose numeric
+      // components accidentally form a valid PAN when joined with hyphens.
+      const path = join(state, 'device-grants.json');
+      const ledger = JSON.parse(readFileSync(path, 'utf8')) as { grants: { id: string }[] };
+      const grant = ledger.grants[0];
+      if (!grant) throw new Error('Missing persisted device grant');
+      grant.id = id;
+      writeFileSync(path, JSON.stringify(ledger));
+      if (id.includes('-')) {
+        expect(label(await item.run(SCREEN))).toBe('ok:existing-grant');
+        expect(item.judgments.readings[0]?.grant).toMatchObject({ id: id.split('-') });
+        expect((await item.service.grants.list())[0]?.id).toBe(id);
+        expect(item.dispatches).toHaveLength(1);
+        const before = item.judgments.requests.length;
+        expect(label(await item.run(SCREEN, '4111111111111111'))).toContain('refused:denied-by-jev:');
+        expect(item.judgments.requests).toHaveLength(before);
+        expect(item.dispatches).toHaveLength(1);
+      } else {
+        expect(label(await item.run(SCREEN))).toContain('refused:denied-by-jev:');
+        expect(item.judgments.requests).toHaveLength(0);
+        expect(item.dispatches).toHaveLength(0);
+      }
+    });
 
   // -------------------------------------------------------------------------
   // device.capabilities.allowAlwaysOffer

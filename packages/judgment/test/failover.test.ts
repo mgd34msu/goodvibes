@@ -326,10 +326,14 @@ describe('finite configured decision model failover', () => {
   });
 
   test('an explicit version mismatch fails closed; aliases do not admit unrelated models', async () => {
-    const port = createSystemOnePort(config(async () => good('drift', 'jev-9.0.0'), { fallbacks: [{ endpoint: secondary, model: 'jev-1.0.0' }] }));
-    expect((await failure(port.ask({ ...request, model: 'jev-1.0.0' }))).kind).toBe('unavailable');
-    const unrelated = createSystemOnePort(config(async () => good('unrelated', 'other-model')));
-    expect((await failure(unrelated.ask(request))).kind).toBe('unavailable');
+    let driftCalls = 0, unrelatedCalls = 0;
+    const port = createSystemOnePort(config(async () => { driftCalls++; return good('drift', 'jev-9.0.0'); }, { fallbacks: [{ endpoint: secondary, model: 'jev-1.0.0' }] }));
+    expect((await failure(port.ask({ ...request, model: 'jev-1.0.0' }))).kind).toBe('invalid-response');
+    const unrelated = createSystemOnePort(config(async () => { unrelatedCalls++; return good('unrelated', 'other-model'); }));
+    expect((await failure(unrelated.ask(request))).kind).toBe('invalid-response');
+    // Each configured target may answer once. Exhausting malformed responses
+    // must preserve invalid-response rather than permit Preferred fallback.
+    expect({ driftCalls, unrelatedCalls }).toEqual({ driftCalls: 2, unrelatedCalls: 2 });
   });
 
   test('all targets and retry policy validate before transmission', () => {

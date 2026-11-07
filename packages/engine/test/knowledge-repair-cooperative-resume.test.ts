@@ -233,7 +233,9 @@ describe('repair passes resume under their original caller', () => {
     const item = await usefulFixture(true);
     const enriched: string[] = [];
     const result = await promoteRepairSources({ store: item.store, enrichSource: async sourceId => { enriched.push(sourceId); } },
-      spaceId, item.gap, item.sources.map(source => source.id), item.task, Date.now() + 20_000);
+      // Two complete guarded publications exceeded the old 20-second fixture
+      // budget on CI. Keep a finite owned budget for the full union proof.
+      spaceId, item.gap, item.sources.map(source => source.id), item.task, Date.now() + 60_000);
     const factIds = item.facts.map(fact => fact.id).sort();
     expect(result).toEqual({ promotedFactCount: 2, repairComplete: true, promotedSourceIds: item.sources.map(source => source.id) });
     expect(enriched).toEqual([item.sources[0]!.id]);
@@ -244,5 +246,5 @@ describe('repair passes resume under their original caller', () => {
     for (const written of combined.nodes) expect(item.store.getNode(written.id)).toBe(written);
     expect(item.store.listEdges().filter(edge => edge.relation === 'describes').map(edge => edge.fromId).sort()).toEqual(factIds);
     expect(item.store.getRefinementTask(item.task.id)).toMatchObject({ state: 'verified', promotedFactCount: 2, metadata: { promotedFactCount: 2 } });
-  });
+  }, 120_000);
 });

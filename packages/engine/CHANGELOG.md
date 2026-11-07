@@ -27,6 +27,11 @@
   indexes owned by a single run.
 - Compare retained native request, reference and review values directly, remove
   unused diagnostic digests, and issue native span and work-plan identities.
+- Preserve native feedback provenance across compaction, undo/redo, cancellation
+  and message cleanup. Bound private observation aliases and recheck changed
+  worker evidence even when its reported summary is unchanged.
+- Report configured decision-provider access failures and exhausted fallback
+  chains accurately without directing other providers' users to Jev billing.
 
 ### SDK changes
 
@@ -35,6 +40,9 @@
 - Remove the unused `autonomousRevision` helper and review-inventory digest
   fields. Native execution ownership and persisted source checks remain separate
   from display and bookkeeping identifiers.
+- Verification source IDs are opaque. `readKind` identifies native receipt,
+  ledger and citation projections locally. Session verification journals retain
+  explicit message-provenance records; resume this format with 3.1.2 or newer.
 
 ## [3.1.1] - 2026-11-07
 

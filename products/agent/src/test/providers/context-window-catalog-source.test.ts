@@ -44,7 +44,7 @@ let root = '';
 beforeEach(() => {
   root = makeProjectTempDir('gv-ctxwin-catalog-source');
   writeFileSync(join(root, 'model-catalog.json'), JSON.stringify({
-    version: 6,
+    version: 7,
     fetchedAt: Date.now(),
     ttlMs: 86_400_000,
     models: [

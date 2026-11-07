@@ -78,13 +78,13 @@ test('downloads a repository archive, supports long model IDs and rejects a fail
   } finally { globalThis.fetch = originalFetch; rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a legacy cached catalog remains available while a repository refresh fails', async () => {
+test.each([5, 6])('a version-%i cached catalog remains available while a repository refresh fails', async version => {
   const { writeFileSync, readFileSync } = await import('node:fs');
   const { refreshProviderCatalog } = await import('../sdk/src/platform/providers/registry-catalog-lifecycle.js');
   const root = mkdtempSync(join(tmpdir(), 'catalog-offline-'));
   const cachePath = join(root, 'models.json'), tmpPath = join(root, 'models.tmp');
   const models = [{ id: 'known', name: 'Known', provider: 'A', providerId: 'a', providerEnvVars: [], pricing: null, tier: 'paid' as const, contextWindow: 16000 }];
-  const bytes = JSON.stringify({ version: 5, fetchedAt: Date.now(), ttlMs: 86400000, models });
+  const bytes = JSON.stringify({ version, fetchedAt: Date.now(), ttlMs: 86400000, models });
   writeFileSync(cachePath, bytes);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response('unavailable', { status: 503 })) as unknown as typeof fetch;

@@ -45,7 +45,7 @@ beforeEach(() => {
   root = makeProjectTempDir('gv-ctxwin-catalog-source');
   writeFileSync(join(root, 'model-catalog.json'), JSON.stringify({
     // Current cache envelope, with synthetic recorded paid access for these fixture providers.
-    version: 6,
+    version: 7,
     fetchedAt: Date.now(),
     ttlMs: 86_400_000,
     models: [

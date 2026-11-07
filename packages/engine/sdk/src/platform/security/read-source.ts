@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
@@ -133,7 +132,7 @@ function observeSecurityReadFile(path: string): unknown {
   try {
     const link = lstatSync(path, { bigint: true }), resolved = realpathSync(path);
     const stat = statSync(path, { bigint: true });
-    const bytes = stat.isFile() ? createHash('sha256').update(readFileSync(path)).digest('hex') : null;
+    const bytes = stat.isFile() ? readFileSync(path) : null;
     const after = statSync(path, { bigint: true }), afterLink = lstatSync(path, { bigint: true });
     assertSecurityReadSource(stat.dev === after.dev && stat.ino === after.ino && stat.size === after.size
       && stat.mode === after.mode && stat.mtimeNs === after.mtimeNs && stat.ctimeNs === after.ctimeNs
@@ -154,7 +153,16 @@ function observeSecurityReadFile(path: string): unknown {
 }
 
 export function captureSecurityReadFiles(paths: readonly string[]): () => void {
-  return captureSecurityReadData(() => paths.map(observeSecurityReadFile));
+  return captureSecurityFileState(() => paths.map(observeSecurityReadFile));
+}
+
+/** These observations come only from native file reads. Keep exact bytes
+ * private to this read's lifetime; never hash or publish a source identifier.
+ * The DTO descriptor walker is for borrowed producer objects, not Buffers.
+ */
+function captureSecurityFileState(read: () => unknown): () => void {
+  const original = read();
+  return () => assertSecurityReadSource(isDeepStrictEqual(original, read()));
 }
 
 export function captureSecurityPluginFiles(roots: readonly string[]): () => void {
@@ -171,5 +179,5 @@ export function captureSecurityPluginFiles(roots: readonly string[]): () => void
       return { entry, path: observeSecurityReadFile(path), manifest: statSync(path).isDirectory() ? observeSecurityReadFile(join(path, 'manifest.json')) : null };
     }) };
   });
-  return captureSecurityReadData(read);
+  return captureSecurityFileState(read);
 }

@@ -112,13 +112,26 @@ test('current execution citations and every failure keep full primary bodies whi
   const view = finalAnswerEvidence(f.contract, f.evidence, {}, [], 'The execution call-used. succeeded; call-prefix-other is a distinct identifier.')!;
   const commands = view.evidence['commands'] as Record<string, unknown>[];
   expect(commands[0]).toMatchObject({ callId: 'call-inactive', executionSucceeded: true, exitCode: 0,
-    commandDigest: hashState(receipts[0]!.command), stdoutDigest: hashState('Actual result for call-inactive'),
+    commandBytes: Buffer.byteLength(receipts[0]!.command), stdoutBytes: Buffer.byteLength('Actual result for call-inactive'),
     bodySource: { storage: 'native-contract-store', contractId: f.contract.id, unitId: 'u1', field: 'commandEvidence', index: 0 } });
   expect(commands[0]).not.toHaveProperty('command');
   expect(commands[0]).not.toHaveProperty('head');
+  expect(commands[0]).not.toHaveProperty('commandDigest');
+  expect(commands[0]).not.toHaveProperty('stdoutDigest');
   expect(commands.slice(1, 4)).toEqual(observed.slice(1, 4));
   expect(commands[4]).toHaveProperty('observationKind', 'retained-command-receipt-index');
   expect(commands[5]).toEqual(unbound);
+  // A reused execution ID is insufficient: every field must match the real
+  // retained observation, including additional attribution and returned text.
+  for (const altered of [
+    { ...observed[0], head: 'Different successful output' },
+    { ...observed[0], agentId: 'another-worker' },
+    { ...observed[0], extra: 'Unretained source metadata' },
+  ]) {
+    f.evidence.commands = [altered];
+    expect(finalAnswerEvidence(f.contract, f.evidence, {}, [], 'The report is ready.')!.evidence['commands']).toEqual([altered]);
+  }
+  f.evidence.commands = [...observed, unbound];
   expect(JSON.stringify(f.contract)).toBe(before);
   expect(view.evidence['fullSourceEvidence']).toMatchObject({ digest: hashState(f.evidence) });
   f.contract.units[0]!.readEvidence = [{ ...f.contract.units[0]!.readEvidence![0]!, returnedContent: '1 | call-inactive.' }];

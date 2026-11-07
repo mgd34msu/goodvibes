@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
 import type { ContractView } from './types.js';
 import type { FileChange } from './evidence.js';
@@ -26,7 +27,6 @@ export function finalContentEvidence(evidence: JsonObject): JsonObject {
     return { ...unit, readObservations: {
       representation: 'native-source-accounting-reference',
       source: { storage: 'native-contract-store', contractId: host['contractId'] ?? null, unitId: unit['id'], field: 'readEvidence' },
-      projectedObservationsDigest: hashState({ observations: unit['readObservations'] }),
       projectedObservationsBytes: Buffer.byteLength(JSON.stringify(unit['readObservations'])),
       checkedBy: unit['latestCheck']['id'] ?? null,
     } };
@@ -41,7 +41,7 @@ function observationTable(value: JsonValue | undefined, check?: JsonValue): Json
     if (!object(read) || !object(check) || check['result'] !== 'pass' || typeof check['id'] !== 'string'
       || !Array.isArray(check['decisionIds']) || !check['decisionIds'].length || Object.hasOwn(read, 'nativeCheckRef')
       || read['validatedByCheckId'] !== check['id'] || !Array.isArray(read['decisionIds'])
-      || hashState(read['decisionIds']) !== hashState(check['decisionIds'])) return read;
+      || !isDeepStrictEqual(read['decisionIds'], check['decisionIds'])) return read;
     const { validatedByCheckId: _checkId, decisionIds: _decisions, ...rest } = read;
     return { ...rest, nativeCheckRef: 'latestCheck' };
   });
@@ -65,14 +65,14 @@ function criterionLinks(value: JsonValue, units: readonly JsonObject[]): JsonVal
     if (!byId.has(id)) byId.set(id, criterion);
     else {
       const previous = byId.get(id);
-      if (previous && hashState(previous) !== hashState(criterion)) byId.set(id, null);
+      if (previous && !isDeepStrictEqual(previous, criterion)) byId.set(id, null);
     }
   }
   return value.map(row => !object(row) || !Array.isArray(row['servedBy']) ? row : { ...row,
     servedBy: row['servedBy'].map(criterion => {
       if (!object(criterion) || typeof criterion['id'] !== 'string') return criterion;
       const source = byId.get(criterion['id']);
-      return source && hashState(source) === hashState(criterion) ? { criterionRef: criterion['id'] } : criterion;
+      return source && isDeepStrictEqual(source, criterion) ? { criterionRef: criterion['id'] } : criterion;
     }) });
 }
 
@@ -80,23 +80,28 @@ function criterionLinks(value: JsonValue, units: readonly JsonObject[]): JsonVal
  * their full primary receipts in the review itself. */
 function commandView(contract: Pick<ContractView, 'id' | 'units'>, value: JsonValue | undefined, text: string | undefined): JsonValue {
   if (text === undefined || !Array.isArray(value)) return value ?? [];
-  const retained = new Map(contract.units.flatMap(unit => (unit.commandEvidence ?? []).map((receipt, index) => [
-    hashState(commandObservation(receipt)),
-    { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'commandEvidence', index },
-  ] as const)));
+  // Bucket by the existing execution ID; compare complete observations before
+  // replacing any body. IDs alone never establish that receipts are identical.
+  const retained = new Map<string, { observation: ReturnType<typeof commandObservation>; source: JsonValue }[]>();
+  for (const unit of contract.units) for (const [index, receipt] of (unit.commandEvidence ?? []).entries()) {
+    if (typeof receipt.callId !== 'string') continue;
+    const matches = retained.get(receipt.callId) ?? [];
+    matches.push({ observation: commandObservation(receipt),
+      source: { storage: 'native-contract-store', contractId: contract.id, unitId: unit.id, field: 'commandEvidence', index } });
+    retained.set(receipt.callId, matches);
+  }
   return value.map(receipt => {
     if (!object(receipt) || typeof receipt['callId'] !== 'string' || receipt['executionSucceeded'] !== true
       || receipt['exitCode'] !== 0 || receipt['success'] !== true || typeof receipt['command'] !== 'string'
       || typeof receipt['head'] !== 'string') return receipt;
     const id = receipt['callId'];
     if (new RegExp('(?<![\\w.-])' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-]|\\.[\\w-])').test(text)) return receipt;
-    const bodySource = retained.get(hashState(receipt));
+    const bodySource = retained.get(id)?.findLast(entry => isDeepStrictEqual(entry.observation, receipt))?.source;
     if (!bodySource) return receipt;
     const { command, head, stderr, sourceCapture, ...identity } = receipt;
     return { ...identity, observationKind: 'retained-command-receipt-index',
-      commandDigest: hashState(command), commandBytes: Buffer.byteLength(command),
-      stdoutDigest: hashState(head), stdoutBytes: Buffer.byteLength(head),
-      ...(typeof stderr === 'string' ? { stderrDigest: hashState(stderr), stderrBytes: Buffer.byteLength(stderr) } : {}),
+      commandBytes: Buffer.byteLength(command), stdoutBytes: Buffer.byteLength(head),
+      ...(typeof stderr === 'string' ? { stderrBytes: Buffer.byteLength(stderr) } : {}),
       ...(sourceCapture === undefined ? {} : { sourceCapture: object(sourceCapture)
         ? Object.fromEntries(Object.entries(sourceCapture).filter(([key]) => key !== 'meaning')) : sourceCapture }), bodySource };
   });
@@ -169,7 +174,7 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
     hostOperations: Array.isArray(evidence['hostOperations']) ? evidence['hostOperations'].map(metadata) : [],
     commands: commandView(contract, evidence['commands'], currentOutput === undefined ? undefined
       : currentOutput + '\n' + artifacts.map(artifact => artifact.content).join('\n')),
-    commandEvidenceMeaning: 'A retained-command-receipt-index preserves an actual successful child execution identity whose id is not referenced by the current answer or artifacts. Its complete command/result remain unchanged at the exact bodySource, bound by the recorded digests. Capture identities retain their original digest/bytes. Indexed command bodies are not supplied here; metadata or previous acceptance cannot prove an unshown purpose or execution result. Referenced executions, failures, unknown child outcomes and receipts without an exact native source remain in full.',
+    commandEvidenceMeaning: 'A retained-command-receipt-index preserves an actual successful child execution identity whose id is not referenced by the current answer or artifacts. Its complete command/result remain at the exact bodySource, selected only after comparing every observation field with that retained receipt. Indexed command bodies are not supplied here; metadata or previous acceptance cannot prove an unshown purpose or execution result. Referenced executions, failures, unknown child outcomes and receipts without an exact native source remain in full.',
     gates: evidence['gates'] ?? [],
     criteria: criterionLinks(object(summaries) ? summaries['checks'] ?? summaries : summaries, units),
     criteriaReferenceMeaning: 'A servedBy criterionRef resolves by exact id to orchestration.units[].criteria, including its complete literal text and recorded verdict. Only identical complete criterion values are referenced; conflicting or additional fields remain inline. All original root criteria remain separately supplied unchanged. These references are native evidence links, not new approval.',
@@ -184,7 +189,7 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
       ownerPriorReads: host['ownerPriorReads'] ?? null,
       inputGeneration: host['inputGeneration'] ?? null, firstUnitStartedAt: host['firstUnitStartedAt'] ?? null,
       currentFiles: host['currentFiles'].map(metadata), privateArtifacts: host['privateArtifacts'] ?? [],
-      historicalContextDigest: hashState({ historicalContext: host['continuationEvidence'] ?? null }),
+      historicalContextSource: { storage: 'native-contract-store', contractId: host['contractId'] ?? contract.id, field: 'taskEvidence' },
       meaning: 'Current artifact contents are complete actual host filesystem reads bound to current byte size and SHA256, or retained successful worker reads matching that identity and their real passed native checks. A sourceHostOperation records a fresh host read for this review, never a worker inspection, execution or earlier acceptance. The native reviewer must judge those actual contents now. Current textual changes retain the exact native-collected diff already supplied in the original evidence beside fresh file identity; a diff does not establish unchanged whole-file contents or semantic approval. No textual change is omitted. Prior native checks establish only their checked scope; they do not approve this new answer or later changes. Every original requirement remains unchanged in the separate mandatory fulfillment check. Complete source records remain retained and digest-bound. Historical task progress and superseded answer drafts are not the current final answer.',
     },
   };

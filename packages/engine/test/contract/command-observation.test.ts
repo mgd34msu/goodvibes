@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { hashState } from '@goodvibes-jev/judgment';
 import { commandObservation } from '../../sdk/src/platform/contract/command-observation.js';
 
 test('native exec output is exposed without confusing the executed script with stdout', () => {
@@ -7,7 +6,8 @@ test('native exec output is exposed without confusing the executed script with s
     stdout: 'CRC passed; current sha256 abc123', stderr: '', withheld_env: ['A_SECRET_NAME'], sandboxed: true });
   const receipt = { command: 'verify archive', success: true, head: raw, agentId: 'original-worker', turn: 2, callId: 'exec-7' };
   expect(commandObservation(receipt)).toMatchObject({ ...receipt, head: 'CRC passed; current sha256 abc123', stderr: '',
-    exitCode: 0, executionSucceeded: true, toolCallSucceeded: true, sourceCapture: { digest: hashState(raw), bytes: Buffer.byteLength(raw) } });
+    exitCode: 0, executionSucceeded: true, toolCallSucceeded: true, sourceCapture: { bytes: Buffer.byteLength(raw) } });
+  expect(commandObservation(receipt)).not.toHaveProperty('sourceCapture.digest');
   expect(receipt.head).toBe(raw);
 });
 

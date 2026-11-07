@@ -1313,7 +1313,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         provider: 'openai',
         model: 'gpt-4.1',
         contextWindow: 128_000,
-        promptHash: 'a'.repeat(64),
         promptChars: 1024,
         approxPromptTokens: 256,
         activeRecords: 3,
@@ -1343,7 +1342,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         provider: 'openai',
         model: 'gpt-4.1',
         contextWindow: 128_000,
-        promptHash: 'b'.repeat(64),
         promptChars: 2048,
         approxPromptTokens: 512,
         activeRecords: 7,
@@ -1415,7 +1413,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               readonly stopReason: string;
               readonly detail?: string;
             };
-            readonly promptHash?: string;
+            readonly promptChars?: number;
             readonly segments?: readonly { readonly id: string; readonly status: string }[];
           } | null;
         };
@@ -1450,7 +1448,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(promptContext.receipts.latest?.turnOutcome?.status).toBe('error');
       expect(promptContext.receipts.latest?.turnOutcome?.terminalEvent).toBe('TURN_ERROR');
       expect(promptContext.receipts.latest?.turnOutcome?.detail).toContain('Provider rejected');
-      expect(promptContext.receipts.latest?.promptHash).toBe('b'.repeat(64));
+      expect(promptContext.receipts.latest?.promptChars).toBe(2048);
       expect(promptContext.receipts.latest?.segments?.some((segment) => segment.id === 'memory' && segment.status === 'attention')).toBe(true);
 
       const memory = promptContext.segments.find((segment) => segment.id === 'memory');
@@ -1490,7 +1488,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             readonly receiptId: string;
             readonly turnId: string | null;
             readonly turnOutcome?: { readonly status: string; readonly terminalEvent: string };
-            readonly promptHash?: string;
+            readonly promptChars?: number;
           } | null;
           readonly recent: readonly { readonly receiptId: string; readonly turnOutcome?: { readonly status: string } }[];
         };
@@ -1500,7 +1498,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(completedFilter.receipts.selected?.receiptId).toBe(completedReceipt.receiptId);
       expect(completedFilter.receipts.selected?.turnId).toBe('turn-prompt-context-ok');
       expect(completedFilter.receipts.selected?.turnOutcome?.terminalEvent).toBe('TURN_COMPLETED');
-      expect(completedFilter.receipts.selected?.promptHash).toBe('a'.repeat(64));
+      expect(completedFilter.receipts.selected?.promptChars).toBe(1024);
       expect(completedFilter.receipts.recent.map((receipt) => receipt.receiptId)).toEqual([completedReceipt.receiptId]);
 
       const exactReceipt = await executeHarnessJson<{

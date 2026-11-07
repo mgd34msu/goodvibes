@@ -100,7 +100,7 @@ describe('prompt context receipts', () => {
       const receipt = composed.receipt;
       expect(receipt.turnId).toBe('turn-receipts');
       expect(receipt.model).toBe('openai:gpt-4.1');
-      expect(receipt.promptHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(receipt).not.toHaveProperty('promptHash');
       expect(receipt.promptChars).toBe(composed.prompt.length);
       expect(receipt.activeRecords).toBeGreaterThan(3);
       expect(receipt.suppressedRecords).toBeGreaterThan(0);
@@ -127,7 +127,7 @@ describe('prompt context receipts', () => {
       expect(store.latest()?.receiptId).toBe(stored.receiptId);
       expect(store.latest()?.turnOutcome?.status).toBe('completed');
       expect(reloaded.latest()?.receiptId).toBe(stored.receiptId);
-      expect(reloaded.latest()?.promptHash).toBe(receipt.promptHash);
+      expect(reloaded.latest()?.promptChars).toBe(composed.prompt.length);
       expect(reloaded.latest()?.turnOutcome?.terminalEvent).toBe('TURN_COMPLETED');
     });
   });

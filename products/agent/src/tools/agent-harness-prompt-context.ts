@@ -65,7 +65,6 @@ interface CompactPromptContextReceipt {
     readonly completedAt: number;
     readonly detail?: string;
   };
-  readonly promptHash?: string;
   readonly promptChars?: number;
   readonly approxPromptTokens?: number;
   readonly activeRecords?: number;
@@ -304,7 +303,6 @@ function compactPromptContextReceipt(
       },
     } : {}),
     ...(includeParameters ? {
-      promptHash: receipt.promptHash,
       promptChars: receipt.promptChars,
       approxPromptTokens: receipt.approxPromptTokens,
       activeRecords: receipt.activeRecords,

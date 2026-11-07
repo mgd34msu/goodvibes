@@ -1,6 +1,5 @@
 import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { writeStoreFile } from '@/utils/store-file.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -70,7 +69,6 @@ export interface PromptContextReceiptDraft {
   readonly provider: string;
   readonly model: string;
   readonly contextWindow: number;
-  readonly promptHash: string;
   readonly promptChars: number;
   readonly approxPromptTokens: number;
   readonly activeRecords: number;
@@ -161,10 +159,6 @@ function approxTokens(text: string): number {
 
 function approxTokensForChars(chars: number): number {
   return Math.ceil(chars / 4);
-}
-
-function promptHash(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
 }
 
 function compactOutcomeDetail(value: string | undefined): string | undefined {
@@ -526,7 +520,6 @@ export async function composeRuntimePromptWithReceipt(
       model: currentModel,
       // Receipts keep a number: 0 records an unknown window.
       contextWindow: input.contextWindow ?? 0,
-      promptHash: promptHash(prompt),
       promptChars: prompt.length,
       approxPromptTokens: approxTokens(prompt),
       activeRecords,

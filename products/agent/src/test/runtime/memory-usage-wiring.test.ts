@@ -32,7 +32,7 @@ async function makeRegistry(): Promise<{ registry: MemoryRegistry; paths: Return
 function draftWithMemory(ids: readonly string[]): PromptContextReceiptDraft {
   return {
     sessionId: 's', turnId: 't', source: 'turn', provider: 'p', model: 'm', contextWindow: 1000,
-    promptHash: 'h', promptChars: 0, approxPromptTokens: 0, activeRecords: ids.length, suppressedRecords: 0,
+    promptChars: 0, approxPromptTokens: 0, activeRecords: ids.length, suppressedRecords: 0,
     segments: [{
       id: 'memory', label: 'Reviewed memory', order: 5, status: 'active',
       activeCount: ids.length, suppressedCount: 0, promptChars: 0, approxTokens: 0,

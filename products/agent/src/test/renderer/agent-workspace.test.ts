@@ -353,7 +353,6 @@ function liveCommandContext(options: {
       provider: 'openai-subscriber',
       model: 'openai:gpt-5.5',
       contextWindow: 256000,
-      promptHash: 'c'.repeat(64),
       promptChars: 2048,
       approxPromptTokens: 512,
       activeRecords: 3,

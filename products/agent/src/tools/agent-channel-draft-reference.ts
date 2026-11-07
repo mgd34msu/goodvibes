@@ -1,4 +1,5 @@
-import { lstatSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+import { readFileObservation, type FileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { dirname } from 'node:path';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -12,7 +13,7 @@ import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 
 type ExecutionOptions = Parameters<Tool['execute']>[1];
-interface FileSource { readonly contents: string; readonly revision: string; }
+interface FileSource extends FileObservation { readonly contents: string; }
 interface Capture {
   readonly id: string;
   readonly reference: string;
@@ -33,13 +34,8 @@ const record = (value: unknown): Record<string, unknown> => {
 const payload = (draft: Record<string, unknown>) => Object.fromEntries(Object.entries(draft).filter(([key]) => !mutableReceiptFields.has(key)));
 
 function readSource(path: string): FileSource {
-  const before = lstatSync(path, { bigint: true });
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new ToolInputProjectionError('held');
-  const fingerprint = (stat: typeof before) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-  const contents = readFileSync(path, 'utf8');
-  const after = lstatSync(path, { bigint: true });
-  if (fingerprint(before) !== fingerprint(after)) throw new ToolInputProjectionError('stale');
-  return { contents, revision: fingerprint(after) };
+  const source = readFileObservation(path);
+  return { ...source, contents: source.bytes.toString('utf8') };
 }
 
 /** A native store lookup binds the only rewritten field; no caller alias grants authority. */
@@ -90,7 +86,7 @@ export function createChannelDraftReferenceCapture(context?: CommandContext): No
         assertOwner();
         if (capture.released) throw new ToolInputProjectionError('stale');
         const current = readSource(path);
-        if (current.revision !== capture.source.revision || current.contents !== capture.source.contents) throw new ToolInputProjectionError('stale');
+        if (!isDeepStrictEqual(current, capture.source)) throw new ToolInputProjectionError('stale');
       },
     };
     capture.assertCurrent(); captures.set(token, capture);

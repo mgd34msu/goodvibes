@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { lstatSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -44,14 +45,7 @@ export function captureStatefulCatalogRequest<T>(context: CommandContext, args: 
 export function captureCatalogFile(path: string): () => void {
   const observe = () => {
     try {
-      const stat = lstatSync(path, { bigint: true });
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new ToolInputProjectionError('held');
-      const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-      const after = lstatSync(path, { bigint: true });
-      if (stat.dev !== after.dev || stat.ino !== after.ino || stat.size !== after.size || stat.mtimeNs !== after.mtimeNs
-        || stat.ctimeNs !== after.ctimeNs || stat.mode !== after.mode) throw new ToolInputProjectionError('held');
-      return { dev: String(stat.dev), ino: String(stat.ino), mode: String(stat.mode), size: String(stat.size),
-        mtime: String(stat.mtimeNs), ctime: String(stat.ctimeNs), hash };
+      return readFileObservation(path);
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
         let parent = dirname(path);
@@ -66,8 +60,8 @@ export function captureCatalogFile(path: string): () => void {
       throw new ToolInputProjectionError('held');
     }
   };
-  const captured = captureCatalogSnapshot(observe());
-  return () => { captured.assertCurrent(observe()); };
+  const captured = observe();
+  return () => { if (!isDeepStrictEqual(observe(), captured)) throw new ToolInputProjectionError('stale'); };
 }
 
 /** Rank the full original catalog; an unsettled match cannot become a selected row. */

@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/sdk/platform/state';
 import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/sdk/platform/runtime/memory-spine';
@@ -14,11 +14,12 @@ import { captureAgentExportPath } from './agent-artifact-effect.ts';
 const contexts = new WeakMap<object, { readonly assertBeforeWrite: () => void; readonly assertLocation: () => void; readonly acceptOwnEffect: () => void }>();
 const readActions = new Set(['list', 'search', 'get']);
 
-function fileRevision(path: string): string | null {
-  const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
-  if (!stat) return null;
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new ToolInputProjectionError('held');
-  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+function fileRevision(path: string) {
+  try { return readFileObservation(path); }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw new ToolInputProjectionError('held');
+  }
 }
 
 /** Full local record input and physical source are captured before repair or admission. */
@@ -49,7 +50,7 @@ export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathServ
     };
     const assertTarget = () => {
       assertLocation();
-      if (path !== null && fileRevision(path) !== before) throw new ToolInputProjectionError('stale');
+      if (path !== null && !isDeepStrictEqual(fileRevision(path), before)) throw new ToolInputProjectionError('stale');
     };
     assertTarget();
     const context = Object.freeze({}); let released = false;

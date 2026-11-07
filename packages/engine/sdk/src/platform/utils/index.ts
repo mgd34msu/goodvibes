@@ -3,6 +3,7 @@ export * from './concurrency.js';
 export * from './delivery-lifetime.js';
 export * from './error-display.js';
 export * from './fetch-with-timeout.js';
+export * from './file-observation.js';
 export * from './glob-to-regex.js';
 export * from './logger.js';
 export * from './markdown-disclosure.js';

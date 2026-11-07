@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { lstatSync, readFileSync } from 'node:fs';
+import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import type { DaemonInvokeOptions, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 
@@ -13,13 +13,11 @@ export interface ChannelStoreEffectOptions extends DaemonInvokeOptions {
 export function retainChannelStoreSource(path: string, options: ChannelStoreEffectOptions): () => void {
   const current = options.assertCurrent, signal = options.signal, prepare = options.preparePublication;
   const revision = () => {
-    const before = lstatSync(path, { bigint: true, throwIfNoEntry: false });
-    if (!before) return null;
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new ToolInputProjectionError('held');
-    const fingerprint = (stat: typeof before) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-    const bytes = readFileSync(path), after = lstatSync(path, { bigint: true });
-    if (fingerprint(before) !== fingerprint(after)) throw new ToolInputProjectionError('stale');
-    return { physical: fingerprint(after), bytes };
+    try { return readFileObservation(path); }
+    catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+      throw new ToolInputProjectionError('held');
+    }
   };
   signal?.throwIfAborted(); current?.();
   const source = current ? revision() : undefined;

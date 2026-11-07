@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/sdk/platform/tools';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/sdk/platform/types';
@@ -29,11 +30,12 @@ function protectedText(value: unknown): boolean {
   return value !== null && typeof value === 'object'
     && Object.entries(value).some(([key, entry]) => containsSecretLikeText(key) || protectedText(entry));
 }
-function revision(path: string): string | null {
-  const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
-  if (!stat) return null;
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new ToolInputProjectionError('held');
-  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+function revision(path: string) {
+  try { return readFileObservation(path); }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw new ToolInputProjectionError('held');
+  }
 }
 function directories(target: AgentLocalStateTarget): readonly (readonly [string, string | null])[] {
   const root = resolve(target.root), path = resolve(target.path);
@@ -67,13 +69,13 @@ export function createAgentLocalStateInputProjector(capture: (args: Record<strin
       targets.forEach((target, index) => {
         if (realpathSync(target.root) !== roots[index]) throw new ToolInputProjectionError('stale');
         resolveAndValidatePath(target.path, target.root);
-        if (target.access === 'read' && revision(target.path) !== files[index]) throw new ToolInputProjectionError('stale');
+        if (target.access === 'read' && !isDeepStrictEqual(revision(target.path), files[index])) throw new ToolInputProjectionError('stale');
       });
     };
     const assertCurrent = () => {
       request.assertCurrent(); request.signal?.throwIfAborted(); assertSources();
       targets.forEach((target, index) => {
-        if (revision(target.path) !== files[index] || JSON.stringify(directories(target)) !== JSON.stringify(parents[index])) {
+        if (!isDeepStrictEqual(revision(target.path), files[index]) || JSON.stringify(directories(target)) !== JSON.stringify(parents[index])) {
           throw new ToolInputProjectionError('stale');
         }
       });
@@ -84,7 +86,7 @@ export function createAgentLocalStateInputProjector(capture: (args: Record<strin
       const selected = stage && captured.mutationPath?.(stage);
       if (stage && captured.mutationPath && !selected) throw new ToolInputProjectionError('stale');
       if (targets.some((target, index) => (!published || target.access !== 'write' || (selected && target.path !== selected))
-        && revision(target.path) !== files[index])) throw new ToolInputProjectionError('stale');
+        && !isDeepStrictEqual(revision(target.path), files[index]))) throw new ToolInputProjectionError('stale');
       const nextParents = targets.map(target => directories(target));
       if (parents.some((chain, index) => chain.some(([path, identity], depth) => {
         const next = nextParents[index]?.[depth];

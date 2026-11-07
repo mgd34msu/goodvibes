@@ -96,10 +96,7 @@ test('reconcile-on-open heals a drifted push record when the app opens already-s
       {
         id: 'push_e2e_seed',
         deviceId,
-        endpointOrigin: 'https://push.example.test',
-        // A placeholder hash that can never equal the real sha256 the client
-        // computes over its live endpoint, the daemon's record is stale.
-        endpointHash: 'stale-hash-from-a-prior-session',
+        endpoint: 'https://push.example.test/stale-endpoint',
         createdAt: 1_700_000_000_000,
       },
     ],
@@ -114,7 +111,6 @@ test('reconcile-on-open heals a drifted push record when the app opens already-s
   // App open, already signed in and already subscribed at the browser level,
   // reconcile-on-open should fire without the operator touching any control.
   await page.goto('/?view=chat');
-  await expect.poll(() => invokeCalls).toContain('push.subscriptions.list');
   await expect.poll(() => invokeCalls).toContain('push.subscriptions.reconcile');
 });
 

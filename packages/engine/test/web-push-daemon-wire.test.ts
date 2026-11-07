@@ -287,9 +287,9 @@ describe('web push: registration refuses what could never receive a push', () =>
 
   test('none of the refused registrations were stored', async () => {
     const { json } = await invokeVerb('push.subscriptions.list');
-    const subs = json.subscriptions as Array<{ endpointHash: string }>;
+    const subs = json.subscriptions as Array<{ id: string; endpointOrigin: string }>;
     // Everything present came from a valid registration; nothing junk landed.
-    expect(subs.every((s) => typeof s.endpointHash === 'string' && s.endpointHash.length > 0)).toBe(true);
+    expect(subs.every((s) => typeof s.id === 'string' && s.id.length > 0 && typeof s.endpointOrigin === 'string')).toBe(true);
   });
 });
 

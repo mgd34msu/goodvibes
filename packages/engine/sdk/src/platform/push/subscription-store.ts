@@ -30,7 +30,7 @@
  * over the same file cannot interleave.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { logger } from '../utils/logger.js';
@@ -87,10 +87,6 @@ function endpointOrigin(endpoint: string): string {
   }
 }
 
-function endpointHash(endpoint: string): string {
-  return createHash('sha256').update(endpoint).digest('base64url').slice(0, 16);
-}
-
 /** The redacted, wire-safe projection of a stored subscription. */
 export function toPublicSubscription(record: StoredPushSubscription): PublicPushSubscription {
   return {
@@ -98,17 +94,11 @@ export function toPublicSubscription(record: StoredPushSubscription): PublicPush
     principalId: record.principalId,
     ...(record.deviceId !== undefined ? { deviceId: record.deviceId } : {}),
     endpointOrigin: endpointOrigin(record.endpoint),
-    endpointHash: endpointHash(record.endpoint),
     createdAt: record.createdAt,
     lastDeliveryAt: record.lastDeliveryAt,
     lastOutcome: record.lastOutcome,
     ...(record.consecutiveFailures ? { consecutiveFailures: record.consecutiveFailures } : {}),
   };
-}
-
-/** The short, stable hash a client compares its own endpoint against to detect drift. */
-export function endpointHashFor(endpoint: string): string {
-  return endpointHash(endpoint);
 }
 
 export class PushSubscriptionStore {
@@ -146,7 +136,7 @@ export class PushSubscriptionStore {
    * serves a record that could not receive a push.
    */
   private async loadUsable(): Promise<StoredPushSubscription[]> {
-    return decidePushSweep(await this.loadRaw(), this.policy(), this.now(), endpointHash).kept;
+    return decidePushSweep(await this.loadRaw(), this.policy(), this.now()).kept;
   }
 
   /**
@@ -219,13 +209,17 @@ export class PushSubscriptionStore {
     return this.run(async () => {
       const policy = this.policy();
       const now = this.now();
-      const decision = decidePushSweep(await this.loadRaw(), policy, now, endpointHash);
+      const decision = decidePushSweep(await this.loadRaw(), policy, now);
       const records = decision.kept;
       const existingIndex = this.matchIndex(records, input);
       if (existingIndex >= 0) {
         const prior = records[existingIndex] as StoredPushSubscription;
         const endpointChanged = prior.endpoint !== input.endpoint;
         const keysChanged = prior.keys.p256dh !== input.keys.p256dh || prior.keys.auth !== input.keys.auth;
+        if (!endpointChanged && !keysChanged && (prior.consecutiveFailures ?? 0) === 0 && decision.removed.length === 0) {
+          await this.discloseRegistrationPass(decision, now);
+          return { record: prior, drift: 'unchanged' };
+        }
         const updated: StoredPushSubscription = {
           ...prior,
           endpoint: input.endpoint,
@@ -378,10 +372,10 @@ export class PushSubscriptionStore {
     return this.run(async () => {
       const policy = this.policy();
       const now = this.now();
-      const decision = decidePushSweep(await this.loadRaw(), policy, now, endpointHash);
+      const decision = decidePushSweep(await this.loadRaw(), policy, now);
       if (decision.removed.length > 0) {
         const doomed = new Set(decision.removed.map((r) => r.subscriptionId));
-        const fresh = decidePushSweep(await this.loadRaw(), policy, now, endpointHash).kept;
+        const fresh = decidePushSweep(await this.loadRaw(), policy, now).kept;
         await this.persist(fresh.filter((r) => !doomed.has(r.id)));
       }
       const report: PushSubscriptionSweepReport = {

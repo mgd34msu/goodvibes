@@ -20,7 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createECDH, createPublicKey, randomBytes, verify as cryptoVerify } from 'node:crypto';
@@ -100,6 +100,26 @@ function readStored(): unknown[] {
   const parsed = JSON.parse(readFileSync(storePath, 'utf-8')) as { subscriptions: unknown[] };
   return parsed.subscriptions;
 }
+
+test('reconcile compares actual keys and endpoint without rewriting an unchanged healthy record', async () => {
+  const store = new PushSubscriptionStore(storePath);
+  const input = { principalId: 'operator', deviceId: 'device-one', endpoint: 'https://push.example.test/device-one', keys: realKeys() };
+  const registered = await store.reconcile(input);
+  const before = readFileSync(storePath), identity = statSync(storePath, { bigint: true });
+  expect((await store.reconcile(input)).drift).toBe('unchanged');
+  expect(readFileSync(storePath)).toEqual(before);
+  expect(statSync(storePath, { bigint: true }).ino).toBe(identity.ino);
+  const rotatedKeys = realKeys();
+  const refreshed = await store.reconcile({ ...input, keys: rotatedKeys });
+  expect(refreshed.drift).toBe('keys-updated');
+  expect(refreshed.record.id).toBe(registered.record.id);
+  expect((await store.get(registered.record.id))?.keys).toEqual(rotatedKeys);
+  const moved = await store.reconcile({ ...input, keys: rotatedKeys, endpoint: 'https://push.example.test/rotated-endpoint' });
+  expect(moved.drift).toBe('endpoint-updated');
+  expect(moved.record.id).toBe(registered.record.id);
+  expect((await store.listPublic('operator'))[0]).not.toHaveProperty('endpoint');
+  expect((await store.listPublic('operator'))[0]).not.toHaveProperty('keys');
+});
 
 function readDisclosures(): PushSubscriptionSweepReport[] {
   if (!existsSync(disclosurePath)) return [];

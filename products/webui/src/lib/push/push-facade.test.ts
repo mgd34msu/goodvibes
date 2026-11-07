@@ -37,7 +37,7 @@ describe('sdk.operator.push: generic invoke-by-id', () => {
   });
 
   test('subscribe forwards endpoint + keys inside the body envelope', async () => {
-    stubFetch({ subscription: { id: 'sub-1', principalId: 'operator', endpointOrigin: 'https://push.example', endpointHash: 'abc123', createdAt: 1 } });
+    stubFetch({ subscription: { id: 'sub-1', principalId: 'operator', endpointOrigin: 'https://push.example', createdAt: 1 } });
     const payload = { endpoint: 'https://push.example/xyz', keys: { p256dh: 'p', auth: 'a' } };
     const result = await sdk.operator.push.subscribe(payload);
     expect(calls[0].url).toContain('/api/control-plane/methods/push.subscriptions.create/invoke');

@@ -48,7 +48,7 @@ export interface StoredPushSubscription {
 
 /**
  * The redacted, wire-safe view of a subscription. The capability URL and key
- * material are deliberately absent; the origin + short hash are enough to
+ * material are deliberately absent; the record id and endpoint origin
  * identify a device in a management UI without handing the capability back out.
  */
 export interface PublicPushSubscription {
@@ -58,13 +58,6 @@ export interface PublicPushSubscription {
   readonly deviceId?: string | undefined;
   /** The endpoint's origin only (e.g. `https://push.example`), never the full path. */
   readonly endpointOrigin: string;
-  /**
-   * A short, stable hash of the full endpoint. A client compares this against
-   * the hash of its OWN current endpoint to detect that the daemon holds a
-   * stale one (drift) and reconcile, the hash reveals drift without ever
-   * handing the capability URL back out.
-   */
-  readonly endpointHash: string;
   readonly createdAt: number;
   readonly lastDeliveryAt?: number | undefined;
   readonly lastOutcome?: PushDeliveryOutcome | undefined;

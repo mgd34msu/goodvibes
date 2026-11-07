@@ -1,22 +1,8 @@
-/**
- * reconcilePushSubscriptionOnOpen, the client half of push-subscription
- * self-heal (Step 2 of the SDK 1.8.0 pairing/push round).
- *
- * Exercises the real function against a stubbed PushManager/serviceWorker and
- * a stubbed fetch answering push.subscriptions.list/reconcile, the same
- * "stub fetch, call the real facade" discipline push-facade.test.ts uses, plus
- * the PushManager stand-in e2e/pwa.e2e.ts's mockPushApis uses for the browser
- * side. Proves: no daemon record + a live subscription reconciles; a served
- * record whose hash already matches the live endpoint reconciles NOTHING
- * (heal-in-place must not become a write on every open); a served record with
- * a genuinely different endpoint (drift) reconciles; no live subscription at
- * all is an honest no-op, not an error.
- */
+/** Real browser facade reconciliation sends the current endpoint and keys to their owner. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { PUSH_DEVICE_ID_STORAGE_KEY, computeEndpointHash, reconcilePushSubscriptionOnOpen } from './push-client';
+import { PUSH_DEVICE_ID_STORAGE_KEY, reconcilePushSubscriptionOnOpen } from './push-client';
 
 const LIVE_ENDPOINT = 'https://push.example.test/live-endpoint';
-const STALE_ENDPOINT = 'https://push.example.test/stale-endpoint';
 const KNOWN_DEVICE_ID = 'device-e2e-fixed';
 
 let originalFetch: typeof fetch;
@@ -91,73 +77,24 @@ describe('reconcilePushSubscriptionOnOpen', () => {
     expect(calls).toHaveLength(0);
   });
 
-  test('no served record for this device reconciles (creates)', async () => {
-    installPushGlobals({ endpoint: LIVE_ENDPOINT });
-    stubFetch({
-      'push.subscriptions.list': { subscriptions: [] },
-      'push.subscriptions.reconcile': {
-        subscription: { id: 'sub-1', principalId: 'operator', deviceId: KNOWN_DEVICE_ID, endpointOrigin: 'https://push.example.test', endpointHash: 'hash-live', createdAt: 1 },
-        drift: 'created',
-      },
-    });
-    const outcome = await reconcilePushSubscriptionOnOpen();
-    expect(outcome.drift).toBe('created');
-    expect(outcome.subscription?.id).toBe('sub-1');
-    expect(calls.map((c) => c.methodId)).toEqual(['push.subscriptions.list', 'push.subscriptions.reconcile']);
-    expect(calls[1].body).toEqual({ deviceId: KNOWN_DEVICE_ID, endpoint: LIVE_ENDPOINT, keys: { p256dh: 'p256dh-key', auth: 'auth-key' } });
-  });
-
-  test('a served record whose hash already matches the live endpoint reconciles NOTHING', async () => {
-    installPushGlobals({ endpoint: LIVE_ENDPOINT });
-    const matchingHash = await computeEndpointHash(LIVE_ENDPOINT);
-    stubFetch({
-      'push.subscriptions.list': {
-        subscriptions: [
-          { id: 'sub-1', principalId: 'operator', deviceId: KNOWN_DEVICE_ID, endpointOrigin: 'https://push.example.test', endpointHash: matchingHash, createdAt: 1 },
-        ],
-      },
-    });
-    const outcome = await reconcilePushSubscriptionOnOpen();
-    expect(outcome.drift).toBe('unchanged');
-    expect(outcome.subscription?.id).toBe('sub-1');
-    // The read happened, but no reconcile write, a healthy device costs nothing.
-    expect(calls.map((c) => c.methodId)).toEqual(['push.subscriptions.list']);
-  });
-
-  test('a served record with a genuinely different endpoint hash (drift) reconciles', async () => {
-    installPushGlobals({ endpoint: LIVE_ENDPOINT });
-    const staleHash = await computeEndpointHash(STALE_ENDPOINT);
-    stubFetch({
-      'push.subscriptions.list': {
-        subscriptions: [
-          { id: 'sub-1', principalId: 'operator', deviceId: KNOWN_DEVICE_ID, endpointOrigin: 'https://push.example.test', endpointHash: staleHash, createdAt: 1 },
-        ],
-      },
-      'push.subscriptions.reconcile': {
-        subscription: { id: 'sub-1', principalId: 'operator', deviceId: KNOWN_DEVICE_ID, endpointOrigin: 'https://push.example.test', endpointHash: 'hash-healed', createdAt: 1 },
-        drift: 'endpoint-updated',
-      },
-    });
-    const outcome = await reconcilePushSubscriptionOnOpen();
-    expect(outcome.drift).toBe('endpoint-updated');
-    expect(calls.map((c) => c.methodId)).toEqual(['push.subscriptions.list', 'push.subscriptions.reconcile']);
-  });
-
-  test('a device with no server record for its id but OTHER devices present still reconciles (does not confuse another device for itself)', async () => {
-    installPushGlobals({ endpoint: LIVE_ENDPOINT });
-    stubFetch({
-      'push.subscriptions.list': {
-        subscriptions: [
-          { id: 'sub-other', principalId: 'operator', deviceId: 'some-other-device', endpointOrigin: 'https://push.example.test', endpointHash: 'irrelevant', createdAt: 1 },
-        ],
-      },
-      'push.subscriptions.reconcile': {
-        subscription: { id: 'sub-new', principalId: 'operator', deviceId: KNOWN_DEVICE_ID, endpointOrigin: 'https://push.example.test', endpointHash: 'hash-new', createdAt: 2 },
-        drift: 'created',
-      },
-    });
-    const outcome = await reconcilePushSubscriptionOnOpen();
-    expect(outcome.drift).toBe('created');
-    expect(outcome.subscription?.id).toBe('sub-new');
-  });
+  test.each(['created', 'unchanged', 'endpoint-updated', 'keys-updated'] as const)(
+    'uses one authenticated owner comparison and reports %s', async drift => {
+      installPushGlobals({ endpoint: LIVE_ENDPOINT });
+      stubFetch({
+        'push.subscriptions.reconcile': {
+          subscription: { id: 'sub-1', principalId: 'operator', deviceId: KNOWN_DEVICE_ID,
+            endpointOrigin: 'https://push.example.test', createdAt: 1 },
+          drift,
+        },
+      });
+      const outcome = await reconcilePushSubscriptionOnOpen();
+      expect(outcome.drift).toBe(drift);
+      expect(outcome.subscription?.id).toBe('sub-1');
+      expect(calls.map(call => call.methodId)).toEqual(['push.subscriptions.reconcile']);
+      expect(calls[0].body).toEqual({ deviceId: KNOWN_DEVICE_ID, endpoint: LIVE_ENDPOINT,
+        keys: { p256dh: 'p256dh-key', auth: 'auth-key' } });
+      expect(outcome.subscription).not.toHaveProperty('endpoint');
+      expect(outcome.subscription).not.toHaveProperty('keys');
+    },
+  );
 });

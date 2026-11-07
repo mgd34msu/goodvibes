@@ -58,7 +58,6 @@ export interface PushSubscriptionRemoval {
   readonly principalId: string;
   /** Origin only, the full endpoint is a capability URL and stays off disclosure. */
   readonly endpointOrigin: string;
-  readonly endpointHash: string;
   readonly reason: PushSubscriptionRemovalReason;
   /** Plain-language proof this record could not have received a push. */
   readonly evidence: string;
@@ -152,7 +151,6 @@ export function decidePushSweep(
   loaded: readonly unknown[],
   policy: PushSubscriptionPolicy,
   now: number,
-  hashEndpoint: (endpoint: string) => string,
 ): PushSweepDecision {
   const kept: StoredPushSubscription[] = [];
   const removed: PushSubscriptionRemoval[] = [];
@@ -164,7 +162,6 @@ export function decidePushSweep(
         subscriptionId: typeof partial.id === 'string' ? partial.id : '(no id)',
         principalId: typeof partial.principalId === 'string' ? partial.principalId : '(unknown)',
         endpointOrigin: endpointOriginOf(partial.endpoint),
-        endpointHash: typeof partial.endpoint === 'string' ? hashEndpoint(partial.endpoint) : '(none)',
         reason: 'malformed',
         evidence: 'record is missing the id / principal / endpoint / keys it needs to be addressed at all',
         removedAt: now,
@@ -177,7 +174,6 @@ export function decidePushSweep(
         subscriptionId: entry.id,
         principalId: entry.principalId,
         endpointOrigin: endpointOriginOf(entry.endpoint),
-        endpointHash: hashEndpoint(entry.endpoint),
         reason: 'unusable',
         evidence: `${problem.field}: ${problem.reason}, no delivery to this record could ever succeed`,
         removedAt: now,
@@ -190,7 +186,6 @@ export function decidePushSweep(
         subscriptionId: entry.id,
         principalId: entry.principalId,
         endpointOrigin: endpointOriginOf(entry.endpoint),
-        endpointHash: hashEndpoint(entry.endpoint),
         reason: 'failure-threshold',
         evidence: `push service refused ${failures} consecutive deliveries (bound ${policy.failureThreshold})`,
         removedAt: now,

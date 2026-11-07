@@ -68,7 +68,7 @@ function makeCatalog(relayAvailable = true, withStepUp = true): { catalog: Gatew
       subscribe: async (input) => {
         captured.subscribed.push({ endpoint: input.endpoint, ...(input.deviceId ? { deviceId: input.deviceId } : {}) });
         return {
-          id: 'push-1', principalId: input.principalId, endpointOrigin: 'https://push', endpointHash: 'h', createdAt: 1,
+          id: 'push-1', principalId: input.principalId, endpointOrigin: 'https://push', createdAt: 1,
         };
       },
     },

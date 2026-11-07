@@ -127,7 +127,7 @@ describe('the pairing hand-off carries the posture', () => {
       tokens: { mint: ({ name }) => ({ id: 'pair-1', name, token: 'gvp_x', createdAt: 1 }) },
       push: {
         getPublicKey: async () => 'VAPID',
-        subscribe: async (input) => ({ id: 'push-1', principalId: input.principalId, endpointOrigin: 'o', endpointHash: 'h', createdAt: 1 }),
+        subscribe: async (input) => ({ id: 'push-1', principalId: input.principalId, endpointOrigin: 'o', createdAt: 1 }),
       },
       relayAvailable: () => false,
       webOrigin: () => webOrigin,

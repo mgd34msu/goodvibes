@@ -46,12 +46,11 @@ const PUBLIC_PUSH_SUBSCRIPTION_SCHEMA = objectSchema({
   principalId: STRING_SCHEMA,
   deviceId: STRING_SCHEMA,
   endpointOrigin: STRING_SCHEMA,
-  endpointHash: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   lastDeliveryAt: NUMBER_SCHEMA,
   lastOutcome: STRING_SCHEMA,
   consecutiveFailures: NUMBER_SCHEMA,
-}, ['id', 'principalId', 'endpointOrigin', 'endpointHash', 'createdAt']);
+}, ['id', 'principalId', 'endpointOrigin', 'createdAt']);
 
 const PUSH_DELIVERY_RECEIPT_SCHEMA = objectSchema({
   subscriptionId: STRING_SCHEMA,

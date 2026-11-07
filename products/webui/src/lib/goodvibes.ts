@@ -1428,12 +1428,6 @@ export interface PublicPushSubscription {
   /** The device identity this record is reconciled on, when known (SDK 1.8.0). */
   readonly deviceId?: string;
   readonly endpointOrigin: string;
-  /**
-   * Short, stable hash of the full endpoint (SDK 1.8.0). A client compares this
-   * against its own live endpoint's hash to detect that the daemon holds a stale
-   * one (drift), see reconcilePushSubscriptionOnOpen in push-client.ts.
-   */
-  readonly endpointHash: string;
   readonly createdAt: number;
   readonly lastDeliveryAt?: number;
   readonly lastOutcome?: string;

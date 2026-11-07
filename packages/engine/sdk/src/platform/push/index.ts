@@ -14,7 +14,7 @@ export {
   isValidVapidSubject,
 } from './vapid.js';
 export type { VapidSecretStore, VapidManagerOptions } from './vapid.js';
-export { PushSubscriptionStore, toPublicSubscription, endpointHashFor } from './subscription-store.js';
+export { PushSubscriptionStore, toPublicSubscription } from './subscription-store.js';
 export type {
   RegisterSubscriptionInput,
   ReconcileResult,

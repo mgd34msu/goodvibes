@@ -119,32 +119,6 @@ export function ensureDeviceId(): string {
 }
 
 /**
- * Base64url-encode raw digest bytes, no padding, `+`/`/` swapped for `-`/`_`.
- * Matches Node's `Buffer.from(digest).toString('base64url')`, which is how the
- * daemon computes `endpointHash` (subscription-store.ts), this must produce
- * byte-identical output or every comparison would report false drift.
- */
-function base64UrlFromDigest(digest: ArrayBuffer): string {
-  const bytes = new Uint8Array(digest);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-/**
- * The short, stable hash a client computes over its OWN live endpoint to
- * compare against the daemon's redacted `endpointHash`, reproduces
- * subscription-store.ts's `endpointHash()` (sha256, base64url, first 16 chars)
- * exactly, so a match here means the daemon's record is genuinely current, not
- * an artifact of a different hashing scheme.
- */
-export async function computeEndpointHash(endpoint: string): Promise<string> {
-  const data = new TextEncoder().encode(endpoint);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return base64UrlFromDigest(digest).slice(0, 16);
-}
-
-/**
  * Pull the wire payload out of a browser PushSubscription's JSON. Pure and
  * browser-free so it is unit-testable; throws a named error when the browser
  * handed back a subscription missing its key material (never send a half one).
@@ -268,10 +242,9 @@ export interface PushReconcileOnOpenOutcome {
 /**
  * Reconcile-on-open: called once per connected+signed-in edge (see
  * usePushSubscriptionReconcile). Compares this browser's LIVE PushManager
- * subscription against the daemon's served record for this device (deviceId +
- * endpointHash, both on the redacted PublicPushSubscription view) and calls
- * push.subscriptions.reconcile only when they actually differ, heal-in-place,
- * never a duplicate record, and no needless daemon write when nothing drifted.
+ * subscription through the authenticated reconcile API. The daemon compares
+ * its actual stored endpoint AND keys, heals in place, and avoids rewriting
+ * an unchanged healthy record. No endpoint or key material is returned.
  *
  * This is the DURABLE convergence point for the self-heal story: a real
  * `pushsubscriptionchange` rotation (public/sw.js) re-subscribes the browser
@@ -301,24 +274,6 @@ export async function reconcilePushSubscriptionOnOpen(): Promise<PushReconcileOn
 
   const deviceId = ensureDeviceId();
   const payload = extractSubscriptionPayload(subscription.toJSON());
-
-  // Read the daemon's own record for this device before writing anything, an
-  // unchanged device costs one read, never a needless reconcile write. A list
-  // failure (e.g. a transient daemon hiccup) falls through to reconcile itself,
-  // which is the authoritative call either way.
-  let served: PublicPushSubscription | undefined;
-  try {
-    served = (await sdk.operator.push.list()).subscriptions.find((s) => s.deviceId === deviceId);
-  } catch {
-    served = undefined;
-  }
-  if (served) {
-    const liveHash = await computeEndpointHash(payload.endpoint);
-    if (liveHash === served.endpointHash) {
-      rememberSubscriptionId(served.id);
-      return { drift: 'unchanged', subscription: served };
-    }
-  }
 
   const { subscription: stored, drift } = await sdk.operator.push.reconcile({ ...payload, deviceId });
   rememberSubscriptionId(stored.id);

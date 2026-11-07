@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -7,7 +6,6 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { createReadStream } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/sdk/platform/config';
 
@@ -21,7 +19,6 @@ export type SettingsKeyClassification =
 
 export interface HomeAuditOptions {
   readonly homeDir: string;
-  readonly includeHashes?: boolean;
 }
 
 export interface HomeFileSummary {
@@ -37,7 +34,6 @@ export interface HomeFileRecord {
   readonly bytes: number;
   readonly mode: string;
   readonly mtimeIso: string;
-  readonly sha256?: string;
 }
 
 export interface SettingsKeyAudit {
@@ -78,21 +74,6 @@ export interface GoodVibesHomeAudit {
   readonly findings: readonly HomeAuditFinding[];
   readonly allowedWriteRoots: readonly string[];
   readonly readOnlyRoots: readonly string[];
-}
-
-export interface HomeSnapshotEntry {
-  readonly relativePath: string;
-  readonly bytes: number;
-  readonly mode: string;
-  readonly sha256: string;
-}
-
-export type HomeSnapshot = Readonly<Record<string, HomeSnapshotEntry>>;
-
-export interface HomeSnapshotDiff {
-  readonly added: readonly string[];
-  readonly removed: readonly string[];
-  readonly changed: readonly string[];
 }
 
 const KNOWN_FOREIGN_ROOTS = new Set([
@@ -198,17 +179,6 @@ function walkFiles(root: string): { files: string[]; directoryCountByOwner: Map<
   visit(root);
   files.sort((a, b) => a.localeCompare(b));
   return { files, directoryCountByOwner };
-}
-
-async function hashFile(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  await new Promise<void>((resolvePromise, reject) => {
-    const stream = createReadStream(path);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', resolvePromise);
-  });
-  return hash.digest('hex');
 }
 
 function readJsonObject(path: string): Record<string, unknown> | null {
@@ -322,7 +292,6 @@ export async function auditGoodVibesHome(options: HomeAuditOptions): Promise<Goo
       bytes: stats.size,
       mode: (stats.mode & 0o777).toString(8).padStart(3, '0'),
       mtimeIso: stats.mtime.toISOString(),
-      sha256: options.includeHashes ? await hashFile(file) : undefined,
     });
   }
 
@@ -350,49 +319,6 @@ export async function auditGoodVibesHome(options: HomeAuditOptions): Promise<Goo
     allowedWriteRoots: [...GOODVIBES_ALLOWED_WRITE_ROOTS],
     readOnlyRoots: [...GOODVIBES_READ_ONLY_ROOTS],
   };
-}
-
-export async function snapshotGoodVibesHome(homeDir: string): Promise<HomeSnapshot> {
-  const root = resolve(homeDir);
-  const { files } = walkFiles(root);
-  const entries: Record<string, HomeSnapshotEntry> = {};
-  for (const file of files) {
-    const stats = statSync(file);
-    const relativePath = toPosixRelative(relative(root, file));
-    entries[relativePath] = {
-      relativePath,
-      bytes: stats.size,
-      mode: (stats.mode & 0o777).toString(8).padStart(3, '0'),
-      sha256: await hashFile(file),
-    };
-  }
-  return entries;
-}
-
-export function diffHomeSnapshots(before: HomeSnapshot, after: HomeSnapshot): HomeSnapshotDiff {
-  const beforeKeys = new Set(Object.keys(before));
-  const afterKeys = new Set(Object.keys(after));
-  const added = [...afterKeys].filter((key) => !beforeKeys.has(key)).sort((a, b) => a.localeCompare(b));
-  const removed = [...beforeKeys].filter((key) => !afterKeys.has(key)).sort((a, b) => a.localeCompare(b));
-  const changed = [...afterKeys]
-    .filter((key) => beforeKeys.has(key))
-    .filter((key) => {
-      const prior = before[key];
-      const next = after[key];
-      return prior.sha256 !== next.sha256 || prior.mode !== next.mode || prior.bytes !== next.bytes;
-    })
-    .sort((a, b) => a.localeCompare(b));
-  return { added, removed, changed };
-}
-
-export function findDisallowedHomeMutations(
-  diff: HomeSnapshotDiff,
-  allowedRoots: readonly string[] = GOODVIBES_ALLOWED_WRITE_ROOTS,
-): string[] {
-  const touched = [...diff.added, ...diff.removed, ...diff.changed];
-  return touched
-    .filter((relativePath) => !allowedRoots.some((root) => relativePath.startsWith(root)))
-    .sort((a, b) => a.localeCompare(b));
 }
 
 export function renderGoodVibesHomeAuditMarkdown(audit: GoodVibesHomeAudit): string {

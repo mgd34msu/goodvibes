@@ -20,7 +20,6 @@ if (args.includes('--help') || args.includes('-h')) {
     'Options:',
     '  --home <path>     The .goodvibes directory to audit. Defaults to the tree under',
     '                    GOODVIBES_HOME, or ~/.goodvibes when that is unset.',
-    '  --hash            Include sha256 hashes for files in the JSON report.',
     '  --json            Print JSON instead of Markdown.',
     '  --out <dir>       Write goodvibes-home-audit.{json,md} to a directory.',
     '  --help            Show this help.',
@@ -37,7 +36,6 @@ const homeDir = readArgValue(args, '--home') ?? resolveGoodVibesTreeDirectory();
 const outputDir = readArgValue(args, '--out');
 const audit = await auditGoodVibesHome({
   homeDir,
-  includeHashes: args.includes('--hash'),
 });
 
 if (outputDir) {

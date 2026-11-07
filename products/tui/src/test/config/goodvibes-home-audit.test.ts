@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   auditGoodVibesHome,
-  diffHomeSnapshots,
-  findDisallowedHomeMutations,
   renderGoodVibesHomeAuditMarkdown,
-  snapshotGoodVibesHome,
 } from '../../config/goodvibes-home-audit.ts';
 
 function makeTempHome(): string {
@@ -94,24 +91,6 @@ describe('GoodVibes home audit', () => {
       normalizedName: 'team-release.json',
       count: 2,
     });
-  });
-
-  test('snapshots and flags writes outside approved TUI/daemon roots', async () => {
-    home = makeTempHome();
-    writeJson(join(home, 'tui', 'settings.json'), { provider: { model: 'openai:gpt-5.5' } });
-    writeFileSync(join(home, 'HomeAssistant.api.json'), '{}\n');
-
-    const before = await snapshotGoodVibesHome(home);
-    writeJson(join(home, 'tui', 'settings.json'), { provider: { model: 'openai:gpt-5.4' } });
-    writeFileSync(join(home, 'HomeAssistant.api.json'), '{"changed":true}\n');
-    const after = await snapshotGoodVibesHome(home);
-
-    const diff = diffHomeSnapshots(before, after);
-    expect(diff.changed).toEqual(expect.arrayContaining([
-      'HomeAssistant.api.json',
-      'tui/settings.json',
-    ]));
-    expect(findDisallowedHomeMutations(diff)).toEqual(['HomeAssistant.api.json']);
   });
 
   test('renders a markdown audit report for human review', async () => {

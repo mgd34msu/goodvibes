@@ -114,7 +114,7 @@ function captureOwnedAdmissionEvidence(value: unknown): ToolOwnedAdmissionEviden
     if ((prototype !== Object.prototype && prototype !== null) || Reflect.ownKeys(descriptors).length !== keys.length
       || !keys.every(key => descriptors[key] && 'value' in descriptors[key]!)) throw new ToolInputProjectionError('invalid');
     const revision: unknown = descriptors['revision']!.value;
-    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new ToolInputProjectionError('invalid');
+    if (typeof revision !== 'string' || !/^[A-Za-z0-9._:-]{1,256}$/.test(revision)) throw new ToolInputProjectionError('invalid');
     const captured = captureProjectionArgs({ kind: descriptors['kind']!.value, operation: descriptors['operation']!.value,
       key: descriptors['key']!.value, effect: descriptors['effect']!.value }, 'goodvibes_settings');
     if ((captured['operation'] !== 'set' && captured['operation'] !== 'reset') || typeof captured['key'] !== 'string'

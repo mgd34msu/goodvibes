@@ -1,5 +1,4 @@
 /** Backend-owned SETTINGS preparation. All semantic observations precede common admission. */
-import { createHash } from 'node:crypto';
 import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
 import type { ConfigManager, PreparedConfigMutationFacts } from '../../config/manager.js';
 import { isValidConfigKey } from '../../config/schema.js';
@@ -27,6 +26,7 @@ interface Capture {
   spent: boolean;
 }
 const captures = new WeakMap<object, Capture>();
+let projectionSequence = 0;
 
 function assertCapture(capture: Capture): void {
   if (capture.released || capture.spent) throw new ToolInputProjectionError('stale');
@@ -89,7 +89,7 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       const capture: Capture = { argsJson: JSON.stringify(args), key, operation: args.mode, local, localFacts, remote, source, route,
         released: false, spent: false };
       assertCapture(capture); captures.set(context, capture);
-      const revision = createHash('sha256').update(JSON.stringify(effect)).digest('hex');
+      const revision = `runtime-settings-${(++projectionSequence).toString(36)}`;
       return { status: 'projected', args, executionContext: context, settingsMutation: local,
         settingsAdmissionEvidence: Object.freeze({ kind: 'agent-settings', operation: args.mode, key, effect, revision }),
         assertCurrent: () => assertCapture(capture),

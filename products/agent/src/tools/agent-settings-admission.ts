@@ -1,7 +1,6 @@
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToolSettingsDispatch,
@@ -50,6 +49,7 @@ interface Capture {
   spent: boolean;
 }
 const captures = new WeakMap<object, Capture>();
+let projectionSequence = 0;
 function assertCapture(capture: Capture): void {
   if (capture.released || capture.spent) throw new ToolInputProjectionError('stale');
   capture.assertOwner();
@@ -197,7 +197,7 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     assertCapture(capture); captures.set(context, capture);
     return { status: 'projected', args: original, executionContext: context, settingsMutation: local,
       settingsAdmissionEvidence: Object.freeze({ kind: 'agent-settings', operation, key, effect,
-        revision: createHash('sha256').update(JSON.stringify(effect)).digest('hex') }),
+        revision: `agent-settings-${(++projectionSequence).toString(36)}` }),
       assertCurrent: () => { assertSelection(); assertCapture(capture); },
       assertRepairedArgs(next) { assertSelection(); assertModelReadingInputCurrent(next, capture.argsJson); assertCapture(capture); },
       async release() { capture.released = true; captures.delete(context); },

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { assertCurrentToolInvocation, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
@@ -57,6 +56,7 @@ interface ImportCapture {
   spent: boolean;
 }
 const captures = new WeakMap<object, ImportCapture>();
+let projectionSequence = 0;
 function assertCapture(capture: ImportCapture): void {
   if (capture.released || capture.spent) throw new ToolInputProjectionError('stale');
   capture.assertCurrent();
@@ -175,7 +175,7 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
       const capture: ImportCapture = { commandContext: context, argsJson, plan, configFacts, effect, assertCurrent: assertSelection, released: false, spent: false };
       assertCapture(capture); captures.set(executionContext, capture);
       return { status: 'projected', args, executionContext, ...(plan ? { settingsMutation: plan } : {}),
-        settingsAdmissionEvidence: Object.freeze({ kind: 'agent-settings', operation: 'set', key, effect, revision: createHash('sha256').update(JSON.stringify(effect)).digest('hex') }),
+        settingsAdmissionEvidence: Object.freeze({ kind: 'agent-settings', operation: 'set', key, effect, revision: `agent-import-${(++projectionSequence).toString(36)}` }),
         assertCurrent: () => assertCapture(capture),
         assertRepairedArgs(next) { assertModelReadingInputCurrent(next, argsJson); assertCapture(capture); },
         async release() { capture.released = true; captures.delete(executionContext); } };

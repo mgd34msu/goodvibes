@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, readClientCredentialsFromJson } from '@goodvibes-jev/engine/sdk/platform/google';
@@ -53,10 +52,11 @@ interface GoogleCapture {
   spent: boolean;
 }
 const captures = new WeakMap<object, GoogleCapture>();
+let settingsProjectionSequence = 0;
 const effectSources = new WeakMap<object, { readonly argsJson: string; readonly assertCurrent: () => void }>();
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
-function fileObservation(path: string): { readonly raw: string; readonly revision: string } {
+function fileObservation(path: string): { readonly raw: string; readonly target: string; readonly file: string; readonly link: string } {
   const target = realpathSync(path);
   const linkBefore = lstatSync(path, { bigint: true });
   const before = statSync(path, { bigint: true });
@@ -65,7 +65,7 @@ function fileObservation(path: string): { readonly raw: string; readonly revisio
   const linkAfter = lstatSync(path, { bigint: true });
   const identity = (value: typeof before) => [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(':');
   if (identity(before) !== identity(after) || identity(linkBefore) !== identity(linkAfter) || realpathSync(path) !== target) throw new ToolInputProjectionError('stale');
-  return { raw, revision: createHash('sha256').update(target).update(identity(after)).update(identity(linkAfter)).update(raw).digest('hex') };
+  return { raw, target, file: identity(after), link: identity(linkAfter) };
 }
 
 /** The registered owner prepares actual stores before any hosted reading. */
@@ -105,7 +105,11 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       const observation = fileObservation(path), parsed = readClientCredentialsFromJson(observation.raw);
       if (!parsed.ok) throw new ToolInputProjectionError('invalid');
       clientId = parsed.credentials.clientId; clientSecret = parsed.credentials.clientSecret;
-      sourceCurrent = () => { if (fileObservation(path).revision !== observation.revision) throw new ToolInputProjectionError('stale'); };
+      sourceCurrent = () => {
+        const current = fileObservation(path);
+        if (current.raw !== observation.raw || current.target !== observation.target || current.file !== observation.file
+          || current.link !== observation.link) throw new ToolInputProjectionError('stale');
+      };
       importedSecret = { key: GOOGLE_SECRET_KEYS.oauthClientSecret, value: clientSecret, scope: 'daemon' };
     } else {
       const reference = text(request.args.clientSecretRef) || secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret);
@@ -152,7 +156,7 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
     assertPrepared(); captures.set(context, capture);
     return { status: 'projected', args: projected, executionContext: context, settingsMutation: plan,
       settingsAdmissionEvidence: { kind: 'agent-settings', operation: 'set', key: GOOGLE_CONFIG_KEYS.oauthClientId, effect,
-        revision: createHash('sha256').update(JSON.stringify(effect)).digest('hex') },
+        revision: `google-settings-${(++settingsProjectionSequence).toString(36)}` },
       assertCurrent: assertPrepared,
       assertRepairedArgs(next) { assertPrepared(); if (JSON.stringify(next) !== capture.projectedJson) throw new ToolInputProjectionError('binding-changed'); },
       async release() { captures.delete(context); },

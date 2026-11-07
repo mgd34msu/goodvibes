@@ -379,7 +379,6 @@ export type {
   SecretImportEntry,
   PreparedScopedSecretDeletion,
   PreparedScopedSecretDeletionFacts,
-  LegacyStoreIdentity,
   SecretDeleteOptions,
   SecretRecord,
   SecretScope,

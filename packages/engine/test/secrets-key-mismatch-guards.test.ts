@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SecretsManager, SecretStoreUnreadableError } from '../sdk/src/platform/config/secrets.js';
-import { keyFingerprint, loadOrCreateKeyfile } from '../sdk/src/platform/config/secrets-keyfile.js';
+import { loadOrCreateKeyfile } from '../sdk/src/platform/config/secrets-keyfile.js';
 
 /**
  * Key-mismatch hardening (2026-07 incident: a lost keyfile + non-exclusive
@@ -88,11 +88,10 @@ describe('SecretsManager key-mismatch guards', () => {
     expect(await fresh.get('SECOND_SECRET')).toBe('second-value');
   });
 
-  test('a key mismatch reads back as a precise fingerprint reason, not a bare auth failure', async () => {
+  test('a replaced keyfile reports an unreadable store without exposing key material', async () => {
     const dirs = makeScratch();
     const writer = makeManager(dirs);
     await writer.set('ORPHANED_SECRET', 'value', { scope: 'user', medium: 'secure' });
-    const writerKey = loadOrCreateKeyfile(dirs.keyfile);
 
     // The keyfile is replaced; a fresh process now holds a different key.
     const replacement = randomBytes(32);
@@ -101,30 +100,22 @@ describe('SecretsManager key-mismatch guards', () => {
     const reader = makeManager(dirs);
     expect(await reader.get('ORPHANED_SECRET')).toBeNull();
     const review = await reader.inspect();
-    // Select the warning for THIS test's store by path, not merely the first
-    // one that says "cannot be read". `inspect()` reports every candidate store
-    // it can see, and the project-scope candidates are derived by walking the
-    // ancestors of `projectRoot`, so whichever directory the temp root happens
-    // to sit under contributes stores too, including a real `~/.goodvibes`
-    // store belonging to the person running the suite. Matching on the text
-    // alone made the assertion depend on that: it read back a stranger's
-    // fingerprints ("written with encryption key 2b8e4193, but the current
-    // keyfile is f5ee33d2") and failed, while the guard under test was working.
+    // Select this fixture's store; ancestor stores are unrelated.
     const warning = review.warnings.find((w: string) => w.includes(dirs.store) && w.includes('cannot be read'));
     expect(warning).toBeDefined();
-    expect(warning!).toContain(`written with encryption key ${keyFingerprint(writerKey)}`);
-    expect(warning!).toContain(keyFingerprint(replacement));
-    expect(warning!).not.toContain('Unsupported state');
+    expect(warning!).toContain('cannot decrypt with the current keyfile');
+    expect(warning!).not.toContain(replacement.toString('hex'));
+    expect(warning!).not.toContain('fingerprint');
   });
 
-  test('stores written before the fingerprint field still decrypt (no keyId → normal decrypt path)', async () => {
+  test('old diagnostic keyId metadata does not replace AES-GCM key authentication', async () => {
     const dirs = makeScratch();
     const sm = makeManager(dirs);
     await sm.set('PLAIN_OLD_SECRET', 'old-value', { scope: 'user', medium: 'secure' });
 
-    // Strip keyId from the envelope to simulate a store written by an older SDK.
+    // Existing v3 files may carry this diagnostic field; it grants no key authority.
     const envelope = JSON.parse(readFileSync(dirs.store, 'utf-8')) as Record<string, unknown>;
-    delete envelope.keyId;
+    envelope.keyId = 'obsolete-public-label';
     writeFileSync(dirs.store, `${JSON.stringify(envelope, null, 2)}\n`, 'utf-8');
 
     const fresh = makeManager(dirs);

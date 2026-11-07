@@ -26,8 +26,7 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  * Encryption keys come from a random keyfile (~/.goodvibes/secrets.key,
  * 0600 in a 0700 directory), generated on first need, never from host
  * identity, so stores survive hostname/username changes and machine moves.
- * Stores written by older SDKs (host-identity key, no version field) are
- * migrated to the keyfile format on first successful read. A store that
+ * Only the versioned keyfile format is supported. A store that
  * exists but cannot be decrypted is a distinct, surfaced error state, it is
  * never treated as empty and never overwritten.
  *
@@ -48,9 +47,7 @@ import {
   SECRETS_STORE_FORMAT_VERSION,
   assertCachedKeyIsCurrent,
   decryptStore as decrypt,
-  deriveLegacyEncryptionKey,
   encryptStore as encrypt,
-  keyFingerprint,
   loadOrCreateKeyfile,
   type EncryptedStoreEnvelope,
 } from './secrets-keyfile.js';
@@ -173,16 +170,6 @@ interface PlaintextStore {
   readonly secrets: Record<string, string>;
 }
 
-/**
- * Identity used only to decrypt legacy stores (written before keyfile-derived
- * encryption existed). Overridable so tests can simulate stores written on a
- * machine with a different hostname/username.
- */
-export interface LegacyStoreIdentity {
-  readonly hostname: string;
-  readonly username: string;
-}
-
 export interface SecretsManagerOptions {
   readonly projectRoot: string;
   readonly globalHome: string;
@@ -206,8 +193,6 @@ export interface SecretsManagerOptions {
   readonly plaintextDaemonFilePath?: string | undefined;
   /** Override the keyfile location (defaults to <globalHome>/.goodvibes/secrets.key). */
   readonly keyFilePath?: string | undefined;
-  /** Override the host identity used to decrypt legacy stores (tests only). */
-  readonly legacyIdentity?: LegacyStoreIdentity | undefined;
 }
 
 function requireAbsoluteOwnedPath(path: string, name: string): string {
@@ -415,7 +400,7 @@ export class SecretsManager {
     const key = keyObservation.raw === null ? this.encKey ?? randomBytes(32) : Buffer.from(keyObservation.raw.trim(), 'hex');
     if (this.encKey && keyObservation.raw !== null && !this.encKey.equals(key)) throw new Error('Secret keyfile changed.');
     const observations = [{ path: this.keyFilePath, observation: keyObservation }];
-    const targets = new Map<string, { readonly store: SecretStorePath; readonly values: Record<string, string>; encryptionKey: Buffer; legacy: boolean }>();
+    const targets = new Map<string, { readonly store: SecretStorePath; readonly values: Record<string, string>; encryptionKey: Buffer }>();
     const items = values.map(entry => ({ key: entry.key, value: entry.value, operation: entry.operation ?? 'set', scope: resolveSecretWriteScope(entry.key, entry.scope) }));
     for (const entry of items) {
       const stores = entry.operation === 'delete' ? [this.resolveWriteTarget(entry.scope, 'secure'), this.resolveWriteTarget(entry.scope, 'plaintext')]
@@ -429,29 +414,23 @@ export class SecretsManager {
         else observations.push({ path: store.path, observation });
         if (entry.operation === 'delete' && observation.raw === null) continue;
         let existing: unknown = {};
-        let encryptionKey = key;
-        let legacy = false;
+        const encryptionKey = key;
         if (observation.raw !== null) {
           const parsed: unknown = JSON.parse(observation.raw);
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Secret store is unavailable.');
           if (store.secure) {
             if (!('iv' in parsed) || typeof parsed.iv !== 'string' || !('tag' in parsed) || typeof parsed.tag !== 'string' || !('data' in parsed) || typeof parsed.data !== 'string') throw new Error('Secret store is unavailable.');
-            const previousKey = !('version' in parsed) ? deriveLegacyEncryptionKey(this.options.legacyIdentity) : keyObservation.raw === null ? null : key;
-            if (!previousKey || ('version' in parsed && parsed.version !== SECRETS_STORE_FORMAT_VERSION)) throw new Error('Secret store is unavailable.');
-            if (entry.operation === 'delete') { encryptionKey = previousKey; legacy = !('version' in parsed); }
-            if ('keyId' in parsed && typeof parsed.keyId !== 'string') throw new Error('Secret store is unavailable.');
-            const envelope = { iv: parsed.iv, tag: parsed.tag, data: parsed.data,
-              ...('version' in parsed ? { version: SECRETS_STORE_FORMAT_VERSION } : {}),
-              ...('keyId' in parsed && typeof parsed.keyId === 'string' ? { keyId: parsed.keyId } : {}) };
-            existing = JSON.parse(decrypt(envelope, previousKey));
+            if (parsed.version !== SECRETS_STORE_FORMAT_VERSION || keyObservation.raw === null) throw new Error('Secret store is unavailable.');
+            const envelope: EncryptedStoreEnvelope = { iv: parsed.iv, tag: parsed.tag, data: parsed.data, version: SECRETS_STORE_FORMAT_VERSION };
+            existing = JSON.parse(decrypt(envelope, key));
           } else existing = 'secrets' in parsed ? parsed.secrets : parsed;
         }
         if (!existing || typeof existing !== 'object' || Array.isArray(existing) || Object.values(existing).some(value => typeof value !== 'string')) throw new Error('Secret store is unavailable.');
-        target = { store, values: { ...captureStrictJudgmentJson(existing) } as Record<string, string>, encryptionKey, legacy }; targets.set(store.path, target);
+        target = { store, values: { ...captureStrictJudgmentJson(existing) } as Record<string, string>, encryptionKey }; targets.set(store.path, target);
       }
       if (entry.operation === 'delete') delete target.values[entry.key];
       else {
-        target.encryptionKey = key; target.legacy = false;
+        target.encryptionKey = key;
         Object.defineProperty(target.values, entry.key, { value: entry.value, enumerable: true, writable: true, configurable: true });
       }
       }
@@ -460,7 +439,6 @@ export class SecretsManager {
     const publications = [...(needsKey ? [{ path: this.keyFilePath, payload: `${key.toString('hex')}\n`, keyfile: true }] : []),
       ...[...targets.values()].map(target => {
         const payload = target.store.secure ? encrypt(JSON.stringify(target.values), target.encryptionKey) : { version: 1, secrets: target.values };
-        if (target.legacy && 'iv' in payload) { delete payload.version; delete payload.keyId; }
         return { path: target.store.path, payload, keyfile: false };
       })];
     const handle = Object.freeze({}) as PreparedSecretImport;
@@ -597,11 +575,8 @@ export class SecretsManager {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Secret store unavailable.');
       let values: Record<string, string>; let encryptionKey: Buffer | undefined;
       if (store.secure) {
-        if (parsed.version === undefined) encryptionKey = deriveLegacyEncryptionKey(this.options.legacyIdentity);
-        else {
-          if (parsed.version !== SECRETS_STORE_FORMAT_VERSION || !keyObservation.raw || !/^[0-9a-f]{64}$/i.test(keyObservation.raw.trim())) throw new Error('Secret store unavailable.');
-          encryptionKey = Buffer.from(keyObservation.raw.trim(), 'hex');
-        }
+        if (parsed.version !== SECRETS_STORE_FORMAT_VERSION || !keyObservation.raw || !/^[0-9a-f]{64}$/i.test(keyObservation.raw.trim())) throw new Error('Secret store unavailable.');
+        encryptionKey = Buffer.from(keyObservation.raw.trim(), 'hex');
         values = JSON.parse(decrypt(parsed as unknown as EncryptedStoreEnvelope, encryptionKey)) as Record<string, string>;
       } else values = ('version' in parsed && 'secrets' in parsed ? parsed.secrets : parsed) as Record<string, string>;
       if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Secret store unavailable.');
@@ -610,7 +585,6 @@ export class SecretsManager {
       let payload: unknown = { version: 1, secrets: next };
       if (encryptionKey) {
         const encrypted = encrypt(JSON.stringify(next), encryptionKey);
-        if (parsed.version === undefined) { delete encrypted.version; delete encrypted.keyId; }
         payload = encrypted;
       }
       publications.push({ path: store.path, payload });
@@ -727,7 +701,7 @@ export class SecretsManager {
     this.keyFilePath = normalizeOptionalOwnedPath(options.keyFilePath, 'keyFilePath')
       ?? resolveSharedDirectory(this.options.globalHome, 'secrets.key');
     setSecretsReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['credentialMutationGeneration', 'pendingLocalMutations', 'options', 'layout', 'keyFilePath', 'getPolicy', 'getCredentialMutationState', 'getAllCandidateStores', 'getReadOrder', 'get', 'getGlobalHome', 'getInternal', 'resolveMaybeReferencedValue', 'migrateLegacyReads', 'readEncryptedStore', 'readPlaintextStore', 'readEncryptedFile', 'readPlaintextFile', 'inspect', 'listDetailed', 'captureReadSource']);
+      const binding = captureSecurityReadBindings(this, ['credentialMutationGeneration', 'pendingLocalMutations', 'options', 'layout', 'keyFilePath', 'getPolicy', 'getCredentialMutationState', 'getAllCandidateStores', 'getReadOrder', 'get', 'getGlobalHome', 'getInternal', 'resolveMaybeReferencedValue', 'readEncryptedStore', 'readPlaintextStore', 'readEncryptedFile', 'readPlaintextFile', 'inspect', 'listDetailed', 'captureReadSource']);
       const state = this.getCredentialMutationState(); assertSecurityReadSource(!state.pending);
       const optionsBinding = captureSecurityReadBindings(this.options, Reflect.ownKeys(this.options).filter((key): key is string => typeof key === 'string'));
       const paths = [...new Set([...this.getAllCandidateStores().map(store => store.path), this.keyFilePath])];
@@ -753,10 +727,8 @@ export class SecretsManager {
   }
 
   async get(key: string): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['getReadOrder', 'migrateLegacyReads', 'getInternal']);
-    const readOrder = this.getReadOrder, migrate = this.migrateLegacyReads, read = this.getInternal;
-    current();
-    if (process.env[key] === undefined) await migrate.call(this, readOrder.call(this));
+    const current = captureSecurityReadBindings(this, ['getInternal']);
+    const read = this.getInternal;
     current();
     const value = await read.call(this, key, new Set([key]));
     current(); return value;
@@ -857,9 +829,8 @@ export class SecretsManager {
    * would copy the pointed-at value over the pointer.
    */
   async getFromScope(key: string, scope: SecretScope, storePath?: string): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['migrateLegacyReads', 'getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
-    const migrate = this.migrateLegacyReads, stores = this.getMigratableStores;
-    current(); await migrate.call(this, stores.call(this).filter(store => storePath !== undefined ? store.path === storePath : store.scope === scope));
+    const current = captureSecurityReadBindings(this, ['getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
+    const stores = this.getMigratableStores;
     current();
     for (const path of stores.call(this)) {
       if (storePath !== undefined ? path.path !== storePath : path.scope !== scope) continue;
@@ -1007,25 +978,6 @@ export class SecretsManager {
 
   }
 
-  /** A legacy read rewrites a whole file too. Re-read after acquiring its
-   * actual mutation namespace, never publish the pre-lock snapshot.
-   * Failed migration retains readable legacy material, as before.
-   */
-  private async migrateLegacyReads(stores: readonly SecretStorePath[]): Promise<void> {
-    const current = captureSecurityReadBindings(this, ['withStoreMutations', 'readEncryptedStore']);
-    const mutate = this.withStoreMutations, read = this.readEncryptedStore;
-    for (const store of stores) {
-      current();
-      if (!store.secure) continue;
-      try {
-        const envelope = JSON.parse(readFileSync(store.path, 'utf8')) as Partial<EncryptedStoreEnvelope> | null;
-        if (!envelope || envelope.version !== undefined) continue;
-        await mutate.call(this, [store.path], () => { current(); return read.call(this, store.path); }, [], current);
-        current();
-      } catch { current(); /* Ordinary read below reports unreadable material; no replacement. */ }
-    }
-  }
-
   private writeStorePaths(scope: SecretScope, medium: SecretStorageMedium, policy: SecretStorageMode): string[] {
     const target = this.resolveWriteTarget(scope, medium);
     return [target.path, ...(target.secure && policy === 'preferred_secure'
@@ -1133,9 +1085,8 @@ export class SecretsManager {
   }
 
   async list(): Promise<string[]> {
-    const current = captureSecurityReadBindings(this, ['migrateLegacyReads', 'getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
-    const migrate = this.migrateLegacyReads, stores = this.getReadOrder;
-    current(); await migrate.call(this, stores.call(this)); current();
+    const current = captureSecurityReadBindings(this, ['getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
+    current();
     const keys = new Set<string>();
     for (const path of this.getReadOrder()) {
       const values = path.secure
@@ -1148,9 +1099,8 @@ export class SecretsManager {
   }
 
   async listDetailed(): Promise<SecretRecord[]> {
-    const current = captureSecurityReadBindings(this, ['migrateLegacyReads', 'getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
-    const migrate = this.migrateLegacyReads, stores = this.getReadOrder;
-    current(); await migrate.call(this, stores.call(this)); current();
+    const current = captureSecurityReadBindings(this, ['getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
+    current();
     const envKeys = new Set(Object.keys(process.env));
     const records: SecretRecord[] = [];
 
@@ -1187,9 +1137,9 @@ export class SecretsManager {
   }
 
   async inspect(): Promise<SecretStorageReview> {
-    const current = captureSecurityReadBindings(this, ['migrateLegacyReads', 'getAllCandidateStores', 'getPolicy', 'listDetailed', 'readEncryptedStore', 'readPlaintextStore']);
-    const migrate = this.migrateLegacyReads, stores = this.getAllCandidateStores, list = this.listDetailed;
-    current(); await migrate.call(this, stores.call(this)); current();
+    const current = captureSecurityReadBindings(this, ['getAllCandidateStores', 'getPolicy', 'listDetailed', 'readEncryptedStore', 'readPlaintextStore']);
+    const list = this.listDetailed;
+    current();
     const policy = this.getPolicy();
     current(); const records = await list.call(this); current();
     const storedRecords = records.filter((record) => record.source !== 'env');
@@ -1326,9 +1276,8 @@ export class SecretsManager {
 
   /** Every credential a migration could move, across every surface's silo. */
   async listDetailedForMigration(): Promise<SecretRecord[]> {
-    const current = captureSecurityReadBindings(this, ['migrateLegacyReads', 'getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
-    const migrate = this.migrateLegacyReads, stores = this.getMigratableStores;
-    current(); await migrate.call(this, stores.call(this)); current();
+    const current = captureSecurityReadBindings(this, ['getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
+    current();
     return listMigratableSecrets(
       this.getMigratableStores(),
       (path, secure) => (secure ? this.readEncryptedFile(path) : this.readPlaintextFile(path)),
@@ -1349,10 +1298,6 @@ export class SecretsManager {
    * exists but cannot be decrypted or parsed). Unreadable is never collapsed
    * into empty: writes to an unreadable store are refused so its contents are
    * never destroyed.
-   *
-   * Legacy stores (no `version` field, host-identity key) are migrated in
-   * place on first successful read: decrypted with the legacy key, then
-   * re-encrypted under the keyfile.
    */
   private readEncryptedStore(filePath: string): SecureStoreReadResult {
     let raw: string;
@@ -1377,24 +1322,10 @@ export class SecretsManager {
       return { status: 'unreadable', reason: 'store file has an unrecognized shape' };
     }
 
-    if (envelope.version === undefined) {
-      return this.migrateLegacyStore(filePath, envelope as EncryptedStoreEnvelope);
-    }
     if (envelope.version !== SECRETS_STORE_FORMAT_VERSION) {
       return {
         status: 'unreadable',
         reason: `store format version ${envelope.version} is not supported by this SDK version`,
-      };
-    }
-
-    // Fingerprint fast-path: when the store records which key wrote it, a
-    // mismatch is reported precisely instead of surfacing later as a bare
-    // GCM authentication failure. Stores without keyId decrypt as before.
-    const currentKeyId = keyFingerprint(this.getEncryptionKey());
-    if (typeof envelope.keyId === 'string' && envelope.keyId !== currentKeyId) {
-      return {
-        status: 'unreadable',
-        reason: `store was written with encryption key ${envelope.keyId}, but the current keyfile is ${currentKeyId}, the keyfile changed after this store was written`,
       };
     }
 
@@ -1407,35 +1338,6 @@ export class SecretsManager {
         reason: `cannot decrypt with the current keyfile (${summarizeError(err)})`,
       };
     }
-  }
-
-  private migrateLegacyStore(filePath: string, envelope: EncryptedStoreEnvelope): SecureStoreReadResult {
-    let plaintext: string;
-    try {
-      plaintext = decrypt(envelope, deriveLegacyEncryptionKey(this.options.legacyIdentity));
-    } catch {
-      return {
-        status: 'unreadable',
-        reason: 'legacy store cannot be decrypted with this machine\'s hostname and username (they changed since the store was written)',
-      };
-    }
-    let secrets: Record<string, string>;
-    try {
-      secrets = JSON.parse(plaintext) as Record<string, string>;
-    } catch {
-      return { status: 'unreadable', reason: 'legacy store decrypted to malformed content' };
-    }
-    if (!this.ownedMutationPaths.has(filePath)) return { status: 'ok', secrets };
-    try {
-      this.writeEncryptedFile(filePath, secrets);
-      logger.info('SecretsManager: migrated legacy encrypted secrets store to keyfile encryption', { path: filePath });
-    } catch (error) {
-      logger.warn('SecretsManager: decrypted legacy store but could not rewrite it under the keyfile', {
-        path: filePath,
-        ...(this.options.diagnosticMode === 'structural' ? { reason: 'store-rewrite-failed' } : { error: summarizeError(error) }),
-      });
-    }
-    return { status: 'ok', secrets };
   }
 
   /**

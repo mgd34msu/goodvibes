@@ -331,7 +331,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'output-schema-fingerprint',
     name: 'Output Schema Fingerprints',
     description:
-      'Appends `_meta.outputSchemaFingerprint` (SHA-256 of sorted result key names) '
+      'Appends `_meta.outputSchemaFingerprint` (exact sorted result key names) '
       + 'and `_meta.schemaShapeId` (canonical mode identifier) to tool results from '
       + 'the find, analyze, and inspect tools. Enables schema drift detection and '
       + 'diagnostic fingerprint surfaces. Disable to omit fingerprint metadata.',

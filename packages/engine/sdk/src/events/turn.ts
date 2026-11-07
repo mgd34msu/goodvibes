@@ -78,8 +78,8 @@ export type TurnEvent =
     turnId: string;
     provider: string;
     model: string;
-    /** Redacted prompt summary: {length, sha256, first100chars} unless telemetry.includeRawPrompts is true. */
-    promptSummary: { length: number; sha256: string; first100chars: string } | string;
+    /** Redacted prompt summary: {length, first100chars} unless telemetry.includeRawPrompts is true. */
+    promptSummary: { length: number; first100chars: string } | string;
   }
   /** A provider chat call completed within the current turn iteration. */
   | {
@@ -87,8 +87,8 @@ export type TurnEvent =
     turnId: string;
     provider: string;
     model: string;
-    /** Redacted response summary: {length, sha256, first100chars} unless telemetry.includeRawPrompts is true. */
-    contentSummary: { length: number; sha256: string; first100chars: string } | string;
+    /** Redacted response summary: {length, first100chars} unless telemetry.includeRawPrompts is true. */
+    contentSummary: { length: number; first100chars: string } | string;
     toolCallCount: number;
     inputTokens: number;
     outputTokens: number;

@@ -192,8 +192,8 @@ Do not rely on `payload.result` being the raw tool return value. Downstream cons
 **`contentSummary` on `LLM_RESPONSE_RECEIVED`**. The provider response is surfaced as a redacted summary by default:
 
 ```ts
-promptSummary: { length: number; sha256: string; first100chars: string } | string;
-contentSummary: { length: number; sha256: string; first100chars: string } | string;
+promptSummary: { length: number; first100chars: string } | string;
+contentSummary: { length: number; first100chars: string } | string;
 ```
 
 Raw prompts and responses are only emitted when `telemetry.includeRawPrompts` is explicitly enabled. In all other configurations the summary object is emitted. Subscribers branch on `typeof` to handle both shapes.

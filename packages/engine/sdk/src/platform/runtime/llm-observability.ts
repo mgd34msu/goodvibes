@@ -6,7 +6,6 @@
  * - instrumentedLlmCall() wrapper that emits LLM_REQUEST_STARTED + enriched LLM_RESPONSE_RECEIVED
  * - includeRawPrompts config awareness
  */
-import { createHash } from 'node:crypto';
 import {
   llmRequestsTotal,
   llmRequestDurationMs,
@@ -23,8 +22,6 @@ import { summarizeError } from '../utils/error-display.js';
 export interface PromptSummary {
   /** Byte length of the raw content. */
   length: number;
-  /** SHA-256 hex digest of the raw content (for deduplication without exposure). */
-  sha256: string;
   /** First 100 chars of the raw content (safe preview). */
   first100chars: string;
 }
@@ -32,7 +29,7 @@ export interface PromptSummary {
 /**
  * Summarize prompt/response content for telemetry emission.
  * When includeRawPrompts is true, returns the raw string.
- * Default (false): returns a PromptSummary with length, sha256, first100chars.
+ * Default (false): returns a PromptSummary with length and first100chars.
  */
 export function summarizePromptContent(
   content: string,
@@ -41,7 +38,6 @@ export function summarizePromptContent(
   if (includeRaw) return content;
   return {
     length: content.length,
-    sha256: createHash('sha256').update(content).digest('hex'),
     first100chars: content.slice(0, 100),
   };
 }

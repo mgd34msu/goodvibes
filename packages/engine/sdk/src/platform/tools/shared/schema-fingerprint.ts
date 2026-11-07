@@ -1,16 +1,4 @@
-/**
- * Output schema fingerprint utility.
- *
- * Provides stable SHA-256 fingerprints derived from the sorted key set of a
- * tool result object. The same output mode / input class always produces the
- * same fingerprint because the hash is computed from the sorted key names, not
- * from the values, making it a schema-level identity rather than a content hash.
- *
- * Integration pattern:
- *   1. After a mode-specific result is produced, call `appendSchemaFingerprint`.
- *   2. The `_meta.outputSchemaFingerprint` field is appended to the result object.
- *   3. When the fingerprint gate is off (tools.outputSchemaFingerprints) the result object is returned unchanged.
- */
+/** Exact top-level tool-result key sets for optional shape diagnostics. */
 
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 
@@ -31,9 +19,9 @@ export function isSchemaFingerprintEnabled(options: SchemaFingerprintOptions = {
  * Canonical schema shape IDs per tool and output mode.
  *
  * The shape ID is the stable, human-readable identifier for what the schema
- * looks like before the hash is computed. It encodes the tool name and mode
+ * looks like. It encodes the tool name and mode
  * so that diagnostics can group / filter by shape without needing to know the
- * full fingerprint.
+ * full key set.
  */
 export const SCHEMA_SHAPE_IDS: Record<string, string> = {
   // find tool modes
@@ -94,67 +82,14 @@ export function getSchemaShapeId(tool: string, mode: string): string {
   return SCHEMA_SHAPE_IDS[key] ?? `${tool}.${mode}.v1`;
 }
 
-/**
- * Compute a stable SHA-256 fingerprint from the sorted top-level key names of
- * a result object.
- *
- * The hash input is the JSON-serialised sorted key array, e.g.:
- *   `["count","files"]` → sha256 → hex string
- *
- * Because the hash is over keys only (not values), the same schema shape
- * always produces the same fingerprint regardless of runtime content.
- *
- * Uses the Web Crypto API (available in Bun via globalThis.crypto).
- */
-export async function computeSchemaFingerprint(
-  result: Record<string, unknown>,
-): Promise<string> {
-  const sortedKeys = Object.keys(result).sort();
-  const canonical = JSON.stringify(sortedKeys);
-  const encoder = new TextEncoder();
-  const data = encoder.encode(canonical);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+/** Exact sorted field names, without hashing or truncation. */
+export async function computeSchemaFingerprint(result: Record<string, unknown>): Promise<string> {
+  return computeSchemaFingerprintSync(result);
 }
 
-/**
- * Synchronous variant using the synchronous `crypto.subtle.digestSync` API
- * available in Bun. Falls back to a deterministic key-sort string when the
- * sync API is not available (e.g. in Node.js test environments without
- * polyfilling).
- *
- * This is the preferred variant for tool `execute()` paths where async is
- * already available, but a sync escape hatch is provided for contexts where
- * adding `await` is impractical.
- */
-export function computeSchemaFingerprintSync(
-  result: Record<string, unknown>,
-): string {
-  const sortedKeys = Object.keys(result).sort();
-  const canonical = JSON.stringify(sortedKeys);
-
-  // Bun exposes crypto.subtle.digestSync (non-standard, Bun-only)
-  const bunCrypto = crypto as typeof crypto & {
-    subtle: typeof crypto.subtle & { digestSync?(algo: string, data: Uint8Array): ArrayBuffer };
-  };
-
-  if (typeof bunCrypto.subtle?.digestSync === 'function') {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(canonical);
-    const hashBuffer = bunCrypto.subtle.digestSync('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  // Deterministic but non-cryptographic path for test/non-Bun environments.
-  // Produces a stable string for the same key set.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < canonical.length; i++) {
-    h ^= canonical.charCodeAt(i);
-    h = (h * 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
+/** The same representation in every runtime. */
+export function computeSchemaFingerprintSync(result: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(result).sort());
 }
 
 // ── Result augmentation ───────────────────────────────────────────────────────
@@ -165,7 +100,7 @@ export function computeSchemaFingerprintSync(
 export interface SchemaFingerprintMeta {
   /** Canonical shape ID (human-readable, e.g. `find.files.v1`). */
   schemaShapeId: string;
-  /** SHA-256 hex (64 chars) in Bun; FNV-1a hex (8 chars) in non-Bun environments. */
+  /** JSON array of exact sorted top-level field names. */
   outputSchemaFingerprint: string;
 }
 

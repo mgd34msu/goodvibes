@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
-import { encryptStore, decryptStore, deriveLegacyEncryptionKey } from '../sdk/src/platform/config/secrets-keyfile.js';
+import { encryptStore, decryptStore } from '../sdk/src/platform/config/secrets-keyfile.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -51,13 +51,12 @@ test('completed deletion fence rejects post-effect file replacement rather than 
   expect(receipt.status).toBe('committed'); expect(() => f.manager.assertCompletedScopedDeletion(prepared)).toThrow();
 });
 
-test.each(['modern', 'legacy'] as const)('scoped deletion preserves %s encryption and unrelated material without key lifecycle writes', async format => {
+test('scoped deletion preserves encryption and unrelated material without key lifecycle writes', async () => {
   const f = fixture(); const path = join(f.root, 'daemon', 'secrets.enc');
   const keyfile = join(f.root, '.goodvibes', 'secrets.key');
-  const key = format === 'modern' ? Buffer.alloc(32, 0x31) : deriveLegacyEncryptionKey();
-  if (format === 'modern') { mkdirSync(join(f.root, '.goodvibes')); writeFileSync(keyfile, key.toString('hex') + '\n'); }
+  const key = Buffer.alloc(32, 0x31);
+  mkdirSync(join(f.root, '.goodvibes')); writeFileSync(keyfile, key.toString('hex') + '\n');
   const envelope = encryptStore(JSON.stringify({ SYNTHETIC: 'private-ciphertext-fixture', OTHER: 'keep-encrypted' }), key);
-  if (format === 'legacy') { delete envelope.version; delete envelope.keyId; }
   writeFileSync(path, JSON.stringify(envelope));
   const keyBefore = existsSync(keyfile) ? readFileSync(keyfile, 'utf8') : null;
   const prepared = f.manager.prepareScopedDeletion('SYNTHETIC', 'daemon');
@@ -65,7 +64,7 @@ test.each(['modern', 'legacy'] as const)('scoped deletion preserves %s encryptio
   const receipt = await f.manager.applyPreparedScopedDeletion(prepared, () => {});
   expect(receipt.status).toBe('committed'); expect(receipt.completedPaths).toContain(path);
   const stored = JSON.parse(readFileSync(path, 'utf8'));
-  expect(stored.version).toBe(format === 'modern' ? 2 : undefined);
+  expect(stored.version).toBe(2);
   expect(JSON.parse(decryptStore(stored, key))).toEqual({ OTHER: 'keep-encrypted' });
   expect(existsSync(keyfile) ? readFileSync(keyfile, 'utf8') : null).toBe(keyBefore);
   expect(() => f.manager.assertCompletedScopedDeletion(prepared)).not.toThrow();

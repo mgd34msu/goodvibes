@@ -23,9 +23,9 @@ describe('summarizePromptContent helper', () => {
     const { summarizePromptContent } = await import('../sdk/src/platform/runtime/llm-observability.js');
     const content = 'Tell me about the weather in Paris.';
     const result = summarizePromptContent(content, false);
-    const summary = result as { length: number; sha256: string; first100chars: string };
+    const summary = result as { length: number; first100chars: string };
     expect(summary.length).toBe(content.length);
-    expect(summary.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(summary).not.toHaveProperty('sha256');
   });
 
   test('returns raw string when includeRaw is true', async () => {

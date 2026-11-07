@@ -75,7 +75,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Append _meta.outputSchemaFingerprint (SHA-256 of sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off.',
+      'Append _meta.outputSchemaFingerprint (exact sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off.',
   },
   {
     key: 'telemetry.otelMode',

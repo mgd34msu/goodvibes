@@ -90,7 +90,7 @@ export function emitLlmRequestStarted(
     turnId: string;
     provider: string;
     model: string;
-    promptSummary: { length: number; sha256: string; first100chars: string } | string;
+    promptSummary: { length: number; first100chars: string } | string;
   }
 ): void {
   bus.emit('turn', createEventEnvelope('LLM_REQUEST_STARTED', { type: 'LLM_REQUEST_STARTED', ...data }, ctx));
@@ -104,7 +104,7 @@ export function emitLlmResponseReceived(
     turnId: string;
     provider: string;
     model: string;
-    contentSummary: { length: number; sha256: string; first100chars: string } | string;
+    contentSummary: { length: number; first100chars: string } | string;
     toolCallCount: number;
     inputTokens: number;
     outputTokens: number;

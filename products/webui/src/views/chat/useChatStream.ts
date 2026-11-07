@@ -277,6 +277,9 @@ export function useChatStream({
         if (cancelled || stoppedRef.current) return;
         if (hadDrop) {
           hadDrop = false;
+          // The daemon may have restarted and reissued canonical message revisions.
+          // Refresh even when a concurrent turn error keeps the view out of polling.
+          void invalidateChatState(activeSessionId);
           // Functional updater: only clear the reconnecting label if nothing else
           // (a fresh send, a genuine turn error) has already moved turnState on.
           // Routed through syncedSetTurnState (already an effect dependency) rather

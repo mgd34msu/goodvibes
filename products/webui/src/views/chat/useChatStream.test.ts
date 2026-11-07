@@ -52,6 +52,7 @@ interface StreamControl {
 }
 
 let renderedLiveText = '';
+let invalidatedSessions: string[] = [];
 let activeStreamControl: StreamControl | null = null;
 // Every stream() opened this test, in order, the epoch/handshake-race tests need to
 // hold BOTH the superseded stream and its successor at once (activeStreamControl only
@@ -136,7 +137,7 @@ function HookOwner({ activeSessionId, turnState, setTurnState, setTurnError, onA
       setLiveText: mock((next: SetStateAction<string>) => { renderedLiveText = typeof next === 'function' ? next(renderedLiveText) : next; }),
       setLocalMessages: mock((_fn: SetStateAction<LocalCompanionMessage[]>) => {}),
       setPendingUserMessageId: mock(() => {}),
-      invalidateChatState: mock(() => Promise.resolve()),
+      invalidateChatState: mock((sessionId: string) => { invalidatedSessions.push(sessionId); return Promise.resolve(); }),
       onSessionMissing: mock(() => {}),
     };
   }, []);
@@ -272,6 +273,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  invalidatedSessions = [];
   activeStreamControl = null;
   allStreamControls = [];
   streamCallCount = 0;
@@ -600,6 +602,9 @@ describe('useChatStream: onReconnect: a daemon blip / SSE drop is honest, not a 
     ctrl!.options.onReady?.();
     expect(ctx.turnState).toBe('syncing');
     expect(ctx.turnError).toBe('');
+    expect(invalidatedSessions).toEqual(['session-recover']);
+    ctrl!.options.onReady?.();
+    expect(invalidatedSessions).toEqual(['session-recover']);
 
     ctx.unmount();
   });
@@ -618,6 +623,7 @@ describe('useChatStream: onReconnect: a daemon blip / SSE drop is honest, not a 
     ctrl!.options.onReady?.();
     // Must stay 'error', onReady only resets when turnState is still 'reconnecting'.
     expect(ctx.turnState).toBe('error');
+    expect(invalidatedSessions).toContain('session-guard');
 
     ctx.unmount();
   });

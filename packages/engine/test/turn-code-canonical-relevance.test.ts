@@ -12,7 +12,7 @@ let installed = false;
 function use(port: Parameters<typeof installJudgmentPort>[0]) { if (!installed) { previous = installJudgmentPort(port); installed = true; } else installJudgmentPort(port); }
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
 function hit(path: string, similarity: number): CodeContextResult {
-  return { chunk: { chunkId: path, path, symbol: 'handle', kind: 'function', lang: 'ts', startLine: 1, endLine: 2, contentHash: 'hash', fileHash: 'file', mtimeMs: 1 }, similarity, distance: 2 * (1 - similarity), label: 'semantic' };
+  return { chunk: { chunkId: path, path, symbol: 'handle', kind: 'function', lang: 'ts', startLine: 1, endLine: 2, fileRevision: 'file', mtimeMs: 1 }, similarity, distance: 2 * (1 - similarity), label: 'semantic' };
 }
 const irrelevant = hit('src/retry-label.ts', 0.99), relevant = hit('src/backoff.ts', 0.01);
 function source(hits = [irrelevant, relevant], options: { signal?: AbortSignal; assertCurrent?: () => Promise<void>; code?: string } = {}): TurnCodeIndexSource {

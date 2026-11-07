@@ -3,13 +3,13 @@ import { constants, closeSync, fstatSync, lstatSync, openSync, opendirSync, read
 import { dirname, join, relative } from 'node:path';
 import {
   assertContractInputAuthority, authorizeContractInputPath, contractInputAuthoritySourceRoot, contractInputAuthorityFiles,
-  registerContractInputReadAssertion, withContractInputReadBatch, type ContractInputAuthority,
+  registerContractInputReadAssertion, withContractInputReadBatch, contractInputAuthorityMutable, type ContractInputAuthority,
 } from '../contract/input-authority.js';
 import { CONTRACT_INPUT_EXCLUSIONS } from '../contract/input-snapshot.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { rankCodeInjectionSnapshots } from '../state/code-injection-ranking.js';
 import { CodeIndexStore } from '../state/code-index-store.js';
-import { sha256 } from '../state/code-index-chunking.js';
+import { createHash } from 'node:crypto';
 import { MEMORY_VECTOR_DIMS } from '../state/memory-vector-store.js';
 import { HASHED_MEMORY_EMBEDDING_PROVIDER, type MemoryEmbeddingProvider, type MemoryEmbeddingProviderRegistry } from '../state/memory-embeddings.js';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
@@ -17,9 +17,13 @@ import type { TurnCodeIndexSource } from './turn-knowledge-injection.js';
 
 const excluded = new Set<string>([...CONTRACT_INPUT_EXCLUSIONS, 'node_modules']);
 const fingerprint = (s: BigIntStats): string => `${s.dev}:${s.ino}:${s.mode}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
-interface Snapshot { readonly path: string; readonly mtimeMs: number; readonly fingerprint: string; readonly digest: string }
+interface Snapshot { readonly path: string; readonly mtimeMs: number; readonly fingerprint: string; readonly digest?: string }
 interface Generation { readonly files: readonly Snapshot[]; readonly directories: ReadonlyMap<string, string>; readonly id: string }
 
+// Mutable live files need their original private byte commitment; immutable
+// receipt files are already compared to their captured input by read authority.
+const mutableCodeDigest = (text: string): string => createHash('sha256').update(text).digest('hex');
+let generationSequence = 0;
 export function createCapturedCodeContext(input: {
   readonly authority: ContractInputAuthority;
   readonly root: string;
@@ -35,7 +39,6 @@ export function createCapturedCodeContext(input: {
   let pinnedProvider: MemoryEmbeddingProvider | null = null;
   let operation: AbortController | undefined;
   let disposed = false;
-  let sequence = 0;
   let unavailable: string | undefined;
   const checkSignal = (): void => { input.signal?.throwIfAborted(); operation?.signal.throwIfAborted(); if (disposed) throw new Error('captured code context is closed'); };
   const checkProvider = (): void => {
@@ -81,7 +84,7 @@ export function createCapturedCodeContext(input: {
       if (onlyPath !== undefined && file.path !== onlyPath) continue;
       const path = join(root, file.path);
       await authorize(path, signal);
-      if (sha256(bytes(path, file.fingerprint).content) !== file.digest) throw new Error('captured code content generation changed');
+      if (file.digest !== undefined && mutableCodeDigest(bytes(path, file.fingerprint).content) !== file.digest) throw new Error('captured code content generation changed');
     }
     // Recheck every metadata identity synchronously after the last yielding policy
     // check. Other member writes cannot silently alter an already-checked file.
@@ -151,7 +154,7 @@ export function createCapturedCodeContext(input: {
               if (read.content.includes('\0')) continue;
               await new Promise<void>(resolve => setImmediate(resolve));
               signal.throwIfAborted();
-              files.push({ path: rel, fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, digest: sha256(read.content) });
+              files.push({ path: rel, fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, ...(contractInputAuthorityMutable(authority) ? { digest: mutableCodeDigest(read.content) } : {}) });
               for (let directory = dirname(path); directory !== root; directory = dirname(directory)) {
                 await authorize(directory, signal);
                 directories.set(directory, fingerprint(lstatSync(directory, { bigint: true })));
@@ -180,18 +183,19 @@ export function createCapturedCodeContext(input: {
                   const read = bytes(path);
                 // Binary filtering consumes only the already-authorized bytes.
                 if (read.content.includes('\0')) continue;
-                files.push({ path: relative(root, path), fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, digest: sha256(read.content) });
+                files.push({ path: relative(root, path), fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, ...(contractInputAuthorityMutable(authority) ? { digest: mutableCodeDigest(read.content) } : {}) });
               }
             } finally { dir.closeSync(); }
           }
         });
-        const generation: Generation = Object.freeze({ files: Object.freeze(files), directories, id: `${++sequence}:${sha256(files.map(f => `${f.path}:${f.digest}`).join('\n'))}` });
+        if (!Number.isSafeInteger(++generationSequence)) throw new Error('Captured code identity exhausted');
+        const generation: Generation = Object.freeze({ files: Object.freeze(files), directories, id: `captured-code-${generationSequence}` });
         await assertGeneration(generation, signal);
         stopWatching = watch(generation, signal);
         store = new CodeIndexStore(root, ':memory:', registry);
         await store.init(); checkProvider(); signal.throwIfAborted();
         if (!store.stats().available) { unavailable = 'code index unavailable'; store.close(); store = undefined; return; }
-        await store.prepareAuthorizedSnapshots({ snapshots: files.map(file => ({ path: file.path, mtimeMs: file.mtimeMs, content: '' })), provider: pinnedProvider, signal,
+        await store.prepareAuthorizedSnapshots({ sourceRevision: generation.id, snapshots: files.map(file => ({ path: file.path, mtimeMs: file.mtimeMs, content: '' })), provider: pinnedProvider, signal,
           loadSnapshot: async file => {
             await assertGeneration(generation, signal, file.path);
             const captured = files.find(candidate => candidate.path === file.path)!;
@@ -232,9 +236,9 @@ export function createCapturedCodeContext(input: {
         await assertCurrent();
         const snapshots = hits.map(hit => {
           const file = selected.files.find(file => file.path === hit.chunk.path);
-          if (!file || file.digest !== hit.chunk.fileHash) throw new Error('captured code hit is stale');
+          if (!file || hit.chunk.fileRevision !== selected.id) throw new Error('captured code hit is stale');
           const content = bytes(join(root, file.path), file.fingerprint).content;
-          if (sha256(content) !== file.digest) throw new Error('captured code hit changed');
+          if (file.digest !== undefined && mutableCodeDigest(content) !== file.digest) throw new Error('captured code hit changed');
           return { hit, code: content };
         });
         const stopWatching = watch(selected, signal);

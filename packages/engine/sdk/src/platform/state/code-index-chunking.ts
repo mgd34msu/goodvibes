@@ -15,11 +15,10 @@
  *    fixed-size line windows ('window'), a non-empty file is never silently
  *    dropped.
  *  - Whitespace-only content yields zero chunks ('empty').
- *  - chunk_id is a deterministic function of path + line span + content hash,
+ *  - chunk_id is a deterministic tuple of source revision and chunk metadata,
  *    so identical trees always chunk identically.
  */
 
-import { createHash } from 'node:crypto';
 import type { SymbolInfo } from '../intelligence/tree-sitter/queries.js';
 
 /** One chunk of source: either a top-level tree-sitter symbol or a fixed-size line window. */
@@ -31,9 +30,8 @@ export interface CodeChunk {
   readonly kind: string;
   readonly startLine: number;
   readonly endLine: number;
-  readonly contentHash: string;
   readonly mtimeMs: number;
-  readonly fileHash: string;
+  readonly fileRevision: string;
 }
 
 /** How a file's chunks were produced. 'window' means "never silently dropped" fell back to fixed-size windows. */
@@ -56,16 +54,12 @@ export const DEFAULT_WINDOW_OVERLAP_LINES = 10;
 /** Languages extractSymbols() actually understands (tree-sitter/queries.ts extractSymbols). Everything else always falls back to windowed chunking. */
 const SYMBOL_SUPPORTED_LANGS = new Set(['typescript', 'tsx', 'javascript', 'python']);
 
-export function sha256(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
-}
-
 export interface ChunkFileInput {
   readonly intelligence: ChunkingIntelligence;
   readonly absPath: string;
   readonly relPath: string;
   readonly content: string;
-  readonly fileHash: string;
+  readonly fileRevision: string;
   readonly mtimeMs: number;
   readonly windowLines?: number | undefined;
   readonly windowOverlapLines?: number | undefined;
@@ -78,7 +72,7 @@ export interface ChunkFileInput {
 export async function chunkFileContent(
   input: ChunkFileInput,
 ): Promise<{ drafts: DraftChunk[]; mode: CodeChunkMode }> {
-  const { intelligence, absPath, relPath, content, fileHash, mtimeMs } = input;
+  const { intelligence, absPath, relPath, content, fileRevision, mtimeMs } = input;
   if (!content.trim()) return { drafts: [], mode: 'empty' };
 
   const lang = intelligence.detectLanguage(absPath) ?? 'unknown';
@@ -91,7 +85,7 @@ export async function chunkFileContent(
 
   if (topLevel.length > 0) {
     const lines = content.split('\n');
-    const drafts = topLevel.map((symbol) => makeSymbolChunk(relPath, lang, symbol, lines, fileHash, mtimeMs));
+    const drafts = topLevel.map((symbol) => makeSymbolChunk(relPath, lang, symbol, lines, fileRevision, mtimeMs));
     return { drafts, mode: 'symbols' };
   }
 
@@ -102,7 +96,7 @@ export async function chunkFileContent(
     relPath,
     lang,
     content,
-    fileHash,
+    fileRevision,
     mtimeMs,
     input.windowLines,
     input.windowOverlapLines,
@@ -115,15 +109,14 @@ function makeSymbolChunk(
   lang: string,
   symbol: SymbolInfo,
   lines: readonly string[],
-  fileHash: string,
+  fileRevision: string,
   mtimeMs: number,
 ): DraftChunk {
   const startLine = symbol.line;
   const endLine = Math.max(symbol.endLine, symbol.line);
   const slice = lines.slice(Math.max(0, startLine - 1), endLine).join('\n');
   const embedText = `${lang} ${symbol.kind} ${symbol.name}\n${slice}`;
-  const contentHash = sha256(embedText);
-  const chunkId = sha256(`${relPath}:${startLine}-${endLine}:${contentHash}`);
+  const chunkId = JSON.stringify([relPath, fileRevision, lang, symbol.kind, symbol.name, startLine, endLine]);
   return {
     embedText,
     chunk: {
@@ -134,9 +127,8 @@ function makeSymbolChunk(
       kind: symbol.kind,
       startLine,
       endLine,
-      contentHash,
       mtimeMs,
-      fileHash,
+      fileRevision,
     },
   };
 }
@@ -145,7 +137,7 @@ function makeWindowChunks(
   relPath: string,
   lang: string,
   content: string,
-  fileHash: string,
+  fileRevision: string,
   mtimeMs: number,
   windowLinesOption?: number | undefined,
   windowOverlapOption?: number | undefined,
@@ -163,8 +155,7 @@ function makeWindowChunks(
       const startLine = start + 1;
       const endLine = end;
       const embedText = `${lang} window ${relPath}\n${slice}`;
-      const contentHash = sha256(embedText);
-      const chunkId = sha256(`${relPath}:${startLine}-${endLine}:${contentHash}`);
+      const chunkId = JSON.stringify([relPath, fileRevision, lang, 'window', '', startLine, endLine]);
       drafts.push({
         embedText,
         chunk: {
@@ -175,9 +166,8 @@ function makeWindowChunks(
           kind: 'window',
           startLine,
           endLine,
-          contentHash,
           mtimeMs,
-          fileHash,
+          fileRevision,
         },
       });
     }

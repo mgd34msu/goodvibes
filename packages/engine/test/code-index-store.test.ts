@@ -19,6 +19,8 @@ import {
   type MemoryEmbeddingProvider,
 } from '../sdk/src/platform/state/memory-embeddings.js';
 import { ConfigManager } from '../sdk/src/platform/config/manager.js';
+import { Database } from 'bun:sqlite';
+import { loadSqliteVecExtension } from '../sdk/src/platform/state/sqlite-vec-loader.js';
 
 const roots: string[] = [];
 
@@ -228,7 +230,7 @@ describe('CodeIndexStore: never silently drops a non-empty file', () => {
 });
 
 describe('CodeIndexStore: chunk shape', () => {
-  test('chunk_id is a deterministic function of path + lines + content hash', async () => {
+  test('chunk_id names the exact source revision and chunk location', async () => {
     const root = makeRoot();
     writeFileSync(join(root, 'a.ts'), TS_FIXTURE);
     const { registry } = makeCountingRegistry(root);
@@ -240,7 +242,46 @@ describe('CodeIndexStore: chunk shape', () => {
     expect(fooChunk).toBeDefined();
     expect(fooChunk.path).toBe('a.ts');
     expect(fooChunk.startLine).toBe(1);
-    expect(fooChunk.chunkId).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.parse(fooChunk.chunkId)).toEqual([fooChunk.path, fooChunk.fileRevision, fooChunk.lang, fooChunk.kind, fooChunk.symbol, fooChunk.startLine, fooChunk.endLine]);
+    expect(fooChunk).not.toHaveProperty('contentHash');
+  });
+
+  test('upgrades stored chunk metadata without losing vector associations or embedding unchanged files again', async () => {
+    const root = makeRoot(), path = join(root, '.goodvibes', 'code-index.sqlite');
+    writeFileSync(join(root, 'a.ts'), TS_FIXTURE);
+    const { registry, callCount } = makeCountingRegistry(root);
+    const initial = new CodeIndexStore(root, path, registry);
+    await initial.init();
+    await initial.buildFull();
+    const before = (await initial.search('foo')).map(result => result.chunk.chunkId).sort();
+    initial.close();
+    // Recreate the supported version-1 metadata layout on a real populated
+    // index. The persisted vectors and their native row IDs stay in place.
+    const previous = new Database(path);
+    await loadSqliteVecExtension(previous);
+    try {
+      previous.run('ALTER TABLE code_chunks RENAME COLUMN file_revision TO file_hash');
+      previous.run("ALTER TABLE code_chunks ADD COLUMN content_hash TEXT NOT NULL DEFAULT 'old-chunk-digest'");
+      previous.run('PRAGMA user_version = 1');
+    } finally { previous.close(); }
+    const reopened = new CodeIndexStore(root, path, registry);
+    try {
+      await reopened.init();
+      expect(reopened.stats().available).toBe(true);
+      const calls = callCount();
+      const build = await reopened.buildFull();
+      expect(build.filesUnchanged).toBe(1);
+      expect(callCount()).toBe(calls);
+      expect((await reopened.search('foo')).map(result => result.chunk.chunkId).sort()).toEqual(before);
+    } finally { reopened.close(); }
+    const upgraded = new Database(path);
+    try {
+      const columns = upgraded.query<{ name: string }, []>('PRAGMA table_info(code_chunks)').all().map(column => column.name);
+      expect(columns).toContain('file_revision');
+      expect(columns).not.toContain('content_hash');
+      expect(columns).not.toContain('file_hash');
+      expect(upgraded.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(2);
+    } finally { upgraded.close(); }
   });
 });
 

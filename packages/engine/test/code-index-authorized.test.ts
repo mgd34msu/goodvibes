@@ -37,6 +37,19 @@ function setup() {
 }
 
 describe('receipt-authorized code index', () => {
+  test('source labels belong to a per-run index and remain stable throughout that run', async () => {
+    const first = setup(), second = setup();
+    await first.store.prepareAuthorizedSnapshots(first.input);
+    await second.store.prepareAuthorizedSnapshots(second.input);
+    const original = (await first.store.searchAuthorized('captured'))[0]?.chunk;
+    const again = (await first.store.searchAuthorized('captured'))[0]?.chunk;
+    const other = (await second.store.searchAuthorized('captured'))[0]?.chunk;
+    expect(original).toBeDefined();
+    expect(again?.chunkId).toBe(original?.chunkId);
+    expect(other?.chunkId).not.toBe(original?.chunkId);
+    expect(original?.fileRevision).toStartWith('authorized-code-');
+    expect(original).not.toHaveProperty('contentHash');
+  });
   test('uses snapshots without reading nonexistent source, prepares stats, and queries async semantic provider', async () => {
     const { store, calls, input, phases } = setup();
     await store.prepareAuthorizedSnapshots(input);

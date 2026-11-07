@@ -611,7 +611,7 @@ test('captured same-line generations refresh without reranking memory and old at
       finishTurn: () => { active = false; }, dispose: () => { disposed = true; },
       rankForInjection: async (_query, hits) => ({ ranked: hits.map(hit => ({ hit, probability: 0.99 })), assertCurrent: async () => {} }),
       stats: () => ({ available: true, indexedChunks: 1, semanticRetrievalAvailable: true }),
-      search: async () => [{ chunk: { chunkId: String(generation), path: 'same.ts', lang: 'typescript', symbol: `symbolGeneration${generation}`, kind: 'function', startLine: 1, endLine: 3, contentHash: String(generation), fileHash: String(generation), mtimeMs: generation }, distance: 0, similarity: 1, label: 'semantic' }],
+      search: async () => [{ chunk: { chunkId: String(generation), path: 'same.ts', lang: 'typescript', symbol: `symbolGeneration${generation}`, kind: 'function', startLine: 1, endLine: 3, fileRevision: String(generation), mtimeMs: generation }, distance: 0, similarity: 1, label: 'semantic' }],
     };
     await runAgentTask({ ...base, codeIndex, beforeProviderRequest: async () => {} }, record);
     expect(record.status).toBe('completed'); expect(generation).toBe(2); expect(disposed).toBe(true);
@@ -679,7 +679,7 @@ test('disabling the global passive flag after a captured turn cannot reuse relea
       prepare: async () => { prepares++; active = true; }, generation: () => active ? 'generation-1' : undefined, finishTurn: () => { active = false; },
       rankForInjection: async (_query, hits) => ({ ranked: hits.map(hit => ({ hit, probability: 0.99 })), assertCurrent: async () => {} }),
       stats: () => ({ available: true, indexedChunks: 1, semanticRetrievalAvailable: true }),
-      search: async () => [{ chunk: { chunkId: 'a', path: 'old.ts', lang: 'typescript', symbol: 'oldSymbol', kind: 'function', startLine: 1, endLine: 3, contentHash: 'old', fileHash: 'old', mtimeMs: 1 }, distance: 0, similarity: 1, label: 'semantic' }],
+      search: async () => [{ chunk: { chunkId: 'a', path: 'old.ts', lang: 'typescript', symbol: 'oldSymbol', kind: 'function', startLine: 1, endLine: 3, fileRevision: 'old', mtimeMs: 1 }, distance: 0, similarity: 1, label: 'semantic' }],
     } }, record);
     expect(record.status).toBe('completed'); expect(prepares).toBe(1);
     expect(prompts[0]).toContain('oldSymbol'); expect(prompts[1]).not.toContain('oldSymbol'); expect(prompts[1]).not.toContain('## Injected Code Context');

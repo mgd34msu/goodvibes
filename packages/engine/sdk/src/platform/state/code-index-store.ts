@@ -55,6 +55,7 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  * in-flight build.
  */
 import { dirname, join, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { createRequire } from 'node:module';
@@ -68,7 +69,6 @@ import { MEMORY_VECTOR_DIMS } from './memory-vector-store.js';
 import { CodeIntelligence } from '../intelligence/facade.js';
 import {
   chunkFileContent,
-  sha256,
   type CodeChunk,
   type CodeChunkMode,
 } from './code-index-chunking.js';
@@ -77,13 +77,14 @@ import {
   EMBEDDING_PROVIDER_META_KEY,
   CODE_INDEX_SCHEMA_VERSION,
   createCodeIndexSchema,
+  migrateCodeIndexSchema,
   countChunksForPath,
   countIndexedChunks,
   countIndexedFiles,
   deleteChunksForPath,
   getChunkById,
   getCodeIndexMeta,
-  getFileHash,
+  getFileRevision,
   listIndexedPaths,
   rowToChunk,
   setCodeIndexMeta,
@@ -233,7 +234,7 @@ export class CodeIndexStore {
         dbPath: this.dbPath,
         db: this.db,
         targetVersion: CODE_INDEX_SCHEMA_VERSION,
-        migrations: [{ toVersion: CODE_INDEX_SCHEMA_VERSION, migrate: () => createCodeIndexSchema(this.db!) }],
+        migrations: [{ toVersion: CODE_INDEX_SCHEMA_VERSION, migrate: () => migrateCodeIndexSchema(this.db!) }],
         closeDb: () => {
           this.db?.close();
           this.db = null;
@@ -737,9 +738,8 @@ export class CodeIndexStore {
   }
 
   /**
-   * Index one file's content. Short-circuits on an unchanged file_hash (no
-   * re-chunk, no re-embed), the "content_hash stable across re-index of
-   * unchanged file" contract, unless forceReembed is set (provider mismatch).
+   * Index one file's content. Short-circuits on an unchanged file revision (no re-chunk or re-embed),
+   * unless forceReembed is set because the embedding provider changed.
    *
    * Epoch honesty: all of a file's chunks are embedded (every await) BEFORE
    * any row is deleted or written, and the epoch is re-checked after each
@@ -755,10 +755,13 @@ export class CodeIndexStore {
     forceReembed: boolean,
   ): Promise<{ indexed: boolean; mode: CodeChunkMode; chunkCount: number } | null> {
     if (!this.db) return null;
-    const fileHash = sha256(content);
+    // One persisted cache commitment per file, not per chunk. This recognizes
+    // the exact source across restarts without storing a second copy of code
+    // merely to avoid repeating every embedding request for an unchanged file.
+    const fileRevision = createHash('sha256').update(content).digest('hex');
     if (!forceReembed) {
-      const existingHash = getFileHash(this.db, relPath);
-      if (existingHash === fileHash) {
+      const existingHash = getFileRevision(this.db, relPath);
+      if (existingHash === fileRevision) {
         return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(this.db, relPath) };
       }
     }
@@ -770,7 +773,7 @@ export class CodeIndexStore {
       absPath,
       relPath,
       content,
-      fileHash,
+      fileRevision,
       mtimeMs,
       windowLines: this.options.windowLines,
       windowOverlapLines: this.options.windowOverlapLines,

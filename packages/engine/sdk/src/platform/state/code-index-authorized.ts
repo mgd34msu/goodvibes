@@ -1,6 +1,6 @@
 /** Receipt-authorized snapshots only: no filesystem discovery, reads, or lexical fallback. */
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
-import { chunkFileContent, sha256, type ChunkingIntelligence } from './code-index-chunking.js';
+import { chunkFileContent, type ChunkingIntelligence } from './code-index-chunking.js';
 import { countIndexedChunks, countIndexedFiles, getChunkById, writeChunk, type VectorRow } from './code-index-db.js';
 import {
   HASHED_MEMORY_EMBEDDING_PROVIDER, type MemoryEmbeddingProvider,
@@ -17,6 +17,8 @@ export interface AuthorizedCodeSnapshot {
 }
 export interface AuthorizedCodePrepareInput {
   readonly snapshots: readonly AuthorizedCodeSnapshot[];
+  /** Native per-run source owner label, not a content digest or permission. */
+  readonly sourceRevision?: string;
   /** Exact object obtained from this store's registry, not an equivalent provider ID. */
   readonly provider: MemoryEmbeddingProvider;
   readonly signal: AbortSignal;
@@ -37,6 +39,7 @@ export interface AuthorizedCodeIndex {
 }
 
 /** Internal implementation; the public entry is the one-shot CodeIndexStore method. */
+let sourceSequence = 0;
 export async function prepareAuthorizedCodeSnapshots(
   input: AuthorizedCodePrepareInput,
   registry: MemoryEmbeddingProviderRegistry,
@@ -45,6 +48,9 @@ export async function prepareAuthorizedCodeSnapshots(
   checkLifecycle: () => void,
 ): Promise<AuthorizedCodeIndex> {
   const { provider, signal, guard, loadSnapshot } = input;
+  if (!Number.isSafeInteger(++sourceSequence)) throw new Error('Authorized code source identity exhausted');
+  const sourceRevision = input.sourceRevision ?? `authorized-code-${sourceSequence}`;
+  if (!sourceRevision || sourceRevision.length > 256) throw new Error('Authorized code source identity is invalid');
   const embed = provider.embed;
   const embedSync = provider.embedSync;
   const check = async (boundary: AuthorizedIndexBoundary, path?: string): Promise<void> => {
@@ -99,7 +105,9 @@ export async function prepareAuthorizedCodeSnapshots(
     await check('chunk', snapshot.path);
     const { drafts } = await chunkFileContent({
       intelligence, absPath: snapshot.path, relPath: snapshot.path,
-      content: snapshot.content, fileHash: sha256(snapshot.content), mtimeMs: snapshot.mtimeMs,
+      // The receipt owner guards exact source bytes; this per-run database is
+      // new and never needs a content commitment for cross-run cache lookup.
+      content: snapshot.content, fileRevision: sourceRevision, mtimeMs: snapshot.mtimeMs,
     });
     await check('chunk', snapshot.path);
     if (chunkCount + drafts.length > maxChunks) {

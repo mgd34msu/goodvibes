@@ -2,7 +2,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, type Stats } from 'node:fs';
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
-import { sha256 } from './code-index-chunking.js';
+import { createHash } from 'node:crypto';
 import { rankCodeInjectionSnapshots, type CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
 import type { CodeContextResult } from './code-index-types.js';
 
@@ -15,6 +15,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   const identity = (stat: Stats) => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
   const directories = new Map<string, string>([[sourceRoot, identity(lstatSync(sourceRoot))]]);
   const files = new Map<string, string>();
+  const observed = new Map<string, { readonly revision: string; readonly code: string }>();
   const check = (): void => { signal.throwIfAborted(); assertSource(); if (realpathSync(root) !== sourceRoot) throw new Error('Code injection root is stale');
     for (const [path, expected] of directories) if (identity(lstatSync(path)) !== expected) throw new Error('Code injection directory is stale'); };
   const authorize = async (path: string): Promise<void> => {
@@ -43,7 +44,15 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       if (offset !== Number(before.size) || byteIdentity(fstatSync(fd, { bigint: true })) !== byteIdentity(before)
         || byteIdentity(lstatSync(path, { bigint: true })) !== byteIdentity(before)) throw new Error('Code injection source is stale');
       const code = buffer.subarray(0, offset).toString('utf8');
-      if (sha256(code) !== hit.chunk.fileHash) throw new Error('Code injection source is stale');
+      const previous = observed.get(path);
+      if (previous) {
+        if (hit.chunk.fileRevision !== previous.revision || code !== previous.code) throw new Error('Code injection source is stale');
+        return previous.code;
+      }
+      // Validate the persisted vector cache's file commitment once per file.
+      // Later awaits compare exact private original text, without hashing again.
+      if (createHash('sha256').update(code).digest('hex') !== hit.chunk.fileRevision) throw new Error('Code injection source is stale');
+      observed.set(path, { revision: hit.chunk.fileRevision, code });
       return code;
     } finally { closeSync(fd); }
   };

@@ -6,7 +6,7 @@
  * code-index-store.ts to keep that file within the 800-line source discipline).
  *
  * Three tables:
- *  - `code_chunks`    chunk metadata (path/lang/symbol/kind/lines/hashes)
+ *  - `code_chunks`    chunk metadata (path/lang/symbol/kind/lines/source revision)
  *  - `code_vectors`   vec0 virtual table keyed by rowid
  *  - `code_index_meta` key/value build provenance, currently the embedding
  *    provider id the index was last fully built with, so search() can refuse
@@ -30,9 +30,8 @@ export type ChunkRow = {
   kind: string;
   start_line: number;
   end_line: number;
-  content_hash: string;
   mtime: number;
-  file_hash: string;
+  file_revision: string;
 };
 
 export type VectorRow = {
@@ -45,10 +44,10 @@ export type VectorRow = {
 export const EMBEDDING_PROVIDER_META_KEY = 'embedding_provider_id';
 
 export const CHUNK_ROW_COLUMNS =
-  'rowid, chunk_id, path, lang, symbol, kind, start_line, end_line, content_hash, mtime, file_hash';
+  'rowid, chunk_id, path, lang, symbol, kind, start_line, end_line, mtime, file_revision';
 
 /** Target `PRAGMA user_version` for the code index store. */
-export const CODE_INDEX_SCHEMA_VERSION = 1;
+export const CODE_INDEX_SCHEMA_VERSION = 2;
 
 export function createCodeIndexSchema(db: Database): void {
   db.run(`
@@ -61,9 +60,8 @@ export function createCodeIndexSchema(db: Database): void {
       kind         TEXT NOT NULL DEFAULT '',
       start_line   INTEGER NOT NULL,
       end_line     INTEGER NOT NULL,
-      content_hash TEXT NOT NULL,
       mtime        INTEGER NOT NULL,
-      file_hash    TEXT NOT NULL
+      file_revision TEXT NOT NULL
     )
   `);
   db.run('CREATE INDEX IF NOT EXISTS code_chunks_path_idx ON code_chunks(path)');
@@ -79,6 +77,16 @@ export function createCodeIndexSchema(db: Database): void {
       value TEXT NOT NULL
     )
   `);
+}
+
+/** Remove redundant chunk digests while retaining existing chunk IDs and
+ * vector row associations. Unchanged files do not need to be re-embedded.
+ */
+export function migrateCodeIndexSchema(db: Database): void {
+  createCodeIndexSchema(db);
+  const columns = db.query<{ name: string }, []>('PRAGMA table_info(code_chunks)').all();
+  if (columns.some(column => column.name === 'content_hash')) db.run('ALTER TABLE code_chunks DROP COLUMN content_hash');
+  if (columns.some(column => column.name === 'file_hash')) db.run('ALTER TABLE code_chunks RENAME COLUMN file_hash TO file_revision');
 }
 
 export function getCodeIndexMeta(db: Database, key: string): string | null {
@@ -97,8 +105,8 @@ export function setCodeIndexMeta(db: Database, key: string, value: string): void
 function ensureChunkRowId(db: Database, chunk: CodeChunk): number {
   db.query(
     `INSERT OR IGNORE INTO code_chunks
-       (chunk_id, path, lang, symbol, kind, start_line, end_line, content_hash, mtime, file_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (chunk_id, path, lang, symbol, kind, start_line, end_line, mtime, file_revision)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     chunk.chunkId,
     chunk.path,
@@ -107,9 +115,8 @@ function ensureChunkRowId(db: Database, chunk: CodeChunk): number {
     chunk.kind,
     chunk.startLine,
     chunk.endLine,
-    chunk.contentHash,
     chunk.mtimeMs,
-    chunk.fileHash,
+    chunk.fileRevision,
   );
   const row = db.query<{ rowid: number }, [string]>(
     'SELECT rowid FROM code_chunks WHERE chunk_id = ? LIMIT 1',
@@ -138,11 +145,11 @@ export function deleteChunksForPath(db: Database, relPath: string): void {
   db.query('DELETE FROM code_chunks WHERE path = ?').run(relPath);
 }
 
-export function getFileHash(db: Database, relPath: string): string | null {
-  const row = db.query<{ file_hash: string }, [string]>(
-    'SELECT file_hash FROM code_chunks WHERE path = ? LIMIT 1',
+export function getFileRevision(db: Database, relPath: string): string | null {
+  const row = db.query<{ file_revision: string }, [string]>(
+    'SELECT file_revision FROM code_chunks WHERE path = ? LIMIT 1',
   ).get(relPath);
-  return row?.file_hash ?? null;
+  return row?.file_revision ?? null;
 }
 
 export function getChunkById(db: Database, chunkId: string): CodeChunk | null {
@@ -187,8 +194,7 @@ export function rowToChunk(row: ChunkRow): CodeChunk {
     kind: row.kind,
     startLine: Number(row.start_line),
     endLine: Number(row.end_line),
-    contentHash: row.content_hash,
     mtimeMs: Number(row.mtime),
-    fileHash: row.file_hash,
+    fileRevision: row.file_revision,
   };
 }

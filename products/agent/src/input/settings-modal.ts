@@ -865,6 +865,7 @@ export class SettingsModal extends TerminalSettingsModalState<
           if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
           this.lastSettingEffectMessage = 'Execution mode updated.';
           this._refreshAllEntries();
+          this.requestHostSettingRender?.();
         },
         (error) => {
           if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;

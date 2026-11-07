@@ -16,6 +16,8 @@
   and max, and retain stored effort preferences across model switches.
 - Route recoverable configuration diagnostics through the terminal output guard
   and remove duplicate effort-remap messages after model changes.
+- Reject repeated claims of live autonomous action receipts and retain the
+  decision and claim in the append-only audit history.
 
 ## [3.1.1] - 2026-11-07
 

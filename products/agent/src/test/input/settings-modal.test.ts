@@ -1,4 +1,6 @@
 import { handleSettingsModalToken } from '../../input/handler-modal-routes.ts';
+import { bindActiveExecutionMode } from '../../permissions/execution-mode.ts';
+import type { GatePresetName } from '@goodvibes-jev/engine/sdk/platform/gate';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { installAgentDaemonCredentialsClient } from '../../config/daemon-credential-routing.ts';
 import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
@@ -890,6 +892,36 @@ describe('SettingsModal', () => {
 
     modal.activateSelected();
     expect(subscriptionManager.get('openai')).toBeNull();
+  });
+
+  test('the permission picker updates the hosted owner and repaints its confirmed mode', async () => {
+    cm.set('permissions.mode', 'safe-owner');
+    let actualMode: GatePresetName = 'safe-jev';
+    let renders = 0;
+    const requestRender = () => { renders++; };
+    const unbind = bindActiveExecutionMode(cm, { hostedSessionId: () => 'hosted-settings', executionMode: () => actualMode,
+      setExecutionMode: async mode => { actualMode = mode; } });
+    try {
+      modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry, undefined, { requestRender });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      modal.selectTarget('permissions.mode');
+      const context = { platform: { configManager: cm }, renderRequest: requestRender, print() {},
+        openSelection: ((_title, items, _options, callback) => {
+          const item = items.find(candidate => candidate.id === 'yolo');
+          if (!item) throw new Error('Permission picker omitted YOLO');
+          callback({ item, action: 'select' });
+        }) as NonNullable<CommandContext['openSelection']>,
+      } as unknown as CommandContext;
+      handleSettingsModalToken({ settingsModal: modal, commandContext: context, requestRender, handleEscape() {} },
+        { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false });
+      const afterKey = renders;
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(actualMode).toBe('yolo');
+      expect(cm.get('permissions.mode')).toBe('safe-owner');
+      expect(modal.getSelected()?.currentValue).toBe('yolo');
+      expect(modal.lastSettingEffectMessage).toBe('Execution mode updated.');
+      expect(renders).toBeGreaterThan(afterKey);
+    } finally { modal.close(); unbind(); }
   });
 
   test('mcp trust mode requires explicit allow-all confirmation', () => {

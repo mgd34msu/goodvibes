@@ -31,7 +31,7 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * turn to the unit and is held and nudged exactly as a sub-agent is); no
  * engine runs and no sub-agent is spawned.
  */
-import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyHash, durablePayloadRevision, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
+import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -617,7 +617,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // Never mint another binding if a compatibility checkpoint proves the receipt went missing.
       for (const storedId of deps.store.listStoredIds()) {
         const stored = deps.store.load(storedId);
-        if (stored?.durableAdmission !== undefined && durableKeyHash(stored.durableAdmission.key) === durableKeyHash(frozen.key)) {
+        if (stored?.durableAdmission !== undefined && durableKeyIdentity(stored.durableAdmission.key) === durableKeyIdentity(frozen.key)) {
           throw new DurableContractAdmissionError('checkpoint');
         }
       }

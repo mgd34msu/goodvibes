@@ -2,7 +2,7 @@ import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
 import { nativeSettlementDigest, nativeWorkAttestationSchema, nativeWorkSettlementSchema, type NativeWorkSettlementReceipt } from '../workflow/work-ledger/native-settlement-types.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
-import { durableKeyHash, durablePayloadRevision, type DurableContractKey } from '../contract/durable-admission.js';
+import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, type DurableContractKey } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
@@ -156,10 +156,10 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
       const next = result.next === null ? null : parseNativeWorkExecutionRecord(result.next);
       const nextIntent = result.nextIntent == null ? null : parseNativeWorkExecutionIntent(result.nextIntent);
       for (const item of [next, nextIntent]) {
-        if (item && (item.projectId !== projectId || item.target.attemptId !== lookup.attemptId || ('workId' in lookup && durableKeyHash(item.request.key) !== durableKeyHash(lookup)))) throw new NativeWorkExecutionError('invalid');
+        if (item && (item.projectId !== projectId || item.target.attemptId !== lookup.attemptId || ('workId' in lookup && durableKeyIdentity(item.request.key) !== durableKeyIdentity(lookup)))) throw new NativeWorkExecutionError('invalid');
       }
       const bound = readRecord(db, projectId, { attemptId: lookup.attemptId });
-      if (next && bound && durableKeyHash(bound.request.key) !== durableKeyHash(next.request.key)) throw new NativeWorkExecutionError('conflict');
+      if (next && bound && durableKeyIdentity(bound.request.key) !== durableKeyIdentity(next.request.key)) throw new NativeWorkExecutionError('conflict');
       if (nextIntent && bound && !current.intent) throw new NativeWorkExecutionError('conflict');
       if (nextIntent) validateIntentTransition(current, nextIntent);
       if (nextIntent?.state === 'associated' && current.intent?.state === 'admitting') assertCurrentTarget(current, nextIntent);

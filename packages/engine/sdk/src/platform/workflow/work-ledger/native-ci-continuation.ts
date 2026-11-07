@@ -6,7 +6,7 @@ import type { ExternalOperationSource } from '../../permissions/external-request
 import { captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { bindNativeCiWatchOwner } from '../../ci-watch/native-owner.js';
 import type { CiWatchSubscription, FixSessionBrief } from '../../ci-watch/types.js';
-import { durablePayloadRevision, durableKeyHash, type DurableStartedContract } from '../../contract/durable-admission.js';
+import { durablePayloadRevision, durableKeyIdentity, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { nativeContractSourceForAdmission } from '../../contract/native-source.js';
 import type { ContractView } from '../../contract/types.js';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativeWorkExecutionHost } from './native-execution.js';
@@ -210,7 +210,7 @@ export function createNativeCiContinuationHost(deps: {
         if (current.record && nativeCiDigest(current.record.issue) !== nativeCiDigest(issue)) throw new Error('Native CI issuance changed');
         return { next: current.record ? null : record, value: undefined };
       }, () => { owner.assertCurrent(); if (policy.current() !== issue.policyRevision) throw new Error('Native CI policy changed during issuance'); });
-      const key = durableKeyHash(issue.originalKey); const set = pending.get(key) ?? new Set<Promise<unknown>>(); set.add(ready); pending.set(key, set);
+      const key = durableKeyIdentity(issue.originalKey); const set = pending.get(key) ?? new Set<Promise<unknown>>(); set.add(ready); pending.set(key, set);
       void ready.finally(() => { set.delete(ready); if (!set.size) pending.delete(key); }).catch(() => {});
       return operation(record, ready);
     },
@@ -236,8 +236,8 @@ export function createNativeCiContinuationHost(deps: {
         next: latest.record && latest.record.state !== 'cancelled' ? { ...latest.record, state: 'cancelled' } : null, value: undefined,
       }), () => { deps.signal.throwIfAborted(); });
     },
-    async beforeSettlement(key: Parameters<typeof durableKeyHash>[0]): Promise<void> {
-      for (;;) { const promises = pending.get(durableKeyHash(key)); if (!promises?.size) return; await Promise.allSettled([...promises]); }
+    async beforeSettlement(key: Parameters<typeof durableKeyIdentity>[0]): Promise<void> {
+      for (;;) { const promises = pending.get(durableKeyIdentity(key)); if (!promises?.size) return; await Promise.allSettled([...promises]); }
     },
     close() { closed = true; unsubscribe?.(); for (const item of controllers.values()) item.abort(); },
   };

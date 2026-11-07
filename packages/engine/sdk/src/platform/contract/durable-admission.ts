@@ -104,6 +104,15 @@ export function durableKeyHash(key: DurableContractKey): string {
   return createHash('sha256').update(canonical(key)).digest('hex');
 }
 
+/** Exact, bounded native IDs for private maps and key comparisons. No prompt,
+ * credential, or serialized request belongs in this bookkeeping identity.
+ * Persisted filename/SQLite digest migration is a separate storage operation.
+ */
+export function durableKeyIdentity(key: DurableContractKey): string {
+  if (!references(key, KEY_FIELDS)) throw new DurableContractAdmissionError('invalid');
+  return JSON.stringify([key.workId, key.criteriaId, key.criteriaRevision, key.attemptId]);
+}
+
 export function freezeDurableRequest(value: DurableContractRequest): DurableContractRequest {
   // Clone before the first await: caller mutation cannot change the operation being admitted.
   let detached: unknown;
@@ -217,7 +226,7 @@ export class DurableContractAdmissions {
       const value: unknown = JSON.parse(readFileSync(path, 'utf-8'));
       if (!record(value) || Object.keys(value).length !== 2 || typeof value['checkpoint'] !== 'string') throw new Error();
       const admission = parseDurableAdmission(value['admission']);
-      if (durableKeyHash(admission.key) !== durableKeyHash(key)) throw new Error();
+      if (durableKeyIdentity(admission.key) !== durableKeyIdentity(key)) throw new Error();
       return { admission, checkpoint: value['checkpoint'] };
     } catch { throw new DurableContractAdmissionError('invalid'); }
   }

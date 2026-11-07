@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { criteriaSetIdForWork, durableKeyHash, durablePayloadRevision, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
+import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import type { ContractIntegrationInspection } from '../../contract/integration-inspection-wire.js';
@@ -89,7 +89,7 @@ function captureTarget(value: NativeWorkExecutionTarget): NativeWorkExecutionTar
     || ![target.workRevision, target.criteriaRevision, target.attemptRevision].every(revision => Number.isSafeInteger(revision) && revision >= 0)) throw new NativeWorkExecutionError('invalid');
   return target;
 }
-function captureKey(value: DurableContractKey): DurableContractKey { const key = Object.freeze({ ...value }); durableKeyHash(key); return key; }
+function captureKey(value: DurableContractKey): DurableContractKey { const key = Object.freeze({ ...value }); durableKeyIdentity(key); return key; }
 function targetKey(target: NativeWorkExecutionTarget): DurableContractKey {
   return { workId: target.workId, criteriaId: criteriaSetIdForWork(target.workId), criteriaRevision: String(target.criteriaRevision), attemptId: target.attemptId };
 }
@@ -135,8 +135,8 @@ export function createNativeWorkExecutionHost(deps: {
     const attempt = current.ledger.attempts.find(item => item.id === execution.target.attemptId && item.workId === execution.target.workId);
     const currentTarget = work && attempt ? { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision } : null;
     const recovery = execution.state === 'cancelled' ? 'cancelled' : contract && isTerminalContractStatus(contract.status) ? 'terminal'
-      : execution.state === 'launch-claimed' && !active.get(durableKeyHash(execution.request.key))?.claimed ? 'required' : 'available';
-    const key = durableKeyHash(execution.request.key);
+      : execution.state === 'launch-claimed' && !active.get(durableKeyIdentity(execution.request.key))?.claimed ? 'required' : 'available';
+    const key = durableKeyIdentity(execution.request.key);
     const settlement: NativeWorkExecutionStatus['settlement'] = current.settlement ? { state: 'published', evidenceId: current.settlement.evidenceId, reportSequence: current.settlement.reportSequence, evidenceSequence: current.settlement.evidenceSequence }
       : settlements.has(key) ? { state: 'pending' } : settlementFailures.has(key) ? { state: 'failed' } : { state: 'required' };
     const currentAttempt = !!work && !!attempt && work.currentAttemptId === attempt.id && attempt.state === 'active';
@@ -182,13 +182,13 @@ export function createNativeWorkExecutionHost(deps: {
       || work.goal !== record.request.input.nativeSource?.goal || JSON.stringify(work.criteria) !== JSON.stringify(record.request.input.nativeSource.criteria)) throw new NativeWorkExecutionError('stale');
   }
   function claimOwner(record: NativeWorkExecutionRecord, authority: NativePairedExecutionAuthority): ActiveOwner {
-    const { current, currentScope } = inspectAuthority(record, authority); const key = durableKeyHash(record.request.key);
+    const { current, currentScope } = inspectAuthority(record, authority); const key = durableKeyIdentity(record.request.key);
     const prior = active.get(key);
     if (prior) { inspectAuthority(record, prior.authority); return prior; }
     const owner = { authority, expected: current, scope: currentScope, claimed: false }; active.set(key, owner); return owner;
   }
   async function withCurrent(admission: DurableContractAdmission, launch: (assertCurrent: () => void) => void) {
-    const owner = active.get(durableKeyHash(admission.key));
+    const owner = active.get(durableKeyIdentity(admission.key));
     if (!owner) throw new NativeWorkExecutionError('recovery-required');
     await owner.authority.withCurrent(owner.expected, async assertAuthority => {
       await deps.scopes.withCurrentScope(owner.scope, async assertScope => {
@@ -295,7 +295,7 @@ export function createNativeWorkExecutionHost(deps: {
   }
   function ownedDelivery(target: NativeWorkExecutionTarget, authority: NativePairedExecutionAuthority, signal: AbortSignal | undefined,
     run: (delivery: Delivery, signal: AbortSignal) => Promise<DurableStartedContract>): Promise<DurableStartedContract> {
-    assertOpen(); const identity = paired(authority); const key = durableKeyHash(targetKey(target)); const prior = deliveries.get(key);
+    assertOpen(); const identity = paired(authority); const key = durableKeyIdentity(targetKey(target)); const prior = deliveries.get(key);
     if (prior) {
       if (!equalTarget(prior.target, target) || prior.identity.authorityId !== identity.authorityId || !equalScopes(prior.identity.scopes, identity.scopes)) return Promise.reject(new NativeWorkExecutionError('conflict'));
       return prior.promise;
@@ -317,7 +317,7 @@ export function createNativeWorkExecutionHost(deps: {
     void promise.then(release, release); return promise;
   }
   function settle(input: DurableContractKey, authority: NativePairedExecutionAuthority, options: { readonly signal?: AbortSignal } = {}): Promise<NativeWorkSettlementReceipt> {
-    assertOpen(); const key = captureKey(input); const identity = paired(authority); const id = durableKeyHash(key);
+    assertOpen(); const key = captureKey(input); const identity = paired(authority); const id = durableKeyIdentity(key);
     const current = deps.storage.current(key); const record = current.record;
     if (!record) return Promise.reject(new NativeWorkExecutionError('not-found'));
     const ownerFacts = inspectAuthority(record, authority);
@@ -426,7 +426,7 @@ export function createNativeWorkExecutionHost(deps: {
           requestFor(latest, suppliedTarget, current, currentScope);
         }
       };
-      assertCancellation(); validated = true; validatedKey = durableKeyHash(request.key);
+      assertCancellation(); validated = true; validatedKey = durableKeyIdentity(request.key);
       if (before.record?.receipt) contractIds.add(before.record.receipt.contractId);
       continuations.revokeSource(request, assertCancellation); privateRevocationCommitted = deps.continuationGrants !== undefined;
       await authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>
@@ -435,14 +435,14 @@ export function createNativeWorkExecutionHost(deps: {
           const existing = current.record ?? current.intent;
           if (existing) {
             if (existing.target.workId !== workId) throw new NativeWorkExecutionError('not-found');
-            inspectAuthority(existing, authority); validated = true; validatedKey = durableKeyHash(existing.request.key);
+            inspectAuthority(existing, authority); validated = true; validatedKey = durableKeyIdentity(existing.request.key);
             if (current.record?.receipt) contractIds.add(current.record.receipt.contractId);
             if (current.intent?.state === 'associated' && !current.record) throw new NativeWorkExecutionError('recovery-required');
             return { next: current.record && current.record.state !== 'cancelled' ? { ...current.record, state: 'cancelled' } : null,
               nextIntent: current.intent && current.intent.state !== 'cancelled' ? { ...current.intent, state: 'cancelled' } : null, value: undefined };
           }
           if (!suppliedTarget) throw new NativeWorkExecutionError('not-found');
-          const request = requestFor(current, suppliedTarget, expected, expectedScope); validated = true; validatedKey = durableKeyHash(request.key);
+          const request = requestFor(current, suppliedTarget, expected, expectedScope); validated = true; validatedKey = durableKeyIdentity(request.key);
           const intent = parseNativeWorkExecutionIntent({ version: 1, projectId: deps.projectId, target: suppliedTarget, authorityScopes: expected.scopes, request, generation: 1, state: 'cancelled' });
           return { next: null, nextIntent: intent, value: undefined };
         })));
@@ -476,7 +476,7 @@ export function createNativeWorkExecutionHost(deps: {
     execution: () => host,
     sourceOwner(contract) {
       const key = contract.durableAdmission?.key; if (!key) throw new NativeWorkExecutionError('invalid');
-      const owner = active.get(durableKeyHash(key)); const current = deps.storage.current(key);
+      const owner = active.get(durableKeyIdentity(key)); const current = deps.storage.current(key);
       if (!owner || !current.record || current.record.receipt?.contractId !== contract.id
         || durablePayloadRevision(current.record.request) !== contract.durableAdmission!.payloadRevision) throw new NativeWorkExecutionError('recovery-required');
       const record = current.record;
@@ -494,7 +494,7 @@ export function createNativeWorkExecutionHost(deps: {
     revokeCiWatch: watch => continuations.revokeWatch(watch),
     nativeOwner: { admission: { withCurrent }, decisions: { reserveCiContinuation: (contract, operation) => continuations.reserve(contract, operation), authorityOf(contract) {
       const key = contract.durableAdmission?.key; if (!key) throw new NativeWorkExecutionError('invalid');
-      const owner = active.get(durableKeyHash(key)); const current = deps.storage.current(key);
+      const owner = active.get(durableKeyIdentity(key)); const current = deps.storage.current(key);
       if (!owner || !current.record) throw new NativeWorkExecutionError('recovery-required');
       if (durablePayloadRevision(current.record.request) !== contract.durableAdmission?.payloadRevision
         || (current.record.receipt && current.record.receipt.contractId !== contract.id)) throw new NativeWorkExecutionError('conflict');
@@ -530,7 +530,7 @@ export function createNativeWorkExecutionHost(deps: {
       if (intent.state === 'associated') throw new NativeWorkExecutionError('recovery-required');
       const work = current.ledger.works.find(item => item.id === workId);
       const attempt = current.ledger.attempts.find(item => item.id === attemptId && item.workId === workId);
-      const delivery = deliveries.get(durableKeyHash(intent.request.key));
+      const delivery = deliveries.get(durableKeyIdentity(intent.request.key));
       return { kind: 'intent', intent, currentTarget: work && attempt ? { workId, attemptId, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptRevision: attempt.revision } : null,
         currentAttempt: !!work && !!attempt && work.currentAttemptId === attemptId && attempt.state === 'active',
         recovery: intent.state === 'cancelled' ? 'cancelled' : intent.state === 'admitting' && delivery?.generation === intent.generation ? 'pending' : 'required' };
@@ -540,7 +540,7 @@ export function createNativeWorkExecutionHost(deps: {
     resume(input, authority, options = {}) {
       const key = captureKey(input); const current = deps.storage.currentByAttempt(key.attemptId); const stored = current.record ?? current.intent;
       if (!stored) return Promise.reject(new NativeWorkExecutionError('not-found'));
-      if (durableKeyHash(stored.request.key) !== durableKeyHash(key)) return Promise.reject(new NativeWorkExecutionError('conflict'));
+      if (durableKeyIdentity(stored.request.key) !== durableKeyIdentity(key)) return Promise.reject(new NativeWorkExecutionError('conflict'));
       return ownedDelivery(stored.target, authority, options.signal, async (delivery, signal) => {
         const latest = deps.storage.currentByAttempt(key.attemptId);
         if (!latest.record) {
@@ -550,7 +550,7 @@ export function createNativeWorkExecutionHost(deps: {
         }
         const existing = latest.record; inspectAuthority(existing, authority);
         if (existing.state === 'cancelled') throw new NativeWorkExecutionError('stale');
-        if (existing.state === 'launch-claimed' && !active.get(durableKeyHash(key))?.claimed) throw new NativeWorkExecutionError('recovery-required');
+        if (existing.state === 'launch-claimed' && !active.get(durableKeyIdentity(key))?.claimed) throw new NativeWorkExecutionError('recovery-required');
         signal.throwIfAborted();
         if (existing.state === 'prepared') await decide(existing.target, authority, signal, true);
         claimOwner(existing, authority);
@@ -561,7 +561,7 @@ export function createNativeWorkExecutionHost(deps: {
     close() {
       if (closing) return closing; closed = true; continuations.close(); lifetime.abort();
       const contracts = runner?.list({ includeTerminal: false }) ?? [];
-      for (const contract of contracts) if (contract.durableAdmission && active.has(durableKeyHash(contract.durableAdmission.key))) runner?.cancel(contract.id, 'Native work host closed');
+      for (const contract of contracts) if (contract.durableAdmission && active.has(durableKeyIdentity(contract.durableAdmission.key))) runner?.cancel(contract.id, 'Native work host closed');
       closing = Promise.allSettled([...pending, ...contracts.map(contract => runner?.join(contract.id))]).then(() => { active.clear(); }); return closing;
     },
   };

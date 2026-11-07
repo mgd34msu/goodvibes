@@ -17,6 +17,22 @@ function fixture() {
   return { ...f, directory };
 }
 
+test('a row without a writer revision gets one stable owner revision and persists it on change', async () => {
+  const f = fixture(), original = await f.create();
+  const { mutationRevision: omitted, ...unversioned } = original;
+  expect(omitted).toBeTruthy();
+  writeFileSync(f.path, JSON.stringify({ version: 1, jobs: [unversioned] }));
+  const store = new AutomationJobStore(f.path);
+  const first = managedAutomationJob((await store.load()).jobs[0]);
+  expect(first.mutationRevision).toBeTruthy();
+  expect((await store.load()).jobs[0]?.mutationRevision).toBe(first.mutationRevision);
+  await store.save([{ ...first, name: 'New writer image' }]);
+  const persisted = managedAutomationJob((await new AutomationJobStore(f.path).load()).jobs[0]);
+  expect(persisted.name).toBe('New writer image');
+  expect(persisted.mutationRevision).not.toBe(first.mutationRevision);
+  expect((await new AutomationJobStore(f.path).load()).jobs[0]?.mutationRevision).toBe(persisted.mutationRevision);
+});
+
 test('actual private stage keeps the original job visible until durable publication', async () => {
   const f = fixture(), job = await f.create(), bytes = readFileSync(f.path);
   const original = PersistentStore.prototype.persist;

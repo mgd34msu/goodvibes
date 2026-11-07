@@ -79,6 +79,9 @@ export class AutomationJobStore {
     if (this.initialized && before !== this.identity) throw new AutomationJobMutationStaleError();
     const snapshot = validateSnapshot(await this.store.load());
     if (this.fileIdentity() !== before) throw new AutomationJobMutationStaleError();
+    // A store row without a writer revision gets one owned by this load. Keep
+    // it across reads of the same file image; the next write persists it.
+    snapshot.jobs = snapshot.jobs.map(job => job.mutationRevision ? job : ownedAutomationJob(job, this.committed.get(job.id)?.mutationRevision));
     if (!this.initialized) {
       this.committed = new Map(snapshot.jobs.map(job => [job.id, structuredClone(job)]));
       if (!this.requestedInitialized) this.requested = new Map(this.committed);

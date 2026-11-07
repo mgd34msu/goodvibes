@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -81,17 +81,13 @@ function sortBindings(bindings: Iterable<AutomationRouteBinding>): AutomationRou
 }
 
 function routeNaturalKey(input: Pick<UpsertRouteBindingInput, 'surfaceKind' | 'surfaceId' | 'externalId' | 'threadId' | 'channelId'>): string {
-  return [
+  return JSON.stringify([
     input.surfaceKind,
     input.surfaceId,
     input.externalId,
     input.threadId ?? '',
     input.channelId ?? '',
-  ].join('\u001f');
-}
-
-function deterministicRouteId(input: Pick<UpsertRouteBindingInput, 'surfaceKind' | 'surfaceId' | 'externalId' | 'threadId' | 'channelId'>): string {
-  return `route-${createHash('sha256').update(routeNaturalKey(input)).digest('hex').slice(0, 12)}`;
+  ]);
 }
 
 export class RouteBindingManager {
@@ -224,7 +220,7 @@ export class RouteBindingManager {
       ? this.bindings.get(input.id)
       : this.listBindings().find((entry) => routeNaturalKey(entry) === routeNaturalKey(input));
     const binding: AutomationRouteBinding = {
-      id: input.id ?? previous?.id ?? deterministicRouteId(input),
+      id: input.id ?? previous?.id ?? `route-${randomUUID()}`,
       kind: input.kind,
       surfaceKind: input.surfaceKind,
       surfaceId: input.surfaceId,

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
 import type { MutationPublication } from '../utils/file-mutation.js';
 
@@ -44,7 +44,8 @@ export class AutomationJobCommitIndeterminateError extends Error {
 }
 
 export function automationJobRevision(job: AutomationJob): string {
-  return job.mutationRevision ?? `legacy:${createHash('sha256').update(JSON.stringify(job)).digest('hex')}`;
+  if (!job.mutationRevision) throw new AutomationJobMutationStaleError();
+  return job.mutationRevision;
 }
 
 /** Internal writers share this map; each actual replacement advances only that job. */

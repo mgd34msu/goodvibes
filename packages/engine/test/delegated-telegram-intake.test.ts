@@ -290,7 +290,7 @@ test('edited Telegram update retires the prior exact original without capturing 
   expect(f.approvals.listApprovals()).toHaveLength(1);
 });
 
-test('remove/recreate of a deterministic route cannot inherit pending source authority', async () => {
+test('remove/recreate of the same natural route cannot inherit pending source authority', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
   const route = f.hostDeps.routes.listBindings()[0]!; await f.hostDeps.routes.removeBinding(route.id); await Bun.sleep(2);
   await f.hostDeps.routes.upsertBinding({ kind: route.kind, surfaceKind: route.surfaceKind, surfaceId: route.surfaceId, externalId: route.externalId, channelId: route.channelId, threadId: route.threadId });

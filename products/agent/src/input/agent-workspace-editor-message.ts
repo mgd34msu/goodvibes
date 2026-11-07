@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readEditorMessage, type EditorMessageReading } from '@goodvibes-jev/engine/sdk/platform/presentation/editor-message';
 import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
@@ -8,8 +7,7 @@ export type EditorMessageState =
   | { readonly status: 'classic'; readonly revision: number; readonly provenance: 'classic' }
   | { readonly status: 'read' | 'uncertain'; readonly revision: number; readonly reading: EditorMessageReading };
 
-interface ProtectedSpan { readonly length: number; readonly digest: string; }
-interface MessageOrigin { readonly messageHash: string; readonly spans: readonly ProtectedSpan[]; }
+interface MessageOrigin { readonly message: string; readonly spans: readonly string[]; }
 
 /**
  * Owned by the input state, never by paint. Identity and relevant context bind
@@ -28,29 +26,17 @@ export class WorkspaceEditorMessage {
   private origin: MessageOrigin | undefined;
   private readonly editorOrigins = new WeakMap<AgentWorkspaceLocalEditor, MessageOrigin>();
 
-  private fingerprint(value: string): string {
-    return createHash('sha256').update(value).digest('hex');
-  }
-
-  private contains(message: string, span: ProtectedSpan): boolean {
-    for (let start = 0; start + span.length <= message.length; start++) {
-      if (this.fingerprint(message.slice(start, start + span.length)) === span.digest) return true;
-    }
-    return false;
-  }
-
   private messageOrigin(editor: AgentWorkspaceLocalEditor): MessageOrigin {
-    const messageHash = this.fingerprint(editor.message);
     const retained = this.editorOrigins.get(editor);
-    if (retained?.messageHash === messageHash) return this.origin = retained;
-    if (this.origin?.messageHash === messageHash) {
+    if (retained?.message === editor.message) return this.origin = retained;
+    if (this.origin?.message === editor.message) {
       this.editorOrigins.set(editor, this.origin);
       return this.origin;
     }
     // A new message inherits only the proven origin spans it still contains.
     // A genuinely new safe message ends the previous privacy lineage. Closing
     // alone does not: a reopened/reworded current error must remain protected.
-    const spans = (this.origin?.spans ?? []).filter((span) => this.contains(editor.message, span));
+    const spans = (this.origin?.spans ?? []).filter(span => editor.message.includes(span));
     for (const field of editor.fields) {
       if (!field.redact) continue;
       const submittedValue = field.value.trim();
@@ -60,13 +46,10 @@ export class WorkspaceEditorMessage {
       // echoes them; an empty trimmed field must never match every message.
       for (const value of new Set([field.value, submittedValue])) {
         if (!value || !editor.message.includes(value)) continue;
-        const digest = this.fingerprint(value);
-        if (!spans.some((span) => span.length === value.length && span.digest === digest)) {
-          spans.push(Object.freeze({ length: value.length, digest }));
-        }
+        if (!spans.includes(value)) spans.push(value);
       }
     }
-    const origin = Object.freeze({ messageHash, spans: Object.freeze(spans) });
+    const origin = Object.freeze({ message: editor.message, spans: Object.freeze(spans) });
     this.editorOrigins.set(editor, origin);
     return this.origin = origin;
   }

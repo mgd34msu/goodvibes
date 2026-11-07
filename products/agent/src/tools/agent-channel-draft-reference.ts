@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -40,7 +39,7 @@ function readSource(path: string): FileSource {
   const contents = readFileSync(path, 'utf8');
   const after = lstatSync(path, { bigint: true });
   if (fingerprint(before) !== fingerprint(after)) throw new ToolInputProjectionError('stale');
-  return { contents, revision: `${fingerprint(after)}:${createHash('sha256').update(contents).digest('hex')}` };
+  return { contents, revision: fingerprint(after) };
 }
 
 /** A native store lookup binds the only rewritten field; no caller alias grants authority. */
@@ -89,7 +88,9 @@ export function createChannelDraftReferenceCapture(context?: CommandContext): No
       assertPayload: captureModelReadingSnapshotGuard(payload(selected)), source, released: false,
       assertCurrent() {
         assertOwner();
-        if (capture.released || readSource(path).revision !== capture.source.revision) throw new ToolInputProjectionError('stale');
+        if (capture.released) throw new ToolInputProjectionError('stale');
+        const current = readSource(path);
+        if (current.revision !== capture.source.revision || current.contents !== capture.source.contents) throw new ToolInputProjectionError('stale');
       },
     };
     capture.assertCurrent(); captures.set(token, capture);

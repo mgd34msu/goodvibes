@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -279,13 +278,13 @@ export async function importVibeFilesIntoMemory(
 
 /**
  * The persisted marker that makes the VIBE.md → memory import a strictly
- * ONE-TIME migration. Keyed by absolute file path → content hash, so importing the same
+ * ONE-TIME migration. Keyed by absolute file path → completed, so importing the same
  * VIBE.md twice is a no-op (re-import would create near-duplicate persona records), while
  * a NEW project's VIBE.md still migrates exactly once. Mirrors the sessions.spine-folded
  * marker precedent (bootstrap.ts), a small JSON sidecar, read before and written after.
  */
 interface VibeImportMarker {
-  readonly migrated: Record<string, string>;
+  readonly migrated: Record<string, true>;
 }
 
 function vibeImportMarkerPath(shellPaths: Pick<ShellPathService, 'resolveUserPath'>): string {
@@ -298,31 +297,28 @@ function readVibeImportMarker(path: string): VibeImportMarker {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
     const migrated = (parsed as { migrated?: unknown })?.migrated;
     if (migrated && typeof migrated === 'object' && !Array.isArray(migrated)) {
-      const out: Record<string, string> = {};
+      const out: Record<string, true> = Object.create(null) as Record<string, true>;
       for (const [key, value] of Object.entries(migrated as Record<string, unknown>)) {
-        if (typeof value === 'string') out[key] = value;
+        // Earlier markers stored a body digest after the same successful import.
+        if (value === true || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))) out[key] = true;
       }
       return { migrated: out };
     }
   } catch {
-    // Corrupt marker → treat as "nothing migrated"; the path+hash guard still prevents
-    // duplicating any record that was already imported in a prior clean run.
+    // An unreadable marker establishes no completed import. The file is
+    // still subject to ordinary source/currentness checks before any write.
   }
   return { migrated: {} };
 }
 
 function writeVibeImportMarker(path: string, marker: VibeImportMarker): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(marker, null, 2)}\n`, 'utf-8');
-}
-
-function hashVibeBody(body: string): string {
-  return createHash('sha256').update(body, 'utf-8').digest('hex');
+  atomicWriteFileSync(path, `${JSON.stringify(marker, null, 2)}\n`);
 }
 
 /**
  * Fold discovered VIBE.md files into persona/constraint records ONCE.
- * Guarded by a persisted path→hash marker so it never re-imports the same file (which
+ * Guarded by a persisted completion marker so boot never re-imports the same file (which
  * would create near-duplicate persona records). Called at boot AFTER memoryStore.init().
  * Returns the number of records created this run (0 when everything is already migrated).
  */
@@ -338,8 +334,9 @@ export async function importVibeFilesIntoMemoryOnce(
     let changed = false;
     for (const file of snapshot.files) {
       const key = resolve(file.path);
-      const hash = hashVibeBody(file.body);
-      if (marker.migrated[key] === hash) continue; // already migrated this exact content
+      // This is a one-time boot import, not an automatic synchronization job.
+      // Later edits require the explicit import route, avoiding duplicate records.
+      if (Object.hasOwn(marker.migrated, key)) continue;
       const current = captureVibeImport(file, memorySpine);
       current();
       const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
@@ -355,7 +352,7 @@ export async function importVibeFilesIntoMemoryOnce(
         created += 1;
         current();
       }
-      marker.migrated[key] = hash;
+      marker.migrated[key] = true;
       changed = true;
     }
     if (changed) writeVibeImportMarker(markerPath, marker);

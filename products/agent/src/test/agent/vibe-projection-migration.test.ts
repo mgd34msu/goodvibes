@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
@@ -83,15 +83,22 @@ describe('VIBE.md persona migration', () => {
     expect(lineRequests.filter(request => Object.hasOwn(request.questions, 'instruction'))).toHaveLength(1);
     expect(Object.keys(lineRequests.find(request => Object.hasOwn(request.questions, 'instruction'))!.questions)).toEqual(['instruction']);
     const markerPath = shellPaths.resolveUserPath('agent', 'vibe-import.migrated.json');
-    const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as { migrated: Record<string, string> };
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as { migrated: Record<string, boolean> };
     const vibePath = join(shellPaths.workingDirectory, 'VIBE.md');
-    expect(marker.migrated[vibePath]).toBe(createHash('sha256').update(readFileSync(vibePath, 'utf8')).digest('hex'));
+    expect(marker.migrated[vibePath]).toBe(true);
 
     // Second run is a no-op, the persisted marker also prevents new readings.
     const secondRun = await importVibeFilesIntoMemoryOnce(memorySpine, shellPaths);
     expect(secondRun).toBe(0);
     expect(lineRequests.filter(request => Object.hasOwn(request.questions, 'instruction'))).toHaveLength(1);
     expect(registry.getAll().filter((r) => r.cls === 'constraint')).toHaveLength(2);
+    expect(lineRequests).toHaveLength(1);
+
+    // Editing an already imported document must not make every later boot
+    // append another copy of its persona records.
+    writeFileSync(vibePath, '# VIBE.md\n- An explicitly edited persona.');
+    expect(await importVibeFilesIntoMemoryOnce(memorySpine, shellPaths)).toBe(0);
+    expect(registry.getAll().filter((record) => record.cls === 'constraint')).toHaveLength(2);
     expect(lineRequests).toHaveLength(1);
   });
 
@@ -108,6 +115,18 @@ describe('VIBE.md persona migration', () => {
     expect(projection).toContain('Ask before sending messages.');
     // Precedence caveat preserved verbatim, persona never overrides explicit/safety.
     expect(projection).toContain('Follow them only when they do not conflict with explicit user instructions');
+  });
+
+  test('an existing completed import marker prevents duplicate records without rehashing the document', async () => {
+    const { shellPaths } = tempShellPaths();
+    const path = join(shellPaths.workingDirectory, 'VIBE.md');
+    writeFileSync(path, '# VIBE.md\n- A document edited after its completed import.');
+    const markerPath = shellPaths.resolveUserPath('agent', 'vibe-import.migrated.json');
+    mkdirSync(join(markerPath, '..'), { recursive: true });
+    writeFileSync(markerPath, JSON.stringify({ migrated: { [path]: 'a'.repeat(64) } }));
+    expect(await importVibeFilesIntoMemoryOnce(memorySpine, shellPaths)).toBe(0);
+    expect(registry.getAll()).toHaveLength(0);
+    expect(lineRequests).toHaveLength(0);
   });
 
   test('with no persona records the projection is null (no empty block)', () => {

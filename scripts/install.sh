@@ -2757,6 +2757,20 @@ main() {
   resolve_platform
 
   if [ "$UNINSTALL" = "1" ]; then
+    for installed_command in goodvibes goodvibes-daemon goodvibes-agent; do
+      command_path="$INSTALL_DIR/$installed_command"
+      if [ -L "$command_path" ]; then
+        linked=$(readlink "$command_path")
+        case "$linked" in
+          */commands/goodvibes|*/commands/goodvibes-daemon|*/commands/goodvibes-agent)
+            owned_prefix=$(dirname "$(dirname "$linked")")
+            if [ -f "$owned_prefix/installation.json" ]; then
+              [ -x "$owned_prefix/current/runtime/bun" ] && [ -f "$owned_prefix/current/uninstall.js" ] || fail 'The receipt-owned uninstaller is missing; restore that installation before removing it.'
+              exec "$owned_prefix/current/runtime/bun" "$owned_prefix/current/uninstall.js" --prefix "$owned_prefix"
+            fi ;;
+        esac
+      fi
+    done
     run_uninstall
     return 0
   fi

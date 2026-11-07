@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -95,6 +95,19 @@ test('an existing checkout receipt keeps its command links and data until its ow
   symlinkSync(join(prefix,'commands/goodvibes'),join(home,'bin/goodvibes'));
   const result=run(); expect(result.status).not.toBe(0);
   expect(result.stderr).toContain('checkout installation owns');
+  expect(existsSync(join(root,'fetches'))).toBe(false);
+  expect(existsSync(join(prefix,'installation.json'))).toBe(true);
+});
+
+test('uninstall delegates an existing checkout receipt to its own installed uninstaller', () => {
+  const prefix=join(home,'checkout-install');mkdirSync(join(prefix,'commands'),{recursive:true});
+  mkdirSync(join(prefix,'current/runtime'),{recursive:true});
+  writeFileSync(join(prefix,'installation.json'),'{}');writeFileSync(join(prefix,'current/uninstall.js'),'owner program');
+  writeFileSync(join(prefix,'current/runtime/bun'),'#!/bin/sh\necho source-owned > "$HOME/source-uninstall-owned"\n');
+  chmodSync(join(prefix,'current/runtime/bun'),0o755);mkdirSync(join(home,'bin'));
+  symlinkSync(join(prefix,'commands/goodvibes'),join(home,'bin/goodvibes'));
+  const result=run(true);expect(result.status,result.stderr).toBe(0);
+  expect(readFileSync(join(home,'source-uninstall-owned'),'utf8').trim()).toBe('source-owned');
   expect(existsSync(join(root,'fetches'))).toBe(false);
   expect(existsSync(join(prefix,'installation.json'))).toBe(true);
 });

@@ -54,13 +54,18 @@ test('schema migration validation legacy and durable callbacks expose only immut
   expect(current).toThrow(SQLiteObservationRetiredError);
 });
 
-test('unchanged checks reuse a complete digest and fixed ephemeral row reads do not self-retire', async () => {
-  const { sqlite } = await fixture();
+test('owned writer epochs avoid full-table hashing and fixed ephemeral row reads do not self-retire', async () => {
+  const { sqlite, handle } = await fixture();
   const scan = spyOn(observations, 'sqliteLocalObservation');
   try {
     const current = sqlite.captureObservation();
     for (let i = 0; i < 5; i++) { read(sqlite); current(); }
-    expect(scan.mock.calls.length).toBe(1);
+    expect(scan.mock.calls.length).toBe(0);
+    handle.run("UPDATE knowledge_sources SET id = 'changed'");
+    expect(current).toThrow(SQLiteObservationRetiredError);
+    const next = sqlite.captureObservation();
+    next();
+    expect(scan.mock.calls.length).toBe(0);
   } finally { scan.mockRestore(); }
 });
 

@@ -1011,6 +1011,17 @@ function observeDatabase(db: SqlDatabase, mode: 'observation' | 'clean-content' 
   try {
     if (state.inFlight) throw new SQLiteObservationRetiredError();
     const revision = state.revision, before = databaseProbe(state.raw, ownedProbePlans(state));
+    if (mode === 'observation' && before.cacheable && before.signature !== null) {
+      // An owned connection's publication lifetime is its actual writer epoch,
+      // fenced by native schema/data versions and method ownership. A complete
+      // table digest cannot add anything to that identity. Clean-content mode
+      // is different: it must recognize an unchanged state after rollback.
+      const after = databaseProbe(state.raw, ownedProbePlans(state));
+      if (state.inFlight || state.revision !== revision || !after.cacheable || before.signature !== after.signature) {
+        throw new SQLiteObservationRetiredError();
+      }
+      return JSON.stringify([String(state.identity), String(revision), after.signature]);
+    }
     const memo = mode === 'observation' ? state.memo : state.cleanMemo;
     const digest = before.cacheable && memo?.revision === revision && memo.probe === before.signature
       ? memo.digest : sqliteLocalObservation(state.raw, mode);
@@ -1734,7 +1745,7 @@ export class SQLiteStore {
             try {
               assertOwnedImage();
               const published = persistence?.read();
-              if (published && imageDigest(published) === imageDigest(data)) {
+              if (published && published.equals(data)) {
                 adopted = true;
                 adopt();
               }

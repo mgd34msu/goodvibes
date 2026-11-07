@@ -5,6 +5,14 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureScreeningProposal, captureScreeningSource, type ScreeningSpan } from '../sdk/src/platform/security/source-screening/proposal.js';
 import { sourceScreeningVerification, verifyScreeningSpans } from '../sdk/src/platform/security/source-screening/verification.js';
 
+test('equal source text does not let a proposal borrow another capture identity', () => {
+  const first = captureScreeningSource(['Ordinary build note']);
+  const second = captureScreeningSource(['Ordinary build note']);
+  expect(second.revision).not.toBe(first.revision);
+  expect(() => captureScreeningProposal(second, { revision: first.revision, spans: [] })).toThrow();
+  expect(captureScreeningProposal(second, { revision: second.revision, spans: [] })).toEqual([]);
+});
+
 const questions = () => ({
   complete: sourceScreeningVerification.items.complete.question,
   precise: sourceScreeningVerification.items.precise.question,

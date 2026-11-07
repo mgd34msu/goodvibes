@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureSourceSpans } from '../source-spans.js';
@@ -8,6 +7,7 @@ import { SOURCE_SCREENING_LIMITS as LIMITS } from './types.js';
 export interface ScreeningSpan { readonly part: number; readonly start: number; readonly end: number; }
 export interface ScreeningSource { readonly revision: string; readonly parts: readonly string[]; }
 const malformed = new WeakSet<object>();
+let sourceSequence = 0;
 const fail = (): never => { const error = new Error('Invalid protected source screening data'); malformed.add(error); throw error; };
 export const isMalformedScreeningProposal = (value: unknown): boolean => value !== null
   && (typeof value === 'object' || typeof value === 'function') && malformed.has(value);
@@ -44,11 +44,13 @@ export function captureScreeningSource(value: readonly string[], credentialLiter
     || snapshot.reduce((sum, part) => sum + part.length, 0) > LIMITS.characters) return fail();
   if (snapshot.some(part => containsIssuerCredential(part))) throw new JudgmentInputError('credential-material');
   const parts = Object.freeze([...snapshot]) as readonly string[];
-  return Object.freeze({ revision: createHash('sha256').update(JSON.stringify(parts)).digest('hex'), parts });
+  sourceSequence++;
+  if (!Number.isSafeInteger(sourceSequence)) return fail();
+  return Object.freeze({ revision: `source-${sourceSequence}`, parts });
 }
 export function captureScreeningProposal(source: ScreeningSource, value: unknown): readonly ScreeningSpan[] {
   // Only our exact generated revision and bounded integer offsets are admitted.
-  // A genuine protocol digest is not reinterpreted as raw card material.
+  // This local request identity is not authority or a content commitment.
   const proposal = fields(value, ['revision', 'spans']);
   if (proposal['revision'] !== source.revision) return fail();
   const proposed = dense(proposal['spans'], LIMITS.spans);

@@ -139,9 +139,9 @@ test('sparse and proxy sources refuse before any descriptor trap or request', ()
   expect(() => f.owner.capture(new Array<string>(2))).toThrow(); expect(traps).toBe(0); expect(f.calls).toHaveLength(0);
 });
 
-test('exact generated revision is protocol provenance, not re-scanned raw card material', async () => {
+test('proposal identity is local bookkeeping independent of source content', async () => {
   const f = fixture({ propose: (source) => {
-    expect(source.revision).toBe('4eaef7926146fbf4a3c2452eefb2a1507274343998d070764ec9719873c0d662');
+    expect(source.revision).toMatch(/^source-[1-9][0-9]*$/);
     return { revision: source.revision, spans: [] };
   },
   });

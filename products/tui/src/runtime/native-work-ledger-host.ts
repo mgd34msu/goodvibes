@@ -17,7 +17,7 @@ import {
   type NativeWorkSubmissionActions,
   type NativeWorkSubmissionState,
 } from './native-work-submission.ts';
-import { createNativeWorkSubmissionBinding, nativeSubmissionIdentity } from './native-work-submission-host.ts';
+import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from './native-work-submission-host.ts';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.ts';
 import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
 import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
@@ -35,6 +35,8 @@ export function createNativeWorkLedgerHost(deps: {
   readonly journalPath?: string;
   readonly workspace: () => string;
 }) {
+  const identityOwner = createNativeSubmissionIdentity();
+  const nativeSubmissionIdentity = identityOwner.identify;
   let discovery: { controller: AbortController; identity: string } | undefined;
   let projectId = '';
   let generation = 0;
@@ -58,6 +60,7 @@ export function createNativeWorkLedgerHost(deps: {
     }
     submission.close();
     intake.close();
+    identityOwner.clear();
     discovery?.controller.abort();
     projectId = id;
     discoveryReason = '';

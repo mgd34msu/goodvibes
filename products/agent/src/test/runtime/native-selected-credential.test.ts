@@ -9,7 +9,7 @@ import { agentHostPairingStorePath, type AgentHostPairingSecret } from '../../ru
 import { readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
 import { resolveConnectedHostConnection } from '../../runtime/client/daemon-verbs.ts';
 import { readConnectedHostReadiness } from '../../runtime/connected-host-readiness.ts';
-import { createNativeWorkSubmissionBinding, nativeSubmissionIdentity } from '../../runtime/native-work-submission-host.ts';
+import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from '../../runtime/native-work-submission-host.ts';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
 import { createNativeLedgerBinding, createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
 import { executeNativeHeadless } from '../../cli/native-headless.ts';
@@ -89,10 +89,12 @@ describe('Agent selected credential identity', () => {
     expect(readConnectedHostOperatorToken(f.homeDirectory, 'HTTP://EXAMPLE.INVALID:80/').selectionIdentity).toBe(selected.selectionIdentity);
     expect(readConnectedHostOperatorToken(f.homeDirectory, 'http://different.invalid').selectionIdentity).not.toBe(selected.selectionIdentity);
     expect(fixture('http://example.invalid').resolve().selectionIdentity).not.toBe(selected.selectionIdentity);
+    const nativeSubmissionIdentity = createNativeSubmissionIdentity('paired').identify;
+    const originalNativeIdentity = nativeSubmissionIdentity(selected, 'p');
     for (const update of [{ tokenId: 'another-owner' }, { name: 'Renamed Agent' }, { createdAt: 2 }, { token: 'synthetic-replaced-token' }]) {
       f.pair({ ...secret, ...update }); const next = f.resolve();
       expect(next.selectionIdentity).not.toBe(selected.selectionIdentity);
-      expect(nativeSubmissionIdentity(next, 'p')).not.toBe(nativeSubmissionIdentity(selected, 'p'));
+      expect(nativeSubmissionIdentity(next, 'p')).not.toBe(originalNativeIdentity);
     }
     f.pair();
     const file = JSON.parse(readFileSync(f.pairingPath, 'utf8'));

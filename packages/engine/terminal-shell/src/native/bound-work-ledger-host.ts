@@ -12,7 +12,7 @@ import {
   type NativeWorkSubmissionState,
   type NativeWorkSubmissionBinding,
 } from './native-work-submission.js';
-import { createNativeWorkSubmissionBinding, nativeSubmissionIdentity, type NativeSubmissionHost } from './native-work-submission-host.js';
+import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity, type NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
 import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
 
@@ -89,7 +89,8 @@ export function createBoundNativeWorkLedgerView(
     current: () => boolean,
   ) => NativeWorkSubmissionBinding = createNativeWorkSubmissionBinding,
 ): NativeWorkLedgerView {
-  const nativeIdentity = (host: NativeSubmissionHost, project: string) => nativeSubmissionIdentity(host, project, policy.identityFormat);
+  const identityOwner = createNativeSubmissionIdentity(policy.identityFormat);
+  const nativeIdentity = identityOwner.identify;
   const model = new NativeWorkLedgerModel(changed, () => {
     sync();
     return active;
@@ -418,6 +419,7 @@ export function createBoundNativeWorkLedgerView(
       preflight.close();
       intakePreflight.close();
       selectionEpoch++;
+      identityOwner.clear();
       active = false;
       stop();
       model.close();

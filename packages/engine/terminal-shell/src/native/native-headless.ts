@@ -7,7 +7,7 @@ import { NativeConversationIntakeControls, type NativeConversationIntakeSelectio
 import { NativeConversationIntakeJournal, type NativeIntakeJournalRecord } from './native-conversation-intake-journal.js';
 import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.js';
 import { captureNativeConversationInput } from './native-conversation-input.js';
-import { nativeSubmissionIdentity, type NativeSubmissionHost, type NativeHostIdentityFormat } from './native-work-submission-host.js';
+import { createNativeSubmissionIdentity, type NativeSubmissionHost, type NativeHostIdentityFormat } from './native-work-submission-host.js';
 import type { NativeHeadlessMode } from './native-headless-options.js';
 export type NativeHeadlessHost = (NativeSubmissionHost & {
     readonly journalPath: string;
@@ -40,6 +40,8 @@ const unavailable = (message: string): NativeConversationIntakeState => ({ statu
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 /** No runtime bootstrap, model, local fallback, token mint or daemon start precedes native admission. */
 export async function executeNativeHeadless(options: NativeHeadlessOptions, policy: NativeConversationIntakePolicy = { allowHosted: false, allowSelectedDiff: false }, identityFormat: NativeHostIdentityFormat = 'credential'): Promise<NativeHeadlessResult> {
+    const identityOwner = createNativeSubmissionIdentity(identityFormat);
+    const nativeSubmissionIdentity = identityOwner.identify;
     const capabilities = Object.freeze({ allowHosted: policy.allowHosted === true, allowSelectedDiff: policy.allowSelectedDiff === true });
     if (options.mode === 'submit' && (options.prompt === undefined || !/\S/u.test(options.prompt))) {
         return { exitCode: 2, response: '', error: 'A complete original prompt is required.', stopReason: 'invalid-input' };
@@ -135,8 +137,8 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
             const host = options.resolveHost();
             if ('reason' in host)
                 return resultForState(unavailable(host.reason), options.mode);
-            const before = nativeSubmissionIdentity(host, '', identityFormat);
-            const currentHost = () => { const current = options.resolveHost(); return !('reason' in current) && nativeSubmissionIdentity(current, '', identityFormat) === before; };
+            const before = nativeSubmissionIdentity(host, '');
+            const currentHost = () => { const current = options.resolveHost(); return !('reason' in current) && nativeSubmissionIdentity(current, '') === before; };
             const discovery = new AbortController();
             const operator = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && !discovery.signal.aborted && currentHost() }) });
             const guard = () => { try {
@@ -161,7 +163,7 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                 return cancelled();
             if (!currentHost())
                 return resultForState(unavailable('Native host selection changed.'), options.mode);
-            const identity = nativeSubmissionIdentity(host, projectId, identityFormat);
+            const identity = nativeSubmissionIdentity(host, projectId);
             const journal = new NativeConversationIntakeJournal(host.journalPath, {}, capabilities);
             selection = () => currentHost() ? { available: true, identity, endpoint: host.baseUrl, projectId,
                 workspace: realpathSync(host.workspace), journal, bind: () => createNativeConversationIntakeBinding(host, projectId, currentHost, capabilities) }
@@ -223,6 +225,7 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
     finally {
         options.signal.removeEventListener('abort', onAbort);
         controls?.close();
+        identityOwner.clear();
     }
 }
 function resultForState(state: NativeConversationIntakeState | undefined, mode: NativeHeadlessMode): NativeHeadlessResult {

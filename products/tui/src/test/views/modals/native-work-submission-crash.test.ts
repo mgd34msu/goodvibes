@@ -38,9 +38,10 @@ test('SIGKILL after server persistence recovers the same journal identity across
   const hostModule = new URL('../../../runtime/native-work-submission-host.ts', import.meta.url).href;
   const journalModule = new URL('../../../runtime/native-work-submission-journal.ts', import.meta.url).href;
   writeFileSync(script, `import { NativeWorkSubmissionControls } from ${JSON.stringify(controlModule)};
-import { createNativeWorkSubmissionBinding, nativeSubmissionIdentity } from ${JSON.stringify(hostModule)};
+import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from ${JSON.stringify(hostModule)};
 import { NativeWorkSubmissionJournal } from ${JSON.stringify(journalModule)};
 const host = { baseUrl: ${JSON.stringify(`http://127.0.0.1:${server.port}`)}, token: process.argv[3], workspace: ${JSON.stringify(home)}, journalPath: ${JSON.stringify(journalPath)} };
+const nativeSubmissionIdentity = createNativeSubmissionIdentity().identify;
 const controls = new NativeWorkSubmissionControls(() => ({ available: true, identity: nativeSubmissionIdentity(host, 'p'), endpoint: host.baseUrl, projectId: 'p', workspace: host.workspace, journal: new NativeWorkSubmissionJournal(host.journalPath), bind: () => createNativeWorkSubmissionBinding(host, 'p') }));
 try { const result = process.argv[2] === 'submit' ? await controls.submitFile(${JSON.stringify(sourcePath)}) : await controls.retry(); console.log(JSON.stringify(result)); } finally { controls.close(); }
 `);

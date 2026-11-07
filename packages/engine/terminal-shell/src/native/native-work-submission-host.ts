@@ -1,7 +1,6 @@
 import { isNativePairedPrincipal } from './native-paired-principal.js';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { createOperatorSdk, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
 import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/operator-read-client';
 import { createOperatorNativeWorkSubmissionClient } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-submission-client';
@@ -16,9 +15,30 @@ export interface NativeSubmissionHost {
     readonly selectionIdentity?: string | undefined;
     readonly expectedPrincipalId?: string | undefined;
 }
-export function nativeSubmissionIdentity(host: NativeSubmissionHost, projectId: string, identityFormat: NativeHostIdentityFormat = 'credential'): string {
-    return createHash('sha256').update(JSON.stringify([host.baseUrl, host.token, realpathSync(host.workspace), projectId, host.journalPath ?? null,
-        ...(identityFormat === 'paired' ? [host.selectionIdentity ?? null, host.expectedPrincipalId ?? null] : [host.credentialIdentity ?? null])])).digest('hex');
+let identitySequence = 0;
+/** One live shell owns these observations. Public labels contain no bearer or
+ * source bytes; the durable journal separately binds the authenticated principal.
+ * Only the latest exact frame per project is retained, at most 16 projects.
+ */
+export function createNativeSubmissionIdentity(identityFormat: NativeHostIdentityFormat = 'credential') {
+    const observations = new Map<string, { readonly frame: readonly (string | null)[]; readonly id: string }>();
+    return {
+        identify(host: NativeSubmissionHost, projectId: string): string {
+            const frame = [host.baseUrl, host.token, realpathSync(host.workspace), projectId, host.journalPath ?? null,
+                ...(identityFormat === 'paired' ? [host.selectionIdentity ?? null, host.expectedPrincipalId ?? null] : [host.credentialIdentity ?? null])];
+            const prior = observations.get(projectId);
+            if (prior && prior.frame.length === frame.length && prior.frame.every((value, index) => value === frame[index])) return prior.id;
+            if (!Number.isSafeInteger(++identitySequence)) throw new Error('Native submission identity exhausted');
+            const id = `native-submission-${identitySequence}`;
+            if (!observations.has(projectId) && observations.size >= 16) {
+                const oldest = observations.keys().next().value;
+                if (oldest !== undefined) observations.delete(oldest);
+            }
+            observations.set(projectId, { frame, id });
+            return id;
+        },
+        clear(): void { observations.clear(); },
+    };
 }
 export function createNativeWorkSubmissionBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true): NativeWorkSubmissionBinding {
     let disposed = false;

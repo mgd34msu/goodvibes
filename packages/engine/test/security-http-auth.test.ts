@@ -10,6 +10,17 @@ import {
 } from '@goodvibes-jev/engine/sdk/platform/security';
 import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { matchesSharedToken } from '../sdk/src/platform/security/http-auth.js';
+
+test.each([
+  ['same-token', 'same-token', true],
+  ['same-toker', 'same-token', false],
+  ['short', 'same-token', false],
+  ['é', 'ab', false],
+  ['é', 'é', true],
+] as const)('shared token comparison handles exact UTF-8 bytes (%s)', (supplied, expected, matches) => {
+  expect(matchesSharedToken(supplied, expected)).toBe(matches);
+});
 
 describe('http auth helpers', () => {
   let userAuth: UserAuthManager;

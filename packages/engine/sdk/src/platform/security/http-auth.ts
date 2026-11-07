@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority } from '../pairing/pairing-token-store.js';
 
@@ -110,16 +110,13 @@ export function extractOperatorAuthToken(
 }
 
 /**
- * Compare two tokens in constant time without leaking length via early-exit.
- * Hash both sides with SHA-256 so the Buffers are always 32 bytes before
- * calling timingSafeEqual, eliminating the length-based side-channel that a
- * plain Buffer.from(token).length check or early-return on length mismatch
- * would have exposed.
+ * Check the token's byte length, then compare its contents in constant time.
+ * Shared tokens are compared directly; no derived verifier is persisted here.
  */
 export function matchesSharedToken(token: string, sharedToken: string): boolean {
-  const aHash = createHash('sha256').update(token).digest();
-  const bHash = createHash('sha256').update(sharedToken).digest();
-  return timingSafeEqual(aHash, bHash);
+  const supplied = Buffer.from(token, 'utf8');
+  const expected = Buffer.from(sharedToken, 'utf8');
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
 export function authenticateOperatorToken(

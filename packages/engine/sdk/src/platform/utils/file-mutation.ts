@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { types as nodeTypes } from 'node:util';
@@ -28,14 +27,15 @@ export function capturePreparedFilePublication(path: string): (publishedPath: st
     const before = lstatSync(filePath, { bigint: true, throwIfNoEntry: false });
     if (!before || !before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) throw new Error('Prepared publication is unavailable.');
     const identity = (stat: BigIntStats) => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.nlink}:${stat.size}:${stat.mtimeNs}`;
-    const hash = createHash('sha256').update(readFileSync(filePath)).digest('hex');
+    const bytes = readFileSync(filePath);
     const after = lstatSync(filePath, { bigint: true, throwIfNoEntry: false });
     if (!after || identity(before) !== identity(after) || before.ctimeNs !== after.ctimeNs) throw new Error('Prepared publication changed.');
-    return `${identity(after)}:${hash}`;
+    return { identity: identity(after), bytes };
   };
   const prepared = snapshot(path);
   return publishedPath => {
-    if (snapshot(publishedPath) !== prepared) throw new Error('File publication does not match its prepared source.');
+    const published = snapshot(publishedPath);
+    if (published.identity !== prepared.identity || !published.bytes.equals(prepared.bytes)) throw new Error('File publication does not match its prepared source.');
   };
 }
 
@@ -69,8 +69,14 @@ export function captureFileMutation(path: string): { readonly assertCurrent: () 
     const stat = lstatSync(target, { bigint: true, throwIfNoEntry: false });
     if (!stat) return null;
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new Error('File mutation target is not a private regular file.');
-    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${createHash('sha256').update(readFileSync(target)).digest('hex')}`;
+    const revision = (value: BigIntStats) => `${value.dev}:${value.ino}:${value.mode}:${value.uid}:${value.gid}:${value.nlink}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`;
+    const bytes = readFileSync(target);
+    const after = lstatSync(target, { bigint: true, throwIfNoEntry: false });
+    if (!after || revision(stat) !== revision(after)) throw new Error('File mutation source changed while reading.');
+    return { revision: revision(after), bytes };
   };
+  const sameFile = (current: ReturnType<typeof file>, expected: ReturnType<typeof file>) => current === null || expected === null
+    ? current === expected : current.revision === expected.revision && current.bytes.equals(expected.bytes);
   const ancestry = () => {
     const parents: Array<{ readonly path: string; readonly identity: string | null; readonly revision: string | null }> = [];
     let first = true;
@@ -87,10 +93,10 @@ export function captureFileMutation(path: string): { readonly assertCurrent: () 
   let expectedFile = file(), expectedParents = ancestry();
   return {
     assertCurrent() {
-      if (file() !== expectedFile || JSON.stringify(ancestry()) !== JSON.stringify(expectedParents)) throw new Error('File mutation source changed.');
+      if (!sameFile(file(), expectedFile) || JSON.stringify(ancestry()) !== JSON.stringify(expectedParents)) throw new Error('File mutation source changed.');
     },
     onEffect(published = false) {
-      if (!published && file() !== expectedFile) throw new Error('File mutation source changed.');
+      if (!published && !sameFile(file(), expectedFile)) throw new Error('File mutation source changed.');
       const currentParents = ancestry();
       if (currentParents.length !== expectedParents.length || expectedParents.some((parent, index) => {
         const current = currentParents[index];

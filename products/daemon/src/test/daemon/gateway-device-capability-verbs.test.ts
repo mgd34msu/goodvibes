@@ -362,7 +362,10 @@ describe('recorded current device ownership', () => {
     const before = (await h.service.grants.list())[0]!; h.approve('deny');
     expect(await requestDevice(h)).toMatchObject({ ok: false, refusal: 'denied-by-jev' });
     expect(h.dispatched).toHaveLength(1); expect((await h.service.grants.list())[0]!.useCount).toBe(before.useCount);
-    expect(h.judgments.readings.at(-1)?.grant).toMatchObject({ id: before.id });
+    // Judgment evidence carries the exact UUID components; the native grant
+    // retains its original identifier and cannot gain a use from a rejection.
+    expect(h.judgments.readings.at(-1)?.grant).toMatchObject({ id: before.id.split('-') });
+    expect((await h.service.grants.list())[0]!.id).toBe(before.id);
   });
   test('late captured bytes after cancellation are never retained', async () => {
     const h = harness(); h.sendBytes(true); const original = h.transport.invokePeer.bind(h.transport);

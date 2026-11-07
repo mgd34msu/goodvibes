@@ -769,6 +769,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
   });
 
 
+  // The complete catalog plus four receipt/redaction paths exceeds one minute
+  // on CI. Keep the assertions and the owning suite's finite deadline intact.
   test('surfaces Personal Ops provider-effect receipts as read-only lane evidence', async () => {
     const artifacts = createHarnessArtifactStore();
     await artifacts.store.create({
@@ -991,5 +993,5 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     } finally {
       fixture.cleanup();
     }
-  });
+  }, 120_000);
 });

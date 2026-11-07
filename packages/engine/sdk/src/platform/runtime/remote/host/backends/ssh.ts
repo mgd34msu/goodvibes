@@ -1,6 +1,6 @@
 import { lstat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { SshBackendConfig } from '../peer-registry.js';
 import { type Backend, type BackendContext, BackendDispatchError, resolveTimeout, buildRemoteShellCommand } from './types.js';
 import { runProcess } from './process-runner.js';
@@ -16,7 +16,8 @@ interface Identity {
   credential: string;
 }
 interface Slot {
-  binding: string;
+  readonly config: Readonly<{ identityRef: string; host: string; user: string; port: number }>;
+  credential: string;
   identity: Promise<Identity>;
   users: number;
   retired: boolean;
@@ -70,6 +71,7 @@ export function createSshBackend(ctx: BackendContext): Backend {
   function retire(slot: Slot): void {
     slot.retired = true;
     if (slot.users !== 0 || slot.cleanup) return;
+    slot.credential = '';
     // A failed identity lookup created no identity to clean. A real cleanup
     // failure is recorded and surfaced by teardown, without logging its data.
     slot.cleanup = slot.identity.then(cleanIdentity, () => {}).catch(() => {
@@ -90,11 +92,12 @@ export function createSshBackend(ctx: BackendContext): Backend {
       const old = pool.get(peerId); if (old) { pool.delete(peerId); retire(old); }
       throw new BackendDispatchError(`Could not resolve SSH identity for peer '${peerId}'.`, 'REMOTE_BACKEND_CREDENTIAL_MISSING');
     }
-    const binding = JSON.stringify([config.identityRef, config.sshHost, config.sshUser, config.sshPort ?? 22, createHash('sha256').update(key).digest('hex')]);
     let slot = pool.get(peerId);
-    if (!slot || slot.binding !== binding) {
+    if (!slot || slot.config.identityRef !== config.identityRef || slot.config.host !== config.sshHost
+      || slot.config.user !== config.sshUser || slot.config.port !== (config.sshPort ?? 22) || slot.credential !== key) {
       const previous = slot;
-      slot = { binding, identity: createIdentity(config, key), users: 0, retired: false };
+      slot = { config: Object.freeze({ identityRef: config.identityRef, host: config.sshHost, user: config.sshUser, port: config.sshPort ?? 22 }),
+        credential: key, identity: createIdentity(config, key), users: 0, retired: false };
       pool.set(peerId, slot);
       slots.add(slot);
       if (previous) retire(previous);

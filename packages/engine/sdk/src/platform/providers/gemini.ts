@@ -152,12 +152,12 @@ export class GeminiProvider implements LLMProvider {
 
   /** Active cached content resource name (e.g., "cachedContents/abc123") */
   private cachedContentName: string | null = null;
-  /** Hash of the content that was cached (systemPrompt + tools + model) */
-  private cachedContentHash: string | null = null;
+  /** Exact private inputs for the one active server resource; never a log/cache ID. */
+  private cachedContentInput: Readonly<{ systemPrompt: string; toolsJson: string; model: string }> | null = null;
   /** When the cache expires (epoch ms) */
   private cachedContentExpiry: number = 0;
-  /** Hashes known to be below the 32K cache minimum, skip API call */
-  private uncacheableHashes = new Set<string>();
+  /** One bounded rejection hint, rather than retaining a history of large prompts. */
+  private uncacheableInput: GeminiProvider['cachedContentInput'] = null;
 
   constructor(
     apiKey: string,
@@ -191,17 +191,6 @@ export class GeminiProvider implements LLMProvider {
     return result;
   }
 
-  private computeCacheHash(
-    systemPrompt: string | undefined,
-    tools: import('./interface.js').ChatRequest['tools'],
-    model: string,
-  ): string {
-    const raw = (systemPrompt ?? '') + JSON.stringify(tools ?? []) + model;
-    const hasher = new Bun.CryptoHasher('sha256');
-    hasher.update(raw);
-    return hasher.digest('hex');
-  }
-
   private async ensureCachedContent(
     systemPrompt: string | undefined,
     tools: import('./interface.js').ChatRequest['tools'],
@@ -211,29 +200,28 @@ export class GeminiProvider implements LLMProvider {
     // Skip if no system prompt and no tools
     if (!systemPrompt && (!tools || tools.length === 0)) return null;
 
-    const hash = this.computeCacheHash(systemPrompt, tools, model);
+    const toolsJson = JSON.stringify(tools ?? []);
+    // Small requests never need a cache identity or retained rejection entry.
+    const estimatedChars = (systemPrompt?.length ?? 0) + toolsJson.length;
+    if (estimatedChars / 3 < 28_000) return null;
 
-    // Skip if previously determined to be below 32K threshold
-    if (this.uncacheableHashes.has(hash)) return null;
+    const input = Object.freeze({ systemPrompt: systemPrompt ?? '', toolsJson, model });
+    const matches = (other: GeminiProvider['cachedContentInput']) => other !== null && other.model === input.model
+      && other.systemPrompt === input.systemPrompt && other.toolsJson === input.toolsJson;
+    if (matches(this.uncacheableInput)) return null;
 
-    // Reuse existing cache if hash matches and not expired (with 60s buffer)
+    // Reuse only an exact input match and a live resource (with 60s buffer).
     if (
       this.cachedContentName &&
-      this.cachedContentHash === hash &&
+      matches(this.cachedContentInput) &&
       this.cachedContentExpiry > Date.now() + 60_000
     ) {
       return this.cachedContentName;
     }
 
-    // Estimate tokens, skip if below 28K (conservative buffer below 32K minimum)
-    const estimatedChars = (systemPrompt?.length ?? 0) + JSON.stringify(tools ?? []).length;
-    if (estimatedChars / 3 < 28_000) {
-      if (this.uncacheableHashes.size >= 50) this.uncacheableHashes.clear();
-      this.uncacheableHashes.add(hash);
-      logger.debug('[Gemini] Content below 32K cache threshold, skipping cache', {
-        estimatedTokens: Math.round(estimatedChars / 3),
-      });
-      return null;
+    if (this.cachedContentExpiry <= Date.now() + 60_000) {
+      this.cachedContentName = null;
+      this.cachedContentInput = null;
     }
 
     // Other requests can still be using the previous resource. Its server TTL
@@ -267,7 +255,7 @@ export class GeminiProvider implements LLMProvider {
       if (res.ok) {
         const data = await res.json() as { name: string; expireTime: string };
         this.cachedContentName = data.name;
-        this.cachedContentHash = hash;
+        this.cachedContentInput = input;
         this.cachedContentExpiry = new Date(data.expireTime).getTime();
 
         logger.info(`[Gemini] Created cache: ${data.name} (expires ${data.expireTime})`);
@@ -286,8 +274,8 @@ export class GeminiProvider implements LLMProvider {
     // prompt cacheable so a later request tries again.
     const { status, text } = rejection;
     if (status === 400 && await readsAsBelowCacheMinimum(text, 'providers.gemini.cache-minimum')) {
-      if (this.uncacheableHashes.size >= 50) this.uncacheableHashes.clear();
-      this.uncacheableHashes.add(hash);
+      // Oversized rejected inputs do not become another long-lived prompt copy.
+      this.uncacheableInput = estimatedChars <= 1024 * 1024 ? input : null;
       logger.debug('[Gemini] Content below cache minimum', { status, error: text.slice(0, 200) });
     } else {
       logger.warn('[Gemini] Cache creation failed', { status, error: text.slice(0, 200) });

@@ -1,9 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused } from '../runtime/decision-policy.js';
+import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, type RefusedDecisionAction } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
-import { hashState, JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { captureOwnedJson, captureJsonEntry, snapshotJudgmentEntry } from '../gate/judgment-input.js';
 import { getProcessUntrustedContentLedger } from '../security/untrusted-content.js';
@@ -402,7 +402,8 @@ export class PermissionManager {
   private readonly autonomousPending = new Set<string>();
   private readonly autonomousEpochs = new Map<string, number>();
   private readonly autonomousClaims = new Set<string>();
-  private readonly ownerRevisions = new Map<string, { readonly toolName: string; readonly argsRevision: string; readonly authorityRevision: string }>();
+  private readonly ownerRevisions = new Map<string, { readonly toolName: string; readonly args: Readonly<Record<string, unknown>>; readonly authority: EntryType }>();
+  private ownerRevisionSequence = 0;
   private readonly autonomousDeferred = new Map<string, { readonly inputRevision: string; readonly until: JevVersionRef }>();
   /** Explicit session-tier decisions only; durable rules are always matched live. */
   private sessionApprovals = new Map<string, boolean>();
@@ -616,13 +617,14 @@ export class PermissionManager {
     // A running selected projection is already claimed. Its body compares the
     // raw owner frame rather than re-entering preclaim catalog/source guards.
     const rawAuthority = this.autonomousAuthority(sourceId, sourceOf);
-    const rawAuthorityRevision = hashState(captureJsonEntry(rawAuthority));
+    const rawAuthoritySnapshot = captureJsonEntry(rawAuthority);
     const capturedAuthority = (choiceProjection === undefined ? rawAuthority : Object.freeze({ ...rawAuthority,
       autonomousChoices: this.autonomousChoiceProjections.choices(choiceProjection, sourceId, rawAuthority) })) as AutonomousPermissionOwner & {
         source: AutonomousToolSource; autonomousChoices: AutonomousToolChoices; directory: string | null; permissions: PermissionConfigSnapshot['permissions']; autoApprove: boolean; surface?: string | undefined;
       };
     const source = capturedAuthority.source;
-    const authorityRevision = hashState(captureJsonEntry(capturedAuthority));
+    const authoritySnapshot = captureJsonEntry(capturedAuthority);
+    const authorityRevision = `admission-${epoch.toString(36)}`;
     const assertPrepared = projectionFunction<() => void>(projectionProperty(options, 'assertPrepared'));
     const assertCurrent = () => {
       assertPermissionActive(signal); assertWorkspace();
@@ -632,7 +634,7 @@ export class PermissionManager {
       assertProjectionCurrent(assertPrepared);
       const current = authority();
       assertPermissionActive(signal);
-      if (hashState(captureJsonEntry(current)) !== authorityRevision) throw new Error('Autonomous admission authority, source or scope changed');
+      if (!isDeepStrictEqual(captureJsonEntry(current), authoritySnapshot)) throw new Error('Autonomous admission authority, source or scope changed');
       if (preparedCall) preparedCall.registry.assertPrepared(preparedCall.call);
       if (this.autonomousClaims.has(sourceId)) throw new Error('Autonomous tool source was already claimed');
       assertWorkspace();
@@ -666,7 +668,7 @@ export class PermissionManager {
     const safety = await this.assessExecutionSafety({
       callId: sourceId, toolName, args, category, policyResult, mode, signal, assertCurrent,
       workingDirectory: capturedAuthority.directory ?? undefined, source,
-      sourceId, actionRevision: hashState(captureJsonEntry({ toolName, args, schemaRevision })), authorityRevision,
+      sourceId, actionRevision: `action-${epoch.toString(36)}`, authorityRevision, authoritySnapshot,
       supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort,
     });
     const result = safety.result;
@@ -685,7 +687,7 @@ export class PermissionManager {
       },
     });
     if (result.approved) {
-      let acceptedRevision = rawAuthorityRevision;
+      let acceptedSnapshot = rawAuthoritySnapshot;
       let acceptedIncarnation = (rawAuthority as Readonly<Record<string, unknown>>)['incarnation'];
       let activeTransition: { readonly binding: ToolPreparedSettingsMutation; readonly transition: PreparedConfigMutationTransition } | undefined;
       const nestedSettingsBindings = new Set<ToolPreparedSettingsMutation>();
@@ -720,7 +722,7 @@ export class PermissionManager {
         const current = this.autonomousAuthority(sourceId, sourceOf, undefined, 'currentness');
         assertOwnedLifetime();
         if ((current as Readonly<Record<string, unknown>>)['incarnation'] !== expected
-          || hashState(captureJsonEntry({ ...current, incarnation: acceptedIncarnation })) !== acceptedRevision) {
+          || !isDeepStrictEqual(captureJsonEntry({ ...current, incarnation: acceptedIncarnation }), acceptedSnapshot)) {
           throw new Error('Autonomous execution authority, source or scope changed');
         }
         assertWorkspace();
@@ -758,11 +760,11 @@ export class PermissionManager {
           const current = this.autonomousAuthority(sourceId, sourceOf, undefined, 'currentness');
           assertOwnedLifetime(); actual.owner.assertCompletedMutation(mutation);
           if ((current as Readonly<Record<string, unknown>>)['incarnation'] !== facts.afterIncarnation
-            || hashState(captureJsonEntry({ ...current, incarnation: acceptedIncarnation })) !== acceptedRevision) {
+            || !isDeepStrictEqual(captureJsonEntry({ ...current, incarnation: acceptedIncarnation }), acceptedSnapshot)) {
             throw new Error('Autonomous settings completion authority changed');
           }
           acceptedIncarnation = facts.afterIncarnation;
-          acceptedRevision = hashState(captureJsonEntry(current));
+          acceptedSnapshot = captureJsonEntry(current);
           activeTransition = undefined;
           assertOwnedLifetime();
         },
@@ -777,20 +779,20 @@ export class PermissionManager {
   private assessExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
     return decisionOrClassic(async () => {
       const result = await this.assessDecisionExecutionSafety(input);
-      if (result.result.autonomousDecision?.outcome === 'reject') rememberDecisionRefusal(this.classicActionKey(input));
+      if (result.result.autonomousDecision?.outcome === 'reject') rememberDecisionRefusal(this.captureRefusalAction(input));
       return result;
     }, () => this.assessClassicExecutionSafety(input));
   }
 
-  private classicActionKey(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): string {
-    return hashState(captureJsonEntry({ tool: input.toolName, args: input.args, directory: input.workingDirectory ?? null }));
+  private captureRefusalAction(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): RefusedDecisionAction {
+    return captureOwnedJson({ tool: input.toolName, args: input.args, directory: input.workingDirectory ?? null }) as RefusedDecisionAction;
   }
 
   private async assessClassicExecutionSafety(input: Parameters<PermissionManager['assessDecisionExecutionSafety']>[0]): ReturnType<PermissionManager['assessDecisionExecutionSafety']> {
     input.assertCurrent();
     if (!input.policyResult.approved || input.mode === 'plan' || input.mode === 'yolo') return { result: input.policyResult };
     const analysis = input.policyResult.analysis;
-    if (wasDecisionRefused(this.classicActionKey(input))) return { result: this.result(false, false, 'safety_check', 'jev_reject', analysis,
+    if (wasDecisionRefused(this.captureRefusalAction(input))) return { result: this.result(false, false, 'safety_check', 'jev_reject', analysis,
       { detail: 'A decision model refused this exact action. Availability fallback cannot override that refusal.' }) };
     const remembered = await this.rememberedDecision(this.getApprovalKey(input.toolName, input.args), input.toolName, input.args,
       { signal: input.signal, assertCurrent: input.assertCurrent });
@@ -806,7 +808,7 @@ export class PermissionManager {
     }
     const approvedRevision = this.ownerRevisions.get(input.sourceId);
     if (approvedRevision && approvedRevision.toolName === input.toolName
-      && approvedRevision.argsRevision === hashState(captureJsonEntry(input.args)) && approvedRevision.authorityRevision === input.authorityRevision) {
+      && isDeepStrictEqual(approvedRevision.args, input.args) && isDeepStrictEqual(approvedRevision.authority, input.authoritySnapshot)) {
       this.ownerRevisions.delete(input.sourceId);
       return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
     }
@@ -817,10 +819,10 @@ export class PermissionManager {
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
-    if (reply.approved && modified && hashState(captureJsonEntry(modified)) !== hashState(captureJsonEntry(input.args)) && input.source) {
-      const argsRevision = hashState(captureJsonEntry(modified));
+    if (reply.approved && modified && !isDeepStrictEqual(modified, input.args) && input.source) {
+      const argsRevision = `owner-edit-${(++this.ownerRevisionSequence).toString(36)}`;
       if (this.ownerRevisions.size >= 10_000 && !this.ownerRevisions.has(input.sourceId)) throw new Error('Owner revision capacity reached');
-      this.ownerRevisions.set(input.sourceId, Object.freeze({ toolName: input.toolName, argsRevision, authorityRevision: input.authorityRevision }));
+      this.ownerRevisions.set(input.sourceId, Object.freeze({ toolName: input.toolName, args: modified, authority: input.authoritySnapshot }));
       return { revision: Object.freeze({ ref: Object.freeze({ id: `owner-revision-${input.callId}`, revision: argsRevision, kind: 'revise-action' }),
         toolName: input.toolName, args: modified }),
         result: this.result(false, false, 'user_prompt', 'user_approved', analysis,
@@ -844,6 +846,7 @@ export class PermissionManager {
     readonly sourceId: string;
     readonly actionRevision: string;
     readonly authorityRevision: string;
+    readonly authoritySnapshot: EntryType;
     readonly supportingIds?: readonly string[];
     readonly decoratePort?: ((port: JudgmentPort) => JudgmentPort) | undefined;
     readonly attribution?: PermissionAttribution | undefined;
@@ -852,8 +855,8 @@ export class PermissionManager {
     if (!input.policyResult.approved) return { result: input.policyResult };
     const approvedRevision = this.ownerRevisions.get(input.sourceId);
     if (input.mode === 'safe-owner' && approvedRevision
-      && approvedRevision.toolName === input.toolName && approvedRevision.argsRevision === hashState(captureJsonEntry(input.args))
-      && approvedRevision.authorityRevision === input.authorityRevision) {
+      && approvedRevision.toolName === input.toolName && isDeepStrictEqual(approvedRevision.args, input.args)
+      && isDeepStrictEqual(approvedRevision.authority, input.authoritySnapshot)) {
       this.ownerRevisions.delete(input.sourceId);
       return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
         { preset: { preset: 'safe-owner', action: 'allow' }, detail: 'The owner approved these exact revised arguments.' }) };
@@ -923,14 +926,14 @@ export class PermissionManager {
       const reason = reply.reason;
       const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
       input.assertCurrent();
-      if (approved && modified && hashState(captureJsonEntry(modified)) !== hashState(captureJsonEntry(input.args))) {
+      if (approved && modified && !isDeepStrictEqual(modified, input.args)) {
         if (!input.source) {
           return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis,
             { boundary: boundaryResult, modifiedArgs: modified, userReason: reason, preset: { preset: 'safe-owner', action: 'ask' } }) };
         }
-        const argsRevision = hashState(captureJsonEntry(modified));
+        const argsRevision = `owner-edit-${(++this.ownerRevisionSequence).toString(36)}`;
         if (this.ownerRevisions.size >= 10_000 && !this.ownerRevisions.has(input.sourceId)) throw new Error('Owner revision capacity reached');
-        this.ownerRevisions.set(input.sourceId, Object.freeze({ toolName: input.toolName, argsRevision, authorityRevision: input.authorityRevision }));
+        this.ownerRevisions.set(input.sourceId, Object.freeze({ toolName: input.toolName, args: modified, authority: input.authoritySnapshot }));
         const revision: AutonomousToolRevision = Object.freeze({
           ref: Object.freeze({ id: `owner-revision-${input.callId}`, revision: argsRevision, kind: 'revise-action' }),
           toolName: input.toolName, args: modified,
@@ -1060,7 +1063,7 @@ export class PermissionManager {
     else if (mode !== 'yolo' && this.ownerDeniesTool(toolName, category, config.permissions?.tools)) policyResult = this.result(false, false, 'config_policy', 'config_deny', analysis);
     const safety = await this.assessExecutionSafety({
       callId, sourceId: callId, toolName, args, category, policyResult, mode, signal, assertCurrent,
-      workingDirectory: config.directory ?? undefined, authorityRevision,
+      workingDirectory: config.directory ?? undefined, authorityRevision, authoritySnapshot: captureJsonEntry(config),
       actionRevision: callId, attribution,
     });
     assertCurrent();

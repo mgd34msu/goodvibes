@@ -84,3 +84,14 @@ test('Preferred retry prose exhaustion cannot invent a delay or restart semantic
   });
   expect(fake.requests).toHaveLength(1);
 });
+
+test('refusal memory retains exact owned action data without a content digest', async () => {
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    const args = { path: 'original.txt', mode: 'read' };
+    rememberDecisionRefusal({ tool: 'read', args, directory: '/workspace' });
+    args.path = 'changed.txt';
+    expect(wasDecisionRefused({ tool: 'read', args: { mode: 'read', path: 'original.txt' }, directory: '/workspace' })).toBe(true);
+    expect(wasDecisionRefused({ tool: 'read', args, directory: '/workspace' })).toBe(false);
+    expect(wasDecisionRefused({ tool: 'read', args: { path: 'original.txt', mode: 'read' }, directory: '/another-workspace' })).toBe(false);
+  });
+});

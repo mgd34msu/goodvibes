@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import {
@@ -20,6 +22,8 @@ export class DecisionModelPolicyChangedError extends Error {
   }
 }
 
+export type RefusedDecisionAction = string | Readonly<{ tool: string; args: Readonly<Record<string, unknown>>; directory: string | null }>;
+
 interface PolicyScope {
   readonly policy: DecisionModelPolicy;
   readonly current: () => void;
@@ -27,7 +31,7 @@ interface PolicyScope {
   readonly state: {
     reason: DecisionModelPolicyState['reason'];
     revision: number;
-    readonly refusals: Set<string>;
+    readonly refusals: Set<RefusedDecisionAction>;
   };
 }
 interface PolicyHostState {
@@ -145,8 +149,21 @@ export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => 
 }
 
 /** A later outage cannot reopen the same refused action within its owning operation. Keys stay host-private. */
-export function rememberDecisionRefusal(action: string): void { scopes.getStore()?.state.refusals.add(action); }
-export function wasDecisionRefused(action: string): boolean { return scopes.getStore()?.state.refusals.has(action) ?? false; }
+export function rememberDecisionRefusal(action: RefusedDecisionAction): void {
+  const refusals = scopes.getStore()?.state.refusals;
+  if (!refusals) return;
+  const captured = captureOwnedJson(action) as RefusedDecisionAction;
+  for (const previous of refusals) if (isDeepStrictEqual(previous, captured)) return;
+  refusals.add(captured);
+}
+export function wasDecisionRefused(action: RefusedDecisionAction): boolean {
+  const refusals = scopes.getStore()?.state.refusals;
+  if (!refusals) return false;
+  if (typeof action === 'string') return refusals.has(action);
+  const captured = captureOwnedJson(action);
+  for (const previous of refusals) if (isDeepStrictEqual(previous, captured)) return true;
+  return false;
+}
 
 /** Explicit capability report for genuinely decision-only features. */
 export function requireDecisionFeature(feature: string): void {

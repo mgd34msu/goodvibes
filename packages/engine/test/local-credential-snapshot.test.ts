@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SecretsManager } from '../sdk/src/platform/config/secrets.ts';
@@ -11,6 +11,25 @@ function fixture() {
  return new SecretsManager({ projectRoot: join(root, 'project'), globalHome: join(root, 'home'), surfaceRoot: 'synthetic', configManager: { get: () => 'plaintext_allowed' } as never });
 }
 const plain = { scope: 'user', medium: 'plaintext' } as const;
+test('local revisions are stable only while the exact lookup result stays current', async () => {
+ const manager = fixture();
+ const absent = manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS');
+ expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).toEqual(absent);
+ await manager.set('SYNTHETIC_ALIAS', 'one', plain);
+ const before = manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS');
+ expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).toEqual(before);
+ const path = (await manager.listDetailed()).find(row => row.key === 'SYNTHETIC_ALIAS')!.path!;
+ const original = readFileSync(path, 'utf8');
+ writeFileSync(path, original.replace('one', 'two'));
+ const changed = manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS');
+ expect(changed).toMatchObject({ state: 'resolved', value: 'two' });
+ expect(changed).not.toEqual(before);
+ writeFileSync(path, original);
+ const restored = manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS');
+ expect(restored).toMatchObject({ state: 'resolved', value: 'one' });
+ expect(restored).not.toEqual(before);
+ expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).toEqual(restored);
+});
 test('local managed alias follows exact precedence and changes revision across ABA', async () => {
  const manager = fixture();
  await manager.set('SYNTHETIC_ALIAS', 'goodvibes://secrets/goodvibes/SYNTHETIC_LEAF', plain);

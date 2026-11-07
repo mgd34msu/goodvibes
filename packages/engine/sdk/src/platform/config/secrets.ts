@@ -34,7 +34,8 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  */
 
 import { dirname, isAbsolute, resolve } from 'path';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
@@ -335,6 +336,11 @@ export class SecretsManager {
   private credentialMutationGeneration = 0;
   private readonly credentialInvalidationListeners = new Set<() => void>();
   private readonly pendingLocalMutations = new Map<string, number>();
+  // Private, bounded observations: revisions name this owner's actual lookup
+  // results. Credential bytes never become a public identity or persisted key.
+  readonly #credentialSnapshotOwner = randomUUID();
+  #credentialSnapshotSequence = 0;
+  readonly #credentialSnapshots = new Map<string, { readonly chain: readonly unknown[]; readonly revision: string }>();
 
   /** Value-free local owner state; no credential names, paths, bytes or hashes. */
   getCredentialMutationState(): Readonly<{ generation: number; pending: boolean }> {
@@ -348,6 +354,7 @@ export class SecretsManager {
   }
 
   private notifyCredentialInvalidation(): void {
+    this.#credentialSnapshots.clear();
     for (const listener of [...this.credentialInvalidationListeners]) {
       try { listener(); } catch { /* An observer cannot defeat credential revocation. */ }
     }
@@ -789,7 +796,15 @@ export class SecretsManager {
     | { readonly state: 'unsupported' } {
     const chain: unknown[] = [this.getPolicy(), this.credentialMutationGeneration];
     const seen = new Set<string>();
-    const revision = () => createHash('sha256').update(JSON.stringify(chain)).digest('hex');
+    const revision = () => {
+      const previous = this.#credentialSnapshots.get(key);
+      if (previous && isDeepStrictEqual(previous.chain, chain)) return previous.revision;
+      // Eviction can only retire an old observation, never admit stale state.
+      if (this.#credentialSnapshots.size >= 128) this.#credentialSnapshots.clear();
+      const value = `${this.#credentialSnapshotOwner}:${(++this.#credentialSnapshotSequence).toString(36)}`;
+      this.#credentialSnapshots.set(key, { chain, revision: value });
+      return value;
+    };
     let current = key;
     for (let depth = 0; depth < 32; depth++) {
       if (seen.has(current) || this.pendingLocalMutations.has(current) || process.env[current] !== undefined) return { state: 'unsupported' };

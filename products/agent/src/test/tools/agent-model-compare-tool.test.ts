@@ -196,7 +196,7 @@ describe('agent_model_compare tool', () => {
       explicitUserRequest: 'Compare product update drafts.',
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success, JSON.stringify(result)).toBe(true);
     expect(result.output).toContain('Candidate A');
     expect(result.output).toContain('Candidate B');
     expect(result.output).toContain('Identities hidden');
@@ -206,16 +206,22 @@ describe('agent_model_compare tool', () => {
     expect(item.openai.calls[0]?.messages[0]).toEqual({ role: 'user', content: 'Write a concise product update.' });
     expect(item.recordedUsage.sort()).toEqual(['anthropic:claude-sonnet', 'openai:gpt-4.1']);
 
-    const comparisonId = result.output!.match(/cmp_[0-9a-f-]+/)?.[0];
+    const comparisonId = result.output!.match(/cmp_[a-p]{32}(?![a-z])/)?.[0];
     expect(comparisonId).toBeTruthy();
 
     const reveal = await item.tool.execute({
       mode: 'reveal',
       comparisonId,
     });
-    expect(reveal.success).toBe(true);
+    expect(reveal.success, JSON.stringify(reveal)).toBe(true);
     expect(reveal.output).toContain('A: openai:gpt-4.1 (GPT-4.1)');
     expect(reveal.output).toContain('B: anthropic:claude-sonnet (Claude Sonnet)');
+
+    const protectedReference = await item.tool.execute({ mode: 'reveal', comparisonId: 'cmp_41111111-1111-4115-a111-111111111111' });
+    expect(protectedReference.success).toBe(false);
+    expect(protectedReference.output ?? '').not.toContain('GPT-4.1');
+    expect(item.openai.calls).toHaveLength(1);
+    expect(item.anthropic.calls).toHaveLength(1);
   });
 
   test('can reveal identities immediately when explicitly requested', async () => {

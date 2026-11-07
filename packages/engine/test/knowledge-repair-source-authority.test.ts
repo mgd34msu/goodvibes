@@ -260,14 +260,16 @@ describe('repair source authority original-read-set and publication boundary', (
   });
   test('canonical secondary is published despite official prose and profile/fact support remains required', async () => {
     const item = await fixture(), fake = promotionReadings();
-    const result = await promoteRepairSources({ store: item.store }, spaceId, item.gap, [item.source.id], item.task, Date.now() + 10_000);
+    // Exercise the complete profile/fact-support publication under a finite
+    // fixture budget that also accommodates the shared CI partition.
+    const result = await promoteRepairSources({ store: item.store }, spaceId, item.gap, [item.source.id], item.task, Date.now() + 60_000);
     expect(result.promotedFactCount).toBe(1);
     const fact = item.store.listNodes().find((node) => node.kind === 'fact')!;
     expect(fact.metadata.sourceAuthority).toBe('secondary'); expect(fact.metadata.value).toBe(statement);
     expect(fake.requests.some((request) => 'profileSupported' in request.questions)).toBe(true);
     expect(fake.requests.some((request) => 'supported' in request.questions)).toBe(true);
     expect(fake.requests.some((request) => 'repairUseful' in request.questions)).toBe(true);
-  });
+  }, 90_000);
   test('source/request/config changes during later profile judgment stop promotion and task publication', async () => {
     for (const change of ['source', 'request', 'configuration', 'port-aba'] as const) {
       const item = await fixture(), fake = promotionReadings(), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();

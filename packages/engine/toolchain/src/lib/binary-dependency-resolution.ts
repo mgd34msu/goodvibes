@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -111,7 +111,11 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
   const stage = (source: string): void => {
     const destDirectory = resolve(root, options.addonOutDir, packageName);
     mkdirSync(destDirectory, { recursive: true });
-    copyFileSync(source, join(destDirectory, file));
+    const destination = join(destDirectory, file);
+    copyFileSync(source, destination);
+    // Package extraction may inherit a private installer's umask. Native
+    // artifact admission requires the staged library's canonical file mode.
+    chmodSync(destination, 0o644);
   };
   const installed = resolveOwnedPackageManifest(ownerPath, packageName);
   if (installed !== null) {

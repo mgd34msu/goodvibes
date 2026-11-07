@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { provideNativeAddon, resolveNativeAddonPayload, resolveOwnedPackageManifest } from '../../toolchain/src/lib/binary-dependency-resolution.ts';
@@ -32,13 +32,18 @@ function fixture() {
   return { root, product, owner, install, destination, stage };
 }
 
-test('resolves the linked dependency owner and stages its native package', () => {
-  const f = fixture(); const native = f.install();
+test('resolves the linked dependency owner and stages its native package with admitted modes under a private umask', () => {
+  const f = fixture();
+  const mask = process.umask(0o077);
+  let native: string;
+  try { native = f.install(); expect(f.stage()).toBe(true); }
+  finally { process.umask(mask); }
   expect(existsSync(join(f.product, 'node_modules', target.nativeAddonPackage!))).toBe(false);
   expect(resolveOwnedPackageManifest(join(f.product, 'package.json'), 'sqlite-vec')).toBe(join(f.owner, 'package.json'));
   expect(resolveOwnedPackageManifest(join(f.owner, 'package.json'), target.nativeAddonPackage!)).toBe(join(native, 'package.json'));
-  expect(f.stage()).toBe(true);
   expect(readFileSync(f.destination(), 'utf8')).toBe('fixture linux-x64');
+  expect(statSync(join(native, target.nativeAddonFile!)).mode & 0o777).toBe(0o600);
+  expect(statSync(f.destination()).mode & 0o777).toBe(0o644);
 });
 
 test('stages the requested installed cross target, not the host package', () => {

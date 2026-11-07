@@ -1,5 +1,4 @@
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment';
-import { verificationHash } from './source.js';
 
 const bound = new WeakSet<JudgmentPort>();
 
@@ -15,7 +14,7 @@ export function bindVerificationTargets(port: JudgmentPort): JudgmentPort {
     const text = typeof requirement === 'string' ? requirement
       : requirement && typeof requirement === 'object' && !Array.isArray(requirement) ? (requirement as Record<string, unknown>).text : undefined;
     const literal = (value: unknown) => typeof value === 'string' && value.length <= 4_000
-      ? { text: value, digest: verificationHash(value) } : undefined;
+      ? { text: value } : undefined;
     const proposedAnswer = literal(state?.response), originalRequirement = literal(text), currentUserRequest = literal(state?.request);
     if (!proposedAnswer && !originalRequirement && !currentUserRequest) return port.ask(request);
     const questions = Object.fromEntries(Object.entries(request.questions).map(([name, question]) => [name, question.type !== 'noul' ? question : {

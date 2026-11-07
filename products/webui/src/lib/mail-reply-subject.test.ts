@@ -5,7 +5,10 @@ import { invalidateClientLifetime } from './client-lifetime';
 type Request = BrowserJudgmentRequest<'webui.mail.reply-subject'>;
 let calls: { input: Request; signal: AbortSignal }[] = [];
 let transport: (input: Request, signal: AbortSignal) => Promise<unknown> = async input => response(input);
-mock.module('./goodvibes', () => ({ runBrowserJudgment: (input: Request, signal: AbortSignal) => { calls.push({ input, signal }); return transport(input, signal); } }));
+mock.module('./goodvibes', () => ({
+  readBrowserDecisionPolicy: async () => ({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }),
+  runBrowserJudgment: (input: Request, signal: AbortSignal) => { calls.push({ input, signal }); return transport(input, signal); },
+}));
 const { readMailReplySubject, readMailReplySubjectResponse } = await import('./mail-reply-subject');
 const request = (): Request => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.mail.reply-subject', batteryVersion: 1, input: { subjectRef: 'synthetic-subject-reference' } });
 function response(input: Request, verdict: 'yes' | 'no' | 'uncertain' = 'no') {
@@ -44,10 +47,11 @@ test('sends only the issued reference and exposes a client-lifetime-bound boolea
 });
 test.each(['cancel', 'client-change'] as const)('%s aborts the transport and rejects its late answer', async kind => {
   const barrier = Promise.withResolvers<unknown>();
-  transport = () => barrier.promise;
+  const started = Promise.withResolvers<void>();
+  transport = () => { started.resolve(); return barrier.promise; };
   const abort = new AbortController();
   const pending = readMailReplySubject('synthetic-subject-reference', abort.signal);
-  await Promise.resolve();
+  await started.promise;
   if (kind === 'cancel') abort.abort(); else invalidateClientLifetime();
   expect(calls[0]!.signal.aborted).toBe(true);
   barrier.resolve(response(calls[0]!.input));

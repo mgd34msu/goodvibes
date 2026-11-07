@@ -33,6 +33,7 @@ let inboxList: InboxListImpl = () => Promise.resolve({ messages: [], total: 0 })
 let inboxRead: (uid: number) => Promise<unknown> = () => Promise.reject(Object.assign(new Error('not used'), { status: 500 }));
 
 mock.module('../../lib/goodvibes', () => ({
+  readBrowserDecisionPolicy: async () => ({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }),
   runBrowserJudgment: (input: ReplyInput, signal: AbortSignal) => { replyRequests.push({ input, signal }); return replyJudgment(input, signal); },
   // src/lib/queries.ts (imported transitively via queryKeys) destructures these off
   // the same module, the mock's surface must satisfy that import even though this

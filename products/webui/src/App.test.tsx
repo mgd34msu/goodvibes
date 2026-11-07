@@ -141,6 +141,7 @@ mock.module('./lib/goodvibes', () => ({
   clearStoredAuthToken: () => Promise.resolve(undefined),
   invokeMethod: () => Promise.resolve({}),
   runBrowserJudgment: () => Promise.reject(new Error('Judgment is not installed in this app fixture.')),
+  readBrowserDecisionPolicy: async () => ({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }),
   sdk: {
     operator: {
       invoke: (method: string) => method === 'workLedger.turn.session'

@@ -149,7 +149,7 @@ export class CompletionVerification {
   }
   private async proposal<T>(operation: Parameters<VerificationWriter>[0]['operation'], context: unknown, key: string,
     access: VerificationAccess, admit: (value: Record<string, unknown>) => T,
-    qualify: (proposed: T) => Promise<unknown | null>, originalScopeAvailable = false): Promise<T> {
+    qualify: (proposed: T, revision: string) => Promise<unknown | null>, originalScopeAvailable = false): Promise<T> {
     access.assertCurrent();
     const cache = this.cache(access);
     if (cache.has(key)) return cache.get(key) as T;
@@ -174,7 +174,7 @@ export class CompletionVerification {
       // Checkpoint only a schema/privacy-admitted proposal. Disk never grants
       // authority: a resumed attempt still has to qualify it with current Jev.
       this.store.rememberProposal(key, candidate);
-      const defects = await qualify(proposed);
+      const defects = await qualify(proposed, this.store.retainProposalRevision(key, proposed));
       access.assertCurrent();
       if (defects === null) {
         const captured = snapshotJudgmentEvidence(proposed) as T;
@@ -206,7 +206,7 @@ export class CompletionVerification {
     // Large instruction histories are reduced with the same source qualification
     // as observations, then the ledger is audited against EVERY original page.
     const pages = verificationFrames(instructions, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
-    const source = pages.length <= 1 ? instructions.map(verificationWireSource) : (await this.evidenceTree(instructions, [], access)).map(node => this.compactNode(node));
+    const source = pages.length <= 1 ? instructions.map(verificationWireSource) : (await this.evidenceTree(instructions, access)).map(node => this.compactNode(node));
     const context = { sources: source, currentRequest: instructions.filter(entry => entry.reference.startsWith('current user request')),
       granularity: 'Use independently checkable obligations: performed work and delivery of its artifact are separate requirements. Preserve explicit scope and constraints; do not turn a full-codebase request into only representative subsystem sampling or add exhaustive runtime testing unless requested.' };
     // Immutable source IDs already identify the original bytes. Qualification
@@ -239,22 +239,19 @@ export class CompletionVerification {
     }
   }
 
-  private async node(sources: readonly (VerificationSource | VerificationReceipt)[], scope: readonly VerificationRequirement[], access: VerificationAccess, focusedRequirement?: VerificationRequirement): Promise<VerificationReceipt> {
+  private async node(sources: readonly (VerificationSource | VerificationReceipt)[], access: VerificationAccess,
+    focusedRequirement?: VerificationRequirement, originalSourceIds?: readonly string[]): Promise<VerificationReceipt> {
     const children = sources.map(source => source.id), wireSources = sources.map(source => 'text' in source ? verificationWireSource(source) : source);
     // Facts describe these sources, not whether the CURRENT task is complete.
     // Changing a request must rerun its requirement checks, without rewriting
     // unchanged source records to fit a different task interpretation.
     const context = { requirements: [] as readonly VerificationRequirement[], sources: wireSources, citationIds: children, ...(focusedRequirement ? { focusedRequirement } : {}),
       maxCharacters: focusedRequirement ? 6_000 : Math.min(8_000, Math.max(2_400, Math.floor(JSON.stringify(wireSources).length * .4))) };
-    const key = verificationHash(['evidence-v1', context]);
-    const previousKey = verificationHash(['evidence-v1', { ...context, requirements: scope }]);
-    const { citationIds: _citationIds, ...legacyContext } = context;
-    const previous = this.store.proposals.get(previousKey)
-      ?? this.store.proposals.get(verificationHash(['evidence-v1', legacyContext]))
-      ?? this.store.proposals.get(verificationHash(['evidence-v1', { ...legacyContext, requirements: scope }]));
-    if (!this.store.proposals.has(key) && previous !== undefined) this.store.rememberProposal(key, previous);
     const operation = sources.some(source => 'summary' in source) ? 'merge' : 'evidence';
-    const proposed = await this.proposal(operation, context, key, access, value => summary(value, new Set(children), context.maxCharacters), async proposed => {
+    // Complete immutable native child IDs bind source/summary values. Do not
+    // serialize and hash all of their bodies merely to name this proposal.
+    const key = JSON.stringify(['evidence-v2', operation, children, context.maxCharacters, focusedRequirement?.id ?? null]);
+    const proposed = await this.proposal(operation, context, key, access, value => summary(value, new Set(children), context.maxCharacters), async (proposed, proposalRevision) => {
       const run = await verificationEvidence.run(access.port, { ...context, proposed } as never, { ...this.options(access), site: verificationEvidence.name });
       const accepted = clean(run.readings);
       run.recordAction(accepted ? 'Qualify only this evidence reduction against its complete identified children; retain originals for retrieval.' : 'Repair this private evidence reduction without asking the working model to repeat its task.');
@@ -275,7 +272,7 @@ export class CompletionVerification {
             focus: 'Judge ONLY this single cited assertion against its cited original sources, including its expressed uncertainty. Native citations preserve original identity and boundaries.' } });
       }
       const defects = await ownedMapLimit(access, jobs, 3, async job => {
-        const key = verificationHash(['atomic-evidence-v1', job]);
+        const key = JSON.stringify(['atomic-evidence-v2', proposalRevision, job.aspect, job.target]);
         const cache = this.cache(access);
         if (cache.has(key)) return null;
         const check = await verificationEvidence.run(access.port, job.state as never, { ...this.options(access), only: [job.aspect], site: verificationEvidence.name });
@@ -290,12 +287,12 @@ export class CompletionVerification {
       });
       return defects.every(defect => defect === null) ? null : defects.filter(Boolean);
     });
-    const receipt: VerificationReceipt = { id: `e-${key.slice(0, 24)}`, summary: proposed, children, representation: 'jev-qualified',
-      sourceIds: sources.flatMap(source => 'sourceIds' in source ? source.sourceIds : [source.id]) };
+    const receipt = this.store.retainEvidence({ summary: proposed, children, representation: 'jev-qualified',
+      sourceIds: originalSourceIds ?? sources.flatMap(source => 'sourceIds' in source ? source.sourceIds : [source.id]) });
     this.nodes.set(receipt.id, receipt); return receipt;
   }
 
-  private async page(sources: readonly VerificationSource[], scope: readonly VerificationRequirement[], access: VerificationAccess): Promise<VerificationReceipt[]> {
+  private async page(sources: readonly VerificationSource[], access: VerificationAccess): Promise<VerificationReceipt[]> {
     if (sources.length === 1 && sources[0]!.text.length <= 1024) {
       // This is the exact original, not a semantic reduction or an approval.
       // Native equality preserves every code unit; Jev still must evaluate the
@@ -305,7 +302,7 @@ export class CompletionVerification {
         children: [source.id], sourceIds: [source.id] };
       this.nodes.set(receipt.id, receipt); return [receipt];
     }
-    try { return [await this.node(sources, scope, access)]; }
+    try { return [await this.node(sources, access)]; }
     catch (error) {
       access.assertCurrent();
       if (error instanceof VerificationSubdivisionError) {
@@ -330,7 +327,7 @@ export class CompletionVerification {
       // No rejected transport request becomes a finding against the user's work.
       if (sources.length > 1) {
         const middle = Math.ceil(sources.length / 2);
-        return [...await this.page(sources.slice(0, middle), scope, access), ...await this.page(sources.slice(middle), scope, access)];
+        return [...await this.page(sources.slice(0, middle), access), ...await this.page(sources.slice(middle), access)];
       }
       const original = sources[0];
       if (!original || original.text.length < 1024) throw new VerificationHeldError('minimum source frame', { cause: error });
@@ -339,18 +336,17 @@ export class CompletionVerification {
       const parts = [original.text.slice(0, middle), original.text.slice(middle)].map((text, index) => this.ownSource({ ...value,
         reference: `${original.reference}; native subdivision ${index + 1}/2`, completeMessage: false, text, originalIds: [originalId] }));
       parts.forEach(part => { this.originals.set(part.id, part); });
-      return [...await this.page(parts.slice(0, 1), scope, access), ...await this.page(parts.slice(1), scope, access)];
+      return [...await this.page(parts.slice(0, 1), access), ...await this.page(parts.slice(1), access)];
     }
   }
 
   private compactNode(node: VerificationReceipt) { return { id: node.id, summary: node.summary, ...(node.representation ? { representation: node.representation } : {}) }; }
-  private async merge(children: readonly VerificationReceipt[], scope: readonly VerificationRequirement[], access: VerificationAccess): Promise<VerificationReceipt[]> {
+  private async merge(children: readonly VerificationReceipt[], access: VerificationAccess): Promise<VerificationReceipt[]> {
     if (children.length === 1) return [...children];
     const wire = children.map(child => ({ ...this.compactNode(child), children: [], sourceIds: [] }));
     try {
-      const parent = await this.node(wire, scope, access);
-      const retained = { ...parent, children: children.map(child => child.id), sourceIds: children.flatMap(child => child.sourceIds) };
-      this.nodes.set(retained.id, retained); return [retained];
+      const parent = await this.node(wire, access, undefined, children.flatMap(child => child.sourceIds));
+      return [parent];
     } catch (error) {
       access.assertCurrent();
       // An irreducible summary has already used its two private proposals.
@@ -359,19 +355,19 @@ export class CompletionVerification {
       if (error instanceof VerificationSubdivisionError) throw error;
       if (!(error instanceof JudgmentContextLimitError)) throw error;
       const middle = Math.ceil(children.length / 2);
-      return [...await this.merge(children.slice(0, middle), scope, access), ...await this.merge(children.slice(middle), scope, access)];
+      return [...await this.merge(children.slice(0, middle), access), ...await this.merge(children.slice(middle), access)];
     }
   }
-  private async evidenceTree(sources: readonly VerificationSource[], scope: readonly VerificationRequirement[], access: VerificationAccess): Promise<VerificationReceipt[]> {
+  private async evidenceTree(sources: readonly VerificationSource[], access: VerificationAccess): Promise<VerificationReceipt[]> {
     const pages = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
-    let nodes = (await ownedMapLimit(access, pages, 3, page => this.page(page, scope, access))).flat();
+    let nodes = (await ownedMapLimit(access, pages, 3, page => this.page(page, access))).flat();
     while (!bounded(nodes.map(node => this.compactNode(node)), VERIFICATION_OVERVIEW_CHARACTERS)) {
       // Only bounded summaries go over the wire. Full child/source ID sets stay
       // local, avoiding a growing duplicate index in every parent request.
       const groups = verificationFrames(nodes.map(node => this.compactNode(node)), 18_000);
       const next = (await ownedMapLimit(access, groups, 3, async group => {
         const children = group.map(item => this.nodes.get(item.id)!);
-        return this.merge(children, scope, access);
+        return this.merge(children, access);
       })).flat();
       if (JSON.stringify(next.map(node => this.compactNode(node))).length >= JSON.stringify(nodes.map(node => this.compactNode(node))).length)
         throw new VerificationSubdivisionError();
@@ -550,7 +546,7 @@ export class CompletionVerification {
     // Keep a bounded native index; every original remains retrievable.
     if (sources.some(source => 'representation' in source && source.representation === 'source-index'))
       return this.sourceIndex(originals(), 8_000);
-    try { return [await this.node(sources, [requirement], access, requirement)]; }
+    try { return [await this.node(sources, access, requirement)]; }
     catch (error) {
       access.assertCurrent();
       if (!(error instanceof VerificationSubdivisionError) && !(error instanceof JudgmentContextLimitError)) throw error;
@@ -911,7 +907,7 @@ export class CompletionVerification {
     } else if (indexed) overview = this.sourceIndex(observations);
     else {
       try {
-        overview = await this.ownedAttempt(access, local => this.evidenceTree(factSources, ledger, local));
+        overview = await this.ownedAttempt(access, local => this.evidenceTree(factSources, local));
         // Qualified runtime facts do not substitute for source review. Keep
         // all exact read bodies available for specific quality/claim questions.
         const readOriginals = new Set(readView.ledgers.flatMap(page => page.originals));
@@ -1054,7 +1050,7 @@ export class CompletionVerification {
     const finalInput = [sources.map(source => source.id), ledger, full.response, overview.map(node => this.compactNode(node))];
     if (this.finalEvidence?.identity !== access.identity || !isDeepStrictEqual(this.finalEvidence.input, finalInput))
       this.finalEvidence = { input: captureOwnedJson(finalInput), identity: access.identity, frontier: [...overview], seen: new Set(), opened: [], earlier: [] };
-    const answer = bounded(full.response, 12_000) ? full.response : { proposedAnswer: (await this.evidenceTree(sources.filter(source => source.kind === 'answer'), ledger, access)).map(node => this.compactNode(node)),
+    const answer = bounded(full.response, 12_000) ? full.response : { proposedAnswer: (await this.evidenceTree(sources.filter(source => source.kind === 'answer'), access)).map(node => this.compactNode(node)),
       meaning: 'Exact proposed answer checked in identified original answer pages. These are proposed claims, not evidence of performed work.' };
     const casesKey = verificationHash(['requirement-checks-v3', ledger, overview.map(node => this.compactNode(node)), answer, recent.map(source => source.id), full.previousReview ?? null, turnContext]);
     const cache = this.cache(access);
@@ -1140,7 +1136,7 @@ export class CompletionVerification {
     // Requirement/quality checks and the complete-history audit qualified the
     // result, and the final publication battery can inspect these same bytes.
     const exactPrimary = directEvidence && bounded(primary.map(verificationWireSource), MAX_EXACT_CASE_CHARACTERS) ? primary : [];
-    const deliveryEvidence = directEvidence ? [...earlierEvidence, ...(exactPrimary.length ? [] : await this.evidenceTree(primary, ledger, access))] : overview;
+    const deliveryEvidence = directEvidence ? [...earlierEvidence, ...(exactPrimary.length ? [] : await this.evidenceTree(primary, access))] : overview;
     const publicationOriginals = [...new Map([...recent, ...exactPrimary, ...this.finalEvidence.opened].map(source => [source.id, source])).values()]
       .sort((left, right) => (this.sourceOrder.get(left.id) ?? 0) - (this.sourceOrder.get(right.id) ?? 0));
     const state: Record<string, unknown> = {

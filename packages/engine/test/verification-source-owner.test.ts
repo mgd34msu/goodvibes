@@ -8,6 +8,9 @@ import { retainedDelegationSources } from '../sdk/src/platform/core/verification
 import { citedReadSources, nativeReadReceipts } from '../sdk/src/platform/core/verification/read-receipts.js';
 import { observeReadContent } from '../sdk/src/platform/tools/read/observation.js';
 import type { VerificationSourceInput } from '../sdk/src/platform/core/verification/types.js';
+import { CompletionVerification } from '../sdk/src/platform/core/verification/coordinator.js';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { verificationWriter } from './_helpers/verification.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -72,6 +75,47 @@ test('retrieval indexes compare every native member and preview, and keep their 
   expect(reopened.retainIndex(changed).id).toBe(current.id);
   expect(readFileSync(f.path, 'utf8')).toBe(bytes);
   expect(current.representation).toBe('source-index');
+});
+
+test('changed qualified summaries retire their native identity without rewriting earlier summary records', () => {
+  const f = journal();
+  const evidence = { representation: 'jev-qualified' as const, children: ['s-child'], sourceIds: ['s-original'],
+    summary: { facts: [{ text: 'The original source says A.', sources: ['s-child'] }], concerns: [] } };
+  const first = f.store.retainEvidence(evidence);
+  const changed = { ...evidence, summary: { facts: [{ text: 'The original source says B.', sources: ['s-child'] }], concerns: [] } };
+  const second = f.store.retainEvidence(changed);
+  expect(second.id).not.toBe(first.id);
+  expect(first.summary.facts[0]?.text).toBe('The original source says A.');
+  const bytes = readFileSync(f.path, 'utf8');
+  expect(new VerificationStore(f.root, f.session).retainEvidence(changed).id).toBe(second.id);
+  expect(readFileSync(f.path, 'utf8')).toBe(bytes);
+});
+
+test('live atomic-qualification revisions follow complete admitted proposal values rather than a reused proposal slot', () => {
+  const store = new VerificationStore();
+  const proposed = { facts: [{ text: 'An actual proposed fact.', sources: ['source-one'] }], concerns: [] };
+  const first = store.retainProposalRevision('native-proposal-slot', proposed);
+  expect(store.retainProposalRevision('native-proposal-slot', structuredClone(proposed))).toBe(first);
+  const changed = store.retainProposalRevision('native-proposal-slot', { ...proposed, concerns: [{ text: 'Contrary evidence.', sources: ['source-one'] }] });
+  expect(changed).not.toBe(first);
+  expect(store.retainProposalRevision('native-proposal-slot', proposed)).not.toBe(first);
+});
+
+test('unchanged persisted sources and summaries avoid another private draft on restart but still receive fresh Jev checks', async () => {
+  const f = journal(), firstPort = fakePort(() => noulAnswer(0.01));
+  const full = { request: 'Review all source and write review.md.', response: 'The report is saved in review.md.',
+    transcript: [{ role: 'tool', callId: 'read-source', content: 'Retained original source line. '.repeat(1_500) }],
+    tools: ['read', 'write'], delegated: [], requirements: null, initial: null, previousReview: null };
+  let drafts = 0;
+  const first = new CompletionVerification(async request => { drafts++; return verificationWriter(request); }, f.store);
+  expect((await first.prepare(full, { port: firstPort.port, identity: {}, assertCurrent() {} })).findings).toHaveLength(0);
+  expect(drafts).toBeGreaterThan(1);
+  const secondPort = fakePort(() => noulAnswer(0.01));
+  const reopened = new CompletionVerification(async () => { throw new Error('Unchanged retained source must not require another private draft'); },
+    new VerificationStore(f.root, f.session));
+  expect((await reopened.prepare(full, { port: secondPort.port, identity: {}, assertCurrent() {} })).findings).toHaveLength(0);
+  expect(secondPort.requests.some(request => request.context?.battery === 'engine.verification.evidence')).toBe(true);
+  expect(secondPort.requests.some(request => request.context?.battery === 'engine.verification.requirement')).toBe(true);
 });
 
 test('selected read and citation sources retain exact provenance and reuse their native IDs after restart', () => {

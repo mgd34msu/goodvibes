@@ -7,6 +7,8 @@ import { issueVerificationId, issueVerificationSource, verificationHash } from '
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
 type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
+type QualifiedEvidence = VerificationReceipt & { readonly representation: 'jev-qualified' };
+type RetainedReceipt = SourceIndex | QualifiedEvidence;
 
 /** One private append-only journal per session, with deduplicated source chunks
  * and proposal records. Disk records never carry reusable approval authority. */
@@ -16,7 +18,8 @@ export class VerificationStore {
   // Only native kind/reference metadata selects a slot. Its value is the
   // already-retained complete source, never a second text cache or text key.
   private readonly latestSources = new Map<VerificationSource['kind'], Map<string, VerificationSource>>();
-  private readonly latestIndexes = new Map<string, SourceIndex>();
+  private readonly latestReceipts = new Map<'index' | 'evidence', Map<string, RetainedReceipt>>();
+  private readonly proposalRevisions = new Map<string, { readonly value: unknown; readonly revision: string }>();
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly path: string | undefined;
@@ -50,12 +53,15 @@ export class VerificationStore {
             this.rememberLatestSource(source);
           }
         }
-        if (value.kind === 'index' && value.value && typeof value.value === 'object') {
-          const index = value.value as SourceIndex;
-          if (typeof index.id === 'string' && index.id.startsWith('index-') && index.id === value.key && index.representation === 'source-index'
+        if ((value.kind === 'index' || value.kind === 'evidence') && value.value && typeof value.value === 'object') {
+          const index = value.value as RetainedReceipt;
+          const prefix = value.kind === 'index' ? 'index-' : 'e-';
+          const representation = value.kind === 'index' ? 'source-index' : 'jev-qualified';
+          if (typeof index.id === 'string' && index.id.startsWith(prefix) && index.id === value.key && index.representation === representation
             && Array.isArray(index.children) && index.children.every(id => typeof id === 'string')
             && Array.isArray(index.sourceIds) && index.sourceIds.every(id => typeof id === 'string')) {
-            this.latestIndexes.set(this.indexSlot(index), index);
+            const entries = this.latestReceipts.get(value.kind) ?? new Map<string, RetainedReceipt>();
+            entries.set(this.receiptSlot(index), index); this.latestReceipts.set(value.kind, entries);
           }
         }
         if (value.kind === 'history' && value.value && typeof value.value === 'object') {
@@ -77,7 +83,7 @@ export class VerificationStore {
             this.archives.set(this.archive.branch!, this.archive);
           }
         }
-        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index') {
+        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence') {
           this.written.set(JSON.stringify([value.kind, value.key]), value.value);
         }
       }
@@ -90,7 +96,7 @@ export class VerificationStore {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   }
-  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index', key: string, value: T): T {
+  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index' | 'evidence', key: string, value: T): T {
     let record: { readonly kind: typeof kind; readonly key: string; readonly value: T };
     try { record = snapshotJudgmentEvidence({ kind, key, value }) as typeof record; }
     catch (error) { throw new VerificationHeldError('generated verification record admission', { cause: error }); }
@@ -138,7 +144,7 @@ export class VerificationStore {
     this.rememberLatestSource(retained);
     return retained;
   }
-  private indexSlot(index: Omit<SourceIndex, 'id'>): string {
+  private receiptSlot(index: Pick<VerificationReceipt, 'children' | 'sourceIds'>): string {
     const members = index.children.length ? index.children : index.sourceIds;
     return JSON.stringify([index.children.length ? 'branch' : 'leaf', members.length, members[0] ?? null, members.at(-1) ?? null]);
   }
@@ -146,16 +152,37 @@ export class VerificationStore {
    * Persist native index IDs so restart does not regenerate retrieval identities.
    */
   retainIndex(index: Omit<VerificationReceipt, 'id'> & { readonly representation: 'source-index' }): VerificationReceipt {
-    const snapshot = captureOwnedJson(index) as Omit<SourceIndex, 'id'>;
-    const slot = this.indexSlot(snapshot), previous = this.latestIndexes.get(slot);
+    return this.retainReceipt('index', index);
+  }
+  /** Historical metadata is not approval. The caller qualifies a new summary
+   * against current originals before retaining its complete native record.
+   */
+  retainEvidence(evidence: Omit<VerificationReceipt, 'id'> & { readonly representation: 'jev-qualified' }): VerificationReceipt {
+    return this.retainReceipt('evidence', evidence);
+  }
+  private retainReceipt(kind: 'index' | 'evidence', receipt: Omit<RetainedReceipt, 'id'>): RetainedReceipt {
+    const snapshot = captureOwnedJson(receipt) as Omit<RetainedReceipt, 'id'>;
+    const slot = this.receiptSlot(snapshot), entries = this.latestReceipts.get(kind) ?? new Map<string, RetainedReceipt>();
+    const previous = entries.get(slot);
     if (previous) {
       const { id: _id, ...value } = previous;
       if (isDeepStrictEqual(captureOwnedJson(value), snapshot)) return previous;
     }
-    const id = issueVerificationId('index');
-    const retained = this.append('index', id, { ...snapshot, id });
-    this.latestIndexes.set(slot, retained);
+    const id = issueVerificationId(kind === 'index' ? 'index' : 'e');
+    const retained = this.append(kind, id, { ...snapshot, id }) as RetainedReceipt;
+    entries.set(slot, retained); this.latestReceipts.set(kind, entries);
     return retained;
+  }
+  /** Live qualification cache identity for the complete admitted proposal.
+   * One current value per proposal slot; no source text enters a Map key.
+   * This identity never survives restart or restores semantic approval.
+   */
+  retainProposalRevision(key: string, proposed: unknown): string {
+    const snapshot = captureOwnedJson(proposed), previous = this.proposalRevisions.get(key);
+    if (previous && isDeepStrictEqual(previous.value, snapshot)) return previous.revision;
+    const revision = issueVerificationId('proposal');
+    this.proposalRevisions.set(key, { value: snapshot, revision });
+    return revision;
   }
   rememberProposal(key: string, proposal: string): void {
     this.proposals.set(key, this.append('proposal', key, proposal));

@@ -7,18 +7,18 @@ export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
 // A letter-only encoding keeps opaque digests from accidentally looking like
 // payment-card material to the mandatory privacy screen. All 256 bits remain.
 export const verificationHash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
-let sourceNamespace: string | undefined;
-let sourceSequence = 0;
+let recordNamespace: string | undefined;
+let recordSequence = 0;
 
 /** An issued record identity, never a digest of source text or an approval.
  * Keep native random identity bytes out of the numeric-material alphabet.
  * A persistent source owner reuses the actual retained record when unchanged.
  */
-export function issueVerificationId(kind: 's' | 'index'): string {
-  sourceNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
-  sourceSequence++;
-  if (!Number.isSafeInteger(sourceSequence)) throw new Error('Verification source identity exhausted');
-  return `${kind}-${sourceNamespace}-${sourceSequence.toString(36)}`;
+export function issueVerificationId(kind: 's' | 'index' | 'e' | 'proposal'): string {
+  recordNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
+  recordSequence++;
+  if (!Number.isSafeInteger(recordSequence)) throw new Error('Verification record identity exhausted');
+  return `${kind}-${recordNamespace}-${recordSequence.toString(36)}`;
 }
 export function issueVerificationSource(source: VerificationSourceInput): VerificationSource {
   return { ...source, id: issueVerificationId('s') };

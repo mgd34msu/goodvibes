@@ -630,7 +630,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');
     for (const member of verified) {
       const path = member.target.path + '.update-download', stat = io.observe(path);
-      if (!stat || stat.mode !== (member.target.executable ? 0o755 : 0o644) || sha256(io.readFile(path)) !== sha256(member.buffer)) throw new Error('Native daemon staging differs from its verified payload');
+      if (!stat || stat.mode !== (member.target.executable ? 0o755 : 0o644) || !io.readFile(path).equals(member.buffer)) throw new Error('Native daemon staging differs from its verified payload');
     }
     return createDaemonNativeRenameGuard(options.targets, io);
   } } : {}) });

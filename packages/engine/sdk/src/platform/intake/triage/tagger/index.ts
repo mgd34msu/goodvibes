@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { IntakeCredentialStore } from '../../context.js';
 import { applySlackReactions } from './slack.js';
@@ -103,17 +103,16 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
         const decisions: string[] = [];
         if (options.provider !== 'email' && !discordForumOnly) for (const tag of tags) {
           if (Object.hasOwn(TAGS, tag)) { meanings.set(tag, tag as TriageProviderTag); continue; }
-          const identity = createHash('sha256').update(tag).digest('hex');
-          if (heldMeanings.has(identity) || heldMeanings.size + pendingMeanings.size >= 1024) throw new TriageTagMeaningHeld();
-          if (pendingMeanings.has(identity)) throw new Error('Triage tag interpretation is already pending');
-          pendingMeanings.add(identity);
+          if (heldMeanings.has(tag) || heldMeanings.size + pendingMeanings.size >= 1024) throw new TriageTagMeaningHeld();
+          if (pendingMeanings.has(tag)) throw new Error('Triage tag interpretation is already pending');
+          pendingMeanings.add(tag);
           try {
             const result = await readCustomTagMeaning(tag, options.port, guarded);
             current(guarded); meanings.set(tag, result.canonical); decisions.push(result.decisionId);
           } catch (error) {
-            if (error instanceof TriageTagMeaningHeld) heldMeanings.add(identity);
+            if (error instanceof TriageTagMeaningHeld) heldMeanings.add(tag);
             throw error;
-          } finally { pendingMeanings.delete(identity); }
+          } finally { pendingMeanings.delete(tag); }
         }
         const keyword = (tag: string) => tag.replace(/[^A-Za-z0-9_]+/g, '_');
         const effects: readonly TriageTagEffect[] = Object.freeze(tags.map(tag => Object.freeze(options.provider === 'email'

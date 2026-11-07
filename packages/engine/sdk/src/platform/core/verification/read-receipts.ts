@@ -92,11 +92,6 @@ export function nativeReadReceipts(sources: readonly VerificationSource[]): {
             integrityProblem: 'Returned source text has missing or mismatched native line provenance. Credit no source-line coverage from this record. The original bytes and claimed metadata remain retained for retrieval.' }) });
         continue;
       }
-      if (!object(observed)
-        || !Number.isSafeInteger(observed.startLine) || Number(observed.startLine) < 1
-        || !Number.isSafeInteger(observed.completeLines) || Number(observed.completeLines) < 0
-        || typeof observed.numbered !== 'boolean' || typeof observed.truncated !== 'boolean'
-        || observed.contentSha256 !== createHash('sha256').update(file.content).digest('hex')) { valid = false; break; }
       const rows = returnedReadRows({ content: file.content, readObservation: observed });
       if (rows.length !== observed.completeLines) { valid = false; break; }
       const { content: _content, ...metadata } = file;

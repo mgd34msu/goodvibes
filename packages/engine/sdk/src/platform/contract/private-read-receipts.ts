@@ -67,11 +67,12 @@ export function readPrivateReceiptArchives(contract: ArchiveOwner) {
     units?: { id: string; observations: { path: string; returnedRanges: string[]; returnedContent?: string; contentKind?: string }[] }[] };
   if (archive.version !== 1 || archive.kind !== 'contract-read-receipts' || archive.contractId !== contract.id
     || archive.inputId !== (contract.inputSnapshot?.id ?? null) || !Array.isArray(archive.units)) throw new Error('Private receipt archive has an unrecognized owner or format');
+  const digest = `sha256-base64url:${createHash('sha256').update(bytes).digest('base64url')}`;
   return [{ kind: 'contract-read-receipts', path: `.goodvibes/reviews/${contract.id}/source-receipts.json`,
-    digest: `sha256-base64url:${createHash('sha256').update(bytes).digest('base64url')}`, bytes: bytes.length,
+    digest, bytes: bytes.length,
     hostFileRead: { operation: 'read-file', source: 'native-host-filesystem', success: true,
       ownerProjectRoot: contract.projectRoot!, absolutePath: path, bytes: bytes.length,
-      digest: `sha256-base64url:${createHash('sha256').update(bytes).digest('base64url')}`,
+      digest,
       modifiedAt: new Date(lstatSync(path).mtimeMs).toISOString(), mode: (lstatSync(path).mode & 0o777).toString(8),
       meaning: 'Actual successful host filesystem read of the private archive outside the disposable worker tree. The returned file passed owner/input binding validation. It establishes stored contents and file identity; it is not a worker write, test execution, native acceptance or permission to alter runtime state.',
     },
@@ -120,21 +121,20 @@ export function verifyPrivateReceiptPreservation(contract: ArchiveOwner, unit: P
       if (!actual || actual.status !== 'passed' || !actual.checks.some(check => check.id === saved.latestCheckId && check.result === 'pass')
         || JSON.stringify(actual.readEvidence ?? []) !== JSON.stringify(saved.observations)) throw new Error('Archived observations differ from their original accepted host records');
     }
-    const referenceChecks: { path: string; sourceUnitId: string; baselineDigest: string; archivedDigest: string; identical: boolean }[] = [];
+    const referenceChecks: { path: string; sourceUnitId: string; bytes: number; identical: boolean }[] = [];
     if (unit.baseline?.head) {
       for (const path of unit.files.filter(path => !path.startsWith('.goodvibes/') && /(?:\.md|\.json|\.txt|SHA256SUMS)$/.test(path))) {
         const result = spawnSync('git', ['-C', cwd, 'show', `${unit.baseline.head}:${path}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
         if (result.status !== 0) continue; // A newly created file held no previous public ledger.
         const original = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
-        let matched: { id: string; text: string } | undefined;
+        let matched: { id: string } | undefined;
         for (const saved of archive.units) for (const read of saved.observations) {
           if (read.contentKind !== 'declared-reference' || read.returnedContent === undefined || !(read.path === path || read.path.endsWith('/' + path))) continue;
           const text = read.returnedContent.split('\n').map(line => line.replace(/^\s*\d+\s*\| ?/, '')).join('\n').replace(/\r\n/g, '\n').replace(/\n$/, '');
-          if (text === original) matched = { id: saved.id, text };
+          if (text === original) matched = { id: saved.id };
         }
         if (!matched) throw new Error(`The original public reference ${path} has no exact preserved private snapshot`);
-        const digest = (text: string) => `sha256-base64url:${createHash('sha256').update(text).digest('base64url')}`;
-        referenceChecks.push({ path, sourceUnitId: matched.id, baselineDigest: digest(original), archivedDigest: digest(matched.text), identical: true });
+        referenceChecks.push({ path, sourceUnitId: matched.id, bytes: Buffer.byteLength(original), identical: true });
       }
     }
     return { gate: 'private-read-receipt-preservation', passed: true, durationMs: performance.now() - start,

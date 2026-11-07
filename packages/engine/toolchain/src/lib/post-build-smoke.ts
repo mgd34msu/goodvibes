@@ -19,7 +19,6 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  */
 
 import { lstatSync, readFileSync, statSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -322,11 +321,10 @@ async function runOwnedPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeRe
   let artifact: string;
   try { current(); originalFile = options.readArtifact ? undefined : fileIdentity(); artifact = readArtifact(binary); fileCurrent(); current(); }
   catch { return failed('artifact scan could not read a current binary'); }
-  const artifactIdentity = createHash('sha256').update(artifact, 'latin1').digest('hex');
   const artifactCurrent = () => {
     current();
     fileCurrent();
-    if (createHash('sha256').update(readArtifact(binary), 'latin1').digest('hex') !== artifactIdentity) throw new Error('Smoke artifact changed.');
+    if (readArtifact(binary) !== artifact) throw new Error('Smoke artifact changed.');
     fileCurrent();
     current();
   };

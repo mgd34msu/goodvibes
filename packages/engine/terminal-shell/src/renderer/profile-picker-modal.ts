@@ -1,6 +1,6 @@
 import { formatTimestamp } from './modal-utils.js';
 import { activeTokens } from './theme.js';
-import { beginModal, finishModal, searchRow, scrollCountText, type KitHint, type SurfaceLayer } from './surface-kit.js';
+import { beginModal, finishModal, searchRow, scrollCountText, wrapLines, type KitHint, type SurfaceLayer } from './surface-kit.js';
 import { drawList, type KitRow } from './surface-kit-list.js';
 import { drawTextBlock, listHeight, modalHeightFor, modalTextWidth, textBlockHeight, type TextLine } from './surface-kit-extra.js';
 
@@ -53,8 +53,9 @@ export function createProfilePickerRenderer(presentation: ProfilePickerPresentat
       { text: presentation.emptyHint, style: { fg: t.textFaint } },
     ];
     const listRows = allRows.length ? listHeight(allRows, 0, width - 1) : textBlockHeight(emptyLines, width);
+    const detailRows = presentation.description ? wrapLines(presentation.description, width).length + 1 : 0;
     const noteRows = notes.length ? textBlockHeight(notes, width) + 1 : 0;
-    const height = modalHeightFor(screenWidth, screenHeight, { hints: presentation.hints }, 2 + listRows + noteRows);
+    const height = modalHeightFor(screenWidth, screenHeight, { hints: presentation.hints }, 2 + listRows + detailRows + noteRows);
     const f = beginModal(screenWidth, screenHeight, { title: 'Profiles', hints: presentation.hints, height });
     const total = modal.profiles.length;
     searchRow(f, f.top, modal.query, 'Filter profiles', modal.query ? `${visible.length} of ${total}` : `${total} saved`);
@@ -82,6 +83,7 @@ export function createProfilePickerRenderer(presentation: ProfilePickerPresentat
         mouseNavigation: presentation.mouseNavigation,
         ...(presentation.trackVisibleRows ? { scrollKey: { owner: modal, name: 'profiles' } } : {}),
       });
+      if (presentation.trackVisibleRows) modal.setVisibleRows?.(Math.max(1, listBottom - result.listTop + 1));
       f.hintRight = scrollCountText(result.above, result.below);
     }
     return finishModal(f);

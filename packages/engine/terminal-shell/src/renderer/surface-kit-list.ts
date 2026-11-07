@@ -4,12 +4,14 @@
  *   ✦ group header         lowercase, accent (violet), bold; a blank row above
  *                          every group except the first (dropped when a
  *                          narrow or short list does not fit)
- *   ● Label  description             right metadata
- *     wrapped continuation of a long label or description
+ *   selected-item explanation (a separate area above the options)
+ *
+ *   ● Label  compact metadata        right metadata
+ *     wrapped continuation of a long label or field value
  *
  * The selected row is the one loud element: a brand → brandEnd gradient inset 2
  * columns from each side of the fill, with dark bold text
- * (selectedListItemText). Long labels and descriptions wrap onto continuation
+ * (selectedListItemText). Long labels and field values wrap onto continuation
  * rows; nothing is clipped. When the list does not fit, group spacing collapses
  * first (always when that makes it fit; on a narrow screen or a short list
  * area in every case), then the list scrolls around the selected row and reports how many
@@ -202,6 +204,8 @@ export interface KitListOptions {
   /** Opt in only when this list uses Up/Down and Enter. */
   readonly mouseNavigation?: (boolean) | undefined;
   readonly rows: readonly KitRow[];
+  /** Current option for scrolling/help when focus is in a separate category rail. */
+  readonly activeIndex?: number | undefined;
   /** First and last canvas rows the list may use (inclusive). */
   readonly top: number;
   readonly bottom: number;
@@ -223,6 +227,8 @@ export interface KitListContext {
   /** Explicit help height. Documentation blocks default to 40% of the area. */
   readonly height?: number | undefined;
   readonly offset?: number | undefined;
+  /** Store the clamped offset so paging back works immediately at either end. */
+  readonly setOffset?: ((offset: number) => void) | undefined;
   /** Existing documentation pagers can supply their own window and indicators. */
   readonly window?: ((capacity: number) => readonly KitSpan[]) | undefined;
 }
@@ -230,7 +236,7 @@ export interface KitListContext {
 function contextLayout(options: KitListOptions): { height: number; lines: readonly KitSpan[] } {
   const width = Math.max(1, options.x1 - options.x0 + 1);
   const details = options.rows.map(row => row.detail ? wrapLines(row.detail, width) : []);
-  const lines = options.context?.lines ?? (details[options.rows.findIndex(row => row.selected)] ?? [])
+  const lines = options.context?.lines ?? (details[options.activeIndex ?? options.rows.findIndex(row => row.selected)] ?? [])
     .map(text => ({ text, fg: activeTokens().textMuted }));
   const capacity = Math.max(0, options.bottom - options.top + 1);
   // Reserve the same area across selection changes, including items with no
@@ -242,9 +248,13 @@ function contextLayout(options: KitListOptions): { height: number; lines: readon
   const height = Math.max(0, Math.min(desired, capacity - minimumItems - 1));
   if (height === 0) return { height, lines: [] };
   if (options.context?.window) return { height, lines: options.context.window(height).slice(0, height) };
-  if (lines.length <= height) return { height, lines };
+  if (lines.length <= height) {
+    options.context?.setOffset?.(0);
+    return { height, lines };
+  }
   const contentRows = Math.max(1, height - 1);
   const offset = Math.max(0, Math.min(options.context?.offset ?? 0, lines.length - contentRows));
+  options.context?.setOffset?.(offset);
   const shown: KitSpan[] = lines.slice(offset, offset + contentRows);
   if (height > 1) shown.push({ text: scrollCountText(offset, lines.length - offset - contentRows), fg: activeTokens().textFaint });
   return { height, lines: shown };
@@ -365,7 +375,7 @@ function drawListRows(canvas: SurfaceCanvas, options: KitListOptions): KitListRe
   const last = rows.length - 1;
   if (plan.scrolls) {
     const { capacity, spanOf } = plan;
-    const selected = rows.findIndex((row) => row.selected === true);
+    const selected = options.activeIndex ?? rows.findIndex((row) => row.selected === true);
     start = Math.max(0, Math.min(rememberedStart(options.scrollKey) ?? options.scrollStart ?? 0, last));
     if (selected >= 0) {
       if (selected < start) start = selected;

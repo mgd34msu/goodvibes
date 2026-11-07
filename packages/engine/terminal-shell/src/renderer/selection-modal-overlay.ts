@@ -115,7 +115,7 @@ export function renderSelectionModalOverlay(
 
   const res = drawList(f.canvas, {
     mouseNavigation, rows, top, bottom: f.bottom, x0: f.l, x1: f.r,
-    context: { height: detailRows, offset: modal.contextScroll },
+    context: { height: detailRows, offset: modal.contextScroll, setOffset: offset => { modal.contextScroll = offset; } },
     scrollKey: { owner: modal, name: 'selection' },
   });
   f.hintRight = scrollCountText(res.above, res.below);

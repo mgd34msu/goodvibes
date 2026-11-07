@@ -141,8 +141,10 @@ describe('renderModelWorkspace', () => {
     expect(text).toContain('OpenAI Embeddings');
     expect(text).toContain('configured');
     expect(text).toContain('unconfigured');
-    expect(text).toContain('Set');
-    expect(text).toContain('OPENAI_API_KEY to enable.');
+    picker.selectedIndex = 1;
+    const selected = linesToText(frameFromLayer(renderModelWorkspace(picker, W, H), W, H)).join('\n');
+    expect(selected).toContain('Set');
+    expect(selected).toContain('OPENAI_API_KEY to enable.');
   });
 
   test('the embeddings target shows provider id + dimensions + configured state, never a model route', () => {

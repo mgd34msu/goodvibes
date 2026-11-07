@@ -98,7 +98,6 @@ describe('renderSettingsModal', () => {
   });
 
   test('selected help stays above a continuous settings list without moving it', () => {
-    modal.searchFocused = false;
     modal.categoryIndex = 0;
     const entries = modal.currentItems;
     expect(entries.length).toBeGreaterThan(3);
@@ -114,7 +113,7 @@ describe('renderSettingsModal', () => {
       for (let i = 0; i < entries.length; i++) {
         expect(text[first + i]).toContain(entries[i]!.setting!.key.split('.').at(-1)!);
       }
-      expect(text.slice(0, first).join('\n')).toContain('source default');
+      expect(text.slice(0, first).join('\n')).toContain(entries[index]!.setting!.key);
     }
     expect(new Set(positions).size).toBe(1);
   });

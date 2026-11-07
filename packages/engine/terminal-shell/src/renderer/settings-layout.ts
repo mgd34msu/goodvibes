@@ -49,6 +49,7 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
     const doc = policy.docLines(modal, selected >= 0, width);
     return drawList(f.canvas, {
       rows,
+      activeIndex: selected,
       top: p.top,
       bottom,
       x0: sx,

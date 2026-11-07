@@ -1,5 +1,6 @@
 // Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
 import { describe, test, expect, beforeEach } from 'bun:test';
+import { handleSelectionModalToken } from '../../input/handler-modal-routes.ts';
 import { SelectionModal } from '../../input/selection-modal.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
 
@@ -15,6 +16,21 @@ describe('SelectionModal', () => {
 
   beforeEach(() => {
     modal = new SelectionModal();
+  });
+
+  test('PageUp and PageDown scroll help while preserving the selected action', () => {
+    modal.open('Tools', mkItems(3));
+    let actions = 0;
+    const state = { selectionModal: modal, selectionCallback: () => { actions++; }, modalStack: [], requestRender: () => {}, handleEscape: () => {} };
+    const page = (logicalName: string) => handleSelectionModalToken(state, {
+      type: 'key', name: logicalName, logicalName, ctrl: false, shift: false, meta: false,
+    });
+    expect(page('pagedown')).toBe(true);
+    expect(modal.contextScroll).toBe(1);
+    expect(page('pageup')).toBe(true);
+    expect(modal.contextScroll).toBe(0);
+    expect(modal.selectedIndex).toBe(0);
+    expect(actions).toBe(0);
   });
 
   // ── open() ─────────────────────────────────────────────────────────────────

@@ -191,7 +191,7 @@ function buildFlagContext(entry: SettingEntry | null): string[] {
 /**
  * The documentation for whatever the settings list has selected, one entry
  * per line (unwrapped; '' separates paragraphs). The first line names the
- * selection; the renderer shows it under the selected row, wrapped in full.
+ * selection; the renderer shows it above the uninterrupted options, with a separate pager.
  */
 export function settingContextLines(modal: SettingsModal): string[] {
   const category = modal.currentCategory;

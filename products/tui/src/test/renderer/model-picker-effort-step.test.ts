@@ -51,17 +51,21 @@ function renderEffortStep(spec: ReasoningEffortSpec | undefined, current = 'medi
 }
 
 describe("the effort step renders the selected model's own options", () => {
-  test("named levels: exactly the model's levels, each with a description", () => {
+  test("named levels: model options stay together with the selected explanation above", () => {
     const text = renderEffortStep({
       kind: 'effort',
       values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
       source: 'catalog',
-    });
+    }, 'max');
     expect(text).toContain('accepts these reasoning levels');
     for (const level of ['none', 'low', 'medium', 'high', 'xhigh', 'max']) {
       expect(text).toContain(level);
     }
     expect(text).toContain('Deepest this model allows');
+    const lines = text.split('\n');
+    const first = lines.findIndex(line => /^\s*none\s*(?:Test Model|$)/.test(line));
+    expect(first).toBeGreaterThan(0);
+    expect(text.indexOf('Deepest this model allows')).toBeLessThan(text.indexOf(lines[first]!));
     // 'instant' was in the old hardcoded list; this model does not offer it.
     expect(text).not.toContain('instant');
   });
@@ -76,7 +80,7 @@ describe("the effort step renders the selected model's own options", () => {
       canDisableReasoning: true,
     });
     expect(text).toContain('thinking-token budget');
-    // The level row wraps its description; the budget it sends is on it.
+    // The selected level's help explains the budget above the options.
     expect(text).toMatch(/8,192 thinking/);
   });
 

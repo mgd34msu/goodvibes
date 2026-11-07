@@ -70,8 +70,13 @@ export function createSettingsDocumentation<
       else rest.push(line);
     }
     const out: DocLine[] = [];
+    // Confirmations and constraints must be visible before optional metadata,
+    // even when the help viewport is short. They remain outside the options.
+    for (const line of rest.filter(line => WARN_PREFIXES.some(prefix => line.startsWith(prefix))))
+      for (const wrapped of wrapLines(line, width)) out.push({ text: wrapped, fg: t.warning });
     if (facts.length > 0) for (const wrapped of wrapLines(facts.join(' · '), width)) out.push({ text: wrapped, fg: t.textFaint });
     for (const line of rest) {
+      if (WARN_PREFIXES.some(prefix => line.startsWith(prefix))) continue;
       if (line === '') {
         if (out.length > 0 && out[out.length - 1]!.text !== '') out.push({ text: '', fg: t.textMuted });
         continue;

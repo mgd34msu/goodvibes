@@ -199,7 +199,9 @@ describe('required activation holds across knowledge refresh catches', () => {
     repairReadings(() => phase);
     const result = await promoteRepairSources({ store: item.store, enrichSource: async () => {
       await captureRepairText(item); phase = 'fallback'; throw new Error('Synthetic extraction worker unavailable');
-    } }, spaceId, gap, [item.source.id], task, Date.now() + 60_000);
+    // This complete recovery/publication fixture took 64 seconds on CI. Its
+    // support budget must cover that work, within the finite outer deadline.
+    } }, spaceId, gap, [item.source.id], task, Date.now() + 90_000);
     expect(result).toEqual({ promotedFactCount: 2, repairComplete: false, promotedSourceIds: [item.source.id] });
     const reopened = await item.reload();
     const promoted = reopened.listNodes().find((node) => node.title === 'Display and picture specifications');
@@ -209,7 +211,7 @@ describe('required activation holds across knowledge refresh catches', () => {
     expect(currentTask.state).toBe('applying'); expect(currentTask.promotedFactCount).toBe(2);
     expect(currentTask.trace.some((entry) => entry.message === 'Repair source enrichment did not finish for one accepted source.')).toBe(true);
     expectProtected(reopened, item);
-  }, 120_000); // Complete promotion/recovery passes measured 51s locally and exceeded 60s on CI.
+  }, 120_000);
 });
 
 async function repairTask(item: Fixture) {

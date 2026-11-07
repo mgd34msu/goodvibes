@@ -1,5 +1,6 @@
 /** Provider mutations are explicit, exact-mirror, one-operation admitted effects. */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
 import type { PermissionManager } from '../../permissions/manager.js';
 import type { AutonomousToolSource } from '../../permissions/autonomous.js';
@@ -11,6 +12,7 @@ import type { OwnedInboxSource } from '../registration.js';
 import type { InboundChannelItem } from '../provider-adapter.js';
 import { captureTagNames } from './tagger/meaning.js';
 import type { TriageTagger } from './tagger/index.js';
+import { captureTriageData } from './evidence.js';
 export interface OwnedInboxTaggingOptions {
   readonly source: OwnedInboxSource;
   readonly tagger: TriageTagger;
@@ -29,7 +31,6 @@ export interface OwnedInboxTagging {
   applyTags(itemId: string, tags: readonly string[], operation: OwnedInboxTagOperation): Promise<void>;
   close(): Promise<void>;
 }
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /** Fresh local reference, unrelated to provider bytes. Colon-delimited UUID
  * groups are protocol identity; no group can resemble a 13-19 digit PAN. */
 const reference = () => randomUUID().replaceAll('-', ':');
@@ -37,7 +38,7 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
   const options = Object.freeze({ ...input });
   const acquireRead = options.source.acquireRead.bind(options.source);
   const prepare = options.tagger.prepareTags.bind(options.tagger);
-  const provider = options.tagger.provider, account = options.tagger.accountScopeId;
+  const provider = options.tagger.provider;
   const accountRef = reference();
   const lifetime = new AbortController();
   const active = new Set<Promise<void>>();
@@ -71,15 +72,17 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
         try {
           baseCurrent(); readCurrent();
           const row = find(); if (!row || row.provider !== provider) throw new Error('Owned triage item unavailable');
-          const revision = hash({ account, row });
-          const assertRow = () => { baseCurrent(); readCurrent(); const latest = find(); if (!latest || hash({ account, row: latest }) !== revision) throw new Error('Owned triage item changed'); };
+          // The read lease owns this exact private row. A digest adds no
+          // authority and needlessly reserializes the complete item at every await.
+          const capturedRow = captureTriageData(row);
+          const assertRow = () => { baseCurrent(); readCurrent(); const latest = find(); if (!latest || !isDeepStrictEqual(captureTriageData(latest), capturedRow)) throw new Error('Owned triage item changed'); };
           assertRow();
           const mutation = await prepare(itemId, tags, { signal, assertCurrent: assertRow });
           const assertCurrent = () => { assertRow(); mutation.assertCurrent(); };
           assertCurrent();
           const registry = new ToolRegistry(options.permissionManager);
           const name = 'inbox_triage_apply_tags';
-          // Account IDs, provider snowflakes/UIDs and content-revision digests
+          // Account IDs and provider snowflakes/UIDs
           // are local transport identity, not semantic action text. This fresh
           // reference is bound only here, after selecting the real owned row and
           // preparing its exact mutation. It cannot select another row, account

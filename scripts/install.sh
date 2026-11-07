@@ -71,22 +71,9 @@ LAUNCHD_DAEMON_LABEL="sh.goodvibes.daemon"
 # marker) is always left alone and only reported.
 LEGACY_SYSTEMD_DAEMON_UNIT="goodvibes-daemon.service"
 
-# The canonical unit's ExecStart deliberately carries NO endpoint flags
-# (--hostname/--port): the daemon resolves controlPlane.hostMode/host/port from
-# the user's settings at boot, so a host configured for hostMode=network or a
-# non-default port keeps that endpoint across installer upgrades. The in-app
-# install-service writes the same shape (buildManagedDaemonServiceManager),
-# so both paths produce the identical running daemon — pinning endpoint
-# constants here is what silently re-pinned custom-configured hosts back to
-# loopback:3421 behind a success receipt. Only --daemon-home is baked: it names
-# where the settings live, not what they say.
-#
-# --daemon-home takes the daemon's own STATE directory ($HOME/.goodvibes/daemon)
-# — the one holding operator-tokens.json, auth-users.json and
-# daemon-settings.json — not $HOME. Both writers baked $HOME, so a serviced
-# daemon filed its identity a level above where every reader looks and the
-# client that talks to it kept reading an empty operator-tokens.json under
-# .goodvibes/daemon.
+# Managed services use the daemon's default home and configured endpoint.
+# Explicit --daemon-home overrides mark a host as externally managed and disable
+# native automatic updates, so the ordinary installed service omits that flag.
 
 # Verify settle used by the supervised transfer: seconds between the two
 # post-start probes (a Type=simple unit reports 'active' from fork onward, so a
@@ -707,12 +694,8 @@ unit_daemon_home_value() {
   printf '%s' "$_uv"
 }
 
-# True when the unit/plist launches the daemon with its own state directory
-# ($HOME/.goodvibes/daemon) as --daemon-home. The flag being PRESENT is not
-# currency: a unit carrying any other value points the daemon's identity at
-# the wrong directory — a daemon launched that way runs, answers status, and
-# serves nothing, because its channel workers open an empty store. Currency
-# requires the value.
+# The installed daemon owns its normal home without an explicit override.
+# Older managed units are regenerated to this form so native updates can run.
 unit_daemon_home_is_canonical() {
   [ -z "$(unit_daemon_home_value "$1")" ]
 }

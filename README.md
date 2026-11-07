@@ -84,26 +84,17 @@ See [installation instructions](docs/installation.md).
 Developers who deliberately want to build their checkout can run
 `./scripts/install-from-checkout.sh`. The public installer never selects that path.
 
-## Common commands
-
-Run these from the repository root:
+## Use GoodVibes
 
 ```sh
-bun install
-bun run typecheck                               # every package
-bun run build                                   # judgment, engine and all four products
-bun run test                                    # installer, judgment, engine and product tests
-bun run products:check                          # product entrypoints, exports and type coverage
-
-bun run --cwd packages/judgment proof           # live proof of every pattern and compound
-bun run --cwd packages/judgment calibrate       # live calibration of every battery
-bun run --cwd packages/engine routing:proof     # live routing proof against the model catalog
-bun run observe:report                          # decision-log analytics
-bun run judgment:lint                           # registration/fixture checks across engine and product TS/TSX
-bun run judgment:audit --json                    # semantic review candidates; not a coverage certificate
+goodvibes                 # Terminal UI
+goodvibes-agent           # Personal agent
+goodvibes-daemon status   # Daemon status
 ```
 
-The root `prepare` script points git at `.githooks/`. The local pre-commit hook runs the source-only credential scope check for engine and product implementation/config changes. Run focused behavior tests during development and `bun run validate` for a complete local integration check. Required CI still runs the full build, types, API, product, browser and containment checks against the reviewed commit. A successful commit alone does not establish merge readiness.
+Choose providers, models, effort levels and decision-model policy in the
+application settings. See the product guides below for pairing, remote access,
+voice, tools and other capabilities.
 
 ## Documentation
 

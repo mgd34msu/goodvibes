@@ -1,6 +1,7 @@
 # Decision-model policy
 
-Status: source implementation written; final CI and release pending. The full build,
+Status: implementation and scoped qualification recorded. Final delivery requires
+green CI on the exact tagged revision and verified published artifacts. The full build,
 fresh API extraction, platform and Agent/TUI process suites, daemon HTTP workflows
 and WebUI checks have passed within the scopes recorded in the
 [release acceptance matrix](../releases/3.1.0-qualification.md). Real Chromium also

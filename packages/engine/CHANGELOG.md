@@ -2,7 +2,10 @@
 
 ## [3.1.0] - 2026-11-06
 
-Status: candidate preparation; complete workflow qualification and publication pending.
+Qualification and delivery evidence is recorded in the
+[release acceptance report](https://github.com/mgd34msu/goodvibes-jev/blob/v3.1.0/docs/releases/3.1.0-qualification.md).
+Native publication requires successful CI on the exact tagged commit and
+verification of its published artifacts.
 
 ### Added
 

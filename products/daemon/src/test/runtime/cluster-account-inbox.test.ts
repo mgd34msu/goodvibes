@@ -38,12 +38,12 @@ function endpoints() {
   let credentialGate: Promise<void> | undefined;
   let sourceGate: Promise<void> | undefined;
   const messages = [{ ts: `${Math.floor((Date.now() - 20_000) / 1_000)}.000000`, user: 'U-SYNTHETIC-SENDER', text }];
-  const slackCalls: Array<{ path: string; authorization: string | null; oldest: string | null }> = [];
+  const slackCalls: Array<{ path: string; authorization: string | null; oldest: string | null; latest: string | null }> = [];
   const sourceCalls: Array<{ path: string; parts?: string[] }> = [];
   const slack = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const url = new URL(request.url);
     expect(request.method).toBe('GET');
-    slackCalls.push({ path: url.pathname, authorization: request.headers.get('authorization'), oldest: url.searchParams.get('oldest') });
+    slackCalls.push({ path: url.pathname, authorization: request.headers.get('authorization'), oldest: url.searchParams.get('oldest'), latest: url.searchParams.get('latest') });
     if (!available) return new Response('{}', { status: 503 });
     if (url.pathname === '/api/auth.test') return Response.json({ ok: true, team_id: actualAccount.workspaceId, user_id: actualAccount.userId });
     if (url.pathname === '/api/conversations.list') return Response.json({ ok: true, channels: [{ id: 'D-SYNTHETIC', user: 'U-SYNTHETIC-SENDER' }] });
@@ -271,10 +271,19 @@ test.each(['credential', 'source'] as const)('revoked %s drains held incumbent s
   await b.registration.ready;
   await a.control.stop(); events.length = 0;
   const source = hold(); remote.holdSource(source.promise);
-  remote.messages.push({ ...remote.messages[0]!, ts: `${Math.floor(Date.now() / 1000)}.000000` });
+  // The next candidate must lie strictly after the committed cursor and before
+  // the next poll's cutoff. Rounding the current wall clock to a second can
+  // equal that cutoff and correctly exclude the very item this test must hold.
+  const receivedAt = before.cursor + 1;
+  expect(receivedAt).toBeLessThan(Date.now());
+  const ts = `${Math.floor(receivedAt / 1000)}.${String((receivedAt % 1000) * 1000).padStart(6, '0')}`;
+  remote.messages.push({ ...remote.messages[0]!, ts });
   const sourceBefore = remote.sourceCalls.length;
   const polling = a.control.start(); void polling.catch(() => {});
   await until(() => remote.sourceCalls.length > sourceBefore);
+  const nextPoll = remote.slackCalls.filter(call => call.path.endsWith('history')).at(-1);
+  expect(nextPoll?.oldest).toBe((before.cursor / 1000).toFixed(6));
+  expect(receivedAt).toBeLessThan(Math.round(Number(nextPoll?.latest) * 1000));
   expect(events).not.toContain('node-a:poll-drained'); expect(events).not.toContain('node-b:poll-start');
   const sourceCalls = remote.sourceCalls.length;
   await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));

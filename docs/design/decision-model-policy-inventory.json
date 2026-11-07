@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "status": "Source dispositions recorded; local scoped workflow qualification passed; exact-final-commit CI and release pending.",
+  "status": "Source dispositions recorded; scoped workflow and delivery evidence are tracked separately.",
   "sourceRevision": "2fd0ee8b1faee8b36bb24b419daacb79d4e7cdee",
   "scope": "Tracked TypeScript source only. Excludes vendor, generated, dist, test/tests/e2e and runtime .goodvibes copies. Includes explicit developer tooling and foundation transport.",
   "method": "Index literal judgmentPort/captureJudgmentPort/createSystemOnePort access sites and declarations, then trace actual enclosing consumers and native/semantic branches. These counts are source navigation, not request counts or exhaustive transitive-call proof.",
-  "verification": "See docs/releases/3.1.0-qualification.md for scoped source, build, typecheck, platform, Agent/TUI process, daemon HTTP and real Chromium evidence. The browser proof passed actual submit/answer/reload/shutdown under all3policies with zero Classic decision requests. No per-origin execution or model-accuracy certificate is asserted. Exact-final-SHA CI and release publication remain pending.",
+  "verification": "See docs/releases/3.1.0-qualification.md for scoped source, build, typecheck, platform, Agent/TUI process, daemon HTTP and real Chromium evidence. The browser proof passed actual submit/answer/reload/shutdown under all3policies with zero Classic decision requests. No per-origin execution or model-accuracy certificate is asserted. Delivery requires exact-final-SHA CI and published-artifact verification; this inventory does not certify those gates.",
   "files": [
     {
       "file": "packages/engine/errors/src/failure-reading.ts",

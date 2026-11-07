@@ -1,5 +1,4 @@
 import { activateClassicFallback } from '../../../runtime/decision-policy.js';
-import { createHash } from 'node:crypto';
 import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
@@ -76,8 +75,7 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
 } = {}): Promise<AnswerEvidenceRelevancePlan> {
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotAnswerEvidenceRelevanceInput(input);
-  const inputHash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
-  if (!snapshot.query.trim() || !snapshot.candidates.length) return freezeSupport({ inputHash, accepted: [], rejected: [] });
+  if (!snapshot.query.trim() || !snapshot.candidates.length) return freezeSupport({ accepted: [], rejected: [] });
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   const controller = new AbortController();
@@ -118,7 +116,7 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
     }));
     check(); checkConfiguration();
     const order = new Map(snapshot.candidates.map((candidate, index) => [candidate.reference, index]));
-    return freezeSupport({ inputHash, model, requestedModel,
+    return freezeSupport({ model, requestedModel,
       accepted: readings.filter((reading) => reading.verdict === 'yes').sort((a, b) => b.probability - a.probability || order.get(a.reference)! - order.get(b.reference)!),
       rejected: readings.filter((reading) => reading.verdict === 'no'),
     });

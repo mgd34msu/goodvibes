@@ -37,7 +37,7 @@ describe('complete-candidate bounded relevance batches', () => {
       expect(JSON.stringify(request.state).length).toBeLessThan(160_000);
     }
     expect(plan.model).toBe('jev-1.13.0'); expect(plan.requestedModel).toBe('jev-latest');
-    expect(plan.inputHash).toHaveLength(64); expect(Object.isFrozen(plan.accepted)).toBe(true);
+    expect(Object.isFrozen(plan.accepted)).toBe(true);
   });
   test('considers candidates beyond the unchanged 100-candidate per-reader boundary', async () => {
     const candidates = Array.from({ length: 105 }, (_, index) => candidate(index + 1));

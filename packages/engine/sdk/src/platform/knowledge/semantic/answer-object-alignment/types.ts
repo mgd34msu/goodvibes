@@ -21,7 +21,6 @@ export interface AnswerObjectReading {
   readonly decisionId?: string | undefined;
 }
 export interface AnswerObjectAlignmentPlan {
-  readonly inputHash: string;
   readonly integrationIntent?: AnswerObjectBoolean | undefined;
   readonly accepted: readonly AnswerObjectReading[];
   readonly rejected: readonly AnswerObjectReading[];

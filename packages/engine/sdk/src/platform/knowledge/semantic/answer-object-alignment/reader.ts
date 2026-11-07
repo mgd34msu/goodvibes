@@ -1,5 +1,4 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { createHash } from 'node:crypto';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
@@ -69,9 +68,8 @@ export async function readAnswerObjectAlignment(input: AnswerObjectAlignmentInpu
   requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshot = snapshotAnswerObjectInput(input);
-  const inputHash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
   options.assertCurrent?.();
-  if (!snapshot.candidates.length) return freezeSupport({ inputHash, accepted: [], rejected: [] });
+  if (!snapshot.candidates.length) return freezeSupport({ accepted: [], rejected: [] });
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   const controller = new AbortController();
@@ -126,7 +124,7 @@ export async function readAnswerObjectAlignment(input: AnswerObjectAlignmentInpu
     // Keep actual alignment probabilities. No old point scale or fixed kind ladder.
     const order = new Map(snapshot.candidates.map((candidate, index) => [candidate.reference, index]));
     accepted.sort((a, b) => b.aligned.probability - a.aligned.probability || order.get(a.reference)! - order.get(b.reference)!);
-    return freezeSupport({ inputHash, integrationIntent, model, requestedModel, accepted, rejected: readings.filter((reading) => !reading.selected) });
+    return freezeSupport({ integrationIntent, model, requestedModel, accepted, rejected: readings.filter((reading) => !reading.selected) });
   };
   try { return await Promise.race([run(), stopped]); }
   catch (error) { controller.abort(); throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }

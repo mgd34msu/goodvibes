@@ -1,5 +1,4 @@
 import { activateClassicFallback } from '../../../runtime/decision-policy.js';
-import { createHash } from 'node:crypto';
 import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { JudgmentInputError } from '../../../gate/judgment-input.js';
 import { withAnswerVerificationBudget } from '../answer-verification/budget.js';
@@ -43,7 +42,6 @@ function prepareBatches(input: AnswerEvidenceRelevanceInput) {
   const baseCharacters = JSON.stringify(head).length;
   const batches: AnswerEvidenceRelevanceInput[] = [];
   const ordinals = new Map<string, number>();
-  const hash = createHash('sha256').update(JSON.stringify(head));
   let candidates: AnswerEvidenceCandidate[] = [], characters = baseCharacters;
   const flush = () => { if (candidates.length) batches.push(freezeSupport({ ...head, candidates })); candidates = []; characters = baseCharacters; };
   for (let index = 0; index < length; index++) {
@@ -53,14 +51,13 @@ function prepareBatches(input: AnswerEvidenceRelevanceInput) {
     if (ordinals.has(candidate.reference)) throw new Held('malformed');
     ordinals.set(candidate.reference, index);
     const text = JSON.stringify(candidate);
-    hash.update('\0').update(text);
     const nextCharacters = characters + text.length + (candidates.length ? 1 : 0);
     if (candidates.length === 100 || nextCharacters > 160_000) flush();
     characters += text.length + (candidates.length ? 1 : 0);
     candidates.push(candidate);
   }
   flush();
-  return { batches, ordinals, inputHash: hash.digest('hex'), query: head.query };
+  return { batches, ordinals, query: head.query };
 }
 
 /** Reuses the same reading and transport. Its actual requests contain one
@@ -82,7 +79,7 @@ export async function prepareAnswerEvidenceRelevanceBatches(input: AnswerEvidenc
         options.assertCurrent?.();
       };
       active();
-      if (!prepared.query.trim() || !prepared.batches.length) return freezeSupport({ inputHash: prepared.inputHash, accepted: [], rejected: [] });
+      if (!prepared.query.trim() || !prepared.batches.length) return freezeSupport({ accepted: [], rejected: [] });
       const configured = judgmentPort('engine.knowledge.answer-evidence-relevance'), configuredModel = configured.model;
       const check = () => {
         active();
@@ -101,7 +98,7 @@ export async function prepareAnswerEvidenceRelevanceBatches(input: AnswerEvidenc
       check();
       accepted.sort((a, b) => b.probability - a.probability || prepared.ordinals.get(a.reference)! - prepared.ordinals.get(b.reference)!);
       rejected.sort((a, b) => prepared.ordinals.get(a.reference)! - prepared.ordinals.get(b.reference)!);
-      return freezeSupport({ inputHash: prepared.inputHash, model, requestedModel, accepted, rejected });
+      return freezeSupport({ model, requestedModel, accepted, rejected });
     }, options.timeoutMs ?? LIMITS.defaultTimeoutMs, options.signal);
   } catch (error) {
     if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;

@@ -35,7 +35,7 @@ describe('initial evidence relevance reading foundation', () => {
     const result = await prepareAnswerEvidenceRelevance(input(candidates));
     expect(result.accepted.map(({ reference }) => reference)).toEqual(['candidate-2', 'candidate-4', 'candidate-8']);
     expect(result.accepted.map(({ probability }) => probability)).toEqual([0.97, 0.97, 0.82]);
-    expect(result.inputHash).toHaveLength(64); expect(Object.isFrozen(result.accepted)).toBe(true); expect(Object.isFrozen(result.accepted[0])).toBe(true);
+    expect(Object.isFrozen(result.accepted)).toBe(true); expect(Object.isFrozen(result.accepted[0])).toBe(true);
     expect(result.model).toBe('jev-1.13.0'); expect(result.accepted[0]!.decisionId).toBeUndefined();
   });
   test('a fact-kind keyword-stuffed candidate can lose to an entity with real support', async () => {

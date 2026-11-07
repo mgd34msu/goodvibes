@@ -35,7 +35,6 @@ export interface AnswerEvidenceRelevanceReading {
   readonly decisionId?: string | undefined;
 }
 export interface AnswerEvidenceRelevancePlan {
-  readonly inputHash: string;
   readonly accepted: readonly AnswerEvidenceRelevanceReading[];
   readonly rejected: readonly AnswerEvidenceRelevanceReading[];
   readonly model?: string | undefined;

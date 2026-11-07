@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { confirmFileDurable, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 
 interface Epoch { readonly version: 1; readonly incarnation: string; readonly fileIdentity: string; }
@@ -57,10 +58,10 @@ function read(path: string): Epoch {
 }
 function locked<T>(path: string, operation: () => T): T {
   ancestry(path, true); // Do not create directories through an existing alias.
-  mkdirSync(dirname(path), { recursive: true }); const rootIdentity = digest(ancestry(path)); const lock = `${path}.owner-lock`;
+  mkdirSync(dirname(path), { recursive: true }); const rootIdentity = ancestry(path); const lock = `${path}.owner-lock`;
   mkdirSync(lock); const owned = lstatSync(lock);
   const assertOwned = () => {
-    if (digest(ancestry(path)) !== rootIdentity) throw new Error('Durable policy epoch root changed');
+    if (!isDeepStrictEqual(ancestry(path), rootIdentity)) throw new Error('Durable policy epoch root changed');
     const current = lstatSync(lock);
     if (!current.isDirectory() || current.dev !== owned.dev || current.ino !== owned.ino || current.birthtimeMs !== owned.birthtimeMs) throw new Error('Durable policy epoch ownership changed');
   };
@@ -81,10 +82,10 @@ export class DurablePolicyEpochOwner {
   private readonly roots: readonly string[];
   private readonly enabled: boolean;
   private accepted = new Map<string, Epoch>();
-  private readonly ownerRoots = new Map<string, string>();
+  private readonly ownerRoots = new Map<string, readonly unknown[]>();
   private assertRoot(root: string): void {
-    const identity = digest(ancestry(root)); const expected = this.ownerRoots.get(root);
-    if (expected && expected !== identity) throw new Error('Durable policy owner root changed');
+    const identity = ancestry(root); const expected = this.ownerRoots.get(root);
+    if (expected && !isDeepStrictEqual(expected, identity)) throw new Error('Durable policy owner root changed');
     this.ownerRoots.set(root, identity);
   }
   private historyExists(): boolean {

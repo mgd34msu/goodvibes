@@ -2,7 +2,7 @@
  * Idempotency, store and key generation.
  *
  * Provides an in-process idempotency store for tool-call deduplication across
- * replay, reconnect, and restart scenarios. Keys are deterministic (derived from
+ * replay and reconnect within this store's lifetime. Keys are deterministic (derived from
  * session + turn + call identifiers) so the same logical call always maps to the
  * same key regardless of when it is submitted.
  *
@@ -18,7 +18,6 @@
  * In-flight records are never evicted.
  */
 
-import { createHash } from 'node:crypto';
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
 import type {
   IdempotencyKeyContext,
@@ -87,16 +86,14 @@ export class IdempotencyStore {
   /**
    * Generate a deterministic idempotency key from a call context.
    *
-   * Uses a SHA-256 hash of `sessionId:turnId:callId` to produce a compact,
-   * collision-resistant key that is stable across restarts (given the same inputs).
+   * Encodes the exact identifier tuple, so separators inside an identifier do
+   * not merge distinct calls. Callers must pass identifiers, never prompt text.
    *
    * @param context - Session, turn, and call identifiers.
-   * @returns Hex-encoded SHA-256 digest (64 characters).
+   * @returns JSON-encoded identifier tuple, for this in-process map.
    */
   generateKey(context: IdempotencyKeyContext): string {
-    return createHash('sha256')
-      .update(`${context.sessionId}:${context.turnId}:${context.callId}`)
-      .digest('hex');
+    return JSON.stringify([context.sessionId, context.turnId, context.callId]);
   }
 
   // ---------------------------------------------------------------------------

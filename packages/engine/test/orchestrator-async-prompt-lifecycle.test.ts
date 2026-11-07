@@ -18,6 +18,7 @@ import type { ChatRequest, LLMProvider } from '../sdk/src/platform/providers/int
 import { UNKNOWN_MODEL_PRICING } from '../sdk/src/platform/providers/model-pricing.js';
 import { PLAN_MODE_INSTRUCTION_MARKER } from '../sdk/src/platform/permissions/plan-mode-instructions.js';
 import { useCoreReadings } from './_helpers/core-readings.ts';
+import type { IdempotencyStore } from '../sdk/src/platform/runtime/idempotency/index.js';
 
 useCoreReadings({ intent: 'chat', needsPlan: false, risk: 0 });
 const orchestrators: Orchestrator[] = [];
@@ -74,6 +75,34 @@ function fixture(getSystemPrompt: NonNullable<OrchestratorOptions['getSystemProm
 }
 
 describe('Orchestrator async prompt lifecycle wiring', () => {
+  test('a reentrant duplicate does not clear the actual turn owner or prevent finalization', async () => {
+    const runtimeBus = new RuntimeEventBus();
+    const f = fixture(async () => 'memory', undefined, { runtimeBus });
+    const actual = f.orchestrator as unknown as {
+      runTurnPreflight(text: string, content: undefined, options: undefined): unknown;
+      ownedIdempotencyStore: IdempotencyStore;
+    };
+    let submitted = false, keyBefore: string | null = null, keyAfter: string | null = null, duplicate: unknown;
+    const text = 'private submission sentinel';
+    runtimeBus.on('TURN_SUBMITTED', () => {
+      if (submitted) return;
+      submitted = true;
+      keyBefore = f.orchestrator.currentSubmissionKey;
+      duplicate = actual.runTurnPreflight(text, undefined, undefined);
+      keyAfter = f.orchestrator.currentSubmissionKey;
+    });
+    await f.orchestrator.handleUserInput(text);
+    expect(submitted).toBe(true);
+    expect(duplicate).toBeNull();
+    expect(keyBefore).toBeTruthy();
+    expect(keyAfter).toBe(keyBefore);
+    expect(f.orchestrator.currentSubmissionKey).toBeNull();
+    expect(f.requests).toHaveLength(1);
+    if (!keyBefore) throw new Error('The real turn did not publish its submission owner');
+    expect(keyBefore).not.toContain(text);
+    expect(actual.ownedIdempotencyStore.getRecord(keyBefore)?.status).toBe('completed');
+  });
+
   test('preserves plan-mode instructions around an asynchronous prompt', async () => {
     const f = fixture(async () => 'reviewed memory');
     await f.orchestrator.handleUserInput('hello');

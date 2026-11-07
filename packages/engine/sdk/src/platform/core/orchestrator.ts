@@ -47,7 +47,8 @@ import { OrchestratorFollowUpRuntime } from './orchestrator-follow-up-runtime.js
 import { ToolCallAbortRegistry, listQueuedMessages, editQueuedMessage, deleteQueuedMessage } from './orchestrator-live-turn.js';
 import { AgentManager } from '../tools/agent/index.js';
 import type { ContractIntake, ContractRunner } from '../contract/index.js';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { TurnSubmissionOwner } from './turn-submission.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
 import { IdempotencyStore } from '../runtime/idempotency/index.js';
 import { toolFormatTelemetry } from '../runtime/telemetry/tool-format-telemetry.js';
@@ -233,6 +234,7 @@ export class Orchestrator {
    * runTurn with the same text is rejected), reset to null on completion.
    */
   public currentSubmissionKey: string | null = null;
+  private readonly submissionOwner = new TurnSubmissionOwner();
 
   /** True when the turn failed (set in catch; read in finally for markComplete vs markFailed). */
   private _turnFailed = false;
@@ -609,6 +611,7 @@ export class Orchestrator {
    */
   public dispose(): void {
     this.disposed = true;
+    this.submissionOwner.clear();
     this.coreServices.sessionLiveTurnControls?.unbind(this);
     this.abort();
     for (const queued of this.messageQueue) if (queued.nativeTurn) failNativeConversationTurn(queued.nativeTurn, false);
@@ -842,7 +845,7 @@ export class Orchestrator {
     const providerRegistry = requireProviderRegistry(this.coreServices);
 
     // --- Phase 1: Preflight, idempotency, event emission, plan injection ---
-    const preflight = this.runTurnPreflight(text, content, options, providerRegistry, !!resume);
+    const preflight = this.runTurnPreflight(text, content, options, !!resume);
     if (!preflight) return; // duplicate in-flight turn was rejected and reported
     const { submissionKey, turnId } = preflight;
     const hookOwner = this.turnHookOwner!;
@@ -891,25 +894,17 @@ export class Orchestrator {
     text: string,
     content: ContentPart[] | undefined,
     options: OrchestratorUserInputOptions | undefined,
-    providerRegistry: ReturnType<typeof requireProviderRegistry>,
     resume = false,
   ): { submissionKey: string; turnId: string } | null {
-    // Session, transcript position and prompt prefix identify one in-flight submission.
-    const submissionIdentity = options?.nativeConversationTurnPermit ? randomUUID() : createHash('sha256')
-      .update(`${this.currentSessionId}:${this.conversation.getMessageCount()}:${text.slice(0, 512)}`)
-      .digest('hex')
-      .slice(0, 16); // 16-char prefix is sufficient for in-process dedup
     const idempotencyStore = getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore);
-    const submissionKey = idempotencyStore.generateKey({
+    const submissionKey = this.submissionOwner.keyFor({
       sessionId: this.currentSessionId,
-      turnId: submissionIdentity,
-      callId:    text.slice(0, 64), // use prompt prefix for human-readable correlation
-    });
+      position: this.conversation.getMessageCount(), text, content,
+    }, !!options?.nativeConversationTurnPermit);
     const submissionCheck = idempotencyStore.checkAndRecord(submissionKey);
     // A retried prompt can have the same transcript position. Execution IDs
     // must never alias an old cancellation target, even before admission.
     const turnId = randomUUID();
-    this.currentSubmissionKey = submissionKey;
 
     if (submissionCheck.status === 'in-flight') {
       const reason = 'Duplicate turn submission rejected because an equivalent turn is already in flight.';
@@ -930,11 +925,9 @@ export class Orchestrator {
           stopReason: 'preflight_failed',
         });
       }
-      this.currentSubmissionKey = null;
       return null;
     }
-    // 'duplicate' (completed/failed), allow re-run (user sent same text intentionally).
-    // We just let it proceed; the prior record will be overwritten.
+    this.currentSubmissionKey = submissionKey;
 
     // Reserve and bind before notifying synchronous submitted-event observers.
     this.turnInFlight = true;
@@ -1187,13 +1180,15 @@ export class Orchestrator {
     // --- Submission key: mark turn complete or failed ---
     // Success: markComplete caches the result for duplicate callers.
     // Failure: markFailed allows retry on the next submission.
-    if (this.currentSubmissionKey) {
+    try {
       if (this._turnFailed) {
-        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markFailed(this.currentSubmissionKey);
+        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markFailed(submissionKey);
       } else {
-        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markComplete(this.currentSubmissionKey);
+        getIdempotencyStore(this.coreServices, this.ownedIdempotencyStore).markComplete(submissionKey);
       }
-      this.currentSubmissionKey = null;
+    } finally {
+      this.submissionOwner.release(submissionKey);
+      if (this.currentSubmissionKey === submissionKey) this.currentSubmissionKey = null;
       this._turnFailed = false;
     }
     this.turnCancellation.end(turnId);

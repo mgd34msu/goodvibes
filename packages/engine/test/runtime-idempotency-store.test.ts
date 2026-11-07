@@ -12,6 +12,16 @@ function captureThrown(fn: () => void): unknown {
 }
 
 describe('IdempotencyStore finalization', () => {
+  test('separator-containing identifiers cannot alias another call tuple', () => {
+    const store = new IdempotencyStore();
+    const first = store.generateKey({ sessionId: 'session:part', turnId: 'turn', callId: 'call' });
+    const second = store.generateKey({ sessionId: 'session', turnId: 'part:turn', callId: 'call' });
+    expect(first).not.toBe(second);
+    expect(store.checkAndRecord(first).status).toBe('new');
+    expect(store.checkAndRecord(second).status).toBe('new');
+    expect(store.checkAndRecord(store.generateKey({ sessionId: 'session:part', turnId: 'turn', callId: 'call' })).status).toBe('in-flight');
+  });
+
   test('markComplete surfaces a missing record', () => {
     const store = new IdempotencyStore();
     const err = captureThrown(() => store.markComplete('missing-key'));

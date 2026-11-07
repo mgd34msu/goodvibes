@@ -5,6 +5,13 @@ export interface SettingsValueEntry {
   readonly isDefault: boolean;
   readonly flag?: { readonly feature: { readonly name: string } } | undefined;
 }
+const CHOICE_LABELS: Readonly<Record<string, string>> = {
+  'judgment.policy': 'Decision models', 'judgment.backend': 'Decision provider',
+  'judgment.model': 'Decision model', 'judgment.endpoint': 'Decision endpoint',
+  'judgment.keySource': 'Credential source', 'judgment.keyName': 'Credential reference',
+  'judgment.fallbacks': 'Decision fallback chain', 'judgment.timeoutMs': 'Decision timeout (ms)',
+  'provider.decisionRouter': 'Decision Router categories', 'permissions.mode': 'Execution permissions',
+};
 export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: {
   readonly richValues: boolean;
   readonly featureLabels: boolean;
@@ -22,6 +29,10 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
   }
   function formatValue(entry: Entry): string {
     const value = entry.currentValue;
+    if (entry.setting.key === 'judgment.backend' && value && typeof value === 'object' && !Array.isArray(value)) {
+      const adapter = (value as { adapter?: unknown }).adapter;
+      return adapter === 'cloudflare-workers-ai' ? 'Cloudflare Workers AI' : adapter === 'laya' ? 'Laya' : 'System One';
+    }
     if (value === null || value === undefined) return '(unset)';
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     if (typeof value === 'string' && policy.isSecretKey(entry.setting.key)) return maskSecretValue(value);
@@ -43,6 +54,7 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
   function getSettingLabel(entry: Entry): string {
     if (policy.featureLabels && entry.flag) return entry.flag.feature.name;
     const key = entry.setting.key;
+    if (Object.hasOwn(CHOICE_LABELS, key)) return CHOICE_LABELS[key] ?? key;
     return (Object.hasOwn(policy.labels, key) ? policy.labels[key] : undefined) ?? key.replace(/^[^.]+\./, '');
   }
   function describeUiRouting(value: string): string {

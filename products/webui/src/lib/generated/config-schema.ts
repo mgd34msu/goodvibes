@@ -196,7 +196,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "medium",
     "description": "Reasoning effort level for models that support it",
-    "validationHint": "a reasoning level the current model supports, run /effort to list them"
+    "validationHint": "a known reasoning effort level, run /effort for the current model choices"
   },
   {
     "key": "provider.model",

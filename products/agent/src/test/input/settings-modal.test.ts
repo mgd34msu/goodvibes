@@ -1,3 +1,5 @@
+import { handleSettingsModalToken } from '../../input/handler-modal-routes.ts';
+import type { CommandContext } from '../../input/command-registry.ts';
 import { installAgentDaemonCredentialsClient } from '../../config/daemon-credential-routing.ts';
 import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
 /**
@@ -104,6 +106,32 @@ describe('SettingsModal', () => {
       setServerTrustMode: () => {},
     } as unknown as McpRegistry;
     mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+  });
+
+  test.each([
+    ['judgment', 'judgment.model', 'Choose decision model'],
+    ['judgment', 'judgment.backend', 'Choose decision provider'],
+    ['judgment', 'judgment.fallbacks', 'Decision fallback order'],
+    ['judgment', 'judgment.policy', 'Decision models'],
+    ['provider', 'provider.decisionRouter', 'Decision Router — choose a category'],
+  ] as const)('Enter on %s / %s opens the actual shared picker', (category, key, title) => {
+    modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
+    modal.categoryIndex = SETTINGS_CATEGORIES.indexOf(category);
+    modal.selectedIndex = modal.currentItems.findIndex(entry => entry.setting.key === key);
+    expect(modal.selectedIndex).toBeGreaterThanOrEqual(0);
+    modal.focusPane = 'settings';
+    let opened = '';
+    const context = {
+      platform: { configManager: cm },
+      session: { runtime: { model: '', reasoningEffort: '' } },
+      openSelection: (name: string) => { opened = name; },
+      print() {}, renderRequest() {},
+    } as unknown as CommandContext;
+    handleSettingsModalToken({ settingsModal: modal, commandContext: context, requestRender() {}, handleEscape() {},
+      openModelPickerWithTarget() {} },
+      { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false });
+    expect(opened).toBe(title);
+    expect(modal.editingMode).toBe(false);
   });
 
   afterEach(() => {

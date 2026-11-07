@@ -99,9 +99,7 @@ export function createModelSelectionAction(
         conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}${ctxNote}`, {
           fg: activeTokens().secondary,
         });
-        // The SDK's own sentence, printed verbatim so the explanation cannot
-        // drift from the resolution that produced it.
-        if (serving.note) conversation.log(serving.note, { fg: policy.noteColor() });
+        // The switch receipt already includes requested and effective effort.
       }
     } catch (e) {
       conversation.log(`Error switching model: ${summarizeError(e)}`, { fg: activeTokens().error });

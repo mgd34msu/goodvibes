@@ -1,3 +1,5 @@
+import { openDecisionRouterSettings } from '@goodvibes-jev/engine/terminal-shell/decision-router-settings-actions';
+import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
 import { sessionPickerDeleteNamedKey, sessionPickerDeleteTextAction } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
@@ -7,14 +9,19 @@ import { createSettingsModalRoute } from '@goodvibes-jev/engine/terminal-shell/s
 export const { handleSettingsModalToken } = createSettingsModalRoute<
   CommandContext,
   import('./model-picker.ts').ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme' | 'daemon-timezone'
+  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'daemon-timezone'
 >({
   focusKey: 'focusPane',
   toggleFocusKey: 'toggleFocusPane',
   cancelInlineEditOnEscape: false,
   toggleFlagCategory: true,
   extendedResetShortcuts: false,
-  openSettingsAction(context, action, requestRender) {
+  openSettingsAction(context, action, requestRender, changed, setExecutionMode) {
+    if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
+    if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode') {
+      openSettingsChoice(context, action, changed, setExecutionMode);
+      return;
+    }
     if (action === 'tts-provider') {
       openTtsProviderPicker(context);
       return;

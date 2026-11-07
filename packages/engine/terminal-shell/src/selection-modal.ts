@@ -36,6 +36,8 @@ export class SelectionModal {
   public selectedIndex = 0;
   public contextScroll = 0;
   public allowSearch = true;
+  private customItem: ((query: string) => SelectionItem | null) | undefined;
+  get allowsCustomValue(): boolean { return this.customItem !== undefined; }
   public customActions: Map<string, SelectionAction> = new Map();
   /**
    * vocab unification: overrides the default per-primaryAction Enter
@@ -54,6 +56,7 @@ export class SelectionModal {
     title: string,
     items: SelectionItem[],
     opts?: {
+      customItem?: ((query: string) => SelectionItem | null) | undefined;
       preSelectId?: string;
       allowSearch?: boolean;
       customActions?: Map<string, SelectionAction>;
@@ -67,6 +70,7 @@ export class SelectionModal {
   ): void {
     this.title = title;
     this.items = items;
+    this.customItem = opts?.customItem;
     this.query = '';
     this.contextScroll = 0;
     this.allowSearch = opts?.allowSearch ?? true;
@@ -88,6 +92,7 @@ export class SelectionModal {
   }
 
   close(): void {
+    this.customItem = undefined;
     this.onHighlight = undefined;
     this.lastHighlightedId = undefined;
     this.active = false;
@@ -161,6 +166,8 @@ export class SelectionModal {
       .sort((a, b) => b.score - a.score);
 
     this.filteredItems = scored.map(r => r.item);
+    const custom = this.customItem?.(this.query.trim());
+    if (custom && !this.filteredItems.some(item => item.id === custom.id)) this.filteredItems.push(custom);
     if (this.selectedIndex >= this.filteredItems.length) {
       this.selectedIndex = Math.max(0, this.filteredItems.length - 1);
     }
@@ -199,6 +206,7 @@ export type OpenSelection = (
     title: string,
     items: SelectionItem[],
     opts: {
+      customItem?: ((query: string) => SelectionItem | null) | undefined;
       preSelectId?: string | undefined;
       allowSearch?: boolean | undefined;
       customActions?: Map<string, SelectionAction>;

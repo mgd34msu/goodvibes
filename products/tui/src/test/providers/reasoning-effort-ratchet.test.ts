@@ -300,6 +300,7 @@ describe('model picker commit: same rules as /model', () => {
 
     const text = logged.join('\n');
     expect(text).toContain('effort: medium (requested xhigh; Capped Model caps at medium)');
+    expect(logged).toHaveLength(1);
   });
 
   test("the picker's effort STEP is a user choice, so it does write the preference", () => {

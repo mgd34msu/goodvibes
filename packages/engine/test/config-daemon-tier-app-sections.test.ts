@@ -399,3 +399,15 @@ describe('the refusal reaches the operator even when the host has taken over std
     expect(recorded).toHaveLength(0);
   });
 });
+
+
+test('recoverable settings notices respect the replaceable host diagnostic stream', () => {
+  const original = process.stderr.write;
+  const recorded: string[] = [];
+  process.stderr.write = ((chunk: unknown) => { recorded.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  try {
+    announceIngestionNotice({ file: '/workspace/settings.json', key: 'display.collapseThreshold',
+      reason: 'expects a number', remedy: 'fix the stored value', action: 'skipped' });
+    expect(recorded.join('')).toContain('display.collapseThreshold');
+  } finally { process.stderr.write = original; }
+});

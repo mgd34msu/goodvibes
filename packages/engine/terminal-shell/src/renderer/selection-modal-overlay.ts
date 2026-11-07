@@ -89,7 +89,7 @@ export function renderSelectionModalOverlay(
   // Size to every item (not the filtered set) so typing never resizes the
   // modal; measure against the same text span drawList uses.
   const allRows = rowsFor(modal.items, -1);
-  const needed = allRows.length === 0 ? 1 : listHeight(allRows, 0, textWidth - 1);
+  const needed = Math.max(modal.allowsCustomValue ? 6 : 1, listHeight(allRows, 0, textWidth - 1));
   const detailRows = modal.items.reduce((max, item) => Math.max(max, item.detail ? wrapLines(item.detail, textWidth).length : 0), 0);
   const searchRows = modal.allowSearch ? 2 : 0;
   const height = modalHeightFor(screenWidth, screenHeight, { hints }, searchRows + needed + (detailRows > 0 ? detailRows + 1 : 0));

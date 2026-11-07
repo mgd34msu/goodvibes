@@ -1,4 +1,6 @@
-import { DecisionRouterEditor } from './DecisionRouterEditor';
+import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
+import { JudgmentModelField, JudgmentProviderField } from "./JudgmentModelFields";
+import { DecisionRouterEditor } from "./DecisionRouterEditor";
 /**
  * SettingsField, one typed config editor row, driven by the SDK schema. Laid
  * out as a settings-dialog row: a readable label, the key in mono and the
@@ -41,28 +43,28 @@ import { DecisionRouterEditor } from './DecisionRouterEditor';
  * shows its schema default distinctly, and a rejected write keeps the row's edit
  * state so the user can correct it.
  */
-import { useRef, useState } from 'react';
+import { useRef, useState } from "react";
 import {
   captureStructuredCredentialReferenceConfigValue,
   isStructuredCredentialReferenceConfigKey,
-} from '@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs';
-import { useSettingsDraft } from '../../hooks/useSettingsDraft';
-import { SettingsDraftConflict } from './SettingsDraftConflict';
-import { maskSecretValue } from '../../lib/config-redaction';
-import { settingLabelForKey } from '../../lib/setting-label';
-import { Button } from '../ui/Button';
-import { Chip } from '../ui/Chip';
-import { Input, Textarea } from '../ui/Field';
-import { Select } from '../ui/Select';
-import { Toggle } from '../ui/Toggle';
-import { isMoneyField } from '../../lib/money';
-import type { ConfigFieldModel } from '../../lib/settings-model';
-import type { ConfigSetOutcome } from '../../lib/goodvibes';
-import { secretStoreSetCommandFor } from '../../lib/secret-store-only-config-keys';
-import { ModelPricesEditor } from './ModelPricesEditor';
-import { TimezonePicker } from './TimezonePicker';
-import { MoneyField } from './MoneyField';
-import { CvvHandlingField } from './CvvHandlingField';
+} from "@goodvibes-jev/engine/sdk/platform/judgment-browser/catalogs";
+import { useSettingsDraft } from "../../hooks/useSettingsDraft";
+import { SettingsDraftConflict } from "./SettingsDraftConflict";
+import { maskSecretValue } from "../../lib/config-redaction";
+import { settingLabelForKey } from "../../lib/setting-label";
+import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
+import { Input, Textarea } from "../ui/Field";
+import { Select } from "../ui/Select";
+import { Toggle } from "../ui/Toggle";
+import { isMoneyField } from "../../lib/money";
+import type { ConfigFieldModel } from "../../lib/settings-model";
+import type { ConfigSetOutcome } from "../../lib/goodvibes";
+import { secretStoreSetCommandFor } from "../../lib/secret-store-only-config-keys";
+import { ModelPricesEditor } from "./ModelPricesEditor";
+import { TimezonePicker } from "./TimezonePicker";
+import { MoneyField } from "./MoneyField";
+import { CvvHandlingField } from "./CvvHandlingField";
 
 interface SettingsFieldProps {
   readonly field: ConfigFieldModel;
@@ -83,9 +85,9 @@ function effectiveValue(field: ConfigFieldModel): unknown {
 
 /** Render a scalar config value into an input's text form, without stringifying objects blindly. */
 function scalarToText(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  if (v === null || v === undefined) return '';
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (v === null || v === undefined) return "";
   return JSON.stringify(v);
 }
 
@@ -93,7 +95,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Secret replacements are write-only: never seed them from live config.
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState("");
   const inFlight = useRef(false);
   const [revealing, setRevealing] = useState(false);
 
@@ -105,7 +107,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
     try {
       await onCommit(field.key, value);
       setRevealing(false);
-      setDraft('');
+      setDraft("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -115,21 +117,53 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
   }
 
   const defaultNote = !field.present ? (
-    <span className="settings-field-default" title="Not set in the daemon config, showing the built-in default.">
+    <span
+      className="settings-field-default"
+      title="Not set in the daemon config, showing the built-in default."
+    >
       default
     </span>
   ) : null;
 
   const control = (() => {
+    if (field.key === "judgment.model")
+      return (
+        <JudgmentModelField
+          value={effectiveValue(field)}
+          onCommit={(value) => onCommit(field.key, value)}
+        />
+      );
+    if (field.key === "judgment.backend")
+      return <JudgmentProviderField value={effectiveValue(field)} onCommit={onCommit} />;
     // Object-typed keys get structured editors (see module header).
-    if (field.type === 'object') {
-      if (field.key === 'provider.decisionRouter') return <DecisionRouterEditor value={effectiveValue(field)} onCommit={next => onCommit(field.key, next)} />;
-      if (field.key === 'pricing.modelPrices') {
+    if (field.type === "object") {
+      if (field.key === "judgment.fallbacks")
+        return (
+          <JudgmentFallbackEditor
+            value={effectiveValue(field)}
+            onCommit={(value) => onCommit(field.key, value)}
+          />
+        );
+      if (field.key === "provider.decisionRouter")
+        return (
+          <DecisionRouterEditor
+            value={effectiveValue(field)}
+            onCommit={(next) => onCommit(field.key, next)}
+          />
+        );
+      if (field.key === "pricing.modelPrices") {
         // The editor owns its saving/error state, commits go straight to the
         // parent's config.set so a rejection surfaces inside the editor row.
-        return <ModelPricesEditor value={effectiveValue(field)} onCommit={(next) => onCommit(field.key, next)} />;
+        return (
+          <ModelPricesEditor
+            value={effectiveValue(field)}
+            onCommit={(next) => onCommit(field.key, next)}
+          />
+        );
       }
-      return <ObjectJsonField field={field} saving={saving} onCommit={(value) => void commit(value)} />;
+      return (
+        <ObjectJsonField field={field} saving={saving} onCommit={(value) => void commit(value)} />
+      );
     }
 
     // Secret string whose real value the daemon resolves ONLY from its own
@@ -143,9 +177,9 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
     // for the same key. None of the three payments/timezone editors that
     // follow currently matches a secret-store-only key, so the order is not
     // load-bearing today, it is what keeps it from becoming load-bearing.
-    if (field.isSecret && field.type === 'string' && field.secretStoreOnly) {
+    if (field.isSecret && field.type === "string" && field.secretStoreOnly) {
       const raw = effectiveValue(field);
-      const masked = typeof raw === 'string' && raw ? maskSecretValue(raw) : '(unset)';
+      const masked = typeof raw === "string" && raw ? maskSecretValue(raw) : "(unset)";
       return (
         <div className="settings-field-secret settings-field-secret--store-only">
           <span className="settings-value settings-value--secret">{masked}</span>
@@ -159,17 +193,19 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
     }
 
     // daemon.timezone, a searchable IANA-zone picker, never free text.
-    if (field.key === 'daemon.timezone') {
+    if (field.key === "daemon.timezone") {
       const current = effectiveValue(field);
-      const value = typeof current === 'string' ? current : '';
-      return <TimezonePicker value={value} disabled={saving} onCommit={(next) => void commit(next)} />;
+      const value = typeof current === "string" ? current : "";
+      return (
+        <TimezonePicker value={value} disabled={saving} onCommit={(next) => void commit(next)} />
+      );
     }
 
     // payments.cvvHandling, an enum select that surfaces the trade-off
     // warning at the moment 'prompt' is selected.
-    if (field.type === 'enum' && field.key === 'payments.cvvHandling' && field.enumValues) {
+    if (field.type === "enum" && field.key === "payments.cvvHandling" && field.enumValues) {
       const current = effectiveValue(field);
-      const value = typeof current === 'string' ? current : '';
+      const value = typeof current === "string" ? current : "";
       return (
         <CvvHandlingField
           value={value}
@@ -182,14 +218,14 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
 
     // A schema key marked unit: 'money', a plain amount, displayed and
     // entered as-is with no unit conversion.
-    if (field.type === 'number' && isMoneyField(field.unit)) {
+    if (field.type === "number" && isMoneyField(field.unit)) {
       const current = effectiveValue(field);
-      const value = typeof current === 'number' ? current : 0;
+      const value = typeof current === "number" ? current : 0;
       return (
         <MoneyField
           key={field.key}
           value={value}
-          currency={currency ?? 'USD'}
+          currency={currency ?? "USD"}
           disabled={saving}
           onCommit={(amount) => onCommit(field.key, amount)}
         />
@@ -197,9 +233,9 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
     }
 
     // Secret string, masked, write-only replace.
-    if (field.isSecret && field.type === 'string') {
+    if (field.isSecret && field.type === "string") {
       const raw = effectiveValue(field);
-      const masked = typeof raw === 'string' && raw ? maskSecretValue(raw) : '(unset)';
+      const masked = typeof raw === "string" && raw ? maskSecretValue(raw) : "(unset)";
       if (!revealing) {
         return (
           <div className="settings-field-secret">
@@ -208,7 +244,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
               size="sm"
               className="settings-field-replace"
               onClick={() => {
-                setDraft('');
+                setDraft("");
                 setError(null);
                 setRevealing(true);
               }}
@@ -229,24 +265,34 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
             placeholder="Enter new value (write-only)"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void commit(draft);
+              if (e.key === "Enter") void commit(draft);
             }}
           />
-          <Button size="sm" disabled={saving} onClick={() => {
-            setDraft('');
-            setError(null);
-            setRevealing(false);
-          }}>
+          <Button
+            size="sm"
+            disabled={saving}
+            onClick={() => {
+              setDraft("");
+              setError(null);
+              setRevealing(false);
+            }}
+          >
             Cancel
           </Button>
-          <Button size="sm" variant="primary" className="settings-field-save" disabled={saving} onClick={() => void commit(draft)}>
+          <Button
+            size="sm"
+            variant="primary"
+            className="settings-field-save"
+            disabled={saving}
+            onClick={() => void commit(draft)}
+          >
             Save
           </Button>
         </div>
       );
     }
 
-    if (field.type === 'boolean') {
+    if (field.type === "boolean") {
       const checked = Boolean(effectiveValue(field));
       return (
         <Toggle
@@ -259,9 +305,9 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
       );
     }
 
-    if (field.type === 'enum' && field.enumValues) {
+    if (field.type === "enum" && field.enumValues) {
       const current = effectiveValue(field);
-      const value = typeof current === 'string' ? current : scalarToText(current);
+      const value = typeof current === "string" ? current : scalarToText(current);
       return (
         <Select
           className="settings-field-select"
@@ -270,7 +316,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
           disabled={saving}
           placement="bottom-end"
           options={[
-            ...(field.enumValues.includes(value) ? [] : [{ value, label: value || '(unset)' }]),
+            ...(field.enumValues.includes(value) ? [] : [{ value, label: value || "(unset)" }]),
             ...field.enumValues.map((opt) => ({ value: opt, label: opt })),
           ]}
           onChange={(next) => void commit(next)}
@@ -278,18 +324,25 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
       );
     }
 
-    return <ScalarSettingsField key={field.key} field={field} onCommit={(value) => onCommit(field.key, value)} />;
+    return (
+      <ScalarSettingsField
+        key={field.key}
+        field={field}
+        onCommit={(value) => onCommit(field.key, value)}
+      />
+    );
   })();
 
   // Wide editors (structured objects, a revealed secret, the timezone picker,
   // a store-only secret note) sit under the text instead of beside it.
-  const stacked = field.type === 'object'
-    || field.key === 'daemon.timezone'
-    || (field.isSecret && field.type === 'string' && (field.secretStoreOnly || revealing));
+  const stacked =
+    field.type === "object" ||
+    field.key === "daemon.timezone" ||
+    (field.isSecret && field.type === "string" && (field.secretStoreOnly || revealing));
 
   return (
     <div
-      className={stacked ? 'settings-field settings-field--stacked' : 'settings-field'}
+      className={stacked ? "settings-field settings-field--stacked" : "settings-field"}
       data-config-key={field.key}
       data-daemon-owned={field.daemonOwned}
     >
@@ -307,7 +360,7 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
             </Chip>
           )}
           {defaultNote}
-          {field.validationHint && field.type === 'number' && (
+          {field.validationHint && field.type === "number" && (
             <span className="settings-field-hint">{field.validationHint}</span>
           )}
         </div>
@@ -329,31 +382,40 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
 }
 
 /** Text and ordinary number fields share refresh, conflict and save ownership. */
-function ScalarSettingsField({ field, onCommit }: {
+function ScalarSettingsField({
+  field,
+  onCommit,
+}: {
   readonly field: ConfigFieldModel;
   readonly onCommit: (value: unknown) => Promise<void>;
 }) {
-  const draft = useSettingsDraft<string | number>(scalarToText(effectiveValue(field)), (text) => {
-    if (field.type !== 'number') return { value: text, text };
-    const value = Number(text);
-    if (text.trim() === '' || !Number.isFinite(value)) {
-      throw new Error(`Enter a finite number${field.validationHint ? ` (${field.validationHint})` : ''}`);
-    }
-    return { value, text: String(value) };
-  }, onCommit);
+  const draft = useSettingsDraft<string | number>(
+    scalarToText(effectiveValue(field)),
+    (text) => {
+      if (field.type !== "number") return { value: text, text };
+      const value = Number(text);
+      if (text.trim() === "" || !Number.isFinite(value)) {
+        throw new Error(
+          `Enter a finite number${field.validationHint ? ` (${field.validationHint})` : ""}`
+        );
+      }
+      return { value, text: String(value) };
+    },
+    onCommit
+  );
   return (
     <div className="settings-field-draft">
       <Input
         className="settings-field-input"
         type="text"
-        inputMode={field.type === 'number' ? 'decimal' : undefined}
+        inputMode={field.type === "number" ? "decimal" : undefined}
         aria-label={field.key}
         value={draft.text}
         disabled={draft.saving}
         onChange={(event) => draft.change(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur();
-          if (event.key === 'Escape' && (draft.dirty || draft.conflicted || draft.error !== null)) {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape" && (draft.dirty || draft.conflicted || draft.error !== null)) {
             event.preventDefault();
             event.stopPropagation();
             draft.reset();
@@ -365,7 +427,9 @@ function ScalarSettingsField({ field, onCommit }: {
         <SettingsDraftConflict onReset={draft.reset} onSave={() => void draft.submit(true)} />
       )}
       {draft.error && (
-        <div className="banner warning settings-field-error" role="alert">{draft.error}</div>
+        <div className="banner warning settings-field-error" role="alert">
+          {draft.error}
+        </div>
       )}
     </div>
   );
@@ -399,21 +463,23 @@ function ObjectJsonField({
       masked = true;
     }
   }
-  const [draft, setDraft] = useState(() => masked ? '' : JSON.stringify(captured ?? {}, null, 2));
+  const [draft, setDraft] = useState(() => (masked ? "" : JSON.stringify(captured ?? {}, null, 2)));
   const [parseError, setParseError] = useState<string | null>(null);
   return (
     <div className="settings-field-object">
       {masked && (
         <>
           <span className="settings-value settings-value--secret">••••</span>
-          <p role="note">Stored fallback references are malformed and hidden. Enter a valid replacement array.</p>
+          <p role="note">
+            Stored fallback references are malformed and hidden. Enter a valid replacement array.
+          </p>
         </>
       )}
       <Textarea
         aria-label={field.key}
         value={draft}
         disabled={saving}
-        rows={Math.min(10, draft.split('\n').length + 1)}
+        rows={Math.min(10, draft.split("\n").length + 1)}
         onChange={(e) => setDraft(e.target.value)}
       />
       <Button
@@ -428,21 +494,21 @@ function ObjectJsonField({
               try {
                 references = captureStructuredCredentialReferenceConfigValue(field.key, parsed);
               } catch {
-                setParseError('Value must be a valid fallback-reference array.');
+                setParseError("Value must be a valid fallback-reference array.");
                 return;
               }
               setParseError(null);
               onCommit(references);
               return;
             }
-            if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-              setParseError('Value must be a JSON object.');
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+              setParseError("Value must be a JSON object.");
               return;
             }
             setParseError(null);
             onCommit(parsed);
           } catch {
-            setParseError('Not valid JSON.');
+            setParseError("Not valid JSON.");
           }
         }}
       >

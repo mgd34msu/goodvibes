@@ -18,6 +18,8 @@ export type SettingsRouteState<Context, Target, Action extends string> = {
     /** Scroll the documentation region (PgUp/PgDn); the renderer clamps and shows honest markers. */
     scrollContext?: ((delta: number) => void) | undefined;
     activateSelected: () => void;
+    refreshPickerValues?: (() => void) | undefined;
+    setPickerExecutionMode?: ((value: string) => void) | undefined;
     handleSubscriptionLogoutKey?: ((key: string) => 'confirmed' | 'cancelled' | 'absorbed' | 'inactive') | undefined;
     adjustSelected: (direction: 'left' | 'right', step?: number | undefined) => void;
     moveFocusedUp?: (() => void) | undefined;
@@ -81,14 +83,14 @@ export function createSettingsModalRoute<Context extends RuntimeSettingResetCont
   readonly cancelInlineEditOnEscape: boolean;
   readonly toggleFlagCategory: boolean;
   readonly extendedResetShortcuts: boolean;
-  readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void) => void;
+  readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void, changed: () => void, setExecutionMode: (value: string) => void) => void;
 }) {
   function consumeSettingsPickerRequest(state: SettingsRouteState<Context, Target, Action>): void {
     const settingsAction = state.settingsModal.pendingSettingsPickerAction ?? null;
     if (settingsAction !== null) {
       state.settingsModal.pendingSettingsPickerAction = null;
       if (!state.commandContext) return;
-      policy.openSettingsAction(state.commandContext, settingsAction, state.requestRender);
+      policy.openSettingsAction(state.commandContext, settingsAction, state.requestRender, () => { state.settingsModal.refreshPickerValues?.(); state.requestRender(); }, value => state.settingsModal.setPickerExecutionMode?.(value));
       return;
     }
     const providerModelTarget = state.settingsModal.pendingProviderModelPickerTarget ?? null;

@@ -702,13 +702,15 @@ describe('provider.reasoningEffort config validation', () => {
     expect(() => config.set('provider.reasoningEffort', '')).toThrow();
   });
 
-  test('once the runtime publishes the model options, validation follows them', () => {
+  test('persisted preferences survive a model with fewer supported levels', () => {
     const config = manager();
     setActiveReasoningEffortOptions(['low', 'high']);
     config.set('provider.reasoningEffort', 'high');
     expect(config.get('provider.reasoningEffort')).toBe('high');
-    // `max` is a real level, but not one THIS model offers.
-    expect(() => config.set('provider.reasoningEffort', 'max')).toThrow();
+    config.set('provider.reasoningEffort', 'max');
+    config.set('provider.model', 'openai:gpt-6.1-sol');
+    expect(config.get('provider.reasoningEffort')).toBe('max');
+    expect(config.getIngestionQuarantine().some(notice => notice.key === 'provider.reasoningEffort')).toBe(false);
   });
 
   test('before any model publishes, the known severity ladder is the floor', () => {
@@ -957,8 +959,8 @@ describe('published reasoning options do not bleed between sessions', () => {
     // The config schema's validator holds no session, so a level that is real
     // on any live session is accepted rather than rejected by whoever ran last.
     expect(isAcceptableReasoningEffortSetting('xhigh')).toBe(true);
-    // A level no live session offers is still rejected.
-    expect(isAcceptableReasoningEffortSetting('minimal')).toBe(false);
+    // Stored preferences remain valid even when no current session offers them.
+    expect(isAcceptableReasoningEffortSetting('minimal')).toBe(true);
     expect(isAcceptableReasoningEffortSetting('turbo')).toBe(false);
   });
 
@@ -966,4 +968,13 @@ describe('published reasoning options do not bleed between sessions', () => {
     setActiveReasoningEffortOptions(['low', 'high']);
     expect(getActiveReasoningEffortOptions('session-never-seen')).toEqual(['low', 'high']);
   });
+});
+
+
+test('GPT-6.1 Sol preserves xhigh and max before a catalog refresh', () => {
+  for (const modelId of ['gpt-6.1-sol', 'openai:gpt-6.1-sol', 'openai/gpt-6.1-sol', 'openai-subscriber:gpt-6.1-sol']) {
+    const spec = resolveReasoningEffortSpec({ modelId });
+    expect(spec.values).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    for (const level of ['xhigh', 'max']) expect(resolveEffortForRequest(level, { modelId }).value).toBe(level);
+  }
 });

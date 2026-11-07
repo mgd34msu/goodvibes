@@ -61,6 +61,21 @@ test('an unsettled sole refusal is an operational failure with no synthesized se
   expect(fake.requests).toHaveLength(1); expect(log.query()).toHaveLength(1);
 });
 
+test('an act capability can be claimed only once and retains its disposition in the audit history', async () => {
+  using log = new SqliteDecisionLog(':memory:');
+  const fake = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
+  const result = await decideAutonomous(input(withDecisionLog(fake.port, log)));
+  result.recordClaim();
+  expect(() => result.recordClaim()).toThrow('already claimed');
+  const entry = log.get(result.decision.judgmentDecisionIds[0]!);
+  const actions = entry?.status === 'answered' ? entry.notes
+    .filter(note => note.kind === 'action').map(note => note.action) : [];
+  expect(actions).toEqual([
+    `autonomous:act:${result.decision.decisionId}`,
+    `autonomous:claim:${result.decision.decisionId}`,
+  ]);
+});
+
 
 test('weak act retains the host catalog and resolves once using only the offered non-executing choices', async () => {
   using log = new SqliteDecisionLog(':memory:');

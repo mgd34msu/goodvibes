@@ -443,24 +443,14 @@ export function screenSettingsForIngestion(
 }
 
 /**
- * Say it on stderr AND in the activity log, in that order.
- *
- * The default writer is a SYNCHRONOUS write to file descriptor 2, not
- * `process.stderr.write`. That is deliberate and load-bearing: the released
- * daemon binary died on exactly this path with zero bytes on either stream,
- * because a host's fatal handler is free to write nowhere and a host is free to
- * replace `process.stderr` (goodvibes-tui does, to keep a rendered screen
- * clean). Disclosing the refusal HERE, at the point of refusal and straight to
- * the descriptor, means every host speaks, including one whose own fatal tail
- * is silent. See daemon/fatal-boot-report.ts.
- *
- * The activity log follows, and is best-effort: on a refusal the process is
- * about to stop, and an asynchronously flushed log is exactly the part that
- * gets discarded. The descriptor write is the guarantee.
+ * Report settings problems through the host's diagnostic stream and activity log.
+ * Fatal refusals use the synchronous descriptor writer so they survive process
+ * exit. Recoverable notices use the replaceable stream, allowing a full-screen
+ * renderer to capture them without writing below its footer.
  */
 export function announceIngestionNotice(
   entry: SettingsIngestionNotice,
-  write: (line: string) => void = writeFatalLine,
+  write: (line: string) => void = entry.action === 'refused' ? writeFatalLine : line => { process.stderr.write(line); },
 ): void {
   const verb = entry.action === 'refused' ? 'REFUSED' : 'skipped';
   const line = `goodvibes settings: ${verb} ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
@@ -486,7 +476,7 @@ export interface IngestSettingsOptions {
   readonly diagnosticMode?: 'default' | 'structural' | undefined;
   /** This reader's version, compared against the file's recorded floor. */
   readonly readerVersion?: string | undefined;
-  /** Where the loud line goes. Defaults to a synchronous write to fd 2. */
+  /** Override diagnostic output. Refusals default to fd 2; recoverable notices use the host stream. */
   readonly write?: ((line: string) => void) | undefined;
   /** Called for every notice, refusals included, before a refusal throws. */
   readonly onNotice?: ((entry: SettingsIngestionNotice) => void) | undefined;

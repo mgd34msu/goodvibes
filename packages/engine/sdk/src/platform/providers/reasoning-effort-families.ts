@@ -152,12 +152,23 @@ const FAMILY_SPECS: Readonly<Record<ReasoningFamily, ReasoningEffortSpec>> = {
   mercury: effort(['instant', 'low', 'medium', 'high']),
 };
 
+/** Exact provider-documented controls, available before a catalog refresh.
+ * https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-11-07).
+ * This is an identity lookup, not a guess about an unknown model family.
+ */
+const DOCUMENTED_MODEL_SPECS = new Map([
+  ...['gpt-6.1-sol', 'openai:gpt-6.1-sol', 'openai/gpt-6.1-sol', 'openai-subscriber:gpt-6.1-sol']
+    .map(id => [id, effort(['low', 'medium', 'high', 'xhigh', 'max'], 'medium')] as const),
+]);
+
 /**
  * Curated spec for a model the live catalog does not cover: its family's row
  * once routing.reasoning-family has read the id, else undefined (not read
  * yet, or no documented family).
  */
 export function findFamilyReasoningEffortSpec(modelId: string): ReasoningEffortSpec | undefined {
+  const documented = DOCUMENTED_MODEL_SPECS.get(modelId.trim());
+  if (documented) return documented;
   if (isClassicOperation()) return undefined;
   const family = knownReasoningFamily(modelId.trim());
   return family ? FAMILY_SPECS[family] : undefined;
@@ -167,6 +178,8 @@ export function findFamilyReasoningEffortSpec(modelId: string): ReasoningEffortS
 export async function readFamilyReasoningEffortSpec(modelId: string, site: string): Promise<ReasoningEffortSpec | undefined> {
   const id = modelId.trim();
   if (!id) return undefined;
+  const documented = DOCUMENTED_MODEL_SPECS.get(id);
+  if (documented) return documented;
   return decisionOrClassic(async () => {
     const family = await readReasoningFamily(id, site);
     return family ? FAMILY_SPECS[family] : undefined;
@@ -182,6 +195,7 @@ export async function readFamilyReasoningEffortSpec(modelId: string, site: strin
  */
 export async function prepareReasoningEffort(requested: string | undefined, input: ReasoningEffortSpecRequest, site: string): Promise<void> {
   if (requested === undefined || requested === '') return;
+  if (DOCUMENTED_MODEL_SPECS.has(input.modelId.trim())) return;
   const declared = input.spec?.source === 'catalog' ? input.spec : catalogReasoningSpec(input) ?? input.spec;
   if (declared && reasoningEffortSourceRank(declared.source) >= reasoningEffortSourceRank('family')) return;
   await readFamilyReasoningEffortSpec(input.modelId, site);

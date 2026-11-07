@@ -19,3 +19,5 @@ export { defineRerank, type Candidate, type Ranked, type Rerank, type RerankFixt
 export { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './port/backend-settings.ts';
 
 export { drainOwned } from './drain-owned.ts';
+
+export { DECISION_MODEL_PROFILES, type JudgmentAdapterKind, type DecisionModelProfile } from './port/model-profiles.ts';

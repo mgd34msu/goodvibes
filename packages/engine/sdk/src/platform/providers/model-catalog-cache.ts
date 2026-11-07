@@ -29,6 +29,10 @@ interface ModelsDevModelCost {
   output?: number | undefined;
   cache_read?: number | undefined;
   cache_write?: number | undefined;
+  text?: {
+    input?: { price?: number | undefined; cache?: { read?: number | undefined; write?: number | undefined } | undefined } | undefined;
+    output?: { price?: number | undefined } | undefined;
+  } | undefined;
 }
 
 interface ModelsDevModelLimit {
@@ -44,6 +48,10 @@ interface ModelsDevModel {
   family?: string | undefined;
   cost?: ModelsDevModelCost | undefined;
   limit?: ModelsDevModelLimit | undefined;
+  capabilities?: {
+    reasoning?: { supported?: boolean | undefined; effort?: string[] | undefined } | undefined;
+    tools?: { supported?: boolean | undefined } | undefined;
+  } | undefined;
   reasoning?: boolean | undefined;
   reasoning_options?: ModelsDevReasoningOption[] | undefined;
   tool_call?: boolean | undefined;
@@ -56,7 +64,7 @@ type ModelsDevResponse = Record<string, CatalogProviderShape>;
 
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 /** Repository-backed cache with canonical identities, model types and capability facts. */
-const CATALOG_CACHE_VERSION = 6;
+const CATALOG_CACHE_VERSION = 7;
 
 export function getCatalogCachePath(cacheDir: string): string {
   return join(cacheDir, 'model-catalog.json');
@@ -173,9 +181,21 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
       const modelId = typeof modelData.id === 'string' && modelData.id.trim() ? modelData.id : modelKey;
       const modelName = typeof modelData.name === 'string' && modelData.name.trim() ? modelData.name : modelId;
       const modelFamily = typeof modelData.family === 'string' ? modelData.family : undefined;
-      const cost = modelData.cost;
+      const rawCost = modelData.cost;
+      const cost = rawCost ? {
+        input: rawCost.input ?? rawCost.text?.input?.price,
+        output: rawCost.output ?? rawCost.text?.output?.price,
+        cache_read: rawCost.cache_read ?? rawCost.text?.input?.cache?.read,
+        cache_write: rawCost.cache_write ?? rawCost.text?.input?.cache?.write,
+      } : undefined;
       const limit = modelData.limit;
-      const reasoningOptions = getReasoningOptions(modelData.reasoning_options);
+      // Repository schema 2 publishes capabilities as nested data. Preserve
+      // exact provider controls rather than degrading them to guessed levels.
+      const controls = modelData.capabilities?.reasoning;
+      const reasoningOptions = getReasoningOptions(modelData.reasoning_options)
+        ?? (Array.isArray(controls?.effort) ? getReasoningOptions([{ type: 'effort', values: controls.effort }]) : undefined);
+      const reasoning = modelData.reasoning ?? controls?.supported;
+      const toolCalling = modelData.tool_call ?? modelData.capabilities?.tools?.supported;
       // The feed's own answer to what this model accepts as input. Undefined
       // when the entry carried no modality block, which is distinct from an
       // entry that carried one listing text only.
@@ -202,7 +222,7 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
       models.push({
         id: modelId,
         modelType: typeof modelData.type === 'string' ? modelData.type : 'chat',
-        ...(typeof modelData.tool_call === 'boolean' ? { toolCalling: modelData.tool_call } : {}),
+        ...(typeof toolCalling === 'boolean' ? { toolCalling } : {}),
         ...(Array.isArray(modelData.modalities?.output) ? { outputModalities: getStringArray(modelData.modalities.output) } : {}),
         ...(typeof modelData.canonical_model_id === 'string' && modelData.canonical_model_id.trim()
           ? { canonicalModelId: modelData.canonical_model_id } : {}),
@@ -215,7 +235,7 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
         tier,
         contextWindow,
         maxOutputTokens,
-        ...(typeof modelData.reasoning === 'boolean' ? { reasoning: modelData.reasoning } : {}),
+        ...(typeof reasoning === 'boolean' ? { reasoning } : {}),
         ...(reasoningOptions !== undefined ? { reasoningOptions } : {}),
         ...(inputModalities !== undefined ? { inputModalities } : {}),
       });
@@ -236,9 +256,12 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
 function validateCatalogCache(value: unknown): { cache: CatalogCacheFile | null; reason?: string } {
   const current = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', CATALOG_CACHE_VERSION);
   if (current.cache) return current;
-  const legacy = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', 5);
-  // Keep the previous catalog usable offline, while requesting repository metadata now.
-  return legacy.cache ? { cache: { ...legacy.cache, version: CATALOG_CACHE_VERSION, ttlMs: 0 } } : current;
+  // Preserve offline data, but refresh catalogs decoded before schema-2 support.
+  for (const version of [6, 5]) {
+    const legacy = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', version);
+    if (legacy.cache) return { cache: { ...legacy.cache, version: CATALOG_CACHE_VERSION, ttlMs: 0 } };
+  }
+  return current;
 }
 
 function loadCatalogCache(cachePath: string): CatalogCacheFile | null {

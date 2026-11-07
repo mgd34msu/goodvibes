@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/engine",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "The platform library: the old goodvibes-sdk packages, with Jev judgment at every decision point.",
   "keywords": [
     "goodvibes",
@@ -1948,6 +1948,16 @@
       "bun": "./terminal-shell/src/settings-subscriptions.ts",
       "types": "./terminal-shell/dist/settings-subscriptions.d.ts",
       "import": "./terminal-shell/dist/settings-subscriptions.js"
+    },
+    "./terminal-shell/decision-router-settings-actions": {
+      "bun": "./terminal-shell/src/decision-router-settings-actions.ts",
+      "types": "./terminal-shell/dist/decision-router-settings-actions.d.ts",
+      "import": "./terminal-shell/dist/decision-router-settings-actions.js"
+    },
+    "./terminal-shell/settings-choice-actions": {
+      "bun": "./terminal-shell/src/settings-choice-actions.ts",
+      "types": "./terminal-shell/dist/settings-choice-actions.d.ts",
+      "import": "./terminal-shell/dist/settings-choice-actions.js"
     },
     "./terminal-shell/theme-settings-actions": {
       "bun": "./terminal-shell/src/theme-settings-actions.ts",

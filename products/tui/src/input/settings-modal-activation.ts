@@ -1,3 +1,4 @@
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
 /**
  * settings-modal-activation, pure action helpers for SettingsModal.
  *
@@ -35,7 +36,7 @@ export interface ActivateSelectedContext {
   setEditBuffer(value: string): void;
   setMcpAllowAllConfirmationTarget(value: string | null): void;
   setSubscriptionLogoutConfirmationTarget(value: string | null): void;
-  setPendingSettingsPickerAction(value: 'tts-provider' | 'tts-voice' | 'theme' | null): void;
+  setPendingSettingsPickerAction(value: 'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | null): void;
   setPendingModelPickerTarget(value: ModelPickerTarget | null): void;
   setPendingProviderModelPickerTarget(value: ModelPickerTarget | null): void;
 }
@@ -70,6 +71,9 @@ export function activateSelected(ctx: ActivateSelectedContext): void {
   }
   if (entry.metadataUnavailable) return;
   const { setting } = entry;
+
+  const choice = SETTINGS_CHOICE_ACTIONS[setting.key];
+  if (choice) { ctx.setPendingSettingsPickerAction(choice); return; }
 
   // Delegate provider/model picker settings to the model picker UI
   if (setting.key === 'tts.provider') {

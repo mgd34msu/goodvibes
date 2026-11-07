@@ -1000,10 +1000,7 @@ async function main() {
   const terminalOutputGuard = installFullScreenTerminalOutputGuard({
     stdout,
     stderr: process.stderr,
-    notify: (message) => {
-      systemMessageRouter.low(message);
-      render();
-    },
+
   });
 
   refreshHerdr = render;

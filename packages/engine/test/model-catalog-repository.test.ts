@@ -154,3 +154,23 @@ test('Anthropic requests use repository output and reasoning facts while live en
     expect(judgments).toBe(0);
   } finally { globalThis.fetch = originalFetch; installJudgmentPort(previous); installCatalogModelFacts([]); }
 });
+
+
+test('repository schema 2 retains GPT-6.1 Sol effort choices, capability flags and base prices', async () => {
+  const { getCatalogModelDefinitionsFrom } = await import('../sdk/src/platform/providers/model-catalog.js');
+  const { effortLevelsForModel } = await import('../sdk/src/platform/providers/reasoning-effort-surface.js');
+  const files = new Map([
+    ['providers/openai/provider.toml', 'name="OpenAI"\nenv=["OPENAI_API_KEY"]'],
+    ['models/openai/gpt-6.1-sol.toml', 'schema=2\nname="GPT-6.1 Sol"\n[capabilities]\nreasoning={supported=true}\ntools={supported=true}\n[limit]\ncontext=1050000\noutput=128000'],
+    ['providers/openai/models/gpt-6.1-sol.toml', 'schema=2\nbase_model="openai/gpt-6.1-sol"\n[capabilities]\nreasoning={supported=true,effort=["low","medium","high","xhigh","max"]}\n[cost.text.input]\nprice=2\ncache={read=0.1,write=2.5}\n[cost.text.output]\nprice=10'],
+  ]);
+  const raw = await parseModelCatalogRepository(files);
+  const models = transformModelsDevResponse(raw, new Map());
+  expect(models[0]).toMatchObject({ reasoning: true, toolCalling: true,
+    pricing: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    reasoningOptions: [{ type: 'effort', values: ['low', 'medium', 'high', 'xhigh', 'max'] }],
+  });
+  const definition = getCatalogModelDefinitionsFrom(models)[0];
+  expect(definition).toBeDefined();
+  expect(effortLevelsForModel(definition!)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+});

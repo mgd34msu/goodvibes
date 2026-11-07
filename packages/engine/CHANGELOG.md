@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.2] - 2026-11-07
+
+### Fixed
+
+- Keep selected-item descriptions above continuous option lists in the shared
+  terminal UI used by TUI and Agent, including settings, generic pickers,
+  slash-command completion, profiles, agent choices and reasoning effort.
+- Keep option positions and mouse targets stable as selection changes. Preserve
+  long-help paging, inline editing, category-rail focus and confirmation prompts.
+
+- Wire decision provider/model, policy, permission, fallback and router controls
+  into both terminals, with provider/model and structured fallback editors in WebUI.
+- Preserve schema-2 catalog reasoning capabilities, including GPT-6.1 Sol xhigh
+  and max, and retain stored effort preferences across model switches.
+- Route recoverable configuration diagnostics through the terminal output guard
+  and remove duplicate effort-remap messages after model changes.
+
 ## [3.1.1] - 2026-11-07
 
 ### Fixed

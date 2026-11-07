@@ -79,16 +79,10 @@ export function getActiveReasoningEffortOptions(sessionId?: string): readonly st
 }
 
 /**
- * Whether a `provider.reasoningEffort` value is acceptable right now.
- *
- * Given a session id, the answer is that session's own resolved levels. Without
- * one, the config schema's validator has no session in hand, because the
- * setting itself is not per session, a level is acceptable when ANY session
- * that has published offers it. Rejecting a level valid on the session the user
- * is actually looking at, because a different session ran a turn more recently,
- * would be the multi-session bleed this scoping exists to prevent. A level no
- * live model offers is still rejected, and before anything has published the
- * known severity ladder is the floor, so a typo never gets through.
+ * Validate a persisted preference without tying it to a temporary serving model.
+ * Known levels remain valid across model switches; request construction resolves
+ * the effective value for each model. Explicit session validation still checks
+ * that session's actual choices. Published custom levels are also accepted.
  */
 export function isAcceptableReasoningEffortSetting(value: unknown, sessionId?: string): boolean {
   if (typeof value !== 'string' || value === '') return false;
@@ -96,14 +90,12 @@ export function isAcceptableReasoningEffortSetting(value: unknown, sessionId?: s
     const scoped = getActiveReasoningEffortOptions(sessionId);
     return scoped === null ? reasoningEffortRank(value) !== -1 : scoped.includes(value);
   }
-  let published = false;
+  if (reasoningEffortRank(value) !== -1) return true;
   if (activeReasoningEffortOptions !== null) {
     if (activeReasoningEffortOptions.includes(value)) return true;
-    published = true;
   }
   for (const levels of activeReasoningEffortOptionsBySession.values()) {
     if (levels.includes(value)) return true;
-    published = true;
   }
-  return published ? false : reasoningEffortRank(value) !== -1;
+  return false;
 }

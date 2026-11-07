@@ -1,3 +1,4 @@
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
 import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import type {
   SettingsModalChange as PlatformSettingsModalChange,
@@ -127,7 +128,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   SettingsCategory,
   SettingEntry,
   ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme'
+  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction
 > {
   public searchFocused = false;
   /** Index into SETTINGS_CATEGORIES. */
@@ -469,6 +470,13 @@ export class SettingsModal extends TerminalSettingsModalState<
   /**
    * Toggle boolean or begin cycling enum values, or enter edit mode for string/number.
    */
+  setPickerExecutionMode(value: string): void { this._setValue('permissions.mode', value); }
+
+  refreshPickerValues(): void {
+    if (this.configManager) refreshEntryValues(this.groups, this.configManager);
+    this.contextScroll = 0;
+  }
+
   activateSelected(): void {
     this._refreshPolicyAvailability();
     _activateSelected({

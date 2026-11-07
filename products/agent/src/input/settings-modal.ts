@@ -1,3 +1,4 @@
+import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
 import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
@@ -71,7 +72,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   SettingsCategory,
   SettingEntry,
   ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme' | 'daemon-timezone'
+  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'daemon-timezone'
 > {
   /** Index into SETTINGS_CATEGORIES. */
 
@@ -360,6 +361,13 @@ export class SettingsModal extends TerminalSettingsModalState<
   /**
    * Toggle boolean or begin cycling enum values, or enter edit mode for string/number.
    */
+  setPickerExecutionMode(value: string): void { this._setValue('permissions.mode', value); }
+
+  refreshPickerValues(): void {
+    this._refreshAllEntries();
+    this.contextScroll = 0;
+  }
+
   activateSelected(): void {
     if (this.currentCategory === 'mcp') {
       const entry = this.getSelectedMcp();
@@ -390,6 +398,9 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (!entry || !this.configManager) return;
 
     const { setting } = entry;
+
+    const choice = SETTINGS_CHOICE_ACTIONS[setting.key];
+    if (choice) { this.pendingSettingsPickerAction = choice; return; }
 
     // Delegate provider/model picker settings to the model picker UI
     if (setting.key === 'tts.provider') {
@@ -427,6 +438,9 @@ export class SettingsModal extends TerminalSettingsModalState<
       const idx = setting.enumValues.indexOf(entry.currentValue as string);
       const nextIdx = (idx + 1) % setting.enumValues.length;
       this._setValue(setting.key, setting.enumValues[nextIdx]);
+    } else if (setting.type === 'object') {
+      this.editingMode = true;
+      this.editBuffer = JSON.stringify(entry.currentValue ?? {});
     } else if (setting.type === 'string' || setting.type === 'number') {
       // Enter inline edit mode
       this.editingMode = true;
@@ -563,6 +577,11 @@ export class SettingsModal extends TerminalSettingsModalState<
         this.editBuffer = '';
         return false;
       }
+    }
+
+    if (setting.type === 'object') {
+      try { parsed = JSON.parse(this.editBuffer); }
+      catch { return false; }
     }
 
     if (setting.validate && !setting.validate(parsed)) {

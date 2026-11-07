@@ -62,7 +62,17 @@ for (const width of [80, 120]) test(`actual settings renderer exposes host priva
   const lines = frameFromLayer(renderSettingsModal(modal, width, 24), width, 24);
   const text = frameText(lines).join('\n');
   expect(text).toContain(KEY);
-  expect(text).toContain('source default');
+  // At narrow sizes warnings take priority in the fixed help pane. Provenance
+  // must remain reachable without inserting documentation between list rows.
+  let help = text;
+  for (let page = 0; page < 12 && !help.includes('source default'); page++) {
+    modal.scrollContext(1);
+    const next = frameFromLayer(renderSettingsModal(modal, width, 24), width, 24);
+    expect(next).toHaveLength(24);
+    for (const line of next) expect(line).toHaveLength(width);
+    help += '\n' + frameText(next).join('\n');
+  }
+  expect(help).toContain('source default');
   expect(text).not.toContain('undefined');
   expect(lines).toHaveLength(24);
   for (const line of lines) expect(line).toHaveLength(width);
@@ -357,10 +367,16 @@ for (const state of ['default', 'local', 'locked'] as const) test(`host ${state}
   if (state === 'local') handle.set(false);
   if (state === 'locked') { seedManagedLock(options.configDir, 'Restrictive test policy'); open(); }
   for (const width of [80, 120]) {
-    const frame = captureFrame(modal, state, width);
+    modal.contextScroll = 0;
+    let frame = captureFrame(modal, state, width);
     expect(frame).toContain(KEY);
-    expect(frame).toContain(`source ${state === 'local' ? 'local' : 'default'}`);
     if (state === 'locked') expect(frame).toContain('locked');
+    const provenance = `source ${state === 'local' ? 'local' : 'default'}`;
+    for (let page = 0; page < 12 && !frame.includes(provenance); page++) {
+      modal.scrollContext(1);
+      frame += '\n' + captureFrame(modal, state, width);
+    }
+    expect(frame).toContain(provenance);
   }
   modal.close();
 });

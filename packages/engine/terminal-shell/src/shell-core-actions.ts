@@ -99,7 +99,6 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
               ctx.session.runtime.reasoningEffort = serving.effective ?? '';
               if (serving.requested !== '') {
                 ctx.print(policy.effortMessage(describeServingEffort(serving, switchedTo), false));
-                if (serving.note) ctx.print(serving.note);
               }
               void providerApi.recordModelUsage(selected.registryKey).catch((err) => {
                 logger.debug('model usage record failed', { err });
@@ -157,7 +156,6 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
           const serving = servingEffortForLevel(level, model);
           ctx.session.runtime.reasoningEffort = serving.effective ?? '';
           ctx.print(policy.effortMessage(describeServingEffort(serving, model), true));
-          if (serving.note) ctx.print(serving.note);
         };
 
         if (args.length === 0) {

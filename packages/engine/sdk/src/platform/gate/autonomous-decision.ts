@@ -153,11 +153,17 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
     recorder.recordReadings(id, recordedDecision);
     recorder.recordAction(id, `autonomous:${outcome}:${context.decisionId}`);
   }
+  // This object is the live capability; parsing a stored receipt never mints
+  // another one. Consume before calling recorder hooks so re-entry and partial
+  // storage failures cannot admit a second execution of this decision.
+  let claimed = false;
   return Object.freeze({ decision, context,
     assertCurrent() { active(); validateJevDecision(decision, context); },
     recordClaim() {
       active();
       if (decision.outcome !== 'act') throw new JudgmentError('invalid-request', 'only an act decision records a claim');
+      if (claimed) throw new JudgmentError('invalid-request', 'autonomous decision was already claimed');
+      claimed = true;
       for (const id of ids) recorder.recordAction(id, `autonomous:claim:${context.decisionId}`);
       active();
     },

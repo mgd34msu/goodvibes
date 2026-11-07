@@ -1,7 +1,23 @@
 # Decision-model policies
 
 The `judgment.policy` setting controls decision-model use independently of tool
-permissions. Choose it in Settings or with the daemon configuration command.
+permissions. In TUI or Agent, open `/settings`, choose **Judgment**, then
+**Decision models**. Choose **Default - On**, **Preferred**, or **Classic - Off**
+from the picker. WebUI exposes the same policy in its Judgment settings.
+
+Choose **Decision provider** and **Decision model** in that category to configure
+Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B, Laya, or a compatible custom
+model. The terminal setup asks for the deployment endpoint and a credential
+reference. Use an environment-variable name or secret-store entry name, never
+the key value. Local deployments can explicitly select no authentication.
+
+**Decision fallback chain** adds, edits, removes, and orders backup targets.
+Each target can use its own model, protocol, endpoint, and credential reference.
+WebUI provides editable fallback rows and an Advanced JSON view.
+
+Execution permissions are in **Permissions → Execution permissions**, including
+**YOLO**. Choose the decision policy and execution permissions independently.
+The daemon configuration command also exposes these settings.
 
 | Policy | Behavior |
 | --- | --- |
@@ -31,3 +47,16 @@ decision models and report that limitation in Classic.
 Installation does not require a live decision-model connection. Configure
 provider accounts in the application. Existing installations retain Default - On
 unless the owner changes it.
+
+## Decision Router
+
+Choose **Provider → Decision Router categories** in the terminal settings to
+assign each category an answer provider, model and effort level. Set **General**
+as the catch-all; unassigned categories use General. WebUI provides the same
+category controls, custom categories and routing-context limits. Advanced
+terminal configuration exposes custom categories and context limits as well.
+
+Select **Decision Router / auto** in the ordinary model picker to enable this
+routing for the conversation. Selecting other providers adds no categorization
+calls. Classification uses bounded context; the chosen answer model receives
+the conversation and tool history.

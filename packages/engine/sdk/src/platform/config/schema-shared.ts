@@ -34,16 +34,14 @@ export interface ConfigSettingDefinition {
  * Returns validate + validationHint for `provider.reasoningEffort`.
  *
  * Not an enum: which reasoning levels exist is per model, and the former
- * four-value list rejected `none`, `minimal`, `xhigh` and `max`, all real
- * levels on models shipping today. Validation runs against the levels the
- * CURRENT model resolved to once the runtime has published them, and against
- * the known severity ladder before that, so a typo is still caught here rather
- * than by a provider.
+ * four-value list rejected `none`, `minimal`, `xhigh` and `max`. The stored
+ * preference remains valid when a serving model temporarily offers fewer levels;
+ * the model's request adapter resolves the effective level separately.
  */
 export function reasoningEffortSetting(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
   return {
     validate: isAcceptableReasoningEffortSetting,
-    validationHint: 'a reasoning level the current model supports, run /effort to list them',
+    validationHint: 'a known reasoning effort level, run /effort for the current model choices',
   };
 }
 

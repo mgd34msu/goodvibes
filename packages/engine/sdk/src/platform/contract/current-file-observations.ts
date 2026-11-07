@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { JsonValue } from '@goodvibes-jev/judgment';
@@ -19,7 +20,7 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
       const bytes = readFileSync(absolute);
       const text = options.includeText && !bytes.includes(0) ? bytes.toString('utf8') : undefined;
       return [{ operation: 'read-current-file', source: 'native-host-filesystem', success: true,
-        path, bytes: bytes.length, binary: bytes.includes(0),
+        path, bytes: bytes.length, binary: bytes.includes(0), sha256: createHash('sha256').update(bytes).digest('hex'),
         ...(text !== undefined && Buffer.from(text, 'utf8').equals(bytes) ? { text } : {}),
         meaning: 'A native read from the current checked tree, with text when requested and representable. This records the read, not semantic correctness, archive integrity, a worker execution or native approval.' }];
     } catch (error) {

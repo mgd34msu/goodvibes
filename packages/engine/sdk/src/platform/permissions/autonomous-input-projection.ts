@@ -1,5 +1,6 @@
 /** Manager-owned host-alternative projection. Raw catalogs never become model evidence. */
-import { hashState } from '@goodvibes-jev/judgment';
+import { isDeepStrictEqual } from 'node:util';
+import type { EntryType } from '@goodvibes-jev/judgment';
 import { captureJsonEntry } from '../gate/judgment-input.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ProjectedToolCall } from '../tools/input-projection.js';
@@ -18,7 +19,7 @@ interface CatalogAuthority {
 
 interface CapturedCatalog {
   readonly sourceId: string;
-  readonly rawRevision: string;
+  readonly rawAuthority: EntryType;
   readonly choices: AutonomousToolChoices;
   readonly calls: readonly ProjectedToolCall[];
   readonly registry: ToolRegistry;
@@ -28,27 +29,28 @@ interface CapturedCatalog {
   releasePromise?: Promise<void>;
 }
 
-const authorityRevision = (authority: CatalogAuthority): string => hashState(captureJsonEntry(authority));
 function stale(): never { throw new Error('Autonomous choice projection is stale or belongs to another source or manager'); }
 function authorityChanged(): never { throw new Error('Autonomous admission authority, source or scope changed'); }
 
 /** Each PermissionManager owns one instance; only its own handles can select a catalog. */
 export class AutonomousChoiceProjectionOwner {
   private readonly captures = new WeakMap<AutonomousChoiceProjection, CapturedCatalog>();
+  private projectionSequence = 0;
 
   async project(sourceId: string, callId: string, registry: ToolRegistry,
     authorityOf: () => CatalogAuthority, signal?: AbortSignal): Promise<AutonomousChoiceProjection> {
     assertPermissionActive(signal);
     const original = authorityOf();
-    const rawRevision = authorityRevision(original);
+    const rawAuthority = captureJsonEntry(original);
+    const projectionId = (++this.projectionSequence).toString(36);
     const calls: ProjectedToolCall[] = [];
     let released = false;
     const assertCurrent = () => {
       assertPermissionActive(signal);
       if (released) stale();
-      const currentRevision = authorityRevision(authorityOf());
+      const current = captureJsonEntry(authorityOf());
       if (released) stale();
-      if (currentRevision !== rawRevision) authorityChanged();
+      if (!isDeepStrictEqual(current, rawAuthority)) authorityChanged();
       assertPermissionActive(signal);
     };
     try {
@@ -62,10 +64,7 @@ export class AutonomousChoiceProjectionOwner {
         assertCurrent();
         registry.assertProjected(projected);
         revisions.push(Object.freeze({
-          ref: Object.freeze({ ...revision.ref, revision: hashState(captureJsonEntry({
-            host: revision.ref, toolName: revision.toolName, args: projected.args,
-            schemaRevision: projected.schemaRevision, projectionRevision: projected.projectionRevision,
-          })) }),
+          ref: Object.freeze({ ...revision.ref, revision: `catalog-${projectionId}-${revisions.length.toString(36)}` }),
           toolName: revision.toolName, args: projected.args,
         }));
       }
@@ -75,7 +74,7 @@ export class AutonomousChoiceProjectionOwner {
       const choices = Object.freeze({ ...inspected, revisions: Object.freeze(revisions) });
       const handle = Object.freeze({}) as AutonomousChoiceProjection;
       this.captures.set(handle, {
-        sourceId, rawRevision, choices, calls: Object.freeze(calls), registry, signal,
+        sourceId, rawAuthority, choices, calls: Object.freeze(calls), registry, signal,
         assertCurrent, get released() { return released; }, set released(value) { released = value; },
       });
       assertCurrent();
@@ -93,7 +92,7 @@ export class AutonomousChoiceProjectionOwner {
   choices(handle: AutonomousChoiceProjection, sourceId: string, authority: CatalogAuthority): AutonomousToolChoices {
     const capture = this.captures.get(handle);
     if (!capture || capture.released || capture.sourceId !== sourceId) stale();
-    if (authorityRevision(authority) !== capture.rawRevision) authorityChanged();
+    if (!isDeepStrictEqual(captureJsonEntry(authority), capture.rawAuthority)) authorityChanged();
     assertPermissionActive(capture.signal);
     // The manager just captured this coherent host frame. An empty catalog has
     // no projector callbacks to stage, so that checked frame is already final.

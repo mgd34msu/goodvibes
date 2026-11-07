@@ -6,15 +6,26 @@ import { fitCompletionEvidence } from './response-completion-budget.js';
 export class CompletionEvidenceProjection {
   private readonly namespace = crypto.randomUUID().replace(/[0-9a-f]/g,
     nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)));
-  private readonly references = new Map<string, string>();
+  // Only a small recent set keeps aliases stable across draft edits. Private
+  // observation bodies never become Map keys or an unbounded duplicate cache.
+  private readonly references: { readonly value: string; readonly reason: string; readonly reference: string }[] = [];
+  private referenceCharacters = 0;
+  private referenceSequence = 0;
   private withheld = new Set<string>();
 
   private reference(value: string, reason: string): string {
-    const key = reason + '\n' + value;
-    let reference = this.references.get(key);
+    let reference = this.references.find(entry => entry.reason === reason && entry.value === value)?.reference;
     if (!reference) {
-      reference = `[WITHHELD:${reason}:${this.namespace}:${this.references.size + 1}]`;
-      this.references.set(key, reference);
+      this.referenceSequence++;
+      if (!Number.isSafeInteger(this.referenceSequence)) throw new Error('Completion observation identity exhausted');
+      reference = `[WITHHELD:${reason}:${this.namespace}:${this.referenceSequence}]`;
+      if (value.length <= 32_768) {
+        while (this.references.length >= 128 || this.referenceCharacters + value.length > 32_768) {
+          const retired = this.references.shift();
+          if (retired) this.referenceCharacters -= retired.value.length;
+        }
+        this.references.push({ value, reason, reference }); this.referenceCharacters += value.length;
+      }
     }
     this.withheld.add(reference);
     return reference;

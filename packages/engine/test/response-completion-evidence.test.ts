@@ -78,6 +78,36 @@ test('protected observations become explicit missing evidence while relevant pub
   expect(snapshotJudgmentEvidence(projected)).toEqual(projected);
 });
 
+test('private observation aliases retire without reusing an earlier identity for different contents', () => {
+  const projection = new CompletionEvidenceProjection();
+  const project = (value: string) => projection.prepareFull(input([{ role: 'tool', content: 'password=' + value }]));
+  const first = project('synthetic-first-private-value');
+  expect(project('synthetic-first-private-value')).toEqual(first);
+  const references = new Set(first.evidenceProjection.withheld);
+  for (let index = 0; index < 256; index++) {
+    const value = 'synthetic-other-private-value-' + index, projected = project(value);
+    expect(JSON.stringify(projected)).not.toContain(value);
+    expect(projected.evidenceProjection.withheld).toHaveLength(1);
+    const reference = projected.evidenceProjection.withheld[0]!;
+    expect(references.has(reference)).toBe(false); references.add(reference);
+  }
+  const latest = project('synthetic-first-private-value');
+  expect(references.has(latest.evidenceProjection.withheld[0]!)).toBe(false);
+  expect(project('synthetic-first-private-value')).toEqual(latest);
+});
+
+test('oversized withheld bodies do not remain in the alias cache between projections', () => {
+  const projection = new CompletionEvidenceProjection();
+  const source = input([{ role: 'tool', content: 'password=' + 'synthetic-private-padding'.repeat(2_000) }]);
+  const first = projection.prepareFull(source), second = projection.prepareFull(source);
+  expect(first.evidenceProjection.withheld).toHaveLength(1);
+  expect(second.evidenceProjection.withheld).toHaveLength(1);
+  expect(second.evidenceProjection.withheld[0]).not.toBe(first.evidenceProjection.withheld[0]);
+  expect(JSON.stringify(first)).not.toContain('synthetic-private-padding');
+  expect(JSON.stringify(second)).not.toContain('synthetic-private-padding');
+  expect(snapshotJudgmentEvidence(second)).toEqual(second);
+});
+
 test('neither original user instructions nor the exact final draft can be rewritten to bypass the privacy screen', () => {
   for (const change of ['request', 'response', 'user', 'initial'] as const) {
     const original: Omit<ReturnType<typeof input>, 'initial'> & { initial: unknown } = input([]);

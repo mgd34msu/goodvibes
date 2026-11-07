@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { ordinaryPlanningRevision } from './_helpers/planning-revision.ts';
 import { KnowledgeStore, ProjectPlanningService, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { findCardNumberShapes } from '../sdk/src/platform/security/card-shapes.ts';
 
@@ -14,7 +15,7 @@ async function fixture() {
   const firstService = new ProjectPlanningService(first);
   const authored: ProjectPlanningStateUpsertInput['state'] = { goal: 'Original goal', executionApproved: false, tasks: [{ id: 'original', title: 'Original work' }] };
   await firstService.upsertState({ projectId: 'fixture', state: authored });
-  const selected = await firstService.getState({ projectId: 'fixture' });
+  const selected = await ordinaryPlanningRevision(first, firstService, 'fixture');
   const second = new KnowledgeStore({ dbPath: path }); await second.init();
   const secondService = new ProjectPlanningService(second);
   return { path, first, second, firstService, secondService, selected, authored };

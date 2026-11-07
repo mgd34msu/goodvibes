@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { ordinaryPlanningRevision } from './_helpers/planning-revision.ts';
 import {
   KnowledgeStore, ProjectPlanningService,
   type ProjectPlanningStateActionInput, type ProjectPlanningStateUpsertInput,
@@ -22,7 +23,7 @@ async function fixture() {
     verificationGates: [{ id: 'tests', description: 'Retry tests pass' }],
   };
   await service.upsertState({ projectId: 'fixture', state: authored });
-  const selected = await service.getState({ projectId: 'fixture' });
+  const selected = await ordinaryPlanningRevision(store, service, 'fixture');
   expect(selected.revision).toBeDefined();
   return { root, path, store, service, selected, authored };
 }

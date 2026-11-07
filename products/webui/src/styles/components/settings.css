@@ -83,6 +83,16 @@
   min-width: 0;
 }
 
+/* Structured editors must shrink with the row, including long select labels. */
+.settings-field-control > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settings-field-control fieldset {
+  min-inline-size: 0;
+}
+
 /* Draft feedback stays below its input, including on narrow settings sheets. */
 .settings-field-draft {
   display: flex;

@@ -23,7 +23,7 @@ const LocalAuthUserSchema = z.object({
 }).strict();
 
 const LocalAuthSessionSchema = z.object({
-  tokenFingerprint: z.string(),
+  id: z.string(),
   username: z.string(),
   expiresAt: z.number(),
 }).strict();

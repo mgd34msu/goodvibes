@@ -40,7 +40,7 @@ describe('local-auth modal surface', () => {
           { username: 'alice', roles: ['admin'] },
           { username: 'bob', roles: [] },
         ],
-        sessions: [{ tokenFingerprint: 'fp1', username: 'alice', expiresAt: Date.now() + 1_000 }],
+        sessions: [{ id: 'session-one', username: 'alice', expiresAt: Date.now() + 1_000 }],
       }),
     };
     const mutations = withMutations

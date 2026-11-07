@@ -111,7 +111,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
     }
     if (sub === 'revoke-session') {
       const token = rest[0];
-      if (!token) return 'Usage: goodvibes auth revoke-session <token-or-fingerprint>';
+      if (!token) return 'Usage: goodvibes auth revoke-session <session-id-or-token>';
       return services.localUserAuthManager.revokeSession(token) ? 'Auth session revoked.' : 'No auth session found.';
     }
     if (sub === 'revoke-sessions') {
@@ -152,7 +152,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
           `GoodVibes auth sessions (${snapshot.sessions.length})`,
           ...snapshot.sessions.map(
             (session) =>
-              `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} fingerprint=${session.tokenFingerprint}`,
+              `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`,
           ),
         ].join('\n'),
       );

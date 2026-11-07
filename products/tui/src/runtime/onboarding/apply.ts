@@ -146,8 +146,8 @@ function buildAuthRollbackAction(
   const username = operation.username.trim();
   const before = auth.inspect();
   const existingUser = before.users.find((user) => user.username === username);
-  const existingSessionFingerprints = new Set(
-    before.sessions.filter((session) => session.username === username).map((session) => session.tokenFingerprint),
+  const existingSessionIds = new Set(
+    before.sessions.filter((session) => session.username === username).map((session) => session.id),
   );
   const userStoreSnapshot = existsSync(before.userStorePath) ? readFileSync(before.userStorePath, 'utf-8') : null;
   const bootstrapCredentialSnapshot = existsSync(before.bootstrapCredentialPath)
@@ -159,8 +159,8 @@ function buildAuthRollbackAction(
 
   return () => {
     for (const session of auth.inspect().sessions) {
-      if (session.username === username && !existingSessionFingerprints.has(session.tokenFingerprint)) {
-        auth.revokeSession(session.tokenFingerprint);
+      if (session.username === username && !existingSessionIds.has(session.id)) {
+        auth.revokeSession(session.id);
       }
     }
 

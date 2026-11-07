@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'crypto';
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
@@ -12,6 +12,7 @@ export interface AuthUser {
 }
 
 export interface AuthSession {
+  readonly id: string;
   token: string;
   username: string;
   expiresAt: number;
@@ -106,7 +107,7 @@ export interface AuthUserRecord {
 }
 
 export interface AuthSessionRecord {
-  readonly tokenFingerprint: string;
+  readonly id: string;
   readonly username: string;
   readonly expiresAt: number;
 }
@@ -180,10 +181,6 @@ function verifyPassword(password: string, passwordHash: string): { readonly para
   } catch {
     return undefined;
   }
-}
-
-function fingerprintToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex').slice(0, 16);
 }
 
 function readBootstrapUsers(filePath: string, observedRecovery?: () => void, freshAbsence = false): AuthUser[] | null {
@@ -580,6 +577,7 @@ export class UserAuthManager {
     }
     const token = randomBytes(32).toString('hex');
     const session: AuthSession = {
+      id: `auth-session-${randomUUID()}`,
       token,
       username,
       expiresAt: Date.now() + this.sessionTtlMs,
@@ -629,10 +627,10 @@ export class UserAuthManager {
     }
   }
 
-  revokeSession(token: string): boolean {
-    if (this.sessions.delete(token)) return true;
-    for (const sessionToken of this.sessions.keys()) {
-      if (fingerprintToken(sessionToken) === token) {
+  revokeSession(tokenOrId: string): boolean {
+    if (this.sessions.delete(tokenOrId)) return true;
+    for (const [sessionToken, session] of this.sessions) {
+      if (session.id === tokenOrId) {
         this.sessions.delete(sessionToken);
         return true;
       }
@@ -664,7 +662,7 @@ export class UserAuthManager {
     this.pruneExpiredSessions();
     return [...this.sessions.values()]
       .map((session) => ({
-        tokenFingerprint: fingerprintToken(session.token),
+        id: session.id,
         username: session.username,
         expiresAt: session.expiresAt,
       }))

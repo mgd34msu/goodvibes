@@ -20,10 +20,10 @@ export const LOCAL_AUTH_USER_SCHEMA = objectSchema({
 }, ['username', 'roles']);
 
 const LOCAL_AUTH_SESSION_SCHEMA = objectSchema({
-  tokenFingerprint: STRING_SCHEMA,
+  id: STRING_SCHEMA,
   username: STRING_SCHEMA,
   expiresAt: NUMBER_SCHEMA,
-}, ['tokenFingerprint', 'username', 'expiresAt']);
+}, ['id', 'username', 'expiresAt']);
 
 export const LOCAL_AUTH_STATUS_SCHEMA = objectSchema({
   userStorePath: STRING_SCHEMA,

@@ -50,6 +50,9 @@ import { trackDisposables } from './_helpers/disposables.ts';
  * of the process. dispose() aborts it.
  */
 const disposables = trackDisposables();
+// Full source promotion, page publication and a second independent answer
+// measured 174s locally. Keep the complete assertions on slower CI hosts.
+const HOME_GRAPH_REPAIR_TIMEOUT_MS = 240_000;
 
 describe('semantic knowledge/wiki enrichment: answer quality', () => {
   test('persists source-grounded facts, wiki pages, and synthesized answers', async () => {
@@ -767,7 +770,7 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
     expect(page.markdown).toContain('Verified Device Facts');
     expect(page.markdown).toContain('Display and picture specifications');
     expect(page.markdown).not.toContain('manual/source');
-  }, 180_000);
+  }, HOME_GRAPH_REPAIR_TIMEOUT_MS);
 
   test('cold Home Graph ask waits for accepted repair source promotion before returning', async () => {
     answerReadings.set({ initialEvidence: [['LG 86NANO90UNA official specifications', 0.99]], sources: [['LG 86NANO90UNA official specifications', 0.99]] });
@@ -905,7 +908,7 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
     expect(page.markdown).toContain('2 x 10W');
     expect(page.markdown).not.toContain('0 source(s)');
     expect(page.markdown).not.toContain('manual/source');
-  }, 180_000);
+  }, HOME_GRAPH_REPAIR_TIMEOUT_MS);
 
   test('Home Graph semantic ask does not let unrelated semantic pages become object anchors', async () => {
     // Explicit readings for the off-intent maintenance/setup facts in this fixture.

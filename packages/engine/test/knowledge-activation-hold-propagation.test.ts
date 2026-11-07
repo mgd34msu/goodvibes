@@ -209,7 +209,7 @@ describe('required activation holds across knowledge refresh catches', () => {
     expect(currentTask.state).toBe('applying'); expect(currentTask.promotedFactCount).toBe(2);
     expect(currentTask.trace.some((entry) => entry.message === 'Repair source enrichment did not finish for one accepted source.')).toBe(true);
     expectProtected(reopened, item);
-  });
+  }, 120_000); // Complete promotion/recovery passes measured 51s locally and exceeded 60s on CI.
 });
 
 async function repairTask(item: Fixture) {

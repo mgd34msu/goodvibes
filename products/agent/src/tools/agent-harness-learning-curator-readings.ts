@@ -3,7 +3,7 @@ import { learningProposalQuality } from '@goodvibes-jev/engine/sdk/platform/know
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
-import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { STAKES_BANDS, type NamedDecision } from '@goodvibes-jev/judgment';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
@@ -29,16 +29,26 @@ function canonicalDefinitionData(decision: NamedDecision): unknown {
     }
     Object.defineProperty(data, key, { value, enumerable: descriptor.enumerable });
   }
-  return captureCatalogData(data);
+  // Keep the actual data references: the snapshot guard captures its detached
+  // baseline and rechecks mutable descendants. Recopying the definition at
+  // every boundary discards its proof for unchanged immutable specifications.
+  return Object.freeze(data);
 }
 const definitionGuards = new WeakMap<NamedDecision, () => void>();
 for (const decision of [learningProposalQuality, learningCuratorScore, learningProposalTarget, learningDuplicateAlignment, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass]) {
   const assertMethods = captureCatalogMethods(decision, Object.keys(Object.getOwnPropertyDescriptors(decision)));
-  const assertData = captureCatalogSnapshotGuard(canonicalDefinitionData(decision));
+  const keys = Reflect.ownKeys(decision);
+  const data = canonicalDefinitionData(decision);
+  const assertData = captureCatalogSnapshotGuard(data);
   // Preserve the original published definition, never a weakened later baseline.
   const site = decision.name;
   definitionGuards.set(decision, () => {
-    assertRegistry(); assertBands(); assertMethods(); assertData(canonicalDefinitionData(decision)); assertMethods();
+    assertRegistry(); assertBands(); assertMethods();
+    const currentKeys = Reflect.ownKeys(decision);
+    if (currentKeys.length !== keys.length || currentKeys.some((key, index) => key !== keys[index])) throw new ToolInputProjectionError('held');
+    // The slot guard binds every original property to these same references;
+    // new/hidden/symbol properties above cannot escape the complete baseline.
+    assertData(data); assertMethods();
     if (gateJudgmentRegistry.get(site) !== decision) throw new ToolInputProjectionError('held');
     assertRegistry(); assertMethods();
   });

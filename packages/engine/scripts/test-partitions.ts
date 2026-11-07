@@ -74,7 +74,10 @@ export function platformTestMatrix(engineRoot: string) {
       name: `bun ${partition.id}`,
       'node-version': '22',
       foundation: index === 0,
-      'test-cmd': `GOODVIBES_TEST_CEILING_MS=900000 bun packages/engine/scripts/test.ts --partition=${partition.id} --manifest-sha256=${manifest.sha256}`,
+      // This dedicated workflow declares a four-minute test. Its watchdog
+      // must let that test settle; ordinary partitions keep the default stall
+      // ceiling and every partition retains the same finite overall deadline.
+      'test-cmd': `GOODVIBES_TEST_CEILING_MS=900000${partition.files.some(file => DEDICATED_TEST_FILES.includes(file)) ? ' GOODVIBES_TEST_STALL_MS=270000' : ''} bun packages/engine/scripts/test.ts --partition=${partition.id} --manifest-sha256=${manifest.sha256}`,
     })),
     ...[
       ['rn-bundle', 'test:rn'], ['workers', 'test:workers'], ['workers-wrangler', 'test:workers:wrangler'],

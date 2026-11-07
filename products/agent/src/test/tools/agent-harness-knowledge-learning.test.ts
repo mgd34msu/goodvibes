@@ -25,6 +25,9 @@ beforeEach(() => {
 afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); });
 
 
+  // Complete native libraries, protected-source HTTP and every canonical grade
+  // are exercised together. The summary alone measured 80s before definition
+  // reuse and 55s after; retain headroom on CI without changing assertions.
   test.each(['summary', 'curator', 'candidate', 'consolidationDetail', 'action', 'promptPlanAction', 'projectContextAction', 'projectContextFileAction'] as const)('exposes a read-only learning curator with ranked local review routes: %s', async surface => {
     setSystemTime(new Date(1_760_000_000_008));
     const fixture = makeFixture();
@@ -408,7 +411,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       setSystemTime();
       fixture.cleanup();
     }
-  });
+  }, 120_000);
 
 
   test('learning_auto_promote refuses to run without an explicit user request and confirm', async () => {

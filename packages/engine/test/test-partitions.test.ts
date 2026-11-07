@@ -65,10 +65,18 @@ test('the actual repo matrix is an exact disjoint cover of canonical and indepen
   expect(manifest.files).toEqual(independent);
   expect(manifest.files).toEqual(defaultTestArgs(root));
   const rows = platformTestMatrix(root).include.filter((row) => row.platform === 'bun');
-  const selected = rows.map((row) => partitionTestArgs(root, row['test-cmd'].split(' ').slice(3))!.map((file) => {
-    expect(file).toStartWith('./test/');
-    return file.slice(2);
-  }));
+  const selected = rows.map((row) => {
+    const command = row['test-cmd'].split(' ');
+    const script = command.indexOf('packages/engine/scripts/test.ts');
+    expect(script).toBeGreaterThan(0);
+    const files = partitionTestArgs(root, command.slice(script + 1))!.map((file) => {
+      expect(file).toStartWith('./test/');
+      return file.slice(2);
+    });
+    expect(command[0]).toBe('GOODVIBES_TEST_CEILING_MS=900000');
+    expect(command.includes('GOODVIBES_TEST_STALL_MS=270000')).toBe(files.includes('test/knowledge-semantic-answer.test.ts'));
+    return files;
+  });
   expect(selected.flat().sort()).toEqual([...manifest.files]);
   expect(new Set(selected.flat()).size).toBe(manifest.files.length);
   expect(selected.map((files) => files.length).every((count) => count > 0)).toBe(true);

@@ -189,6 +189,24 @@ describe('native protected learning curator readings', () => {
     } finally { Object.defineProperty(learningCuratorScore, 'run', descriptor); readings.release(); await pending.catch(() => {}); }
   });
 
+  for (const addition of ['hidden', 'symbol'] as const) test(`pending additional ${addition} definition data retires an already-used canonical guard`, async () => {
+    const source = { proposedUse: 'synthetic guard reuse', record: { summary: 'Complete native record.' } };
+    installJudgmentPort(port().port);
+    await readLearningGrade(source, options());
+    const readings = suspendedPort(); installJudgmentPort(readings.port);
+    const pending = readLearningGrade(source, options());
+    const outcome = pending.then(() => null, error => error as unknown);
+    const key = addition === 'symbol' ? Symbol('synthetic definition extension') : 'syntheticHiddenDefinition';
+    try {
+      await readings.started;
+      Object.defineProperty(learningCuratorScore, key, { value: 'A new unreviewed specification', enumerable: addition !== 'hidden', configurable: true });
+      readings.release();
+      expect(await outcome).toBeInstanceOf(Error);
+    } finally {
+      Reflect.deleteProperty(learningCuratorScore, key); readings.release(); await outcome;
+    }
+  });
+
   test('the original ordinary band holds a confirm-level score without a replacement', async () => {
     const readings = port({ confidence: 0.70 }); installJudgmentPort(readings.port);
     await expect(readLearningGrade({ record: 'ordinary' }, options())).rejects.toBeInstanceOf(ToolInputProjectionError);

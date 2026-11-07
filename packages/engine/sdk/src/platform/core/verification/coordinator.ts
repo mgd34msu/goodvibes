@@ -5,7 +5,7 @@ import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { verificationEvidence, verificationIntegration, verificationRequirement, verificationScope, verificationSource, verificationRepairs, verificationNoIssue, verificationResolution, verificationAudit, verificationInstructionAudit, verificationObservationAudit } from './batteries.js';
 import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
 import { VerificationStore } from './store.js';
-import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationAccess, type VerificationReceipt, type VerificationRequirement, type VerificationSource, type VerificationSummary, type VerificationWriter } from './types.js';
+import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationAccess, type VerificationReceipt, type VerificationRequirement, type VerificationSource, type VerificationSourceInput, type VerificationSummary, type VerificationWriter } from './types.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
 import { bindVerificationTargets } from './targets.js';
 import { retainedDelegationSources } from './delegated-history.js';
@@ -108,6 +108,7 @@ export class CompletionVerification {
   private previousSources: { identity: object; request: unknown; ids: Set<string> } | undefined;
   private finalEvidence: { input: unknown; identity: object; frontier: VerificationReceipt[]; seen: Set<string>; opened: readonly VerificationSource[]; earlier: VerificationReceipt[] } | undefined;
   constructor(private readonly writer: VerificationWriter, readonly store = new VerificationStore()) {}
+  private readonly ownSource = (source: VerificationSourceInput) => this.store.retainSource(source);
 
   private readViews(sources: readonly VerificationSource[]) {
     // Source IDs bind immutable original bytes. Execution metadata is separate
@@ -121,7 +122,7 @@ export class CompletionVerification {
     // Snapshot only on a cache miss. Keys contain no source bodies, and exact
     // private metadata comparisons cannot merge differing tool associations.
     const captured = captureOwnedJson(input);
-    const view = nativeReadReceipts(sources);
+    const view = nativeReadReceipts(sources, this.ownSource);
     if (this.readReceiptViews.length >= 32) this.readReceiptViews.shift();
     this.readReceiptViews.push({ input: captured, view });
     return view;
@@ -314,9 +315,10 @@ export class CompletionVerification {
         const retained: VerificationReceipt[] = [];
         for (const source of sources) for (let offset = 0; offset < source.text.length; offset += 5_000) {
           const text = source.text.slice(offset, offset + 5_000);
-          const original = { ...source, completeMessage: !!source.completeMessage && offset === 0 && text.length === source.text.length,
-            id: `s-${verificationHash([source.id, offset, text]).slice(0, 24)}`, reference: `${source.reference}; exact retained interval ${offset}..${offset + text.length}`, text };
-          this.originals.set(original.id, original); this.store.rememberSource(original);
+          const { id: originalId, ...value } = source;
+          const original = this.ownSource({ ...value, completeMessage: !!source.completeMessage && offset === 0 && text.length === source.text.length,
+            originalIds: [originalId], reference: `${source.reference}; exact retained interval ${offset}..${offset + text.length}`, text });
+          this.originals.set(original.id, original);
           const receipt: VerificationReceipt = { id: `e-original-${original.id}`, representation: 'exact-original',
             summary: { facts: [{ text: `Exact quoted ${original.kind} source (${original.reference}):\n${text}`, sources: [original.id] }], concerns: [] }, children: [original.id], sourceIds: [original.id] };
           this.nodes.set(receipt.id, receipt); retained.push(receipt);
@@ -333,10 +335,10 @@ export class CompletionVerification {
       const original = sources[0];
       if (!original || original.text.length < 1024) throw new VerificationHeldError('minimum source frame', { cause: error });
       const middle = Math.ceil(original.text.length / 2);
-      const parts = [original.text.slice(0, middle), original.text.slice(middle)].map((text, index) => ({ ...original,
-        reference: `${original.reference}; native subdivision ${index + 1}/2`, completeMessage: false, text,
-        id: `s-${verificationHash([original.id, index, text]).slice(0, 24)}` }));
-      parts.forEach(part => { this.originals.set(part.id, part); this.store.rememberSource(part); });
+      const { id: originalId, ...value } = original;
+      const parts = [original.text.slice(0, middle), original.text.slice(middle)].map((text, index) => this.ownSource({ ...value,
+        reference: `${original.reference}; native subdivision ${index + 1}/2`, completeMessage: false, text, originalIds: [originalId] }));
+      parts.forEach(part => { this.originals.set(part.id, part); });
       return [...await this.page(parts.slice(0, 1), scope, access), ...await this.page(parts.slice(1), scope, access)];
     }
   }
@@ -857,15 +859,14 @@ export class CompletionVerification {
   }
   private async prepareAttempt(full: Record<string, unknown>, access: VerificationAccess): Promise<{ state: Record<string, unknown>; findings: readonly CompletionFinding[] }> {
     access.assertCurrent();
-    const currentSources = verificationSources(full);
-    const sources = [...currentSources, ...retainedDelegationSources(full, this.store.sources)];
+    const currentSources = verificationSources(full, this.ownSource);
+    const sources = [...currentSources, ...retainedDelegationSources(full, this.store.sources, this.ownSource)];
     this.originalTurns = verificationOriginalTurns(currentSources);
-    for (const source of currentSources) this.store.rememberSource(source);
     for (const [position, source] of sources.entries()) { this.originals.set(source.id, source); this.sourceOrder.set(source.id, position); }
     const ledger = await this.ledger(sources.filter(source => source.kind === 'instruction'), access);
     const observations = sources.filter(source => source.kind !== 'answer');
     const readView = this.readViews(observations), readReceipts = readView.receipts;
-    const citedPages = citedReadSources(readView.reads, typeof full.response === 'string' ? full.response : '');
+    const citedPages = citedReadSources(readView.reads, typeof full.response === 'string' ? full.response : '', undefined, this.ownSource);
     const citedSources = citedPages.map(page => page.source);
     for (const receipt of readReceipts) {
       this.originals.set(receipt.id, receipt);

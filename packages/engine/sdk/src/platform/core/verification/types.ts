@@ -11,7 +11,11 @@ export interface VerificationSource {
   readonly execution?: Readonly<Record<string, unknown>>;
   /** Native call identities on every interval of an assistant tool request. */
   readonly toolCallIds?: readonly string[];
+  /** Local original-record links; carried by the source owner, not model text. */
+  readonly originalIds?: readonly string[];
 }
+export type VerificationSourceInput = Omit<VerificationSource, 'id'>;
+export type VerificationSourceOwner = (source: VerificationSourceInput) => VerificationSource;
 export interface VerificationFact {
   readonly text: string;
   readonly sources: readonly string[];

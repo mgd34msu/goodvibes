@@ -28,6 +28,11 @@ import { observeReadContent } from '../sdk/src/platform/tools/read/observation.j
 import type { VerificationAccess, VerificationWriter } from '../sdk/src/platform/core/verification/types.js';
 import type { LLMProvider } from '../sdk/src/platform/providers/interface.js';
 
+/** Expected identities come from the same actual retained-source owner. */
+function ownedSources(verifier: CompletionVerification, full: Record<string, unknown>) {
+  return verificationSources(full, source => verifier.store.retainSource(source));
+}
+
 const directories: string[] = [];
 const originalPort = installJudgmentPort(undefined);
 afterEach(() => { installJudgmentPort(originalPort); for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -271,11 +276,12 @@ test.each([false, true])('bounded worker receipts stay primary while older histo
       if (request.operation !== 'requirements') throw new Error('No new summaries or diagnoses are needed for this exact primary proof.');
       return verificationWriter(request);
     };
-    const result = await new CompletionVerification(writer).prepare(full, access(fake.port));
+    const verifier = new CompletionVerification(writer);
+    const result = await verifier.prepare(full, access(fake.port));
     expect(result.findings).toHaveLength(0);
     expect(checked).toBeGreaterThan(0);
     expect(result.state.delegated).toMatchObject(full.delegated.map(({ evidence: _evidence, ...assignment }) => assignment));
-    const originals = verificationSources(full).filter((source) => source.kind !== 'answer');
+    const originals = ownedSources(verifier, full).filter((source) => source.kind !== 'answer');
     expect(originals.every((source) => audited.has(source.id))).toBe(true);
     expect(fake.requests.some((request) => request.context?.battery === 'engine.verification.integration')).toBe(true);
   },
@@ -380,10 +386,11 @@ test('retrieval indexes remain native locations instead of becoming another set 
     }
     throw new Error('No working-model repair is justified by this retained evidence.');
   };
-  const result = await new CompletionVerification(writer).prepare(input, access(fake.port));
+  const verifier = new CompletionVerification(writer);
+  const result = await verifier.prepare(input, access(fake.port));
   expect(result.findings).toHaveLength(0);
   expect(summaries).toBeGreaterThan(0);
-  const originals = verificationSources(input).filter((source) => source.kind !== 'answer');
+  const originals = ownedSources(verifier, input).filter((source) => source.kind !== 'answer');
   expect(new Set(originals.map((source) => source.id))).toEqual(audited);
 });
 
@@ -551,7 +558,8 @@ test('an uncertain history page is resolved against its individual originals wit
     if (name === 'missed') return noulAnswer(original ? (original.text.includes('OLD-REPORT-VERSION') ? 0.4 : 0.01) : 0.4);
     return noulAnswer(0.01);
   });
-  expect((await new CompletionVerification(writer).prepare(input, access(fake.port))).findings).toEqual([]);
+  const verifier = new CompletionVerification(writer);
+  expect((await verifier.prepare(input, access(fake.port))).findings).toEqual([]);
   expect(diagnosed).toHaveLength(1);
   expect(diagnosed[0]).toContain(':audit:');
   const judgments = fake.requests.filter(
@@ -560,7 +568,7 @@ test('an uncertain history page is resolved against its individual originals wit
       (request.context?.battery === 'engine.verification.instruction-audit' &&
         (request.state as never as { originalInstruction?: unknown }).originalInstruction),
   );
-  const expected = verificationSources(input).filter((source) => source.kind !== 'answer');
+  const expected = ownedSources(verifier, input).filter((source) => source.kind !== 'answer');
   expect(
     new Set(
       judgments.map((request) => {
@@ -943,7 +951,8 @@ test('a source-backed native resolution settles uncertain quality once and still
     const current = raw as unknown as { requirement?: unknown };
     return noulAnswer(name === 'satisfied' ? 0.99 : name === 'quality_gap' && current.requirement ? 0.4 : 0.01);
   });
-  const result = await new CompletionVerification(writer).prepare(input, access(fake.port));
+  const verifier = new CompletionVerification(writer);
+  const result = await verifier.prepare(input, access(fake.port));
   expect(result.findings).toHaveLength(0);
   expect(diagnoses).toBe(1);
   const resolutions = fake.requests.filter((request) => request.context?.battery === 'engine.verification.resolution');
@@ -954,7 +963,7 @@ test('a source-backed native resolution settles uncertain quality once and still
   const audited = fake.requests
     .filter((request) => ['engine.verification.audit', 'engine.verification.instruction-audit'].includes(request.context?.battery ?? ''))
     .flatMap((request) => ((request.state as unknown as { sources?: { id: string }[] }).sources ?? []).map((source) => source.id));
-  expect(new Set(audited)).toEqual(new Set(verificationSources(input).map((source) => source.id)));
+  expect(new Set(audited)).toEqual(new Set(ownedSources(verifier, input).map((source) => source.id)));
   const checks = (
     result.state.verification as {
       requirementChecks: { readings: { quality_gap: { outcome: string } }; resolution?: { aspects: string[] } }[];
@@ -1195,7 +1204,8 @@ test('a bounded native follow-up checks all current results without redrafting e
     return verificationWriter(request);
   };
   const fake = good();
-  expect((await new CompletionVerification(writer).prepare(input, access(fake.port))).findings).toHaveLength(0);
+  const verifier = new CompletionVerification(writer);
+  expect((await verifier.prepare(input, access(fake.port))).findings).toHaveLength(0);
   expect(operations).toEqual(['requirements']);
   const first = fake.requests.find((request) => request.context?.battery === 'engine.verification.requirement')!;
   const opened = (first.state as unknown as { opened: { sources: { execution?: { callId?: string } }[] } }).opened.sources;
@@ -1205,7 +1215,7 @@ test('a bounded native follow-up checks all current results without redrafting e
   expect(boundary.currentTurn.entryMessageCount).toBe(before.transcript.length);
   expect(new Set(boundary.currentTurn.observationIds)).toEqual(
     new Set(
-      verificationSources(input)
+      ownedSources(verifier, input)
         .filter((source) => source.execution && ['native-tests', 'report-update', 'final-diff'].includes(String(source.execution.callId)))
         .map((source) => source.id),
     ),
@@ -1213,7 +1223,7 @@ test('a bounded native follow-up checks all current results without redrafting e
   const audited = fake.requests
     .filter((request) => ['engine.verification.audit', 'engine.verification.instruction-audit'].includes(request.context?.battery ?? ''))
     .flatMap((request) => ((request.state as unknown as { sources?: { id: string }[] }).sources ?? []).map((source) => source.id));
-  expect(new Set(audited)).toEqual(new Set(verificationSources(input).map((source) => source.id)));
+  expect(new Set(audited)).toEqual(new Set(ownedSources(verifier, input).map((source) => source.id)));
   expect(fake.requests.some((request) => request.context?.battery === 'engine.verification.integration')).toBe(true);
 });
 
@@ -1417,7 +1427,8 @@ test('held page audits repeat only for a changed evidence context and still cove
       ? choiceAnswer(question, Object.keys(question.criteria)[0]!, 0.99)
       : noulAnswer(name === 'missed' && unopenedAuditSource(raw) ? 0.99 : 0.01),
   );
-  const result = await new CompletionVerification(verificationWriter).prepare(input, access(fake.port));
+  const verifier = new CompletionVerification(verificationWriter);
+  const result = await verifier.prepare(input, access(fake.port));
   expect(result.findings).toHaveLength(0);
   const audits = fake.requests.filter((request) =>
     ['engine.verification.audit', 'engine.verification.instruction-audit'].includes(request.context?.battery ?? ''),
@@ -1428,7 +1439,7 @@ test('held page audits repeat only for a changed evidence context and still cove
   expect(pages.length).toBeGreaterThan(10);
   expect(new Set(pages)).toEqual(
     new Set(
-      verificationSources(input)
+      ownedSources(verifier, input)
         .filter((source) => source.kind !== 'answer')
         .map((source) => source.id),
     ),
@@ -1733,7 +1744,7 @@ test('the verifier reads every original interval, including a hidden middle, and
   const verifier = new CompletionVerification(writer);
   expect((await verifier.prepare(state(content), access(fake.port))).findings).toHaveLength(0);
   expect(repairs).toBeGreaterThan(0);
-  const expected = verificationSources(state(content));
+  const expected = ownedSources(verifier, state(content));
   const checked = fake.requests.filter((request) => request.context?.battery === 'engine.verification.evidence').flatMap((request) => (request.state as never as { sources: { id: string }[] }).sources);
   for (const source of expected) expect(checked.some((entry) => entry.id === source.id)).toBeTrue();
   expect(Math.max(...fake.requests.map((request) => JSON.stringify(request).length))).toBeLessThan(70_000);
@@ -1773,11 +1784,12 @@ test('large histories inspect primary evidence first and audit every interval fo
     { role: 'tool', callId: 'latest-write', content: 'The report was written.' },
     ],
   };
-  const result = await new CompletionVerification(writer).prepare(source, access(fake.port));
+  const verifier = new CompletionVerification(writer);
+  const result = await verifier.prepare(source, access(fake.port));
   expect(result.findings.length).toBeGreaterThan(0);
   const audited = fake.requests.filter((request) => ['engine.verification.audit', 'engine.verification.instruction-audit'].includes(request.context?.battery ?? ''))
     .flatMap((request) => (request.state as never as { sources?: { id: string }[] }).sources ?? []);
-  for (const original of verificationSources(source)) expect(audited.some((entry) => entry.id === original.id)).toBeTrue();
+  for (const original of ownedSources(verifier, source)) expect(audited.some((entry) => entry.id === original.id)).toBeTrue();
   expect(evidenceDrafts).toBeLessThan(6);
   const requirement = fake.requests.find((request) => request.context?.battery === 'engine.verification.requirement')!;
   expect((requirement.state as never as { evidence: unknown[] }).evidence).toEqual([]);

@@ -1,9 +1,9 @@
 import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
-import type { VerificationSource } from './types.js';
-import { verificationHash } from './source.js';
+import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
+import type { VerificationSource, VerificationSourceInput } from './types.js';
+import { issueVerificationSource, verificationHash } from './source.js';
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
 
@@ -12,6 +12,9 @@ import { VerificationHeldError } from './types.js';
 export class VerificationStore {
   readonly sources = new Map<string, VerificationSource>();
   readonly proposals = new Map<string, string>();
+  // Only native kind/reference metadata selects a slot. Its value is the
+  // already-retained complete source, never a second text cache or text key.
+  private readonly latestSources = new Map<VerificationSource['kind'], Map<string, VerificationSource>>();
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly path: string | undefined;
@@ -40,7 +43,10 @@ export class VerificationStore {
         if (value.kind === 'source' && value.value && typeof value.value === 'object') {
           const source = value.value as VerificationSource;
           if (typeof source.id === 'string' && typeof source.reference === 'string' && typeof source.text === 'string'
-            && ['instruction', 'observation', 'answer'].includes(source.kind)) this.sources.set(source.id, source);
+            && ['instruction', 'observation', 'answer'].includes(source.kind)) {
+            this.sources.set(source.id, source);
+            this.rememberLatestSource(source);
+          }
         }
         if (value.kind === 'history' && value.value && typeof value.value === 'object') {
           const history = value.value as VerificationArchive['histories'][number];
@@ -99,8 +105,28 @@ export class VerificationStore {
     if (kind !== 'archive') this.written.set(slot, record.value);
     return record.value;
   }
-  rememberSource(source: VerificationSource): void {
-    this.sources.set(source.id, this.append('source', source.id, source));
+  private rememberLatestSource(source: VerificationSource): void {
+    const kind = this.latestSources.get(source.kind) ?? new Map<string, VerificationSource>();
+    kind.set(source.reference, source); this.latestSources.set(source.kind, kind);
+  }
+  /** Reuse only the complete unchanged native record, including execution and
+   * original-source links. Restored IDs are opaque; reading never rehashes text.
+   * Restored sources still require current semantic qualification.
+   */
+  retainSource(source: VerificationSourceInput): VerificationSource {
+    const snapshot = captureOwnedJson(source) as VerificationSourceInput;
+    const previous = this.latestSources.get(snapshot.kind)?.get(snapshot.reference);
+    if (previous && this.sources.get(previous.id) === previous) {
+      const { id: _id, ...value } = previous;
+      if (isDeepStrictEqual(captureOwnedJson(value), snapshot)) return previous;
+    }
+    return this.rememberSource(issueVerificationSource(snapshot));
+  }
+  rememberSource(source: VerificationSource): VerificationSource {
+    const retained = this.append('source', source.id, source);
+    this.sources.set(source.id, retained);
+    this.rememberLatestSource(retained);
+    return retained;
   }
   rememberProposal(key: string, proposal: string): void {
     this.proposals.set(key, this.append('proposal', key, proposal));

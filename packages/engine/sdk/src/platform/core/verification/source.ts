@@ -1,12 +1,26 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { VerificationSource } from './types.js';
+import type { VerificationSource, VerificationSourceInput, VerificationSourceOwner } from './types.js';
 
 export const VERIFICATION_FRAME_CHARACTERS = 28_000;
 export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
 // A letter-only encoding keeps opaque digests from accidentally looking like
 // payment-card material to the mandatory privacy screen. All 256 bits remain.
 export const verificationHash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
+let sourceNamespace: string | undefined;
+let sourceSequence = 0;
+
+/** An issued record identity, never a digest of source text or an approval.
+ * Keep native random identity bytes out of the numeric-material alphabet.
+ * A persistent source owner reuses the actual retained record when unchanged.
+ */
+export function issueVerificationSource(source: VerificationSourceInput): VerificationSource {
+  sourceNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
+  sourceSequence++;
+  if (!Number.isSafeInteger(sourceSequence)) throw new Error('Verification source identity exhausted');
+  const id = `s-${sourceNamespace}-${sourceSequence.toString(36)}`;
+  return { ...source, id };
+}
 
 /** Host call IDs select a small bucket; exact metadata decides membership.
  * Grouping grants no authority and never hashes arguments or returned text.
@@ -31,7 +45,7 @@ export function verificationExecutionGroups(sources: readonly VerificationSource
 
 /** Every byte belongs to an identified source interval. Boundaries are visible;
  * no middle is dropped and a fragment never claims to be a whole observation. */
-export function verificationSources(state: Record<string, unknown>): VerificationSource[] {
+export function verificationSources(state: Record<string, unknown>, own: VerificationSourceOwner = issueVerificationSource): VerificationSource[] {
   const result: VerificationSource[] = [];
   const add = (kind: VerificationSource['kind'], reference: string, value: unknown, messageRole?: VerificationSource['messageRole'], execution?: VerificationSource['execution'], toolCallIds?: readonly string[]) => {
     const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -55,8 +69,8 @@ export function verificationSources(state: Record<string, unknown>): Verificatio
         }
       }
       const label = `${reference}; ${start === 0 && end === text.length ? 'complete source' : 'partial source'}; characters ${start}..${end} of ${text.length}`;
-      result.push({ id: `s-${verificationHash([kind, label, text.slice(start, end)]).slice(0, 24)}`, kind,
-        reference: label, text: text.slice(start, end), ...(messageRole ? { messageRole, completeMessage: start === 0 && end === text.length } : {}), ...(execution ? { execution } : {}), ...(toolCallIds?.length ? { toolCallIds } : {}) });
+      result.push(own({ kind, reference: label, text: text.slice(start, end),
+        ...(messageRole ? { messageRole, completeMessage: start === 0 && end === text.length } : {}), ...(execution ? { execution } : {}), ...(toolCallIds?.length ? { toolCallIds } : {}) }));
       start = end;
     }
   };
@@ -122,7 +136,7 @@ export function verificationSources(state: Record<string, unknown>): Verificatio
 /** Exact run encoding, not a summary: joining every segment count times
  * reconstructs the original code units, including escaped JSON newlines. */
 export function verificationWireSource(source: VerificationSource) {
-  const { messageRole: _localRole, completeMessage: _localBoundary, ...wire } = source;
+  const { messageRole: _localRole, completeMessage: _localBoundary, originalIds: _localOrigins, ...wire } = source;
   const segments = source.text.split(/(?<=\n)|(?<=\\n)/u);
   const runs: { text: string; count: number }[] = [];
   for (const text of segments) {

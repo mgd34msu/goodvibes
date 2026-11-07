@@ -1,11 +1,13 @@
 import { isNativeCompletedWorkReceipt } from './response-completion-contracts.js';
-import { verificationHash, verificationSources, verificationWireSource } from './verification/source.js';
+import { issueVerificationSource, verificationHash, verificationSources, verificationWireSource } from './verification/source.js';
+import type { VerificationSourceOwner } from './verification/types.js';
 
 /** A bounded view of already approved work and this turn's exact observations.
  * Every original instruction and the full current draft remain present. All
  * omitted historical observations remain owned by the caller's source fence
  * and available to normal retrieval if ANY final check is not settled. */
-export function nativeWorkCheckpoint(original: readonly unknown[], admitted: readonly unknown[], full: Record<string, unknown>) {
+export function nativeWorkCheckpoint(original: readonly unknown[], admitted: readonly unknown[], full: Record<string, unknown>,
+  own: VerificationSourceOwner = issueVerificationSource) {
   if (!original.some((value, index) => isNativeCompletedWorkReceipt(value, admitted[index]))) return undefined;
   const initial = full.initial as { request?: unknown; transcript?: readonly Record<string, unknown>[] } | null;
   const transcript = full.transcript as readonly Record<string, unknown>[];
@@ -20,7 +22,7 @@ export function nativeWorkCheckpoint(original: readonly unknown[], admitted: rea
     && (work.contentReview as { matchesSavedAnswer?: unknown } | null)?.matchesSavedAnswer === true
     && ((work.originalObligationCoverage as { matchesOriginalScope?: unknown } | null)?.matchesOriginalScope === true
       || (work.goalCoverage as { matchesOriginalScope?: unknown } | null)?.matchesOriginalScope === true))) return undefined;
-  const instructions = verificationSources(full).filter(source => source.kind === 'instruction');
+  const instructions = verificationSources(full, own).filter(source => source.kind === 'instruction');
   const originalUsers = instructions.filter(source => source.messageRole === 'user').map(source => {
     if (source.completeMessage) {
       try {

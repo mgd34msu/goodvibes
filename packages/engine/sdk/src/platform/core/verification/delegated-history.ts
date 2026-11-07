@@ -1,10 +1,11 @@
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
-import { verificationHash } from './source.js';
-import type { VerificationSource } from './types.js';
+import { issueVerificationSource } from './source.js';
+import type { VerificationSource, VerificationSourceOwner } from './types.js';
 
 /** Restore observations only for workers actually returned by this branch.
  * Retained bytes never restore execution permission or completion approval. */
-export function retainedDelegationSources(full: Record<string, unknown>, retained: ReadonlyMap<string, VerificationSource>): VerificationSource[] {
+export function retainedDelegationSources(full: Record<string, unknown>, retained: ReadonlyMap<string, VerificationSource>,
+  own: VerificationSourceOwner = issueVerificationSource): VerificationSource[] {
   const known = new Map<string, string>();
   const calls = new Map<string, string>();
   const visit = (messages: unknown, reference: string) => {
@@ -31,13 +32,17 @@ export function retainedDelegationSources(full: Record<string, unknown>, retaine
   visit(full.transcript, 'transcript');
   const live = new Set(Array.isArray(full.delegated) ? full.delegated.map(agent => agent?.id) : []);
   const sources: VerificationSource[] = [];
+  // The owner may persist a selected projection. Never walk newly added map
+  // entries or recursively turn earlier projections into new originals.
+  const originals = [...retained.values()].filter(source => !source.originalIds?.length);
   for (const [id, parent] of known) {
     if (live.has(id)) continue;
-    for (const source of retained.values()) {
+    for (const source of originals) {
       if (source.kind !== 'observation' || !(source.reference.startsWith(`delegated assignment/result ${id};`)
         || source.reference.startsWith(`delegated ${id}.evidence[`))) continue;
       const reference = `${source.reference}; retained historical worker observation associated with ${parent}. Not a new execution, user instruction or current approval.`;
-      sources.push({ ...source, reference, id: `s-${verificationHash([source.kind, reference, source.text]).slice(0, 24)}` });
+      const { id: originalId, ...original } = source;
+      sources.push(own({ ...original, reference, originalIds: [originalId] }));
     }
   }
   return captureStrictJudgmentJson(sources) as VerificationSource[];

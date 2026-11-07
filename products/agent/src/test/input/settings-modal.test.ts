@@ -916,7 +916,7 @@ describe('SettingsModal', () => {
         { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false });
       const afterKey = renders;
       await new Promise(resolve => setTimeout(resolve, 0));
-      expect(actualMode).toBe('yolo');
+      expect<GatePresetName>(actualMode).toBe('yolo');
       expect(cm.get('permissions.mode')).toBe('safe-owner');
       expect(modal.getSelected()?.currentValue).toBe('yolo');
       expect(modal.lastSettingEffectMessage).toBe('Execution mode updated.');

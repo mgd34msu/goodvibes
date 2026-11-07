@@ -197,7 +197,7 @@ The curl installer fetches this monorepo only and builds all four products from
 one checkout:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
 ```
 
 Use `sh -s -- --no-service --decision-policy 'Classic - Off'` after the pipe
@@ -210,7 +210,7 @@ checkout with no uncommitted changes to tracked files:
 ```bash
 read -rsp 'TypeSafe API key: ' TYPESAFE_API_KEY; echo
 export TYPESAFE_API_KEY
-./install.sh
+./scripts/install.sh
 unset TYPESAFE_API_KEY
 goodvibes
 ```
@@ -222,7 +222,7 @@ Bun and Node runtimes are supplied when needed. The daemon serves the WebUI at
 configured separately. See [installation instructions](docs/installation.md)
 for prerequisites, credentials, custom paths and service options.
 
-Run `goodvibes-uninstall` (or `./uninstall.sh`) to remove the application and
+Run `goodvibes-uninstall` (or `./scripts/uninstall.sh`) to remove the application and
 service while keeping your data. Add `--purge` to delete the data too.
 
 ## Common commands

@@ -1,12 +1,12 @@
 #!/bin/sh
 # Install every GoodVibes product from this monorepo only.
-# curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
+# curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
 set -eu
 
 # A checkout uses its own installer and exact source revision. A downloaded or
 # piped copy bootstraps that same installer from the single repository below.
 if [ -f "$0" ]; then
-  installer_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+  installer_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
   if [ -f "$installer_root/scripts/install-from-checkout.sh" ] && [ -f "$installer_root/packages/engine/package.json" ]; then
     exec bash "$installer_root/scripts/install-from-checkout.sh" "$@"
   fi
@@ -19,8 +19,8 @@ case "${1:-}" in
     cat <<'HELP'
 Install the daemon, TUI, Agent and WebUI from mgd34msu/goodvibes-jev.
 
-  curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
+  curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
 
 GOODVIBES_REF selects one branch or tag for the complete suite (default: main).
 GOODVIBES_SOURCE_ROOT selects where persistent source checkouts are kept.

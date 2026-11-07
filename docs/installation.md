@@ -1,9 +1,9 @@
 # Install and uninstall GoodVibes Jev
 
-The root `install.sh` also works as a curl entry point:
+The `scripts/install.sh` entry point also works as a curl entry point:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
 ```
 
 It clones **only `mgd34msu/goodvibes-jev`** and builds the daemon, TUI, Agent and
@@ -16,7 +16,7 @@ installed service may use its checkout as the workspace.
 Pass normal installer options through `sh -s --`, for example:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
+curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
 ```
 
 The website redirect is managed separately; this change does not update it.
@@ -37,7 +37,7 @@ git clone https://github.com/mgd34msu/goodvibes-jev.git
 cd goodvibes-jev
 read -rsp 'TypeSafe API key: ' TYPESAFE_API_KEY; echo
 export TYPESAFE_API_KEY
-./install.sh
+./scripts/install.sh
 unset TYPESAFE_API_KEY
 ```
 
@@ -81,11 +81,11 @@ may require administrator authorization for that command.
 ## Options and storage
 
 ```bash
-./install.sh --help
-./install.sh --no-service             # Install without creating a service
-./install.sh --service                # Enable the service on a later run
-./install.sh --workspace ~/Projects/my-project  # Set the daemon's project workspace
-./install.sh --port 43121             # Choose another local port
+./scripts/install.sh --help
+./scripts/install.sh --no-service             # Install without creating a service
+./scripts/install.sh --service                # Enable the service on a later run
+./scripts/install.sh --workspace ~/Projects/my-project  # Set the daemon's project workspace
+./scripts/install.sh --port 43121             # Choose another local port
 ```
 
 Programs live under `~/.local/share/goodvibes-jev`. Data, settings and credentials
@@ -116,7 +116,7 @@ From a checkout with no uncommitted changes to tracked files:
 
 ```bash
 git pull --ff-only
-./install.sh
+./scripts/install.sh
 goodvibes --version
 goodvibes-daemon --version
 systemctl --user status goodvibes-jev.service
@@ -149,8 +149,8 @@ It refuses to delete a command or unit that has been replaced or modified.
 From the repository, the equivalent commands are:
 
 ```bash
-./uninstall.sh
-./uninstall.sh --prefix "$HOME/custom-program-directory" --purge
+./scripts/uninstall.sh
+./scripts/uninstall.sh --prefix "$HOME/custom-program-directory" --purge
 ```
 
 Choose `--purge` when uninstalling if you want to delete the data. A normal

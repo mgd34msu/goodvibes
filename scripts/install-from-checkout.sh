@@ -5,7 +5,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 case "${1:-}" in
   --help|-h)
     cat <<'HELP'
-Usage: ./install.sh [--prefix DIR] [--bin-dir DIR] [--data-dir DIR] [--workspace DIR]
+Usage: ./scripts/install.sh [--prefix DIR] [--bin-dir DIR] [--data-dir DIR] [--workspace DIR]
                     [--port PORT] [--no-service|--service]
 
 Build and install the daemon, terminal UI, agent and WebUI from this checkout.
@@ -21,10 +21,10 @@ Defaults:
 
 Export TYPESAFE_API_KEY before installation or put it in the installed
 private environment file afterward. Jev uses jev-latest.
-Re-run to update from the current checkout. Use ./uninstall.sh to remove.
+Re-run to update from the current checkout. Use ./scripts/uninstall.sh to remove.
 HELP
     exit 0 ;;
-  --uninstall) shift; exec "$root/uninstall.sh" "$@" ;;
+  --uninstall) shift; exec "$root/scripts/uninstall.sh" "$@" ;;
 esac
 [[ $(uname -s) == Linux ]] || { echo 'The installer currently supports Linux only.' >&2; exit 1; }
 [[ $(id -u) != 0 ]] || { echo 'Run as your regular user, without sudo.' >&2; exit 1; }

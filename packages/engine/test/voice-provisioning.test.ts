@@ -598,9 +598,9 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
       fetchImpl, extractArchive: bothExtractor,
     });
     // Present-but-mismatched with no usable binary is reported EXPLICITLY as a
-    // sideload mismatch (got X, want Y), not the generic bundle-unavailable.
+    // sideload verification failure, rather than generic bundle-unavailable.
     expect(result2.stt.state).toBe('sideload-mismatch');
-    expect(result2.stt.reason).toMatch(/does not match the pinned sha256.*got.*want/is);
+    expect(result2.stt.reason).toMatch(/failed verification against the published download pin/i);
     rmSync(dir, { recursive: true, force: true });
     rmSync(dir2, { recursive: true, force: true });
   });

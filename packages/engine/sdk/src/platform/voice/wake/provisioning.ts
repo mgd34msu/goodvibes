@@ -75,11 +75,9 @@
  */
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { logger } from '../../utils/logger.js';
 import {
   downloadVerifiedFile,
   fileMatches,
-  fileSha256,
   type VerifiedDownloadSpec,
 } from '../provisioning/download-verified.js';
 import {
@@ -478,16 +476,6 @@ async function provisionOne(
   options: WakeProvisionOptions,
 ): Promise<WakeComponentOutcome> {
   const { component, spec, dest } = step;
-  // Content check before anything else: a file that exists but does not hash to
-  // the pin is treated as absent, and its bad hash is reported rather than swallowed.
-  if (existsSync(dest) && !fileMatches(dest, spec)) {
-    logger.warn('wake artifact failed verification and will be re-fetched', {
-      component,
-      path: dest,
-      expectedSha256: spec.sha256,
-      actualSha256: fileSha256(dest) ?? '(unreadable)',
-    });
-  }
   options.onProgress?.({ component, phase: 'download', bytesTotal: spec.bytes });
   const result = await downloadVerifiedFile({
     spec,

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import { dirname, join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { downloadVerifiedFile, fileMatches, fileMatchesCached, fileSha256, type VerifiedDownloadResult } from './download-verified.js';
+import { downloadVerifiedFile, fileMatches, fileMatchesCached, type VerifiedDownloadResult } from './download-verified.js';
 import type { VoiceInstallProgressSnapshot } from './install-progress.js';
 import {
   DEFAULT_PIPER_VOICE,
@@ -389,8 +389,7 @@ async function provisionWhisperStt(ctx: {
       }
     } else if (archivePresent) {
       // Present but fails the current pin, NEVER extract it. Report honestly.
-      const got = fileSha256(paths.whisperArchive);
-      const reason = `A whisper bundle is present at ${paths.whisperArchive} but does not match the pinned sha256 (got ${(got ?? 'unreadable').slice(0, 12)}…, want ${whisper.bundle.sha256.slice(0, 12)}…). Rebuild it byte-for-byte with scripts/build-whisper-bundle.ts, or wait for a release that hosts it. Local TTS is unaffected.`;
+      const reason = `A whisper bundle is present at ${paths.whisperArchive} but failed verification against the published download pin. Rebuild it byte-for-byte with scripts/build-whisper-bundle.ts, or wait for a release that hosts it. Local TTS is unaffected.`;
       if (isUsableBinary(paths.whisperBinary)) {
         // An older verified binary is still installed, keep serving it; the pin
         // update simply cannot be applied from a mismatched archive, and the
@@ -403,7 +402,7 @@ async function provisionWhisperStt(ctx: {
         return unprovisioned({ engine: 'whisper-cpp', state: 'sideload-mismatch', reason });
       }
     } else if (!isUsableBinary(paths.whisperBinary)) {
-      const reason = `The whisper.cpp ${whisper.version} bundle for ${platform} is pinned (sha256 ${whisper.bundle.sha256.slice(0, 12)}…) but not yet hosted. Build it reproducibly with scripts/build-whisper-bundle.ts and drop the archive at ${paths.whisperArchive}, or wait for a release that hosts it. Local TTS is unaffected.`;
+      const reason = `The whisper.cpp ${whisper.version} bundle for ${platform} is pinned but not yet hosted. Build it reproducibly with scripts/build-whisper-bundle.ts and drop the archive at ${paths.whisperArchive}, or wait for a release that hosts it. Local TTS is unaffected.`;
       emit('whisper-engine', 'error', reason);
       components.push({ id: 'whisper-engine', state: 'failed', error: reason });
       return unprovisioned({ engine: 'whisper-cpp', state: 'bundle-unavailable', reason });
@@ -549,7 +548,7 @@ export function localVoiceRuntimeStatus(options: { managedRoot: string; platform
         binaryPath: paths.whisperBinary,
         modelPath: paths.whisperModel,
         ...(whisper.bundle.url === null && !sttBinaryPresent
-          ? { reason: `The pinned whisper.cpp ${whisper.version} bundle (sha256 ${whisper.bundle.sha256.slice(0, 12)}…) is not yet hosted. Build it byte-for-byte with scripts/build-whisper-bundle.ts and drop the archive at ${paths.whisperArchive}, it must match the pin exactly (the script produces a reproducible tarball), or wait for a hosting release.` }
+          ? { reason: `The pinned whisper.cpp ${whisper.version} bundle is not yet hosted. Build it byte-for-byte with scripts/build-whisper-bundle.ts and drop the archive at ${paths.whisperArchive}, it must match the pin exactly (the script produces a reproducible tarball), or wait for a hosting release.` }
           : {}),
       }
     : {
@@ -573,8 +572,8 @@ export function localVoiceRuntimeStatus(options: { managedRoot: string; platform
   }
   const binaryPresent = isUsableBinary(paths.piperBinary);
   // Cached verification: hashing the 63MB model on every status poll would
-  // block the event loop for hundreds of ms; the cache keys on
-  // (path, size, mtime) and the full hash still runs on provisioning decisions.
+  // block the event loop; the cache binds physical file identity, size, times
+  // and the expected pin. Actual provisioning decisions verify the full file.
   const voicePresent = fileMatchesCached(paths.defaultVoiceOnnx, DEFAULT_PIPER_VOICE.onnx) && existsSync(paths.defaultVoiceJson);
   const state: VoiceRuntimeState = binaryPresent && voicePresent ? 'provisioned' : (binaryPresent || voicePresent) ? 'partial' : 'not-provisioned';
   return {

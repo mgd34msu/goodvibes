@@ -36,23 +36,11 @@ export type VerifiedDownloadResult =
   | { readonly ok: true; readonly path: string; readonly bytes: number; readonly skipped: boolean }
   | { readonly ok: false; readonly reason: 'download-failed' | 'checksum-mismatch' | 'size-mismatch'; readonly error: string };
 
+/** External download pins require SHA-256; only actual pin comparisons call this. */
 function sha256Hex(bytes: Uint8Array): string {
   const hash = createHash('sha256');
   hash.update(bytes);
   return hash.digest('hex');
-}
-
-/**
- * The lowercase hex sha256 of a file, or null when it cannot be read. For
- * honest "got X, want Y" mismatch reporting; never throws.
- */
-export function fileSha256(path: string): string | null {
-  try {
-    if (!existsSync(path)) return null;
-    return sha256Hex(readFileSync(path));
-  } catch {
-    return null;
-  }
 }
 
 /** True when an existing file already matches the pinned size + checksum. */

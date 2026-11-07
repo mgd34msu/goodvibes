@@ -2,7 +2,7 @@ import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/pla
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/sdk/platform/artifacts';
-import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { lstatSync, readFileSync } from 'node:fs';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
@@ -41,7 +41,7 @@ export interface AutonomyLiveNativeFacts {
 const liveObservations = new WeakMap<object, { readonly assertCurrent: () => void; readonly captureEpoch: () => () => void }>();
 const releaseLiveObservation = new FinalizationRegistry<() => void>(release => release());
 
-/** Native notifications retain ABA evidence without retaining producer text. */
+/** Native notifications retain ABA evidence and one latest private snapshot. */
 export function captureNativeReadModelObservation(model: object): () => void {
   let observation = liveObservations.get(model);
   if (!observation) {
@@ -49,16 +49,15 @@ export function captureNativeReadModelObservation(model: object): () => void {
     const read = modelReadingServicePath(model, ['getSnapshot']), subscribe = modelReadingServicePath(model, ['subscribe']);
     if (typeof read !== 'function' || typeof subscribe !== 'function') throw new ToolInputProjectionError('unavailable');
     const reference = new WeakRef(model), state = { epoch: 0, valid: true };
-    let digest: string | undefined;
+    let previous: unknown;
     const changed = () => {
       const current = reference.deref(); if (!current) return;
       try {
         if (modelReadingServicePath(current, ['getSnapshot']) !== read) throw new ToolInputProjectionError('held');
-        const serialized = JSON.stringify(capturePersonalOpsData(read.call(current)));
-        if (typeof serialized !== 'string') throw new ToolInputProjectionError('invalid');
-        const next = createHash('sha256').update(serialized).digest('hex');
-        if (next !== digest || !state.valid) state.epoch++;
-        digest = next; state.valid = true;
+        const next = capturePersonalOpsData(read.call(current));
+        if (next === undefined) throw new ToolInputProjectionError('invalid');
+        if (!isDeepStrictEqual(next, previous) || !state.valid) state.epoch++;
+        previous = next; state.valid = true;
       } catch { state.epoch++; state.valid = false; }
     };
     methods();
@@ -152,15 +151,18 @@ function captureLiveSources(context: CommandContext, observe = false) {
       const stat = lstatSync(file, { bigint: true, throwIfNoEntry: false });
       if (!stat) return null;
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new ToolInputProjectionError('held');
-      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${createHash('sha256').update(readFileSync(file)).digest('hex')}`;
+      const stamp = (entry: typeof stat) => `${entry.dev}:${entry.ino}:${entry.mode}:${entry.nlink}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
+      const bytes = readFileSync(file), after = lstatSync(file, { bigint: true });
+      if (stamp(after) !== stamp(stat)) throw new ToolInputProjectionError('held');
+      return { stamp: stamp(after), bytes };
     };
     const before = revision();
     if (before !== null) {
-      try { researchFile = JSON.parse(readFileSync(file, 'utf8')); } catch { throw new ToolInputProjectionError('unavailable'); }
+      try { researchFile = JSON.parse(before.bytes.toString('utf8')); } catch { throw new ToolInputProjectionError('unavailable'); }
       capturePersonalOpsData(researchFile);
     }
     researchRuns = captureCatalogData(new AgentResearchRunRegistry(file).snapshot().runs);
-    const assertResearch = () => { if (revision() !== before || researchRunStorePath(shellPaths) !== file) throw new ToolInputProjectionError('held'); };
+    const assertResearch = () => { if (!isDeepStrictEqual(revision(), before) || researchRunStorePath(shellPaths) !== file) throw new ToolInputProjectionError('held'); };
     assertResearch(); guards.push(assertResearch);
   }
   const data = { tasks, approvals, automation, artifacts, researchRuns, researchFile };

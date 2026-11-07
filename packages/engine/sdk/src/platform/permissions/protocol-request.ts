@@ -1,7 +1,5 @@
 import { types as nodeTypes } from 'node:util';
 /** Fixed protocol identity positions. This module describes data, never authority. */
-import { createHash } from 'node:crypto';
-import { canonicalJson, type EntryType } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { captureAutonomousChoices } from './autonomous.js';
 
@@ -9,6 +7,7 @@ const brand: unique symbol = Symbol('captured-protocol-request');
 export interface CapturedProtocolRequest { readonly [brand]: true }
 interface Captured { readonly wire: unknown; readonly meaning: unknown; readonly revision: string }
 const captures = new WeakMap<CapturedProtocolRequest, Captured>();
+let captureSequence = 0;
 type Kind = 'acp-permission' | 'mcp-elicitation' | 'mcp-input-required';
 
 function identity(value: unknown, numeric: boolean): void {
@@ -45,7 +44,7 @@ function capture(value: unknown, kind: Kind): CapturedProtocolRequest {
     return projected;
   }
   const meaning = snapshotJudgmentInput(project(wire, []));
-  const revision = createHash('sha256').update(canonicalJson(wire as EntryType)).digest('hex');
+  const revision = `protocol-${(++captureSequence).toString(36)}`;
   const token: CapturedProtocolRequest = Object.freeze({ [brand]: true as const });
   captures.set(token, Object.freeze({ wire, meaning, revision }));
   return token;

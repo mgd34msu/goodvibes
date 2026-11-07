@@ -96,7 +96,6 @@ history, including upstream releases.
 - Release policy
 - [Semver policy](./semver-policy.md)
 - [OpenAPI operator contract](./openapi-contract.md): the published OpenAPI 3.1 document and how it is generated.
-- [Contract regeneration recipe](./contract-regeneration-recipe.md): the end-to-end procedure for adding an operator method or namespace.
 
 ## Generated references
 
@@ -113,7 +112,3 @@ Repository-wide policies and engine references:
 - [Installation and updates](../../../docs/installation.md)
 - [Security policy](../../../SECURITY.md)
 - [Changelog](../CHANGELOG.md)
-- Test coverage
-
-Type directive rationale and guarded host-only imports are documented in
-[type suppressions and optional imports](type-suppressions-and-optional-imports.md).

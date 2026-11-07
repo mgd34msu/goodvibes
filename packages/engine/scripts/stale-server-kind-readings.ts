@@ -23,7 +23,6 @@ export const CHECKED_FILES: readonly string[] = [
   'docs/expo-integration.md',
   'docs/react-native-integration.md',
   'docs/web-ui-integration.md',
-  'test/workers/SETUP.md',
   'test/workers/workers.test.ts',
   'test/workers-wrangler/wrangler.test.ts',
 ];

@@ -574,3 +574,12 @@ credential. Ordinary explanations and value-free schema descriptions are not
 blanket-censored. The deterministic PAN check can refuse a Luhn-valid identifier
 that is not a card; protecting the hosted request takes precedence over classifying
 that value remotely.
+
+## Browser Content Security Policy
+
+Optional host integrations for OpenTelemetry, Node worker threads and Sharp use
+guarded dynamic imports. These paths are unavailable in browser windows and
+workers; browser embeddings must not enable `unsafe-eval` for them. Regex
+isolation uses a Blob worker and fails closed if the embedding policy blocks
+that worker source. Configure worker permissions for the browser capabilities
+you enable.

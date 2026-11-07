@@ -1521,9 +1521,7 @@ purchase list.
 
 ## 10. Surface contract
 
-Operator methods, following `docs/contract-regeneration-recipe.md` end to end
-(catalog module → schema → route handler → DirectTransport surface →
-`DIRECT_TRANSPORT_COVERAGE` entry → regenerate → gates). Verb tails conform to
+The following operator methods expose the payment controls. Verb tails conform to
 the core-verb spec (`packages/engine/contracts/src/core-verbs.ts`); `approve` and `deny`
 are already in the `approval-and-routing` exempt category and `cancel` is a core
 verb.
@@ -1796,8 +1794,6 @@ code.
   the two windows must never be unified into one primitive
 - `docs/security.md`, `SecretsManager`, storage policies, permission system
 - `docs/secrets.md`, the `goodvibes://secrets/...` reference form
-- `docs/contract-regeneration-recipe.md`, the procedure for the `payments.*`
-  operator namespace
 - `platform/security/content-taint.ts`, `untrusted-content.ts`,
   `turn-boundary.ts`, `link-validation.ts`, `public-suffix.ts`
 - `platform/control-plane/approval-broker.ts`,

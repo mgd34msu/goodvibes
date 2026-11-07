@@ -132,9 +132,9 @@ function captureOwnedAdmissionEvidence(value: unknown): ToolOwnedAdmissionEviden
   }
   const hasAliases = suppliedAliases && descriptors['aliases']!.value !== undefined;
   const revision: unknown = descriptors['revision']!.value;
-  if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new ToolInputProjectionError('invalid');
+  if (typeof revision !== 'string' || !/^[A-Za-z0-9._:-]{1,256}$/.test(revision)) throw new ToolInputProjectionError('invalid');
   // The revision is typed protocol identity. Scanning its incidental digit runs
-  // as action text would mistake a valid digest for credential/card material.
+  // as action text would mistake a generated identity for credential/card material.
   const captured = captureProjectionArgs({ kind: descriptors['kind']!.value,
     root: descriptors['root']!.value, paths: descriptors['paths']!.value,
     ...(hasAliases ? { aliases: descriptors['aliases']!.value } : {}) }, 'admission-evidence');

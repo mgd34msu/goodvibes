@@ -1,6 +1,5 @@
 /** Read subjects belong to the real backend, not to caller-authored permission arguments. */
 import { lstatSync, realpathSync, statSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import type { ProjectIndex } from '../../state/project-index.js';
 import type { ToolExecuteOptions } from '../../types/tools.js';
@@ -23,6 +22,7 @@ interface ReadCapture {
   released: boolean;
 }
 const captures = new WeakMap<object, ReadCapture>();
+let readProjectionSequence = 0;
 
 function paths(args: Record<string, unknown>): readonly string[] {
   if (!Array.isArray(args.files) || args.files.length === 0) throw new ToolInputProjectionError('invalid');
@@ -87,8 +87,11 @@ export function createAgentReadInputProjector(index: Pick<ProjectIndex, 'baseDir
         return Object.freeze({ input, path, canonical: canonicalPath(path), revision: revision(path, root) });
       }));
       const capture: ReadCapture = { index, root, subjects, allowOutsideProject, currentAllowsOutsideProject, released: false };
-      // Generated resource protocol identity, not semantic text or file bytes.
-      const resourceRevision = createHash('sha256').update(JSON.stringify({ root, subjects, allowOutsideProject })).digest('hex');
+      // The registered private capture checks the actual resources. Its label
+      // neither commits their bytes nor grants authority.
+      readProjectionSequence++;
+      if (!Number.isSafeInteger(readProjectionSequence)) throw new ToolInputProjectionError('held');
+      const resourceRevision = `read-projection-${readProjectionSequence}`;
       const context = Object.freeze({}); captures.set(context, capture);
       return {
         status: 'projected', args: request.args, executionContext: context,

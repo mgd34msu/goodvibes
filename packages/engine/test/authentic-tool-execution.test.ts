@@ -145,7 +145,7 @@ test('active checks do not re-enter preclaim projection guards', async () => {
 });
 
 test('captured registration evidence is closed, detached, frozen and bound to exact handles', async () => {
-  const evidence = { kind: 'agent-read' as const, root: '/synthetic/project', paths: ['/synthetic/project/a.ts'], revision: 'a'.repeat(64) };
+  const evidence = { kind: 'agent-read' as const, root: '/synthetic/project', paths: ['/synthetic/project/a.ts'], revision: 'read-projection-1' };
   const { registry } = fixture(async () => ({ success: true }), { async project(request) {
     return { status: 'projected', args: request.args, admissionEvidence: evidence };
   } });

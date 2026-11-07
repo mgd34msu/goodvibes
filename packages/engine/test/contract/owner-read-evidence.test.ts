@@ -7,7 +7,6 @@ import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 import type { Contract } from '../../sdk/src/platform/contract/types.js';
 import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
-import { hashState } from '@goodvibes-jev/judgment';
 import { observeReadContent } from '../../sdk/src/platform/tools/read/observation.js';
 
 const roots: string[] = [];
@@ -79,16 +78,27 @@ test('redirected session storage cannot contribute prior-owner observations', ()
   expect(f.read(f.contract, '')).toBeUndefined();
 });
 
+test('cached owner observations follow exact journal bytes through same-size edits and restoration', () => {
+  const f = fixture(); const original = readFileSync(f.saved);
+  expect(f.read(f.contract, '')).toMatchObject({ sourceReads: [{ returnedRanges: ['1'] }] });
+  const changed = original.toString('utf8').replace('1 | first', '1 | FIRST');
+  expect(Buffer.byteLength(changed)).toBe(original.length);
+  writeFileSync(f.saved, changed);
+  expect(f.read(f.contract, '')).toMatchObject({ sourceReads: [] });
+  writeFileSync(f.saved, original);
+  expect(f.read(f.contract, '')).toMatchObject({ sourceReads: [{ returnedRanges: ['1'] }] });
+});
+
 test('correction proposal identity ignores bookkeeping but changes when actual owner observations change', () => {
   const f = fixture(); const work = { ...contractWorkReceipts(f.contract, { ownerEvidence: f.read(f.contract, '') }),
     privateArchiveChecks: [{ unitId: 'repair', gate: 'preservation', passed: true, output: 'Matched.', durationMs: 1 }] };
-  const first = hashState(JSON.stringify(workReceiptIdentity(work)));
+  const first = JSON.stringify(workReceiptIdentity(work));
   const later = JSON.parse(JSON.stringify(work));
   later.privateArchiveChecks[0].durationMs = 89;
-  later.ownerPriorReads.sources[0].sha256 = 'another-session-save-with-the-same-reads';
-  expect(hashState(JSON.stringify(workReceiptIdentity(later)))).toBe(first);
+  later.ownerPriorReads.sources[0].bytes += 100;
+  expect(JSON.stringify(workReceiptIdentity(later))).toBe(first);
   later.ownerPriorReads.sourceReads[0].returnedRanges = ['1-2'];
-  expect(hashState(JSON.stringify(workReceiptIdentity(later)))).not.toBe(first);
+  expect(JSON.stringify(workReceiptIdentity(later))).not.toBe(first);
 });
 
 test('decoded stderr keeps observational number withholding while the native receipt stays exact', () => {

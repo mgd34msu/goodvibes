@@ -966,7 +966,6 @@ test('a source-backed native resolution settles uncertain quality once and still
     kind: 'native-verified-work',
     result: 'pass',
     requirements: [{ text: 'Complete the original requested review and deliver its report.', result: 'pass' }],
-    bindings: { proposedAnswer: verificationHash(input.response) },
   });
   expect(fake.requests.some((request) => request.context?.battery === 'engine.verification.integration')).toBe(true);
 });

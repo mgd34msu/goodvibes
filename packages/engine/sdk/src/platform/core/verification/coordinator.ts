@@ -420,7 +420,7 @@ export class CompletionVerification {
     const workEvidence = { ...evidence, nativeQualification, sources: evidenceSources.map(source => {
       if (!source.id.startsWith('cited-')) return verificationWireSource(source);
       return { id: source.id, kind: source.kind, reference: source.reference,
-        representation: 'native-checked-source-reference', digest: verificationHash(source.text), bytes: Buffer.byteLength(source.text),
+        representation: 'native-checked-source-reference', bytes: Buffer.byteLength(source.text),
         meaning: 'Exact source excerpt assessed by the supplied scoped native work check. Its complete text remains retained. This reference does not establish unrelated facts, erase contrary observations or approve final output.' };
     }) };
     const available = new Set([...sources, ...observations.ledgers.map(page => page.source)].map(source => source.id));
@@ -1197,8 +1197,7 @@ export class CompletionVerification {
       state.verifiedWork = {
         kind: 'native-verified-work', result: 'pass',
         requirements: cases.map(({ requirement }) => ({ id: requirement.id, text: requirement.text, result: 'pass' })),
-        bindings: { originalScope: verificationHash(ledger), observations: verificationHash(sources.map(source => source.id)), proposedAnswer: verificationHash(full.response) },
-        meaning: 'The runtime has completed every original requirement, work-quality, original-source history and integration check for these exact bindings. Prior uncertain readings were resolved under their native policies. This establishes only the listed work; it does not approve the current response, support unrelated claims, override later invalidating observations or permit publication.',
+        meaning: 'The runtime has completed every original requirement, work-quality, original-source history and integration check for the listed work and observations in this current verification request. Prior uncertain readings were resolved under their native policies. This establishes only the listed work; it does not approve the current response, support unrelated claims, override later invalidating observations or permit publication.',
       };
     }
     return { state, findings };

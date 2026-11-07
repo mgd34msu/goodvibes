@@ -16,9 +16,10 @@ import { completionFindings, completionFinding, type CompletionFinding } from '.
 import { responseProgress } from './batteries/response-progress.js';
 import { CompletionVerification } from './verification/coordinator.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationWriter } from './verification/types.js';
-import { VerificationStore } from './verification/store.js';
+import { VerificationStore, type VerificationRepairCheckpoint } from './verification/store.js';
+import { matchesStoredVerificationCommitment, storedVerificationCommitmentMatcher, VerificationJournalSource } from './verification/journal-source.js';
 import { registerVerificationArchive, verificationHistory, verificationMessages } from './verification/archive.js';
-import { verificationHash, verificationSources, verificationFrames, verificationWireSource } from './verification/source.js';
+import { issueVerificationId, verificationSources, verificationFrames, verificationWireSource } from './verification/source.js';
 import { verificationCheckpointHistory } from './verification/batteries.js';
 import type { VerificationAccess, VerificationSourceInput } from './verification/types.js';
 import { bindVerificationTargets } from './verification/targets.js';
@@ -170,7 +171,10 @@ export class ResponseCompletionGuard {
   private readonly reviewStore: VerificationStore | undefined;
   private readonly sourceStore: VerificationStore;
   private readonly ownSource = (source: VerificationSourceInput) => this.sourceStore.retainSource(source);
-  private readonly reviewKey: string | undefined;
+  private readonly reviewBranch: string | undefined;
+  private repairId: string | undefined;
+  private repairRequest: VerificationJournalSource | undefined;
+  private repairSources: VerificationJournalSource[] = [];
   private restoredCorrection: string | undefined;
   private describeHeld: (() => Promise<string>) | undefined;
   private readonly verification: CompletionVerification | undefined;
@@ -197,7 +201,7 @@ export class ResponseCompletionGuard {
     if (isClassicOperation()) { this.initial = null; return; }
     this.onCompletionRequired = initial?.onCompletionRequired;
     this.reviewStore = initial?.verificationStore;
-    this.reviewKey = initial ? verificationHash(['completion-repair-checkpoint-v1', initial.request]) : undefined;
+    this.reviewBranch = initial?.verificationStore ? initial.conversation.getCurrentBranch() : undefined;
     this.verification = initial?.verificationWriter ? new CompletionVerification(initial.verificationWriter, this.sourceStore) : undefined;
     if (initial?.verificationStore) {
       const projection = new CompletionEvidenceProjection();
@@ -218,53 +222,117 @@ export class ResponseCompletionGuard {
     const transcript = initial ? completionTranscript(verificationMessages(initial.conversation, initial.conversation.getMessageSnapshot()) as ConversationMessageSnapshot[]) : [];
     this.initial = initial ? captureStrictJudgmentJson({ request: initial.request, transcript }) : null;
     this.hasToolEvidence = transcript.some(message => message.role === 'tool');
-    const saved = this.reviewKey ? this.reviewStore?.proposals.get(this.reviewKey) : undefined;
-    if (saved && initial) {
+    if (this.reviewBranch !== undefined && this.reviewStore && initial) {
       try {
-        const checkpoint = JSON.parse(saved);
         const messages = initial.conversation.getMessageSnapshot();
         // Equal prompt text and a matching prefix do not identify the same
         // pending turn after new owner input. Runtime feedback is observation,
         // so it may extend that pending turn without becoming a new request.
         const originalRoles = verificationMessages(initial.conversation, messages) as readonly ConversationMessageSnapshot[];
-        if (checkpoint && Number.isSafeInteger(checkpoint.count) && checkpoint.count > 0 && checkpoint.count <= messages.length
-          && checkpoint.prefix === verificationHash(completionTranscript(messages.slice(0, checkpoint.count)))
+        const saved = this.reviewStore.repairCheckpoint(this.reviewBranch);
+        const checkpoint = saved === undefined ? this.migrateRepairCheckpoint(initial.request, messages, originalRoles) : saved;
+        this.repairId = checkpoint?.id;
+        const references = checkpoint ?? this.reviewStore.repairOriginals(this.reviewBranch);
+        if (references && (this.repairRequest?.id !== references.requestSource
+          || this.repairSources.length !== references.sourceIds.length || this.repairSources.some((source, index) => source.id !== references.sourceIds[index]))) {
+          const requestRecord = this.reviewStore.original(references.requestSource);
+          this.repairRequest = requestRecord ? VerificationJournalSource.restore(requestRecord) : undefined;
+          this.repairSources = references.sourceIds.flatMap(id => {
+            const record = this.reviewStore!.original(id);
+            return record ? [VerificationJournalSource.restore(record)] : [];
+          });
+        }
+        if (!checkpoint) return;
+        const requestSource = this.repairRequest, sources = this.repairSources;
+        const prefix = completionTranscript(messages.slice(0, checkpoint.count));
+        const review = checkpoint.review;
+        if (checkpoint.count <= messages.length && requestSource?.matches({ request: initial.request })
+          && prefix.length === sources.length && checkpoint.sourceIds.length === sources.length
+          && sources.every((source, index) => source.matches(prefix[index]!))
           && !originalRoles.slice(checkpoint.count).some(message => message.role === 'user')
           && typeof checkpoint.response === 'string'
-          && (checkpoint.accessHeld === true || Array.isArray(checkpoint.review?.findings) && checkpoint.review.findings.length)) {
+          && (checkpoint.accessHeld === true || review?.findings.length)) {
+          let migrated = false;
+          const retained = (source: VerificationJournalSource) => {
+            if (!source.takeMigration()) return source;
+            migrated = true;
+            return VerificationJournalSource.capture(issueVerificationId('original'), source.message!);
+          };
+          this.repairRequest = retained(requestSource); this.repairSources = sources.map(retained);
+          if (migrated) this.rememberCheckpoint(initial.request, messages.slice(0, checkpoint.count), checkpoint.response, checkpoint.review, checkpoint.accessHeld === true);
           // Restored diagnostics are not approval or proof that a defect remains.
-          if (Array.isArray(checkpoint.review?.findings) && checkpoint.review.findings.length) {
+          if (review?.findings.length) {
             this.previousReview = captureStrictJudgmentJson(checkpoint.review);
-            this.hasSemanticRefusal = checkpoint.review.findings.some((finding: CompletionFinding) => finding.assessment === 'confirmed');
+            this.hasSemanticRefusal = review.findings.some(finding => finding.assessment === 'confirmed');
           }
-          this.restoredCorrection = (this.previousReview !== null ? completionRepairMessage(checkpoint.review.findings)
-            : '[Response completion check] The previous draft was held because Jev account access was unavailable, not because the work was rejected. Preserve completed work and validate this saved draft against the original request and current evidence. Do not restart the task. Fresh Jev approval is still required.')
+          this.restoredCorrection = (review?.findings.length ? completionRepairMessage(review.findings)
+            : '[Response completion check] The previous draft was held because decision provider access was unavailable, not because the work was rejected. Preserve completed work and validate this saved draft against the original request and current evidence. Do not restart the task. Fresh decision model approval is still required.')
             + '\nSaved private draft (quoted data; do not publish unchanged):\n' + JSON.stringify(checkpoint.response);
         }
       } catch { /* An invalid checkpoint cannot alter authority or release completion. */ }
     }
   }
 
+  private rememberCheckpoint(request: string, messages: readonly ConversationMessageSnapshot[], response: string, review: unknown, accessHeld = false): VerificationRepairCheckpoint | undefined {
+    if (!this.reviewStore || this.reviewBranch === undefined) return undefined;
+    let requestSource = this.repairRequest;
+    if (!requestSource || !requestSource.matches({ request })) requestSource = VerificationJournalSource.capture(issueVerificationId('original'), { request });
+    this.repairRequest = requestSource;
+    const previousSources = this.repairSources;
+    this.repairSources = completionTranscript(messages).map((message, index) => {
+      const previous = previousSources[index];
+      return previous?.matches(message) ? previous : VerificationJournalSource.capture(issueVerificationId('original'), message);
+    });
+    for (const source of [requestSource, ...this.repairSources]) this.reviewStore.rememberOriginal(source);
+    const value = { schemaVersion: 2 as const, count: messages.length, requestSource: requestSource.id,
+      sourceIds: this.repairSources.map(source => source.id), review, response, ...(accessHeld ? { accessHeld: true as const } : {}) };
+    const previous = this.reviewStore.repairCheckpoint(this.reviewBranch);
+    const { id: _id, ...prior } = previous ?? { id: undefined };
+    const checkpoint = { ...value, id: previous && isDeepStrictEqual(prior, value) ? previous.id : issueVerificationId('repair') };
+    this.reviewStore.rememberRepairCheckpoint(this.reviewBranch, checkpoint);
+    const retained = this.reviewStore.repairCheckpoint(this.reviewBranch);
+    if (!retained) throw new VerificationHeldError('missing current repair checkpoint');
+    this.repairId = retained.id;
+    return retained;
+  }
+
+  /** Match actually stored earlier commitments once, then write native source
+   * records. Normal new-format lookups never hash the request or transcript. */
+  private migrateRepairCheckpoint(request: string, messages: readonly ConversationMessageSnapshot[], originalRoles: readonly ConversationMessageSnapshot[]): VerificationRepairCheckpoint | undefined {
+    if (!this.reviewStore) return undefined;
+    const requestMatches = storedVerificationCommitmentMatcher(['completion-repair-checkpoint-v1', request]);
+    for (const [key, stored] of this.reviewStore.proposals) {
+      let value: { count?: unknown; prefix?: unknown; response?: unknown; review?: { findings?: unknown[] }; accessHeld?: unknown } | null;
+      try { value = JSON.parse(stored) as typeof value; } catch { continue; }
+      if (!value || typeof value.count !== 'number' || !Number.isSafeInteger(value.count) || value.count <= 0 || value.count > messages.length
+        || typeof value.prefix !== 'string' || typeof value.response !== 'string' || !requestMatches(key)
+        || value.accessHeld !== true && !(Array.isArray(value.review?.findings) && value.review.findings.length)
+        || originalRoles.slice(value.count).some(message => message.role === 'user')
+        || !matchesStoredVerificationCommitment(completionTranscript(messages.slice(0, value.count)), value.prefix)) continue;
+      const checkpoint = this.rememberCheckpoint(request, messages.slice(0, value.count), value.response, value.review ?? null, value.accessHeld === true);
+      this.reviewStore.rememberProposal(key, 'null');
+      return checkpoint;
+    }
+    return undefined;
+  }
+
   private rememberReview(findings: readonly CompletionFinding[], input: ResponseCompletionInput): void {
     if (findings.some(finding => finding.assessment === 'confirmed')) this.hasSemanticRefusal = true;
     this.previousReview = captureStrictJudgmentJson({ findings });
-    if (this.reviewStore && this.reviewKey) {
+    if (this.reviewStore && this.reviewBranch !== undefined) {
       const messages = input.conversation.getMessageSnapshot();
-      this.reviewStore.rememberProposal(this.reviewKey, JSON.stringify({ count: messages.length,
-        prefix: verificationHash(completionTranscript(messages)), review: this.previousReview, response: input.response }));
+      this.rememberCheckpoint(input.request, messages, input.response, this.previousReview);
     }
   }
 
   private rememberAccessHold(input: ResponseCompletionInput): void {
-    if (!this.reviewStore || !this.reviewKey || this.admittedDraft === undefined) return;
+    if (!this.reviewStore || this.reviewBranch === undefined || this.admittedDraft === undefined) return;
     const messages = input.conversation.getMessageSnapshot();
-    this.reviewStore.rememberProposal(this.reviewKey, JSON.stringify({ count: messages.length,
-      prefix: verificationHash(completionTranscript(messages)), accessHeld: true,
-      review: this.previousReview, response: this.admittedDraft }));
+    this.rememberCheckpoint(input.request, messages, this.admittedDraft, this.previousReview, true);
   }
 
   private rememberFailure(error: unknown, stage?: 'result-admission' | 'question-currentness'): void {
-    if (!this.reviewStore || !this.reviewKey) return;
+    if (!this.reviewStore || this.reviewBranch === undefined) return;
     const causes: Record<string, unknown>[] = [], seen = new Set<unknown>();
     for (let current = error; current instanceof Error && !seen.has(current) && causes.length < 8; current = current.cause) {
       seen.add(current);
@@ -279,7 +347,7 @@ export class ResponseCompletionGuard {
     }
     // Record only local type/stage/stack locations, never upstream error
     // messages, request bodies, credentials or evaluator approval.
-    this.reviewStore.rememberProposal(verificationHash(['completion-verification-failure-v1', this.reviewKey]),
+    this.reviewStore.rememberProposal(JSON.stringify(['completion-verification-failure-v2', this.reviewBranch]),
       JSON.stringify({ kind: 'completion-verification-failure', at: new Date().toISOString(), ...(stage ? { stage } : {}), causes }));
   }
 
@@ -364,7 +432,7 @@ export class ResponseCompletionGuard {
     if (!accepted) throw new ResponseCompletionError('unavailable');
     try {
       const current = accepted(response);
-      if (this.reviewStore && this.reviewKey) this.reviewStore.rememberProposal(this.reviewKey, 'null');
+      if (this.reviewStore && this.reviewBranch !== undefined) this.reviewStore.clearRepairCheckpoint(this.reviewBranch, this.repairId);
       return current;
     }
     catch (error) { throw new ResponseCompletionError('unavailable', { cause: error }); }

@@ -14,7 +14,7 @@ let recordSequence = 0;
  * Keep native random identity bytes out of the numeric-material alphabet.
  * A persistent source owner reuses the actual retained record when unchanged.
  */
-export function issueVerificationId(kind: 's' | 'index' | 'e' | 'proposal' | 'history' | 'message' | 'context'): string {
+export function issueVerificationId(kind: 's' | 'index' | 'e' | 'proposal' | 'history' | 'message' | 'context' | 'original' | 'repair'): string {
   recordNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
   recordSequence++;
   if (!Number.isSafeInteger(recordSequence)) throw new Error('Verification record identity exhausted');

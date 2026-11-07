@@ -13,6 +13,10 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { verificationWriter } from './_helpers/verification.js';
 import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
 import { appendVerificationObservation, archiveVerificationCompaction, registerVerificationArchive, verificationHistory, verificationMessages } from '../sdk/src/platform/core/verification/archive.js';
+import { VerificationJournalSource } from '../sdk/src/platform/core/verification/journal-source.js';
+import { ResponseCompletionGuard, type ResponseCompletionInput } from '../sdk/src/platform/core/response-completion.js';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -24,6 +28,12 @@ function journal() {
 }
 const source = (): VerificationSourceInput => ({ kind: 'observation', reference: 'native tool call; complete source', text: 'Actual returned bytes.',
   messageRole: 'tool', completeMessage: true, execution: { callId: 'actual-call', tool: 'read', exactArguments: { path: 'source.ts' } } });
+
+async function holdForAccount(guard: ResponseCompletionGuard, input: ResponseCompletionInput): Promise<void> {
+  const previous = installJudgmentPort({ model: 'laya', async ask() { throw new JudgmentError('rejected', 'Synthetic provider access refusal', { status: 402 }); } });
+  try { await expect(guard.check(input)).rejects.toMatchObject({ problem: 'access-blocked', status: 402 }); }
+  finally { installJudgmentPort(previous); }
+}
 
 test('unchanged source records reuse owned IDs without another journal write, including after restart', () => {
   const f = journal(); const input = source();
@@ -246,6 +256,114 @@ test('an inadmissible latest archive cannot silently fall back to earlier messag
   appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'unadmitted-position', value: { histories: [], derived: [[0, 'message-private-record']],
     messageRecords: [{ id: 'message-private-record', message: { role: 'user', content: 'password=synthetic-unadmitted-private-value' } }] } }) + '\n');
   expect(() => new VerificationStore(f.root, f.session)).toThrow('unadmitted archived provenance');
+});
+
+test('repair checkpoints reuse original message records across draft edits and recover private observations without storing them', async () => {
+  const f = journal(), request = 'Review the source and deliver the findings.', conversation = new ConversationManager();
+  conversation.addUserMessage(request);
+  conversation.addToolResults([{ callId: 'private-observation', success: true, output: 'password=synthetic-private-checkpoint-value' }]);
+  const initial = { request, conversation, verificationStore: f.store };
+  const first = new ResponseCompletionGuard(initial);
+  const input = { request, response: 'The review found an input-validation defect.', conversation, tools: ['read'] };
+  await holdForAccount(first, input);
+  const before = f.store.repairCheckpoint('main');
+  expect(before?.schemaVersion).toBe(2);
+  expect(before?.sourceIds).toHaveLength(2);
+  await holdForAccount(first, { ...input, response: 'The retained findings describe an input-validation defect.' });
+  const after = f.store.repairCheckpoint('main');
+  expect(after?.sourceIds).toEqual(before?.sourceIds);
+  expect(after?.requestSource).toBe(before?.requestSource);
+  expect(after?.id).not.toBe(before?.id);
+  const records = readFileSync(f.path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+  expect(records.filter(record => record.kind === 'original')).toHaveLength(3);
+  expect(readFileSync(f.path, 'utf8')).not.toContain('synthetic-private-checkpoint-value');
+  const reopened = new VerificationStore(f.root, f.session);
+  const restored = new ResponseCompletionGuard({ ...initial, verificationStore: reopened });
+  expect(restored.resumedRepair()).toContain(after!.response);
+  expect(restored.resumedRepair()).toContain('Do not restart the task');
+  expect(restored.resumedRepair()).not.toContain('Jev account');
+  expect(restored.resumedRepair()).not.toContain('synthetic-private-checkpoint-value');
+  expect(() => restored.beginFinalization({ content: after!.response })).toThrow();
+  conversation.addUserMessage(request);
+  const next = new ResponseCompletionGuard({ ...initial, verificationStore: new VerificationStore(f.root, f.session) });
+  expect(next.resumedRepair()).toBe('');
+  await holdForAccount(next, input);
+  const later = readFileSync(f.path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+  expect(later.filter(record => record.kind === 'original')).toHaveLength(4);
+});
+
+test('a repair checkpoint belongs to its native branch and stale cleanup cannot clear a newer diagnostic', async () => {
+  const f = journal(), request = 'Review the source.', conversation = new ConversationManager(); conversation.addUserMessage(request);
+  const input = { request, response: 'Retained private review draft.', conversation, tools: [] };
+  await holdForAccount(new ResponseCompletionGuard({ request, conversation, verificationStore: f.store }), input);
+  const main = f.store.repairCheckpoint('main')!;
+  conversation.forkBranch('alternate'); conversation.switchBranch('alternate');
+  const alternate = new ResponseCompletionGuard({ request, conversation, verificationStore: f.store });
+  expect(alternate.resumedRepair()).toBe('');
+  await holdForAccount(alternate, input);
+  const other = f.store.repairCheckpoint('alternate')!;
+  expect(other.id).not.toBe(main.id);
+  expect(f.store.repairCheckpoint('main')?.id).toBe(main.id);
+  await holdForAccount(alternate, { ...input, response: 'A revised retained draft.' });
+  const latest = f.store.repairCheckpoint('alternate')!;
+  f.store.clearRepairCheckpoint('alternate', other.id);
+  expect(f.store.repairCheckpoint('alternate')?.id).toBe(latest.id);
+  f.store.clearRepairCheckpoint('alternate', latest.id);
+  expect(new VerificationStore(f.root, f.session).repairCheckpoint('alternate')).toBeNull();
+  expect(new VerificationStore(f.root, f.session).repairCheckpoint('main')?.id).toBe(main.id);
+});
+
+test('existing held drafts convert their stored request and prefix commitments once, and clearing cannot resurrect them', () => {
+  const f = journal(), request = 'Review the source.', conversation = new ConversationManager(); conversation.addUserMessage(request);
+  const key = verificationHash(['completion-repair-checkpoint-v1', request]);
+  const value = { count: 1, prefix: verificationHash(conversation.getMessageSnapshot()), accessHeld: true, review: null, response: 'An earlier retained draft.' };
+  f.store.rememberProposal(key, JSON.stringify(value));
+  const guard = new ResponseCompletionGuard({ request, conversation, verificationStore: f.store });
+  expect(guard.resumedRepair()).toContain(value.response);
+  const checkpoint = f.store.repairCheckpoint('main')!;
+  expect(checkpoint.schemaVersion).toBe(2);
+  expect(f.store.proposals.get(key)).toBe('null');
+  expect(() => guard.beginFinalization({ content: value.response })).toThrow();
+  const reopened = new VerificationStore(f.root, f.session), bytes = readFileSync(f.path, 'utf8');
+  expect(new ResponseCompletionGuard({ request, conversation, verificationStore: reopened }).resumedRepair()).toContain(value.response);
+  expect(readFileSync(f.path, 'utf8')).toBe(bytes);
+  reopened.clearRepairCheckpoint('main', checkpoint.id);
+  reopened.rememberProposal(key, JSON.stringify(value));
+  expect(new ResponseCompletionGuard({ request, conversation, verificationStore: new VerificationStore(f.root, f.session) }).resumedRepair()).toBe('');
+});
+
+test('immutable original IDs cannot be rebound, including after recovery of a stored commitment', () => {
+  const f = journal();
+  const original = VerificationJournalSource.capture('original-actual-source', { content: 'Actual retained source.' });
+  f.store.rememberOriginal(original);
+  expect(() => f.store.rememberOriginal(VerificationJournalSource.capture(original.id, { content: 'A foreign substituted source.' }))).toThrow('immutable journal original changed');
+  const value = { content: 'Recovered public original.' };
+  appendFileSync(f.path, JSON.stringify({ kind: 'original', key: 'original-stored-commitment', value: { id: 'original-stored-commitment', contentCommitment: verificationHash(value) } }) + '\n');
+  const reopened = new VerificationStore(f.root, f.session);
+  expect(() => reopened.rememberOriginal(VerificationJournalSource.capture('original-stored-commitment', { content: 'Foreign source.' }))).toThrow('immutable journal original changed');
+  const recovered = VerificationJournalSource.restore(reopened.original('original-stored-commitment')!);
+  expect(recovered.matches(value)).toBe(true);
+  expect(() => reopened.rememberOriginal(recovered)).toThrow('immutable journal original changed');
+  const converted = VerificationJournalSource.capture('original-converted-public-source', recovered.message!);
+  reopened.rememberOriginal(converted);
+  const restored = new VerificationStore(f.root, f.session);
+  expect(restored.original(recovered.id)).toHaveProperty('contentCommitment');
+  expect(restored.original(converted.id)).toHaveProperty('message');
+});
+
+test('a repair checkpoint with missing originals holds recovery instead of reviving earlier diagnostics', () => {
+  const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
+  appendFileSync(f.path, JSON.stringify({ kind: 'repair', key: 'main', value: { schemaVersion: 2, id: 'repair-incomplete', count: 1,
+    requestSource: 'original-missing-request', sourceIds: ['original-missing-message'], review: null, response: 'Retained draft.', accessHeld: true } }) + '\n');
+  expect(() => new VerificationStore(f.root, f.session)).toThrow('missing repair checkpoint original');
+});
+
+test('malformed restored findings cannot become current repair guidance', () => {
+  const f = journal(), source = VerificationJournalSource.capture('original-source-record', { content: 'Actual source.' });
+  f.store.rememberOriginal(source);
+  expect(() => f.store.rememberRepairCheckpoint('main', { schemaVersion: 2, id: 'repair-invalid-review', count: 1,
+    requestSource: source.id, sourceIds: [source.id], response: 'Retained draft.', review: { findings: [null] } })).toThrow('invalid repair checkpoint');
+  expect(f.store.repairCheckpoint('main')).toBeUndefined();
 });
 
 test('retrieval indexes compare every native member and preview, and keep their issued IDs on restart', () => {

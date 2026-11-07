@@ -1,16 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
-import { captureOwnedJson, JudgmentInputError, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
-import { issueVerificationId, verificationHash } from './source.js';
+import { captureOwnedJson } from '../../gate/judgment-input.js';
+import { issueVerificationId } from './source.js';
 import { VerificationHeldError } from './types.js';
+import { VerificationJournalSource, type VerificationJournalRecord } from './journal-source.js';
 
-export type VerificationArchivedMessage = { readonly id: string } & (
-  { readonly message: Readonly<Record<string, unknown>> } | { readonly contentCommitment: string }
-);
-interface OwnedMessage {
-  message?: Readonly<Record<string, unknown>>;
-  persisted?: VerificationArchivedMessage;
-  observed?: { readonly message: Readonly<Record<string, unknown>>; readonly matches: boolean };
-}
+export type VerificationArchivedMessage = VerificationJournalRecord;
+type OwnedMessage = VerificationJournalSource;
 
 export interface VerificationArchive {
   readonly branch?: string;
@@ -48,51 +43,24 @@ function ownedMessage(entry: Archive, id: string): OwnedMessage {
     // Earlier journals stored only this commitment. It remains a checked
     // recovery input, never a newly issued message ID or live currentness key.
     if (!/^[a-p]{64}$/.test(id)) throw new VerificationHeldError('missing archived message provenance');
-    record = { persisted: { id, contentCommitment: id } }; entry.messageRecords.set(id, record);
+    record = VerificationJournalSource.restore({ id, contentCommitment: id }); entry.messageRecords.set(id, record);
   }
   return record;
 }
 function matchesMessage(entry: Archive, id: string | undefined, value: Record<string, unknown>): boolean {
   if (id === undefined) return false;
   const record = ownedMessage(entry, id);
-  const message = captureOwnedJson(value) as Readonly<Record<string, unknown>>;
-  if (record.message) return isDeepStrictEqual(record.message, message);
-  if (record.observed && isDeepStrictEqual(record.observed.message, message)) return record.observed.matches;
-  const saved = record.persisted;
-  const matches = !!saved && 'contentCommitment' in saved && verificationHash(message) === saved.contentCommitment;
-  record.observed = { message, matches };
-  if (matches) {
-    record.message = message;
-    try {
-      // Recover an ordinary public original once, then persist the native
-      // record so later restarts do not reconstruct its old content digest.
-      record.persisted = { id, message: snapshotJudgmentEvidence(message) as Readonly<Record<string, unknown>> };
-      entry.provenanceChanged = true;
-    } catch (error) {
-      if (!(error instanceof JudgmentInputError) || error.problem === 'unsupported-input') throw error;
-    }
-  }
+  const matches = record.matches(value);
+  if (record.takeMigration()) entry.provenanceChanged = true;
   return matches;
 }
 function retainMessage(entry: Archive, value: Record<string, unknown>): string {
   const id = issueVerificationId('message');
-  entry.messageRecords.set(id, { message: captureOwnedJson(value) as Readonly<Record<string, unknown>> });
+  entry.messageRecords.set(id, VerificationJournalSource.capture(id, value));
   return id;
 }
 function persistedMessage(entry: Archive, id: string): VerificationArchivedMessage {
-  const record = ownedMessage(entry, id);
-  if (record.persisted) return record.persisted;
-  if (!record.message) throw new VerificationHeldError('missing original message provenance');
-  try {
-    record.persisted = { id, message: snapshotJudgmentEvidence(record.message) as Readonly<Record<string, unknown>> };
-  } catch (error) {
-    if (!(error instanceof JudgmentInputError) || error.problem === 'unsupported-input') throw error;
-    // A private original cannot be copied into the journal. Commit once for
-    // recovery without retaining raw text on disk; live reads compare the
-    // already-owned complete message instead of repeatedly hashing it.
-    record.persisted = { id, contentCommitment: verificationHash(record.message) };
-  }
-  return record.persisted;
+  return ownedMessage(entry, id).stored();
 }
 function snapshot(branch: string, entry: Archive): VerificationArchive {
   const ids = [...new Set([...entry.derived.values(), ...entry.runtimeMessages.values()])];
@@ -178,7 +146,7 @@ export function registerVerificationArchive(owner: object, save: Archives['save'
     const name = value.branch ?? 'main', current = entries.branches.get(name);
     if (!current?.changed) {
       const messageRecords = new Map<string, OwnedMessage>();
-      for (const saved of value.messageRecords ?? []) messageRecords.set(saved.id, { persisted: saved, ...('message' in saved ? { message: saved.message } : {}) });
+      for (const saved of value.messageRecords ?? []) messageRecords.set(saved.id, VerificationJournalSource.restore(saved));
       entries.branches.set(name, { histories: [...value.histories], derived: new Map(value.derived), runtimeMessages: new Map(value.runtimeMessages), messageRecords, changed: true });
     }
   }

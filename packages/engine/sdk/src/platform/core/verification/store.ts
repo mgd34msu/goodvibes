@@ -6,9 +6,56 @@ import type { VerificationReceipt, VerificationSource, VerificationSourceInput }
 import { issueVerificationId, issueVerificationSource } from './source.js';
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
+import { VerificationJournalSource, type VerificationJournalRecord } from './journal-source.js';
+import type { CompletionFinding } from '../response-completion-findings.js';
 type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
 type QualifiedEvidence = VerificationReceipt & { readonly representation: 'jev-qualified' };
 type RetainedReceipt = SourceIndex | QualifiedEvidence;
+export interface VerificationRepairCheckpoint {
+  readonly schemaVersion: 2;
+  readonly id: string;
+  readonly count: number;
+  readonly requestSource: string;
+  readonly sourceIds: readonly string[];
+  readonly review: { readonly findings: readonly CompletionFinding[] } | null;
+  readonly response: string;
+  readonly accessHeld?: true;
+}
+
+function validRepairReview(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1) return false;
+  const findings = (value as { findings?: unknown }).findings;
+  return Array.isArray(findings) && findings.every((finding: unknown) => {
+    if (!finding || typeof finding !== 'object' || Array.isArray(finding)) return false;
+    const row = finding as Record<string, unknown>;
+    const allowed = ['check', 'issue', 'repair', 'resolvedWhen', 'preserve', 'remaining', 'passage', 'localization', 'assessment'];
+    if (Object.keys(row).some(key => !allowed.includes(key))
+      || ['check', 'issue', 'repair', 'resolvedWhen'].some(key => typeof row[key] !== 'string' || !(row[key] as string).trim())) return false;
+    for (const key of ['preserve', 'remaining']) if (row[key] !== undefined && (!Array.isArray(row[key]) || (row[key] as unknown[]).some(text => typeof text !== 'string'))) return false;
+    if (row.passage !== undefined) {
+      if (!row.passage || typeof row.passage !== 'object' || Array.isArray(row.passage)) return false;
+      const passage = row.passage as Record<string, unknown>;
+      if (Object.keys(passage).length !== 2 || typeof passage.reference !== 'string' || typeof passage.quote !== 'string') return false;
+    }
+    return (row.localization === undefined || typeof row.localization === 'string' && ['established', 'candidate-to-investigate', 'unavailable'].includes(row.localization))
+      && (row.assessment === undefined || row.assessment === 'confirmed' || row.assessment === 'unresolved');
+  });
+}
+
+function repairCheckpoint(value: unknown): VerificationRepairCheckpoint {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new VerificationHeldError('invalid repair checkpoint');
+  const row = value as Record<string, unknown>;
+  const names = ['schemaVersion', 'id', 'count', 'requestSource', 'sourceIds', 'review', 'response', ...(Object.hasOwn(row, 'accessHeld') ? ['accessHeld'] : [])];
+  if (Object.keys(row).length !== names.length || names.some(key => !Object.hasOwn(row, key)) || row.schemaVersion !== 2
+    || typeof row.id !== 'string' || !row.id || row.id.length > 256 || typeof row.count !== 'number' || !Number.isSafeInteger(row.count) || row.count < 0
+    || typeof row.requestSource !== 'string' || !row.requestSource || row.requestSource.length > 256
+    || !Array.isArray(row.sourceIds) || row.sourceIds.length > row.count
+    || row.sourceIds.some(id => typeof id !== 'string' || !id || id.length > 256)
+    || typeof row.response !== 'string' || !validRepairReview(row.review) || Object.hasOwn(row, 'accessHeld') && row.accessHeld !== true)
+    throw new VerificationHeldError('invalid repair checkpoint');
+  return value as VerificationRepairCheckpoint;
+}
 
 /** One private append-only journal per session, with deduplicated source chunks
  * and proposal records. Disk records never carry reusable approval authority. */
@@ -23,6 +70,9 @@ export class VerificationStore {
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly historyKeys = new WeakMap<object, string>();
+  private readonly originals = new Map<string, VerificationJournalRecord>();
+  private readonly repairCheckpoints = new Map<string, VerificationRepairCheckpoint | null>();
+  private readonly latestRepairOriginals = new Map<string, Pick<VerificationRepairCheckpoint, 'requestSource' | 'sourceIds'>>();
   private readonly path: string | undefined;
   private readonly root: string | undefined;
   archive: VerificationArchive | undefined;
@@ -46,13 +96,29 @@ export class VerificationStore {
         catch {
           // JSON parsing has already produced inert data. An unreadable latest
           // position must not resurrect an earlier branch's message authority.
-          if (record && typeof record === 'object' && (record as { kind?: unknown }).kind === 'archive')
-            throw new VerificationHeldError('unadmitted archived provenance');
+          if (record && typeof record === 'object') {
+            const kind = (record as { kind?: unknown }).kind;
+            if (kind === 'archive' || kind === 'repair' || kind === 'original') throw new VerificationHeldError('unadmitted archived provenance');
+          }
           continue;
         }
         const value = record as { kind?: unknown; key?: unknown; value?: unknown };
         if (typeof value.key !== 'string') continue;
         if (value.kind === 'proposal' && typeof value.value === 'string') this.proposals.set(value.key, value.value);
+        if (value.kind === 'original') {
+          const original = VerificationJournalSource.restore(value.value as VerificationJournalRecord).stored();
+          if (original.id !== value.key) throw new VerificationHeldError('invalid original record identity');
+          const previous = this.originals.get(original.id);
+          if (previous && !isDeepStrictEqual(previous, original)) throw new VerificationHeldError('immutable journal original changed');
+          this.originals.set(original.id, original);
+        }
+        if (value.kind === 'repair') {
+          const checkpoint = value.value === null ? null : repairCheckpoint(value.value);
+          if (checkpoint && [checkpoint.requestSource, ...checkpoint.sourceIds].some(id => !this.originals.has(id)))
+            throw new VerificationHeldError('missing repair checkpoint original');
+          this.repairCheckpoints.set(value.key, checkpoint);
+          if (checkpoint) this.latestRepairOriginals.set(value.key, { requestSource: checkpoint.requestSource, sourceIds: checkpoint.sourceIds });
+        }
         if (value.kind === 'source' && value.value && typeof value.value === 'object') {
           const source = value.value as VerificationSource;
           if (typeof source.id === 'string' && typeof source.reference === 'string' && typeof source.text === 'string'
@@ -108,7 +174,7 @@ export class VerificationStore {
             this.archives.set(this.archive.branch!, this.archive);
           }
         }
-        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence') {
+        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence' || value.kind === 'original' || value.kind === 'repair') {
           this.written.set(JSON.stringify([value.kind, value.key]), value.value);
         }
       }
@@ -121,7 +187,7 @@ export class VerificationStore {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   }
-  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index' | 'evidence', key: string, value: T): T {
+  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index' | 'evidence' | 'original' | 'repair', key: string, value: T): T {
     let record: { readonly kind: typeof kind; readonly key: string; readonly value: T };
     try { record = snapshotJudgmentEvidence({ kind, key, value }) as typeof record; }
     catch (error) { throw new VerificationHeldError('generated verification record admission', { cause: error }); }
@@ -211,6 +277,37 @@ export class VerificationStore {
   }
   rememberProposal(key: string, proposal: string): void {
     this.proposals.set(key, this.append('proposal', key, proposal));
+  }
+  original(id: string): VerificationJournalRecord | undefined { return this.originals.get(id); }
+  rememberOriginal(source: VerificationJournalSource): void {
+    const record = source.stored();
+    const previous = this.originals.get(record.id);
+    if (previous) {
+      if (!isDeepStrictEqual(previous, record)) throw new VerificationHeldError('immutable journal original changed');
+      return;
+    }
+    this.originals.set(record.id, this.append('original', record.id, record));
+  }
+  repairCheckpoint(branch: string): VerificationRepairCheckpoint | null | undefined { return this.repairCheckpoints.get(branch); }
+  /** Data references remain reusable after the pending diagnostic is cleared.
+   * They never restore that diagnostic or convey approval. */
+  repairOriginals(branch: string): Pick<VerificationRepairCheckpoint, 'requestSource' | 'sourceIds'> | undefined { return this.latestRepairOriginals.get(branch); }
+  rememberRepairCheckpoint(branch: string, value: unknown): void {
+    const checkpoint = repairCheckpoint(captureOwnedJson(value));
+    if ([checkpoint.requestSource, ...checkpoint.sourceIds].some(id => !this.originals.has(id)))
+      throw new VerificationHeldError('missing repair checkpoint original');
+    const previous = this.repairCheckpoints.get(branch);
+    if (previous?.id === checkpoint.id) {
+      if (!isDeepStrictEqual(previous, checkpoint)) throw new VerificationHeldError('repair checkpoint identity reused');
+      return;
+    }
+    const retained = this.append('repair', branch, checkpoint);
+    this.repairCheckpoints.set(branch, retained);
+    this.latestRepairOriginals.set(branch, { requestSource: retained.requestSource, sourceIds: retained.sourceIds });
+  }
+  clearRepairCheckpoint(branch: string, expectedId: string | undefined): void {
+    if (this.repairCheckpoints.get(branch)?.id !== expectedId || expectedId === undefined) return;
+    this.repairCheckpoints.set(branch, this.append('repair', branch, null));
   }
   rememberArchive(value: VerificationArchive): void {
     const branch = value.branch ?? 'main', previous = this.archives.get(branch);

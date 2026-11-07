@@ -35,7 +35,8 @@ export async function refreshReleaseWebUi(options: ReleaseWebUiOptions): Promise
   async function download(name: string, limit: number): Promise<Buffer> {
     assertCurrent();
     const response = await fetchImpl(`${base}/${name}`, { signal, redirect: 'follow' });
-    assertCurrent();
+    try { assertCurrent(); }
+    catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
     if (!response.ok || !response.body) throw new Error('Release WebUI download is unavailable');
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = []; let length = 0;

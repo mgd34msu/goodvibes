@@ -25,7 +25,7 @@ function fixture(invalid = false) {
     assertCurrent:()=>{if (!current) throw new Error('Owner retired');},
     fetchImpl:(async (input: string | URL | Request) => {
       requests.push(String(input));
-      return new Response(String(input).endsWith('SHA256SUMS.txt') ? `${hash}  goodvibes-webui-bundle-3.1.1.tar.gz\n` : archive);
+      return new Response(String(input).endsWith('SHA256SUMS.txt') ? `${hash}  goodvibes-webui-bundle-3.1.1.tar.gz\n` : new Uint8Array(archive));
     }) as typeof fetch};
   return {options,requests,retire:()=>{current=false;}};
 }

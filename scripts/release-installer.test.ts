@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -87,4 +87,14 @@ test('release uninstall needs no downloads and preserves user data', () => {
   expect(existsSync(join(root, 'fetches'))).toBe(false);
   for (const name of ['goodvibes','goodvibes-agent','goodvibes-daemon','daemon-installation.json']) expect(existsSync(join(home, 'bin', name))).toBe(false);
   expect(readFileSync(join(home, '.goodvibes/settings.json'), 'utf8')).toBe('owner data');
+});
+
+test('an existing checkout receipt keeps its command links and data until its own uninstall', () => {
+  const prefix=join(home,'checkout-install'); mkdirSync(join(prefix,'commands'),{recursive:true});
+  writeFileSync(join(prefix,'installation.json'),'{}'); mkdirSync(join(home,'bin'));
+  symlinkSync(join(prefix,'commands/goodvibes'),join(home,'bin/goodvibes'));
+  const result=run(); expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('checkout installation owns');
+  expect(existsSync(join(root,'fetches'))).toBe(false);
+  expect(existsSync(join(prefix,'installation.json'))).toBe(true);
 });

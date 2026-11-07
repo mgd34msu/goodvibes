@@ -2778,6 +2778,21 @@ main() {
     return 0
   fi
 
+  # Receipt-owned checkout installs use a different data/service layout. Do not
+  # replace their command links and strand their installed uninstaller.
+  for installed_command in goodvibes goodvibes-daemon goodvibes-agent; do
+    command_path="$INSTALL_DIR/$installed_command"
+    if [ -L "$command_path" ]; then
+      linked=$(readlink "$command_path")
+      case "$linked" in
+        */commands/goodvibes|*/commands/goodvibes-daemon|*/commands/goodvibes-agent)
+          owned_prefix=$(dirname "$(dirname "$linked")")
+          if [ -f "$owned_prefix/installation.json" ]; then
+            fail "A checkout installation owns $command_path. Run its goodvibes-uninstall first (user data is preserved), then install released binaries. Its saved data remains in the data directory recorded by $owned_prefix/installation.json."
+          fi ;;
+      esac
+    fi
+  done
   resolve_version
 
   BASE_URL="https://github.com/$REPO/releases/download/$VERSION"

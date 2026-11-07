@@ -438,7 +438,10 @@ export class CompletionVerification {
     // factual bearing, and draft-specific claims are judged by the checks that
     // receive the draft. Keying qualifications by the draft re-audited the
     // entire history for every rewording, observed live at review scale.
-    const scopeKey = verificationHash(['counterevidence-scope-v3', requirement, turnContext?.request, turnContext?.requirements]);
+    // These are immutable, locally qualified ledger records. Their native IDs
+    // already bind the complete instruction sources and requirement wording;
+    // request text does not need another content digest for each audited page.
+    const scopeKey = JSON.stringify(['counterevidence-scope-v4', requirement.id, turnContext?.requirements.map(item => item.id) ?? null]);
     let qualified = authority.get(scopeKey);
     if (!qualified) { qualified = new Map(); authority.set(scopeKey, qualified); }
     for (const source of observations.observations) {
@@ -494,8 +497,8 @@ export class CompletionVerification {
           // the requirement does not change with answer wording, and a changed
           // evidence binding starts fresh attempts.
           const binding = nativeQualification && typeof nativeQualification === 'object' ? (nativeQualification as { evidenceBinding?: unknown }).evidenceBinding ?? null : null;
-          const sourceKey = verificationHash(['original-counterevidence-v2', requirement, turnContext?.requirements,
-            verificationWireSource(observation), originalTurn ?? null, binding]);
+          const sourceKey = JSON.stringify(['original-counterevidence-v3', scopeKey, observation.id,
+            originalTurn?.sources.map(source => source.id) ?? null, binding]);
           if (cache.has(sourceKey)) return cache.get(sourceKey) === true;
           const refinement = instruction ? verificationInstructionAudit : verificationObservationAudit;
           const exact = await refinement.run(access.port, state as never,
@@ -656,7 +659,9 @@ export class CompletionVerification {
           kind: 'native-provisional-requirement-check', requirement: { id: requirement.id, text: requirement.text },
           readings: readingEvidence({ unfinished: run.readings.unfinished, quality_gap: run.readings.quality_gap }),
           ...(resolution ? { resolution } : {}), ...(run.result.decisionId ? { decisionId: run.result.decisionId } : {}),
-          evidenceBinding: verificationHash({ ...opened, sources: primarySources(opened.sources).map(verificationWireSource) }),
+          // Actual retained source/summary IDs bind their complete immutable
+          // originals. This is private retrieval metadata, never an approval.
+          evidenceBinding: JSON.stringify([primarySources(opened.sources).map(source => source.id), opened.earlier.map(node => node.id)]),
           ...(focusedAssessment?.qualifiedNoIssues?.length ? { qualifiedDiagnosis: focusedAssessment.noIssues.filter(item => focusedAssessment!.qualifiedNoIssues!.includes(item.check)) } : {}),
           meaning: 'This runtime just obtained a positive Jev work/quality assessment of this exact requirement and the bound primary observations. It is provisional until EVERY original history interval is checked for contrary facts. It does not establish another requirement, factual claims outside this scope, unchanged current files or final-response approval. Identify actual unaccounted counterevidence on the supplied page; do not repeat the component review merely because its quoted source bodies are referenced here.',
         });
@@ -1063,7 +1068,7 @@ export class CompletionVerification {
       const pending = new Set<AbortController>();
       const checked = await ownedMapLimit(access, ledger, 3, async requirement => {
         if (indexed && confirmedGap) return null;
-        const resultKey = verificationHash([casesKey, requirement.id]);
+        const resultKey = JSON.stringify(['requirement-result', casesKey, requirement.id]);
         const retained = cache.get(resultKey) as Awaited<ReturnType<CompletionVerification['inspect']>> | undefined;
         const controller = new AbortController(); pending.add(controller);
         const local = indexed ? { ...access, signal: access.signal ? AbortSignal.any([access.signal, controller.signal]) : controller.signal,
@@ -1114,7 +1119,7 @@ export class CompletionVerification {
         }]);
       }
       cases![index] = rechecked;
-      cache.set(verificationHash([casesKey, entry.requirement.id]), captureStrictJudgmentJson(rechecked));
+      cache.set(JSON.stringify(['requirement-result', casesKey, entry.requirement.id]), captureStrictJudgmentJson(rechecked));
       return [];
     });
     cache.set(casesKey, captureStrictJudgmentJson(cases));

@@ -7,7 +7,7 @@ import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } f
 import { randomUuid } from './uuid';
 
 type Request = BrowserJudgmentRequest<'webui.code.language'>;
-export type CodeSource = { readonly sessionId: string; readonly messageId: string; readonly content: string; readonly start: number; readonly end: number };
+export type CodeSource = { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string; readonly content: string; readonly start: number; readonly end: number };
 export type CodeLanguageResult = { readonly status: 'ready'; readonly language: WebuiCodeLanguage; readonly provenance?: 'classic'; readonly isCurrent: () => boolean } | { readonly status: 'held' | 'unavailable' };
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const keys = (value: Record<string, unknown>, names: readonly string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
@@ -18,7 +18,7 @@ const nonempty = (value: unknown): value is string => typeof value === 'string' 
 /** Bind the complete evidence and closed choice to this request, never accept a value-only response. */
 export function readCodeLanguageResponse(request: Request, raw: unknown): { readonly status: 'ready'; readonly language: WebuiCodeLanguage } | { readonly status: 'held' } | undefined {
   const result = object(raw);
-  if (result?.protocolVersion !== 1 || result.batteryVersion !== 1 || result.battery !== request.battery
+  if (result?.protocolVersion !== 1 || result.batteryVersion !== request.batteryVersion || result.battery !== request.battery
     || result.requestId !== request.requestId || (result.status !== 'settled' && result.status !== 'held')) return undefined;
   const settled = result.status === 'settled';
   if (!keys(result, ['protocolVersion', 'batteryVersion', 'requestId', 'battery', 'status', settled ? 'value' : 'reason', 'readings', 'outcome', 'evidence'])) return undefined;
@@ -47,20 +47,20 @@ export function readCodeLanguageResponse(request: Request, raw: unknown): { read
   return { status: 'ready', language: reading.choice as WebuiCodeLanguage };
 }
 
-/** Only source identities, structural offsets and a display-binding digest leave the browser. */
+/** Only owner-issued source revisions and structural offsets leave the browser. */
 export async function readCodeLanguage(source: CodeSource, signal: AbortSignal): Promise<CodeLanguageResult> {
-  if (!source.sessionId || !source.messageId || !source.content || source.content.length > 1_000_000 || signal.aborted) return { status: 'held' };
+  const { sessionId, messageId, contentRevision, content, start, end } = source;
+  if (!sessionId || !messageId || !contentRevision || sessionId.length > 256 || messageId.length > 256 || contentRevision.length > 256 || !source.content || source.content.length > 1_000_000 || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > content.length || signal.aborted) return { status: 'held' };
   const lifetime = getClientLifetime(); const abort = new AbortController();
   const cancel = () => abort.abort(); const unsubscribe = subscribeClientLifetime(cancel);
   signal.addEventListener('abort', cancel, { once: true });
-  const isCurrent = () => !signal.aborted && !abort.signal.aborted && isClientLifetimeCurrent(lifetime);
+  const isCurrent = () => !signal.aborted && !abort.signal.aborted && isClientLifetimeCurrent(lifetime)
+    && source.sessionId === sessionId && source.messageId === messageId && source.contentRevision === contentRevision
+    && source.content === content && source.start === start && source.end === end;
   try {
     if (!isCurrent()) return { status: 'unavailable' };
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source.content));
-    if (!isCurrent()) return { status: 'unavailable' };
-    const contentDigest = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
-    const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.code.language', batteryVersion: 1,
-      input: { sessionId: source.sessionId, messageId: source.messageId, start: source.start, end: source.end, contentDigest } };
+    const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.code.language', batteryVersion: 2,
+      input: { sessionId, messageId, contentRevision, start, end } };
     const raw = await runBrowserJudgment(request, abort.signal);
     if (!isCurrent()) return { status: 'unavailable' };
     const result = readCodeLanguageResponse(request, raw);

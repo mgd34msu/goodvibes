@@ -4,7 +4,7 @@ import { classicSpeechEndOffsets, DecisionModelsDisabledError } from '@goodvibes
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
 import { randomUuid } from '../uuid';
 
-export interface SpeechSource { readonly sessionId: string; readonly messageId: string; readonly content: string }
+export interface SpeechSource { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string; readonly content: string }
 type Request = BrowserJudgmentRequest<'webui.voice.speech-seams'>;
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const keys = (value: Record<string, unknown>, names: readonly string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
@@ -17,7 +17,7 @@ export function readSpeechSeamsResponse(request: Request, paragraph: string, raw
   const candidates = [...paragraph.matchAll(/\s+/g)].map(match => match.index); candidates.push(paragraph.length);
   const selected = candidates.slice(request.input.cursor, request.input.cursor + 64);
   const result = object(raw);
-  if (result?.protocolVersion !== 1 || result.batteryVersion !== 1 || result.battery !== request.battery || result.requestId !== request.requestId
+  if (result?.protocolVersion !== 1 || result.batteryVersion !== request.batteryVersion || result.battery !== request.battery || result.requestId !== request.requestId
     || result.status !== 'settled' || result.outcome !== 'act'
     || !keys(result, ['protocolVersion', 'batteryVersion', 'requestId', 'battery', 'status', 'value', 'readings', 'outcome', 'evidence'])) return undefined;
   const readings = object(result.readings); const value = object(result.value);
@@ -45,11 +45,11 @@ export function readSpeechSeamsResponse(request: Request, paragraph: string, raw
   return offsets;
 }
 
-/** Only canonical identities and a digest leave the browser; text is resolved and screened by its owner. */
+/** Only owner-issued revisions leave the browser; text is resolved and screened by its owner. */
 export async function readSpeechSeams(source: SpeechSource, start: number, end: number, signal: AbortSignal): Promise<readonly number[]> {
-  const { sessionId, messageId, content } = source;
-  if (!source.sessionId || !source.messageId || source.sessionId.length > 256 || source.messageId.length > 256
-    || !source.content || source.content.length > 1_000_000 || start < 0 || end > source.content.length || end <= start) throw new SpeechSeamsUnavailable();
+  const { sessionId, messageId, contentRevision, content } = source;
+  if (!contentRevision || contentRevision.length > 256 || !source.sessionId || !source.messageId || source.sessionId.length > 256 || source.messageId.length > 256
+    || !source.content || source.content.length > 1_000_000 || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > source.content.length || end <= start) throw new SpeechSeamsUnavailable();
   const paragraph = source.content.slice(start, end);
   const count = [...paragraph.matchAll(/\s+/g)].length + 1;
   if (paragraph.length > 32768 || count > 4096) throw new SpeechSeamsUnavailable();
@@ -57,15 +57,14 @@ export async function readSpeechSeams(source: SpeechSource, start: number, end: 
   const cancel = () => abort.abort(); const unsubscribe = subscribeClientLifetime(cancel);
   signal.addEventListener('abort', cancel, { once: true });
   const assertCurrent = () => { if (signal.aborted || abort.signal.aborted || !isClientLifetimeCurrent(lifetime)
-    || source.sessionId !== sessionId || source.messageId !== messageId || source.content !== content) throw new SpeechSeamsUnavailable(); };
+    || source.sessionId !== sessionId || source.messageId !== messageId || source.contentRevision !== contentRevision || source.content !== content) throw new SpeechSeamsUnavailable(); };
   try {
-    assertCurrent(); const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)); assertCurrent();
-    const contentDigest = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    assertCurrent();
     const offsets: number[] = [];
     for (let cursor = 0; cursor < count; cursor += 64) {
       assertCurrent();
-      const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.voice.speech-seams', batteryVersion: 1,
-        input: { sessionId, messageId, start, end, contentDigest, cursor } };
+      const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.voice.speech-seams', batteryVersion: 2,
+        input: { sessionId, messageId, start, end, contentRevision, cursor } };
       const raw = await runBrowserJudgment(request, abort.signal); assertCurrent();
       const result = readSpeechSeamsResponse(request, paragraph, raw); if (!result) throw new SpeechSeamsUnavailable();
       offsets.push(...result);

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { BrowserJudgmentError, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
+import { BrowserJudgmentError, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
 import { validateBrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/projection.ts';
 import type { BrowserJudgmentProjection } from '../sdk/src/platform/judgment-browser/types.ts';
 import { WEBUI_CODE_LANGUAGES } from '../daemon-sdk/src/index.ts';
 
 const unknownReading = { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'escalate' } as const;
-const request = (battery: string, input: unknown) => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: 1, input }) as BrowserJudgmentRequest;
+const request = (battery: BrowserJudgmentBatteryId, input: unknown) => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: BROWSER_JUDGMENT_BATTERY_VERSIONS[battery], input }) as BrowserJudgmentRequest;
 const check = (req: BrowserJudgmentRequest, projection: unknown, state?: unknown) => validateBrowserJudgmentProjection(req, projection as BrowserJudgmentProjection<unknown>, state);
 const held = (readings: unknown) => ({ status: 'held', reason: 'uncertain', readings });
 const errorNames = ['session_not_found', 'session_closed', 'session_active', 'session_not_local', 'method_unknown'];
@@ -57,7 +57,7 @@ test('settled public platform and code projections preserve admitted approximate
     const options = platform ? ['ios-share-menu', 'other'] : WEBUI_CODE_LANGUAGES;
     const req = request(platform ? 'webui.pwa.install-platform' : 'webui.code.language', platform
       ? { userAgent: 'Synthetic fixture', platform: 'MacIntel', maxTouchPoints: 5 }
-      : { sessionId: 'synthetic-session', messageId: 'synthetic-message', start: 0, end: 5, contentDigest: 'a'.repeat(64) });
+      : { sessionId: 'synthetic-session', messageId: 'synthetic-message', start: 0, end: 5, contentRevision: 'source-owner-revision' });
     const reading = {
       kind: 'choice', choice, confidence: 0.99, outcome: 'act',
       probabilities: Object.fromEntries(options.map(option => [option, option === choice ? 0.99 : 0])),

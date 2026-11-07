@@ -1,6 +1,6 @@
 import type { JudgmentPort, Questions, Reading } from '@goodvibes-jev/judgment/decisions';
 import type {
-  AuthenticatedPrincipal, BrowserJudgmentBatteryId, BrowserJudgmentInputMap, BrowserJudgmentValueMap,
+  AuthenticatedPrincipal, BrowserJudgmentBatteryVersion, BrowserJudgmentBatteryId, BrowserJudgmentInputMap, BrowserJudgmentValueMap,
 } from '@goodvibes-jev/engine/daemon-sdk';
 import type { BrowserJudgmentReferences } from './references.js';
 
@@ -33,7 +33,7 @@ export interface BrowserJudgmentResolveContext {
 /** Executable adapter around an existing Battery or named pattern; never received over HTTP. */
 export interface BrowserJudgmentBattery<K extends BrowserJudgmentBatteryId, S, R> {
   readonly id: K;
-  readonly version: 1;
+  readonly version: BrowserJudgmentBatteryVersion<K>;
   /** Fixed questions only. Dynamic state must not be embedded in logged questions. */
   readonly questions: Questions;
   readonly maxCalls: number;
@@ -55,7 +55,7 @@ export interface BrowserJudgmentRoute {
 export interface BrowserJudgmentAuthorization {
   readonly principal: AuthenticatedPrincipal;
   readonly battery: BrowserJudgmentBatteryId;
-  readonly batteryVersion: 1;
+  readonly batteryVersion: BrowserJudgmentBatteryVersion;
   readonly sourceBinding: string;
   readonly route: Pick<BrowserJudgmentRoute, 'revision' | 'kind'>;
 }

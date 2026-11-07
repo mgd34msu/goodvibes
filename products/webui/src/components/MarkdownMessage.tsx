@@ -1,6 +1,6 @@
 import { readCodeLanguage, type CodeLanguageResult } from '../lib/code-language-judgment';
 import { subscribeClientLifetime } from '../lib/client-lifetime';
-import { isValidElement, ReactNode, useEffect, useState } from 'react';
+import { isValidElement, ReactNode, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -37,7 +37,7 @@ function codeTextFromChildren(children: ReactNode): string {
   return textFromReactNode(child?.props.children ?? children);
 }
 
-interface MessageSource { readonly sessionId: string; readonly messageId: string }
+interface MessageSource { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string }
 interface CodeBlockProps {
   source?: MessageSource;
   content: string;
@@ -52,21 +52,22 @@ function CodeBlock({ children, lineNumbers, source, content, start, end }: CodeB
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
-  const [reading, setReading] = useState<{ signature: string; result: CodeLanguageResult }>();
+  const [reading, setReading] = useState<{ source: object; result: CodeLanguageResult }>();
   const [identityRevision, setIdentityRevision] = useState(0);
   const declaredLanguage = normalizeLanguage(language);
-  const sessionId = source?.sessionId; const messageId = source?.messageId;
-  const signature = JSON.stringify([sessionId, messageId, content, start, end, identityRevision]);
+  const sessionId = source?.sessionId; const messageId = source?.messageId; const contentRevision = source?.contentRevision;
+  const currentSource = useMemo(() => ({ sessionId, messageId, contentRevision, content, start, end, identityRevision }),
+    [sessionId, messageId, contentRevision, content, start, end, identityRevision]);
   useEffect(() => subscribeClientLifetime(() => { setReading(undefined); setIdentityRevision(value => value + 1); }), []);
   useEffect(() => {
-    if (declaredLanguage || !sessionId || !messageId || start === undefined || end === undefined) return;
+    if (declaredLanguage || !sessionId || !messageId || !contentRevision || start === undefined || end === undefined) return;
     const abort = new AbortController();
-    void readCodeLanguage({ sessionId, messageId, content, start, end }, abort.signal).then(result => {
-      if (!abort.signal.aborted) setReading({ signature, result });
+    void readCodeLanguage({ sessionId, messageId, contentRevision, content, start, end }, abort.signal).then(result => {
+      if (!abort.signal.aborted) setReading({ source: currentSource, result });
     });
     return () => abort.abort();
-  }, [declaredLanguage, sessionId, messageId, content, start, end, signature]);
-  const inferredLanguage = reading?.signature === signature && reading.result.status === 'ready' && reading.result.isCurrent() ? reading.result.language : '';
+  }, [declaredLanguage, sessionId, messageId, contentRevision, content, start, end, currentSource]);
+  const inferredLanguage = reading?.source === currentSource && reading.result.status === 'ready' && reading.result.isCurrent() ? reading.result.language : '';
   const highlighted = highlightCode(visibleCode, declaredLanguage || inferredLanguage);
   const highlightedLines = highlighted.html.split('\n');
   const displayLanguage = language || highlighted.language;

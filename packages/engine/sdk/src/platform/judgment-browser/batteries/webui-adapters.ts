@@ -27,7 +27,7 @@ const hasHttpStatus = (source: ResolvedDaemonRefusal): source is ResolvedDaemonR
 
 export function createWebuiCodeLanguageAdapter(resolve: BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>>['resolve']): BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>> {
   return {
-    id: 'webui.code.language', version: 1, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS['webui.code.language']!, resolve,
+    id: 'webui.code.language', version: 2, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS['webui.code.language']!, resolve,
     async run(port, input, { signal }) {
       checkAbort(signal); const state = preflight(() => snapshotWebuiCode(input));
       const run = await codeLanguageBattery.run(port, state, { signal, site: 'webui.code.language' });

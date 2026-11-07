@@ -72,6 +72,7 @@ export class BrowserJudgmentService {
     const request = parseBrowserJudgmentRequest(raw);
     const battery = this.options.registry.get(request.battery);
     if (!battery) throw new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
+    if (battery.version !== request.batteryVersion) throw new BrowserJudgmentError('JUDGMENT_BATTERY_VERSION_UNSUPPORTED');
     if (this.#active.size >= LIMIT.totalRuns || [...this.#active.values()].filter((run) => run.principal === identity.principalId).length >= LIMIT.principalRuns) {
       throw new BrowserJudgmentError('JUDGMENT_BUSY');
     }
@@ -137,7 +138,7 @@ export class BrowserJudgmentService {
         requireSynchronousAssertion(() => resolved.assertCurrent(), 'JUDGMENT_REFERENCE_HELD');
         requireSynchronousAssertion(() => route.assertCurrent(), 'JUDGMENT_PERMISSION_HELD');
         for (const kind of endpointKinds) {
-          if (!granted(this.options.authorize({ principal: actor, battery: request.battery, batteryVersion: 1, sourceBinding: resolved.sourceBinding,
+          if (!granted(this.options.authorize({ principal: actor, battery: request.battery, batteryVersion: request.batteryVersion, sourceBinding: resolved.sourceBinding,
             route: { revision: route.revision, kind } }))) throw new BrowserJudgmentError('JUDGMENT_PERMISSION_HELD');
         }
       };
@@ -176,7 +177,7 @@ export class BrowserJudgmentService {
             try { safeState = snapshotJudgmentInput(questionRequest.state); }
             catch { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); }
             const result = await route.port.ask({ ...questionRequest, state: safeState as typeof questionRequest.state, signal,
-              context: { battery: request.battery, batteryVersion: 1, site: 'browser.judgment' },
+              context: { battery: request.battery, batteryVersion: request.batteryVersion, site: 'browser.judgment' },
               // Retention is an independent boundary from transmission. In
               // particular a revoked source must not acquire a failure row
               // when an asynchronous key lookup subsequently rejects.
@@ -228,7 +229,7 @@ export class BrowserJudgmentService {
         ? { status: projected.status, reason: projected.reason, readings: projected.readings,
             ...(projected.structuralBasis === undefined ? {} : { structuralBasis: projected.structuralBasis }) }
         : projected;
-      const response = { protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: 1, ...wireProjection, outcome, evidence };
+      const response = { protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: request.batteryVersion, ...wireProjection, outcome, evidence };
       if (new TextEncoder().encode(JSON.stringify(response)).byteLength > LIMIT.bodyBytes) throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
       return response;
     } finally {

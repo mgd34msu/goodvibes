@@ -88,6 +88,9 @@ describe('regenerate: honest lineage', () => {
     expect(retainedFirst!.content).toBe('first answer');
     expect(typeof retainedFirst!.supersededAt).toBe('number');
     expect(retainedFirst!.supersededReason).toBe('regenerate');
+    expect(retainedFirst!.contentRevision).not.toBe(firstAssistant!.contentRevision);
+    expect(Object.isFrozen(retainedFirst)).toBe(true);
+    expect(manager.getMessages(session.id).find(m => m.id === retainedFirst!.id)).toBe(retainedFirst);
 
     // A new active assistant response exists with the regenerated content.
     const active = activeOnly(all);

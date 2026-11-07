@@ -17,7 +17,7 @@ function validAnswer(request: Request) {
   const candidates = [...text.matchAll(/\s+/g)].map(match => match.index!); candidates.push(text.length);
   const selected = candidates.slice(request.input.cursor, request.input.cursor + 64);
   const yes = (offset: number) => sentenceOffsets.includes(offset);
-  return new Response(JSON.stringify({ protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: 1,
+  return new Response(JSON.stringify({ protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: 2,
     status: 'settled', outcome: 'act', value: { endOffsets: selected.filter(yes), nextCursor: request.input.cursor + 64 < candidates.length ? request.input.cursor + 64 : null },
     readings: Object.fromEntries(selected.map((offset, i) => [`seam_${i}`, { kind: 'yes-no', probability: yes(offset) ? 0.999 : 0.001, verdict: yes(offset) ? 'yes' : 'no', outcome: 'act' }])),
     evidence: selected.map((_, i) => ({ decisionId: `offline-seam-${request.input.cursor + i}`, model: 'fixture', requestedModel: 'fixture', usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1 })),
@@ -36,7 +36,7 @@ class FakeAudioContext {
 }
 function mount() {
   let voice!: UseTtsResult;
-  function Harness({ content, sessionId, messageId }: { content: string; sessionId: string; messageId: string }) { voice = useTts({ sessionId, messageId, content }); return null; }
+  function Harness({ content, sessionId, messageId }: { content: string; sessionId: string; messageId: string }) { voice = useTts({ sessionId, messageId, content, contentRevision: 'message-owner-revision' }); return null; }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(['voice', 'status'], {}); client.setQueryData(['voice', 'config'], {});
   const root = createRoot(document.createElement('div')); let mounted = true;

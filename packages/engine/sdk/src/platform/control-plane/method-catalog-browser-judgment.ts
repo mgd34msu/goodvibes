@@ -1,4 +1,4 @@
-import { BROWSER_JUDGMENT_PATH, WEBUI_CODE_LANGUAGES } from '@goodvibes-jev/engine/daemon-sdk';
+import { BROWSER_JUDGMENT_PATH, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId, WEBUI_CODE_LANGUAGES } from '@goodvibes-jev/engine/daemon-sdk';
 import { methodDescriptor, objectSchema, arraySchema, STRING_SCHEMA, NUMBER_SCHEMA, BOOLEAN_SCHEMA } from './method-catalog-shared.js';
 
 const literal = (value: string | number) => ({ type: typeof value, enum: [value] });
@@ -8,7 +8,7 @@ const candidate = { anyOf: [
   objectSchema({ kind: literal('chat'), sessionId: ref }, ['kind', 'sessionId']),
 ] };
 const inputs = [
-  ['webui.voice.speech-seams', objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' }, cursor: { type: 'integer', minimum: 0, maximum: 4095, multipleOf: 64 } }, ['sessionId', 'messageId', 'start', 'end', 'contentDigest', 'cursor'])],
+  ['webui.voice.speech-seams', objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentRevision: ref, cursor: { type: 'integer', minimum: 0, maximum: 4095, multipleOf: 64 } }, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', 'cursor'])],
   ['webui.errors.daemon-refusal', objectSchema({ errorRef: ref }, ['errorRef'])],
   ['webui.status.badge-tone', objectSchema({
     vocabulary: { type: 'string', enum: ['badge', 'library-dot'] },
@@ -30,10 +30,10 @@ const inputs = [
   ['webui.credentials.provider-key', objectSchema({ providerId: { type: 'string', minLength: 1, maxLength: 128 }, keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['providerId', 'keys'])],
   ['webui.settings.card-material-key', objectSchema({ keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['keys'])],
   ['webui.config.credential-key', objectSchema({ keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['keys'])],
-  ['webui.code.language', objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' } }, ['sessionId', 'messageId', 'start', 'end', 'contentDigest'])],
+  ['webui.code.language', objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentRevision: ref }, ['sessionId', 'messageId', 'start', 'end', 'contentRevision'])],
 ] as const;
-const envelope = (battery: string, input: Record<string, unknown>) => objectSchema({
-  protocolVersion: literal(1), requestId: { ...STRING_SCHEMA, format: 'uuid' }, battery: literal(battery), batteryVersion: literal(1), input,
+const envelope = (battery: BrowserJudgmentBatteryId, input: Record<string, unknown>) => objectSchema({
+  protocolVersion: literal(1), requestId: { ...STRING_SCHEMA, format: 'uuid' }, battery: literal(battery), batteryVersion: literal(BROWSER_JUDGMENT_BATTERY_VERSIONS[battery]), input,
 }, ['protocolVersion', 'requestId', 'battery', 'batteryVersion', 'input']);
 const outcomes = { type: 'string', enum: ['act', 'confirm', 'escalate'] };
 const p = { type: 'number', minimum: 0, maximum: 1 };
@@ -61,12 +61,12 @@ const values = [
   objectSchema({ matches: arraySchema(BOOLEAN_SCHEMA) }, ['matches']),
   objectSchema({ language: { type: 'string', enum: [...WEBUI_CODE_LANGUAGES] } }, ['language']),
 ];
-const output = (battery: string, value: Record<string, unknown>) => {
+const output = (battery: BrowserJudgmentBatteryId, value: Record<string, unknown>) => {
   const structural: Record<string, Record<string, unknown>> = battery === 'webui.errors.daemon-refusal'
     ? { structuralBasis: objectSchema({ method_unknown: literal('http-status-not-404') }, ['method_unknown']) } : {};
   return { anyOf: [
-    objectSchema({ protocolVersion: literal(1), requestId: STRING_SCHEMA, battery: literal(battery), batteryVersion: literal(1), status: literal('settled'), value, readings, outcome: outcomes, evidence, ...structural }, ['protocolVersion', 'requestId', 'battery', 'batteryVersion', 'status', 'value', 'readings', 'outcome', 'evidence']),
-    objectSchema({ protocolVersion: literal(1), requestId: STRING_SCHEMA, battery: literal(battery), batteryVersion: literal(1), status: literal('held'), reason: literal('uncertain'), readings, outcome: { type: 'string', enum: ['confirm', 'escalate'] }, evidence, ...structural }, ['protocolVersion', 'requestId', 'battery', 'batteryVersion', 'status', 'reason', 'readings', 'outcome', 'evidence']),
+    objectSchema({ protocolVersion: literal(1), requestId: STRING_SCHEMA, battery: literal(battery), batteryVersion: literal(BROWSER_JUDGMENT_BATTERY_VERSIONS[battery]), status: literal('settled'), value, readings, outcome: outcomes, evidence, ...structural }, ['protocolVersion', 'requestId', 'battery', 'batteryVersion', 'status', 'value', 'readings', 'outcome', 'evidence']),
+    objectSchema({ protocolVersion: literal(1), requestId: STRING_SCHEMA, battery: literal(battery), batteryVersion: literal(BROWSER_JUDGMENT_BATTERY_VERSIONS[battery]), status: literal('held'), reason: literal('uncertain'), readings, outcome: { type: 'string', enum: ['confirm', 'escalate'] }, evidence, ...structural }, ['protocolVersion', 'requestId', 'battery', 'batteryVersion', 'status', 'reason', 'readings', 'outcome', 'evidence']),
   ] };
 };
 

@@ -1,6 +1,5 @@
 import { createSpeechSeamsAdapter } from './batteries/speech-seams.js';
 import { canonicalSpeechSeams, snapshotSpeechSeams } from './speech-source.js';
-import { createHash } from 'node:crypto';
 import { readCanonicalFencedBlock } from './code-source.js';
 import {
   BrowserJudgmentError, missingScopes,
@@ -137,25 +136,27 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
     const battery = 'webui.code.language';
     const principal = context.currentPrincipal();
     const sessions = chatSource;
-    if (!sessions?.getMessages || !canRead(principal, ['read:sessions'])) return held();
+    if (!sessions || (!sessions.getMessage && !sessions.getMessages) || !canRead(principal, ['read:sessions'])) return held();
     const session = sessions.getSession(input.sessionId);
-    const message = sessions.getMessages(input.sessionId).find(item => item.id === input.messageId && item.sessionId === input.sessionId);
-    if (!session || session.id !== input.sessionId || !message) return held();
-    const content = message.content; const createdAt = message.createdAt; const supersededAt = message.supersededAt;
+    const readMessage = () => sessions.getMessage
+      ? sessions.getMessage(input.sessionId, input.messageId)
+      : sessions.getMessages?.(input.sessionId).find(item => item.id === input.messageId);
+    const message = readMessage();
+    if (!session || session.id !== input.sessionId || !message || message.id !== input.messageId || message.sessionId !== input.sessionId || !message.contentRevision || message.contentRevision !== input.contentRevision) return held();
+    const content = message.content; const contentRevision = message.contentRevision; const createdAt = message.createdAt; const supersededAt = message.supersededAt;
     const assertCurrent = () => {
       context.signal.throwIfAborted();
       const current = context.currentPrincipal();
       if (current.principalId !== principal.principalId || current.principalKind !== principal.principalKind || !canRead(current, ['read:sessions'])
         || chatSource !== sessions || sessions.getSession(input.sessionId) !== session || session.id !== input.sessionId
-        || sessions.getMessages!(input.sessionId).find(item => item.id === input.messageId) !== message
-        || message.content !== content || message.createdAt !== createdAt || message.supersededAt !== supersededAt) return held();
+        || readMessage() !== message
+        || message.id !== input.messageId || message.sessionId !== input.sessionId || message.contentRevision !== contentRevision || message.content !== content || message.createdAt !== createdAt || message.supersededAt !== supersededAt) return held();
     };
     assertCurrent();
     let snapshot;
     try {
-      // Complete original content is screened before hashing or selecting a block.
+      // Screen the complete canonical source before selecting any outward content.
       const original = snapshotJudgmentInput({ content }) as { readonly content: string };
-      if (createHash('sha256').update(original.content).digest('hex') !== input.contentDigest) return held();
       snapshot = snapshotWebuiCode(readCanonicalFencedBlock(original.content, input.start, input.end));
     } catch { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); }
     const id = remember(references.issue({ principalId: principal.principalId, battery, revision: crypto.randomUUID(),
@@ -169,25 +170,27 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
     const battery = 'webui.voice.speech-seams';
     const principal = context.currentPrincipal();
     const sessions = chatSource;
-    if (!sessions?.getMessages || !canRead(principal, ['read:sessions'])) return held();
+    if (!sessions || (!sessions.getMessage && !sessions.getMessages) || !canRead(principal, ['read:sessions'])) return held();
     const session = sessions.getSession(input.sessionId);
-    const message = sessions.getMessages(input.sessionId).find(item => item.id === input.messageId && item.sessionId === input.sessionId);
-    if (!session || session.id !== input.sessionId || !message) return held();
-    const content = message.content; const createdAt = message.createdAt; const supersededAt = message.supersededAt;
+    const readMessage = () => sessions.getMessage
+      ? sessions.getMessage(input.sessionId, input.messageId)
+      : sessions.getMessages?.(input.sessionId).find(item => item.id === input.messageId);
+    const message = readMessage();
+    if (!session || session.id !== input.sessionId || !message || message.id !== input.messageId || message.sessionId !== input.sessionId || !message.contentRevision || message.contentRevision !== input.contentRevision) return held();
+    const content = message.content; const contentRevision = message.contentRevision; const createdAt = message.createdAt; const supersededAt = message.supersededAt;
     const assertCurrent = () => {
       context.signal.throwIfAborted();
       const current = context.currentPrincipal();
       if (current.principalId !== principal.principalId || current.principalKind !== principal.principalKind || !canRead(current, ['read:sessions'])
         || chatSource !== sessions || sessions.getSession(input.sessionId) !== session || session.id !== input.sessionId
-        || sessions.getMessages!(input.sessionId).find(item => item.id === input.messageId) !== message
-        || message.id !== input.messageId || message.sessionId !== input.sessionId || message.content !== content || message.createdAt !== createdAt || message.supersededAt !== supersededAt) return held();
+        || readMessage() !== message
+        || message.id !== input.messageId || message.sessionId !== input.sessionId || message.contentRevision !== contentRevision || message.content !== content || message.createdAt !== createdAt || message.supersededAt !== supersededAt) return held();
     };
     assertCurrent();
     let snapshot;
     try {
-      // Complete original content is screened before hashing or selecting a block.
+      // Screen the complete canonical source before selecting any outward content.
       const original = snapshotJudgmentInput({ content }) as { readonly content: string };
-      if (createHash('sha256').update(original.content).digest('hex') !== input.contentDigest) return held();
       snapshot = canonicalSpeechSeams(original.content, input.start, input.end, input.cursor);
     } catch { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); }
     const id = remember(references.issue({ principalId: principal.principalId, battery, revision: crypto.randomUUID(),

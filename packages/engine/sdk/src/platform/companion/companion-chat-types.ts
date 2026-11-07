@@ -55,6 +55,8 @@ export interface CompanionChatMessage {
   readonly sessionId: string;
   readonly role: CompanionChatMessageRole;
   readonly content: string;
+  /** Opaque revision issued by the current message owner; reissued on reload or replacement. */
+  readonly contentRevision?: string | undefined;
   readonly attachments: readonly CompanionChatMessageAttachment[];
   readonly metadata?: Record<string, unknown> | undefined;
   readonly createdAt: number;

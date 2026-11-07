@@ -97,7 +97,7 @@ export function useTts(source?: SpeechSource): UseTtsResult {
     const cancel = () => owner.current?.abort();
     const unsubscribe = subscribeClientLifetime(cancel);
     return () => { cancel(); unsubscribe(); };
-  }, [source?.sessionId, source?.messageId, source?.content]);
+  }, [source?.sessionId, source?.messageId, source?.contentRevision, source?.content]);
   const { availability } = useVoiceStatus();
   const { config } = useSharedVoiceConfig();
 

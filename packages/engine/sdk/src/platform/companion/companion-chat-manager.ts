@@ -227,6 +227,7 @@ export interface CompanionChatManagerConfig {
 }
 
 export class CompanionChatManager {
+  readonly #ownedMessages = new WeakSet<CompanionChatMessage>();
   private readonly sessions = new Map<string, InternalSession>();
   private readonly provider: CompanionLLMProvider;
   private readonly eventPublisher: CompanionChatEventPublisher;
@@ -410,14 +411,25 @@ export class CompanionChatManager {
   }
 
   getMessages(sessionId: string): CompanionChatMessage[] {
-    return this.sessions.get(sessionId)?.messages ?? [];
+    // Headers belong to the manager. A caller may rearrange its view, never the transcript.
+    return [...(this.sessions.get(sessionId)?.messages ?? [])];
+  }
+
+  /** Borrow one immutable header for a live source check without copying the transcript. */
+  getMessage(sessionId: string, messageId: string): CompanionChatMessage | undefined {
+    return this.sessions.get(sessionId)?.messages.find(message => message.id === messageId);
   }
 
   private normalizeMessage(message: CompanionChatMessage): CompanionChatMessage {
-    return {
+    if (this.#ownedMessages.has(message)) return message;
+    const owned = Object.freeze({
       ...message,
       attachments: message.attachments ?? [],
-    };
+      // Disk/caller revisions are not proof of this owner's current source.
+      contentRevision: randomUUID(),
+    });
+    this.#ownedMessages.add(owned);
+    return owned;
   }
 
   updateSession(
@@ -622,7 +634,7 @@ export class CompanionChatManager {
     // the conversation every round.
     const providerContent = await buildProviderUserContent(content, attachments, this.artifactStore);
 
-    session.messages.push(userMsg);
+    session.messages.push(this.normalizeMessage(userMsg));
     session.lastActivityAt = now;
     this._updateMeta(session, {
       messageCount: session.messages.length,
@@ -721,7 +733,7 @@ export class CompanionChatManager {
     const queuedMsg = idx >= 0 ? session.messages[idx] : undefined;
     if (queuedMsg?.deliveryState === 'queued') {
       const { deliveryState: _cleared, ...delivered } = queuedMsg;
-      session.messages[idx] = delivered;
+      session.messages[idx] = this.normalizeMessage(delivered);
       this._persist(session.meta.id);
     }
     // The companion/webui turn boundary: this manager runs its own turn loop,
@@ -803,7 +815,7 @@ export class CompanionChatManager {
       isShutdown: () => this.disposed,
       publish,
       persistPartial: (message) => {
-        session.messages.push(message);
+        session.messages.push(this.normalizeMessage(message));
         session.lastActivityAt = message.createdAt;
         this._updateMeta(session, { messageCount: session.messages.length, updatedAt: message.createdAt });
         this._persist(sessionId);
@@ -927,7 +939,7 @@ export class CompanionChatManager {
         createdAt: now,
         inReplyTo: userMessageId,
       };
-      session.messages.push(assistantMsg);
+      session.messages.push(this.normalizeMessage(assistantMsg));
       session.lastActivityAt = now;
       this._updateMeta(session, { messageCount: session.messages.length, updatedAt: now });
 
@@ -1031,6 +1043,7 @@ export class CompanionChatManager {
     anchorUserMessageId: string,
     now: number,
   ): void {
+    session.messages = session.messages.map(message => this.normalizeMessage(message));
     const conversation = new ConversationManager();
     for (const msg of activeMessages(session.messages)) {
       if (msg.role === 'user') conversation.addUserMessage(buildReplayUserContent(msg));

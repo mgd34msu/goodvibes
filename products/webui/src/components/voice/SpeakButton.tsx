@@ -20,11 +20,12 @@ import '../../styles/components/voice.css';
 interface SpeakButtonProps {
   readonly messageId: string;
   readonly sessionId?: string;
+  readonly contentRevision?: string;
   readonly text: string;
 }
 
-export function SpeakButton({ messageId, sessionId, text }: SpeakButtonProps) {
-  const { availability, canPlay, state, isActive, speak, stop } = useTts(sessionId ? { sessionId, messageId, content: text } : undefined);
+export function SpeakButton({ messageId, sessionId, contentRevision, text }: SpeakButtonProps) {
+  const { availability, canPlay, state, isActive, speak, stop } = useTts(sessionId && contentRevision ? { sessionId, messageId, contentRevision, content: text } : undefined);
 
   if (!text.trim()) return null;
 
@@ -32,10 +33,10 @@ export function SpeakButton({ messageId, sessionId, text }: SpeakButtonProps) {
   const loading = active && state.phase === 'loading';
   const playing = active && state.phase === 'playing';
 
-  if (!availability.ttsAvailable || !canPlay) {
+  if (!availability.ttsAvailable || !canPlay || !sessionId || !contentRevision) {
     const reason = !canPlay
       ? 'This browser cannot play synthesised audio.'
-      : TTS_UNAVAILABLE_MESSAGE;
+      : !availability.ttsAvailable ? TTS_UNAVAILABLE_MESSAGE : 'The saved reply is still loading.';
     return (
       <IconButton
         className="voice-speak-btn voice-unavailable"

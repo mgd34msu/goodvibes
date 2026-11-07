@@ -23,6 +23,8 @@ export interface ChatMessage {
   source?: string;
   /** Primary text content. */
   content?: string;
+  /** Current daemon-owned canonical message revision. Absent on optimistic drafts. */
+  contentRevision?: string;
   /** Alternative text keys. */
   text?: string;
   body?: string;

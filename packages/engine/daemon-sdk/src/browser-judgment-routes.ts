@@ -26,9 +26,19 @@ export interface BrowserJudgmentMailSubjectSource {
   readonly principal: AuthenticatedPrincipal;
   readonly snapshot: BrowserJudgmentMailSubjectSnapshot;
 }
+export interface BrowserJudgmentChatMessage {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly content: string;
+  readonly contentRevision?: string | undefined;
+  readonly createdAt: number;
+  readonly supersededAt?: number | undefined;
+}
 export interface BrowserJudgmentChatSessions {
+  /** Native single-message lookup avoids copying transcript arrays at each await guard. */
+  getMessage?(sessionId: string, messageId: string): BrowserJudgmentChatMessage | undefined;
   /** Optional canonical completed messages; absence holds code-language reading. */
-  getMessages?(sessionId: string): readonly { readonly id: string; readonly sessionId: string; readonly content: string; readonly createdAt: number; readonly supersededAt?: number | undefined }[];
+  getMessages?(sessionId: string): readonly BrowserJudgmentChatMessage[];
   getSession(id: string): { readonly id: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number } | null;
 }
 export interface BrowserJudgmentErrorSource {

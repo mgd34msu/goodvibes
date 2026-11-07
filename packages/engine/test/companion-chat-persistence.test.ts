@@ -132,6 +132,14 @@ describe('messages restored in order after restart', () => {
       expect(msgsA.length).toBeGreaterThanOrEqual(1);
       expect(msgsA[0]!.role).toBe('user');
       expect(msgsA[0]!.content).toBe('Hello world');
+      const revision = msgsA[0]!.contentRevision;
+      expect(typeof revision).toBe('string');
+      expect(managerA.getMessages(session.id)[0]).toBe(msgsA[0]);
+      expect(managerA.getMessage(session.id, msgsA[0]!.id)).toBe(msgsA[0]);
+      expect(Object.isFrozen(msgsA[0])).toBe(true);
+      expect(Reflect.set(msgsA[0]!, 'content', 'foreign text')).toBe(false);
+      msgsA.splice(0, 1);
+      expect(managerA.getMessages(session.id)[0]!.content).toBe('Hello world');
 
       managerA.dispose();
 
@@ -143,6 +151,8 @@ describe('messages restored in order after restart', () => {
       expect(msgsB.length).toBeGreaterThanOrEqual(1);
       expect(msgsB[0]!.role).toBe('user');
       expect(msgsB[0]!.content).toBe('Hello world');
+      expect(typeof msgsB[0]!.contentRevision).toBe('string');
+      expect(msgsB[0]!.contentRevision).not.toBe(revision);
 
       // Assert order is preserved
       for (let i = 0; i < msgsB.length - 1; i++) {

@@ -357,13 +357,11 @@ test('daemon composition explicitly authorizes canonical chat speech seams on th
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
   const session = { id: 'speech-chat', title: 'Synthetic', createdAt: 1, updatedAt: 2 };
-  const message = { id: 'speech-message', sessionId: session.id, content, createdAt: 3 };
+  const message = { id: 'speech-message', sessionId: session.id, content, contentRevision: 'speech-owner-revision', createdAt: 3 };
   const release = service.bindChatSessions({ getSession: id => id === session.id ? session : null, getMessages: () => [message] });
   try {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)));
-    const contentDigest = [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('');
-    const result = await service.execute({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.voice.speech-seams', batteryVersion: 1,
-      input: { sessionId: session.id, messageId: message.id, start: 0, end: content.length, cursor: 0, contentDigest } }, principal, new AbortController().signal, () => principal);
+    const result = await service.execute({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.voice.speech-seams', batteryVersion: 2,
+      input: { sessionId: session.id, messageId: message.id, start: 0, end: content.length, cursor: 0, contentRevision: message.contentRevision } }, principal, new AbortController().signal, () => principal);
     expect(result).toMatchObject({ status: 'settled', battery: 'webui.voice.speech-seams' });
     const boundaries = [3, 10, 18, 23, 28, content.length];
     expect(calls).toHaveLength(boundaries.length);

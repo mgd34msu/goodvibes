@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { type AuthenticatedPrincipal, type BrowserJudgmentRequest } from '../daemon-sdk/src/index.ts';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.ts';
@@ -10,13 +9,13 @@ import { speechSeamsBattery } from '../sdk/src/platform/judgment-browser/batteri
 const content = 'Dr. Rivera paused… then said “Go.” Next came silence.';
 const owner: AuthenticatedPrincipal = { principalId: 'speech-fixture-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };
 const request = (text = content, cursor = 0): BrowserJudgmentRequest<'webui.voice.speech-seams'> => ({
-  protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.voice.speech-seams', batteryVersion: 1,
-  input: { sessionId: 'chat', messageId: 'message', start: 0, end: text.length, contentDigest: createHash('sha256').update(text).digest('hex'), cursor },
+  protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.voice.speech-seams', batteryVersion: 2,
+  input: { sessionId: 'chat', messageId: 'message', start: 0, end: text.length, contentRevision: 'message-owner-revision', cursor },
 });
 function fixture(options: { beforeAnswer?: () => Promise<void>; probability?: number; authorized?: boolean; content?: string } = {}) {
   const log = new SqliteDecisionLog(':memory:'); const calls: unknown[] = []; let actor = owner;
   const session = { id: 'chat', title: 'Fixture', createdAt: 1, updatedAt: 2 };
-  let message = { id: 'message', sessionId: 'chat', content: options.content ?? content, createdAt: 3 };
+  let message = { id: 'message', sessionId: 'chat', content: options.content ?? content, contentRevision: 'message-owner-revision', createdAt: 3 };
   const port: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
     calls.push(input.state); await options.beforeAnswer?.();
     const state = input.state as { paragraph: string; candidates: number[]; boundary: { offset: number } };
@@ -44,12 +43,12 @@ test('canonical speech source reads contrary abbreviation, ellipsis and quotatio
     expect(f.log.query()).toHaveLength(candidates.length); expect(JSON.stringify(f.log.query())).not.toContain(content);
   } finally { await f.close(); }
 });
-test.each(['permission', 'digest', 'unknown-message', 'partial-paragraph', 'protected-outside-paragraph', 'oversized'] as const)('%s makes zero provider calls', async kind => {
+test.each(['permission', 'revision', 'unknown-message', 'partial-paragraph', 'protected-outside-paragraph', 'oversized'] as const)('%s makes zero provider calls', async kind => {
   const text = kind === 'oversized' ? 'x'.repeat(32769) : content;
   const f = fixture({ authorized: kind !== 'permission', content: kind === 'protected-outside-paragraph' ? text + '\n\nAuthorization: Bearer synthetic-protected-material' : text });
   try {
     const input = request(kind === 'protected-outside-paragraph' ? text + '\n\nAuthorization: Bearer synthetic-protected-material' : text);
-    if (kind === 'digest') Object.assign(input.input, { contentDigest: '0'.repeat(64) });
+    if (kind === 'revision') Object.assign(input.input, { contentRevision: 'retired-message-revision' });
     if (kind === 'unknown-message') Object.assign(input.input, { messageId: 'unknown' });
     if (kind === 'partial-paragraph') Object.assign(input.input, { end: 10 });
     if (kind === 'protected-outside-paragraph') Object.assign(input.input, { end: content.length });

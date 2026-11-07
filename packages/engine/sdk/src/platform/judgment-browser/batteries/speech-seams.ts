@@ -84,7 +84,7 @@ export const speechSeamsBattery = {
 type Run = { state: State; run: Awaited<ReturnType<typeof readSpeechSeams>> };
 export function createSpeechSeamsAdapter(resolve: BrowserJudgmentBattery<'webui.voice.speech-seams', State, Run>['resolve']): BrowserJudgmentBattery<'webui.voice.speech-seams', State, Run> {
   return {
-    id: 'webui.voice.speech-seams', version: 1, maxCalls: 64,
+    id: 'webui.voice.speech-seams', version: 2, maxCalls: 64,
     questions: Object.fromEntries(Object.entries(speechSeamsBattery.items).map(([name, item]) => [name, item.question])), resolve,
     async run(port, raw, { signal }) {
       signal.throwIfAborted(); const state = snapshotSpeechSeams(raw);

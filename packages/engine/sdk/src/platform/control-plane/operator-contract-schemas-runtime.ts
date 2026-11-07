@@ -155,6 +155,7 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
   role: COMPANION_CHAT_MESSAGE_ROLE_SCHEMA,
   content: STRING_SCHEMA,
+  contentRevision: { ...STRING_SCHEMA, minLength: 1, maxLength: 256 },
   attachments: arraySchema(COMPANION_CHAT_ATTACHMENT_SCHEMA),
   createdAt: NUMBER_SCHEMA,
   // Delivery honesty marker: 'cancelled' = an assistant partial whose turn

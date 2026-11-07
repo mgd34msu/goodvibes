@@ -10,12 +10,12 @@ let calls: { request: Request; signal: AbortSignal }[] = [];
 let transport: (request: Request) => Promise<unknown> = async request => response(request);
 mock.module('../lib/goodvibes', () => ({ runBrowserJudgment: (request: Request, signal: AbortSignal) => { calls.push({ request, signal }); return transport(request); } }));
 const { MarkdownMessage } = await import('./MarkdownMessage');
-const { readCodeLanguageResponse } = await import('../lib/code-language-judgment');
+const { readCodeLanguage, readCodeLanguageResponse } = await import('../lib/code-language-judgment');
 const { highlightCode, normalizeLanguage } = await import('../lib/highlight');
-const source = { sessionId: 'synthetic-session', messageId: 'synthetic-message' };
+const source = { sessionId: 'synthetic-session', messageId: 'synthetic-message', contentRevision: 'message-owner-revision' };
 const content = 'Before\n```\nconst count: number = 2;\n```\nAfter';
 function response(request: Request, held = false) {
-  return { protocolVersion: 1, batteryVersion: 1, requestId: request.requestId, battery: request.battery,
+  return { protocolVersion: 1, batteryVersion: 2, requestId: request.requestId, battery: request.battery,
     status: held ? 'held' : 'settled', ...(held ? { reason: 'uncertain' } : { value: { language: 'typescript' } }),
     readings: { language: { kind: 'choice', choice: 'typescript', confidence: held ? 0.5 : 0.99,
       probabilities: Object.fromEntries(WEBUI_CODE_LANGUAGES.map(language => [language, language === 'typescript' ? 1 : 0])), outcome: held ? 'confirm' : 'act' } },
@@ -42,7 +42,7 @@ test('actual Markdown caller sends source binding only and adopts typed language
   expect(el.querySelector('code')?.textContent).toBe('const count: number = 2;');
   expect(calls).toHaveLength(1);
   expect(calls[0]!.request.input).toMatchObject({ sessionId: source.sessionId, messageId: source.messageId, start: content.indexOf('```'), end: content.lastIndexOf('```') + 3 });
-  expect(calls[0]!.request.input.contentDigest).toHaveLength(64);
+  expect(calls[0]!.request.input.contentRevision).toBe(source.contentRevision);
   expect(JSON.stringify(calls[0]!.request)).not.toContain('const count');
 });
 test('no source or an unavailable reader stays escaped plaintext with no heuristic language', async () => {
@@ -82,8 +82,8 @@ test('client rejects wrong request, mismatched value and malformed language evid
 });
 
 test('array-coerced language and outcome cannot select a grammar', () => {
-  const request: Request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.code.language', batteryVersion: 1,
-    input: { ...source, start: 0, end: 5, contentDigest: 'a'.repeat(64) } };
+  const request: Request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.code.language', batteryVersion: 2,
+    input: { ...source, start: 0, end: 5 } };
   for (const property of ['choice', 'outcome'] as const) {
     const raw = response(request);
     Object.assign(raw.readings.language, { [property]: [raw.readings.language[property]] });
@@ -107,8 +107,8 @@ test('an admitted approximate-unit Choice reaches the actual Markdown grammar un
 
 test.each(['negative', 'over-one', 'non-finite', 'non-maximal', 'unknown-choice', 'extra-option', 'outside-total', 'invalid-confidence'])(
   'rejects %s code-language Choice evidence', kind => {
-    const request: Request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.code.language', batteryVersion: 1,
-      input: { ...source, start: 0, end: 5, contentDigest: 'a'.repeat(64) } };
+    const request: Request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.code.language', batteryVersion: 2,
+      input: { ...source, start: 0, end: 5 } };
     const raw = response(request); const reading = raw.readings.language;
     if (kind === 'negative') reading.probabilities.python = -0.001;
     if (kind === 'over-one') reading.probabilities.typescript = 1.001;
@@ -120,3 +120,15 @@ test.each(['negative', 'over-one', 'non-finite', 'non-maximal', 'unknown-choice'
     if (kind === 'invalid-confidence') reading.confidence = 1.001;
     expect(readCodeLanguageResponse(request, raw)).toBeUndefined();
   });
+
+test.each(['contentRevision', 'content', 'end'] as const)('%s source replacement refuses a valid late language reading', async field => {
+  const answer = Promise.withResolvers<unknown>(); transport = () => answer.promise;
+  const current = { ...source, content, start: content.indexOf('```'), end: content.lastIndexOf('```') + 3 };
+  const pending = readCodeLanguage(current, new AbortController().signal);
+  await wait(() => calls.length === 1);
+  if (field === 'end') current.end--;
+  else if (field === 'content') current.content += '\nchanged';
+  else current.contentRevision = 'replacement-owner-revision';
+  answer.resolve(response(calls[0]!.request));
+  expect(await pending).toEqual({ status: 'unavailable' });
+});

@@ -28,7 +28,7 @@ function RetainedMessage({ message }: { message: ChatMessage }) {
     <article className={`retained-message ${tone}`} aria-label={`Retained ${tone} message`}>
       <span className="retained-message__role">{tone === 'user' ? 'You' : 'Assistant'}</span>
       <div className="retained-message__body">
-        {text ? <MarkdownMessage content={text} source={message.sessionId && message.id ? { sessionId: message.sessionId, messageId: message.id } : undefined} /> : null}
+        {text ? <MarkdownMessage content={text} source={message.sessionId && message.id && message.contentRevision ? { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision } : undefined} /> : null}
         {attachments.length > 0 && (
           <div className="retained-message__attachments">
             {attachments.map((attachment, attachmentIndex) => (

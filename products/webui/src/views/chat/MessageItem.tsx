@@ -161,10 +161,10 @@ export function MessageItem({
         // the transcript after every automatic compaction.
         <details className="message-compaction-handoff">
           <summary>Compaction handoff: context re-injected after auto-compaction ({text.split('\n').length} lines)</summary>
-          <MarkdownMessage content={text} source={message.sessionId && message.id ? { sessionId: message.sessionId, messageId: message.id } : undefined} />
+          <MarkdownMessage content={text} source={message.sessionId && message.id && message.contentRevision ? { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision } : undefined} />
         </details>
       ) : (
-        text && <MarkdownMessage content={text} source={message.sessionId && message.id ? { sessionId: message.sessionId, messageId: message.id } : undefined} />
+        text && <MarkdownMessage content={text} source={message.sessionId && message.id && message.contentRevision ? { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision } : undefined} />
       )}
       {attachments.length > 0 && (
         <div className="message-attachments">
@@ -248,7 +248,7 @@ export function MessageItem({
           )}
 
           {/* Read aloud. Spoken output for assistant replies (honest states inside) */}
-          {isAssistant && text && <SpeakButton messageId={message.id ?? id} sessionId={message.sessionId} text={text} />}
+          {isAssistant && text && <SpeakButton messageId={message.id ?? id} sessionId={message.sessionId} contentRevision={message.contentRevision} text={text} />}
 
           {/* Artifacts: opens the side panel with this reply's code blocks and files */}
           {isAssistant && (text || attachments.length > 0) && (

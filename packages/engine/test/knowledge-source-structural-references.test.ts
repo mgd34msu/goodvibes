@@ -264,6 +264,14 @@ describe('fresh generated source and extraction references', () => {
     const fake = readings(); const { store, source, extraction } = await fixture();
     const proof = captureKnowledgeSourceReferences(store, source, extraction);
     expect(proof).toBeDefined();
+    // Exact values may be detached or reordered by a native consumer holding
+    // the real private proof; the copy alone still carries no origin proof.
+    const sourceCopy = { ...source, metadata: { ...source.metadata } };
+    const extractionCopy = { ...extraction, metadata: { ...extraction.metadata } };
+    expect(projectKnowledgeSourceReferences(sourceCopy, extractionCopy, proof)).toMatchObject({
+      sourceId: 'source-reference', extractionId: 'extraction-reference',
+    });
+    expect(captureKnowledgeSourceReferences(store, sourceCopy, extractionCopy)).toBeUndefined();
     expect(() => projectKnowledgeSourceReferences({ ...source, metadata: { ...source.metadata, origin: 'changed' } }, extraction, proof)).toThrow(KnowledgeGeneratedFactSupportHeldError);
     expect(() => projectKnowledgeSourceReferences(source, { ...extraction, excerpt: 'Changed extraction' }, proof)).toThrow(KnowledgeGeneratedFactSupportHeldError);
     expect(() => projectKnowledgeSourceReferences(source, { ...extraction, sourceId: 'different-source' }, proof)).toThrow(KnowledgeGeneratedFactSupportHeldError);

@@ -66,7 +66,7 @@ const NEWER_RELEASE_AVAILABLE = (async (url: string) => {
   if (String(url).endsWith('/releases/latest')) {
     const response = new Response(null, {
       status: 302,
-      headers: { location: 'https://github.com/mgd34msu/goodvibes-agent/releases/tag/v1.19.0' },
+      headers: { location: 'https://github.com/mgd34msu/goodvibes-jev/releases/tag/v1.19.0' },
     });
     Object.defineProperty(response, 'url', { value: url });
     return response;

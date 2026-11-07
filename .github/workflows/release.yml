@@ -232,14 +232,27 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun packages/engine/scripts/align-dist-tags.ts
 
+  complete-suite-assets:
+    if: >-
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release'))
+    needs: [verify-tag-version, release-verify]
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/suite-release-assets.yml
+    with:
+      tag: ${{ github.ref_name }}
+
   prepare-native-assets:
     if: >-
       always() &&
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')) &&
       needs.verify-tag-version.result == 'success' &&
-      needs.release-verify.result == 'success'
-    needs: [verify-tag-version, release-verify]
+      needs.release-verify.result == 'success' &&
+      needs.complete-suite-assets.result == 'success'
+    needs: [verify-tag-version, release-verify, complete-suite-assets]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -316,6 +329,21 @@ jobs:
         env:
           CI_RUN_ID: ${{ needs.release-verify.outputs.run_id }}
         run: bun .github/scripts/stage-native-release-assets.mjs "$GITHUB_SHA" "$CI_RUN_ID" /tmp/native-release-downloads /tmp/native-release-assets
+      - name: Download complete installer assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: installer-release-assets
+          path: /tmp/installer-release-assets
+      - name: Complete the admitted native release
+        run: |
+          # Retain original CI-admitted bytes on collisions; add missing targets,
+          # browser driver and WebUI from the same verified source release.
+          for asset in /tmp/installer-release-assets/*; do
+            name=$(basename "$asset")
+            if [ ! -e "/tmp/native-release-assets/$name" ]; then
+              cp "$asset" "/tmp/native-release-assets/$name"
+            fi
+          done
       - name: Upload admitted native release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

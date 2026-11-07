@@ -261,8 +261,12 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   const addonIncluded = addon !== null && checksums.get(addon.assetName) !== undefined;
   const addonTargetPath = addon && addonIncluded ? join(dirname(appBinaryPath), 'lib', addon.dirName, addon.fileName) : null;
 
+  const runtimeTargets = options.platform === 'linux' && ['.bun', '.bun.json', '.bun.LICENSE.md'].some(suffix => checksums.has(artifacts.app + suffix))
+    ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({ label: 'captured Bun' + suffix, path: appBinaryPath + suffix, assetName: artifacts.app + suffix, executable: suffix === '.bun' })) : [];
+
   const targets: UpdateTarget[] = [
     { label: 'app binary', path: appBinaryPath, assetName: artifacts.app, executable: true },
+    ...runtimeTargets,
     ...(addon && addonTargetPath ? [{ label: 'vector addon', path: addonTargetPath, assetName: addon.assetName, executable: false }] : []),
   ];
 
@@ -340,6 +344,7 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   // would undo an update this app did not perform.
   const targets = [
     { label: 'app binary', path: options.execPath },
+    ...(options.platform === 'linux' ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({label:'captured Bun' + suffix,path:options.execPath + suffix})) : []),
     ...(addon ? [{ label: 'vector addon', path: join(dirname(options.execPath), 'lib', addon.dirName, addon.fileName) }] : []),
   ];
 

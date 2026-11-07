@@ -75,10 +75,10 @@ import {
 import { extractTarGzTree } from '../../runtime/tar-archive.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
 
-const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-agent/releases/latest';
+const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
 
 function releaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes-agent/releases/download/${tag}`;
+  return `https://github.com/mgd34msu/goodvibes-jev/releases/download/${tag}`;
 }
 
 /**
@@ -238,10 +238,13 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<void> {
   // same manifest, then swaps it atomically with the outgoing file kept at
   // `<path>.previous`. The addon bytes above are already verified, so the
   // addon swap after this cannot fail on bad data.
+  const runtimeTargets = options.platform === 'linux' && ['.bun', '.bun.json', '.bun.LICENSE.md'].some(suffix => checksums.has(binaryAsset + suffix))
+    ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({ label: 'captured Bun' + suffix, path: appBinaryPath + suffix, assetName: binaryAsset + suffix, executable: suffix === '.bun' })) : [];
+
   await applyVerifiedUpdate({
     fetchImpl: options.fetchImpl,
     downloadBaseUrl: baseUrl,
-    targets: [{ label: 'agent binary', path: appBinaryPath, assetName: binaryAsset, executable: true }],
+    targets: [{ label: 'agent binary', path: appBinaryPath, assetName: binaryAsset, executable: true }, ...runtimeTargets],
     io,
     platform: options.platform,
   });
@@ -313,6 +316,7 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   const addon = resolveSqliteVecArchive(options.platform, options.arch);
   const targets = [
     { label: 'agent binary', path: options.execPath },
+    ...(options.platform === 'linux' ? ['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => ({label:'captured Bun' + suffix,path:options.execPath + suffix})) : []),
     ...(addon ? [{ label: 'vector addon', path: join(dirname(options.execPath), 'lib', addon.dirName, addon.fileName) }] : []),
   ];
 

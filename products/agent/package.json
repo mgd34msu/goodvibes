@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/agent",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "private": true,
   "description": "GoodVibes personal operator assistant TUI with a proactive Agent product brain, isolated Agent Knowledge, local profiles, routines, skills, personas, and explicit build delegation.",
   "type": "module",
@@ -23,11 +23,7 @@
     "README.md",
     "CHANGELOG.md",
     "docs/*.md",
-    "release/release-notes.md",
-    "release/performance-snapshot.json",
-    "release/release-readiness.json",
-    "release/live-verification/live-verification.json",
-    "release/live-verification/live-verification.md"
+    "release/release-notes.md"
   ],
   "scripts": {
     "dev": "bun run src/main.ts",

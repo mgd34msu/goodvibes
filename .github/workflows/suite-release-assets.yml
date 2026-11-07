@@ -1,0 +1,107 @@
+name: Complete suite release assets
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release to complete without replacing its published binaries
+        required: true
+        default: v3.1.0
+      publish_existing:
+        description: Add missing files to the existing release
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      publish_existing:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: suite-release-assets-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Retain packaging tooling
+        run: cp .github/scripts/package-suite-release.mjs "$RUNNER_TEMP/package-suite-release.mjs"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Require exact-source successful push CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/source-sha"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$(cat "$RUNNER_TEMP/source-sha")&event=push&status=completed" > "$RUNNER_TEMP/ci-runs.json"
+          run_id=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); a=[r for r in r["workflow_runs"] if r["conclusion"]=="success"]; assert a; print(a[0]["id"])' "$RUNNER_TEMP/ci-runs.json")
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" --paginate --slurp > "$RUNNER_TEMP/ci-jobs.json"
+          python3 -c 'import json,sys; j=[j for p in json.load(open(sys.argv[1])) for j in p["jobs"]]; assert j and all(j["conclusion"]=="success" for j in j)' "$RUNNER_TEMP/ci-jobs.json"
+      - name: Build publisher tooling and engine
+        run: bun packages/engine/scripts/build.ts
+      - name: Package and execute native release binaries
+        env:
+          TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          bun "$RUNNER_TEMP/package-suite-release.mjs" "$TARGET" "$RUNNER_TEMP/release-assets" "$RELEASE_TAG"
+          tar -czf "$RUNNER_TEMP/suite-$TARGET.tgz" -C "$RUNNER_TEMP/release-assets" .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: suite-release-${{ matrix.target }}
+          path: ${{ runner.temp }}/suite-${{ matrix.target }}.tgz
+          retention-days: 7
+          if-no-files-found: error
+  collect:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: suite-release-*
+          path: ${{ runner.temp }}/suite-archives
+      - name: Admit complete same-source suite
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/collect-suite-release.py "$RUNNER_TEMP/suite-archives" "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installer-release-assets
+          path: ${{ runner.temp }}/suite-assets/*
+          retention-days: 7
+          if-no-files-found: error
+      - name: Complete existing published release
+        if: inputs.publish_existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 .github/scripts/publish-missing-suite-assets.py "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"

@@ -1,30 +1,12 @@
 # goodvibes-tui
 
-## Jev migration status
-
-The TUI is a private workspace in the GoodVibes Jev monorepo and is built by
-its suite installer. Integration and full product acceptance remain in progress.
-The screenshots and product tour below preserve upstream reference behavior;
-the current decision contract
-takes precedence over legacy permission prompts and owner escalation. Jev makes
-semantic decisions; explicit owner settings and deterministic checks control
-tool access. The shared judgment port owns retry/waiting and cancellation.
-
 ## Install
 
-Use the [suite installer](../../docs/installation.md) from the monorepo root.
-It installs the daemon, TUI, Agent and WebUI, pairs the TUI and registers the
-selected project workspace. Configure the conversation provider separately,
-then run `goodvibes` from your project directory. This private workspace is not
-installed through the upstream npm package or `goodvibes.sh` installer.
-
-`goodvibes --no-worries-just-vibes` enables auto-approve for one launch, including
-reads and searches outside the project. It does not persist the override or
-bypass authentication, scopes or operating-system access. See [CLI flags](docs/cli-flags.md#--no-worries-just-vibes).
-
-Actionable work uses the engine's [completion verification](../../packages/engine/docs/runtime-orchestration.md#completion-verification).
-Rejected final drafts stay private while specific findings are repaired.
-Conversation and status questions do not require completing earlier work first.
+Use the [suite installer](../../docs/installation.md) to install released TUI,
+Agent, daemon and WebUI components from one monorepo version, then run
+`goodvibes` from your project directory. Configure your conversation provider
+in the application. Decision-model policies and execution permissions are
+separate; see [decision-model policies](../../docs/decision-model-policy.md).
 
 ## Native work controls (local Jev implementation)
 

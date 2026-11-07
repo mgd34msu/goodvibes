@@ -104,14 +104,6 @@ history, including upstream releases.
 - [Peer API reference](./reference-peer.md)
 - [Runtime events reference](./reference-runtime-events.md)
 
-## Decision records
-
-Dated records of design decisions live in [decisions/](./decisions/). Each one
-captures a choice, its alternatives, and the reasoning at the time it was made.
-Where the code has since moved, a dated correction note appears inside the
-record rather than a silent rewrite. Review findings that shaped the code are
-kept the same way in [reviews/](./reviews/).
-
 ## Project and repository docs
 
 Repository-wide policies and engine references:

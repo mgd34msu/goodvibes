@@ -1,5 +1,6 @@
 /** Explicit serving composition. There is deliberately no substitute inbox. */
 import { writeSync } from 'node:fs';
+import { refreshReleaseWebUi } from './release-webui.js';
 import {
   applyRuntimeConfigOverrides, applyRuntimeConfigValue, applyRuntimeEndpointFlagOverrides,
   applyRuntimeFeatureFlagOverrides, resolveRuntimeEndpointBinding,
@@ -74,6 +75,25 @@ export function runConfiguredDaemonCli(
         stdout(renderDaemonStartupBanner(version, { homeDir: homeDirectory, daemonHomeDir: daemonHomeDirectory, ...intended }));
         if (closed) return undefined;
         const updateArtifact = resolveInstalledDaemonUpdateArtifact({ isOverridden }, { signal: maintenance.signal });
+        if (updateArtifact && config.get('update.auto') === true && config.get('controlPlane.webui.serve') === true) {
+          const bundleDir = config.get('controlPlane.webui.bundleDir');
+          try {
+            const refreshed = await refreshReleaseWebUi({execPath: process.execPath, version, bundleDir, signal: maintenance.signal,
+              assertCurrent: () => {
+                maintenance.signal.throwIfAborted(); updateArtifact.assertCurrent?.();
+                if (config.get('update.auto') !== true || config.get('controlPlane.webui.bundleDir') !== bundleDir) throw new Error('WebUI update owner changed');
+              }});
+            if (closed) return undefined;
+            if (refreshed) {
+              maintenance.signal.throwIfAborted(); updateArtifact.assertCurrent?.();
+              if (config.get('update.auto') !== true || config.get('controlPlane.webui.bundleDir') !== bundleDir) throw new Error('WebUI update owner changed');
+              await config.set('controlPlane.webui.bundleDir', refreshed);
+            }
+          } catch {
+            if (maintenance.signal.aborted) throw maintenance.signal.reason;
+            stderr('WebUI release refresh did not complete; the previous bundle is retained.');
+          }
+        }
         if (closed) return undefined;
         const companion = getOrCreateCompanionToken('tui', { daemonHomeDir: daemonHomeDirectory });
         if (companion.quarantined) {

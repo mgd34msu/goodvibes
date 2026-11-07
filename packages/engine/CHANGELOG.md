@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.1] - 2026-11-07
+
+### Fixed
+
+- Install prebuilt, checksum-verified binaries and supporting files from one
+  monorepo release. Restore command paths, upgrade/restart handling, PATH setup
+  and uninstall. The curl installer requires no source checkout or compiler.
+- Include all four products, browser drivers, native addons and required Linux
+  runtime companions in release downloads for Linux/macOS x64/arm64.
+- Enable standalone compiled TUI and Agent update paths against the monorepo
+  release feed, preserving their runtime companions on update and rollback.
+- Install the daemon's verified native receipt and enable its normal automatic
+  update ownership. Refresh installer-owned WebUI bundles after daemon updates.
+
 ## [3.1.0] - 2026-11-06
 
 Qualification and delivery evidence is recorded in the

@@ -1,27 +1,12 @@
 # GoodVibes Agent
 
-## Jev migration status
-
-Agent is a private workspace in the GoodVibes Jev monorepo, included in the
-suite installer and root build, typecheck and test commands. Integration and
-full product acceptance remain in progress. The upstream tour below describes
-inherited behavior; the current decision contract
-supersedes its semantic confirmation/escalation paths. Explicit owner settings,
-identity, scopes and revocation still control access. The shared judgment port
-owns retry/waiting and cancellation.
-
 ## Install
 
-Use the [suite installation guide](../../docs/installation.md) from the monorepo
-root, then run `goodvibes-agent`. A fresh Agent home opens setup. The installer
-pairs the TUI; Agent's connected-host credentials and native authority require
-separate setup. See [native readiness](docs/setup-explicit-pairing.md#native-intake-setup-readiness) before
-using native conversation or work controls. Completing the onboarding marker
-alone does not grant those scopes.
-
-This workspace is not installed through the upstream npm package. Updates use
-the repository's `./install.sh`; the release and automatic-update descriptions
-in historical product docs are not release claims for this checkout.
+Use the [suite installer](../../docs/installation.md) to install released TUI,
+Agent, daemon and WebUI components from one monorepo version, then run
+`goodvibes-agent` from your project directory. Configure your conversation provider
+in the application. Decision-model policies and execution permissions are
+separate; see [decision-model policies](../../docs/decision-model-policy.md).
 
 ## Native work controls (local Jev implementation)
 

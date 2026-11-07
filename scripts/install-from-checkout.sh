@@ -5,7 +5,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 case "${1:-}" in
   --help|-h)
     cat <<'HELP'
-Usage: ./scripts/install.sh [--prefix DIR] [--bin-dir DIR] [--data-dir DIR] [--workspace DIR]
+Usage: ./scripts/install-from-checkout.sh [--prefix DIR] [--bin-dir DIR] [--data-dir DIR] [--workspace DIR]
                     [--port PORT] [--no-service|--service]
 
 Build and install the daemon, terminal UI, agent and WebUI from this checkout.

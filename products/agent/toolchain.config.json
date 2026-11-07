@@ -99,11 +99,7 @@
       "dist/package/main.js",
       "bin/goodvibes-agent.ts",
       "tsconfig.json",
-      "release/release-notes.md",
-      "release/performance-snapshot.json",
-      "release/release-readiness.json",
-      "release/live-verification/live-verification.json",
-      "release/live-verification/live-verification.md"
+      "release/release-notes.md"
     ],
     "forbiddenTarballPrefixes": [
       ".github/",

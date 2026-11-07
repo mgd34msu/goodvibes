@@ -315,7 +315,7 @@ resolve_tag() {
 resolve_version() {
   # Resolve once. A suite cannot mix versions from former product repositories.
   for requested in "$REQUESTED_DAEMON_VERSION" "$REQUESTED_AGENT_VERSION" "$REQUESTED_WEBUI_VERSION"; do
-    [ "$requested" = "$REQUESTED_VERSION" ] || fail "All products use GOODVIBES_VERSION; remove conflicting per-product version overrides."
+    [ "${requested#v}" = "${REQUESTED_VERSION#v}" ] || fail "All products use GOODVIBES_VERSION; remove conflicting per-product version overrides."
   done
   VERSION=$(resolve_tag "$REPO" "$REQUESTED_VERSION")
   printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || fail "Invalid release version: $VERSION"
@@ -346,26 +346,37 @@ prepare_release() {
       done
     fi
   done
-  if [ "$WITH_VECTOR" = 1 ]; then fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"; fi
-  if [ "$WITH_AGENT" = 1 ]; then fetch_release_asset browser-driver.tar.gz; fi
+  if [ "$os_tag" = linux ]; then fetch_release_asset "goodvibes-daemon-$PLATFORM_SUFFIX.ci-artifact.json"; fi
+  if [ "$WITH_VECTOR" = 1 ] || [ "$os_tag" = linux ]; then fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"; fi
+  fetch_release_asset browser-driver.tar.gz
   if [ "$WITH_WEBUI" = 1 ]; then fetch_release_asset "goodvibes-webui-bundle-${VERSION#v}.tar.gz"; fi
   for _manifest in daemon agent webui; do cp "$WORKDIR/SHA256SUMS.txt" "$WORKDIR/$_manifest-SHA256SUMS.txt"; done
 }
 install_release_binary() {
   _binary=$1
   _binary_asset="$_binary-$PLATFORM_SUFFIX"
+  _installed_binary=$_binary
   # Linux compiled entrypoints require their adjacent, released ordinary Bun.
   # Keep the filename relationship when installing under the command name.
   if [ "$os_tag" = linux ]; then
     for _binary_suffix in .bun .bun.json .bun.LICENSE.md; do
-      cp "$WORKDIR/$_binary_asset$_binary_suffix" "$INSTALL_DIR/$_binary$_binary_suffix.incoming"
-      case "$_binary_suffix" in .bun) chmod 755 "$INSTALL_DIR/$_binary$_binary_suffix.incoming" ;; *) chmod 644 "$INSTALL_DIR/$_binary$_binary_suffix.incoming" ;; esac
-      mv -f "$INSTALL_DIR/$_binary$_binary_suffix.incoming" "$INSTALL_DIR/$_binary$_binary_suffix"
+      cp "$WORKDIR/$_binary_asset$_binary_suffix" "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming"
+      case "$_binary_suffix" in .bun) chmod 755 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; *) chmod 644 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; esac
+      mv -f "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" "$INSTALL_DIR/$_installed_binary$_binary_suffix"
     done
   fi
-  cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_binary.incoming"
-  chmod 755 "$INSTALL_DIR/$_binary.incoming"
-  mv -f "$INSTALL_DIR/$_binary.incoming" "$INSTALL_DIR/$_binary"
+  cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_installed_binary.incoming"
+  chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
+  mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
+  if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
+    "${INSTALL_DIR}/${_installed_binary}.bun" -e '
+      const artifact = JSON.parse(await Bun.file(process.argv[1]).text());
+      const receipt = {schema:1,packageName:"@goodvibes-jev/daemon",version:process.argv[2],artifact};
+      await Bun.write(process.argv[3], JSON.stringify(receipt,null,2)+"\n");
+    ' "$WORKDIR/$_binary_asset.ci-artifact.json" "${VERSION#v}" "$INSTALL_DIR/daemon-installation.json.incoming"
+    chmod 644 "$INSTALL_DIR/daemon-installation.json.incoming"
+    mv -f "$INSTALL_DIR/daemon-installation.json.incoming" "$INSTALL_DIR/daemon-installation.json"
+  fi
 }
 
 # --- restart on upgrade ---
@@ -703,7 +714,7 @@ unit_daemon_home_value() {
 # serves nothing, because its channel workers open an empty store. Currency
 # requires the value.
 unit_daemon_home_is_canonical() {
-  [ "$(unit_daemon_home_value "$1")" = "$HOME/.goodvibes/daemon" ]
+  [ -z "$(unit_daemon_home_value "$1")" ]
 }
 
 # One-line reason a unit's launch arguments are stale, or nothing when they
@@ -717,10 +728,10 @@ unit_launch_stale_reason() {
   fi
   if ! unit_daemon_home_is_canonical "$1"; then
     _sr=$(unit_daemon_home_value "$1")
-    if [ -z "$_sr" ]; then
-      printf 'launches without --daemon-home'
+    if [ "$_sr" = "$HOME/.goodvibes/daemon" ]; then
+      printf 'passes an explicit home override, disabling installed-native automatic updates'
     else
-      printf 'launches with --daemon-home %s instead of %s/.goodvibes/daemon' "$_sr" "$HOME"
+      printf 'overrides the normal daemon state directory with %s' "$_sr"
     fi
     return 0
   fi
@@ -908,7 +919,7 @@ restart_bare_processes() {
     if [ "$_is_daemon" = "1" ]; then
       # Canonical only — never derived from the process being replaced.
       # display_args is for the human-readable notices below only.
-      display_args="--daemon-home $HOME/.goodvibes/daemon"
+      display_args=""
     else
       # No canonical shape known for this binary — recover the original
       # arguments so flags survive.
@@ -944,7 +955,7 @@ restart_bare_processes() {
       # working directory, which is what the unit gets from systemd by default.
       (
         cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
-        exec nohup "$new_bin" --daemon-home "$HOME/.goodvibes/daemon" >/dev/null 2>&1
+        exec nohup "$new_bin" >/dev/null 2>&1
       ) &
       newpid=$!
     else
@@ -1138,7 +1149,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart="$INSTALL_DIR/goodvibes-daemon" --daemon-home "$HOME/.goodvibes/daemon"
+ExecStart="$INSTALL_DIR/goodvibes-daemon"
 Restart=on-failure
 RestartSec=2$_restart_escalation
 
@@ -1169,8 +1180,6 @@ write_launchd_plist() {
   <key>ProgramArguments</key>
   <array>
     <string>$INSTALL_DIR/goodvibes-daemon</string>
-    <string>--daemon-home</string>
-    <string>$HOME/.goodvibes/daemon</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -1696,7 +1705,7 @@ install_daemon() {
 # a skip. Placed with an atomic rename so a running process never dlopen()s a
 # half-written file.
 install_sqlite_vec() {
-  [ "$WITH_VECTOR" = "1" ] || return 0
+  [ "$WITH_VECTOR" = "1" ] || [ "$os_tag" = linux ] || return 0
   addon_asset="sqlite-vec-${VEC_OS}-${arch_tag}.${VEC_SUFFIX}"
 
   # The addon is verified against the SAME SHA256SUMS.txt as the daemon binary,
@@ -1727,6 +1736,7 @@ install_sqlite_vec() {
   say "  verified   $addon_asset"
 
   mkdir -p "$addon_dir"
+  chmod 644 "$WORKDIR/$addon_asset"
   mv -f "$WORKDIR/$addon_asset" "$addon_target"
   say "  installed  $addon_target"
 }
@@ -1804,7 +1814,6 @@ install_agent() {
     fail "the installed goodvibes-agent binary failed to run ('goodvibes-agent --version')"
   fi
 
-  install_browser_driver "$agent_base_url" "$AGENT_VERSION"
 }
 
 # --- browser driver: makes goodvibes-agent able to drive a browser at all ---
@@ -2682,6 +2691,11 @@ run_uninstall() {
     say "  removed    $addon_dir"
     record_removed "$addon_dir"
   done
+  for native in "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.json" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.LICENSE.md" "$INSTALL_DIR/daemon-installation.json"; do
+    for tail in '' .previous; do
+      if [ -f "$native$tail" ]; then rm -f "$native$tail"; record_removed "$native$tail"; fi
+    done
+  done
   # Drop the lib dir only if the installer left it empty.
   rmdir "$INSTALL_DIR/lib" 2>/dev/null || true
 
@@ -2833,6 +2847,10 @@ main() {
   # rather than after the next restart.
   install_webui
 
+  # The driver is shared platform support, including when Agent is skipped.
+  install_browser_driver "$BASE_URL" "$VERSION"
+  if [ "$WITH_AGENT" = 1 ]; then install_agent; fi
+
   # Bring a platform-managed canonical unit up to the current (config-derived)
   # launch shape BEFORE the restart below, so the restart applies it.
   refresh_stale_canonical_unit
@@ -2840,7 +2858,6 @@ main() {
   restart_running_daemon
 
   if [ "$WITH_AGENT" = "1" ]; then
-    install_agent
     restart_running_agent
   fi
 

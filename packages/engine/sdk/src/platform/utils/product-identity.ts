@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { detectInstallKind } from '../runtime/install-kind.js';
 
 /** A compiled product may resolve a foreign package.json. Only its own manifest may override the baked version. */
 export function readProductVersion(moduleDirectory: string, packageName: string, fallback: string): string {
@@ -12,7 +13,7 @@ export function readProductVersion(moduleDirectory: string, packageName: string,
 }
 
 export function workspaceProductUpdatePolicy(manifest: { readonly private?: boolean; readonly dependencies?: Readonly<Record<string, unknown>> }, packageName: string, label: string) {
-  const isWorkspaceDistribution = manifest.private === true && manifest.dependencies?.['@goodvibes-jev/engine'] === 'workspace:*';
+  const isWorkspaceDistribution = detectInstallKind(process.execPath) !== 'binary' && manifest.private === true && manifest.dependencies?.['@goodvibes-jev/engine'] === 'workspace:*';
   const rebuildCommand = `bun run --filter ${packageName} build`;
   const guidance = `This ${label} is built from a private Jev workspace. Update the workspace and build the engine, then run ${rebuildCommand} from the workspace root.`;
   return { isWorkspaceDistribution, rebuildCommand, guidance };

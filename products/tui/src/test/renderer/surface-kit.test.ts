@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/sdk/platform/types';
 import { ansiToHex, mixHex } from '@goodvibes-jev/engine/sdk/platform/presentation';
-import { beginModal, finishModal, modalGeometry, searchRow, standardModalWidth } from '../../renderer/surface-kit.ts';
+import { beginModal, finishModal, modalGeometry, searchRow, standardModalWidth, SurfaceCanvas } from '../../renderer/surface-kit.ts';
 import { drawList, drawRow, type KitRow } from '../../renderer/surface-kit-list.ts';
 import { composeLayers, type CellGrid } from '../../renderer/surface-compose.ts';
 import { activeTokens, setActiveThemeMode } from '../../renderer/theme.ts';
@@ -320,5 +320,43 @@ describe('dim pass and stamp-over', () => {
     composeLayers(grid(screen, 10), [{ x: 0, y: 0, lines: [[createStyledCell('t', { fg: activeTokens().warning, bg: activeTokens().backgroundPanel })]], dim: false }]);
     expect(screen[0]![0]!.fg).toBe(activeTokens().warning);
     expect(screen[0]![5]!.bg).toBe('');
+  });
+});
+
+
+describe('shared list context', () => {
+  test('short and long help stay above contiguous options and mouse targets', () => {
+    const options = [
+      { label: 'Alpha', detail: 'Short help.' },
+      { label: 'Bravo', detail: 'Long help. '.repeat(20) },
+      { label: 'Charlie' },
+    ];
+    const starts: number[] = [];
+    for (let selected = 0; selected < options.length; selected++) {
+      const canvas = new SurfaceCanvas(60, 24);
+      const result = drawList(canvas, {
+        rows: options.map((row, i) => ({ ...row, selected: i === selected })),
+        mouseNavigation: true, top: 1, bottom: 22, x0: 4, x1: 55,
+      });
+      starts.push(result.listTop);
+      expect(text(canvas.lines[result.listTop])).toContain('Alpha');
+      expect(text(canvas.lines[result.listTop + 1])).toContain('Bravo');
+      expect(text(canvas.lines[result.listTop + 2])).toContain('Charlie');
+      expect(canvas.hitTargets.map(target => target.y)).toEqual([result.listTop, result.listTop + 1, result.listTop + 2]);
+      if (selected < 2) expect(text(canvas.lines[1])).toContain(selected === 0 ? 'Short help.' : 'Long help.');
+    }
+    expect(new Set(starts).size).toBe(1);
+  });
+
+  test('short screens keep the selected option visible below help', () => {
+    for (const height of [1, 2, 3, 6]) {
+      const canvas = new SurfaceCanvas(40, height);
+      const result = drawList(canvas, {
+        rows: Array.from({ length: 20 }, (_, i) => ({ label: `Option ${i}`, detail: 'Help '.repeat(100), selected: i === 19 })),
+        top: 0, bottom: height - 1, x0: 3, x1: 36,
+      });
+      expect(result.listTop).toBeLessThan(height);
+      expect(canvas.lines.map(text).join('\n')).toContain('Option 19');
+    }
   });
 });

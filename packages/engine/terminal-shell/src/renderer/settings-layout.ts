@@ -9,7 +9,7 @@ import {
   type ModalFrame,
   type SurfaceLayer,
 } from './surface-kit.js';
-import { drawRow, drawScrollingList, measureRow, rememberStart, rememberedStart, type KitRow } from './surface-kit-list.js';
+import { drawList, drawScrollingList, type KitRow } from './surface-kit-list.js';
 import { inset, type KitInset } from './surface-kit-parts.js';
 import type { DocLine } from './settings-documentation.js';
 export interface SettingsLayoutModal {
@@ -19,7 +19,7 @@ export interface SettingsLayoutModal {
   readonly searchResults: readonly unknown[];
   readonly currentCategory: string;
 }
-/** Common settings viewport allocation, selected-row documentation and scrolling. */
+/** Settings adapt their documentation pager to the shared list/context element. */
 export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: {
   readonly listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number };
   readonly categoryRows: (modal: Modal) => KitRow[];
@@ -46,57 +46,16 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
       rows.forEach((row, index) => {
         rows[index] = { ...row, onClick: () => policy.selectRow?.(modal, index) };
       });
-    const capacity = Math.max(1, bottom - p.top + 1);
     const doc = policy.docLines(modal, selected >= 0, width);
-
-    if (selected < 0) {
-      let y = p.top;
-      for (const row of rows) y += drawRow(f.canvas, y, row, sx, sr, bottom);
-      if (rows.length > 0) y++;
-      for (const line of policy.windowDoc(modal, doc, Math.max(1, bottom - y + 1))) {
-        if (y > bottom) break;
-        f.canvas.put(sx, y++, line.text, { fg: line.fg, bold: line.bold });
-      }
-      return { above: 0, below: 0 };
-    }
-
-    const heights = rows.map((row) => measureRow(row, sx, sr));
-    // The documentation takes what the rows leave, but never less than a few lines.
-    const rowsTotal = heights.reduce((a, b) => a + b, 0);
-    const docBudget = Math.max(3, Math.min(doc.length, capacity - Math.min(rowsTotal, Math.max(3, Math.floor(capacity * 0.35))) - 2));
-    const shownDoc = policy.windowDoc(modal, doc, docBudget);
-    const blockH = shownDoc.length > 0 ? shownDoc.length + 2 : 0;
-    const rowCapacity = Math.max(1, capacity - blockH);
-
-    // Scroll so the selected row (and its block) is in view; the window only
-    // moves when the selection leaves it.
-    const listName = modal.searchFocused ? 'search' : `category:${modal.currentCategory}`;
-    const scrollKey = { owner: modal, name: listName };
-    let start = Math.max(0, Math.min(rememberedStart(scrollKey) ?? 0, rows.length - 1));
-    const span = (from: number, to: number): number => heights.slice(from, to + 1).reduce((a, b) => a + b, 0);
-    if (selected < start) start = selected;
-    while (start < selected && span(start, selected) > rowCapacity) start++;
-    while (start > 0 && span(start - 1, rows.length - 1) <= rowCapacity) start--;
-    rememberStart(scrollKey, start);
-
-    let y = p.top;
-    let last = start - 1;
-    for (let i = start; i < rows.length; i++) {
-      const row = rows[i];
-      const height = heights[i];
-      if (!row || height === undefined || y + height - 1 > bottom) break;
-      y += drawRow(f.canvas, y, row, sx, sr, bottom);
-      last = i;
-      if (i === selected && shownDoc.length > 0) {
-        y++;
-        for (const line of shownDoc) {
-          if (y > bottom) break;
-          f.canvas.put(sx, y++, line.text, { fg: line.fg, bold: line.bold });
-        }
-        y++;
-      }
-    }
-    return { above: start, below: Math.max(0, rows.length - last - 1) };
+    return drawList(f.canvas, {
+      rows,
+      top: p.top,
+      bottom,
+      x0: sx,
+      x1: sr,
+      context: { lines: doc, window: capacity => policy.windowDoc(modal, doc, capacity) },
+      scrollKey: { owner: modal, name: modal.searchFocused ? 'search' : `category:${modal.currentCategory}` },
+    });
   }
   function renderSettingsModal(modal: Modal, screenWidth: number, screenHeight = 24): SurfaceLayer {
     const crumbs = policy.breadcrumbs(modal);

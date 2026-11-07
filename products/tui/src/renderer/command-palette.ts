@@ -23,7 +23,7 @@ import { beginModal, finishModal, scrollCountText, searchRow, type SurfaceLayer 
 import { drawList, type KitRow } from './surface-kit-list.ts';
 import { inset, insetLines, type KitInset } from './surface-kit-parts.ts';
 
-function rowsFor(palette: PaletteView): KitRow[] {
+function rowsFor(palette: PaletteView, showDetail: boolean): KitRow[] {
   const selected = palette.getSelected();
   const rows: KitRow[] = [];
   const searching = palette.query.trim().length > 0;
@@ -32,7 +32,7 @@ function rowsFor(palette: PaletteView): KitRow[] {
     for (const entry of section.entries) {
       rows.push({
         label: entry.title,
-        desc: palette.describe(entry.id),
+        detail: showDetail ? [palette.describe(entry.id), entry.description, entry.argsHint ? `/${entry.id} ${entry.argsHint}` : ''].filter(Boolean).join('\n') : undefined,
         right: entry.right ?? `/${entry.id}`,
         selected: entry === selected,
       });
@@ -83,7 +83,7 @@ export function renderCommandPalette(palette: PaletteView, screenWidth: number, 
   // A preview when there is room for it; below that the list takes the width.
   const sideBySide = inner >= 70;
   const x1 = sideBySide ? f.l + Math.floor(inner * 0.55) - 1 : f.r;
-  const result = drawList(f.canvas, { mouseNavigation: true, rows: rowsFor(palette), top: body, bottom: f.bottom, x0: f.l, x1, scrollKey: { owner: palette, name: 'list' } });
+  const result = drawList(f.canvas, { mouseNavigation: true, rows: rowsFor(palette, !sideBySide), top: body, bottom: f.bottom, x0: f.l, x1, scrollKey: { owner: palette, name: 'list' } });
   if (sideBySide) {
     const p = inset(f.canvas, x1 + 3, body, f.r + 2 - (x1 + 3) + 1, f.bottom - body + 1);
     drawPreview(palette, palette.getSelected(), f.canvas, p);

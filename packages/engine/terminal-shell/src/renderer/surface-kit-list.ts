@@ -18,7 +18,7 @@
 
 import { getDisplayWidth } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { activeTokens } from './theme.js';
-import { MODAL_MARK_INSET, SurfaceCanvas, scrollCountText, type KitStyle } from './surface-kit.js';
+import { MODAL_MARK_INSET, SurfaceCanvas, scrollCountText, wrapLines, type KitStyle } from './surface-kit.js';
 
 /** A run of text with one style (used for custom labels such as fuzzy-match highlights). */
 export interface KitSpan {
@@ -38,8 +38,10 @@ export interface KitRow {
   readonly label?: (string) | undefined;
   /** Custom label spans; replaces `label` when set. */
   readonly spans?: (readonly KitSpan[]) | undefined;
-  /** Muted text after the label (wraps with it). */
+  /** Compact row metadata or an editable field value (wraps with the label). */
   readonly desc?: (string) | undefined;
+  /** Explanatory text, shown above the list when this item is selected. */
+  readonly detail?: string | undefined;
   /** Muted metadata right-aligned on the row's first line. */
   readonly right?: (string) | undefined;
   readonly rightFg?: (string) | undefined;
@@ -195,6 +197,8 @@ export function drawRow(canvas: SurfaceCanvas, y: number, row: KitRow, x0: numbe
 // ---------------------------------------------------------------------------
 
 export interface KitListOptions {
+  /** Selected-item help has its own viewport above the uninterrupted list. */
+  readonly context?: KitListContext | undefined;
   /** Opt in only when this list uses Up/Down and Enter. */
   readonly mouseNavigation?: (boolean) | undefined;
   readonly rows: readonly KitRow[];
@@ -211,6 +215,43 @@ export interface KitListOptions {
    * moves when the selection leaves it instead of re-anchoring every frame.
    */
   readonly scrollKey?: ({ readonly owner: object; readonly name: string }) | undefined;
+}
+
+export interface KitListContext {
+  /** Pre-wrapped help lines. Otherwise the selected row's detail is used. */
+  readonly lines?: readonly KitSpan[] | undefined;
+  /** Explicit help height. Documentation blocks default to 40% of the area. */
+  readonly height?: number | undefined;
+  readonly offset?: number | undefined;
+  /** Existing documentation pagers can supply their own window and indicators. */
+  readonly window?: ((capacity: number) => readonly KitSpan[]) | undefined;
+}
+
+function contextLayout(options: KitListOptions): { height: number; lines: readonly KitSpan[] } {
+  const width = Math.max(1, options.x1 - options.x0 + 1);
+  const details = options.rows.map(row => row.detail ? wrapLines(row.detail, width) : []);
+  const lines = options.context?.lines ?? (details[options.rows.findIndex(row => row.selected)] ?? [])
+    .map(text => ({ text, fg: activeTokens().textMuted }));
+  const capacity = Math.max(0, options.bottom - options.top + 1);
+  // Reserve the same area across selection changes, including items with no
+  // help. Changing focus must never move the list or insert prose between rows.
+  const desired = options.context?.height ?? (options.context?.lines || options.context?.window
+    ? Math.floor(capacity * 0.4)
+    : details.reduce((max, detail) => Math.max(max, detail.length), 0));
+  const minimumItems = Math.max(1, Math.min(3, options.rows.filter(row => !isHeader(row)).length));
+  const height = Math.max(0, Math.min(desired, capacity - minimumItems - 1));
+  if (height === 0) return { height, lines: [] };
+  if (options.context?.window) return { height, lines: options.context.window(height).slice(0, height) };
+  if (lines.length <= height) return { height, lines };
+  const contentRows = Math.max(1, height - 1);
+  const offset = Math.max(0, Math.min(options.context?.offset ?? 0, lines.length - contentRows));
+  const shown: KitSpan[] = lines.slice(offset, offset + contentRows);
+  if (height > 1) shown.push({ text: scrollCountText(offset, lines.length - offset - contentRows), fg: activeTokens().textFaint });
+  return { height, lines: shown };
+}
+
+function listArea(options: KitListOptions, height: number): KitListOptions {
+  return { ...options, top: options.top + (height > 0 ? height + 1 : 0) };
 }
 
 const scrollMemory = new WeakMap<object, Map<string, number>>();
@@ -232,6 +273,8 @@ export function rememberStart(key: KitListOptions['scrollKey'], start: number): 
 }
 
 export interface KitListResult {
+  /** First option row, after the fixed help area and its separating blank row. */
+  readonly listTop: number;
   /** Item rows (headers excluded) hidden above / below the window. */
   readonly above: number;
   readonly below: number;
@@ -287,7 +330,7 @@ function planList(canvas: SurfaceCanvas, options: KitListOptions): ListPlan {
  * need to know where the end is, by the same spacing rules drawList uses.
  */
 export function listScrollEnd(canvas: SurfaceCanvas, options: KitListOptions): number {
-  const plan = planList(canvas, options);
+  const plan = planList(canvas, listArea(options, contextLayout(options).height));
   if (!plan.scrolls) return 0;
   const last = options.rows.length - 1;
   let start = last;
@@ -309,6 +352,12 @@ const SHORT_LIST_ROWS = 10;
  * does not fit on a narrow screen (below 90 columns) or a short list area.
  */
 export function drawList(canvas: SurfaceCanvas, options: KitListOptions): KitListResult {
+  const context = contextLayout(options);
+  context.lines.forEach((line, index) => canvas.put(options.x0, options.top + index, line.text, line));
+  return drawListRows(canvas, listArea(options, context.height));
+}
+
+function drawListRows(canvas: SurfaceCanvas, options: KitListOptions): KitListResult {
   const { rows, top, bottom, x0, x1 } = options;
   const plan = planList(canvas, options);
   const { gaps, heights } = plan;
@@ -355,6 +404,7 @@ export function drawList(canvas: SurfaceCanvas, options: KitListOptions): KitLis
     return n;
   };
   return {
+    listTop: top,
     above: countItems(0, start - 1),
     below: countItems(lastDrawn + 1, last),
     start,
@@ -367,11 +417,16 @@ export function drawList(canvas: SurfaceCanvas, options: KitListOptions): KitLis
  * the list's last row carries the muted scroll count ("3 more ↑ · 12 more ↓").
  */
 export function drawScrollingList(canvas: SurfaceCanvas, options: KitListOptions): KitListResult {
+  const context = contextLayout(options);
+  context.lines.forEach((line, index) => canvas.put(options.x0, options.top + index, line.text, line));
+  const area = listArea(options, context.height);
   const scratch = new SurfaceCanvas(canvas.width, canvas.height);
   scratch.compact = canvas.compact;
-  const trial = drawList(scratch, options);
-  if (trial.above === 0 && trial.below === 0) return drawList(canvas, options);
-  const result = drawList(canvas, { ...options, bottom: options.bottom - 1 });
+  const trial = drawListRows(scratch, area);
+  if (trial.above === 0 && trial.below === 0) return drawListRows(canvas, area);
+  // On a very short screen the option itself takes precedence over a count.
+  if (area.bottom <= area.top) return drawListRows(canvas, area);
+  const result = drawListRows(canvas, { ...area, bottom: area.bottom - 1 });
   const text = scrollCountText(result.above, result.below);
   if (text) canvas.right(options.x1, options.bottom, text, { fg: activeTokens().textFaint });
   return result;

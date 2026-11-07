@@ -97,6 +97,28 @@ describe('renderSettingsModal', () => {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  test('selected help stays above a continuous settings list without moving it', () => {
+    modal.searchFocused = false;
+    modal.categoryIndex = 0;
+    const entries = modal.currentItems;
+    expect(entries.length).toBeGreaterThan(3);
+    const positions: number[] = [];
+    for (const index of [0, 2, 3]) {
+      modal.selectedIndex = index;
+      modal.contextScroll = 0;
+      const layer = renderSettingsModal(modal, 160, 60);
+      const text = layer.lines.map(line => line.map(cell => cell.char).join(''));
+      const first = text.findIndex(line => /(?:◇\s+)?stream\s+(?:true|false)\s*$/.test(line));
+      expect(first).toBeGreaterThan(0);
+      positions.push(first);
+      for (let i = 0; i < entries.length; i++) {
+        expect(text[first + i]).toContain(entries[i]!.setting!.key.split('.').at(-1)!);
+      }
+      expect(text.slice(0, first).join('\n')).toContain('source default');
+    }
+    expect(new Set(positions).size).toBe(1);
+  });
+
   test('each line has correct terminal width', () => {
     const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
     for (const line of lines) {

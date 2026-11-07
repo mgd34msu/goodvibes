@@ -6,7 +6,7 @@
 export interface SelectionItem {
   id: string;
   label: string;
-  detail?: string;        // shown to the right of label
+  detail?: string;        // selected-item help above the list
   category?: string;      // optional grouping header
   actions?: string;       // hint text for available actions (e.g., "[d] delete")
   fg?: string;             // optional foreground color override for this item
@@ -34,6 +34,7 @@ export class SelectionModal {
   public items: SelectionItem[] = [];
   public filteredItems: SelectionItem[] = [];
   public selectedIndex = 0;
+  public contextScroll = 0;
   public allowSearch = true;
   public customActions: Map<string, SelectionAction> = new Map();
   /**
@@ -67,6 +68,7 @@ export class SelectionModal {
     this.title = title;
     this.items = items;
     this.query = '';
+    this.contextScroll = 0;
     this.allowSearch = opts?.allowSearch ?? true;
     this.customActions = opts?.customActions ?? new Map();
     this.primaryVerbLabel = opts?.primaryVerbLabel;
@@ -91,6 +93,7 @@ export class SelectionModal {
     this.active = false;
     this.title = '';
     this.query = '';
+    this.contextScroll = 0;
     this.items = [];
     this.filteredItems = [];
     this.selectedIndex = 0;
@@ -123,6 +126,11 @@ export class SelectionModal {
     this.emitHighlight();
   }
 
+  /** Scroll help without moving the selected option. */
+  scrollContext(delta: number): void {
+    this.contextScroll = Math.max(0, this.contextScroll + delta);
+  }
+
   /** Get currently highlighted item */
   getSelected(): SelectionItem | null {
     if (this.filteredItems.length === 0) return null;
@@ -131,6 +139,7 @@ export class SelectionModal {
 
   /** Notify onHighlight when the highlighted row differs from the last one reported. */
   private emitHighlight(): void {
+    this.contextScroll = 0;
     if (!this.onHighlight) return;
     const item = this.getSelected();
     const id = item?.id ?? null;

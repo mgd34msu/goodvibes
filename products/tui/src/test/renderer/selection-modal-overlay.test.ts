@@ -61,6 +61,29 @@ describe('renderSelectionModalOverlay (modal surface kit)', () => {
     expect(text).toContain(detail);
   });
 
+  test('selected details precede the options and paging never changes selection', () => {
+    const modal = new SelectionModal();
+    modal.open('Tools', [
+      { id: 'a', label: 'Alpha', detail: 'First help paragraph.' },
+      { id: 'b', label: 'Bravo', detail: Array.from({ length: 40 }, (_, i) => `Help line ${i}`).join('\n') },
+      { id: 'c', label: 'Charlie' },
+    ]);
+    modal.moveDown();
+    const rowIndex = () => layerText(renderSelectionModalOverlay(modal, 80, 24)).findIndex(line => /Alpha\s*$/.test(line));
+    const top = rowIndex();
+    const text = layerText(renderSelectionModalOverlay(modal, 80, 24));
+    expect(text.findIndex(line => line.includes('Help line 0'))).toBeLessThan(top);
+    expect(text[top + 1]).toMatch(/Bravo\s*$/);
+    expect(text[top + 2]).toMatch(/Charlie\s*$/);
+    modal.scrollContext(20);
+    expect(layerTextBlock(renderSelectionModalOverlay(modal, 80, 24))).toContain('Help line 20');
+    expect(modal.getSelected()?.id).toBe('b');
+    expect(rowIndex()).toBe(top);
+    modal.moveDown();
+    expect(modal.contextScroll).toBe(0);
+    expect(rowIndex()).toBe(top);
+  });
+
   test('a short question is a small centered dialog that stays inside the screen', () => {
     const modal = new SelectionModal();
     modal.open('Continue?', [{ id: 'y', label: 'Yes' }, { id: 'n', label: 'No' }], { allowSearch: false });

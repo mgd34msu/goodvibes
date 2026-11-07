@@ -10,18 +10,19 @@ import { createSettingsDocumentation } from '@goodvibes-jev/engine/terminal-shel
  *
  *   ▏Search all settings                                       display
  *
- *   ✦ interface          element panel
- *     Display        9     ◇ Theme                        goodvibes
- *     UI             4       display.theme · default goodvibes · …
- *   ✦ ai routing             Color palette for the whole interface…
- *     Provider       7     Theme mode                          dark
+ *   ✦ interface          selected-item help
+ *     Display       10      Color palette for the whole interface…
+ *     UI             4      display.theme · default goodvibes · …
+ *   ✦ ai routing
+ *     Provider       7    ◇ Theme                        goodvibes
+ *                         Theme mode                          dark
  *
  *   ↑↓ move   ⏎ change   ←→ category   ctrl+r reset
  *
  * The search row is always live and reaches every setting in every category
  * at once. Categories on the left, plain rows in an element panel on the
  * right: name, value, and a ◇ when the value differs from the default. The
- * selected row explains itself in place, wrapped in full, with its key,
+ * selected row is explained above the uninterrupted list, with its key,
  * default, type and source. The breadcrumb in the title says where you are.
  */
 
@@ -87,7 +88,7 @@ function categoryRows(modal: SettingsModal): KitRow[] {
 // Documentation block
 // ---------------------------------------------------------------------------
 
-/** Fact lines folded into one compact line under the selected row (the row itself shows the current value). */
+/** Fact lines folded into one compact line above the list (the row itself shows the current value). */
 
 /** Window the documentation by modal.contextScroll (PgUp/PgDn), marking hidden lines honestly. */
 

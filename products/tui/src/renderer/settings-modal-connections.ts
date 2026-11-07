@@ -25,7 +25,6 @@ export function connectionRows(modal: SettingsModal, selectable: boolean): KitRo
   const selectedIndex = Math.max(0, Math.min(modal.selectedIndex, items.length - 1));
   return items.map((entry, index) => ({
     label: connectionSurfaceLabel(entry.surface),
-    desc: entry.detail,
     right: entry.state,
     selected: selectable && index === selectedIndex,
     current: !selectable && index === selectedIndex,

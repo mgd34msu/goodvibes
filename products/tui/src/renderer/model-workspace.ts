@@ -129,7 +129,7 @@ function embeddingRows(picker: ModelPickerModal): KitRow[] {
     return picker.catalogLoading ? [] : [{ label: 'No embedding providers are registered.', muted: true }];
   return picker.embeddingProviders.map((provider, index) => ({
     label: provider.label,
-    desc: provider.detail,
+    detail: provider.detail,
     right: `${provider.dimensions}d · ${provider.configured ? 'configured' : 'unconfigured'}`,
     rightFg: provider.configured ? undefined : t.warning,
     mark: provider.configured ? '●' : '○',
@@ -154,7 +154,7 @@ function effortRows(picker: ModelPickerModal): KitRow[] {
     return rows;
   }
   picker.effortLevels.forEach((effort, index) => {
-    rows.push({ label: effort, desc: presentation?.choices[index]?.description || undefined, selected: index === picker.selectedIndex });
+    rows.push({ label: effort, detail: presentation?.choices[index]?.description || undefined, selected: index === picker.selectedIndex });
   });
   if (presentation?.caveat && picker.effortLevels.length > 0)
     rows.push({ label: presentation.caveat, selectable: false, labelFg: t.textFaint });

@@ -31,7 +31,7 @@ export function createProfilePickerRenderer(presentation: ProfilePickerPresentat
     const describe = (profile: { readonly name: string; readonly timestamp: number }): KitRow => ({
       label: profile.name,
       right: formatTimestamp(profile.timestamp),
-      ...(presentation.description === undefined ? {} : { desc: presentation.description }),
+      ...(presentation.description === undefined ? {} : { detail: presentation.description }),
     });
     const rows = visible.map(
       (profile, index): KitRow => ({

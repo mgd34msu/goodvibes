@@ -337,7 +337,7 @@ const providerRows = (picker: ModelPickerModal): KitRow[] =>
 function effortRows(picker: ModelPickerModal): KitRow[] {
   return picker.effortLevels.map((effort, index) => ({
     label: effort,
-    desc: picker.effortDetails.get(effort),
+    detail: picker.effortDetails.get(effort),
     selected: index === picker.selectedIndex,
   }));
 }

@@ -10,18 +10,19 @@ import { createSettingsDocumentation, fitValue } from '@goodvibes-jev/engine/ter
  *
  *   ▏Search all settings                                       display
  *
- *   ✦ interface          ┌ element inset ─────────────────────────────┐
- *     Display        9     ◇ Theme                        goodvibes
- *     UI             4       Color palette for the whole interface…
- *   ✦ ai routing             display.theme · default goodvibes · …
- *     Provider       7     Theme mode                          dark
+ *   ✦ interface          selected-item help
+ *     Display       10      Color palette for the whole interface…
+ *     UI             4      display.theme · default goodvibes · …
+ *   ✦ ai routing
+ *     Provider       7    ◇ Theme                        goodvibes
+ *                         Theme mode                          dark
  *
  *   ↑↓ move   ⏎ change   ←→ category   ctrl+r reset to default
  *
  * Search reaches every setting in every category at once (the search row is
  * always live). Categories on the left, plain rows on the right: name, value,
- * and a ◇ when the value differs from the default. The selected row explains
- * itself in place, wrapped in full, with its key, default, type and source
+ * and a ◇ when the value differs from the default. The selected row is explained
+ * above the uninterrupted list, with its key, default, type and source
  * (PgUp/PgDn scroll long documentation). The breadcrumb in the title says
  * where you are. Changes to the theme preview live (see theme-settings-actions).
  */
@@ -74,7 +75,7 @@ function categoryRows(modal: SettingsModal): KitRow[] {
 // Documentation block
 // ---------------------------------------------------------------------------
 
-/** Fact lines folded into one compact line under the selected row (the row itself shows the current value). */
+/** Fact lines folded into one compact line above the list (the row itself shows the current value). */
 
 /**
  * The complete documentation the selected row explains itself with (its name

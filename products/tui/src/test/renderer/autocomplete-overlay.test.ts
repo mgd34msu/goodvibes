@@ -44,7 +44,7 @@ describe('renderAutocompleteOverlay', () => {
     expect(lines[0]!.slice(POPUP_BAR_X + 1).every((cell) => cell.char === ' ')).toBe(true);
     expect(lines[lines.length - 1]!.slice(POPUP_BAR_X + 1).every((cell) => cell.char === ' ')).toBe(true);
     // The selected row carries the gradient across the fill with dark bold text.
-    const selectedRow = lines[1]!;
+    const selectedRow = lines.find(line => line.some(cell => cell.char === '/' && cell.fg === t.selectedListItemText))!;
     expect(selectedRow[POPUP_BAR_X + 1]!.bg).toBe(t.brand);
     const nameCell = selectedRow[POPUP_BAR_X + 3]!;
     expect(nameCell.char).toBe('/');
@@ -58,8 +58,7 @@ describe('renderAutocompleteOverlay', () => {
       .map((line) => line.map((cell) => cell.char).join(''))
       .join(' ')
       .replace(/[│┌┐└┘├┤┬┴┼─▸┃]/g, ' ')
-      // The selected row's right-aligned "tab complete" sits on the first
-      // line of its wrapped description; it is not part of the description.
+      // The tab hint belongs to the command row, below its description.
       .replace(/tab complete/g, ' ')
       .replace(/\s+/g, ' ');
   }
@@ -110,7 +109,7 @@ describe('renderAutocompleteOverlay', () => {
     }
   });
 
-  test('a short description that already fits renders inline on the command row (no unnecessary wrap)', () => {
+  test('even a short description appears above the command list', () => {
     const registry = new CommandRegistry();
     registry.register({
       name: 'bookmarks',
@@ -124,8 +123,8 @@ describe('renderAutocompleteOverlay', () => {
       .map((line) => line.map((cell) => cell.char).join(''))
       .find((line) => line.includes('List bookmarked blocks'));
     expect(rowText).toBeDefined();
-    // Inline means the command name and its description share one physical
-    // row rather than the description wrapping onto a line of its own.
-    expect(rowText).toContain('/bookmarks');
+    expect(rowText).not.toContain('/bookmarks');
+    const text = lines.map(line => line.map(cell => cell.char).join(''));
+    expect(text.findIndex(line => line.includes('List bookmarked blocks'))).toBeLessThan(text.findIndex(line => line.includes('/bookmarks')));
   });
 });

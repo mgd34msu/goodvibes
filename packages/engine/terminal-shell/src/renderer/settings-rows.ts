@@ -1,7 +1,7 @@
 import { activeTokens } from './theme.js';
 import { fitValue } from './settings-documentation.js';
 import { mcpTrustRows, type McpTrustRowEntry } from './mcp-form-rows.js';
-import { inferSubscriptionRouteReason, type SubscriptionEntry } from '../settings-subscriptions.js';
+import { type SubscriptionEntry } from '../settings-subscriptions.js';
 import type { KitRow } from './surface-kit-list.js';
 import type { KitHint } from './surface-kit.js';
 interface SettingRowEntry {
@@ -100,7 +100,6 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry>, Entry 
             [
               entry.activeRoute ? policy.routeLabel(entry.activeRoute) : '',
               entry.authFreshness ?? '',
-              inferSubscriptionRouteReason(entry) ?? '',
             ]
               .filter(Boolean)
               .join(' · ') || undefined,

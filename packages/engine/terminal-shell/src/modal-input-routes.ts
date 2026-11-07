@@ -28,6 +28,7 @@ type SelectionRouteState = {
         setQuery: (query: string) => void;
         moveUp: () => void;
         moveDown: () => void;
+        scrollContext?: (delta: number) => void;
         close: () => void;
     };
     selectionCallback: ((result: SelectionResult | null) => void) | null;
@@ -133,6 +134,9 @@ export function handleSelectionModalToken(state: SelectionRouteState, token: Inp
         }
         else if (token.logicalName === 'down') {
             state.selectionModal.moveDown();
+        }
+        else if (token.logicalName === 'pageup' || token.logicalName === 'pagedown') {
+            state.selectionModal.scrollContext?.(token.logicalName === 'pageup' ? -1 : 1);
         }
         else if (token.logicalName === 'left' || token.logicalName === 'right') {
             const selected = state.selectionModal.getSelected();

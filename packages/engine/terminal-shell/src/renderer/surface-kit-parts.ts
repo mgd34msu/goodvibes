@@ -355,7 +355,10 @@ export function renderPopup(options: PopupOptions): PopupResult {
   canvas.fill(fillX, 0, fillW, used + 2, t.backgroundPanel);
   if (options.header) drawRow(canvas, 1, options.header, x0, x1);
   const listOptions = { rows: options.rows, top: 1 + headerRows, bottom: used, x0, x1, scrollKey };
-  const list = overflow ? drawScrollingList(canvas, listOptions) : drawList(canvas, listOptions);
+  // Content-sized popups retain the help height measured at their full budget.
+  // Recomputing its percentage after shrinking would move options on focus.
+  const context = { height: Math.max(0, trial.listTop - 1) };
+  const list = overflow ? drawScrollingList(canvas, { ...listOptions, context }) : drawList(canvas, { ...listOptions, context });
   for (let r = 0; r < used + 2; r++) canvas.put(POPUP_BAR_X, r, '┃', { fg: t.textFaint });
   return { lines: canvas.lines, list };
 }

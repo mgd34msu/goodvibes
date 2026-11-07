@@ -4,7 +4,7 @@
  *
  * Title row, the always-live search row (when the picker searches), items as
  * kit rows grouped under ✦ category headers, the selected item as the
- * gradient row, details wrapped in full after the label, a muted scroll count
+ * gradient row, selected details above the uninterrupted list, a muted scroll count
  * and keycap hints. The modal sizes to its content: a short question is a
  * small centered dialog that shows every answer; a long list takes the
  * standard height and scrolls around the selected row.
@@ -19,6 +19,7 @@ import {
   maxModalHeight,
   searchRow,
   scrollCountText,
+  wrapLines,
   type KitHint,
   type SurfaceLayer,
 } from './surface-kit.js';
@@ -40,6 +41,7 @@ function hintsFor(modal: SelectionModal): KitHint[] {
   const base: KitHint[] = [['↑↓', 'move'], ['⏎', primaryVerb(modal, item)]];
   if (item?.primaryAction === 'toggle' && !item.actions) base.push(['space', 'toggle']);
   if (item?.adjustable) base.push(['←→', 'adjust']);
+  if (modal.items.some(item => item.detail)) base.push(['pgup pgdn', 'details']);
   // Item action strings are legacy "[d] delete" / "d delete" text; each one
   // becomes a keycap. Several may share one string separated by spaces.
   const actionStrings = item?.actions ? splitActionString(item.actions) : [];
@@ -63,7 +65,7 @@ function rowsFor(items: readonly SelectionItem[], selectedIndex: number): KitRow
     }
     rows.push({
       label: item.label,
-      desc: item.detail,
+      detail: item.detail,
       selected: index === selectedIndex,
       labelFg: item.fg,
     });
@@ -88,8 +90,9 @@ export function renderSelectionModalOverlay(
   // modal; measure against the same text span drawList uses.
   const allRows = rowsFor(modal.items, -1);
   const needed = allRows.length === 0 ? 1 : listHeight(allRows, 0, textWidth - 1);
+  const detailRows = modal.items.reduce((max, item) => Math.max(max, item.detail ? wrapLines(item.detail, textWidth).length : 0), 0);
   const searchRows = modal.allowSearch ? 2 : 0;
-  const height = modalHeightFor(screenWidth, screenHeight, { hints }, searchRows + needed);
+  const height = modalHeightFor(screenWidth, screenHeight, { hints }, searchRows + needed + (detailRows > 0 ? detailRows + 1 : 0));
   // A short picker (it fits well inside the screen) is a small centered dialog.
   const center = height <= Math.round(maxModalHeight(screenHeight) * 0.6);
   const f = beginModal(screenWidth, screenHeight, { title: modal.title, hints, height, center });
@@ -110,7 +113,11 @@ export function renderSelectionModalOverlay(
     return finishModal(f);
   }
 
-  const res = drawList(f.canvas, { mouseNavigation, rows, top, bottom: f.bottom, x0: f.l, x1: f.r });
+  const res = drawList(f.canvas, {
+    mouseNavigation, rows, top, bottom: f.bottom, x0: f.l, x1: f.r,
+    context: { height: detailRows, offset: modal.contextScroll },
+    scrollKey: { owner: modal, name: 'selection' },
+  });
   f.hintRight = scrollCountText(res.above, res.below);
   return finishModal(f);
 }
@@ -129,6 +136,7 @@ export function renderSelectionModalPackageText(): string {
     'edit',
     'delete',
     'adjust',
+    'details',
     '<n> more ↑',
     '<n> more ↓',
   ].join('\n');

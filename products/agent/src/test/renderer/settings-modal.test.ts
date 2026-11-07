@@ -102,6 +102,28 @@ describe('renderSettingsModal', () => {
     return layerTextBlock(renderSettingsModal(modal, width, height));
   }
 
+  test('selected help stays above a continuous settings list without moving it', () => {
+    modal.searchFocused = false;
+    modal.categoryIndex = 0;
+    const entries = modal.currentItems;
+    expect(entries.length).toBeGreaterThan(3);
+    const positions: number[] = [];
+    for (const index of [0, 2, 3]) {
+      modal.selectedIndex = index;
+      modal.contextScroll = 0;
+      const layer = renderSettingsModal(modal, 160, 60);
+      const text = layer.lines.map(line => line.map(cell => cell.char).join(''));
+      const first = text.findIndex(line => /(?:◇\s+)?stream\s+(?:true|false)\s*$/.test(line));
+      expect(first).toBeGreaterThan(0);
+      positions.push(first);
+      for (let i = 0; i < entries.length; i++) {
+        expect(text[first + i]).toContain(entries[i]!.setting!.key.split('.').at(-1)!);
+      }
+      expect(text.slice(0, first).join('\n')).toContain('source default');
+    }
+    expect(new Set(positions).size).toBe(1);
+  });
+
   test('is a kit modal layer that fits the screen', () => {
     const layer = renderSettingsModal(modal, W, 40);
     expect(layer.dim).toBe(true);

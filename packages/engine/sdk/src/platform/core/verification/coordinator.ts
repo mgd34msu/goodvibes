@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { verificationEvidence, verificationIntegration, verificationRequirement, verificationScope, verificationSource, verificationRepairs, verificationNoIssue, verificationResolution, verificationAudit, verificationInstructionAudit, verificationObservationAudit } from './batteries.js';
-import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, issueVerificationId, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
+import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, issueVerificationId, verificationExecutionGroups, verificationFrames, verificationSources, verificationWireSource } from './source.js';
 import { VerificationStore } from './store.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationAccess, type VerificationReceipt, type VerificationRequirement, type VerificationSource, type VerificationSourceInput, type VerificationSummary, type VerificationWriter } from './types.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
@@ -36,7 +36,9 @@ type RepairAssessment = {
   qualifiedNoIssues?: readonly string[];
 };
 type VerificationContextRecord = { readonly input: unknown; readonly id: string };
-type VerificationCaseScope = VerificationContextRecord & { readonly audits: Map<string, VerificationContextRecord> };
+type VerificationRepairCandidate = { readonly context: unknown; candidate: string | undefined };
+type VerificationCaseScope = VerificationContextRecord & { readonly audits: Map<string, VerificationContextRecord>;
+  readonly repairs: Map<string, VerificationRepairCandidate> };
 type VerificationTurnContext = {
   readonly request: unknown;
   readonly requirements: readonly { readonly id: string; readonly text: string }[];
@@ -142,7 +144,8 @@ export class CompletionVerification {
     if (previous && isDeepStrictEqual(previous.input, input)) return previous.id;
     // Only the current scope is retained by this live authority. Its owned
     // views share source strings; no serialized body becomes a key.
-    const current = { input: captureOwnedJson(input), id: issueVerificationId('context'), audits: new Map<string, VerificationContextRecord>() };
+    const current = { input: captureOwnedJson(input), id: issueVerificationId('context'), audits: new Map<string, VerificationContextRecord>(),
+      repairs: new Map<string, VerificationRepairCandidate>() };
     this.caseScopes.set(access.identity, current); return current.id;
   }
   private auditScope(requirement: string, input: unknown, access: VerificationAccess): string {
@@ -759,7 +762,18 @@ export class CompletionVerification {
   }
 
   private async repairs(evidence: unknown, checks: readonly string[], access: VerificationAccess): Promise<RepairAssessment> {
-    const context = { evidence, checks, maxCharacters: 8_000 };
+    const context = snapshotJudgmentEvidence({ evidence, checks, maxCharacters: 8_000 }) as { readonly evidence: unknown; readonly checks: readonly string[]; readonly maxCharacters: number };
+    const scope = this.caseScopes.get(access.identity);
+    if (!scope) throw new VerificationHeldError('missing live diagnostic scope');
+    const key = JSON.stringify(checks);
+    let retained = scope.repairs.get(key);
+    if (!retained || !isDeepStrictEqual(retained.context, context)) {
+      if (!scope.repairs.has(key) && scope.repairs.size >= 32) {
+        const first = scope.repairs.keys().next().value;
+        if (first !== undefined) scope.repairs.delete(first);
+      }
+      retained = { context, candidate: undefined }; scope.repairs.set(key, retained);
+    }
     const admit = (value: Record<string, unknown>): RepairAssessment => {
       const noIssues = value.noIssues ?? [];
       if (!bounded(value, 8_000) || !Array.isArray(value.findings) || !Array.isArray(noIssues)
@@ -784,8 +798,10 @@ export class CompletionVerification {
       });
       return { findings, noIssues: cleared };
     };
-    const key = verificationHash(['repairs-v2', context]);
-    let candidate = this.store.proposals.get(key), repair: unknown = null;
+    // Candidates belong to this live case and receive fresh qualification on
+    // every use. The outer checkpoint persists final findings and held drafts;
+    // no second persistent content-derived key is needed for a temporary draft.
+    let candidate = retained.candidate, repair: unknown = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       access.assertCurrent();
       if (candidate === undefined) {
@@ -794,17 +810,18 @@ export class CompletionVerification {
       }
       let proposed: RepairAssessment;
       try { proposed = admit(parse(candidate)); }
-      catch { candidate = undefined; repair = { problem: 'Account for each supplied check ID exactly once, either with a concrete cited finding or a cited noIssues assessment. Do not invent work when no defect is supported.' }; continue; }
+      catch { candidate = undefined; retained.candidate = undefined; repair = { problem: 'Account for each supplied check ID exactly once, either with a concrete cited finding or a cited noIssues assessment. Do not invent work when no defect is supported.' }; continue; }
+      retained.candidate = candidate;
       const runs = await Promise.all([
         ...(proposed.findings.length ? [verificationRepairs.run(access.port, { ...context, proposed: proposed.findings } as never,
           { ...this.options(access), site: verificationRepairs.name })] : []),
-        ...proposed.noIssues.map(diagnosis => verificationNoIssue.run(access.port, { evidence, diagnosis } as never,
+        ...proposed.noIssues.map(diagnosis => verificationNoIssue.run(access.port, { evidence: context.evidence, diagnosis } as never,
           { ...this.options(access), site: verificationNoIssue.name })),
       ]);
       for (const run of runs) run.recordAction(clean(run.readings) ? 'Admit this private diagnosis; no-issue assessments require fresh native checks and never become working-model repairs.' : 'Repair the private diagnosis against the same scope, evidence and readings.');
       const noIssueOffset = proposed.findings.length ? 1 : 0;
       const qualifiedNoIssues = proposed.noIssues.filter((_, index) => clean(runs[index + noIssueOffset]!.readings)).map(item => item.check);
-      if (runs.every(run => clean(run.readings))) { this.store.rememberProposal(key, candidate); return { ...proposed, qualifiedNoIssues }; }
+      if (runs.every(run => clean(run.readings))) return { ...proposed, qualifiedNoIssues };
       if (runs.every(run => Object.values(run.readings).every(reading => !(reading.verdict === 'yes' && reading.outcome === 'act')))) {
         // This is private diagnostic guidance, not execution authority or a new
         // acceptance requirement. An unsettled localization should prompt one
@@ -815,8 +832,9 @@ export class CompletionVerification {
       }
       repair = { proposed, readings: runs.map(run => readingEvidence(run.readings)), instruction: 'Remove invented or ineffective repairs. Give only the specific correction justified by the original requirement and primary evidence.' };
       candidate = undefined;
+      retained.candidate = undefined;
     }
-    const original = evidence as { requirement?: VerificationRequirement; requirements?: unknown };
+    const original = context.evidence as { requirement?: VerificationRequirement; requirements?: unknown };
     const requirement = original.requirement?.text ?? JSON.stringify(original.requirements);
     return { noIssues: [], findings: checks.map(check => ({ check, issue: `Unresolved ${check} reading for original requirement: ${requirement}`,
       repair: `Inspect the primary implementation or artifact implicated by this exact requirement and settle the reading: ${requirement}. Do not repeat unchanged report/hash/log checks, add work, or treat an uncertain reading as a proven defect.`,

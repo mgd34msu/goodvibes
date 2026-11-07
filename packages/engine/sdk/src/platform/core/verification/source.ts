@@ -1,12 +1,8 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { VerificationSource, VerificationSourceInput, VerificationSourceOwner } from './types.js';
 
 export const VERIFICATION_FRAME_CHARACTERS = 28_000;
 export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
-// A letter-only encoding keeps opaque digests from accidentally looking like
-// payment-card material to the mandatory privacy screen. All 256 bits remain.
-export const verificationHash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
 let recordNamespace: string | undefined;
 let recordSequence = 0;
 

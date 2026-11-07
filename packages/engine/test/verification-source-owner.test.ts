@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
-import { issueVerificationSource, verificationHash, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
+import { issueVerificationSource, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
 import { retainedDelegationSources } from '../sdk/src/platform/core/verification/delegated-history.js';
 import { citedReadSources, nativeReadReceipts } from '../sdk/src/platform/core/verification/read-receipts.js';
 import { observeReadContent } from '../sdk/src/platform/tools/read/observation.js';
@@ -149,7 +149,8 @@ test('earlier stored provenance commitments migrate public originals into exact 
   const f = journal(), conversation = new ConversationManager();
   conversation.addUserMessage('[Summary] Earlier work is retained as reference.');
   f.store.rememberArchive({ histories: [], derived: [] });
-  const prior = verificationHash(conversation.getMessageSnapshot()[0]);
+  // Fixed earlier-format fixture, independent of the current implementation.
+  const prior = 'oncfadclihooppodmieiniadfiemimjfepcifbinphkgkjnjkbnmlegohcbbcnmh';
   appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'earlier-position', value: { histories: [], derived: [[0, prior]] } }) + '\n');
   const restored = new VerificationStore(f.root, f.session);
   registerVerificationArchive(conversation, value => restored.rememberArchive(value), [...restored.archives.values()]);
@@ -315,8 +316,8 @@ test('a repair checkpoint belongs to its native branch and stale cleanup cannot 
 
 test('existing held drafts convert their stored request and prefix commitments once, and clearing cannot resurrect them', () => {
   const f = journal(), request = 'Review the source.', conversation = new ConversationManager(); conversation.addUserMessage(request);
-  const key = verificationHash(['completion-repair-checkpoint-v1', request]);
-  const value = { count: 1, prefix: verificationHash(conversation.getMessageSnapshot()), accessHeld: true, review: null, response: 'An earlier retained draft.' };
+  const key = 'giehkliihjmninenafpghoailomgnhceobeahjkfijmfdagjabljpffafkppnikh';
+  const value = { count: 1, prefix: 'bhfhocmghppiibmegpallheiihjnkjlhlhngoakcfddpeileacgaidnpgggjaipj', accessHeld: true, review: null, response: 'An earlier retained draft.' };
   f.store.rememberProposal(key, JSON.stringify(value));
   const guard = new ResponseCompletionGuard({ request, conversation, verificationStore: f.store });
   expect(guard.resumedRepair()).toContain(value.response);
@@ -338,7 +339,7 @@ test('immutable original IDs cannot be rebound, including after recovery of a st
   f.store.rememberOriginal(original);
   expect(() => f.store.rememberOriginal(VerificationJournalSource.capture(original.id, { content: 'A foreign substituted source.' }))).toThrow('immutable journal original changed');
   const value = { content: 'Recovered public original.' };
-  appendFileSync(f.path, JSON.stringify({ kind: 'original', key: 'original-stored-commitment', value: { id: 'original-stored-commitment', contentCommitment: verificationHash(value) } }) + '\n');
+  appendFileSync(f.path, JSON.stringify({ kind: 'original', key: 'original-stored-commitment', value: { id: 'original-stored-commitment', contentCommitment: 'apgaohfemallppnpgkcpbhlbhihknphdnbnndoilhjbopaigibkmpbkjlnkfnfol' } }) + '\n');
   const reopened = new VerificationStore(f.root, f.session);
   expect(() => reopened.rememberOriginal(VerificationJournalSource.capture('original-stored-commitment', { content: 'Foreign source.' }))).toThrow('immutable journal original changed');
   const recovered = VerificationJournalSource.restore(reopened.original('original-stored-commitment')!);

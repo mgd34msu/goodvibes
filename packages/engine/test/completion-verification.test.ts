@@ -13,7 +13,7 @@ function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
 import { JudgmentContextLimitError, JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { CompletionVerification } from '../sdk/src/platform/core/verification/coordinator.js';
-import { verificationExecutionGroups, verificationHash, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
+import { issueVerificationId, verificationExecutionGroups, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
 import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
 import { createVerificationWriter } from '../sdk/src/platform/core/verification/writer.js';
 import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
@@ -899,15 +899,49 @@ test('a no-issue diagnosis rechecks the original requirement instead of manufact
     const current = raw as unknown as { requirement?: unknown; privateRepairAssessment?: unknown };
     return noulAnswer(name === 'unfinished' && current.requirement && !current.privateRepairAssessment ? 0.4 : 0.01);
   });
-  const result = await new CompletionVerification(noIssueWriter).prepare(
+  let diagnostics = 0;
+  const result = await new CompletionVerification(async request => {
+    if (request.operation === 'findings') {
+      diagnostics++;
+      expect(Object.isFrozen(request.context)).toBe(true);
+      expect(Object.isFrozen((request.context as { evidence: object }).evidence)).toBe(true);
+    }
+    return noIssueWriter(request);
+  }).prepare(
     state('Completed review and delivery observed.'),
     access(fake.port),
   );
   expect(result.findings).toHaveLength(0);
+  expect(diagnostics).toBeGreaterThan(0);
   const checks = fake.requests.filter((request) => request.context?.battery === 'engine.verification.requirement');
   expect(checks.length).toBeGreaterThan(1);
   expect(JSON.stringify(checks.at(-1)!.state)).toContain('privateRepairAssessment');
   expect(fake.requests.some((request) => request.context?.battery === 'engine.verification.integration')).toBe(true);
+});
+
+test('an admitted live diagnostic candidate survives a qualification outage but still requires a fresh decision', async () => {
+  const fake = fakePort((name, _question, raw) => {
+    const current = raw as { requirement?: unknown; privateRepairAssessment?: unknown };
+    return noulAnswer(name === 'unfinished' && current.requirement && !current.privateRepairAssessment ? .4 : .01);
+  });
+  let blocked = true, drafts = 0;
+  const port: VerificationAccess['port'] = { ...fake.port, async ask(request) {
+    if (request.context?.battery === 'engine.verification.no-issue' && blocked) {
+      blocked = false;
+      throw new JudgmentError('unavailable', 'Synthetic qualification outage');
+    }
+    return fake.port.ask(request);
+  } };
+  const verifier = new CompletionVerification(async request => {
+    if (request.operation === 'findings') drafts++;
+    return noIssueWriter(request);
+  });
+  const owner = access(port), input = state('Completed review and delivery observed.');
+  await expect(verifier.prepare(input, owner)).rejects.toMatchObject({ kind: 'unavailable' });
+  expect(drafts).toBe(1);
+  expect((await verifier.prepare(input, owner)).findings).toHaveLength(0);
+  expect(drafts).toBe(1);
+  expect(fake.requests.some(request => request.context?.battery === 'engine.verification.no-issue')).toBe(true);
 });
 
 test('a held cached case can pass on retry without mutating its frozen checkpoint', async () => {
@@ -2216,8 +2250,10 @@ test('lossless repeated-line encoding retains exact bytes and a different middle
   expect(JSON.stringify(wire).length).toBeLessThan(1000);
 });
 
-test('native evidence digests cannot accidentally become card-shaped numbers', () => {
-  for (let index = 0; index < 100; index++) expect(verificationHash({ index })).toMatch(/^[a-p]{64}$/);
+test('native evidence IDs stay unique and pass the observational privacy boundary', () => {
+  const ids = Array.from({ length: 100 }, () => issueVerificationId('e'));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(() => snapshotJudgmentEvidence({ ids })).not.toThrow();
 });
 
 test('a refused checker RESULT halts validation and preserves the exact unpublished draft', async () => {

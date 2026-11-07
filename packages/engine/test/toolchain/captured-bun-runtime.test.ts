@@ -26,12 +26,16 @@ function elf(machine: number): Buffer {
   const bytes = Buffer.alloc(64); bytes.write('\x7fELF'); bytes[4] = 2; bytes[5] = 1; bytes.writeUInt16LE(machine, 18); return bytes;
 }
 
-test.skipIf(!supportedHost)('stages and launches real ordinary Bun beside each artifact with exact notice and provenance', () => {
+test.skipIf(!supportedHost)('stages and launches real ordinary Bun with exact notice, provenance and modes under a private umask', () => {
   const root = fixture();
-  provideCapturedBunRuntime({ root, outDir: 'dist', target: native, artifacts: ['app', 'daemon'] });
+  const mask = process.umask(0o077);
+  try { provideCapturedBunRuntime({ root, outDir: 'dist', target: native, artifacts: ['app', 'daemon'] }); }
+  finally { process.umask(mask); }
   for (const name of ['app', 'daemon']) {
     const runtime = join(root, 'dist', `${name}.bun`);
     expect(statSync(runtime).mode & 0o777).toBe(0o755);
+    expect(statSync(`${runtime}.LICENSE.md`).mode & 0o777).toBe(0o644);
+    expect(statSync(`${runtime}.json`).mode & 0o777).toBe(0o644);
     const result = spawnSync(runtime, ['--no-env-file', '--no-autoload-bunfig', '--print', '6 * 7'], { cwd: root, env: { HOME: root }, encoding: 'utf8' });
     expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({ status: 0, stdout: '42\n', stderr: '' });
     const sha256 = createHash('sha256').update(readFileSync(runtime)).digest('hex');

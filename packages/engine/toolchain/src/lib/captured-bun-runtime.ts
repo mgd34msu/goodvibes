@@ -109,8 +109,11 @@ export function provideCapturedBunRuntime(options: ProvideCapturedBunRuntimeOpti
         const compiled = join(outputRoot, artifact);
         const dest = `${compiled}.bun`;
         copyFileSync(runtime, join(staging, 'next')); chmodSync(join(staging, 'next'), 0o755); renameSync(join(staging, 'next'), dest);
-        writeFileSync(join(staging, 'notice'), notice); renameSync(join(staging, 'notice'), `${dest}.LICENSE.md`);
+        // Artifact admission requires canonical modes even when a private
+        // installer checkout inherits umask 077. Keep staging directories private.
+        writeFileSync(join(staging, 'notice'), notice); chmodSync(join(staging, 'notice'), 0o644); renameSync(join(staging, 'notice'), `${dest}.LICENSE.md`);
         writeFileSync(join(staging, 'provenance'), `${JSON.stringify({ version, target: target.key, ...(pinnedPackage ? { package: distribution.packageName } : {}), source: provenance, sha256, upstreamSource: `https://github.com/oven-sh/bun/tree/bun-v${version}` }, null, 2)}\n`);
+        chmodSync(join(staging, 'provenance'), 0o644);
         renameSync(join(staging, 'provenance'), `${dest}.json`);
       }
     } finally { rmSync(staging, { recursive: true, force: true }); }

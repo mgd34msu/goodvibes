@@ -1,8 +1,8 @@
 import { createKnowledgeExtractionOwner } from './extraction-ownership.js';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { snapshotNodeInput } from './activation/projection.js';
-import { supportHash } from './semantic/verification/projection.js';
 import { assertKnowledgeIngestUriOperation, beginKnowledgeUriPreparation, completeKnowledgeUriPreparation, cancelKnowledgeUriPreparation, consumeKnowledgeUriPreparation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { ArtifactRecord } from '../artifacts/types.js';
 import { extractKnowledgeArtifact, type KnowledgeExtractionResult } from './extractors.js';
@@ -45,7 +45,7 @@ export async function prepareKnowledgeExtraction(
     await context.store.init();
     owner.assertCurrent();
     const readRetained = () => ({ source: context.store.getSource(sourceId), extraction: context.store.getExtractionBySourceId(sourceId) });
-    const retainedHash = supportHash(readRetained());
+    const retained = snapshotNodeInput(readRetained());
     const content = await context.artifactStore.readContent(artifactId);
     owner.assertCurrent();
     const record = snapshotNodeInput(content.record);
@@ -53,16 +53,17 @@ export async function prepareKnowledgeExtraction(
     if (record.id !== artifactId || createHash('sha256').update(buffer).digest('hex') !== record.sha256) {
       throw new KnowledgeExtractionJudgmentHoldError();
     }
-    const recordHash = supportHash(record);
     const canonicalUri = await uris.canonicalize(record.sourceUri ?? '');
     owner.assertCurrent();
-    if (supportHash(readRetained()) !== retainedHash || supportHash(context.artifactStore.getRecord(artifactId)) !== recordHash) {
+    const unchanged = () => isDeepStrictEqual(snapshotNodeInput(readRetained()), retained)
+      && isDeepStrictEqual(snapshotNodeInput(context.artifactStore.getRecord(artifactId)), record);
+    if (!unchanged()) {
       throw new KnowledgeExtractionJudgmentHoldError();
     }
     const canonicalSource = canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined;
     const assertCurrent = () => {
       owner.assertCurrent();
-      if (supportHash(readRetained()) !== retainedHash || supportHash(context.artifactStore.getRecord(artifactId)) !== recordHash
+      if (!unchanged()
         || (canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined) !== canonicalSource) {
         throw new KnowledgeExtractionJudgmentHoldError();
       }

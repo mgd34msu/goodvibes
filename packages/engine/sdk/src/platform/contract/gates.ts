@@ -17,7 +17,8 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { CONTRACT_CONFIG_DEFAULTS, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
-import { captureGateInput, gateDefinitionIdentity, type GateInputIdentity } from './gate-input.js';
+import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
+import { isDeepStrictEqual } from 'node:util';
 import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
 import type { ContractCheckedGate, GateResultOutcome } from '../../events/contract.js';
 
@@ -61,6 +62,16 @@ interface GateCommandResult {
   readonly exitCode: number | null;
   readonly kind: 'completed' | 'timeout' | 'tool-error';
 }
+
+type GateInputIdentity = GateSourceInputIdentity & { readonly definition: string };
+let definitionSequence = 0;
+function nextDefinitionId(): string {
+  if (!Number.isSafeInteger(++definitionSequence)) throw new Error('Gate definition identity exhausted');
+  return `gate-definition-${definitionSequence}`;
+}
+const gateDefinitions = (gates: readonly QualityGate[]) => gates.map(gate => Object.freeze({
+  name: gate.name, command: gate.command, enabled: gate.enabled, required: gate.required, verification: gate.verification,
+}));
 
 const liveGateInputs = new WeakMap<QualityGateResult, () => GateInputIdentity>();
 const gateInvalidations = new WeakMap<QualityGateResult, (result: QualityGateResult) => void>();
@@ -235,10 +246,20 @@ export interface RunContractGatesOptions {
 export async function runContractGates(options: RunContractGatesOptions): Promise<QualityGateResult[]> {
   const gates = getEnabledContractGates(options.configManager).map(gate => Object.freeze({ ...gate }));
   if (gates.length === 0) return [];
-  const expectedDefinition = gateDefinitionIdentity(gates);
+  let definitionSnapshot = gateDefinitions(gates), definition = nextDefinitionId();
+  const expectedDefinition = definition;
   const timeoutMs = getContractGateTimeoutMs(options.configManager);
   const results: QualityGateResult[] = [];
-  const capture = () => captureGateInput(options.cwd, getEnabledContractGates(options.configManager));
+  const capture = (): GateInputIdentity => {
+    const current = gateDefinitions(getEnabledContractGates(options.configManager));
+    if (!isDeepStrictEqual(current, definitionSnapshot)) {
+      definitionSnapshot = current;
+      definition = nextDefinitionId();
+    }
+    // Compare configured command bytes privately. The receipt carries only an
+    // owned label, so credentials embedded in commands cannot enter provenance.
+    return { ...captureGateInput(options.cwd), definition };
+  };
   const emitResult = (result: QualityGateResult): void => {
     emitContractEvent(options.runtimeBus, options.sessionId, {
       type: 'CONTRACT_GATE_RESULT', contractId: options.contractId, targetId: options.targetId,

@@ -184,9 +184,9 @@ test('Git routing and config environment cannot hide changes to the requested so
     process.env.GIT_CONFIG_COUNT = '1';
     process.env.GIT_CONFIG_KEY_0 = 'core.worktree';
     process.env.GIT_CONFIG_VALUE_0 = foreign;
-    const before = captureGateInput(directory, []);
+    const before = captureGateInput(directory);
     writeFileSync(join(directory, 'source.ts'), 'changed');
-    expect(captureGateInput(directory, []).source).not.toBe(before.source);
+    expect(captureGateInput(directory).source).not.toBe(before.source);
   } finally {
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key];
@@ -202,9 +202,9 @@ test('a standalone project inside an ignored parent directory does not receive a
   const project = join(directory, 'ignored', 'project');
   mkdirSync(project, { recursive: true });
   writeFileSync(join(project, 'source.ts'), 'original');
-  const before = captureGateInput(project, []);
+  const before = captureGateInput(project);
   writeFileSync(join(project, 'source.ts'), 'changed');
-  expect(captureGateInput(project, []).source).not.toBe(before.source);
+  expect(captureGateInput(project).source).not.toBe(before.source);
 });
 
 test('a replaced package script cannot inherit a previous scripts machine-reporter identity', async () => {
@@ -235,6 +235,7 @@ test('a changed configured command cannot receive a receipt from the previous pl
     onResult: (_results, result) => { if (result.gate === 'prepare') gates[1]!.command = 'exit 0'; },
   });
   expect(results[1]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'check-definition-changed-before-check', output: '' });
+  expect(JSON.stringify(results.map(result => result.provenance))).not.toContain(gates[0]!.command);
   const result = await judge(results);
   if (result.discarded) throw new Error('unexpected cancellation');
   expect(result.check.result).not.toBe('pass');

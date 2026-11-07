@@ -236,7 +236,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const { contract } = run;
     assertOwnedContractSource(contract);
     const tree = contractTree(contract);
-    const source = input.scope === 'deliverable' ? captureGateInput(tree, []).source : undefined;
+    const source = input.scope === 'deliverable' ? captureGateInput(tree).source : undefined;
     if (input.scope === 'deliverable') acceptedSources.delete(run);
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
@@ -662,7 +662,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       judgment.recordAction('discarded: the contract already ended');
       return null;
     }
-    if (source !== undefined && captureGateInput(tree, []).source !== source)
+    if (source !== undefined && captureGateInput(tree).source !== source)
       throw new PublicationPending('The result source changed during acceptance; verify its current contents before publication.');
     const checkId = `${input.targetId}.k${input.checks.length + 1}`;
     const now = run.env.now();
@@ -836,7 +836,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const check = run.contract.checks.at(-1);
     const accepted = acceptedSources.get(run);
     let current: string | undefined;
-    try { if (accepted) current = captureGateInput(accepted.tree, []).source; }
+    try { if (accepted) current = captureGateInput(accepted.tree).source; }
     catch { throw new PublicationPending('The accepted result source is unavailable; verify its current contents before publication.'); }
     if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source !== current)
       throw new PublicationPending('The result source changed after acceptance; verify its current contents before publication.');

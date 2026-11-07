@@ -3,23 +3,14 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTRACT_INPUT_EXCLUSIONS, listContractInputPaths } from './input-snapshot.js';
-import type { QualityGate } from './gates.js';
 
-export interface GateInputIdentity {
+export interface GateSourceInputIdentity {
   readonly source: string;
-  readonly definition: string;
   readonly packageScripts: Readonly<Record<string, string>>;
 }
 
 const excluded = new Set<string>([...CONTRACT_INPUT_EXCLUSIONS, 'node_modules']);
 const visible = (path: string): boolean => !path.split('/').some(part => excluded.has(part));
-
-export function gateDefinitionIdentity(gates: readonly QualityGate[]): string {
-  return createHash('sha256').update(JSON.stringify(gates.map(gate => ({
-    name: gate.name, command: gate.command, enabled: gate.enabled,
-    required: gate.required, verification: gate.verification,
-  })))).digest('hex');
-}
 
 function sourcePaths(root: string): string[] {
   try {
@@ -58,7 +49,7 @@ function packageScripts(bytes: readonly Buffer[]): Readonly<Record<string, strin
 }
 
 /** Ignored Git outputs and known runtime/dependency directories are not source inputs. */
-export function captureGateInput(cwd: string, gates: readonly QualityGate[]): GateInputIdentity {
+export function captureGateInput(cwd: string): GateSourceInputIdentity {
   const root = realpathSync(cwd);
   const rootStat = lstatSync(root, { bigint: true });
   if (!rootStat.isDirectory()) throw new Error('Gate source root is not a directory');
@@ -98,5 +89,5 @@ export function captureGateInput(cwd: string, gates: readonly QualityGate[]): Ga
   if (JSON.stringify(paths) !== JSON.stringify(sourcePaths(root))) throw new Error('Gate source membership changed during capture');
   const rootAfter = lstatSync(root, { bigint: true });
   if (rootStat.dev !== rootAfter.dev || rootStat.ino !== rootAfter.ino) throw new Error('Gate source root changed during capture');
-  return { source: hash.digest('hex'), packageScripts: scripts, definition: gateDefinitionIdentity(gates) };
+  return { source: hash.digest('hex'), packageScripts: scripts };
 }

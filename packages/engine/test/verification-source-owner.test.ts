@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
@@ -57,6 +57,43 @@ test('restoration treats earlier record IDs as opaque and never derives them aga
   const otherOwner = new VerificationStore();
   expect(otherOwner.retainSource(source()).id).not.toBe(prior.id);
   expect(issueVerificationSource(source()).id).not.toBe(issueVerificationSource(source()).id);
+});
+
+test('archive history IDs survive restart and preserve originals when a caller mutates its prior message array', () => {
+  const f = journal(), history = { messages: [{ role: 'user', content: 'Original owner request.' }] };
+  f.store.rememberArchive({ histories: [history], derived: [] });
+  const initial = readFileSync(f.path, 'utf8');
+  const reopened = new VerificationStore(f.root, f.session);
+  reopened.rememberArchive({ histories: [structuredClone(history)], derived: [] });
+  expect(readFileSync(f.path, 'utf8')).toBe(initial);
+  history.messages[0]!.content = 'A changed owner request.';
+  f.store.rememberArchive({ histories: [history], derived: [] });
+  const records = readFileSync(f.path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const originals = records.filter(record => record.kind === 'history');
+  expect(originals).toHaveLength(2);
+  expect(originals[0].key).not.toBe(originals[1].key);
+  expect(originals[0].value.messages[0].content).toBe('Original owner request.');
+  expect(originals[1].value.messages[0].content).toBe('A changed owner request.');
+  expect(new VerificationStore(f.root, f.session).archive?.histories[0]?.messages[0]?.content).toBe('A changed owner request.');
+});
+
+test('existing history identities remain opaque and inline archive originals receive a native record only once', () => {
+  const f = journal();
+  f.store.rememberArchive({ histories: [], derived: [] });
+  const history = { messages: [{ role: 'tool', content: 'Previously retained original bytes.' }] };
+  appendFileSync(f.path, JSON.stringify({ kind: 'history', key: 'existing-stored-key', value: history }) + '\n'
+    + JSON.stringify({ kind: 'archive', key: 'old-position-key', value: { historyKeys: ['existing-stored-key'], derived: [] } }) + '\n');
+  const restored = new VerificationStore(f.root, f.session), before = readFileSync(f.path, 'utf8');
+  restored.rememberArchive(restored.archive!);
+  expect(readFileSync(f.path, 'utf8')).toBe(before);
+  appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'inline-position-key', value: { branch: 'inline', histories: [history], derived: [] } }) + '\n');
+  const inline = new VerificationStore(f.root, f.session);
+  inline.rememberArchive(inline.archive!);
+  const saved = readFileSync(f.path, 'utf8');
+  const reopened = new VerificationStore(f.root, f.session);
+  reopened.rememberArchive(reopened.archive!);
+  expect(readFileSync(f.path, 'utf8')).toBe(saved);
+  expect(reopened.archive?.histories[0]?.messages).toEqual(history.messages);
 });
 
 test('retrieval indexes compare every native member and preview, and keep their issued IDs on restart', () => {

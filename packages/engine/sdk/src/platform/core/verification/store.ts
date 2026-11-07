@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import type { VerificationReceipt, VerificationSource, VerificationSourceInput } from './types.js';
-import { issueVerificationId, issueVerificationSource, verificationHash } from './source.js';
+import { issueVerificationId, issueVerificationSource } from './source.js';
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
 type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
@@ -22,6 +22,7 @@ export class VerificationStore {
   private readonly proposalRevisions = new Map<string, { readonly value: unknown; readonly revision: string }>();
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
+  private readonly historyKeys = new WeakMap<object, string>();
   private readonly path: string | undefined;
   private readonly root: string | undefined;
   archive: VerificationArchive | undefined;
@@ -66,7 +67,9 @@ export class VerificationStore {
         }
         if (value.kind === 'history' && value.value && typeof value.value === 'object') {
           const history = value.value as VerificationArchive['histories'][number];
-          if (Array.isArray(history.messages)) this.histories.set(value.key, history);
+          if (Array.isArray(history.messages)) {
+            this.histories.set(value.key, history); this.historyKeys.set(history, value.key);
+          }
         }
         if (value.kind === 'archive' && value.value && typeof value.value === 'object') {
           const entry = value.value as VerificationArchive;
@@ -74,11 +77,15 @@ export class VerificationStore {
             if (entry.runtimeMessages !== undefined && (!Array.isArray(entry.runtimeMessages)
               || entry.runtimeMessages.some(pair => !Array.isArray(pair) || !Number.isSafeInteger(pair[0]) || pair[0] < 0 || typeof pair[1] !== 'string')))
               throw new VerificationHeldError('invalid runtime message provenance');
-            if (Array.isArray(entry.histories)) for (const history of entry.histories) if (history && Array.isArray(history.messages)) this.histories.set(verificationHash(history), history);
+            if (Array.isArray(entry.histories)) for (const history of entry.histories) if (history && Array.isArray(history.messages)) {
+              const key = issueVerificationId('history');
+              this.histories.set(key, history); this.historyKeys.set(history, key);
+            }
             const metadata = value.value as { historyKeys?: string[]; branch?: string };
             if (Array.isArray(metadata.historyKeys) && metadata.historyKeys.some(key => typeof key !== 'string' || !this.histories.has(key))) throw new VerificationHeldError('missing archived original source');
             this.archive = { branch: typeof metadata.branch === 'string' ? metadata.branch : 'main',
-              histories: Array.isArray(metadata.historyKeys) ? metadata.historyKeys.flatMap(key => this.histories.get(key) ?? []) : [...this.histories.values()], derived: entry.derived,
+              histories: Array.isArray(metadata.historyKeys) ? metadata.historyKeys.flatMap(key => this.histories.get(key) ?? [])
+                : Array.isArray(entry.histories) ? entry.histories : [...this.histories.values()], derived: entry.derived,
               ...(entry.runtimeMessages ? { runtimeMessages: entry.runtimeMessages } : {}) };
             this.archives.set(this.archive.branch!, this.archive);
           }
@@ -188,17 +195,31 @@ export class VerificationStore {
     this.proposals.set(key, this.append('proposal', key, proposal));
   }
   rememberArchive(value: VerificationArchive): void {
-    for (const history of value.histories) {
-      const key = verificationHash(history);
-      if (!this.histories.has(key)) this.histories.set(key, this.append('history', key, history));
-    }
     const branch = value.branch ?? 'main', previous = this.archives.get(branch);
-    const position = { branch, historyKeys: value.histories.map(history => verificationHash(history)), derived: value.derived,
+    const keys = value.histories.map((history, index) => {
+      // Histories already belong to this append-only archive. Reuse their
+      // actual persisted identity, including identities read from older rows.
+      // A reconstructed value can reuse only the exact previous branch slot.
+      const before = previous?.histories[index];
+      let key = this.historyKeys.get(history);
+      if (key !== undefined && !isDeepStrictEqual(this.histories.get(key), history)) key = undefined;
+      if (key === undefined && before && isDeepStrictEqual(before, history)) key = this.historyKeys.get(before);
+      key ??= issueVerificationId('history');
+      const existing = this.histories.get(key);
+      const retained = existing && this.written.has(JSON.stringify(['history', key])) ? existing : this.append('history', key, history);
+      this.histories.set(key, retained);
+      this.historyKeys.set(history, key); this.historyKeys.set(retained, key);
+      return key;
+    });
+    const position = { branch, historyKeys: keys, derived: value.derived,
       ...(value.runtimeMessages?.length ? { runtimeMessages: value.runtimeMessages } : {}) };
-    if (!previous || JSON.stringify(previous.derived) !== JSON.stringify(value.derived)
-      || JSON.stringify(previous.runtimeMessages ?? []) !== JSON.stringify(value.runtimeMessages ?? [])
-      || JSON.stringify(previous.histories.map(history => verificationHash(history))) !== JSON.stringify(position.historyKeys))
-      this.append('archive', verificationHash(position), position);
-    this.archive = value; this.archives.set(branch, value);
+    if (!previous || !isDeepStrictEqual(previous.derived, value.derived)
+      || !isDeepStrictEqual(previous.runtimeMessages ?? [], value.runtimeMessages ?? [])
+      || !isDeepStrictEqual(previous.histories.map(history => this.historyKeys.get(history)), keys))
+      this.append('archive', branch, position);
+    const metadata = captureOwnedJson({ branch, derived: value.derived,
+      ...(value.runtimeMessages ? { runtimeMessages: value.runtimeMessages } : {}) }) as Omit<VerificationArchive, 'histories'>;
+    const retained = Object.freeze({ ...metadata, histories: Object.freeze(keys.map(key => this.histories.get(key)!)) });
+    this.archive = retained; this.archives.set(branch, retained);
   }
 }

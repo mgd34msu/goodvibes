@@ -13,7 +13,7 @@ function fakePort(answer: Parameters<typeof baseFakePort>[0]) {
 import { JudgmentContextLimitError, JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { CompletionVerification } from '../sdk/src/platform/core/verification/coordinator.js';
-import { verificationHash, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
+import { verificationExecutionGroups, verificationHash, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
 import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
 import { createVerificationWriter } from '../sdk/src/platform/core/verification/writer.js';
 import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
@@ -2357,9 +2357,23 @@ test('equal queries with distinct executions survive A B A; archived replicas of
   const first = { role: 'tool', callId: 'A-1', content: 'query A' },
     middle = { role: 'tool', callId: 'B-1', content: 'query B' },
     last = { role: 'tool', callId: 'A-2', content: 'query A' };
-  const sources = verificationSources({ ...state(), transcript: [first, middle, last], archive: [{ messages: [first] }] });
+  const sources = verificationSources({ ...state(), transcript: [first, middle, last], archive: [{ messages: [structuredClone(first)] }] });
   expect(sources.filter((source) => source.kind === 'observation')).toHaveLength(3);
   expect(sources.map((source) => source.text).join('\n')).toContain('A-2');
+  const changed = verificationSources({ ...state(), transcript: [first, { ...first, content: 'Different returned bytes' }] });
+  expect(changed.filter(source => source.kind === 'observation')).toHaveLength(2);
+});
+
+test('execution grouping preserves exact metadata and first-observation order', () => {
+  const execution = { callId: 'same-call', tool: 'read', exactArguments: { path: 'first.ts' } };
+  const source = (id: string, value: typeof execution) => ({ id, kind: 'observation' as const, reference: id, text: id, execution: value });
+  const a = source('a', execution), b = source('b', { ...execution, callId: 'other-call' });
+  const changed = source('changed', { ...execution, exactArguments: { path: 'second.ts' } });
+  const aAgain = source('a-again', structuredClone(execution));
+  const grouped = verificationExecutionGroups([a, b, changed, aAgain]);
+  expect(grouped.groups.map(group => group.map(item => item.id))).toEqual([['a', 'a-again'], ['b'], ['changed']]);
+  expect(grouped.has(structuredClone(execution))).toBe(true);
+  expect(grouped.has({ ...execution, exactArguments: { path: 'third.ts' } })).toBe(false);
 });
 
 test('native compaction preserves original scope and observations across guard recreation without elevating summary prose to user authority', async () => {

@@ -2,7 +2,7 @@ import { JudgmentContextLimitError, JudgmentError, mapLimit } from '@goodvibes-j
 import { snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { verificationEvidence, verificationIntegration, verificationRequirement, verificationScope, verificationSource, verificationRepairs, verificationNoIssue, verificationResolution, verificationAudit, verificationInstructionAudit, verificationObservationAudit } from './batteries.js';
-import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
+import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
 import { VerificationStore } from './store.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationAccess, type VerificationReceipt, type VerificationRequirement, type VerificationSource, type VerificationSummary, type VerificationWriter } from './types.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
@@ -1015,15 +1015,11 @@ export class CompletionVerification {
         if (bounded(candidate.map(verificationWireSource), VERIFICATION_FRAME_CHARACTERS * 2)) delegatedPrimary = candidate;
       }
     }
-    const receiptsByExecution = new Map<string, VerificationSource[]>();
-    for (const receipt of readReceipts) {
-      const key = verificationHash(receipt.execution), group = receiptsByExecution.get(key) ?? [];
-      group.push(receipt); receiptsByExecution.set(key, group);
-    }
+    const receiptsByExecution = verificationExecutionGroups(readReceipts);
     // A latest execution may be too large for the current window. Its first
     // and last raw fragments cannot reconstruct the original JSON, but the
     // complete retained execution can still supply its authenticated receipt.
-    const selectedCurrent = currentPrimary.filter(source => source.execution?.tool !== 'read' || !receiptsByExecution.has(verificationHash(source.execution)));
+    const selectedCurrent = currentPrimary.filter(source => source.execution?.tool !== 'read' || !receiptsByExecution.has(source.execution));
     const recent = [...new Map([...(exactRuntimeFacts ? factSources : []), ...hostPrimary, ...checkedAnswer,
       ...(exactRuntimeFacts ? [] : citedSources), ...selectedCurrent, ...delegatedPrimary].map(source => [source.id, source])).values()];
     const recentFor = (requirement: VerificationRequirement) => exactRuntimeFacts

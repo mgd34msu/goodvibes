@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { returnedReadRows } from '../../tools/read/observation.js';
-import { verificationHash } from './source.js';
+import { verificationExecutionGroups, verificationHash } from './source.js';
 import type { VerificationSource } from './types.js';
 
 type JsonObject = Record<string, unknown>;
@@ -53,16 +53,11 @@ export function nativeReadReceipts(sources: readonly VerificationSource[]): {
   reads: NativeRead[];
   ledgers: ReadLedgerPage[];
 } {
-  const groups = new Map<string, VerificationSource[]>();
-  for (const source of sources) {
-    if (source.messageRole !== 'tool' || source.execution?.tool !== 'read' || typeof source.execution.callId !== 'string') continue;
-    const key = verificationHash(source.execution);
-    const group = groups.get(key) ?? []; group.push(source); groups.set(key, group);
-  }
+  const { groups } = verificationExecutionGroups(sources.filter(source => source.messageRole === 'tool' && source.execution?.tool === 'read'));
   const replaced = new Set<string>();
   const receipts: VerificationSource[] = [];
   const reads: NativeRead[] = [];
-  for (const group of groups.values()) {
+  for (const group of groups) {
     let message: unknown, result: unknown;
     try {
       message = JSON.parse(group.map(source => source.text).join(''));

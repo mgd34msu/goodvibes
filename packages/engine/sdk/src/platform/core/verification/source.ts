@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { VerificationSource } from './types.js';
 
 export const VERIFICATION_FRAME_CHARACTERS = 28_000;
@@ -6,6 +7,27 @@ export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
 // A letter-only encoding keeps opaque digests from accidentally looking like
 // payment-card material to the mandatory privacy screen. All 256 bits remain.
 export const verificationHash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
+
+/** Host call IDs select a small bucket; exact metadata decides membership.
+ * Grouping grants no authority and never hashes arguments or returned text.
+ */
+export function verificationExecutionGroups(sources: readonly VerificationSource[]) {
+  type Group = { execution: NonNullable<VerificationSource['execution']>; sources: VerificationSource[] };
+  const ordered: Group[] = [], byCall = new Map<string, Group[]>();
+  const find = (execution: VerificationSource['execution']) => typeof execution?.callId === 'string'
+    ? byCall.get(execution.callId)?.find(group => isDeepStrictEqual(group.execution, execution)) : undefined;
+  for (const source of sources) {
+    const execution = source.execution;
+    if (typeof execution?.callId !== 'string') continue;
+    let group = find(execution);
+    if (!group) {
+      group = { execution, sources: [] }; ordered.push(group);
+      const bucket = byCall.get(execution.callId) ?? []; bucket.push(group); byCall.set(execution.callId, bucket);
+    }
+    group.sources.push(source);
+  }
+  return { groups: ordered.map(group => group.sources), has: (execution: VerificationSource['execution']) => find(execution) !== undefined };
+}
 
 /** Every byte belongs to an identified source interval. Boundaries are visible;
  * no middle is dropped and a fragment never claims to be a whole observation. */
@@ -40,7 +62,7 @@ export function verificationSources(state: Record<string, unknown>): Verificatio
   };
   add('instruction', 'current user request', state.request);
   if (state.requirements != null) add('instruction', 'host acceptance criteria, subordinate to original user scope', state.requirements);
-  const seenExecutions = new Set<string>();
+  const seenExecutions = new Map<string, string[]>();
   const mainCalls = new Map<string, { id: string; name?: string; arguments?: unknown }>();
   const transcript = (messages: unknown, prefix: string, callContext = new Map<string, { id: string; name?: string; arguments?: unknown }>(), lane = 'main', originalInstructions = true) => {
     if (!Array.isArray(messages)) return;
@@ -48,18 +70,20 @@ export function verificationSources(state: Record<string, unknown>): Verificatio
       const calls = message.toolCalls as { id: string; name?: string; arguments?: unknown }[] | undefined;
       if (message.role === 'assistant') for (const call of calls ?? []) if (typeof call.id === 'string') callContext.set(call.id, call);
       const identity = message.role === 'tool' ? message.callId : calls?.map(call => call.id);
+      const serializedMessage = JSON.stringify(message);
       if (identity) {
         // Only a repeated snapshot of the SAME execution is redundant. Equal
         // queries with different call IDs (including A B A) remain distinct.
-        const key = verificationHash([lane, identity, message]);
-        if (seenExecutions.has(key)) return;
-        seenExecutions.add(key);
+        const key = JSON.stringify([lane, identity]);
+        const previous = seenExecutions.get(key) ?? [];
+        if (previous.includes(serializedMessage)) return;
+        previous.push(serializedMessage); seenExecutions.set(key, previous);
       }
       const role = ['user', 'assistant', 'tool', 'system'].includes(String(message.role)) ? message.role as VerificationSource['messageRole'] : undefined;
       const call = message.role === 'tool' && typeof message.callId === 'string' ? callContext.get(message.callId) : undefined;
       const execution = message.role === 'tool' ? { callId: message.callId, outcome: message.outcome ?? 'unknown', ...(call ? { tool: call.name,
         ...(JSON.stringify(call.arguments ?? null).length <= 2_000 ? { exactArguments: call.arguments ?? null } : { argumentsSource: `Original assistant call ${call.id}; arguments are retained separately, not clipped or inferred.` }) } : {}) } : undefined;
-      add(originalInstructions && message.role === 'user' ? 'instruction' : 'observation', `${prefix}[${index}]; role ${message.role}`, message, role, execution, message.role === 'assistant' ? calls?.map(call => call.id) : undefined);
+      add(originalInstructions && message.role === 'user' ? 'instruction' : 'observation', `${prefix}[${index}]; role ${message.role}`, serializedMessage, role, execution, message.role === 'assistant' ? calls?.map(call => call.id) : undefined);
     });
   };
   const archive = state.archive as readonly { messages: unknown }[] | undefined;

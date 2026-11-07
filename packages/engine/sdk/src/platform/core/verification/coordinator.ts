@@ -98,8 +98,8 @@ export class CompletionVerification {
   private readonly disclosedLimitations = new Map<string, { readonly observation: string; readonly reference: string; readonly requirement: string; readonly attempts: number }>();
   private readonly sourceWitnesses = new Map<string, readonly string[]>();
   private originalTurns: ReadonlyMap<string, readonly VerificationSource[]> = new Map();
-  private previousSources: { identity: object; request: string; ids: Set<string> } | undefined;
-  private finalEvidence: { key: string; identity: object; frontier: VerificationReceipt[]; seen: Set<string>; opened: readonly VerificationSource[]; earlier: VerificationReceipt[] } | undefined;
+  private previousSources: { identity: object; request: unknown; ids: Set<string> } | undefined;
+  private finalEvidence: { input: unknown; identity: object; frontier: VerificationReceipt[]; seen: Set<string>; opened: readonly VerificationSource[]; earlier: VerificationReceipt[] } | undefined;
   constructor(private readonly writer: VerificationWriter, readonly store = new VerificationStore()) {}
 
   private readViews(sources: readonly VerificationSource[]) {
@@ -201,7 +201,9 @@ export class CompletionVerification {
     const source = pages.length <= 1 ? instructions.map(verificationWireSource) : (await this.evidenceTree(instructions, [], access)).map(node => this.compactNode(node));
     const context = { sources: source, currentRequest: instructions.filter(entry => entry.reference.startsWith('current user request')),
       granularity: 'Use independently checkable obligations: performed work and delivery of its artifact are separate requirements. Preserve explicit scope and constraints; do not turn a full-codebase request into only representative subsystem sampling or add exhaustive runtime testing unless requested.' };
-    const key = verificationHash(['scope-v1', context]);
+    // Immutable source IDs already identify the original bytes. Qualification
+    // is scoped to the live access identity; an AI overview grants no scope.
+    const key = JSON.stringify(['scope-v2', instructions.map(entry => [entry.id, entry.kind, entry.messageRole, entry.completeMessage])]);
     try { return await this.proposal('requirements', context, key, access, value => requirements(value, new Set([...instructions.map(entry => entry.id), ...source.map(entry => entry.id)])), async proposed => {
       const runs = await ownedMapLimit(access, pages, 3, async sources => {
         const run = await verificationScope.run(access.port, { sources: sources.map(verificationWireSource), instructionOverview: source, proposed, instruction: 'Check omissions against this original page; assess invented scope against the COMPLETE instruction overview. Other original pages may support other ledger items. Do not require one page to prove all work.' } as never,
@@ -919,8 +921,8 @@ export class CompletionVerification {
         indexed = true; overview = this.sourceIndex(observations);
       }
     }
-    const requestKey = verificationHash(full.request), previous = this.previousSources;
-    const added = indexed && previous?.identity === access.identity && previous.request === requestKey ? observations.filter(source => !previous.ids.has(source.id) && source.kind === 'observation') : [];
+    const requestSource = captureOwnedJson(full.request), previous = this.previousSources;
+    const added = indexed && previous?.identity === access.identity && isDeepStrictEqual(previous.request, requestSource) ? observations.filter(source => !previous.ids.has(source.id) && source.kind === 'observation') : [];
     const acceptance = new Map<string, VerificationSource[]>();
     for (const source of observations) {
       if (!source.reference.startsWith('host completed contract ')) continue;
@@ -1042,10 +1044,10 @@ export class CompletionVerification {
       if (recent.some(source => source.id === receipt.id)) continue;
       if (bounded([...recent, receipt].map(verificationWireSource), MAX_EXACT_CASE_CHARACTERS - VERIFICATION_FRAME_CHARACTERS)) recent.push(receipt);
     }
-    const rememberSources = () => { this.previousSources = { identity: access.identity, request: requestKey, ids: new Set(sources.map(source => source.id)) }; };
-    const key = verificationHash([sources.map(source => source.id), ledger, full.response, overview.map(node => this.compactNode(node))]);
-    if (this.finalEvidence?.key !== key || this.finalEvidence.identity !== access.identity)
-      this.finalEvidence = { key, identity: access.identity, frontier: [...overview], seen: new Set(), opened: [], earlier: [] };
+    const rememberSources = () => { this.previousSources = { identity: access.identity, request: requestSource, ids: new Set(sources.map(source => source.id)) }; };
+    const finalInput = [sources.map(source => source.id), ledger, full.response, overview.map(node => this.compactNode(node))];
+    if (this.finalEvidence?.identity !== access.identity || !isDeepStrictEqual(this.finalEvidence.input, finalInput))
+      this.finalEvidence = { input: captureOwnedJson(finalInput), identity: access.identity, frontier: [...overview], seen: new Set(), opened: [], earlier: [] };
     const answer = bounded(full.response, 12_000) ? full.response : { proposedAnswer: (await this.evidenceTree(sources.filter(source => source.kind === 'answer'), ledger, access)).map(node => this.compactNode(node)),
       meaning: 'Exact proposed answer checked in identified original answer pages. These are proposed claims, not evidence of performed work.' };
     const casesKey = verificationHash(['requirement-checks-v3', ledger, overview.map(node => this.compactNode(node)), answer, recent.map(source => source.id), full.previousReview ?? null, turnContext]);

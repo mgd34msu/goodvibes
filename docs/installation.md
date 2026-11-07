@@ -1,158 +1,68 @@
-# Install and uninstall GoodVibes Jev
-
-The `scripts/install.sh` entry point also works as a curl entry point:
+# Install and uninstall GoodVibes
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
+curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-It clones **only `mgd34msu/goodvibes-jev`** and builds the daemon, TUI, Agent and
-WebUI together from that checkout. It does not install the former split
-GoodVibes repositories. The default source ref is `main`; set `GOODVIBES_REF`
-on the `sh` process to select another branch or tag. Source checkouts are kept
-under `${XDG_DATA_HOME:-$HOME/.local/share}/goodvibes-jev-source` because the
-installed service may use its checkout as the workspace.
+This installs **released binaries**, the browser driver and the WebUI from
+`mgd34msu/goodvibes-jev`. It resolves the release version once and uses that same
+version and checksum manifest for all products. It never clones or builds source.
+Missing assets or mismatched checksums stop installation before replacing programs.
 
-Pass normal installer options through `sh -s --`, for example:
+To pin the complete suite:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh -s -- --no-service --decision-policy 'Classic - Off'
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.0 sh
 ```
 
-The website redirect is managed separately; this change does not update it.
+The installer uses POSIX shell, curl or wget, tar, and sha256sum or shasum.
+It detects Linux/macOS and x64/arm64; the selected release must publish the
+complete asset set for that platform. Linux runtime companions are downloaded
+with the binaries. No system Bun, Node, Git or package manager is required.
 
+## Options
 
-The installer builds the daemon, terminal UI, agent and WebUI from your current
-checkout of this repository. It supports Linux x64 and arm64 with glibc.
-Run it as your normal user, without `sudo`.
+| Setting | Behavior |
+| --- | --- |
+| `GOODVIBES_VERSION` | One monorepo release, default `latest` |
+| `GOODVIBES_INSTALL_DIR` | Command directory, default `~/.local/bin` |
+| `GOODVIBES_AGENT=0` | Skip Agent and its browser driver |
+| `GOODVIBES_WEBUI=0` | Skip WebUI |
+| `GOODVIBES_VECTOR=0` | Skip the SQLite vector addon |
+| `GOODVIBES_WAKE_MODEL=0` | Skip optional wake-word provisioning |
+| `GOODVIBES_DAEMON_SERVICE=0` | Skip first-run service registration |
+| `GOODVIBES_RESTART_DAEMON=0` | Leave running daemon/agent processes untouched |
+| `GOODVIBES_SHADOW_REMOVE=ask|0|1` | Prompt, report only, or remove recognized older commands that shadow this installation |
+| `GOODVIBES_UNINSTALL=1` | Uninstall managed programs/services while preserving user data |
 
-You need Git, curl, tar, unzip and sha256sum. The installer supplies private Bun
-and Node runtimes when needed, installs workspace dependencies, builds the suite,
-verifies the Jev connection, pairs the TUI to the local daemon, registers its project workspace,
-and enables a systemd user service. A working systemd user session is required
-unless you choose `--no-service`. Allow several minutes for the first build.
+`--version`, `--bin-dir`, `--no-service`, `--service`, `--decision-policy` and
+`--uninstall` can also be passed through `sh -s --`. A decision policy is changed
+only when explicitly selected; installing software does not require a live
+judgment-model connection. Provider account setup remains in the application.
 
-```bash
-git clone https://github.com/mgd34msu/goodvibes-jev.git
-cd goodvibes-jev
-read -rsp 'TypeSafe API key: ' TYPESAFE_API_KEY; echo
-export TYPESAFE_API_KEY
-./scripts/install.sh
-unset TYPESAFE_API_KEY
-```
+## Existing installations and services
 
-The checkout must have no uncommitted changes to tracked files. The installed
-release records the exact Git commit it was built from. See [updating](#update-and-check-the-installation)
-for the update procedure.
-
-## Credentials and commands
-
-Jev uses `jev-latest`. The prompt in the installation example keeps the TypeSafe
-key out of shell history. That key configures judgment; select and authenticate
-the conversation model separately in the application.
-
-Installation requires a working Jev connection and stops with a setup error if
-the key is missing or rejected. On the first install, an exported key is saved in the private environment file
-at `~/.local/share/goodvibes-jev-data/environment`. Existing environment files
-are preserved on updates. You can also edit that file afterward, then restart
-with `systemctl --user restart goodvibes-jev.service`. Provider accounts and
-optional integrations still need their usual setup in the application.
-
-Commands are installed in `~/.local/bin`: `goodvibes`, `goodvibes-agent`,
-`goodvibes-daemon` and `goodvibes-uninstall`. If necessary, add
-`export PATH="$HOME/.local/bin:$PATH"` to your shell configuration.
-
-The WebUI runs at **http://127.0.0.1:3421**. It is served by the daemon and
-requires no separate service. Check status or logs with:
-
-```bash
-systemctl --user status goodvibes-jev.service
-journalctl --user -u goodvibes-jev.service
-```
-
-Launch `goodvibes` from your project directory for the terminal UI, or
-`goodvibes-agent` for Agent. The installer pairs the TUI; Agent has its own
-[connected-host setup and native authority requirements](../products/agent/docs/setup-explicit-pairing.md#native-intake-setup-readiness).
-
-The service starts with your user session. To start it before login and keep it
-running after logout, run `loginctl enable-linger "$USER"`; your distribution
-may require administrator authorization for that command.
-
-## Options and storage
-
-```bash
-./scripts/install.sh --help
-./scripts/install.sh --no-service             # Install without creating a service
-./scripts/install.sh --service                # Enable the service on a later run
-./scripts/install.sh --workspace ~/Projects/my-project  # Set the daemon's project workspace
-./scripts/install.sh --port 43121             # Choose another local port
-```
-
-Programs live under `~/.local/share/goodvibes-jev`. Data, settings and credentials
-live separately under `~/.local/share/goodvibes-jev-data`, which is the suite's
-`GOODVIBES_HOME`; its application state is in the `.goodvibes` subdirectory.
-An existing `~/.goodvibes` tree is left alone.
-
-The daemon uses this checkout as its project workspace by default. Choose another
-project with `--workspace`; updates remember that choice. Installation registers
-the workspace and saves a private local TUI pairing credential so chat is ready
-to connect. Uninstalling, including `--purge`, leaves the project workspace intact.
-
-Use `--prefix DIR`, `--bin-dir DIR` and `--data-dir DIR` to choose different,
-non-overlapping directories below your home. These paths must not traverse
-symlinks. Repeat a custom install with the same `--prefix`; the other paths
-are remembered. Existing commands and services belonging to another installation
-are never overwritten. Choose another command directory or remove the previous
-installation first.
-
-With `--no-service`, start the daemon using `goodvibes-daemon serve`; repeat any
-selected port or workspace options needed for that manual launch.
-Browser drivers are included; browser engines and optional voice models are
-provisioned by the application when those features are used.
-
-## Update and check the installation
-
-From a checkout with no uncommitted changes to tracked files:
-
-```bash
-git pull --ff-only
-./scripts/install.sh
-goodvibes --version
-goodvibes-daemon --version
-systemctl --user status goodvibes-jev.service
-```
-
-Repeat a custom installation with its original `--prefix`. The installer
-remembers command/data paths, port, workspace and service choice. Existing
-environment files are retained, so updates reuse the saved TypeSafe key. The
-previous release remains available until replacement startup succeeds; a
-startup failure restores it. Restart open TUI and Agent processes after an
-update so they use the new release.
-
-If installation refuses a dirty checkout, commit or stash your tracked changes
-before retrying. If the Jev probe fails, check the saved key and endpoint. For a
-service startup failure, inspect the journal command above. These checks confirm
-installation and startup; functional acceptance still depends on the selected
-providers and workflows.
+The release installer retains the original installer’s command paths and
+`~/.goodvibes` data. It handles upgrades, running daemon/agent restarts, systemd
+user services and launchd agents. Existing custom services are distinguished from
+installer-managed services; migration preserves settings and has rollback handling.
+PATH setup and checks for older commands remain part of installation.
 
 ## Uninstall
 
-```bash
-goodvibes-uninstall                  # Preserve settings, credentials and data
-goodvibes-uninstall --purge          # Also delete this installation's data
+```sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_UNINSTALL=1 sh
 ```
 
-The uninstaller stops and disables the managed service, then removes its unit,
-commands, binaries and private runtimes. It works without the source checkout.
-It refuses to delete a command or unit that has been replaced or modified.
+This removes installer-managed programs, supporting files and service files,
+keeping `~/.goodvibes` settings, sessions and memory. A saved installer can perform
+this operation without release downloads. `scripts/uninstall.sh` also recognizes
+receipt-owned installations made by the earlier checkout installer and invokes
+their installed uninstaller. Their `--prefix` and `--purge` options remain available.
 
-From the repository, the equivalent commands are:
+## Explicit developer source installation
 
-```bash
-./scripts/uninstall.sh
-./scripts/uninstall.sh --prefix "$HOME/custom-program-directory" --purge
-```
-
-Choose `--purge` when uninstalling if you want to delete the data. A normal
-uninstall preserves it for a later reinstall. These commands do not remove your
-source checkout, system runtimes, or other GoodVibes installations.
+`./scripts/install-from-checkout.sh` is the separate developer build path. It
+requires a clean checkout and the build toolchain. Its receipt-owned program/data
+layout is distinct from release-binary installations. The curl installer does not
+fall back to building source when a release asset is unavailable.

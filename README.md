@@ -193,37 +193,30 @@ The runner is designed to run as a CLI and as the daemon's hosted-session host. 
 
 ## Install the application
 
-The curl installer fetches this monorepo only and builds all four products from
-one checkout:
+Install the latest released version of all four products from this monorepo:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh | sh
+curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Use `sh -s -- --no-service --decision-policy 'Classic - Off'` after the pipe
-for a Classic installation without a service. The website redirect is managed
-separately.
+The installer downloads and verifies prebuilt release binaries, their required
+runtime companions, the browser driver and the WebUI. It does not clone source,
+install build dependencies or compile anything. One release version is used for
+the complete suite. To select a release explicitly:
 
-On Linux x64/arm64 with glibc, run the installer as your normal user from a
-checkout with no uncommitted changes to tracked files:
-
-```bash
-read -rsp 'TypeSafe API key: ' TYPESAFE_API_KEY; echo
-export TYPESAFE_API_KEY
-./scripts/install.sh
-unset TYPESAFE_API_KEY
-goodvibes
+```sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.0 sh
 ```
 
-It builds the suite, verifies Jev connectivity, pairs the TUI to the local
-daemon, registers the selected workspace and creates a systemd user service.
-Bun and Node runtimes are supplied when needed. The daemon serves the WebUI at
-`http://127.0.0.1:3421`. Provider accounts for the conversation model are
-configured separately. See [installation instructions](docs/installation.md)
-for prerequisites, credentials, custom paths and service options.
+Commands install in `~/.local/bin` by default; existing `~/.goodvibes` data is
+preserved. The installer retains upgrade/restart handling, service migration,
+PATH setup and uninstall. Use `GOODVIBES_INSTALL_DIR` for a custom command path,
+`GOODVIBES_DAEMON_SERVICE=0` to skip service setup, or
+`GOODVIBES_UNINSTALL=1` to remove installed programs while keeping user data.
+See [installation instructions](docs/installation.md).
 
-Run `goodvibes-uninstall` (or `./scripts/uninstall.sh`) to remove the application and
-service while keeping your data. Add `--purge` to delete the data too.
+Developers who deliberately want to build their checkout can run
+`./scripts/install-from-checkout.sh`. The public installer never selects that path.
 
 ## Common commands
 

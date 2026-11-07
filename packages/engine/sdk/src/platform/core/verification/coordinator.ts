@@ -35,6 +35,8 @@ type RepairAssessment = {
   /** Assigned by this runtime only after the specific factual dismissal passes. */
   qualifiedNoIssues?: readonly string[];
 };
+type VerificationContextRecord = { readonly input: unknown; readonly id: string };
+type VerificationCaseScope = VerificationContextRecord & { readonly audits: Map<string, VerificationContextRecord> };
 type VerificationTurnContext = {
   readonly request: unknown;
   readonly requirements: readonly { readonly id: string; readonly text: string }[];
@@ -89,7 +91,7 @@ function requirements(value: Record<string, unknown>, ids: Set<string>): Verific
  * permit. Only this process's current Jev identity can qualify cached records. */
 export class CompletionVerification {
   private readonly qualified = new WeakMap<object, Map<string, unknown>>();
-  private readonly caseScopes = new WeakMap<object, { readonly input: unknown; readonly id: string }>();
+  private readonly caseScopes = new WeakMap<object, VerificationCaseScope>();
   private readonly nodes = new Map<string, VerificationReceipt>();
   private readonly originals = new Map<string, VerificationSource>();
   private readonly sourceOrder = new Map<string, number>();
@@ -140,8 +142,19 @@ export class CompletionVerification {
     if (previous && isDeepStrictEqual(previous.input, input)) return previous.id;
     // Only the current scope is retained by this live authority. Its owned
     // views share source strings; no serialized body becomes a key.
-    const current = { input: captureOwnedJson(input), id: issueVerificationId('context') };
+    const current = { input: captureOwnedJson(input), id: issueVerificationId('context'), audits: new Map<string, VerificationContextRecord>() };
     this.caseScopes.set(access.identity, current); return current.id;
+  }
+  private auditScope(requirement: string, input: unknown, access: VerificationAccess): string {
+    const scope = this.caseScopes.get(access.identity);
+    if (!scope) throw new VerificationHeldError('missing live audit scope');
+    const previous = scope.audits.get(requirement);
+    if (previous && isDeepStrictEqual(previous.input, input)) return previous.id;
+    // One current metadata view per requirement in the current case scope.
+    // Source bodies stay in their owned records; retiring this case releases
+    // the metadata views instead of accumulating plaintext cache keys.
+    const current = { input: captureOwnedJson(input), id: issueVerificationId('context') };
+    scope.audits.set(requirement, current); return current.id;
   }
   private async ownedAttempt<T>(access: VerificationAccess, work: (local: VerificationAccess) => Promise<T>): Promise<T> {
     const controller = new AbortController(), pending = new Set<Promise<unknown>>();
@@ -465,6 +478,9 @@ export class CompletionVerification {
     // but a request is not an execution observation that the work failed.
     const pages = [observations.observations.filter(source => source.kind === 'instruction'), observations.observations.filter(source => source.kind !== 'instruction')]
       .flatMap(group => verificationFrames(group, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length));
+    const { sources: _sources, earlier: _earlier, ...details } = evidence;
+    const auditScope = this.auditScope(requirement.id, { turnContext, requirement, response, details, nativeQualification,
+      sourceIds: evidence.sources?.map(source => source.id) ?? null, earlierIds: evidence.earlier?.map(node => node.id) ?? null }, access);
     const checks = await ownedMapLimit(access, pages, 3, async page => {
       // These sets belong to ONE exact source/requirement/answer/authority
       // cursor. Opening another immutable original does not undo a checked
@@ -474,7 +490,7 @@ export class CompletionVerification {
       // Later retrieved proof can resolve that concern. Recheck it under the
       // exact new context; the cache below still prevents identical rereads.
       const context = { ...turnContext, requirement, response, caseEvidence: workEvidence, sources: page.map(verificationWireSource) };
-      const key = verificationHash(['source-audit-v2', context]), cache = this.cache(access);
+      const key = JSON.stringify(['source-audit-v3', auditScope, page.map(source => source.id)]), cache = this.cache(access);
       if (cache.has(key)) {
         const accepted = cache.get(key) === true;
         const held = cache.get(key);

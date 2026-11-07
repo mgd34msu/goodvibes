@@ -1,5 +1,6 @@
 import { JudgmentContextLimitError, JudgmentError, mapLimit } from '@goodvibes-jev/judgment';
-import { snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
+import { isDeepStrictEqual } from 'node:util';
+import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { verificationEvidence, verificationIntegration, verificationRequirement, verificationScope, verificationSource, verificationRepairs, verificationNoIssue, verificationResolution, verificationAudit, verificationInstructionAudit, verificationObservationAudit } from './batteries.js';
 import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
@@ -89,7 +90,7 @@ export class CompletionVerification {
   // rewording. Component acceptance is separately retained by native contract
   // receipts.
   private readonly historyQualifications = new WeakMap<object, Map<string, Map<string, readonly string[]>>>();
-  private readonly readReceiptViews = new Map<string, ReturnType<typeof nativeReadReceipts>>();
+  private readonly readReceiptViews: { readonly input: unknown; readonly view: ReturnType<typeof nativeReadReceipts> }[] = [];
   // A permanently mid-band observation audit cannot block publication forever:
   // after bounded distinct attempts over unchanged evidence it is retained as a
   // disclosed limitation, never as counterevidence and never as approval.
@@ -105,13 +106,17 @@ export class CompletionVerification {
     // Source IDs bind immutable original bytes. Execution metadata is separate
     // because it carries the native tool association. Reusing this local view
     // avoids parsing multi-megabyte histories on every independent requirement.
-    const key = verificationHash(sources.map(source => [source.id, source.messageRole, source.execution]));
-    let view = this.readReceiptViews.get(key);
-    if (!view) {
-      view = nativeReadReceipts(sources);
-      if (this.readReceiptViews.size >= 32) this.readReceiptViews.delete(this.readReceiptViews.keys().next().value!);
-      this.readReceiptViews.set(key, view);
+    const input = sources.map(source => [source.id, source.messageRole, source.execution]);
+    for (let index = this.readReceiptViews.length - 1; index >= 0; index--) {
+      const saved = this.readReceiptViews[index];
+      if (saved && isDeepStrictEqual(saved.input, input)) return saved.view;
     }
+    // Snapshot only on a cache miss. Keys contain no source bodies, and exact
+    // private metadata comparisons cannot merge differing tool associations.
+    const captured = captureOwnedJson(input);
+    const view = nativeReadReceipts(sources);
+    if (this.readReceiptViews.length >= 32) this.readReceiptViews.shift();
+    this.readReceiptViews.push({ input: captured, view });
     return view;
   }
 

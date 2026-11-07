@@ -2,7 +2,7 @@ import { makeProjectTempDir } from './project-temp.ts';
 import { createTempDirRegistry } from './temp-registry.ts';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogModel } from '../../sdk/src/platform/providers/model-catalog.ts';
+import type { CatalogModel, loadCatalogCache } from '../../sdk/src/platform/providers/model-catalog.ts';
 import type { BenchmarkEntry } from '../../sdk/src/platform/providers/model-benchmarks.ts';
 
 export interface ProviderCacheFixture {
@@ -53,7 +53,7 @@ export function writeModelCatalogCache(models: CatalogModel[], cacheDir: string,
   const { catalogPath } = getProviderCachePaths(cacheDir);
   mkdirSync(cacheDir, { recursive: true });
   // The repository-backed cache retains identity and capability metadata.
-  const payload = { version: 7 as const, fetchedAt, ttlMs, models };
+  const payload = { version: 7, fetchedAt, ttlMs, models } satisfies NonNullable<ReturnType<typeof loadCatalogCache>>;
   writeFileSync(catalogPath, JSON.stringify(payload, null, 2), 'utf-8');
 }
 

@@ -21,7 +21,6 @@ import {
   describeSurfaceEmailConfigProblem,
   readSurfaceEmailSettings,
 } from '../sdk/src/platform/email/surface-config.ts';
-import { addressDigest } from '../sdk/src/platform/email/address-digest.ts';
 import { daemonSecretKeyFor } from '../sdk/src/platform/config/daemon-secret-keys.ts';
 import { readEmailConfig, smtpPasswordRefFor } from '../sdk/src/platform/email/email-service.ts';
 import { createDaemonEmailGatewayService } from '../sdk/src/platform/control-plane/routes/email-composition.ts';
@@ -316,16 +315,6 @@ describe('unfinished mailbox setup', () => {
 // ---------------------------------------------------------------------------
 
 describe('addresses in log fields', () => {
-  test('the digest is stable, normalised, and not the address', () => {
-    const digest = addressDigest('Avery@Example.com ');
-    expect(digest).toBe(addressDigest('avery@example.com'));
-    expect(digest).toHaveLength(16);
-    expect(/^[0-9a-f]{16}$/.test(digest)).toBe(true);
-    expect(digest).not.toContain('avery');
-    expect(digest).not.toContain('@');
-    expect(addressDigest('someone-else@example.com')).not.toBe(digest);
-  });
-
   test('no raw address reaches a logged field on any mail verb', async () => {
     const logged: { event: string; fields: Record<string, unknown> }[] = [];
     const backend: EmailGatewayService = {
@@ -386,11 +375,10 @@ describe('addresses in log fields', () => {
     for (const address of ['jane@example.com', 'sam@example.com', 'Jane Doe', '@example.com']) {
       expect(serialised).not.toContain(address);
     }
-    // The digest is present and IS the digest, the field is populated, not
-    // simply omitted, so "no raw address" is not passing by saying nothing.
-    expect(logged[1]?.fields['from']).toBe(addressDigest('Jane Doe <jane@example.com>'));
-    expect(logged[3]?.fields['recipient']).toBe(addressDigest('jane@example.com, sam@example.com'));
-    expect(logged[0]?.fields['senders']).toBe(addressDigest('Jane Doe <jane@example.com>'));
+    expect(logged[1]?.fields).not.toHaveProperty('from');
+    expect(logged[3]?.fields).not.toHaveProperty('recipient');
+    expect(logged[0]?.fields).not.toHaveProperty('senders');
+    expect(logged[0]?.fields['count']).toBe(1);
     expect(logged[1]?.fields['hasHtml']).toBe(true);
     expect(logged[1]?.fields['attachments']).toBe(1);
   });

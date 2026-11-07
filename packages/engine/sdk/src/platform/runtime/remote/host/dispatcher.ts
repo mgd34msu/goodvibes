@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { RemoteHostLogger, RemoteHostCredentialStore } from './context.js';
 import type { PeerRegistry, PeerRecord } from './peer-registry.js';
 import {
@@ -8,12 +7,6 @@ import {
   BackendDispatchError,
   createBackends,
 } from './backends/index.js';
-
-/** SHA-256 of input, truncated to the first `hexChars` hex characters. */
-function sha256First(input: string, hexChars: number): string {
-  const digest = createHash('sha256').update(input, 'utf-8').digest('hex');
-  return digest.slice(0, Math.max(0, hexChars));
-}
 
 // ---------------------------------------------------------------------------
 // Work-item hook, long-running invocations are enqueued as work items visible
@@ -36,8 +29,7 @@ export interface RemoteWorkEnqueuer {
 
 // ---------------------------------------------------------------------------
 // Invoke result, returned to the agent through remote.peers.invoke. Includes
-// stdoutDigest (sha256 of FULL stdout, 64 hex chars) per the receipt contract.
-// The agent may receive only a truncated stdout preview.
+// The agent receives a bounded stdout preview and knows whether output was omitted.
 // ---------------------------------------------------------------------------
 
 export const STDOUT_PREVIEW_LIMIT = 4_096;
@@ -52,8 +44,9 @@ export interface RemoteInvokeResult {
   completed: boolean;
   stdout: string;
   stderr: string;
-  /** SHA-256 of the full stdout, 64 hex chars. */
-  stdoutDigest: string;
+  /** UTF-8 byte length before preview truncation. */
+  stdoutBytes: number;
+  stdoutTruncated: boolean;
 }
 
 export interface RemoteDispatcherOptions {
@@ -164,7 +157,8 @@ export class RemoteDispatcher {
         completed: false,
         stdout: '',
         stderr: '',
-        stdoutDigest: sha256First('', 64),
+        stdoutBytes: 0,
+        stdoutTruncated: false,
       };
     }
 
@@ -179,7 +173,8 @@ export class RemoteDispatcher {
       completed: result.workId === undefined,
       stdout: truncate(fullStdout, STDOUT_PREVIEW_LIMIT),
       stderr: truncate(result.stderr ?? '', STDOUT_PREVIEW_LIMIT),
-      stdoutDigest: sha256First(fullStdout, 64),
+      stdoutBytes: Buffer.byteLength(fullStdout, 'utf8'),
+      stdoutTruncated: fullStdout.length > STDOUT_PREVIEW_LIMIT,
     };
   }
 

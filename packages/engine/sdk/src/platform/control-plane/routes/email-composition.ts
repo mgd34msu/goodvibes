@@ -25,8 +25,7 @@ import { readErrorFailure } from '../../types/errors.js';
  *  3. `createDaemonEmailGatewayService`, which of those a given composition
  *     gets.
  *
- * Every address in a log field is a digest. See `email/address-digest.ts` for
- * why that is not optional.
+ * Operational log fields omit sender and recipient addresses.
  */
 import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-sdk';
 import { EmailService, type EmailServiceDeps, type EmailReplySubjectSource } from '../../email/index.js';
@@ -34,7 +33,6 @@ import {
   getProcessUntrustedContentLedger,
   type UntrustedContentLedger,
 } from '../../security/untrusted-content.js';
-import { addressDigest } from '../../email/address-digest.js';
 import type { SurfaceEmailConfigProblem } from '../../email/surface-config.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { resolveOwnerAddresses } from '../../security/owner-identity.js';
@@ -54,9 +52,8 @@ import type {
 /**
  * One operational log line about a mail verb.
  *
- * Addresses arrive here already reduced to a digest, see `address-digest.ts`
- * for why, and note that this signature makes it awkward to pass anything else:
- * the fields are scalars a log can hold, not a message a log should not.
+ * Fields describe the operation and its outcome, without message bodies or
+ * address-derived correlation tokens.
  */
 export type EmailGatewayLog = (
   event: string,
@@ -259,9 +256,6 @@ export function instrumentEmailGateway(
       log('email.inbox.list', {
         count: result.messages.length,
         unreadOnly: input.unreadOnly ?? true,
-        // Digested, and joined rather than listed one per sender: the line says
-        // how many distinct people wrote, never who.
-        senders: result.messages.map((message) => addressDigest(message.from)).join(','),
       });
       return result;
     },
@@ -272,7 +266,6 @@ export function instrumentEmailGateway(
       if (message === null) return null;
       log('email.inbox.read', {
         uid,
-        from: addressDigest(message.from),
         hasHtml: message.bodyHtml !== undefined && message.bodyHtml.length > 0,
         attachments: message.attachments?.length ?? 0,
       });
@@ -285,7 +278,6 @@ export function instrumentEmailGateway(
       log('email.draft.create', {
         mailbox: result.mailbox,
         ...(result.uid === undefined ? {} : { uid: result.uid }),
-        recipient: addressDigest(input.to),
       });
       return result;
     },
@@ -296,7 +288,6 @@ export function instrumentEmailGateway(
       log('email.send', {
         messageId: result.messageId,
         sentAt: result.sentAt,
-        recipient: addressDigest(input.to),
       });
       return result;
     },

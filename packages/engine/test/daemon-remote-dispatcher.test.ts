@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'bun:test';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { PeerRegistry } from '../sdk/src/platform/runtime/remote/host/peer-registry.ts';
@@ -53,11 +52,11 @@ async function registryWith(records: PeerRecord[]): Promise<PeerRegistry> {
 }
 
 describe('RemoteDispatcher', () => {
-  it('routes by backendKind and returns a full-stdout digest with a truncated preview', async () => {
+  it('routes by backendKind and reports omitted output with the full UTF-8 size', async () => {
     const registry = await registryWith([
       { peerId: 'p1', displayName: 'P1', backendKind: 'ssh', backendConfig: { kind: 'ssh', sshHost: 'h', sshUser: 'u', identityRef: SECRET_REF } },
     ]);
-    const bigStdout = 'a'.repeat(STDOUT_PREVIEW_LIMIT + 500);
+    const bigStdout = 'a'.repeat(STDOUT_PREVIEW_LIMIT + 500) + '🙂';
     let seenCommand = '';
     const backends = new Map<PeerRecord['backendKind'], Backend>([
       ['ssh', makeBackend('ssh', { exitCode: 0, stdout: bigStdout, stderr: '' }, (_p, c) => { seenCommand = c; })],
@@ -76,7 +75,8 @@ describe('RemoteDispatcher', () => {
     expect(result.completed).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.length).toBe(STDOUT_PREVIEW_LIMIT);
-    expect(result.stdoutDigest).toBe(createHash('sha256').update(bigStdout, 'utf-8').digest('hex'));
+    expect(result.stdoutBytes).toBe(Buffer.byteLength(bigStdout, 'utf8'));
+    expect(result.stdoutTruncated).toBe(true);
     registry.close();
   });
 

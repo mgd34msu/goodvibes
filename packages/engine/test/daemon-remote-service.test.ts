@@ -39,7 +39,7 @@ function makeFakeDispatcher(): { requests: DispatchRequest[]; dispatcher: Remote
   const fake = {
     dispatch: async (request: DispatchRequest) => {
       requests.push(request);
-      return { peerId: request.peerId, backendKind: 'ssh', completed: true, stdout: '', stderr: '', stdoutDigest: '0' };
+      return { peerId: request.peerId, backendKind: 'ssh', completed: true, stdout: '', stderr: '', stdoutBytes: 0, stdoutTruncated: false };
     },
   };
   return { requests, dispatcher: fake as unknown as RemoteDispatcher };

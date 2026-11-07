@@ -275,6 +275,7 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   };
   e2eHome.setAgentSetting('provider.model', 'e2e-stub:stub-model');
   e2eHome.setAgentSetting('update.auto', false);
+  e2eHome.setAgentSetting('update.autoUpdateAtLaunch', false);
   // The daemon's settings file owns controlPlane.*; the Agent reads it there.
   mergeJson(join(daemonHome, 'settings.json'), 'controlPlane.host', '127.0.0.1');
   mergeJson(join(daemonHome, 'settings.json'), 'controlPlane.port', daemonPort);

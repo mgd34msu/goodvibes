@@ -833,17 +833,21 @@ describe('release.yml: by-reference release', () => {
     const list = steps(preparation);
     const guard = list.findIndex((step) => String(step.name) === 'Require the verified CI producer');
     const downloads = list.filter((step) => String(step.uses ?? '').includes('download-artifact'));
-    expect(downloads).toHaveLength(6);
+    expect(downloads).toHaveLength(7);
     expect(downloads.map((step) => (step.with as Record<string, unknown>).name)).toEqual([
       'workspace-build-output', 'tui-native-linux-x64',
       'daemon-native-linux-x64', 'daemon-native-linux-arm64',
       'daemon-native-darwin-x64', 'daemon-native-darwin-arm64',
+      'installer-release-assets',
     ]);
     expect(guard).toBeGreaterThanOrEqual(0);
-    for (const download of downloads) {
+    for (const download of downloads.filter(step => (step.with as Record<string, unknown>).name !== 'installer-release-assets')) {
       expect(download).toHaveProperty('with.run-id', '${{ needs.release-verify.outputs.run_id }}');
       expect(guard).toBeLessThan(list.indexOf(download));
     }
+    const completion = downloads.find(step => (step.with as Record<string, unknown>).name === 'installer-release-assets');
+    expect(completion).not.toHaveProperty('with.run-id');
+    expect(needsOf(preparation)).toContain('complete-suite-assets');
     const staged = list.findIndex((step) => String(step.run ?? '').includes('.github/scripts/stage-native-release-assets.mjs'));
     const uploaded = list.findIndex((step) => String(step.uses ?? '').includes('upload-artifact'));
     expect(staged).toBeGreaterThanOrEqual(0);
@@ -862,6 +866,7 @@ describe('release.yml: by-reference release', () => {
       ['publish-npm', 'release-verify'],
       ['prepare-native-assets', 'verify-tag-version'],
       ['prepare-native-assets', 'release-verify'],
+      ['prepare-native-assets', 'complete-suite-assets'],
       ['github-release', 'publish-npm'],
       ['github-release', 'prepare-native-assets'],
     ] as const) {
@@ -882,7 +887,7 @@ describe('release.yml: by-reference release', () => {
     const npm = rel.jobs!['publish-npm']!, release = rel.jobs!['github-release']!, preparation = rel.jobs!['prepare-native-assets']!;
     for (const event of ['push', 'workflow_dispatch']) {
       expect(permitsPublication(npm, { 'verify-tag-version': 'success', 'release-verify': 'success' }, event, 'release', false)).toBe(false);
-      expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'release-verify': 'success' }, event, 'release', false)).toBe(true);
+      expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'release-verify': 'success', 'complete-suite-assets': 'success' }, event, 'release', false)).toBe(true);
       const results: Record<string, JobResult> = { 'publish-npm': 'skipped', 'prepare-native-assets': 'success' };
       expect(permitsPublication(release, results, event, 'release', false)).toBe(true);
       expect(permitsPublication(release, results, event, 'release', true)).toBe(false);

@@ -480,7 +480,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
   });
 
 
-  test.each(['summary', 'evidence', 'notesArtifact', 'ambiguousArtifact', 'missingArtifact', 'inventory', 'inventoryWithQuality', 'item', 'ambiguous', 'missing'] as const)('exposes release evidence artifacts and readiness inventory lookup to the model: %s', async view => {
+  test.each(['summary', 'evidence', 'notesArtifact', 'ambiguousArtifact', 'missingArtifact', 'inventory', 'inventoryWithQuality', 'item', 'ambiguous', 'missing'] as const)('reports shipped release notes and unavailable private development evidence honestly: %s', async view => {
     const fixture = makeFixture();
     try {
       if (view === 'summary') {
@@ -492,12 +492,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           readonly releaseReadiness?: { readonly status?: string; readonly path?: string; readonly items?: number };
           readonly modelAccess?: { readonly releaseEvidence?: string; readonly releaseReadiness?: string };
         };
-        expect(summaryJson.releaseEvidence?.status).toBe('available');
+        expect(summaryJson.releaseEvidence?.status).toBe('degraded');
         expect(summaryJson.releaseEvidence?.artifacts).toBe(5);
-        expect(summaryJson.releaseEvidence?.available).toBe(5);
-        expect(summaryJson.releaseReadiness?.status).toBe('available');
+        expect(summaryJson.releaseEvidence?.available).toBe(1);
+        expect(summaryJson.releaseReadiness?.status).toBe('unavailable');
         expect(summaryJson.releaseReadiness?.path).toBe('release/release-readiness.json');
-        expect(summaryJson.releaseReadiness?.items).toBeGreaterThan(0);
+        expect(summaryJson.releaseReadiness?.items).toBeUndefined();
         expect(summaryJson.modelAccess?.releaseEvidence).toContain('audit action:"evidence|artifact"');
         expect(summaryJson.modelAccess?.releaseReadiness).toContain('audit action:"readiness|item"');
         return;
@@ -515,17 +515,18 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           readonly artifacts: number;
           readonly available: number;
           readonly filtered: number;
-          readonly artifactsList: readonly { readonly id?: string; readonly path?: string; readonly summary?: Record<string, unknown>; readonly content?: string }[];
+          readonly artifactsList: readonly { readonly id?: string; readonly path?: string; readonly status?: string; readonly summary?: Record<string, unknown>; readonly content?: string }[];
         };
         expect(evidenceJson.mode).toBe('release_evidence');
         expect(evidenceJson.artifacts).toBe(5);
-        expect(evidenceJson.available).toBe(5);
+        expect(evidenceJson.available).toBe(1);
         expect(evidenceJson.filtered).toBe(2);
         expect(evidenceJson.artifactsList.map((artifact) => artifact.id)).toEqual([
           'live-verification-json',
           'live-verification-markdown',
         ]);
         expect(evidenceJson.artifactsList.map((artifact) => artifact.content)).toEqual([undefined, undefined]);
+        expect(evidenceJson.artifactsList.map((artifact) => artifact.status)).toEqual(['missing', 'missing']);
         return;
       }
 
@@ -578,25 +579,15 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(inventory.success).toBe(true);
         if (!inventory.success) throw new Error(inventory.error);
         const inventoryJson = JSON.parse(inventory.output!) as {
-          readonly mode: string;
-          readonly path: string;
-          readonly totals: {
-            readonly items: number;
-            readonly filtered: number;
-            readonly requiredQualityDimensions: readonly string[];
-            readonly completeQualityDimensions: number;
-            readonly expectedQualityDimensions: number;
-          };
-          readonly items: readonly { readonly id?: string; readonly quality?: unknown }[];
+          readonly mode: string; readonly path: string; readonly status: string;
+          readonly reason: string; readonly totals?: unknown; readonly items?: unknown;
         };
         expect(inventoryJson.mode).toBe('release_readiness');
         expect(inventoryJson.path).toBe('release/release-readiness.json');
-        expect(inventoryJson.totals.items).toBeGreaterThan(0);
-        expect(inventoryJson.totals.filtered).toBeGreaterThan(0);
-        expect(inventoryJson.totals.requiredQualityDimensions).toContain('modelAccess');
-        expect(inventoryJson.totals.completeQualityDimensions).toBe(inventoryJson.totals.expectedQualityDimensions);
-        expect(inventoryJson.items.map((item) => item.id)).toContain('release-readiness-inventory-gate');
-        expect(inventoryJson.items.map((item) => item.quality)).toEqual(Array(inventoryJson.items.length).fill(undefined));
+        expect(inventoryJson.status).toBe('unavailable');
+        expect(inventoryJson.reason).toContain('not present');
+        expect(inventoryJson.totals).toBeUndefined();
+        expect(inventoryJson.items).toBeUndefined();
         return;
       }
 
@@ -608,7 +599,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           limit: 1,
         });
         expect(inventoryWithQuality.success).toBe(true);
-        expect(inventoryWithQuality.output).toContain('"quality"');
+        expect(JSON.parse(inventoryWithQuality.output!)).toMatchObject({ status: 'unavailable' });
+        expect(inventoryWithQuality.output).not.toContain('"quality"');
         return;
       }
 
@@ -618,32 +610,21 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           itemId: 'release-readiness-inventory-gate',
         });
         expect(item.success).toBe(true);
-        if (!item.success) throw new Error(item.error);
-        const itemJson = JSON.parse(item.output!) as {
-          readonly status: string;
-          readonly lookup: { readonly source: string; readonly resolvedBy: string };
-          readonly item: { readonly id: string; readonly quality: { readonly modelAccess?: string } };
-        };
-        expect(itemJson.status).toBe('found');
-        expect(itemJson.lookup.source).toBe('itemId');
-        expect(itemJson.lookup.resolvedBy).toBe('id');
-        expect(itemJson.item.id).toBe('release-readiness-inventory-gate');
-        expect(itemJson.item.quality.modelAccess).toContain('release_evidence');
-        expect(itemJson.item.quality.modelAccess).toContain('release_readiness');
+        expect(JSON.parse(item.output!)).toMatchObject({ status: 'unavailable' });
         return;
       }
 
       if (view === 'ambiguous') {
         const ambiguous = await fixture.tool.execute({ mode: 'release_readiness_item', query: 'Agent' });
-        expect(ambiguous.success).toBe(false);
-        expect(ambiguous.error).toContain('Unknown release readiness item');
+        expect(ambiguous.success).toBe(true);
+        expect(JSON.parse(ambiguous.output!)).toMatchObject({ status: 'unavailable' });
         return;
       }
 
       if (view === 'missing') {
         const missing = await fixture.tool.execute({ mode: 'release_readiness_item', itemId: 'not-a-readiness-item' });
-        expect(missing.success).toBe(false);
-        expect(missing.error).toContain('Unknown release readiness item not-a-readiness-item');
+        expect(missing.success).toBe(true);
+        expect(JSON.parse(missing.output!)).toMatchObject({ status: 'unavailable' });
         return;
       }
 

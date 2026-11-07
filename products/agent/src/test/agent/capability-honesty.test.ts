@@ -1,12 +1,10 @@
 /**
  * Capability readiness registry pins: every entry declares an allowed level,
  * advertised nouns resolve to their registry entry, certified entries map to a
- * passing live-verification scenario, and onboarding copy renders readiness
+ * registered live-verification scenario, and onboarding copy renders readiness
  * from the registry.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   CAPABILITY_REGISTRY,
   CAPABILITY_READINESS_LEVELS,
@@ -16,9 +14,6 @@ import {
 } from '../../agent/capability-registry.ts';
 import { LIVE_VERIFICATION_SCENARIO_IDS } from '../../verification/live-verifier.ts';
 import { AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES } from '../../input/agent-workspace-onboarding-categories.ts';
-
-const SRC_ROOT = join(import.meta.dir, '..', '..');
-const REPO_ROOT = join(SRC_ROOT, '..');
 
 /**
  * Capability nouns as they appear in advertised onboarding copy, each mapped
@@ -75,23 +70,13 @@ describe('capability readiness registry', () => {
     expect(missingFromRegistry).toEqual([]);
   });
 
-  // (b): every `certified` entry maps to a real live-verification scenario id
-  // that passed in the current committed report; no other level carries a
-  // scenario id.
-  test('certified capabilities map to a live-verification scenario that passed', () => {
-    const reportPath = join(REPO_ROOT, 'release', 'live-verification', 'live-verification.json');
-    const report = JSON.parse(readFileSync(reportPath, 'utf-8')) as {
-      checks: ReadonlyArray<{ id: string; status: string }>;
-    };
-    const passedScenarioIds = new Set(
-      report.checks.filter((check) => check.status === 'pass').map((check) => check.id),
-    );
-
+  // The source contract checks scenario ownership; historical development
+  // reports are private. A scenario mapping does not certify a fresh live run.
+  test('certified capabilities name a registered live-verification scenario', () => {
     for (const capability of CAPABILITY_REGISTRY) {
       if (capability.level === 'certified') {
         expect(capability.scenarioId).toBeDefined();
         expect(LIVE_VERIFICATION_SCENARIO_IDS).toContain(capability.scenarioId!);
-        expect(passedScenarioIds.has(capability.scenarioId!)).toBe(true);
       } else {
         // Only certified entries may claim a live scenario.
         expect(capability.scenarioId).toBeUndefined();

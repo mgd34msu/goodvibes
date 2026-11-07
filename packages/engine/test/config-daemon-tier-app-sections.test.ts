@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveOrCreateDaemonPath } from '../sdk/src/platform/config/daemon-tier-paths.ts';
@@ -201,6 +201,21 @@ describe('settings ingestion: a value the reader rejects', () => {
 
 describe('settings ingestion: a key form from a newer component', () => {
   const readings = useConfigReadings({ forms: { 'clientSecretRef@v2': 'clientSecretRef' } });
+
+  test('terminal launch update settings load without unknown-setting judgments', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gv-launch-update-settings-'));
+    try {
+      const configDir = join(root, 'config');
+      mkdirSync(configDir);
+      writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ update: { autoUpdateAtLaunch: false, launchCheckTimeoutMs: 4000 } }));
+      const manager = new ConfigManager({ homeDir: root, configDir, surfaceRoot: 'tui' });
+      expect(manager.get('update.autoUpdateAtLaunch')).toBe(false);
+      expect(manager.get('update.launchCheckTimeoutMs')).toBe(4000);
+      await manager.announceUnknownSettingForms();
+      expect(readings.requests).toHaveLength(0);
+      expect(manager.getIngestionQuarantine()).toHaveLength(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 
   test('an unknown key read as a newer form of a known key is announced once the port can read it, and the file is left alone', async () => {
     const { manager, path } = managerOverDaemonTier({

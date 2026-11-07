@@ -13,6 +13,8 @@
   release feed, preserving their runtime companions on update and rollback.
 - Install the daemon's verified native receipt and enable its normal automatic
   update ownership. Refresh installer-owned WebUI bundles after daemon updates.
+- Recognize terminal launch-update settings in the shared configuration schema,
+  honoring their values without unknown-setting decision-model requests.
 
 ## [3.1.0] - 2026-11-06
 

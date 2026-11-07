@@ -186,7 +186,8 @@ describe('update.autoUpdateAtLaunch: false stops a compiled binary replacing its
     const { home, work } = scratch();
     const settings = settingsFrom(home, work);
 
-    expect(settings.autoUpdateAtLaunch).toBeUndefined();
+    expect(settings.autoUpdateAtLaunch).toBe(true);
+    expect(settings.launchCheckTimeoutMs).toBe(2500);
     expect(await launchWouldSwap(settings), 'default stays ON').toBe(true);
     expect(periodicArmed(home, work), 'default stays ON').toBe(true);
   });

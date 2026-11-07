@@ -3509,6 +3509,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Daemon self-update: check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (owner-directed default; the previous binary is kept for one-command rollback)"
   },
   {
+    "key": "update.autoUpdateAtLaunch",
+    "type": "boolean",
+    "default": true,
+    "description": "Standalone TUI and Agent binaries check for and install a newer release at launch. Set false to disable launch updates; periodic updates also stop unless update.auto is explicitly enabled"
+  },
+  {
+    "key": "update.launchCheckTimeoutMs",
+    "type": "number",
+    "default": 2500,
+    "description": "Maximum milliseconds spent checking for a terminal update at launch; the installed version starts if the check cannot complete",
+    "validationHint": "integer in [250, 30000]"
+  },
+  {
     "key": "update.intervalMinutes",
     "type": "number",
     "default": 60,

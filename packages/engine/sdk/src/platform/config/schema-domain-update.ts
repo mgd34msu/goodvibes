@@ -1,5 +1,5 @@
 /**
- * schema-domain-update.ts, the daemon self-update config domain.
+ * schema-domain-update.ts, the shared daemon and terminal self-update config domain.
  *
  * The daemon checks for a new release hourly, downloads and
  * checksum-verifies it, swaps binaries at a no-active-work moment (never
@@ -30,6 +30,8 @@ export function migrateLegacyDaemonReleaseFeed(parsed: Record<string, unknown>):
 /** Daemon self-update: hourly check, verify, idle-moment swap, auto-restart. */
 export interface UpdateConfig {
   auto: boolean;
+  autoUpdateAtLaunch: boolean;
+  launchCheckTimeoutMs: number;
   intervalMinutes: number;
   firstCheckSeconds: number;
   releasesUrl: string;
@@ -46,6 +48,8 @@ declare module './schema-types.js' {
 export const updateConfigDefaults = {
   update: {
     auto: true,
+    autoUpdateAtLaunch: true,
+    launchCheckTimeoutMs: 2500,
     intervalMinutes: 60,
     firstCheckSeconds: 30,
     releasesUrl: DAEMON_RELEASES_LATEST_URL,
@@ -60,6 +64,19 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: true,
     description: 'Daemon self-update: check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (owner-directed default; the previous binary is kept for one-command rollback)',
+  },
+  {
+    key: 'update.autoUpdateAtLaunch',
+    type: 'boolean',
+    default: true,
+    description: 'Standalone TUI and Agent binaries check for and install a newer release at launch. Set false to disable launch updates; periodic updates also stop unless update.auto is explicitly enabled',
+  },
+  {
+    key: 'update.launchCheckTimeoutMs',
+    type: 'number',
+    default: 2500,
+    description: 'Maximum milliseconds spent checking for a terminal update at launch; the installed version starts if the check cannot complete',
+    ...intRange(250, 30_000),
   },
   {
     key: 'update.intervalMinutes',

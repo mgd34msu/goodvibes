@@ -553,6 +553,8 @@ export type ConfigKey =
   | 'service.serviceName'
   | 'service.logPath'
   | 'update.auto'
+  | 'update.autoUpdateAtLaunch'
+  | 'update.launchCheckTimeoutMs'
   | 'update.intervalMinutes'
   | 'update.firstCheckSeconds'
   | 'update.releasesUrl'

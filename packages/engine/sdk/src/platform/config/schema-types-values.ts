@@ -362,6 +362,8 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'service.serviceName' ? string :
   K extends 'service.logPath' ? string :
   K extends 'update.auto' ? boolean :
+  K extends 'update.autoUpdateAtLaunch' ? boolean :
+  K extends 'update.launchCheckTimeoutMs' ? number :
   K extends 'update.intervalMinutes' ? number :
   K extends 'update.firstCheckSeconds' ? number :
   K extends 'update.releasesUrl' ? string :

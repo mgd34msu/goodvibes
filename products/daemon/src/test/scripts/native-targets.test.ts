@@ -10,6 +10,7 @@ import { installDaemonNative, rollbackDaemonNative } from '../../../scripts/inst
 import { verifiedDaemonNativePath } from '../../cli/native-launch.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { assertDaemonNativePayloadBytes } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 // These are inert fixture bytes. Nothing here claims execution of an ARM64 binary.
 async function fixture(target: DaemonNativeTarget) {
@@ -72,6 +73,24 @@ for (const target of DAEMON_NATIVE_TARGETS) {
     expect(() => inspectInstallation(f.prefix, '', target)).toThrow('different native target');
     rmSync(foreign); writeFileSync(foreign + '.update-transaction', 'foreign recovery evidence');
     expect(() => inspectInstallation(f.prefix, '', target)).toThrow('different native target');
+  });
+  test(`${target} installed bytes and runtime metadata must both match their verified producer`, async () => {
+    const f = await fixture(target); f.writeReceipt();
+    const paths = targetPaths(f.prefix, target);
+    const bunPath = paths[1]!.path; const changed = Buffer.from(readFileSync(bunPath));
+    changed[0] = changed[0]! ^ 1; writeFileSync(bunPath, changed);
+    expect(() => inspectInstallation(f.prefix, '', target)).toThrow('differs from its source manifest');
+    f.writeReceipt();
+    const buffers = paths.slice(0, -1).map(file => readFileSync(file.path));
+    const metadata = JSON.parse(buffers[3]!.toString('utf8'));
+    metadata.sha256 = '0'.repeat(64);
+    buffers[3] = Buffer.from(JSON.stringify(metadata));
+    const artifact = structuredClone(f.artifact);
+    // Real pin fixture: the metadata payload matches its manifest, but names
+    // a different Bun binary. Reusing the verified digest must still refuse it.
+    artifact.files[3]!.sha256 = Bun.CryptoHasher.hash('sha256', buffers[3], 'hex');
+    artifact.files[3]!.size = buffers[3].length;
+    expect(() => assertDaemonNativePayloadBytes(artifact, buffers)).toThrow('Bun runtime provenance is invalid');
   });
   for (const mutation of ['bytes', 'mode', 'missing', 'manifest-target', 'mixed-path', 'source', 'head', 'tree', 'payload-symlink', 'manifest-symlink', 'parent-symlink'] as const) {
     test(`${target} refuses ${mutation} before packing`, async () => {

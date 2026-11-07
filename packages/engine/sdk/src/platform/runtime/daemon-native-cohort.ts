@@ -69,14 +69,18 @@ export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNat
 }
 export function assertDaemonNativePayloadBytes(artifact: DaemonCiArtifact, buffers: readonly Buffer[]): void {
   if (buffers.length !== artifact.files.length) throw new Error('Native daemon payload set is incomplete');
+  let bunDigest: string | undefined;
   for (const [index, file] of artifact.files.entries()) {
     const bytes = buffers[index];
-    if (!bytes || bytes.length !== file.size || digest(bytes) !== file.sha256) throw new Error(`Native daemon payload differs from its source manifest: ${file.path}`);
+    if (!bytes || bytes.length !== file.size) throw new Error(`Native daemon payload differs from its source manifest: ${file.path}`);
+    const actual = digest(bytes);
+    if (actual !== file.sha256) throw new Error(`Native daemon payload differs from its source manifest: ${file.path}`);
+    if (index === 1) bunDigest = actual;
   }
-  const bun = buffers[1], metadata = buffers[3];
-  if (!bun || !metadata) throw new Error('Native daemon runtime is incomplete');
+  const metadata = buffers[3];
+  if (!bunDigest || !metadata) throw new Error('Native daemon runtime is incomplete');
   const value: unknown = JSON.parse(metadata.toString('utf8'));
-  if (!record(value) || value.version !== '1.3.14' || value.target !== artifact.target || value.sha256 !== digest(bun)
+  if (!record(value) || value.version !== '1.3.14' || value.target !== artifact.target || value.sha256 !== bunDigest
     || value.upstreamSource !== 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' || typeof value.source !== 'string'
     || !(value.source === 'build-interpreter' || value.source.startsWith('installed:@oven/bun-linux-') || value.source.startsWith('npm:@oven/bun-linux-'))) throw new Error('Native daemon Bun runtime provenance is invalid');
 }

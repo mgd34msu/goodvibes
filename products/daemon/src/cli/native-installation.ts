@@ -1,7 +1,7 @@
 /** Read-only native receipt admission shared by the source installer and launcher. */
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
-import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, sha256, verifyChecksum, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { daemonCiPayloads, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
 const PACKAGE = '@goodvibes-jev/daemon';
 const RECEIPT = 'daemon-installation.json';
@@ -75,7 +75,6 @@ export function inspectInstallation(prefix: string, suffix: '' | '.previous', ta
     if (!stat.isFile() || (stat.mode & 0o777) !== (member.executable ? 0o755 : 0o644)) throw new Error(`Invalid cohort member: ${member.label}`);
     if (index < receipt.artifact.files.length) {
       const file = receipt.artifact.files[index]!;
-      verifyChecksum(member.label, sha256(readFileSync(path)), file.sha256);
       if (stat.size !== file.size) throw new Error(`Invalid cohort size: ${member.label}`);
     }
   }

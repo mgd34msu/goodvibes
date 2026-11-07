@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
-import { DraftSyncStore, sha256First } from '../sdk/src/platform/channels/host-drafts/draft-store.js';
+import { DraftSyncStore } from '../sdk/src/platform/channels/host-drafts/draft-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function deferred() {
@@ -48,7 +48,8 @@ test('close during initialization cannot reopen the store when initialization fi
 
 test('an admitted save owns one snapshot before awaiting encryption', async () => {
   const entered = deferred(); const release = deferred();
-  const store = makeStore({ ...cipher, async encrypt(text) { entered.resolve(); await release.promise; return cipher.encrypt(text); } });
+  const encrypted: string[] = [];
+  const store = makeStore({ ...cipher, async encrypt(text) { encrypted.push(text); entered.resolve(); await release.promise; return cipher.encrypt(text); } });
   await store.init();
   const input = { id: 'one', message: 'original fixture body', title: 'Original', tags: ['original'] };
   const writing = store.upsert(input);
@@ -57,7 +58,8 @@ test('an admitted save owns one snapshot before awaiting encryption', async () =
     input.message = 'changed body'; input.title = 'Changed'; input.tags[0] = 'changed';
     release.resolve();
     const { draft } = await writing;
-    expect(draft.message).toBe(sha256First('original fixture body', 12));
+    expect(draft.message).toBe('[redacted]');
+    expect(encrypted).toEqual(['original fixture body']);
     expect(draft.title).toBe('Original');
     expect(draft.tags).toEqual(['original']);
   } finally { release.resolve(); await writing; await store.close(); }
@@ -65,7 +67,8 @@ test('an admitted save owns one snapshot before awaiting encryption', async () =
 
 test('concurrent same-id snapshots retain call order and the first creation metadata', async () => {
   const entered = deferred(); const release = deferred();
-  const store = makeStore({ ...cipher, async encrypt(text) { if (text === 'first') { entered.resolve(); await release.promise; } return cipher.encrypt(text); } });
+  const encrypted: string[] = [];
+  const store = makeStore({ ...cipher, async encrypt(text) { encrypted.push(text); if (text === 'first') { entered.resolve(); await release.promise; } return cipher.encrypt(text); } });
   await store.init();
   const first = store.upsert({ id: 'same', message: 'first', createdAt: '2026-01-01T00:00:00.000Z' });
   await entered.promise;
@@ -76,7 +79,8 @@ test('concurrent same-id snapshots retain call order and the first creation meta
     expect(one.created).toBe(true);
     expect(two.created).toBe(false);
     expect(two.draft.createdAt).toBe(one.draft.createdAt);
-    expect(store.get('same')?.message).toBe(sha256First('second', 12));
+    expect(store.get('same')?.message).toBe('[redacted]');
+    expect(encrypted).toEqual(['first', 'second']);
   } finally { release.resolve(); await Promise.allSettled([first, second]); await store.close(); }
 });
 
@@ -87,6 +91,6 @@ test('an encryption failure does not poison a later admitted snapshot', async ()
     const first = store.upsert({ id: 'same', message: 'fail' });
     const second = store.upsert({ id: 'same', message: 'works' });
     await expect(first).rejects.toThrow('fixture cipher failed');
-    expect((await second).draft.message).toBe(sha256First('works', 12));
+    expect((await second).draft.message).toBe('[redacted]');
   } finally { await store.close(); }
 });

@@ -123,7 +123,7 @@ describe('registerDraftMethods', () => {
     )) as { draft: { id: string; message: string }; created: boolean };
     expect(saved.created).toBe(true);
     expect(saved.draft.id).toBe('id-1');
-    expect(saved.draft.message).not.toBe('hello'); // digest, not body
+    expect(saved.draft.message).not.toBe('hello'); // fixed redaction marker
 
     const listed = (await catalog.invoke(LIST, invocation({}))) as {
       drafts: unknown[];
@@ -133,7 +133,7 @@ describe('registerDraftMethods', () => {
     expect(listed.drafts.length).toBe(1);
   });
 
-  test('get returns a flat draft with messageDigest, or a notFound marker', async () => {
+  test('get returns a flat redacted draft, or a notFound marker', async () => {
     const saved = (await catalog.invoke(
       SAVE,
       confirmedSave({ message: 'body' }),
@@ -141,12 +141,12 @@ describe('registerDraftMethods', () => {
     const got = (await catalog.invoke(GET, invocation({ draftId: saved.draft.id }))) as {
       id: string;
       message: string;
-      messageDigest: string;
       notFound?: boolean;
     };
     expect(got.notFound).toBeUndefined();
     expect(got.id).toBe(saved.draft.id);
-    expect(got.messageDigest).toBe(got.message);
+    expect(got.message).toBe('[redacted]');
+    expect(got).not.toHaveProperty('messageDigest');
 
     const missing = (await catalog.invoke(GET, invocation({ draftId: 'ghost' }))) as {
       notFound: boolean;

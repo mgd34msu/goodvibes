@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { logger } from '../../utils/logger.js';
 import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
@@ -23,17 +22,9 @@ import { channelDraftWireReference } from './wire-reference.js';
 //   - The webhook URL is encrypted at rest (`webhookEnc`) and is ALWAYS
 //     redacted ('[redacted]') in every list/get response, the raw URL never
 //     leaves the store.
-//   - `messageDigest` (sha256First(body, 12)) is computed at save time and
-//     stored alongside, so reads never need to decrypt the body. The required
-//     `message` field of every emitted record carries the DIGEST, never the
-//     plaintext body.
+//   - Responses carry a fixed '[redacted]' message marker. They neither
+//     decrypt the body nor publish a deterministic token for private text.
 // ---------------------------------------------------------------------------
-
-/** SHA-256 of `input`, truncated to the first `hexChars` hex characters. */
-export function sha256First(input: string, hexChars: number): string {
-  const digest = createHash('sha256').update(input, 'utf-8').digest('hex');
-  return digest.slice(0, Math.max(0, hexChars));
-}
 
 /** Redact a stored webhook for responses: present → '[redacted]', else undefined. */
 export function redactWebhook(value?: string | null): string | undefined {
@@ -53,25 +44,18 @@ export const ALL_DRAFT_STATUSES: readonly DraftStatus[] = [
   'failed',
 ];
 
-export const DRAFT_MESSAGE_DIGEST_HEX = 12;
 export const DEFAULT_DRAFT_VERSION = 1;
 export const DEFAULT_DRAFT_LIST_LIMIT = 50;
 export const MAX_DRAFT_LIST_LIMIT = 200;
 
-/**
- * Public draft record returned by list/get/save. Matches the SDK
- * CHANNEL_DRAFT_SCHEMA: the required `message` field carries the message
- * DIGEST (never the plaintext body). `webhook` is always '[redacted]' when set.
- * `messageDigest` is emitted ONLY by `get` (whose output schema permits
- * additional properties); strict list/save records omit it.
- */
+/** Public metadata only. Body and webhook values remain private and encrypted. */
 export interface DraftRecord {
   version: number;
   id: string;
   createdAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
   status: DraftStatus;
-  message: string; // sha256First(body, 12) digest. Plaintext body is NEVER transmitted.
+  message: string; // Fixed '[redacted]' marker. Plaintext body is never transmitted.
   title?: string;
   channel?: string;
   route?: string;
@@ -133,7 +117,6 @@ const SCHEMA: string[] = [
      status TEXT NOT NULL,
      title TEXT,
      bodyEnc TEXT NOT NULL,
-     messageDigest TEXT NOT NULL,
      channel TEXT,
      route TEXT,
      webhookEnc TEXT,
@@ -153,7 +136,6 @@ interface DraftRow {
   updatedAt: string;
   status: string;
   title: string | null;
-  messageDigest: string;
   channel: string | null;
   route: string | null;
   webhookEnc: string | null;
@@ -236,7 +218,13 @@ export class DraftSyncStore {
     if (this.closed) return Promise.reject(new Error('DraftSyncStore is closed'));
     if (this.initialized) return Promise.resolve();
     if (this.initializing) return this.initializing;
-    const pending = Promise.resolve().then(() => this.store.init()).then(() => {
+    const pending = Promise.resolve().then(() => this.store.init()).then(async () => {
+      // Existing stores contain an unused plaintext body digest. Remove the
+      // column without decrypting or rewriting the authenticated ciphertext.
+      if (this.store.all<{ name: string }>('PRAGMA table_info(drafts)').some(column => column.name === 'messageDigest')) {
+        this.store.run('ALTER TABLE drafts DROP COLUMN messageDigest');
+        await this.store.save();
+      }
       if (!this.closed) this.initialized = true;
     });
     this.initializing = pending;
@@ -282,7 +270,7 @@ export class DraftSyncStore {
 
   /**
    * Create (no id) or update (id present) a draft. Encrypts the body and
-   * webhook at rest, computes messageDigest, preserves createdAt on update, and
+   * webhook at rest, preserves createdAt on update, and
    * sets updatedAt to input.updatedAt when present (enabling 'most recent
    * updatedAt wins') or now() otherwise.
    *
@@ -321,7 +309,6 @@ export class DraftSyncStore {
 
     const bodyEnc = await this.cipher.encrypt(input.message, assertCurrent, retainEncryption);
     current?.();
-    const messageDigest = sha256First(input.message, DRAFT_MESSAGE_DIGEST_HEX);
     const webhookEnc =
       input.webhook !== undefined && input.webhook !== ''
         ? await this.cipher.encrypt(input.webhook, assertCurrent, retainEncryption)
@@ -334,16 +321,15 @@ export class DraftSyncStore {
     const write = (target: Pick<HandlerSqliteStore, 'run' | 'get'>) => {
       target.run(
       `INSERT INTO drafts (
-         id, version, createdAt, updatedAt, status, title, bodyEnc, messageDigest,
+         id, version, createdAt, updatedAt, status, title, bodyEnc,
          channel, route, webhookEnc, link, tags, sentResponseId, sendError
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(id) DO UPDATE SET
          version = excluded.version,
          updatedAt = excluded.updatedAt,
          status = excluded.status,
          title = excluded.title,
          bodyEnc = excluded.bodyEnc,
-         messageDigest = excluded.messageDigest,
          channel = excluded.channel,
          route = excluded.route,
          webhookEnc = excluded.webhookEnc,
@@ -357,7 +343,6 @@ export class DraftSyncStore {
         status,
         nullable(input.title),
         bodyEnc,
-        messageDigest,
         nullable(input.channel),
         nullable(input.route),
         webhookEnc,
@@ -371,7 +356,7 @@ export class DraftSyncStore {
     );
 
       const row = target.get<DraftRow>('SELECT * FROM drafts WHERE id = ?', [id]);
-      return { draft: toRecord(row ?? this.fallbackRow(id, version, createdAt, updatedAt, status, messageDigest, webhookEnc, input)), created };
+      return { draft: toRecord(row ?? this.fallbackRow(id, version, createdAt, updatedAt, status, webhookEnc, input)), created };
     };
     const result = current ? await this.store.persistTransaction(write, current, withPublication) : write(this.store);
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
@@ -458,13 +443,13 @@ export class DraftSyncStore {
     const rows =
       query.status !== undefined
         ? this.store.all<DraftRow>(
-            `SELECT id, version, createdAt, updatedAt, status, title, messageDigest,
+            `SELECT id, version, createdAt, updatedAt, status, title,
                     channel, route, webhookEnc, link, tags, sentResponseId, sendError
              FROM drafts WHERE status = ? ORDER BY updatedAt DESC, id ASC LIMIT ?`,
             [query.status, limit],
           )
         : this.store.all<DraftRow>(
-            `SELECT id, version, createdAt, updatedAt, status, title, messageDigest,
+            `SELECT id, version, createdAt, updatedAt, status, title,
                     channel, route, webhookEnc, link, tags, sentResponseId, sendError
              FROM drafts ORDER BY updatedAt DESC, id ASC LIMIT ?`,
             [limit],
@@ -502,7 +487,7 @@ export class DraftSyncStore {
 
   private getRow(id: string): DraftRow | null {
     return this.store.get<DraftRow>(
-      `SELECT id, version, createdAt, updatedAt, status, title, messageDigest,
+      `SELECT id, version, createdAt, updatedAt, status, title,
               channel, route, webhookEnc, link, tags, sentResponseId, sendError
        FROM drafts WHERE id = ?`,
       [id],
@@ -517,7 +502,6 @@ export class DraftSyncStore {
     createdAt: string,
     updatedAt: string,
     status: DraftStatus,
-    messageDigest: string,
     webhookEnc: string | null,
     input: DraftSaveInput,
   ): DraftRow {
@@ -528,7 +512,6 @@ export class DraftSyncStore {
       updatedAt,
       status,
       title: nullable(input.title),
-      messageDigest,
       channel: nullable(input.channel),
       route: nullable(input.route),
       webhookEnc,
@@ -553,7 +536,7 @@ function clampLimit(limit: number | undefined): number {
 
 /**
  * Map a stored row to a wire record. The required `message` field carries the
- * DIGEST (never plaintext); the webhook is redacted; tags are parsed.
+ * fixed redaction marker; the webhook is redacted; tags are parsed.
  */
 export function toRecord(row: DraftRow): DraftRecord {
   const record: DraftRecord = {
@@ -562,7 +545,7 @@ export function toRecord(row: DraftRow): DraftRecord {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     status: row.status as DraftStatus,
-    message: row.messageDigest,
+    message: '[redacted]',
   };
   if (row.title !== null) record.title = row.title;
   if (row.channel !== null) record.channel = row.channel;

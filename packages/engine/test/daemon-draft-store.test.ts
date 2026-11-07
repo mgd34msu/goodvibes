@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import type { AtRestCipher } from '../sdk/src/platform/config/daemon-credential-store.js';
+import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
 import {
-  DRAFT_MESSAGE_DIGEST_HEX,
   DraftSyncStore,
   MAX_DRAFT_LIST_LIMIT,
-  sha256First,
 } from '../sdk/src/platform/channels/host-drafts/draft-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -79,13 +78,35 @@ describe('DraftSyncStore', () => {
     expect(asRec.bodyEnc).toBeUndefined();
   });
 
-  test('the message field carries the sha256First(body,12) digest', async () => {
+  test('the message field is redacted without a deterministic private-body token', async () => {
     const body = 'the quick brown fox';
     const { draft } = await store.upsert({ message: body });
-    const expected = sha256First(body, DRAFT_MESSAGE_DIGEST_HEX);
-    expect(draft.message).toBe(expected);
-    expect(draft.message.length).toBe(DRAFT_MESSAGE_DIGEST_HEX);
+    expect(draft.message).toBe('[redacted]');
+    expect(draft).not.toHaveProperty('messageDigest');
     expect(draft.message).not.toBe(body);
+  });
+
+  test('opening an existing store removes body digests and preserves encrypted drafts', async () => {
+    const { draft } = await store.upsert({ message: 'private draft', webhook: 'private hook', title: 'Retain this draft' });
+    await store.close();
+    const existing = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
+    await existing.init();
+    let ciphertext: unknown;
+    try {
+      existing.run("ALTER TABLE drafts ADD COLUMN messageDigest TEXT NOT NULL DEFAULT 'previous-body-digest'");
+      ciphertext = existing.get('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id]);
+    } finally { await existing.close(); }
+    // Upgrade does not need the key just to remove display-only metadata.
+    store = makeStore(dir, { async encrypt() { throw new Error('Unexpected encryption'); }, async decrypt() { throw new Error('Unexpected decryption'); } });
+    await store.init();
+    expect(store.get(draft.id)).toMatchObject({ id: draft.id, title: 'Retain this draft', message: '[redacted]', webhook: '[redacted]' });
+    await store.close();
+    const upgraded = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
+    await upgraded.init();
+    try {
+      expect(upgraded.all<{ name: string }>('PRAGMA table_info(drafts)').some(column => column.name === 'messageDigest')).toBe(false);
+      expect(upgraded.get('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id])).toEqual(ciphertext);
+    } finally { await upgraded.close(); }
   });
 
   test('webhook is encrypted at rest and always redacted on read', async () => {
@@ -169,7 +190,7 @@ describe('DraftSyncStore', () => {
     try {
       const record = reopened.get(draft.id);
       expect(record?.id).toBe(draft.id);
-      expect(record?.message).toBe(sha256First('durable', DRAFT_MESSAGE_DIGEST_HEX));
+      expect(record?.message).toBe('[redacted]');
     } finally {
       await reopened.close();
     }

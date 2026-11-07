@@ -7,7 +7,7 @@
  */
 export { registerDraftMethods } from './register.js';
 export type { RegisterDraftsOptions, DraftRegistration } from './register.js';
-export { DraftSyncStore, sha256First, redactWebhook } from './draft-store.js';
+export { DraftSyncStore, redactWebhook } from './draft-store.js';
 export type {
   DraftListQuery,
   DraftRecord,

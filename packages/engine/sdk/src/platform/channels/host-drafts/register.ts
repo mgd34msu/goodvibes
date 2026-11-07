@@ -15,7 +15,7 @@
  * current paired owner authority, retained through durable publication.
  *
  * SECURITY: the message body is encrypted at rest and NEVER returned (the wire
- * `message` field carries the sha256First(body,12) digest). Webhooks are
+ * `message` field carries a fixed redaction marker). Webhooks are
  * encrypted at rest and ALWAYS redacted on read; RAW webhook tokens submitted
  * to save are REJECTED, the agent must redact ('[redacted]') or pass a
  * goodvibes://secrets/ reference before transmission.
@@ -235,7 +235,7 @@ interface ListResponse {
 }
 
 /** get: a flat draft (CHANNEL_DRAFT_GET_OUTPUT permits additionalProperties) or a notFound marker. */
-type GetResponse = (DraftRecord & { messageDigest: string }) | { notFound: true; id: string };
+type GetResponse = DraftRecord | { notFound: true; id: string };
 
 interface SaveResponse {
   draft: DraftRecord;
@@ -328,9 +328,7 @@ export function registerDraftMethods(
     const privateId = isNativeDraftWireReference(id) ? store.resolveReferenceId(id) : id;
     const record = privateId === undefined ? null : store.get(privateId);
     if (record === null) { snapshotJudgmentInput({ draftId: id }); return { notFound: true, id }; }
-    // get output permits additional properties, expose messageDigest explicitly
-    // alongside the schema-required `message` field (both carry the digest).
-    return { ...record, id: channelDraftWireReference(record.id), messageDigest: record.message };
+    return { ...record, id: channelDraftWireReference(record.id) };
   };
 
   const saveHandler: TypedHandler<unknown, SaveResponse> = async ({ body, context }) => {

@@ -195,7 +195,7 @@ describe('agent workspace channel triage: honest inbound attribution', () => {
     const bindings = (triage.routeBindings as { bindings: readonly Record<string, unknown>[] }).bindings;
     expect(bindings[0]?.principalLabel).toBe('unknown principal');
     expect(bindings[0]?.principal).toBeNull();
-    expect(bindings[0]?.externalIdDigest).toBeNull();
+    expect(bindings[0]).not.toHaveProperty('externalIdDigest');
     expect(resolveCallCount).toBe(0);
   });
 

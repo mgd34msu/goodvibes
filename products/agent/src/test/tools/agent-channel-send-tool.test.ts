@@ -111,7 +111,7 @@ describe('agent_channel_send tool', () => {
     const snapshot = readAgentChannelDeliveryReceipts(shellPaths);
     expect(snapshot.receipts).toHaveLength(1);
     expect(snapshot.receipts[0]?.target.display).toBe('webhook https://hooks.example.test/...');
-    expect(snapshot.receipts[0]?.target.addressDigest).toBeTruthy();
+    expect(snapshot.receipts[0]?.target).not.toHaveProperty('addressDigest');
     expect(snapshot.receipts[0]?.messagePreview).toContain('token=[redacted]');
     expect(JSON.stringify(snapshot)).not.toContain('secret-token');
     expect(JSON.stringify(snapshot)).not.toContain('super-secret-value');

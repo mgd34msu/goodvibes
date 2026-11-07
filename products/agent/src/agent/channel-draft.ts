@@ -28,7 +28,7 @@
  * Persistence: JSON file at {agentRoot}/channels/drafts.json via ShellPathService.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
@@ -257,10 +257,6 @@ function writeDrafts(path: string, drafts: readonly ChannelDraft[], assertCurren
 
 function generateDraftId(): string {
   return `draft-${randomUUID().replaceAll('-', '_')}`;
-}
-
-function draftDigest(message: string): string {
-  return createHash('sha256').update(message).digest('hex').slice(0, 12);
 }
 
 // ---------------------------------------------------------------------------
@@ -614,13 +610,12 @@ export function formatChannelDraft(draft: ChannelDraft): string {
         : draft.link
           ? `link=${draft.link}`
           : 'no-target';
-  const digest = draftDigest(draft.message);
   const lines = [
     `draft ${draft.id}`,
     `  status: ${draft.status}`,
     `  target: ${targetPart}`,
     ...(draft.title ? [`  title: ${draft.title}`] : []),
-    `  message: ${draft.message.length} chars sha256:${digest}`,
+    `  message: ${draft.message.length} chars`,
     `  created: ${draft.createdAt}  updated: ${draft.updatedAt}`,
     ...(draft.tags && draft.tags.length > 0 ? [`  tags: ${draft.tags.join(', ')}`] : []),
     ...(draft.sentResponseId ? [`  sent response: ${draft.sentResponseId}`] : []),

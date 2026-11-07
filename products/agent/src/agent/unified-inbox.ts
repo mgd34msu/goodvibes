@@ -67,8 +67,6 @@ export interface UnifiedInboxRouteBindingItem {
   readonly bindingKind: string;
   readonly surfaceKind: string;
   readonly surfaceId: string | null;
-  /** External id is digested, never the raw identifier. */
-  readonly externalIdDigest: string | null;
   /** Resolved sender principal, when the channel identity maps to one. Never a guess. */
   readonly principal: { readonly id: string; readonly name: string; readonly kind: string } | null;
   /** Human-facing sender label, the resolved principal's "name (id)", or "unknown principal". */
@@ -282,7 +280,6 @@ function toRouteBindingItem(raw: Record<string, unknown>): UnifiedInboxRouteBind
     bindingKind: readString(raw, 'kind', 'unknown'),
     surfaceKind: readString(raw, 'surfaceKind', 'unknown'),
     surfaceId: readStringOrNull(raw, 'surfaceId'),
-    externalIdDigest: readStringOrNull(raw, 'externalIdDigest'),
     principal: toPrincipalOrNull(raw),
     principalLabel: readString(raw, 'principalLabel', UNKNOWN_PRINCIPAL_LABEL),
     sessionPolicy: readStringOrNull(raw, 'sessionPolicy'),
@@ -555,7 +552,7 @@ export function formatUnifiedInbox(inbox: UnifiedInbox): string {
   if (routeBindingItems.length > 0) {
     lines.push('', '  Route Bindings');
     for (const item of routeBindingItems.slice(0, 10)) {
-      lines.push(`  - ${item.id}: ${item.surfaceKind} ${item.bindingKind} ext=${item.externalIdDigest ?? 'none'} sender=${item.principalLabel}`);
+      lines.push(`  - ${item.id}: ${item.surfaceKind} ${item.bindingKind} sender=${item.principalLabel}`);
     }
   }
 

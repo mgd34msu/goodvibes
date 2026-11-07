@@ -355,7 +355,6 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
     target: receipt.target,
     title: receipt.title,
     messageLength: receipt.messageLength,
-    messageDigest: receipt.messageDigest,
     messagePreview: receipt.messagePreview,
     strategyCount: receipt.strategyCount,
     responseId: receipt.responseId ?? null,

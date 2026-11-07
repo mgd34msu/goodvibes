@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { agentRecordNonce } from '../utils/record-nonce.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -17,7 +16,6 @@ export interface AgentChannelDeliveryReceiptTarget {
   readonly label?: string;
   readonly addressHost?: string;
   readonly addressScheme?: string;
-  readonly addressDigest?: string;
   readonly redactedAddress?: boolean;
 }
 
@@ -31,7 +29,6 @@ export interface AgentChannelDeliveryReceipt {
   readonly target: AgentChannelDeliveryReceiptTarget;
   readonly messagePreview: string;
   readonly messageLength: number;
-  readonly messageDigest: string;
   readonly strategyCount: number;
   readonly responseId?: string;
   readonly authorization: 'explicit-user-confirmed';
@@ -67,10 +64,6 @@ function readString(value: unknown): string {
 
 function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 16);
 }
 
 function normalizeWhitespace(value: string): string {
@@ -111,14 +104,12 @@ function summarizeAddress(address: string | undefined, kind: string): AgentChann
       display: `${kind} ${url.protocol}//${url.host}/...`,
       addressHost: url.host,
       addressScheme: url.protocol.replace(/:$/, ''),
-      addressDigest: digest(normalized),
       redactedAddress: true,
     };
   } catch {
     return {
       kind,
       display: `${kind} [redacted-target]`,
-      addressDigest: digest(normalized),
       redactedAddress: true,
     };
   }
@@ -161,7 +152,6 @@ function parseTarget(value: unknown): AgentChannelDeliveryReceiptTarget | null {
   const label = readString(value.label);
   const addressHost = readString(value.addressHost);
   const addressScheme = readString(value.addressScheme);
-  const addressDigest = readString(value.addressDigest);
   return {
     kind,
     display,
@@ -170,7 +160,6 @@ function parseTarget(value: unknown): AgentChannelDeliveryReceiptTarget | null {
     ...(label ? { label } : {}),
     ...(addressHost ? { addressHost } : {}),
     ...(addressScheme ? { addressScheme } : {}),
-    ...(addressDigest ? { addressDigest } : {}),
     ...(value.redactedAddress === true ? { redactedAddress: true } : {}),
   };
 }
@@ -185,11 +174,10 @@ function parseReceipt(value: unknown): AgentChannelDeliveryReceipt | null {
   const target = parseTarget(value.target);
   const messagePreview = readString(value.messagePreview);
   const messageLength = readNumber(value.messageLength);
-  const messageDigest = readString(value.messageDigest);
   const strategyCount = readNumber(value.strategyCount);
   const userRoute = readString(value.userRoute);
   const modelRoute = readString(value.modelRoute);
-  if (!id || !createdAt || Number.isNaN(Date.parse(createdAt)) || !source || !status || !title || !target || messageLength === null || !messageDigest || strategyCount === null || !userRoute || !modelRoute) {
+  if (!id || !createdAt || Number.isNaN(Date.parse(createdAt)) || !source || !status || !title || !target || messageLength === null || strategyCount === null || !userRoute || !modelRoute) {
     return null;
   }
   const responseId = readString(value.responseId);
@@ -203,7 +191,6 @@ function parseReceipt(value: unknown): AgentChannelDeliveryReceipt | null {
     target,
     messagePreview,
     messageLength,
-    messageDigest,
     strategyCount,
     ...(responseId ? { responseId } : {}),
     authorization: 'explicit-user-confirmed',
@@ -260,7 +247,6 @@ export function recordAgentChannelDeliveryReceipt(
     target: summarizeTarget(input.result),
     messagePreview: previewMessage(input.result.message),
     messageLength: input.result.message.length,
-    messageDigest: digest(input.result.message),
     strategyCount: input.result.strategyCount,
     ...(input.result.responseId ? { responseId: input.result.responseId } : {}),
     authorization: 'explicit-user-confirmed',
@@ -284,7 +270,7 @@ export function formatAgentChannelDeliveryReceiptLine(receipt: AgentChannelDeliv
     `target=${receipt.target.display}`,
     `title=${receipt.title}`,
     receipt.responseId ? `response=${receipt.responseId}` : '',
-    `message=${receipt.messageLength} chars sha256:${receipt.messageDigest}`,
+    `message=${receipt.messageLength} chars`,
     receipt.messagePreview ? `preview="${receipt.messagePreview}"` : '',
   ].filter(Boolean).join(' ');
 }

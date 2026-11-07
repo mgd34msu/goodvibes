@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '../agent/channel-delivery-receipts.ts';
 import type { CommandContext } from './command-registry.ts';
 import {
@@ -82,10 +81,6 @@ function readLimit(value: unknown, fallback: number): number {
   return Math.max(1, Math.min(100, Math.trunc(parsed)));
 }
 
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
 function boundedText(value: string, max = 160): string {
   const collapsed = value.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= max) return collapsed;
@@ -108,7 +103,7 @@ function redactedAddress(value: string): Record<string, unknown> {
   } catch {
     display = '[redacted-address]';
   }
-  return { address: display, addressDigest: `sha256:${digest(value)}` };
+  return { address: display };
 }
 
 function routeFailureView(failure: ConnectedHostRouteFailure): Record<string, unknown> {
@@ -266,7 +261,6 @@ async function routeBindingView(binding: JsonRecord, connection: ConnectedHostCo
     surfaceKind,
     surfaceId: readString(binding, 'surfaceId') || null,
     title: redactText(readString(binding, 'title'), 100) || null,
-    externalIdDigest: externalId ? `sha256:${digest(externalId)}` : null,
     principal: attribution.principal,
     principalLabel: attribution.label,
     ...(attribution.error ? { principalResolutionError: attribution.error } : {}),
@@ -329,7 +323,6 @@ function receiptTriage(context: CommandContext, limit: number): Record<string, u
       source: receipt.source,
       status: receipt.status,
       target: receipt.target,
-      messageDigest: receipt.messageDigest,
       messagePreview: receipt.messagePreview,
     })),
     ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
@@ -476,7 +469,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
     lines.push(`  state: ${bindings.state}; total: ${bindings.totalBindings}`);
     const routeRows = Array.isArray(bindings.bindings) ? bindings.bindings.filter(isRecord) : [];
     for (const binding of routeRows.slice(0, 5)) {
-      lines.push(`  - ${readString(binding, 'id')}: ${readString(binding, 'surfaceKind')} ${readString(binding, 'kind')} external=${readString(binding, 'externalIdDigest')} sender=${readString(binding, 'principalLabel', UNKNOWN_PRINCIPAL_LABEL)}`);
+      lines.push(`  - ${readString(binding, 'id')}: ${readString(binding, 'surfaceKind')} ${readString(binding, 'kind')} sender=${readString(binding, 'principalLabel', UNKNOWN_PRINCIPAL_LABEL)}`);
     }
     if (routeRows.length === 0) lines.push('  no route bindings reported');
   }

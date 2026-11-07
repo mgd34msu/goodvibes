@@ -446,7 +446,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         readonly total: number;
         readonly receipts: readonly {
           readonly receiptId: string;
-          readonly target: { readonly display: string; readonly addressDigest?: string };
+          readonly target: { readonly display: string };
           readonly messagePreview: string;
           readonly responseId: string | null;
         }[];
@@ -454,7 +454,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(deliveries.mode).toBe('channel_deliveries');
       expect(deliveries.total).toBe(1);
       expect(deliveries.receipts[0]?.target.display).toBe('webhook https://hooks.example.test/...');
-      expect(deliveries.receipts[0]?.target.addressDigest).toBeTruthy();
+      expect(deliveries.receipts[0]?.target).not.toHaveProperty('addressDigest');
       expect(deliveries.receipts[0]?.messagePreview).toContain('api_key=[redacted]');
       expect(deliveries.receipts[0]?.responseId).toBe('response-1');
       expect(JSON.stringify(deliveries)).not.toContain('secret-token');
@@ -514,23 +514,23 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           readonly status: string;
           readonly deliveries: {
             readonly retryCandidateCount: number;
-            readonly retryCandidates: readonly { readonly target: { readonly address?: string; readonly addressDigest?: string }; readonly error?: string }[];
+            readonly retryCandidates: readonly { readonly target: { readonly address?: string }; readonly error?: string }[];
           };
           readonly surfaceMessages: { readonly totalMessages: number; readonly messages: readonly { readonly title: string; readonly bodyPreview: string }[] };
-          readonly routeBindings: { readonly totalBindings: number; readonly bindings: readonly { readonly externalIdDigest: string | null }[] };
+          readonly routeBindings: { readonly totalBindings: number; readonly bindings: readonly Record<string, unknown>[] };
           readonly inboundFeed: { readonly providerInboxFeed: string };
         }>(fixture, { mode: 'channel_triage', limit: 3 });
         expect(triage.mode).toBe('channel_triage');
         expect(triage.status).toBe('attention');
         expect(triage.deliveries.retryCandidateCount).toBe(1);
         expect(triage.deliveries.retryCandidates[0]?.target.address).toBe('https://hooks.example.test/...');
-        expect(triage.deliveries.retryCandidates[0]?.target.addressDigest).toBeTruthy();
+        expect(triage.deliveries.retryCandidates[0]?.target).not.toHaveProperty('addressDigest');
         expect(triage.deliveries.retryCandidates[0]?.error).toBe('HTTP 500 api_key=[redacted]');
         expect(triage.surfaceMessages.totalMessages).toBe(1);
         expect(triage.surfaceMessages.messages[0]?.title).toBe('Route token=[redacted]');
         expect(triage.surfaceMessages.messages[0]?.bodyPreview).toContain('[redacted-url]');
         expect(triage.routeBindings.totalBindings).toBe(1);
-        expect(triage.routeBindings.bindings[0]?.externalIdDigest).toContain('sha256:');
+        expect(triage.routeBindings.bindings[0]).not.toHaveProperty('externalIdDigest');
         expect(triage.inboundFeed.providerInboxFeed).toBe('not_published_by_current_channel_contract');
         expect(JSON.stringify(triage)).not.toContain(channelTriageToken);
         expect(JSON.stringify(triage)).not.toContain('harness-secret-token');

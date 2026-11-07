@@ -153,7 +153,6 @@ describe('aggregateUnifiedInbox', () => {
             kind: 'companion',
             surfaceKind: 'slack',
             surfaceId: 'W123',
-            externalIdDigest: 'sha256:abcdef',
             sessionPolicy: 'new',
             threadPolicy: 'continue',
             deliveryGuarantee: 'at_least_once',
@@ -171,7 +170,7 @@ describe('aggregateUnifiedInbox', () => {
     expect(item.kind).toBe('route_binding');
     expect(item.id).toBe('bind-1');
     expect(item.surfaceKind).toBe('slack');
-    expect(item.externalIdDigest).toBe('sha256:abcdef');
+    expect(item).not.toHaveProperty('externalIdDigest');
     expect(item.sessionPolicy).toBe('new');
     expect(item.deliveryGuarantee).toBe('at_least_once');
     expect(item.lastSeenAt).toBe(50000);
@@ -240,7 +239,7 @@ describe('aggregateUnifiedInbox', () => {
         route: '/api/routes/bindings',
         state: 'ready',
         totalBindings: 1,
-        bindings: [{ id: 'b1', kind: 'companion', surfaceKind: 'slack', surfaceId: null, externalIdDigest: null, sessionPolicy: null, threadPolicy: null, deliveryGuarantee: null, lastSeenAt: null, sessionId: null, runId: null, jobId: null }],
+        bindings: [{ id: 'b1', kind: 'companion', surfaceKind: 'slack', surfaceId: null, sessionPolicy: null, threadPolicy: null, deliveryGuarantee: null, lastSeenAt: null, sessionId: null, runId: null, jobId: null }],
       },
     });
     const inbox = aggregateUnifiedInbox(triage);

@@ -311,7 +311,7 @@ describe('/channels command', () => {
     expect(output).toContain('delivery-1: failed webhook https://hooks.example.test/...');
     expect(output).toContain('error=HTTP 500 token=[redacted]');
     expect(output).toContain('slack: warn Slack token=[redacted]');
-    expect(output).toContain('binding-1: slack channel external=sha256:');
+    expect(output).toContain('binding-1: slack channel sender=');
     expect(output).toContain('Agent Receipts');
     expect(output).toContain('target=webhook https://hooks.example.test/...');
     expect(output).not.toContain('route-token-redacted');

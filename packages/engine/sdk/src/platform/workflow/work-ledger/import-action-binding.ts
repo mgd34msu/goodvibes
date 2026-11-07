@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
 import { workLedgerCommandSchema } from './types.js';
+
+let importActionSequence = 0;
 
 /** Identity capture only; host construction supplies these facts, not payload authority. */
 export function captureLegacyImportAction(input: {
@@ -11,8 +12,11 @@ export function captureLegacyImportAction(input: {
   const command = workLedgerCommandSchema.parse(input.command);
   if (command.type !== 'import_legacy' || command.manifest.projectId !== input.projectId) throw new Error('Import action project mismatch');
   const commandJson = JSON.stringify(command);
-  const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  return Object.freeze({ requestKey: hash([...identity, command.requestId]), actionId: hash([...identity, commandJson]), commandJson,
+  importActionSequence++;
+  if (!Number.isSafeInteger(importActionSequence)) throw new Error('Import action identity exhausted');
+  // Only ordinary owner/request identifiers enter this private pending-map key.
+  // Complete command bytes remain separate for exact conflict detection.
+  return Object.freeze({ requestKey: JSON.stringify([...identity, command.requestId]), actionId: `import-action-${importActionSequence}`, commandJson,
     storeId: input.storeId, projectId: input.projectId, principalKind: input.principalKind, principalId: input.principalId,
     requestId: command.requestId, manifestDigest: command.manifest.digest, expectedRevision: command.expectedRevision });
 }

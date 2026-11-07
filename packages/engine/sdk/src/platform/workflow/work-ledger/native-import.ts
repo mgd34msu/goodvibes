@@ -1,5 +1,4 @@
 /** Trusted legacy-import composition. Recorded decisions are evidence, never serialized capabilities. */
-import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { canonicalJson, JudgmentError, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -19,7 +18,6 @@ export interface NativeLegacyImportDependencies {
   readonly scopes: NativeExecutionScopeOwner; readonly port: JudgmentPort; readonly decisionLog: Pick<DecisionLog, 'get'>;
   readonly readSource: (id: string) => { readonly source: unknown; readonly generation: string | null };
 }
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /**
  * Lossless display of host protocol metadata. These fields are created by the
  * manifest/store owners, not an exemption for arbitrary source content. Raw
@@ -72,14 +70,19 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
       : Promise.resolve(refusal('request_conflict', 'Original request is already processing a different command.'));
     const promise = Promise.resolve().then(async (): Promise<NativeLegacyImportResult> => {
       const actor = deps.authority.issueActor({ projectId: deps.projectId, role: 'coordinator',
-        actorId: `host:legacy-import:${hash(['token', expected.principalId])}` });
+        actorId: expected.principalId });
       const signal = options.signal ? AbortSignal.any([lifetime.signal, options.signal]) : lifetime.signal;
       let submitted = false;
       const authorized = () => !closed && options.isAuthorized() && JSON.stringify(paired(authority)) === JSON.stringify(expected);
+      const assertCommand = () => {
+        if (JSON.stringify(command) !== action.commandJson) throw new NativeImportPrecommitError('request_conflict', 'Original import command changed.');
+      };
       try {
+        assertCommand();
         if (!authorized()) return refusal('forbidden', 'Native import authority changed.');
         // Durable receipt first: source, ledger revision, process host ID and Jev availability may all have changed.
         const replay = await deps.service.lookupLegacyImport(command, actor);
+        assertCommand();
         if (!authorized()) return refusal('forbidden', 'Native import authority changed.');
         if (replay) return replay;
         if (signal.aborted) return refusal('cancelled', 'Import was cancelled before admission.');
@@ -88,6 +91,7 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
         const snapshot = await deps.service.readSnapshot(actor);
         if (snapshot.revision !== command.expectedRevision) return refusal('conflict', 'Aggregate ledger revision changed.', snapshot.revision);
         const assertCurrent = () => {
+          assertCommand();
           if (closed) throw new NativeImportPrecommitError('closed', 'Native import host is closed.');
           if (signal.aborted) throw new NativeImportPrecommitError('cancelled', 'Import was cancelled before admission.');
           if (!authorized()) throw new NativeImportPrecommitError('forbidden', 'Native import authority changed.');
@@ -104,10 +108,12 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
           catch { throw new NativeImportPrecommitError('stale_source', 'Complete persisted import sources changed.'); }
         };
         assertCurrent();
-        const binding = { sourceId: hash({ storeId, projectId: deps.projectId, sources: command.manifest.sources.map(source => source.source.id) }),
-          inputRevision: command.manifest.digest, actionId: action.actionId, actionRevision: hash(action.commandJson),
-          authorityId: hash({ pairedPrincipal: expected.authorityId }), authorityRevision: hash({ pairedIncarnation: expected.authorityRevision }),
-          scopeId: hash({ workspaceScope: scope.scopeId }), scopeRevision: hash({ workspaceGeneration: scope.scopeRevision }) };
+        // The private live checks bind these roles to the exact captured
+        // command, paired owner and workspace. Their labels grant nothing.
+        const binding = { sourceId: `${action.actionId}:source`,
+          inputRevision: command.manifest.digest, actionId: action.actionId, actionRevision: `${action.actionId}:command`,
+          authorityId: `${action.actionId}:paired-principal`, authorityRevision: `${action.actionId}:paired-incarnation`,
+          scopeId: `${action.actionId}:workspace`, scopeRevision: `${action.actionId}:workspace-generation` };
         const result = await decideAutonomous({ port: deps.port, site: NATIVE_IMPORT_SITE,
           instructions: 'Decide whether this exact bounded historical import is supported by the complete captured source records. Imported work starts unverified and unclaimed; historical statuses, execution approvals and artifacts grant no native execution, completion, or verification authority. Preserve exact goals, criteria, provenance, project and ledger revision. Act only on the offered import. Reject if unsupported. No human approval or client decision can authorize this operation.',
           actionDescription: 'Atomically import exactly this captured legacy manifest into the selected native project ledger.', binding,

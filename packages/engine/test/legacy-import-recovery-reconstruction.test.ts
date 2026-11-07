@@ -78,15 +78,17 @@ test('independent processes retain the winning exact command after the first pro
   const competitors = [run('agent', false), run('tui', false)];
   for (const child of competitors) { expect((await new Response(child.stdout).text()).trim()).toBe('crash-before-send'); expect(await child.exited).toBe(0); }
 });
-test('complete action identity covers tails, selected store and actual principal', () => {
+test('private pending keys cover selected store and principal while exact commands retain their tails', () => {
   const f = setup(); const facts = { storeId: '/store', projectId: f.binding.projectId, principalKind: 'user', principalId: 'principal', command: f.command };
   const original = captureLegacyImportAction(facts);
-  expect(captureLegacyImportAction({ ...facts, storeId: '/other' }).actionId).not.toBe(original.actionId);
+  expect(captureLegacyImportAction({ ...facts, storeId: '/other' }).requestKey).not.toBe(original.requestKey);
   expect(captureLegacyImportAction({ ...facts, principalId: 'other' }).requestKey).not.toBe(original.requestKey);
+  expect(captureLegacyImportAction({ ...facts, principalKind: 'a:b', principalId: 'c' }).requestKey)
+    .not.toBe(captureLegacyImportAction({ ...facts, principalKind: 'a', principalId: 'b:c' }).requestKey);
   const altered = structuredClone(fixture); Object.assign(altered.sources[0]!.source.metadata, { longEvidence: 'x'.repeat(6000) + 'different-tail' });
   const prepared = prepareLegacyWorkLedgerMigration(altered); if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   const changed = captureLegacyImportAction({ ...facts, command: { ...f.command, manifest: prepared.manifest } });
-  expect(changed.requestKey).toBe(original.requestKey); expect(changed.actionId).not.toBe(original.actionId);
+  expect(changed.requestKey).toBe(original.requestKey); expect(changed.commandJson).not.toBe(original.commandJson);
   expect(changed.commandJson).toContain('different-tail');
   expect(() => captureLegacyImportAction({ ...facts, command: { ...f.command, approved: true } })).toThrow();
 });

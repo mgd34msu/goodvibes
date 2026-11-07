@@ -135,9 +135,27 @@ test('dedicated import scopes commit once from actual recorded lineage; complete
   expect(record.notes).toContainEqual(expect.objectContaining({ kind: 'action', action: expect.stringContaining('autonomous:claim:') }));
   const state = f.fake.requests[0]!.state as { binding: Record<string, string> };
   for (const key of ['actionId', 'actionRevision', 'authorityId', 'authorityRevision', 'scopeId', 'scopeRevision'])
-    expect(state.binding[key]).toMatch(/^[a-f0-9]{64}$/);
+    expect(state.binding[key]).toMatch(/^import-action-[1-9][0-9]*(?::[a-z-]+)?$/);
   const manifest = (f.fake.requests[0]!.state as unknown as { input: { manifest: { sources: object[] } } }).input.manifest;
   expect(Object.keys(manifest.sources[0]!).sort()).toEqual(['digest', 'generation', 'source']);
+});
+
+test('a command retained by a host callback cannot change while its admission reading awaits', async () => {
+  let retained: { expectedRevision: number } | undefined;
+  const f = await fixture({ decorate: port => ({ ...port, async ask(request) {
+    if (!retained) throw new Error('Expected the actual command passed to replay lookup');
+    retained.expectedRevision = 99;
+    return port.ask(request);
+  } }) });
+  const lookup = f.deps.service.lookupLegacyImport;
+  f.deps.service.lookupLegacyImport = function (command, actor) {
+    retained = command as { expectedRevision: number };
+    return lookup.call(this, command, actor);
+  };
+  expect(await f.run()).toMatchObject({ kind: 'rejected', code: 'request_conflict' });
+  expect((await f.ledger.service.readSnapshot(f.actor)).revision).toBe(0);
+  expect(f.log.query({ site: NATIVE_IMPORT_SITE }).some(entry => entry.notes.some(note => note.kind === 'action'
+    && note.action.startsWith('autonomous:claim:')))).toBe(false);
 });
 
 test('fresh refusal has no ledger effects; explicit same-command reconsideration performs a new recorded read', async () => {

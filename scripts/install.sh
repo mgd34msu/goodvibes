@@ -1974,7 +1974,7 @@ prune_old_webui_bundles() {
   [ -d "$WEBUI_ROOT" ] || return 0
   for _old in "$WEBUI_ROOT"/*; do
     [ -d "$_old" ] || continue
-    [ "$(basename "$_old")" = "$_keep" ] && continue
+    [ "${_old##*/}" = "$_keep" ] && continue
     rm -rf "$_old"
     say "  removed    $_old (superseded)"
   done

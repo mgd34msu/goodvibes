@@ -277,7 +277,7 @@ function renderRuntimeEventReference(): string {
   // validators check, so this section cannot drift from what is accepted.
   lines.push('## Named contract events');
   lines.push('');
-  lines.push('The `contracts` domain carries one named event per step of a contract (docs/design/contract-runner.md section 8.1). Each field below is required unless marked optional.');
+  lines.push('The `contracts` domain carries one named event per step of a contract. Each field below is required unless marked optional.');
   lines.push('');
   for (const type of CONTRACT_EVENT_TYPES) {
     lines.push(`### \`${type}\``);

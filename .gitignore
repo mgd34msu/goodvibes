@@ -42,3 +42,6 @@ __pycache__/
 
 # Local Plat workspace, specs, and generated indexes
 .plat/
+
+# Local platform development plans, reviews and working documentation
+/.goodvibes/dev/

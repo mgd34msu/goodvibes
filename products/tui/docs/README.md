@@ -37,7 +37,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [Channels, remote runtime, and API](channels-remote-and-api.md)
   Omnichannel surfaces, reply routing, remote peers, node-host contracts, and the daemon/control-plane HTTP + streaming surfaces.
 
-- [Contract runtime ownership](contract-runtime.md)
+- Contract runtime ownership
   Canonical runner, persistence and agent-tool boundaries, with focused verification.
 
 - [Session durability](session-durability.md)
@@ -49,7 +49,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [CLI flags](cli-flags.md)
   Global flags reference covering session lifecycle (`--continue`, `--resume`, `--fork`), the `-y`/`--non-interactive` commit gate for plugin bundle installs, output format consolidation, the `--host` alias, and all other startup and command-specific flags.
 
-- [Architecture](architecture.md)
+- Architecture
   Source layout, the import-direction rules `bun run architecture:check` enforces, and the operator API bridge that answers `panels.list` / `panels.open` with the modal views.
 
 - [Commands reference](commands-reference.md)
@@ -64,10 +64,10 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [QEMU sandbox bootstrapping](qemu-sandbox.md)
   Sandbox isolation modes, host prerequisites, generated QEMU setup bundle files, Debian cloud-image bootstrapping, guest runtime installs, validation, and troubleshooting.
 
-- [Release and publishing](release-and-publishing.md)
+- Release and publishing
   Release validation, GitHub CD, compiled binary releases, npm distribution, and the GitHub Packages mirror.
 
-- [Testing and validation](testing-and-validation.md)
+- Testing and validation
   What runs while you work, on every push, and before a release; the test layers; the end-to-end tests against the built binary.
 
 - [Local verification](verification/local-verification.md)

@@ -7,14 +7,14 @@ These are the package-facing docs for the GoodVibes Agent `3.1.x` release line.
 - [Docs index](README.md)
 - [Getting started](getting-started.md)
 - [Connected host](connected-host.md)
-- [Execution and session owners](runtime-owners.md)
+- Execution and session owners
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
 - [Tools and commands](tools-and-commands.md)
 - [Channels, remote access, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)
 - [Voice and live TTS](voice-and-live-tts.md)
-- [Release and publishing](release-and-publishing.md)
-- [Testing and validation](testing-and-validation.md)
+- Release and publishing
+- Testing and validation
 - [Google setup runbook](google-setup-runbook.md)
 - [Google scope strategy](google-scope-strategy.md)
 

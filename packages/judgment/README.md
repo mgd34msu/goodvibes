@@ -18,7 +18,7 @@ npm install @goodvibes-jev/judgment
 
 ## Current contract and migration status
 
-The [autonomous Jev decision contract](../../docs/design/autonomous-jev-decisions.md)
+The autonomous Jev decision contract
 is the target for every semantic decision. Consumers use `act`, `revise`, `defer`
 or `reject`, with no human runtime approval or escalation. Schema and binding
 validation are implemented; they are not a semantic evaluator, authorization

@@ -292,7 +292,7 @@ excluding imported dependencies. Historical references are advisory; this
 report does not enforce a consumer bundle-size limit. Actual package and
 browser/RN compatibility checks remain separate required checks.
 
-See [Testing and Validation](./testing-and-validation.md#entry-file-gzip-diagnostics).
+See Testing and Validation.
 
 **Runtime SLO gates** use consecutive-violation counting. A budget fails only when the threshold is exceeded on `tolerance` consecutive samples, which prevents transient spikes from failing the gate.
 

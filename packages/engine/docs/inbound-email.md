@@ -15,9 +15,9 @@ Capability checks distinguish a readable mailbox from a connection that exists
 but cannot supply the required content. A verification expectation can fail with
 `capability-lost` or expire without a matching message; these outcomes are reported.
 
-The [complete design and implementation history](decisions/2026-07-27-inbound-email-design.md)
+The complete design and implementation history
 preserves the authority model, protocol decisions, test plan, reproduced defects,
 and their dated dispositions. Its historical findings are not a claim that every
 listed defect remains present or that all have been resolved. The
-[recorded inbound-mail review](decisions/2026-07-27-inbound-email-medium-findings.md)
+recorded inbound-mail review
 retains the supporting review evidence and corrections.

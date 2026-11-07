@@ -6,7 +6,7 @@ migration: a parsed command is not proof its configured runtime is deployable.
 The shipped launcher admits unconfigured Slack/Discord/email membership, but
 configured accounts need explicit trusted local source/screening ownership.
 Service activation additionally needs an explicitly composed installed executable.
-See [deployment boundaries](../README.md) and [validation](testing-and-validation.md).
+See [deployment boundaries](../README.md) and validation.
 
 Unknown commands and unsupported flags exit 2 instead of starting a daemon.
 `goodvibes-daemon --help --json` is the read-only machine catalog; it does not

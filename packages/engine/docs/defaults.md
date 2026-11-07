@@ -116,7 +116,7 @@ Both capabilities default off; the daemon stays loopback-only until you opt in e
 | `controlPlane.cors.enabled` | `false` | Answer OPTIONS preflight and emit `Access-Control-Allow-*` for allowlisted origins. Never wildcards; credentials are allowlist-gated. |
 | `controlPlane.cors.allowedOrigins` | `''` | Comma-separated explicit origin allowlist (e.g. `http://localhost:5173`). Empty refuses every cross-origin request. |
 
-See [Web UI Integration → Deployment topology](./web-ui-integration.md#deployment-topology-same-origin-vs-cross-origin) and the decision record [`docs/decisions/2026-07-07-webui-cross-origin-deployment.md`](./decisions/2026-07-07-webui-cross-origin-deployment.md).
+See [Web UI Integration → Deployment topology](./web-ui-integration.md#deployment-topology-same-origin-vs-cross-origin) and the decision record `docs/decisions/2026-07-07-webui-cross-origin-deployment.md`.
 
 ## Spoken output and TTS
 

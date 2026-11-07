@@ -6,7 +6,7 @@ The code lives in `packages/engine/sdk/src/platform/contract/`. The build design
 
 See also: [Runtime events reference](./reference-runtime-events.md#contracts) for the `contracts` event domain, [Runtime orchestration](./runtime-orchestration.md) for the contract lifecycle, and [Observability](./observability.md) for event subscription.
 
-The current [autonomous decision contract](../../../docs/design/autonomous-jev-decisions.md)
+The current autonomous decision contract
 supersedes the owner-approval/escalation paths described below. Those sections
 record legacy runner behavior still undergoing migration. Completion checking
 for standalone turns is documented in [runtime orchestration](./runtime-orchestration.md#completion-verification).

@@ -5,7 +5,7 @@
 Agent is a private workspace in the GoodVibes Jev monorepo, included in the
 suite installer and root build, typecheck and test commands. Integration and
 full product acceptance remain in progress. The upstream tour below describes
-inherited behavior; the [current decision contract](../../docs/design/autonomous-jev-decisions.md)
+inherited behavior; the current decision contract
 supersedes its semantic confirmation/escalation paths. Explicit owner settings,
 identity, scopes and revocation still control access. The shared judgment port
 owns retry/waiting and cancellation.
@@ -61,7 +61,7 @@ produce a visible diagnostic; there is no legacy conversation fallback.
 The exact original and delivery mode survive restart. `/work intake-status`
 inspects and reopens observation; `intake-retry`, `intake-resume` and
 `intake-cancel` recover or cancel that same original. A lost reply never creates
-fresh IDs or switches delivery modes. [Remote-owner contract](../../docs/design/agent-native-remote-conversation.md).
+fresh IDs or switches delivery modes. Remote-owner contract.
 
 Pairing remains explicit setup. The existing `pairing.tokens.migrate` operator
 method accepts `{ "name": "Agent" }` from an authenticated existing shared-token
@@ -168,8 +168,8 @@ Each row links to the page that documents it. The workspace's own `/` search and
 | Knowledge, artifacts, and multimodal | Isolated Agent Knowledge, document/image/media artifacts, ingest and review routes | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Channels, remote access, and API | Slack, Discord, Telegram, Matrix, webhook, and other configured channels; setup/triage/delivery; companion pairing; the operator method catalog | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
 | Voice and live TTS | Spoken playback, TTS/STT provider setup | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
-| Release and publishing | Package identity, release asset layout, the package gate | [release-and-publishing.md](docs/release-and-publishing.md) |
-| Testing and validation | What runs locally, on every push, before a release, and at the version bump | [testing-and-validation.md](docs/testing-and-validation.md) |
+| Release and publishing | Package identity, release asset layout, the package gate | release-and-publishing.md |
+| Testing and validation | What runs locally, on every push, before a release, and at the version bump | testing-and-validation.md |
 | Google setup | The generated step-by-step runbook for connecting Gmail and Google Calendar, plus which OAuth scopes the integration requests and why | [google-setup-runbook.md](docs/google-setup-runbook.md), [google-scope-strategy.md](docs/google-scope-strategy.md) |
 
 Full index: [docs/README.md](docs/README.md).

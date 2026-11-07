@@ -5,7 +5,7 @@
 The TUI is a private workspace in the GoodVibes Jev monorepo and is built by
 its suite installer. Integration and full product acceptance remain in progress.
 The screenshots and product tour below preserve upstream reference behavior;
-the [current decision contract](../../docs/design/autonomous-jev-decisions.md)
+the current decision contract
 takes precedence over legacy permission prompts and owner escalation. Jev makes
 semantic decisions; explicit owner settings and deterministic checks control
 tool access. The shared judgment port owns retry/waiting and cancellation.
@@ -326,7 +326,7 @@ Run these commands from `products/tui` after preparing the monorepo:
 
 The compiled binary is the TUI entrypoint. With `daemon.enabled` on (the default) it adopts a running standalone GoodVibes daemon over loopback, and when a daemon is installed as a service but stopped, it starts that service once and waits for it to come online. It never embeds or constructs a daemon of its own. The control plane, HTTP listener (`danger.httpListener`), and web surface are all hosted by the daemon; the TUI configures them and reports their bindings.
 
-Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. CI also checks import cycles and layer boundaries (`scripts/check-architecture.ts`), and the release gates hold the performance budgets (`scripts/perf-baseline.json`). [Testing and validation](docs/testing-and-validation.md) says what runs where.
+Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. CI also checks import cycles and layer boundaries (`scripts/check-architecture.ts`), and the release gates hold the performance budgets (`scripts/perf-baseline.json`). Testing and validation says what runs where.
 
 Some decisions worth knowing before you read the source:
 
@@ -341,7 +341,7 @@ Some decisions worth knowing before you read the source:
 
 The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference consumers of those surfaces live under [`examples/`](examples/reference-operator-client/README.md).
 
-Source layout, in brief (the layer rules and the operator API bridge are in [docs/architecture.md](docs/architecture.md)):
+Source layout, in brief (the layer rules and the operator API bridge are in docs/architecture.md):
 
 ```text
 src/

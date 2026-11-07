@@ -18,8 +18,8 @@ it does not install them into a shell.
 checked-in `bin/goodvibes-daemon`. It supplies `createProductionDaemonRuntime()`
 to the dispatcher. The production inbox represents actual unconfigured members
 and requires trusted account admission for configured providers; see the
-[inbox contract](../../../docs/contracts/daemon-inbox-and-triage.md) and
-[runtime ownership](../../../docs/contracts/daemon-runtime-ownership.md).
+inbox contract and
+runtime ownership.
 An embedded dispatcher without an inbox factory refuses serve before acquisition.
 Do not recreate the superseded claim that the shipped entrypoint has no factory,
 or substitute an empty set for required provider membership.
@@ -601,7 +601,7 @@ recorded model/judgment transport is synthetic. The hosted-session verifier
 exercises real compiled HTTP streaming, persisted assistant history, detach
 policy, explicit kill and lifecycle boundaries; merely having that code is not
 an execution or live-provider receipt. Payload digests are checked again after
-execution. See [runtime ownership](../../../docs/contracts/daemon-runtime-ownership.md)
+execution. See runtime ownership
 for the served graph and [hosted sessions](hosted-sessions.md) for its API.
 
 Preserve wrapper/version tests and canonical toolchain target/addon/sidecar/smoke

@@ -52,6 +52,6 @@ publication. Product-level preparation only writes generated browser data and
 asset cache stamps. Existing legacy URLs continue to map into Chat, Work,
 Library, Personal and Settings while preserving deep-link fragments.
 
-See [development](docs/development.md), [testing and validation](docs/testing-and-validation.md),
-[runtime boundaries](docs/runtime-boundaries.md) and [known limitations](docs/known-limitations.md)
+See development, testing and validation,
+runtime boundaries and [known limitations](docs/known-limitations.md)
 for the supported workflows and remaining integration work.

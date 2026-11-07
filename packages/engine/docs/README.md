@@ -47,8 +47,8 @@ history, including upstream releases.
 - [Tool safety](./tool-safety.md)
 - [Contract criteria](./contract-criteria.md)
 - [Project review inventory](./contract-criteria.md#project-review-inventory): inspected files, accepted assessments and current versions.
-- [Architecture](./architecture.md)
-- [Platform architecture](./architecture-platform.md)
+- Architecture
+- Platform architecture
 
 ## Knowledge, media, and search
 
@@ -91,9 +91,9 @@ history, including upstream releases.
 - [Error handling](./error-handling.md): consumer patterns for catching structured errors.
 - [Error kinds reference](./error-kinds.md): public `SDKErrorKind` reference table.
 - [Troubleshooting](./troubleshooting.md)
-- [Testing and validation](./testing-and-validation.md): commands and CI gates.
-- [Testing architecture](./testing.md): suite structure and intent.
-- [Release policy](./release-and-publishing.md)
+- Testing and validation: commands and CI gates.
+- Testing architecture: suite structure and intent.
+- Release policy
 - [Semver policy](./semver-policy.md)
 - [OpenAPI operator contract](./openapi-contract.md): the published OpenAPI 3.1 document and how it is generated.
 - [Contract regeneration recipe](./contract-regeneration-recipe.md): the end-to-end procedure for adding an operator method or namespace.
@@ -121,7 +121,7 @@ Repository-wide policies and engine references:
 - [Installation and updates](../../../docs/installation.md)
 - [Security policy](../../../SECURITY.md)
 - [Changelog](../CHANGELOG.md)
-- [Test coverage](../COVERAGE.md)
+- Test coverage
 
 Type directive rationale and guarded host-only imports are documented in
 [type suppressions and optional imports](type-suppressions-and-optional-imports.md).

@@ -71,4 +71,4 @@ Setting discovery is compact by default through `settings action:"list"` and ful
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
 - [Voice and live TTS](voice-and-live-tts.md)
 
-The full source-screening, lifecycle, nullable output and preserved mechanical boundaries are specified in [Agent model readiness](../../../docs/contracts/agent-model-readiness.md). Live calibration remains separate from offline fixture verification.
+The full source-screening, lifecycle, nullable output and preserved mechanical boundaries are specified in Agent model readiness. Live calibration remains separate from offline fixture verification.

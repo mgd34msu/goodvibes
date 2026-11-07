@@ -25,7 +25,7 @@ owners. Merely filling token settings does not construct that authority. A fresh
 unconfigured inbox may boot; configured missing/unreadable authority refuses with
 owned rollback instead of silently becoming an empty inbox. Configured Discord
 inbox/DM catalog qualification remains open. See [deployment boundaries](../README.md)
-and [production intake contract](../../../docs/contracts/daemon-runtime-ownership.md#production-intake-and-selected-transport).
+and production intake contract.
 
 Malformed settings are not treated as safe defaults. Preserve the file and fix the
 reported key/schema/version issue; do not delete safety constraints to force boot.

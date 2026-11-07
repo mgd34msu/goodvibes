@@ -20,7 +20,7 @@ Its settlement boundary covers the turn's owned provider, tool, hook, and hook-A
 work. Independent workflow-trigger automations may continue; `TURN_CANCEL` is not a
 global “all side effects stopped” receipt. Uncooperative owned work must stay pending
 rather than be reported drained. See the [cancellation contract and platform limits](docs/hosted-turn-cancellation.md)
-and the [retained review evidence](docs/decisions/2026-10-16-hosted-turn-review-boundary.md).
+and the retained review evidence.
 
 ```mermaid
 flowchart LR
@@ -158,7 +158,7 @@ bun run build
 | `bun run refresh:contracts` | Regenerate shared contract artifacts and product snapshots after a contract change |
 | `bun run docs:generate` / `bun run docs:check` | Regenerate / verify API reference docs; the check also verifies required docs and examples exist |
 
-CI (`.github/workflows/ci.yml`) runs `validate`, a standing eval gate scored against a checked-in baseline, a dependency and secret-scan audit, a single `build` that every downstream job restores rather than rebuilding, a `platform-matrix` job (Bun tests plus companion-bundle and Workers runtime legs), a types-resolution check over the packed exports map, `publint`, and a packaged-artifact conformance lane. On a green `main` push, an auto-release job tags and dispatches the release, but only while the repo's `RELEASE_ARMED` variable is set. Full gate reference: [docs/testing-and-validation.md](./docs/testing-and-validation.md).
+CI (`.github/workflows/ci.yml`) runs `validate`, a standing eval gate scored against a checked-in baseline, a dependency and secret-scan audit, a single `build` that every downstream job restores rather than rebuilding, a `platform-matrix` job (Bun tests plus companion-bundle and Workers runtime legs), a types-resolution check over the packed exports map, `publint`, and a packaged-artifact conformance lane. On a green `main` push, an auto-release job tags and dispatches the release, but only while the repo's `RELEASE_ARMED` variable is set. Full gate reference: docs/testing-and-validation.md.
 
 ---
 
@@ -169,7 +169,7 @@ the engine, judgment and daemon; the other product manifests retain their own
 versions. The application products are private workspaces and the suite is
 installed from this checkout. Export and compatibility rules are recorded in
 [the semver policy](./docs/semver-policy.md); release machinery and its explicit
-gates are described in [release and publishing](./docs/release-and-publishing.md).
+gates are described in release and publishing.
 Update an installed suite with the [repository installer](../../docs/installation.md#update-and-check-the-installation).
 
 ## Security

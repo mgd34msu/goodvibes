@@ -1016,7 +1016,7 @@ Test-harness and CI honesty release: no product code changed.
 - The lint and end-to-end CI jobs are now blocking. They previously ran with
   `continue-on-error`, which let the workflow report success while those jobs
   failed: a green checkmark must mean everything is green. Ruling recorded in
-  [docs/decisions/2026-07-07-e2e-ci-in-ci.md](docs/decisions/2026-07-07-e2e-ci-in-ci.md).
+  docs/decisions/2026-07-07-e2e-ci-in-ci.md.
 - Removed a stale duplicate of the 1.1.0 installable-app notes that had been
   left under Unreleased.
 - Documentation refreshed to the shipped 1.1.x surface: the README (badges,

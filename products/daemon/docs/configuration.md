@@ -139,4 +139,4 @@ cover real-manager validation, refusal before mutation, unchanged stored bytes,
 and honest post-write receipts. [Emitted CLI tests](../src/test/cli/entrypoint.test.ts)
 cover the selected daemon store across processes and selected-store migration.
 These are bounded fixture contracts, not live-provider or release acceptance.
-See [testing and validation](testing-and-validation.md) for the supported runner.
+See testing and validation for the supported runner.

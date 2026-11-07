@@ -1620,7 +1620,7 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
 
 ## Named contract events
 
-The `contracts` domain carries one named event per step of a contract (docs/design/contract-runner.md section 8.1). Each field below is required unless marked optional.
+The `contracts` domain carries one named event per step of a contract. Each field below is required unless marked optional.
 
 ### `CONTRACT_CREATED`
 

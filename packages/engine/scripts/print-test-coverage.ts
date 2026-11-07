@@ -25,7 +25,7 @@ const lines = [
   'It includes nested suites and product tests; generated/vendor/build files are excluded.', '',
   'Regenerate from the repository root:', '',
   '```sh',
-  'bun packages/engine/scripts/print-test-coverage.ts > packages/engine/COVERAGE.md',
+  'bun packages/engine/scripts/print-test-coverage.ts > .goodvibes/dev/packages/engine/COVERAGE.md',
   '```', '',
 ];
 for (const [prefix, title] of workspaces) {

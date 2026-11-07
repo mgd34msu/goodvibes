@@ -1,6 +1,6 @@
 # Native planning and saved historical records
 
-New terminal requests use native conversation intake. The historical project-planning interview is retired: the TUI does not generate clarification questions, propose answers, request execution approval, or turn a saved goal into a new native request. This follows the [autonomous Jev decision contract](../../../docs/design/autonomous-jev-decisions.md).
+New terminal requests use native conversation intake. The historical project-planning interview is retired: the TUI does not generate clarification questions, propose answers, request execution approval, or turn a saved goal into a new native request. This follows the autonomous Jev decision contract.
 
 ## Boundary
 

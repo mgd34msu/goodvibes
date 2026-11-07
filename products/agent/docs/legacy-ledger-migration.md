@@ -162,5 +162,5 @@ mutation, preserve the paired credential bytes, leave a private 0600 journal
 with zero saved commands, exit naturally and record no external-network use.
 Do not infer mutation/runner/live-provider acceptance from those read probes.
 
-The [native persistence and legacy guard contract](../../../docs/contracts/native-work-persistence-and-history.md)
+The native persistence and legacy guard contract
 retains generic source-write compatibility and durable publication requirements.

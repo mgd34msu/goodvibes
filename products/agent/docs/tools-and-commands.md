@@ -477,7 +477,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 - [Connected host](connected-host.md)
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
 - [Channels, remote access, and API](channels-remote-and-api.md)
-- [Release and publishing](release-and-publishing.md)
+- Release and publishing
 
 ## Native work ledger (read only)
 

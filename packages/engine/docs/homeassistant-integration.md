@@ -424,7 +424,7 @@ Foreground repair re-reads the changed corpus through the same typed readers at
 its existing successful re-answer transition, retaining the original question,
 subject and configuration bindings. Returned results and enrichment targets use
 the actual semantic-selected results. See the
-[retrieval contract](../../../docs/contracts/knowledge-judgment-and-persistence.md#home-graph-semantic-retrieval) for selection,
+retrieval contract for selection,
 lifecycle and transaction limits.
 Generated semantic wiki pages and extracted fact nodes are not used as Home
 Assistant object anchors, so a generated Kasa page or generic "features" fact

@@ -32,8 +32,6 @@ const requiredDocs = [
   'docs/companion-app-patterns.md',
   'docs/error-handling.md',
   'docs/troubleshooting.md',
-  'docs/release-and-publishing.md',
-  'docs/testing-and-validation.md',
   'docs/reference-operator.md',
   'docs/reference-peer.md',
   'docs/reference-runtime-events.md',
@@ -68,8 +66,8 @@ for (const relativePath of [...requiredDocs, ...requiredExamples]) {
 
 // A status must precede the design body, so proposed behavior cannot silently
 // become a release claim. Reuse this docs lane rather than adding another script.
-const designDirectory = resolve(SDK_ROOT, '../../docs/design');
-for (const file of readdirSync(designDirectory).filter(name => name.endsWith('.md'))) {
+const designDirectory = resolve(SDK_ROOT, '../../.goodvibes/dev/docs/design');
+for (const file of existsSync(designDirectory) ? readdirSync(designDirectory).filter(name => name.endsWith('.md')) : []) {
   const preamble = readFileSync(resolve(designDirectory, file), 'utf8').split('\n').slice(0, 10).join('\n');
   if (!/^\*{0,2}Status:/m.test(preamble)) throw new Error(`Design doc needs an explicit status preamble: ${file}`);
 }

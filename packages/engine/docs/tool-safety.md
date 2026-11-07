@@ -12,7 +12,7 @@ Tool admission uses explicit owner settings and deterministic checks. Jev
 interprets work and verifies outcomes; its uncertainty or unavailability cannot
 veto an otherwise valid tool call. Authentication, scopes, revocation, captured
 input ownership, cancellation and schema validation still apply. The
-[autonomous decision contract](../../../docs/design/autonomous-jev-decisions.md)
+autonomous decision contract
 supersedes legacy semantic approval/escalation flows, including the historical
 approval UI described later in this guide.
 

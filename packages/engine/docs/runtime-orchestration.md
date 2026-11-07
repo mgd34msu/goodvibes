@@ -37,7 +37,7 @@ Embedders can still compose legacy `createContractIntake` routing. Its
 request-route and owner-reply behavior is a compatibility path, and native-mode
 runners reject that source-less intake. The contract lifecycle descriptions
 below include those legacy APIs and statuses; current consumers follow the
-[autonomous decision contract](../../../docs/design/autonomous-jev-decisions.md).
+autonomous decision contract.
 
 Important pieces:
 

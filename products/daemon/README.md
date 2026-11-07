@@ -10,7 +10,7 @@ Copyright (c) 2026 Mike Davis.
 - [Command reference](docs/commands-reference.md): complete vocabulary, flags, refusals and remote conventions
 - [Configuration](docs/configuration.md): exact homes, layers, persistent keys and runtime overlays
 - [Hosted sessions](docs/hosted-sessions.md): Jev authority, trust, detach/kill, leases and recovery
-- [Testing and validation](docs/testing-and-validation.md): actual scripts, official runner and proof limits
+- Testing and validation: actual scripts, official runner and proof limits
 - [Suite installation and uninstall](../../docs/installation.md): build this repository and configure the Linux user service
 - [Troubleshooting](docs/troubleshooting.md): startup, authentication, binding, services and tool refusals
 
@@ -50,7 +50,7 @@ revokes the source even if the setting is restored. Group DMs are unsupported.
 The host supplies the live `ProtectedSourceOwnerOptions` capability for both the
 local proposal service and `jev-latest`, including established ephemeral retention.
 The standalone launcher has no managed local screening runner; settings or endpoint
-addresses cannot establish its retention policy. [Inbox contract](../../docs/contracts/daemon-inbox-and-triage.md#discord-account-and-intended-channels)
+addresses cannot establish its retention policy. Inbox contract
 describes the owned read and revocation boundaries.
 Service install/start/restart/migrate requires a
 launcher that supplies both real inbox composition and its installed executable
@@ -111,7 +111,7 @@ The shipped executable uses it without inferred account grants. No fixture
 factory is installed. Explicit Discord admission requires an authenticated bot,
 a trusted intended-channel scope and a protected screening owner; it does not
 discover exhaustive historical DMs. See
-[production intake contract](../../docs/contracts/daemon-runtime-ownership.md#production-intake-and-selected-transport) for the configured deployment boundary.
+production intake contract for the configured deployment boundary.
 
 `createEmailDaemonInboxFactory({ account, screening })` supplies an explicit
 TLS mailbox inbox for single-node or account-eligible clustered operation, with
@@ -120,7 +120,7 @@ and durable UIDVALIDITY/UID progress. The root supplies its owned mail-service
 constructor and, in cluster mode, awaitable election gates. First polling records
 a typed history boundary; content starts on the next ordinary cadence. Omitted history
 and remaining backlog are disclosed separately from provider failures. See
-[email inbox contract](../../docs/contracts/daemon-inbox-and-triage.md#email-complete-source-reads) for prerequisites and limits. This
+email inbox contract for prerequisites and limits. This
 does not infer a grant for configured standalone accounts.
 
 Before constructing its server, the explicit host awaits initial custom-provider
@@ -136,7 +136,7 @@ workspace floor also awaits its own initial custom load before copying the
 daemon registry's current discovery snapshot and admitting a model selection.
 Shutdown drains pending floor acquisition and its cleanup. Floors do not launch
 their own LAN scans or watch the cache for updates. Cache membership
-provides no protected-source authority. See [provider preload contract](../../docs/contracts/daemon-runtime-ownership.md#provider-preload-and-background-discovery).
+provides no protected-source authority. See provider preload contract.
 
 Once explicit startup is admitted, the launcher loads or creates the shared
 `operator-tokens.json` in the selected daemon home. The same token authenticates
@@ -186,7 +186,7 @@ must enable Slack and select that workspace; credentials come from the existing
 daemon credential resolver. This factory owns real Slack history polling,
 protected content previews, an account-specific SQLite mirror
 and authenticated reads, including token rotation and awaited shutdown. See
-[Slack inbox contract](../../docs/contracts/daemon-inbox-and-triage.md#slack-account-and-transport) for the exact trusted inputs,
+Slack inbox contract for the exact trusted inputs,
 transport and live-proof requirements. It does not compose other providers or
 infer admission for configured standalone accounts.
 
@@ -241,7 +241,7 @@ each source retains its own account database, lock, read proof and cluster gate.
 Duplicate wire provider IDs are rejected. Explicit provider membership is still
 required for custom composition. The production constructor includes explicit
 unconfigured membership and explicit account-bound Slack, Discord and email
-sources. See [multi-owner inbox contract](../../docs/contracts/daemon-inbox-and-triage.md#aggregation-and-multi-owner-read-fencing) for lifecycle,
+sources. See multi-owner inbox contract for lifecycle,
 pagination and protected-read contracts.
 
 ## Explicit local release preparation

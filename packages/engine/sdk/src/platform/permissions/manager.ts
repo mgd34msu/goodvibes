@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused } from '../runtime/decision-policy.js';
@@ -38,7 +39,7 @@ import type { CommandClassification, PolicyRule, PermissionDecision as LayeredPe
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { HookDispatcher } from '../hooks/index.js';
 import type { HookCategory, HookEventPath, HookPhase } from '../hooks/types.js';
-import type { ConfigManager, PreparedConfigMutationTransition } from '../config/manager.js';
+import { retainPermissionConfigurationOwner, type PermissionConfigurationOwner, type ConfigManager, type PreparedConfigMutationTransition } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import type {
@@ -119,14 +120,33 @@ function readDecisionOtlpConfig(configManager: Pick<ConfigManager, 'get'>): Deci
 }
 
 const permissionConfigOwners = new WeakMap<PermissionConfigReader, object>();
+const nativePermissionConfigs = new WeakMap<PermissionConfigReader, {
+  readonly owner: PermissionConfigurationOwner;
+  readonly snapshot: NonNullable<PermissionConfigReader['getAutonomousSnapshot']>;
+}>();
+
+/** Native revisions avoid repeated serialization; custom readers retain exact snapshots. */
+function capturePermissionConfiguration(reader: PermissionConfigReader, read: () => unknown, captured: unknown): () => void {
+  const native = nativePermissionConfigs.get(reader);
+  if (native && Object.getOwnPropertyDescriptor(reader, 'getAutonomousSnapshot')?.value === native.snapshot) {
+    const unchanged = native.owner.captureRevision();
+    return () => {
+      if (Object.getOwnPropertyDescriptor(reader, 'getAutonomousSnapshot')?.value !== native.snapshot || !unchanged()) {
+        throw new Error('Permission configuration changed while deciding');
+      }
+    };
+  }
+  const original = captureJsonEntry(captured);
+  return () => {
+    if (!isDeepStrictEqual(captureJsonEntry(read()), original)) throw new Error('Permission configuration changed while deciding');
+  };
+}
 
 export function createPermissionConfigReader(
   configManager: Pick<ConfigManager, 'get' | 'getRaw' | 'getWorkingDirectory'> & Partial<Pick<ConfigManager, 'getAutonomousPermissionSnapshot' | 'flushConfigFileChanges'>>,
 ): PermissionConfigReader {
-  // Bind the construction-owned accessor, not its result. Every check still
-  // copies current permission state; unrelated configuration domains need not
-  // be cloned for each original-owner/runtime path in a captured read sweep.
-  const permissionSnapshot = configManager.getAutonomousPermissionSnapshot?.bind(configManager);
+  const snapshotAccessor = configManager.getAutonomousPermissionSnapshot;
+  const permissionSnapshot = snapshotAccessor?.bind(configManager);
   const flushPendingChanges = configManager.flushConfigFileChanges?.bind(configManager);
   const reader: PermissionConfigReader = {
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
@@ -140,6 +160,8 @@ export function createPermissionConfigReader(
     getDecisionOtlpConfig: () => readDecisionOtlpConfig(configManager),
   };
   permissionConfigOwners.set(reader, configManager);
+  const native = retainPermissionConfigurationOwner(configManager, snapshotAccessor);
+  if (native && permissionSnapshot) nativePermissionConfigs.set(reader, { owner: native, snapshot: permissionSnapshot });
   return reader;
 }
 
@@ -485,10 +507,10 @@ export class PermissionManager {
   autonomousPreparation(sourceId: string, sourceOf: () => AutonomousToolSource, signal?: AbortSignal, decoratePort?: (port: JudgmentPort) => JudgmentPort, choiceProjection?: AutonomousChoiceProjection): { readonly port: JudgmentPort; assertCurrent(): void } {
     assertPermissionActive(signal);
     this.assertSelectedModeCurrent();
-    const revision = hashState(captureJsonEntry(this.autonomousAuthority(sourceId, sourceOf, choiceProjection)));
+    const original = captureJsonEntry(this.autonomousAuthority(sourceId, sourceOf, choiceProjection));
     const assertCurrent = () => {
       assertPermissionActive(signal);
-      if (this.autonomousClaims.has(sourceId) || hashState(captureJsonEntry(this.autonomousAuthority(sourceId, sourceOf, choiceProjection, 'currentness'))) !== revision)
+      if (this.autonomousClaims.has(sourceId) || !isDeepStrictEqual(captureJsonEntry(this.autonomousAuthority(sourceId, sourceOf, choiceProjection, 'currentness')), original))
         throw new Error('Autonomous preparation authority changed or source was claimed');
       assertPermissionActive(signal);
     };
@@ -1008,13 +1030,15 @@ export class PermissionManager {
       autoApprove: this.configReader.isAutoApproveEnabled(), directory: this.configReader.getWorkingDirectory(),
     };
     const config = authoritySnapshot();
-    const authorityRevision = hashState(captureJsonEntry(config));
+    const assertConfiguration = capturePermissionConfiguration(this.configReader, authoritySnapshot, config);
+    // The call names its owned immutable capture; owner revisions enforce freshness.
+    const authorityRevision = callId;
     const assertCurrent = () => {
       assertPermissionActive(signal);
       exposure.assertCurrent(); assertWorkspace();
       if (this.gate.surfaceOf?.() !== surface) throw new Error('Execution source authority changed while deciding');
-      if (mode !== this.getMode() || owner?.getRevision() !== ownerRevision
-        || hashState(captureJsonEntry(authoritySnapshot())) !== authorityRevision) throw new Error('Execution mode or owner changed while deciding');
+      assertConfiguration();
+      if (mode !== this.getMode() || owner?.getRevision() !== ownerRevision) throw new Error('Execution mode or owner changed while deciding');
     };
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
@@ -1037,7 +1061,7 @@ export class PermissionManager {
     const safety = await this.assessExecutionSafety({
       callId, sourceId: callId, toolName, args, category, policyResult, mode, signal, assertCurrent,
       workingDirectory: config.directory ?? undefined, authorityRevision,
-      actionRevision: hashState(captureJsonEntry({ toolName, args })), attribution,
+      actionRevision: callId, attribution,
     });
     assertCurrent();
     return this.emitAndReturn(callId, toolName, category, safety.result, hookOwner);
@@ -1116,6 +1140,11 @@ export class PermissionManager {
   getMode(): GatePresetName {
     const scoped = currentExecutionModeOwner();
     if (scoped) return scoped.getMode();
+    const native = nativePermissionConfigs.get(this.configReader);
+    if (native && Object.getOwnPropertyDescriptor(this.configReader, 'getAutonomousSnapshot')?.value === native.snapshot) {
+      const frame = native.owner.readMode();
+      return effectivePermissionMode(frame.mode, frame.autoApprove);
+    }
     const frame = this.configReader.getAutonomousSnapshot?.();
     return frame ? effectivePermissionMode(frame.permissions.mode, frame.autoApprove)
       : effectivePermissionMode(this.configReader.getSnapshot().permissions?.mode, this.configReader.isAutoApproveEnabled());
@@ -1130,11 +1159,12 @@ export class PermissionManager {
       autoApprove: this.configReader.isAutoApproveEnabled(), directory: this.configReader.getWorkingDirectory(),
     };
     const frame = snapshot();
-    const revision = hashState(captureJsonEntry(frame));
+    const assertConfiguration = capturePermissionConfiguration(this.configReader, snapshot, frame);
     const mode = owner?.getMode() ?? effectivePermissionMode(frame.permissions.mode, frame.autoApprove);
     return Object.freeze({ mode, assertCurrent: () => {
+      assertConfiguration();
       if (currentExecutionModeOwner() !== owner || owner?.getRevision() !== ownerRevision
-        || (owner && owner.getMode() !== mode) || hashState(captureJsonEntry(snapshot())) !== revision) {
+        || (owner && owner.getMode() !== mode)) {
         throw new Error('Execution mode owner or configuration changed during the invocation');
       }
     } });

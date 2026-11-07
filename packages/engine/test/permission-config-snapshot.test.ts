@@ -145,3 +145,41 @@ test('autonomous preparation settles already-published config writes before taki
     expect(() => preparation.assertCurrent()).toThrow('Autonomous preparation authority changed');
   } finally { stop(); }
 });
+
+test('native mode guards use owner revisions without cloning or hashing snapshots again', () => {
+  const owner = config();
+  const permission = new PermissionManager(async () => ({ approved: false, remember: false }), createPermissionConfigReader(owner), new PolicyRuntimeState());
+  const frame = permission.captureExecutionMode();
+  const clone = spyOn(globalThis, 'structuredClone').mockImplementation(() => { throw new Error('A mode check must not clone configuration'); });
+  const hash = spyOn(Bun.CryptoHasher, 'hash').mockImplementation(() => { throw new Error('A mode check must not hash configuration'); });
+  try {
+    expect(permission.getMode()).toBe(frame.mode);
+    expect(() => frame.assertCurrent()).not.toThrow();
+    expect(() => frame.assertCurrent()).not.toThrow();
+    expect(clone).not.toHaveBeenCalled(); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); clone.mockRestore(); }
+  owner.set('permissions.mode', 'plan');
+  expect(() => frame.assertCurrent()).toThrow();
+});
+
+test('ordinary lookalike fields cannot replace the actual private configuration owner', () => {
+  const owner = config(); const original = owner.getConfigurationIncarnation();
+  Object.defineProperty(owner, 'config', { value: { permissions: { mode: 'yolo' } }, configurable: true });
+  Object.defineProperty(owner, 'permissionIncarnation', { value: original + 100, configurable: true });
+  const permission = new PermissionManager(async () => ({ approved: false, remember: false }), createPermissionConfigReader(owner), new PolicyRuntimeState());
+  const frame = permission.captureExecutionMode();
+  expect(permission.getMode()).not.toBe('yolo');
+  expect(owner.getConfigurationIncarnation()).toBe(original);
+  owner.set('permissions.mode', 'plan');
+  expect(() => frame.assertCurrent()).toThrow();
+});
+
+test('custom readers without a native owner retain exact currentness checks', () => {
+  const owner = config(); const frame = owner.getAutonomousPermissionSnapshot();
+  const reader = { getAutonomousSnapshot: () => frame, getSnapshot: () => ({ permissions: frame.permissions }),
+    getWorkingDirectory: () => frame.directory, isAutoApproveEnabled: () => frame.autoApprove };
+  const permission = new PermissionManager(async () => ({ approved: false, remember: false }), reader, new PolicyRuntimeState());
+  const captured = permission.captureExecutionMode();
+  frame.permissions.tools.read = frame.permissions.tools.read === 'deny' ? 'allow' : 'deny';
+  expect(() => captured.assertCurrent()).toThrow();
+});

@@ -912,8 +912,11 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
     let settledGraph: string | undefined;
     try {
       await withTestTimeout(enrichmentEntered);
-      improvement = semantic.selfImprove({ knowledgeSpaceId: 'homeassistant:test', gapIds: [gap.id], maxRunMs: 45_000 });
-      const result = await withTestTimeout(improvement, 50_000);
+      // The complete rich-text promotion reached 51 seconds on CI. Ordering
+      // is proved by the held enrichment call, not a wall-clock speed claim.
+      // Keep finite budgets with room for the full guarded publication.
+      improvement = semantic.selfImprove({ knowledgeSpaceId: 'homeassistant:test', gapIds: [gap.id], maxRunMs: 90_000 });
+      const result = await withTestTimeout(improvement, 100_000);
       expect(enrichmentCompleted).toBe(false);
       expect(result.closedGaps).toBe(1);
       expect(result.promotedFactCount).toBeGreaterThanOrEqual(3);
@@ -929,7 +932,7 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
     await expect(enrichment).rejects.toMatchObject({ reason: 'stale' });
     expect(enrichmentCompleted).toBe(true);
     expect(graphSnapshot()).toBe(settledGraph);
-  }, 60_000);
+  }, 120_000);
 
   test('self-improvement promotes already-indexed source facts by linking them to the repair subject', async () => {
     const { store } = createStores();

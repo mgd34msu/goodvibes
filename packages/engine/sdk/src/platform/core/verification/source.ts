@@ -138,7 +138,7 @@ export function verificationSources(state: Record<string, unknown>, own: Verific
 /** Exact run encoding, not a summary: joining every segment count times
  * reconstructs the original code units, including escaped JSON newlines. */
 export function verificationWireSource(source: VerificationSource) {
-  const { messageRole: _localRole, completeMessage: _localBoundary, originalIds: _localOrigins, ...wire } = source;
+  const { messageRole: _localRole, completeMessage: _localBoundary, originalIds: _localOrigins, readKind: _localReadKind, ...wire } = source;
   const segments = source.text.split(/(?<=\n)|(?<=\\n)/u);
   const runs: { text: string; count: number }[] = [];
   for (const text of segments) {

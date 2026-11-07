@@ -13,6 +13,8 @@ export interface VerificationSource {
   readonly toolCallIds?: readonly string[];
   /** Local original-record links; carried by the source owner, not model text. */
   readonly originalIds?: readonly string[];
+  /** Native read projection provenance; independent of the opaque record ID. */
+  readonly readKind?: 'receipt' | 'ledger' | 'citation';
 }
 export type VerificationSourceInput = Omit<VerificationSource, 'id'>;
 export type VerificationSourceOwner = (source: VerificationSourceInput) => VerificationSource;

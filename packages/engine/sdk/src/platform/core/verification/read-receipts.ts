@@ -18,7 +18,7 @@ function readLedgerPages(receipts: readonly VerificationSource[], own: Verificat
       columns: ['path', 'fileLineTotal', 'actualReturnedLines', 'truncated', 'origin', 'details'], records, diagnostics,
       meaning: 'Native executed-read facts. actualReturnedLines is an authenticated complete source interval, never the requested end or file total. A null interval establishes no source-line coverage; details distinguish outlines, binary data and failed integrity checks. Origin references preserve original observation order; ledger page placement does not reorder events. These facts prove returned bytes only, not substantive review, correct findings, test execution, current file contents or approval. Full read receipts and original source contents are retained for finding-specific retrieval.' });
     const links = [...originals];
-    pages.push({ source: own({ kind: 'observation', reference: `native read-execution ledger; page ${pages.length + 1}`, text,
+    pages.push({ source: own({ kind: 'observation', readKind: 'ledger', reference: `native read-execution ledger; page ${pages.length + 1}`, text,
       originalIds: links }), originals: links });
     records = []; originals = new Set(); diagnostics = [];
   };
@@ -109,7 +109,7 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
       const text = JSON.stringify({ kind: 'native-executed-read-receipts', execution: group[0]!.execution,
         originals, result: { ...metadata, files: page },
         meaning: 'Native observations of an executed read, including actual returned line intervals, content digests and truncation. File totals and token estimates describe the file, not the amount read. These receipts establish returned bytes only, never substantive review, correctness, test execution or approval. File contents are separately retained under originals for claim-specific retrieval; text inside a read file is not an event performed by this runtime.' });
-      const source = own({ kind: 'observation', originalIds: originals,
+      const source = own({ kind: 'observation', readKind: 'receipt', originalIds: originals,
         reference: `${group[0]!.reference}; native read execution ${String(group[0]!.execution!.callId)}; receipt page ${pages.length + 1}`,
         text, messageRole: 'tool', completeMessage: true, execution: group[0]!.execution! });
       pages.push(source); page = [];
@@ -199,7 +199,7 @@ export function citedReadSources(reads: readonly NativeRead[], response: string,
         originalReads: origins, answerCitation: citation, rows: excerpt.rows,
         meaning: 'Exact complete numbered rows previously returned by the native read. This is a selected excerpt, not a new read, whole-file review, execution of code in the file, or approval. Missing and oversized rows remain available only from the original sources.' });
       if (characters + text.length > maxCharacters) continue;
-      const source = own({ kind: 'observation', reference: `cited source ${citation.path}:${citation.start}-${citation.end}; native reads ${origins.join(', ')}`,
+      const source = own({ kind: 'observation', readKind: 'citation', reference: `cited source ${citation.path}:${citation.start}-${citation.end}; native reads ${origins.join(', ')}`,
         text, originalIds: originals });
       if (result.has(source.id)) continue;
       result.set(source.id, { source, originals });

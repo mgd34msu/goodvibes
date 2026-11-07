@@ -430,7 +430,7 @@ export class CompletionVerification {
     // with history; it must not re-review all quoted application code per page.
     // Full originals remain owned and available to the final content checks.
     const workEvidence = { ...evidence, nativeQualification, sources: evidenceSources.map(source => {
-      if (!source.id.startsWith('cited-')) return verificationWireSource(source);
+      if (source.readKind !== 'citation') return verificationWireSource(source);
       return { id: source.id, kind: source.kind, reference: source.reference,
         representation: 'native-checked-source-reference', bytes: Buffer.byteLength(source.text),
         meaning: 'Exact source excerpt assessed by the supplied scoped native work check. Its complete text remains retained. This reference does not establish unrelated facts, erase contrary observations or approve final output.' };

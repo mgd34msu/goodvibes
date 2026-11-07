@@ -267,6 +267,10 @@ test('selected read and citation sources retain exact provenance and reuse their
   };
   const first = read(f.store), bytes = readFileSync(f.path, 'utf8');
   expect(first.citations).toHaveLength(1);
+  expect(first.citations[0]?.source.readKind).toBe('citation');
+  expect(first.native.receipts[0]?.readKind).toBe('receipt');
+  expect(first.native.ledgers[0]?.source.readKind).toBe('ledger');
+  expect(verificationWireSource(first.citations[0]!.source)).not.toHaveProperty('readKind');
   expect(JSON.parse(first.citations[0]!.source.text).rows).toEqual(content.split('\n'));
   const reopened = read(new VerificationStore(f.root, f.session));
   expect(reopened.originals.map(value => value.id)).toEqual(first.originals.map(value => value.id));
@@ -275,6 +279,26 @@ test('selected read and citation sources retain exact provenance and reuse their
   expect(reopened.citations.map(value => value.source.id)).toEqual(first.citations.map(value => value.source.id));
   expect(reopened.citations[0]?.originals).toEqual(first.citations[0]?.originals);
   expect(readFileSync(f.path, 'utf8')).toBe(bytes);
+});
+
+test('counterevidence audits recognize a native read citation independently of its opaque ID and retain its complete original', async () => {
+  const content = '1 | Actual source definition.\n2 | Actual source implementation.';
+  const file = { path: 'source.ts', content, readObservation: observeReadContent(content, 1, 2, true) };
+  const full = { request: 'Review source.ts and report its observed implementation.', response: 'The implementation is at source.ts:1-2.',
+    transcript: [
+      { role: 'tool', callId: 'earlier-observation', content: 'Earlier actual native observation. '.repeat(12_000) },
+      { role: 'assistant', toolCalls: [{ id: 'read-source', name: 'read', arguments: { path: 'source.ts' } }] },
+      { role: 'tool', callId: 'read-source', outcome: 'ok', content: JSON.stringify({ success: true, files: [file] }) },
+    ], initial: { request: 'Review source.ts and report its observed implementation.', transcript: [] },
+    tools: ['read'], delegated: [], requirements: null, previousReview: null };
+  const fake = fakePort(() => noulAnswer(.01)), verifier = new CompletionVerification(verificationWriter);
+  expect((await verifier.prepare(full, { port: fake.port, identity: {}, assertCurrent() {} })).findings).toHaveLength(0);
+  const audits = fake.requests.filter(request => ['engine.verification.audit', 'engine.verification.instruction-audit'].includes(request.context?.battery ?? ''));
+  const cited = audits.flatMap(request => ((request.state as unknown as { caseEvidence?: { sources?: Record<string, unknown>[] } }).caseEvidence?.sources ?? []))
+    .filter(source => typeof source.reference === 'string' && source.reference.startsWith('cited source source.ts:'));
+  expect(cited.length).toBeGreaterThan(0);
+  expect(cited.every(source => source.representation === 'native-checked-source-reference' && !Object.hasOwn(source, 'text'))).toBe(true);
+  expect([...verifier.store.sources.values()].some(source => source.readKind === 'citation' && source.text.includes('Actual source implementation.'))).toBe(true);
 });
 
 test('a retained worker source is projected once, without recursively persisting projections as new originals', () => {

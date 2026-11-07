@@ -68,13 +68,20 @@ function summary(value: Record<string, unknown>, ids: Set<string>, limit: number
   };
   return { facts: facts(value.facts), concerns: facts(value.concerns) };
 }
+let requirementSequence = 0;
+function requirementId(kind: 'requirement' | 'original'): string {
+  requirementSequence++;
+  if (!Number.isSafeInteger(requirementSequence)) throw new VerificationHeldError('requirement identity exhausted');
+  return `${kind}-${requirementSequence}`;
+}
+
 function requirements(value: Record<string, unknown>, ids: Set<string>): VerificationRequirement[] {
   if (!bounded(value, 8_000) || !Array.isArray(value.requirements) || !value.requirements.length) throw new Error('Expected a bounded nonempty requirement ledger');
   return value.requirements.map((raw: unknown) => {
     const item = raw as { text?: unknown; sources?: unknown } | null;
     if (!item || typeof item.text !== 'string' || !item.text.trim() || !Array.isArray(item.sources) || !item.sources.length
       || !item.sources.every(id => typeof id === 'string' && ids.has(id))) throw new Error('Requirement needs original instruction citations');
-    return { id: `requirement-${verificationHash(item).slice(0, 16)}`, text: item.text, sources: item.sources as string[] };
+    return { id: requirementId('requirement'), text: item.text, sources: item.sources as string[] };
   });
 }
 
@@ -219,7 +226,7 @@ export class CompletionVerification {
       // Corrections change earlier obligations. Independent checks of each old
       // message can resurrect a withdrawn restriction or completed task. Keep
       // every original byte and judge their ordered meaning as one scope.
-      const fallback = [{ id: `original-${verificationHash(originals.map(source => source.id)).slice(0, 24)}`,
+      const fallback = [{ id: requirementId('original'),
         text: JSON.stringify({ meaning: 'Fulfill the active original obligations in this complete ordered instruction sequence. Later corrections supersede earlier instructions; restrictions apply from when imposed. Historical, completed or withdrawn instructions must not become new work. Preserve all still-active obligations and requested deliverables.',
           orderedInstructions: originals.map(source => ({ reference: source.reference, text: source.text })) }),
         sources: originals.map(source => source.id) }];

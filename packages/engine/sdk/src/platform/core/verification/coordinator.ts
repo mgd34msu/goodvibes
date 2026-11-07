@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { verificationEvidence, verificationIntegration, verificationRequirement, verificationScope, verificationSource, verificationRepairs, verificationNoIssue, verificationResolution, verificationAudit, verificationInstructionAudit, verificationObservationAudit } from './batteries.js';
-import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
+import { VERIFICATION_FRAME_CHARACTERS, VERIFICATION_OVERVIEW_CHARACTERS, issueVerificationId, verificationExecutionGroups, verificationFrames, verificationHash, verificationSources, verificationWireSource } from './source.js';
 import { VerificationStore } from './store.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationAccess, type VerificationReceipt, type VerificationRequirement, type VerificationSource, type VerificationSourceInput, type VerificationSummary, type VerificationWriter } from './types.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
@@ -89,6 +89,7 @@ function requirements(value: Record<string, unknown>, ids: Set<string>): Verific
  * permit. Only this process's current Jev identity can qualify cached records. */
 export class CompletionVerification {
   private readonly qualified = new WeakMap<object, Map<string, unknown>>();
+  private readonly caseScopes = new WeakMap<object, { readonly input: unknown; readonly id: string }>();
   private readonly nodes = new Map<string, VerificationReceipt>();
   private readonly originals = new Map<string, VerificationSource>();
   private readonly sourceOrder = new Map<string, number>();
@@ -133,6 +134,14 @@ export class CompletionVerification {
     let cache = this.qualified.get(access.identity);
     if (!cache) { cache = new Map(); this.qualified.set(access.identity, cache); }
     return cache;
+  }
+  private caseScope(input: unknown, access: VerificationAccess): string {
+    const previous = this.caseScopes.get(access.identity);
+    if (previous && isDeepStrictEqual(previous.input, input)) return previous.id;
+    // Only the current scope is retained by this live authority. Its owned
+    // views share source strings; no serialized body becomes a key.
+    const current = { input: captureOwnedJson(input), id: issueVerificationId('context') };
+    this.caseScopes.set(access.identity, current); return current.id;
   }
   private async ownedAttempt<T>(access: VerificationAccess, work: (local: VerificationAccess) => Promise<T>): Promise<T> {
     const controller = new AbortController(), pending = new Set<Promise<unknown>>();
@@ -579,9 +588,8 @@ export class CompletionVerification {
     }
   }
 
-  private async inspect(requirement: VerificationRequirement, ledger: readonly VerificationRequirement[], overview: readonly VerificationReceipt[], response: unknown, access: VerificationAccess, auditSources?: readonly VerificationSource[], defer = () => false, recent: readonly VerificationSource[] = [], previousReview: unknown = null, assessment?: RepairAssessment, turnContext?: VerificationTurnContext) {
-    const key = verificationHash(['retrieval-v1', requirement, ledger, overview.map(node => this.compactNode(node)), response,
-      auditSources?.map(source => source.id), recent.map(source => source.id), previousReview, turnContext]);
+  private async inspect(requirement: VerificationRequirement, ledger: readonly VerificationRequirement[], overview: readonly VerificationReceipt[], response: unknown, access: VerificationAccess, scope: string, auditSources?: readonly VerificationSource[], defer = () => false, recent: readonly VerificationSource[] = [], previousReview: unknown = null, assessment?: RepairAssessment, turnContext?: VerificationTurnContext) {
+    const key = JSON.stringify(['retrieval-v2', scope, requirement.id, auditSources?.map(source => source.id) ?? null, recent.map(source => source.id)]);
     const cache = this.cache(access), retained = cache.get(key) as InspectionCursor | undefined;
     let frontier = retained ? [...retained.frontier] : [...overview];
     let opened: InspectionCursor['opened'] = retained ? { sources: [...retained.opened.sources], earlier: [...retained.opened.earlier] } : { sources: recent, earlier: [] };
@@ -1057,7 +1065,8 @@ export class CompletionVerification {
       this.finalEvidence = { input: captureOwnedJson(finalInput), identity: access.identity, frontier: [...overview], seen: new Set(), opened: [], earlier: [] };
     const answer = bounded(full.response, 12_000) ? full.response : { proposedAnswer: (await this.evidenceTree(sources.filter(source => source.kind === 'answer'), access)).map(node => this.compactNode(node)),
       meaning: 'Exact proposed answer checked in identified original answer pages. These are proposed claims, not evidence of performed work.' };
-    const casesKey = verificationHash(['requirement-checks-v3', ledger, overview.map(node => this.compactNode(node)), answer, recent.map(source => source.id), full.previousReview ?? null, turnContext]);
+    const casesKey = this.caseScope({ ledger, overview: overview.map(node => node.id), answer, recent: recent.map(source => source.id),
+      observations: observations.map(source => source.id), previousReview: full.previousReview ?? null, turnContext }, access);
     const cache = this.cache(access);
     const retainedCases = cache.get(casesKey) as readonly Awaited<ReturnType<CompletionVerification['inspect']>>[] | undefined;
     // Cache snapshots are immutable. A retry may replace a formerly held case
@@ -1074,7 +1083,7 @@ export class CompletionVerification {
         const local = indexed ? { ...access, signal: access.signal ? AbortSignal.any([access.signal, controller.signal]) : controller.signal,
           assertCurrent: () => { access.signal?.throwIfAborted(); access.assertCurrent(); if (controller.signal.aborted) throw new VerificationDeferredError(); } } : access;
         try {
-          const entry = retained ?? await this.inspect(requirement, ledger, overview, answer, local, indexed ? observations : undefined, () => indexed && confirmedGap, recentFor(requirement), full.previousReview ?? null, undefined, turnContext);
+          const entry = retained ?? await this.inspect(requirement, ledger, overview, answer, local, casesKey, indexed ? observations : undefined, () => indexed && confirmedGap, recentFor(requirement), full.previousReview ?? null, undefined, turnContext);
           local.assertCurrent(); cache.set(resultKey, captureStrictJudgmentJson(entry));
           if ([entry.readings.unfinished, entry.readings.quality_gap].some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) {
             confirmedGap = true;
@@ -1100,7 +1109,7 @@ export class CompletionVerification {
       // A diagnosis of "no defect" is not a repair instruction and cannot
       // settle a held gate. Reuse the exact retrieval cursor and independently
       // recheck the requirement, quality and every remaining original audit.
-      const rechecked = await this.inspect(entry.requirement, ledger, overview, answer, access,
+      const rechecked = await this.inspect(entry.requirement, ledger, overview, answer, access, casesKey,
         indexed ? observations : undefined, () => false, recentFor(entry.requirement), full.previousReview ?? null, assessment, turnContext);
       const stillHeld = rechecked.auditHeld || Object.entries(rechecked.readings).some(([name, reading]) =>
         name !== 'observed_gap' && !rechecked.resolution?.aspects.includes(name) && (name !== 'needs_source' || rechecked.sourceExhausted) && (reading.verdict !== 'no' || reading.outcome !== 'act'));

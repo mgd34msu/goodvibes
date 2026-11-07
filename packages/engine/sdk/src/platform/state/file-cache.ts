@@ -6,8 +6,6 @@ import { summarizeError } from '../utils/error-display.js';
  * A cache entry tracking file read history and content state.
  */
 export interface CacheEntry {
-  /** SHA-256 hash of the file content at last read/update. */
-  contentHash: string;
   /** Stored content (only in with_content mode). */
   content?: string | undefined;
   lineCount: number;
@@ -34,6 +32,8 @@ export type CacheStatus = 'miss' | 'unchanged' | 'modified';
 interface LRUNode {
   filePath: string;
   entry: CacheEntry;
+  /** Exact private baseline, including in metadata-only response mode. */
+  observedContent: string;
   /** Approximate memory footprint in bytes (content + overhead). */
   memBytes: number;
   /** Access time for LRU eviction. */
@@ -47,15 +47,15 @@ interface LRUNode {
  * and provides conflict information for OCC workflows.
  */
 export class FileStateCache {
-  private readonly mode: 'hash_only' | 'with_content';
+  private readonly mode: 'metadata_only' | 'with_content';
   private readonly maxMemoryBytes: number;
   private cache: Map<string, LRUNode> = new Map();
   private totalMemBytes = 0;
   private totalReads = 0;
   private cacheHits = 0;
 
-  constructor(options?: { mode?: 'hash_only' | 'with_content'; maxMemoryMB?: number }) {
-    this.mode = options?.mode ?? 'hash_only';
+  constructor(options?: { mode?: 'metadata_only' | 'with_content'; maxMemoryMB?: number }) {
+    this.mode = options?.mode ?? 'metadata_only';
     this.maxMemoryBytes = (options?.maxMemoryMB ?? 200) * 1024 * 1024;
   }
 
@@ -67,8 +67,8 @@ export class FileStateCache {
    * Look up the current state of a file.
    *
    * - miss: file has never been cached
-   * - unchanged: content hash matches what we last saw
-   * - modified: content hash differs (external modification)
+   * - unchanged: exact content matches what we last saw
+   * - modified: exact content differs (external modification)
    *
    * In `with_content` mode, a unified diff is included when status is 'modified'.
    */
@@ -81,10 +81,8 @@ export class FileStateCache {
 
     // Re-read file to detect external changes
     let currentContent: string;
-    let currentHash: string;
     try {
       currentContent = readFileSync(filePath, 'utf-8');
-      currentHash = this.hash(currentContent);
     } catch (err) {
       if (isMissingFileError(err)) {
         return { status: 'miss' };
@@ -94,7 +92,7 @@ export class FileStateCache {
 
     node.accessAt = Date.now();
 
-    if (currentHash === node.entry.contentHash) {
+    if (currentContent === node.observedContent) {
       this.cacheHits++;
       node.entry.lastReadAt = Date.now();
       node.entry.readCount++;
@@ -108,17 +106,21 @@ export class FileStateCache {
       diff = unifiedDiff(node.entry.content, currentContent, filePath);
     }
 
-    // Update version and hash to reflect the detected change
+    // Advance the actual observation and keep the cache's memory accounting exact.
     node.entry.version++;
-    node.entry.contentHash = currentHash;
+    node.observedContent = currentContent;
+    const oldMem = node.memBytes;
+    node.memBytes = estimateMemBytes(filePath, currentContent);
+    this.totalMemBytes += node.memBytes - oldMem;
+    node.entry.lineCount = currentContent.split('\n').length;
+    node.entry.byteSize = Buffer.byteLength(currentContent, 'utf-8');
+    node.entry.tokenEstimate = Math.ceil(node.entry.byteSize / 4);
     if (this.mode === 'with_content') {
-      const oldMem = node.memBytes;
       node.entry.content = currentContent;
-      node.memBytes = estimateMemBytes(filePath, currentContent);
-      this.totalMemBytes += node.memBytes - oldMem;
     }
     node.entry.lastReadAt = Date.now();
     node.entry.readCount++;
+    this.evictIfNeeded();
 
     return { status: 'modified', entry: { ...node.entry }, diff };
   }
@@ -132,7 +134,6 @@ export class FileStateCache {
     content: string,
     metadata?: { tool?: string; agent?: string },
   ): void {
-    const hash = this.hash(content);
     const lineCount = content.split('\n').length;
     const byteSize = Buffer.byteLength(content, 'utf-8');
     const tokenEstimate = Math.ceil(byteSize / 4);
@@ -141,7 +142,7 @@ export class FileStateCache {
     const existing = this.cache.get(filePath);
     if (existing) {
       const oldMem = existing.memBytes;
-      existing.entry.contentHash = hash;
+      existing.observedContent = content;
       existing.entry.lineCount = lineCount;
       existing.entry.byteSize = byteSize;
       existing.entry.tokenEstimate = tokenEstimate;
@@ -152,11 +153,10 @@ export class FileStateCache {
         existing.entry.content = content;
       }
       existing.accessAt = now;
-      existing.memBytes = estimateMemBytes(filePath, this.mode === 'with_content' ? content : '');
+      existing.memBytes = estimateMemBytes(filePath, content);
       this.totalMemBytes += existing.memBytes - oldMem;
     } else {
       const entry: CacheEntry = {
-        contentHash: hash,
         lineCount,
         byteSize,
         firstReadAt: now,
@@ -169,8 +169,8 @@ export class FileStateCache {
       if (this.mode === 'with_content') {
         entry.content = content;
       }
-      const memBytes = estimateMemBytes(filePath, this.mode === 'with_content' ? content : '');
-      const node: LRUNode = { filePath, entry, memBytes, accessAt: now };
+      const memBytes = estimateMemBytes(filePath, content);
+      const node: LRUNode = { filePath, entry, observedContent: content, memBytes, accessAt: now };
       this.cache.set(filePath, node);
       this.totalMemBytes += memBytes;
     }
@@ -242,12 +242,6 @@ export class FileStateCache {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
-
-  private hash(content: string): string {
-    const hasher = new Bun.CryptoHasher('sha256');
-    hasher.update(content);
-    return hasher.digest('hex');
-  }
 
   private evictIfNeeded(): void {
     if (this.totalMemBytes <= this.maxMemoryBytes) return;

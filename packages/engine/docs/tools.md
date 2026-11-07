@@ -244,6 +244,10 @@ Read/write/edit tools share `FileStateCache`, `ProjectIndex`, and
 `FileUndoManager` instances within a session. Write and edit operations support
 transaction modes so hosts can roll back failed multi-file changes.
 
+The file cache compares exact private text snapshots and tracks observation
+versions. Its memory budget covers those snapshots in both response modes:
+`metadata_only` returns bookkeeping; `with_content` also returns text and diffs.
+
 ## Agent and contract integration
 
 The `agent` tool can spawn individual agents, spawn batches of independent

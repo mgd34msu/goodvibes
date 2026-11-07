@@ -123,6 +123,35 @@ describe('state persistence failures', () => {
     expect(cache.lookup(file)).toEqual({ status: 'miss' });
   });
 
+  for (const mode of ['metadata_only', 'with_content'] as const) test(`FileStateCache detects same-size edits and restoration in ${mode} mode`, () => {
+    const dir = tempDir('file-cache-exact'); mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'tracked.txt'); const original = 'first\nsecond';
+    writeFileSync(file, original);
+    const cache = new FileStateCache({ mode }); cache.update(file, original);
+    const initial = cache.lookup(file);
+    expect(initial.status).toBe('unchanged');
+    expect(initial.entry?.version).toBe(1);
+    if (mode === 'metadata_only') expect(initial.entry).not.toHaveProperty('content');
+    writeFileSync(file, 'FIRST\nsecond');
+    const changed = cache.lookup(file);
+    expect(changed.status).toBe('modified'); expect(changed.entry?.version).toBe(2);
+    if (mode === 'with_content') expect(changed.diff).toContain('+FIRST');
+    else expect(changed.entry).not.toHaveProperty('content');
+    writeFileSync(file, original);
+    expect(cache.lookup(file)).toMatchObject({ status: 'modified', entry: { version: 3 } });
+    expect(cache.checkConflict(file, 1)).toMatchObject({ yourVersion: 1, currentVersion: 3 });
+  });
+
+  test('FileStateCache accounts for private baseline memory and evicts a growing observation', () => {
+    const dir = tempDir('file-cache-growth'); mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'tracked.txt'); writeFileSync(file, 'short');
+    const cache = new FileStateCache({ mode: 'metadata_only', maxMemoryMB: 0.002 });
+    cache.update(file, 'short'); expect(cache.getStats().uniqueFiles).toBe(1);
+    writeFileSync(file, 'x'.repeat(4096));
+    expect(cache.lookup(file)).toMatchObject({ status: 'modified', entry: { byteSize: 4096, tokenEstimate: 1024 } });
+    expect(cache.getStats()).toMatchObject({ uniqueFiles: 0, memoryMB: 0 });
+  });
+
   test('SQLiteStore throws on file-backed save failures', async () => {
     const dir = tempDir('sqlite-store-save');
     mkdirSync(dir, { recursive: true });

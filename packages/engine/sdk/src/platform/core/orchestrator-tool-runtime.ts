@@ -3,7 +3,6 @@ import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
-import { hashState } from '@goodvibes-jev/judgment';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { UnknownPreparedToolError } from '../tools/preparation-error.js';
 import type { PreparedToolCall } from '../tools/registry.js';
@@ -190,14 +189,16 @@ async function executeToolCallsInMode(
     const autonomous = typeof deps.permissionManager.admitAutonomous === 'function'
       && typeof deps.toolRegistry.prepareCall === 'function';
     const sourceIdentity = { session: deps.sessionId, turn: turnId, call: call.id };
-    // These are protocol references, never the request or tool arguments. Use
-    // the existing typed-reference privacy checks before hashing: UUID digit
-    // runs are not payment-card input. Non-identity content still fails closed.
+    // These are protocol references, never the request or tool arguments. Keep
+    // their typed-reference admission before assigning the invocation's opaque
+    // source reference. Non-identity content still fails closed.
     if (!isYoloExecution()) captureAutonomousChoices({ resumeConditions: [
       { id: sourceIdentity.session, revision: sourceIdentity.turn },
       { id: sourceIdentity.call, revision: 'tool-call' },
     ] });
-    const sourceId = hashState(sourceIdentity);
+    // The same admitted invocation carries this reference through preparation,
+    // projection and execution. Its live source owner checks the actual values.
+    const sourceId = autonomous ? crypto.randomUUID() : '';
     const sourceOf = deps.autonomousSource;
     if (autonomous && !sourceOf) throw new Error('Autonomous execution requires the host source goal and criteria');
     const earlyCallSignal = autonomous ? deps.toolCallSignals?.open(call.id) : undefined;

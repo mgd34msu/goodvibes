@@ -747,6 +747,36 @@ describe('release.yml: by-reference release', () => {
     expect(needsOf(rv)).toContain('verify-tag-version');
   });
 
+  test('manual native publication resolves a version tag and binds artifacts to its verified source', () => {
+    const verify = rel.jobs!['verify-tag-version']!;
+    const resolve = steps(verify).find(step => step.id === 'source')!;
+    expect(verify).toHaveProperty('outputs.sha', '${{ steps.version.outputs.sha }}');
+    expect(rel.jobs!['release-verify']).toHaveProperty('with.sha', '${{ needs.verify-tag-version.outputs.sha }}');
+    expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.tag', '${{ needs.verify-tag-version.outputs.tag }}');
+    expect(runText(rel, 'prepare-native-assets')).toContain('test "$RECORDED_SOURCE" = "$SOURCE_SHA"');
+    expect(runText(rel, 'prepare-native-assets')).toContain('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"');
+    expect(rel.jobs!['github-release']).toHaveProperty('with.tag', '${{ needs.verify-tag-version.outputs.tag }}');
+    const root = mkdtempSync(join(tmpdir(), 'gv-release-tag-'));
+    try {
+      for (const [tag, caller, npm, allowed] of [
+        ['v3.1.1', 'v3.1.1', 'true', true],
+        ['v3.1.1', 'main', 'false', true],
+        ['main', 'main', 'false', false],
+        ['v3.1.1', 'main', 'true', false],
+        ['v3.1.1; exit 0', 'main', 'false', false],
+      ] as const) {
+        const output = join(root, 'output');
+        writeFileSync(output, '');
+        const result = spawnSync('bash', ['-e', '-c', String(resolve.run)], {
+          env: { ...process.env, RELEASE_TAG: tag, CALLER_REF: caller, PUBLISH_NPM: npm, GITHUB_OUTPUT: output },
+          encoding: 'utf8',
+        });
+        expect(result.status === 0, result.stderr).toBe(allowed);
+        expect(readFileSync(output, 'utf8')).toBe(allowed ? `tag=${tag}\n` : '');
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test('every caller job grants at least the permissions its called reusable workflow requests', () => {
     // GitHub validates this at workflow startup: a called workflow's job may
     // only use permissions the caller job grants. An under-granting caller is

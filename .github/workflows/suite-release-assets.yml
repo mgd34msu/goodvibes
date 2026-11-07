@@ -58,7 +58,7 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/source-sha"
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$(cat "$RUNNER_TEMP/source-sha")&event=push&status=completed" > "$RUNNER_TEMP/ci-runs.json"
           run_id=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); a=[r for r in r["workflow_runs"] if r["conclusion"]=="success"]; assert a; print(a[0]["id"])' "$RUNNER_TEMP/ci-runs.json")
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" --paginate --slurp > "$RUNNER_TEMP/ci-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=30" --paginate --slurp > "$RUNNER_TEMP/ci-jobs.json"
           python3 -c 'import json,sys; j=[j for p in json.load(open(sys.argv[1])) for j in p["jobs"]]; assert j and all(j["conclusion"]=="success" for j in j)' "$RUNNER_TEMP/ci-jobs.json"
       - name: Build publisher tooling and engine
         run: bun packages/engine/scripts/build.ts

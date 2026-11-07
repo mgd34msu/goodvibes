@@ -26,6 +26,10 @@ on:
           - dry-run
           - release
         default: dry-run
+      tag:
+        description: "Existing native release tag to resume using current publishing tooling; npm must be disabled when dispatching from another ref"
+        required: false
+        default: ""
       dry_run:
         description: "Legacy dry-run guard (used only for a non-release dispatch)"
         required: false
@@ -48,7 +52,7 @@ concurrency:
   # nothing, so parallel manual dry-runs are fine and must not queue behind a
   # real release. The `ref` input is deliberately NOT part of the key; it
   # defaults to "main", which would collapse every dispatch into one group.
-  group: sdk-release-${{ (github.event_name == 'push' || github.event.inputs.mode == 'release') && github.ref_name || github.run_id }}
+  group: sdk-release-${{ (github.event_name == 'push' || github.event.inputs.mode == 'release') && (github.event.inputs.tag || github.ref_name) || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -58,17 +62,38 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
+      - name: Resolve immutable release tag
+        id: source
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          CALLER_REF: ${{ github.ref_name }}
+          PUBLISH_NPM: ${{ vars.PUBLISH_NPM }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo 'An existing version tag is required.' >&2; exit 1; }
+          if [ "$PUBLISH_NPM" = true ] && [ "$RELEASE_TAG" != "$CALLER_REF" ]; then
+            echo 'npm publication must execute at its own tag ref.' >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.ref }}
+          ref: refs/tags/${{ steps.source.outputs.tag }}
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.3.14"
       - name: Verify git tag matches package.json version
-        run: bun packages/engine/scripts/verify-release-tag-version.ts
+        id: version
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+        run: |
+          GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   # By-reference validation: verify the tagged commit's push-CI run is per-job
   # green. Replaces the old 45-minute validate-release re-run. Emits the CI run
@@ -91,7 +116,7 @@ jobs:
       checks: read
     uses: ./.github/workflows/reusable-release-verify.yml
     with:
-      sha: ${{ github.sha }}
+      sha: ${{ needs.verify-tag-version.outputs.sha }}
       workflow: ci.yml
       toolchain-source: workspace
     secrets:
@@ -242,7 +267,7 @@ jobs:
       actions: read
     uses: ./.github/workflows/suite-release-assets.yml
     with:
-      tag: ${{ github.ref_name }}
+      tag: ${{ needs.verify-tag-version.outputs.tag }}
 
   prepare-native-assets:
     if: >-
@@ -264,22 +289,26 @@ jobs:
       - name: Checkout released source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.ref }}
+          ref: refs/tags/${{ needs.verify-tag-version.outputs.tag }}
           fetch-depth: 0
       - name: Require the verified CI producer
         env:
           RUN_ID: ${{ needs.release-verify.outputs.run_id }}
           RECORDED_SOURCE: ${{ needs.release-verify.outputs.head_sha }}
+          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
         run: |
           test -n "$RUN_ID"
-          test "$RECORDED_SOURCE" = "$GITHUB_SHA"
+          test "$RECORDED_SOURCE" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
       - name: Select the published engine version
         id: version
+        env:
+          RELEASE_TAG: ${{ needs.verify-tag-version.outputs.tag }}
         run: |
           version=$(bun -e 'console.log(JSON.parse(await Bun.file("packages/engine/package.json").text()).version)')
-          test "v$version" = "$GITHUB_REF_NAME"
+          test "v$version" = "$RELEASE_TAG"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Download exact workspace and Agent output
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -328,7 +357,8 @@ jobs:
       - name: Verify and stage admitted native release assets
         env:
           CI_RUN_ID: ${{ needs.release-verify.outputs.run_id }}
-        run: bun .github/scripts/stage-native-release-assets.mjs "$GITHUB_SHA" "$CI_RUN_ID" /tmp/native-release-downloads /tmp/native-release-assets
+          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
+        run: bun .github/scripts/stage-native-release-assets.mjs "$SOURCE_SHA" "$CI_RUN_ID" /tmp/native-release-downloads /tmp/native-release-assets
       - name: Download complete installer assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -360,12 +390,12 @@ jobs:
       (needs.publish-npm.result == 'success' ||
        (vars.PUBLISH_NPM != 'true' && needs.publish-npm.result == 'skipped')) &&
       needs.prepare-native-assets.result == 'success'
-    needs: [publish-npm, prepare-native-assets]
+    needs: [verify-tag-version, publish-npm, prepare-native-assets]
     permissions:
       contents: write
     uses: ./.github/workflows/reusable-gh-release.yml
     with:
-      tag: ${{ github.ref_name }}
+      tag: ${{ needs.verify-tag-version.outputs.tag }}
       artifact-name: native-release-assets
       assets-glob: dist/*
       changelog-path: packages/engine/CHANGELOG.md

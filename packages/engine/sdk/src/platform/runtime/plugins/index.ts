@@ -56,6 +56,7 @@ export type {
 export {
   PluginTrustStore,
   validatePluginSignature,
+  pluginManifestSignaturePayload,
   filterCapabilitiesByTrust,
   SAFE_CAPABILITIES,
 } from './trust.js';

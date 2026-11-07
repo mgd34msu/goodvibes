@@ -59,6 +59,7 @@ export {
   resolveCapabilityManifest,
   validateManifestV2,
   validatePluginSignature,
+  pluginManifestSignaturePayload,
 } from './plugins/index.js';
 export type {
   PluginCapability,

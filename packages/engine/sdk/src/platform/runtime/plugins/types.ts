@@ -87,7 +87,7 @@ export interface PluginManifestV2 extends PluginManifest {
    */
   minRuntimeVersion?: string | undefined;
   /**
-   * Base64-encoded HMAC-SHA256 signature of the canonical manifest payload.
+   * Base64-encoded Ed25519 signature of the complete canonical manifest payload.
    * Required for plugins that want to operate at the `trusted` tier.
    */
   signature?: string | undefined;

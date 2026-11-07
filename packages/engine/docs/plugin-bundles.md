@@ -13,6 +13,25 @@ construction**. An unpinned or capability-opaque entry cannot be represented.
 
 Import from `@goodvibes-jev/engine/sdk/platform/runtime/ecosystem`.
 
+## Plugin manifest signatures
+
+The plugin trust SDK verifies Ed25519 signatures with the publisher's PEM public
+key. Authors keep the private key in their signing environment and sign the bytes
+returned by `pluginManifestSignaturePayload(manifest)`, exported from
+`@goodvibes-jev/engine/sdk/platform/runtime/plugins`. Store the 64-byte signature
+as canonical base64 in the manifest's `signature` field.
+
+The payload includes every JSON manifest field except `signature`; object keys
+and the capability list are sorted. Entry points, hooks, descriptions, and runtime
+constraints therefore participate in verification. `validatePluginSignature`
+checks a signature, and `PluginTrustStore.trustSigned(name, manifest, publicKey)`
+grants trust only to the matching plugin name after verification.
+
+Previously accepted HMAC signatures need to be replaced with publisher signatures;
+persisted grants from that format require re-verification. A manifest signature
+authenticates its metadata. Verify distributed code with the bundle's published
+pin as described below.
+
 ## The manifest
 
 ```jsonc

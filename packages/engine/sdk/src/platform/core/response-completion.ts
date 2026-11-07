@@ -1,4 +1,5 @@
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
+import { isDeepStrictEqual } from 'node:util';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
@@ -173,7 +174,7 @@ export class ResponseCompletionGuard {
   private restoredCorrection: string | undefined;
   private describeHeld: (() => Promise<string>) | undefined;
   private readonly verification: CompletionVerification | undefined;
-  private readonly checkpointAudits = new WeakMap<object, Set<string>>();
+  private readonly checkpointAudits = new WeakMap<object, { readonly basis: unknown; readonly pages: Set<string> }>();
   private sourceAdmitted = false;
   private assertEvidenceCurrent: (() => void) | undefined;
   private admittedDraft: string | undefined;
@@ -186,10 +187,10 @@ export class ResponseCompletionGuard {
    * equivalent cycle re-reads fully, so acceptance is never hidden behind a
    * stale verdict and there is no terminal retry limit.
    */
-  private heldCycle: { readonly evidenceKey: string; readonly draft: string; readonly correction: string;
+  private heldCycle: { readonly evidenceKey: unknown; readonly draft: string; readonly correction: string;
     readonly wordingCannotRepair: boolean; shortCircuits: number } | undefined;
   private readonly onCompletionRequired: (() => void) | undefined;
-  private publication: { source: string; identity: object; completion: Set<string>; consolidation: Set<string>; execution: Set<string> } | undefined;
+  private publication: { source: unknown; identity: object; completion: Set<string>; consolidation: Set<string>; execution: Set<string> } | undefined;
 
   constructor(initial?: { readonly request: string; readonly conversation: ConversationManager; readonly verificationWriter?: VerificationWriter; readonly verificationStore?: VerificationStore; readonly onCompletionRequired?: () => void }) {
     this.sourceStore = initial?.verificationStore ?? new VerificationStore();
@@ -474,7 +475,7 @@ export class ResponseCompletionGuard {
     const preparedState = this.evidenceProjection.prepareFull(source.snapshot);
     const retainedWorkers = this.reviewStore ? retainedDelegationSources(preparedState, this.reviewStore.sources, this.ownSource) : [];
     const fullState = retainedWorkers.length
-      ? { ...preparedState, retainedWorkerObservations: retainedWorkers.map(verificationWireSource) } : preparedState;
+      ? Object.freeze({ ...preparedState, retainedWorkerObservations: Object.freeze(retainedWorkers.map(worker => Object.freeze(verificationWireSource(worker)))) }) : preparedState;
     const hasDelegatedEvidence = preparedState.delegated.length > 0 || retainedWorkers.length > 0;
     this.sourceAdmitted = true;
     this.admittedDraft = preparedState.response;
@@ -492,11 +493,16 @@ export class ResponseCompletionGuard {
     // judged. Checks whose repair requires new execution evidence cannot be
     // satisfied by rewording, so return the remembered repair instead of
     // re-running the full battery and verification suite for every draft.
-    const evidenceKey = verificationHash(['completion-evidence-v1', input.request, transcript,
-      (input.delegated ?? []).map(agent => ({ id: agent.id, status: agent.status, output: agent.output })),
-      input.completedWork ?? [], input.requirements ?? null]);
+    // Keep one view of the admitted immutable records, not another serialized
+    // transcript or digest. Raw withheld values never extend their lifetime
+    // through this retry cache. New archive, worker or tool evidence also ends
+    // an old held cycle even when the draft and task wording are unchanged.
+    const evidenceKey = Object.freeze({ request: fullState.request, transcript: fullState.transcript, archive: fullState.archive,
+      tools: fullState.tools, delegated: fullState.delegated, completedWork: fullState.completedWork,
+      requirements: fullState.requirements, initial: fullState.initial,
+      retainedWorkers: 'retainedWorkerObservations' in fullState ? fullState.retainedWorkerObservations : null });
     const held = this.heldCycle;
-    if (held && held.evidenceKey === evidenceKey && (held.draft === input.response || held.wordingCannotRepair) && held.shortCircuits < 3) {
+    if (held && isDeepStrictEqual(held.evidenceKey, evidenceKey) && (held.draft === input.response || held.wordingCannotRepair) && held.shortCircuits < 3) {
       held.shortCircuits++;
       return held.correction + `\n\n[Response completion check] This is rejection ${held.shortCircuits + 1} of an equivalent draft with no new execution evidence. `
         + 'Rewording the answer cannot complete the held work. Perform the specific repairs above with tools now; a full fresh check runs once new execution evidence exists.';
@@ -618,11 +624,11 @@ export class ResponseCompletionGuard {
     if ([...Object.values(run.readings), ...Object.values(consolidation?.readings ?? {})]
       .some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) this.hasSemanticRefusal = true;
     owner.assertCurrent(); current();
-    const publicationSource = state === fullState ? null : verificationHash(fullState);
+    const publicationSource = state === fullState ? null : fullState;
     // A checkpoint always needs fresh final checks, never accumulated approval
     // from another evidence view or an earlier proposed answer.
     if (checkpoint) this.publication = undefined;
-    if (publicationSource && (this.publication?.source !== publicationSource || this.publication.identity !== this.verificationCacheIdentity))
+    if (publicationSource && (!isDeepStrictEqual(this.publication?.source, publicationSource) || this.publication?.identity !== this.verificationCacheIdentity))
       this.publication = { source: publicationSource, identity: this.verificationCacheIdentity, completion: new Set(), consolidation: new Set(), execution: new Set() };
     const qualifications = publicationSource ? this.publication! : { completion: new Set<string>(), consolidation: new Set<string>(), execution: new Set<string>() };
     const settle = (qualified: Set<string>, aspect: string, reading: { verdict: string; outcome: string }) => {
@@ -779,21 +785,27 @@ export class ResponseCompletionGuard {
   }
 
   private async checkCheckpointHistory(full: Record<string, unknown>, checkpoint: Record<string, unknown>, access: VerificationAccess): Promise<boolean> {
-    let cache = this.checkpointAudits.get(access.identity);
-    if (!cache) { cache = new Set(); this.checkpointAudits.set(access.identity, cache); }
     // The current proposed answer is deliberately absent: unchanged history
     // and scoped native work do not need another audit for every wording edit.
     // Any changed instruction, receipt or current observation starts new checks.
     const basis = { completedWork: checkpoint.completedWork, originalInstructions: checkpoint.originalInstructions,
       currentObservations: checkpoint.transcript };
+    let retained = this.checkpointAudits.get(access.identity);
+    if (!retained || !isDeepStrictEqual(retained.basis, basis)) {
+      // A checkpoint is already bounded to 192k characters. Retain only its
+      // current complete basis, with qualified page IDs scoped to this owner.
+      retained = { basis: captureStrictJudgmentJson(basis), pages: new Set() };
+      this.checkpointAudits.set(access.identity, retained);
+    }
+    const cache = retained.pages;
     const pages = verificationFrames(verificationSources(full, this.ownSource).filter(source => source.kind === 'observation' && source.messageRole),
       undefined, source => JSON.stringify(verificationWireSource(source)).length);
     let accepted = true;
     await mapLimit(pages, 3, async page => {
       access.assertCurrent();
       if (!accepted) return;
-      const state = { ...basis, sources: page.map(verificationWireSource) }, key = verificationHash(state);
-      if (cache!.has(key)) return;
+      const state = { ...basis, sources: page.map(verificationWireSource) }, key = JSON.stringify(page.map(source => source.id));
+      if (cache.has(key)) return;
       const run = await verificationCheckpointHistory.run(access.port, state as never,
         { ...(access.signal ? { signal: access.signal } : {}), beforeAttempt: access.assertCurrent,
           ...(access.onRetry ? { onRetry: access.onRetry } : {}), site: verificationCheckpointHistory.name });
@@ -801,7 +813,7 @@ export class ResponseCompletionGuard {
       const qualified = run.readings.missed.verdict === 'no' && run.readings.missed.outcome === 'act';
       run.recordAction(qualified ? 'This complete original history page does not invalidate the scoped work receipts; fresh final-response checks remain required.'
         : 'Retrieve retained originals before using a work checkpoint; this history page contains unresolved possible counterevidence.');
-      if (qualified) cache!.add(key); else accepted = false;
+      if (qualified) cache.add(key); else accepted = false;
     });
     return accepted;
   }

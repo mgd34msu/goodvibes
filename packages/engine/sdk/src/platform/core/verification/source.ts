@@ -146,7 +146,13 @@ export function verificationWireSource(source: VerificationSource) {
     if (last?.text === text) last.count++; else runs.push({ text, count: 1 });
   }
   const encoded = { encoding: 'lossless consecutive segment runs; concatenate text repeated count times, without separators', codeUnits: source.text.length, runs };
-  return JSON.stringify(encoded).length < JSON.stringify(source.text).length * .7 ? { ...wire, text: encoded } : wire;
+  if (JSON.stringify(encoded).length < JSON.stringify(source.text).length * .7) {
+    // A retained owner supplies immutable execution metadata. Its newly built
+    // lossless text view must be immutable as well before another guard owns it.
+    runs.forEach(run => Object.freeze(run)); Object.freeze(runs); Object.freeze(encoded);
+    return Object.freeze({ ...wire, text: encoded });
+  }
+  return Object.freeze(wire);
 }
 
 export function verificationFrames<T>(values: readonly T[], limit = VERIFICATION_FRAME_CHARACTERS, sizeOf = (value: T) => JSON.stringify(value).length): T[][] {

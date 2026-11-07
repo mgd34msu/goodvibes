@@ -256,6 +256,22 @@ test('new execution evidence after a held draft gets a fresh full check instead 
   expect(fake.requests.length).toBeGreaterThan(calls);
 });
 
+test('changed worker proof ends a held cycle even when its ID, status, output and proposed answer stay the same', async () => {
+  const fake = answered('unfinished'); installJudgmentPort(fake.port);
+  const guard = new ResponseCompletionGuard();
+  const worker = { id: 'source-review-worker', task: 'Review the source and produce review.md.', status: 'completed', output: 'Review is saved.',
+    evidence: [{ role: 'tool' as const, callId: 'worker-read', content: 'Source file inspected.' }] };
+  const input = { ...source(), delegated: [worker] };
+  expect(await guard.check(input)).toBeString();
+  const calls = fake.requests.length;
+  expect(await guard.check(input)).toContain('rejection 2');
+  expect(fake.requests.length).toBe(calls);
+  worker.evidence.push({ role: 'tool', callId: 'worker-delivery', content: 'New native worker observation: review.md delivered.' });
+  expect(await guard.check(input)).toBeString();
+  expect(fake.requests.length).toBeGreaterThan(calls);
+  expect(JSON.stringify(fake.requests.slice(calls))).toContain('New native worker observation: review.md delivered.');
+});
+
 test('a held correction names localized findings from the actual evidence', async () => {
   const fake = answered('unfinished'); installJudgmentPort(fake.port);
   const correction = await new ResponseCompletionGuard().check(source());

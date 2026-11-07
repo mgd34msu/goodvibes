@@ -62,6 +62,18 @@ function writePlanWithItems(store: WorkPlanStore, items: readonly RawItem[], sta
 }
 
 describe('WorkPlanStore', () => {
+  test('a native plan identity stays owned until it is written and survives reopening', () => {
+    const store = makeStore();
+    const original = store.getActivePlan().id;
+    expect(store.getActivePlan().id).toBe(original);
+    store.addItem('Persist this actual plan');
+    const reloaded = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT,
+      projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
+    expect(reloaded.getActivePlan().id).toBe(original);
+    expect(reloaded.listItems()[0]?.title).toBe('Persist this actual plan');
+    expect(makeStore().getActivePlan().id).not.toBe(original);
+  });
+
   test('persists workspace-scoped work plan items', () => {
     const store = makeStore();
     const item = store.addItem('Patch contract task routing', {

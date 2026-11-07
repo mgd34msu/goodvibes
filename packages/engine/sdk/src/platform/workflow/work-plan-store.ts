@@ -197,11 +197,6 @@ function safeFileId(projectId: string, projectRoot: string): string {
   return `${safe.slice(0, 80) || 'project'}-${hash}`;
 }
 
-function createPlanId(projectId: string, projectRoot: string): string {
-  const hash = createHash('sha256').update(`${projectId}\0${projectRoot}`).digest('hex').slice(0, 12);
-  return `wp-${hash}`;
-}
-
 function createItemId(): string {
   return `wpi-${randomUUID().slice(0, 8)}`;
 }
@@ -341,6 +336,7 @@ export class WorkPlanStore {
 
   readonly homeDirectory: string;
   private readonly options: WorkPlanStoreOptions;
+  private readonly newPlanId = `wp-${randomUUID()}`;
 
   constructor(options: WorkPlanStoreOptions) {
     this.options = Object.freeze({ ...options });
@@ -543,7 +539,7 @@ export class WorkPlanStore {
     const housekeeping = normalizeHousekeeping(parsed.housekeeping);
     return {
       plan: {
-        id: readString(parsed.id) ?? createPlanId(this.options.projectId, this.options.projectRoot),
+        id: readString(parsed.id) ?? this.newPlanId,
         projectId: readString(parsed.projectId) ?? this.options.projectId,
         projectRoot: readString(parsed.projectRoot) ?? this.options.projectRoot,
         title: readString(parsed.title) ?? 'Work Plan',
@@ -683,7 +679,7 @@ export class WorkPlanStore {
   private createEmptyPlan(): WorkPlan {
     const time = nowMs();
     return {
-      id: createPlanId(this.options.projectId, this.options.projectRoot),
+      id: this.newPlanId,
       projectId: this.options.projectId,
       projectRoot: this.options.projectRoot,
       title: 'Work Plan',

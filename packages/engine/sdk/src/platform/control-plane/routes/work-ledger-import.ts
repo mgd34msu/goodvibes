@@ -1,5 +1,5 @@
 import { createNativeLegacyImportHost, NATIVE_IMPORT_SCOPES, type NativeLegacyImportDependencies } from '../../workflow/work-ledger/native-import.js';
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod/v4';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
@@ -38,7 +38,7 @@ export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCat
       return result;
     }
     const actor = host.authority.issueActor({ projectId: host.projectId, role: 'coordinator',
-      actorId: `host:legacy-import:${createHash('sha256').update(JSON.stringify([context.principalKind, context.principalId])).digest('hex')}` });
+      actorId: `host:work-ledger-import:${randomUUID()}` });
     try {
       if (prepare) {
         const parsed = z.strictObject({ projectId: z.string().min(1).max(200), sourceIds: z.array(z.string().min(1).max(200)).min(1).max(500) }).safeParse(input);

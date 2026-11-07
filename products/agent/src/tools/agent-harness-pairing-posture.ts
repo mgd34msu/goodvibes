@@ -279,7 +279,7 @@ function describeRoute(route: PairingRoute, options: {
     ...(options.includeParameters ? {
       policy: {
         effect: route.effect,
-        values: 'Pairing posture returns endpoint binding and token fingerprint only; raw companion tokens and QR payloads are never returned by this read-only mode.',
+        values: 'Pairing posture returns endpoint binding and token presence only; raw companion tokens and QR payloads are never returned by this read-only mode.',
         mutation: 'Pairing display, manual token display, companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
       },
       modelAccess: {

@@ -134,7 +134,6 @@ export function connectedHostAuthSignals(posture: SetupConnectedHostAuthPosture)
   return [
     `native intake auth: ${posture.nativeIntake.status}; ${posture.nativeIntake.detail}`,
     `operator token: ${posture.operatorToken.usable ? 'readable (not authority evidence)' : posture.operatorToken.present ? 'present but unusable' : 'missing'} (${posture.operatorToken.path})`,
-    ...(posture.operatorToken.fingerprint ? [`operator token fingerprint: ${posture.operatorToken.fingerprint}`] : []),
     ...(posture.operatorToken.error ? [`operator token parse error: ${posture.operatorToken.error}`] : []),
     `token provisioning route: ${posture.routes.provisionTokenRoute}`,
     `compatibility auth users: ${posture.compatibilityAuth.users}`,

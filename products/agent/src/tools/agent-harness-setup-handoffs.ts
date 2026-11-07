@@ -113,7 +113,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
             userRoute: item.userRoute,
             modelRoute: authPosture?.routes.provisionTokenRoute ?? provisionConnectedHostTokenRoute(),
             nextStep: 'Create or repair the local companion token file, then rerun auth and connected-host status.',
-            safety: 'Confirmed local token provisioning; returns only path, fingerprint, peer id, and timestamps, never the raw token.',
+            safety: 'Confirmed local token provisioning; returns only path, peer id, and timestamps, never the raw token.',
             requiresConfirmation: true,
           }),
         setupHandoff({

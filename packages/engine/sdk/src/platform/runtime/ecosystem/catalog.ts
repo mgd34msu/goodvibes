@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { dirname, join, resolve } from 'node:path';
 import { VERSION } from '../../version.js';
@@ -65,7 +64,6 @@ export interface EcosystemInstallReceipt {
   readonly entry: EcosystemCatalogEntry;
   readonly sourcePath: string;
   readonly targetPath: string;
-  readonly fingerprint: string;
   readonly provenanceSummary: string;
   readonly runtimeFit: {
     readonly appVersion: string;
@@ -284,27 +282,6 @@ function compareVersions(a: string, b: string): number {
     if (l < r) return -1;
   }
   return 0;
-}
-
-function hashPath(path: string): string {
-  const hash = createHash('sha256');
-  if (!existsSync(path)) {
-    hash.update(`missing:${path}`);
-    return hash.digest('hex');
-  }
-  const stat = statSync(path);
-  if (stat.isDirectory()) {
-    const names = readdirSync(path).sort((a, b) => a.localeCompare(b));
-    hash.update(`dir:${path}`);
-    for (const name of names) {
-      hash.update(name);
-      hash.update(hashPath(join(path, name)));
-    }
-    return hash.digest('hex');
-  }
-  hash.update(`file:${path}`);
-  hash.update(readFileSync(path));
-  return hash.digest('hex');
 }
 
 function readCatalogFile(path: string): EcosystemCatalogEntry[] {
@@ -532,7 +509,6 @@ export function installEcosystemCatalogEntry(
     entry,
     sourcePath: review.sourcePath,
     targetPath,
-    fingerprint: hashPath(targetPath),
     provenanceSummary: entry.provenance ?? entry.source,
     runtimeFit: {
       appVersion: VERSION,

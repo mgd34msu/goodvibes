@@ -230,7 +230,6 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
           `  installedAt: ${new Date(receipt.installedAt).toISOString()}`,
           `  scope: ${receipt.scope}`,
           `  targetPath: ${receipt.targetPath}`,
-          `  fingerprint: ${receipt.fingerprint}`,
           `  provenance: ${receipt.provenanceSummary}`,
           `  compatibility: ${receipt.compatibility.status}`,
           ...receipt.compatibility.reasons.map((reason) => `  note: ${reason}`),

@@ -481,16 +481,15 @@ for (const field of ['args', 'destination', 'goal', 'diff', 'connection', 'genui
   expect(JSON.stringify(log.query())).not.toContain('password=synthetic-private');
 });
 
-import { autonomousSourceRevision, externalRequestRevision, externalSourceRequestRevision } from '../sdk/src/platform/permissions/autonomous-protocol-binding.ts';
-import { captureAutonomousSource } from '../sdk/src/platform/permissions/autonomous.ts';
-import { hashState, type EntryType } from '@goodvibes-jev/judgment';
-test('typed source revision retains canonical hash identity and exact private provenance', () => {
-  const source = selectedDiffSource(); const revision = autonomousSourceRevision(source);
-  expect(revision).toBe(hashState(captureAutonomousSource(source) as unknown as EntryType));
+import { retainAutonomousSource } from '../sdk/src/platform/permissions/autonomous.ts';
+import { captureOwnedJson } from '../sdk/src/platform/gate/judgment-input.ts';
+test('retained source compares exact private provenance without a digest', () => {
+  const source = selectedDiffSource(); const isCurrent = retainAutonomousSource(source);
+  expect(isCurrent(structuredClone(source))).toBe(true);
   source.selectedDiffContext.provenance.latestCheckpointId = 'changed';
-  expect(autonomousSourceRevision(source)).not.toBe(revision);
+  expect(isCurrent(source)).toBe(false);
 });
-for (const shape of ['getter', 'prototype', 'toJSON']) test(`new revision paths reject executable ${shape} without running it`, () => {
+for (const shape of ['getter', 'prototype', 'toJSON']) test(`source and request captures reject executable ${shape} without running it`, () => {
   let effects = 0;
   const make = () => {
     const value = shape === 'prototype' ? Object.create({ inherited: true }) as Record<string, unknown> : {} as Record<string, unknown>;
@@ -500,9 +499,9 @@ for (const shape of ['getter', 'prototype', 'toJSON']) test(`new revision paths 
     if (shape === 'toJSON') Object.defineProperty(value, 'toJSON', { value() { effects++; return {}; } });
     return value;
   };
-  expect(() => autonomousSourceRevision(make())).toThrow();
-  expect(() => externalRequestRevision(PAN_SHAPED_PROTOCOL_UUID, '/synthetic', make())).toThrow();
-  expect(() => externalSourceRequestRevision(make(), selectedDiffSource())).toThrow();
+  expect(() => retainAutonomousSource(make())).toThrow();
+  expect(() => captureOwnedJson(make())).toThrow();
+  expect(() => readProtocolRequest(make())).toThrow();
   expect(effects).toBe(0);
 });
 

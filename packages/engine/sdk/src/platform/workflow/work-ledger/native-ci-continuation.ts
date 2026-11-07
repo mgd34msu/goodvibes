@@ -3,8 +3,7 @@ import { ciRepairPrompt } from '../../ci-watch/repair-prompt.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { PairingTokenManager, NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
-import { captureAutonomousSource } from '../../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { bindNativeCiWatchOwner } from '../../ci-watch/native-owner.js';
 import type { CiWatchSubscription, FixSessionBrief } from '../../ci-watch/types.js';
 import { durablePayloadRevision, durableKeyHash, type DurableStartedContract } from '../../contract/durable-admission.js';
@@ -190,7 +189,7 @@ export function createNativeCiContinuationHost(deps: {
       const { storage, policy } = available(); originalOperation.assertCurrent(); originalOperation.signal?.throwIfAborted();
       const owner = deps.sourceOwner(contract); owner.assertCurrent();
       const supplied = captureAutonomousSource(originalOperation.sourceOf());
-      if (autonomousSourceRevision(supplied) !== autonomousSourceRevision(nativeContractSourceForAdmission(contract))) throw new Error('Native CI source getter changed');
+      if (!retainAutonomousSource(supplied)(nativeContractSourceForAdmission(contract))) throw new Error('Native CI source getter changed');
       const pairing = owner.authority.current(); const scope = deps.scopes.currentScope(deps.projectRoot);
       if (pairing && !pairing.scopes.every(scope => policy.scopes().includes(scope))) throw new Error('Native CI gateway scope ceiling changed');
       const ledgerSource = deps.storage.current(owner.record.request.key).ledger.works.find(work => work.id === owner.record.target.workId)?.source;

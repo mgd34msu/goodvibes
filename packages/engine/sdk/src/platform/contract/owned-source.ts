@@ -1,6 +1,5 @@
 /** Live, original-source custody for a seeded compatibility contract. Never recovered from prose. */
-import { captureAutonomousSource } from '../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { bindContractActionSource, bindContractActionSignal, getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import type { Contract } from './types.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
@@ -20,12 +19,12 @@ export function bindOwnedContractSource(contract: Contract, owner: object): void
   const sourceOf = getContractActionSource(owner);
   if (!sourceOf || !contract.originalSource) return;
   const source = captureAutonomousSource(sourceOf());
-  const revision = autonomousSourceRevision(source);
+  const sourceIsCurrent = retainAutonomousSource(source);
   const signal = getContractActionSignal(owner);
   bindContractActionSignal(contract, signal);
   bindContractActionSource(contract, () => {
     signal?.throwIfAborted();
-    if (autonomousSourceRevision(sourceOf()) !== revision || autonomousSourceRevision(contract.originalSource) !== revision) {
+    if (!sourceIsCurrent(sourceOf()) || !sourceIsCurrent(contract.originalSource)) {
       throw new Error('Original contract source changed');
     }
     return source;

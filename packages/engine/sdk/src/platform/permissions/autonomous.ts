@@ -2,7 +2,7 @@ import { array } from 'zod/v4';
 import { nativeSelectedDiffEvidence } from '../workflow/work-ledger/native-diff-evidence.js';
 import { captureNativeSelectedDiffContext, type NativeSelectedDiffContext } from '../workflow/work-ledger/native-diff-context.js';
 import { nativeConversationContinuationMessageSchema, NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES, NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
-import { types as nodeTypes } from 'node:util';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { createHash } from 'node:crypto';
 /** Recorded Jev tool outcomes. No human callback or transport retry lives here. */
 import {
@@ -90,11 +90,17 @@ export function captureCurrentAutonomousSourceFrame(value: unknown) {
   return captureSourceFrame(value, true);
 }
 
+/** Private exact comparison against an owned original, never an authority grant. */
+export function retainAutonomousSource(value: unknown): (current: unknown) => boolean {
+  const original = captureCurrentAutonomousSourceFrame(value).source;
+  return current => isDeepStrictEqual(captureCurrentAutonomousSourceFrame(current).source, original);
+}
+
 export function captureAutonomousSource(value: unknown): AutonomousToolSource {
   return captureAutonomousSourceFrame(value).source;
 }
 
-/** Privacy-safe semantic projection; full validated identity still binds tool-source hashes and retries. */
+/** Privacy-safe semantic projection; full validated identity remains in private source guards. */
 export function autonomousSourceEvidence(source: AutonomousToolSource) {
   return captureAutonomousSourceFrame(source).evidence;
 }

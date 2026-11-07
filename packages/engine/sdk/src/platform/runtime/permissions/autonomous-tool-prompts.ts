@@ -1,10 +1,10 @@
 /** Host-owned tool controls. Subprocess output is evidence, never authority. */
 import type { EntryType } from '@goodvibes-jev/judgment';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { autonomousRevision, autonomousSourceEvidence, captureAutonomousSource } from '../../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../../permissions/autonomous-protocol-binding.js';
+import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-input.js';
+import { autonomousSourceEvidence, captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalPermissionHost } from '../../permissions/external-request.js';
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import type { WorkspaceTrustManager } from '../workspace-trust.js';
@@ -44,14 +44,14 @@ export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: Exec
     if (!/(?:\[[yY]\/[nN]\]|\[[nN]\/[yY]\]|\(yes\/no\)|\[yes\/no\])/i.test(captured.prompt)) return { answered: false };
     const assertTrust = await prepareTrust?.call(workspaceTrust, 'execute', signal);
     const source = captureAutonomousSource(operation.sourceOf());
-    const sourceRevision = autonomousSourceRevision(source);
-    const requestRevision = autonomousRevision(captured);
+    const sourceIsCurrent = retainAutonomousSource(source);
+    const sourceRevision = 'captured-source', requestRevision = 'captured-prompt';
     let closed = false;
     const assertCurrent = () => {
       if (closed) throw new Error('Terminal control admission closed');
       signal.throwIfAborted(); execution.assertCurrent(); operation.assertCurrent(); assertTrust?.();
       if (host.workspaceTrust !== workspaceTrust || workspaceTrust?.prepareAutonomousConstraint !== prepareTrust) throw new Error('Workspace trust capability changed');
-      if (autonomousSourceRevision(operation.sourceOf()) !== sourceRevision || autonomousRevision(ask) !== requestRevision) throw new Error('Terminal source or prompt changed');
+      if (!sourceIsCurrent(operation.sourceOf()) || !isDeepStrictEqual(captureOwnedJson(ask), captured)) throw new Error('Terminal source or prompt changed');
     };
     assertCurrent();
     const sourceId = randomUUID();

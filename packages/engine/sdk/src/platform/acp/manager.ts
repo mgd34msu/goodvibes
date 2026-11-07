@@ -1,5 +1,4 @@
-import { captureAutonomousSource } from '../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { currentExternalOperationSource } from '../permissions/external-operation-scope.js';
 import type { ExternalPermissionHost, ExternalOperationSource } from '../permissions/external-request.js';
 /**
@@ -72,10 +71,10 @@ export class AcpManager {
   async spawn(task: SubagentTask, operation: ExternalOperationSource | undefined = currentExternalOperationSource()): Promise<string> {
     operation?.signal?.throwIfAborted(); operation?.assertCurrent();
     const source = operation ? captureAutonomousSource(operation.sourceOf()) : undefined;
-    const sourceRevision = source ? autonomousSourceRevision(source) : undefined;
+    const sourceIsCurrent = source ? retainAutonomousSource(source) : undefined;
     const assertOperationCurrent = () => {
       operation?.signal?.throwIfAborted(); operation?.assertCurrent();
-      if (operation && autonomousSourceRevision(captureAutonomousSource(operation.sourceOf())) !== sourceRevision) throw new Error('ACP originating source changed');
+      if (operation && !sourceIsCurrent?.(operation.sourceOf())) throw new Error('ACP originating source changed');
     };
     const ownedOperation = operation && source ? { ...operation, assertCurrent: assertOperationCurrent, sourceOf: () => { assertOperationCurrent(); return source; } } : undefined;
     const id = randomUUID();

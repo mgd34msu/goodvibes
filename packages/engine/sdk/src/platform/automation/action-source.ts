@@ -1,14 +1,13 @@
 /** Trusted, nonserialized source custody through an automation spawn. */
 import type { ExternalOperationSource } from '../permissions/external-request.js';
-import { captureAutonomousSource } from '../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import type { NativePlannerBinding } from '../tools/agent/contract-binding.js';
 const owners = new WeakMap<object, NativePlannerBinding>();
 export function captureAutomationSource(operation: ExternalOperationSource): ExternalOperationSource {
   operation.assertCurrent(); operation.signal?.throwIfAborted();
-  const source = captureAutonomousSource(operation.sourceOf()); const revision = autonomousSourceRevision(source);
+  const source = captureAutonomousSource(operation.sourceOf()); const sourceIsCurrent = retainAutonomousSource(source);
   const assertCurrent = () => { operation.assertCurrent(); operation.signal?.throwIfAborted();
-    if (autonomousSourceRevision(operation.sourceOf()) !== revision) throw new Error('Automation original source changed'); };
+    if (!sourceIsCurrent(operation.sourceOf())) throw new Error('Automation original source changed'); };
   return { ...operation, assertCurrent, sourceOf: () => { assertCurrent(); return source; } };
 }
 export function bindAutomationAction<T extends object>(input: T, operation: ExternalOperationSource | undefined): T {

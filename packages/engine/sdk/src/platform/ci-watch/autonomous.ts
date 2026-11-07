@@ -2,8 +2,7 @@ import { captureNativeCiWatchOwner, nativeCiWatchOwner } from './native-owner.js
 import { ciRepairPrompt } from './repair-prompt.js';
 /** Watch-owned repair decisions. CI output describes failure; it never authorizes work. */
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { captureAutonomousSource } from '../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalOperationSource, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
 import type { CiWatchSubscription, FixSessionBrief, FixSessionStarter } from './types.js';
@@ -15,10 +14,10 @@ export function captureCiWatchOwner(operation: ExternalOperationSource | undefin
   if (native) return native;
   operation.assertCurrent(); operation.signal?.throwIfAborted();
   const source = captureAutonomousSource(operation.sourceOf());
-  const revision = autonomousSourceRevision(source);
+  const sourceIsCurrent = retainAutonomousSource(source);
   const assertCurrent = () => {
     operation.assertCurrent(); operation.signal?.throwIfAborted();
-    if (autonomousSourceRevision(operation.sourceOf()) !== revision) throw new Error('CI watch original source changed');
+    if (!sourceIsCurrent(operation.sourceOf())) throw new Error('CI watch original source changed');
   };
   const inputFacts = operation.inputFacts ? snapshotJudgmentInput(operation.inputFacts) as readonly Readonly<Record<string, unknown>>[] : undefined;
   return Object.freeze({ ...(inputFacts ? { inputFacts } : {}), sourceOf() { assertCurrent(); return source; }, assertCurrent,

@@ -1,10 +1,9 @@
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { prepareExternalExecution, prepareExternalWorkspaceRevision } from '../permissions/external-execution.js';
-import { autonomousSourceRevision } from '../permissions/autonomous-protocol-binding.js';
 import { captureExternalRequestEvidence } from '../permissions/external-request-evidence.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
-import { autonomousRevision } from '../permissions/autonomous.js';
+import { retainAutonomousSource } from '../permissions/autonomous.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 import { captureOwnedJson, retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
@@ -403,7 +402,7 @@ export class McpRegistry {
       throw new Error(`McpRegistry: server '${parsed.serverName}' is not connected`);
     }
     const assertBackend = captureMcpBackendMethods(client, ['getToolSchema', 'captureToolScope', 'captureToolSchemaScope', 'callTool']);
-    const sourceRevision = source ? autonomousSourceRevision(source.sourceOf()) : undefined;
+    const sourceIsCurrent = source ? retainAutonomousSource(source.sourceOf()) : undefined;
     const policyLife = this.policyLifetime(parsed.serverName);
     const host = this.permissionHost;
     const transport = client.captureToolScope();
@@ -419,8 +418,6 @@ export class McpRegistry {
       } : null) as Readonly<Record<string, unknown>>;
     };
     const serverPolicy = policySnapshot();
-    const policyRevision = () => autonomousRevision(policySnapshot());
-    const revision = autonomousRevision(serverPolicy);
     const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, serverPolicy });
     let assertWorkspaceCurrent: (() => void) | undefined;
     let schemaScope: ReturnType<McpClient['captureToolSchemaScope']> | undefined;
@@ -428,8 +425,8 @@ export class McpRegistry {
       assertCaller(); assertBackend(); signal.throwIfAborted(); transport.assertCurrent(); source?.assertCurrent(); assertWorkspaceCurrent?.();
       schemaScope?.assertCurrent();
       this.executionByClient.get(client)?.assertCurrent();
-      if (source && autonomousSourceRevision(source.sourceOf()) !== sourceRevision) throw new Error('MCP original operation source changed');
-      if (policyRevision() !== revision || this.permissionHost !== host) throw new Error('MCP server policy changed');
+      if (source && !sourceIsCurrent?.(source.sourceOf())) throw new Error('MCP original operation source changed');
+      if (!isDeepStrictEqual(policySnapshot(), serverPolicy) || this.permissionHost !== host) throw new Error('MCP server policy changed');
       if (this.clients.get(parsed.serverName) !== client || this.freshness.isQuarantined(parsed.serverName)) throw new Error('MCP operation authority changed');
     };
     const operation = source ? { ...source, inputFacts: [args, ...(source.inputFacts ?? [])], assertCurrent,

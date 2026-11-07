@@ -1,7 +1,6 @@
 /** Exact sandbox-plan admission. This never widens the plan or changes its argv. */
 import { randomUUID } from 'node:crypto';
-import { captureAutonomousSource } from '../../permissions/autonomous.js';
-import { autonomousSourceRevision } from '../../permissions/autonomous-protocol-binding.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { admitExternalRequest } from '../../permissions/external-request.js';
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
@@ -21,13 +20,13 @@ export async function admitSandboxEscalation(host: AutonomousToolPromptHost, inp
   let transferred = false;
   try {
     const assertTrust = await prepareTrust?.call(workspaceTrust, 'execute', signal);
-    const sourceRevision = autonomousSourceRevision(captureAutonomousSource(operation.sourceOf()));
+    const sourceIsCurrent = retainAutonomousSource(captureAutonomousSource(operation.sourceOf()));
     let closed = false;
     const assertCurrent = () => {
       if (closed) throw new Error('Sandbox escalation admission closed');
       signal.throwIfAborted(); execution.assertCurrent(); operation.assertCurrent(); assertTrust?.();
       if (host.workspaceTrust !== workspaceTrust || workspaceTrust?.prepareAutonomousConstraint !== prepareTrust) throw new Error('Workspace trust capability changed');
-      if (autonomousSourceRevision(operation.sourceOf()) !== sourceRevision) throw new Error('Sandbox operation source changed');
+      if (!sourceIsCurrent(operation.sourceOf())) throw new Error('Sandbox operation source changed');
     };
     assertCurrent();
     admission = await admitExternalRequest(host, { connectionId: randomUUID(), destination: 'owned-exec-sandbox', signal, assertCurrent }, operation, {

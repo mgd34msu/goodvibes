@@ -1,11 +1,10 @@
 import { readProtocolRequest, type CapturedProtocolRequest } from './protocol-request.js';
-import { autonomousSourceRevision, externalRequestRevision } from './autonomous-protocol-binding.js';
 import { captureExternalRequestEvidence } from './external-request-evidence.js';
 /** ACP/MCP use the same recorded autonomous admission as native tools. No human fallback. */
 import { randomUUID } from 'node:crypto';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import { captureCurrentAutonomousSourceFrame, type AutonomousToolSource } from './autonomous.js';
+import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, retainAutonomousSource, type AutonomousToolSource } from './autonomous.js';
 import { awaitPermission } from './cancellation.js';
 import { assertCurrentExternalAdmission, claimExternalAdmission, closeExternalAdmission, type PermissionManager } from './manager.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
@@ -51,19 +50,21 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
   try {
     assertCurrent();
     const source = captureCurrentAutonomousSourceFrame(operation.sourceOf()).source;
-    const sourceRevision = autonomousSourceRevision(source);
+    const sourceIsCurrent = retainAutonomousSource(source);
+    captureCurrentAutonomousChoices({ resumeConditions: [{ id: transport.connectionId, revision: 'connection' }] });
     const protocol = input.protocolSubject ? readProtocolRequest(input.protocolSubject) : undefined;
     const payload = captureOwnedJson(input.args) as Record<string, unknown>;
     const args = protocol ? captureOwnedJson({ ...payload, protocolRequest: protocol.meaning }) as Record<string, unknown> : payload;
     const sourceOf = () => {
       assertCurrent();
       const current = captureCurrentAutonomousSourceFrame(operation.sourceOf()).source;
-      if (autonomousSourceRevision(current) !== sourceRevision) throw new Error('External operation source changed');
+      if (!sourceIsCurrent(current)) throw new Error('External operation source changed');
       return source;
     };
-    const admission = await awaitPermission(() => host.permissionManager.admitAutonomous(randomUUID(), input.tool, args, {
+    const requestId = randomUUID();
+    const admission = await awaitPermission(() => host.permissionManager.admitAutonomous(requestId, input.tool, args, {
       externalRequestEvidence, signal, sourceOf, assertPrepared: assertCurrent, ...(input.supportingDecisionIds ? { preparationDecisionIds: input.supportingDecisionIds } : {}),
-      schemaRevision: externalRequestRevision(transport.connectionId, transport.destination, args, input.protocolSubject),
+      schemaRevision: protocol?.revision ?? requestId,
       decoratePort: () => host.port,
     }), signal);
     assertCurrent();

@@ -42,7 +42,14 @@ export class VerificationStore {
         let record: unknown; try { record = JSON.parse(line); } catch { continue; }
         // Admissible bytes and matching local identities are still untrusted
         // proposals: every restored record needs a current Jev qualification.
-        try { record = snapshotJudgmentEvidence(record); } catch { continue; }
+        try { record = snapshotJudgmentEvidence(record); }
+        catch {
+          // JSON parsing has already produced inert data. An unreadable latest
+          // position must not resurrect an earlier branch's message authority.
+          if (record && typeof record === 'object' && (record as { kind?: unknown }).kind === 'archive')
+            throw new VerificationHeldError('unadmitted archived provenance');
+          continue;
+        }
         const value = record as { kind?: unknown; key?: unknown; value?: unknown };
         if (typeof value.key !== 'string') continue;
         if (value.kind === 'proposal' && typeof value.value === 'string') this.proposals.set(value.key, value.value);
@@ -77,6 +84,16 @@ export class VerificationStore {
             if (entry.runtimeMessages !== undefined && (!Array.isArray(entry.runtimeMessages)
               || entry.runtimeMessages.some(pair => !Array.isArray(pair) || !Number.isSafeInteger(pair[0]) || pair[0] < 0 || typeof pair[1] !== 'string')))
               throw new VerificationHeldError('invalid runtime message provenance');
+            if (entry.messageRecords !== undefined && (!Array.isArray(entry.messageRecords)
+              || entry.messageRecords.some(record => !record || typeof record !== 'object' || Array.isArray(record)
+                || typeof record.id !== 'string' || !record.id || record.id.length > 256 || Object.keys(record).length !== 2
+                || ('message' in record ? !record.message || typeof record.message !== 'object' || Array.isArray(record.message)
+                  : !('contentCommitment' in record) || typeof record.contentCommitment !== 'string' || !/^[a-p]{64}$/.test(record.contentCommitment)))
+              || new Set(entry.messageRecords.map(record => record.id)).size !== entry.messageRecords.length))
+              throw new VerificationHeldError('invalid archived message records');
+            const recordedMessages = new Set(entry.messageRecords?.map(record => record.id));
+            if ([...entry.derived, ...(entry.runtimeMessages ?? [])].some(([, id]) => id.startsWith('message-') && !recordedMessages.has(id)))
+              throw new VerificationHeldError('missing archived message record');
             if (Array.isArray(entry.histories)) for (const history of entry.histories) if (history && Array.isArray(history.messages)) {
               const key = issueVerificationId('history');
               this.histories.set(key, history); this.historyKeys.set(history, key);
@@ -86,7 +103,8 @@ export class VerificationStore {
             this.archive = { branch: typeof metadata.branch === 'string' ? metadata.branch : 'main',
               histories: Array.isArray(metadata.historyKeys) ? metadata.historyKeys.flatMap(key => this.histories.get(key) ?? [])
                 : Array.isArray(entry.histories) ? entry.histories : [...this.histories.values()], derived: entry.derived,
-              ...(entry.runtimeMessages ? { runtimeMessages: entry.runtimeMessages } : {}) };
+              ...(entry.runtimeMessages ? { runtimeMessages: entry.runtimeMessages } : {}),
+              ...(entry.messageRecords ? { messageRecords: entry.messageRecords } : {}) };
             this.archives.set(this.archive.branch!, this.archive);
           }
         }
@@ -212,13 +230,16 @@ export class VerificationStore {
       return key;
     });
     const position = { branch, historyKeys: keys, derived: value.derived,
-      ...(value.runtimeMessages?.length ? { runtimeMessages: value.runtimeMessages } : {}) };
+      ...(value.runtimeMessages?.length ? { runtimeMessages: value.runtimeMessages } : {}),
+      ...(value.messageRecords?.length ? { messageRecords: value.messageRecords } : {}) };
     if (!previous || !isDeepStrictEqual(previous.derived, value.derived)
       || !isDeepStrictEqual(previous.runtimeMessages ?? [], value.runtimeMessages ?? [])
+      || !isDeepStrictEqual(previous.messageRecords ?? [], value.messageRecords ?? [])
       || !isDeepStrictEqual(previous.histories.map(history => this.historyKeys.get(history)), keys))
       this.append('archive', branch, position);
     const metadata = captureOwnedJson({ branch, derived: value.derived,
-      ...(value.runtimeMessages ? { runtimeMessages: value.runtimeMessages } : {}) }) as Omit<VerificationArchive, 'histories'>;
+      ...(value.runtimeMessages ? { runtimeMessages: value.runtimeMessages } : {}),
+      ...(value.messageRecords ? { messageRecords: value.messageRecords } : {}) }) as Omit<VerificationArchive, 'histories'>;
     const retained = Object.freeze({ ...metadata, histories: Object.freeze(keys.map(key => this.histories.get(key)!)) });
     this.archive = retained; this.archives.set(branch, retained);
   }

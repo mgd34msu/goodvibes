@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VerificationStore } from '../sdk/src/platform/core/verification/store.js';
-import { issueVerificationSource, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
+import { issueVerificationSource, verificationHash, verificationSources, verificationWireSource } from '../sdk/src/platform/core/verification/source.js';
 import { retainedDelegationSources } from '../sdk/src/platform/core/verification/delegated-history.js';
 import { citedReadSources, nativeReadReceipts } from '../sdk/src/platform/core/verification/read-receipts.js';
 import { observeReadContent } from '../sdk/src/platform/tools/read/observation.js';
@@ -11,6 +11,8 @@ import type { VerificationSourceInput } from '../sdk/src/platform/core/verificat
 import { CompletionVerification } from '../sdk/src/platform/core/verification/coordinator.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { verificationWriter } from './_helpers/verification.js';
+import { ConversationManager } from '../sdk/src/platform/core/conversation.js';
+import { appendVerificationObservation, archiveVerificationCompaction, registerVerificationArchive, verificationHistory, verificationMessages } from '../sdk/src/platform/core/verification/archive.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -94,6 +96,99 @@ test('existing history identities remain opaque and inline archive originals rec
   reopened.rememberArchive(reopened.archive!);
   expect(readFileSync(f.path, 'utf8')).toBe(saved);
   expect(reopened.archive?.histories[0]?.messages).toEqual(history.messages);
+});
+
+test('native feedback records preserve exact roles after restart and do not bind a changed message occupying the same slot', () => {
+  const f = journal(), conversation = new ConversationManager();
+  conversation.addUserMessage('Review the source; do not change it.');
+  registerVerificationArchive(conversation, value => f.store.rememberArchive(value));
+  appendVerificationObservation(conversation, 'Observed native report delivery.');
+  const record = f.store.archive?.messageRecords?.[0];
+  expect(record?.id).toStartWith('message-');
+  expect(record).toHaveProperty('message'); expect(record).not.toHaveProperty('contentCommitment');
+  const resumed = new ConversationManager(); resumed.fromJSON(conversation.toJSON() as Parameters<ConversationManager['fromJSON']>[0]);
+  const reopened = new VerificationStore(f.root, f.session);
+  registerVerificationArchive(resumed, value => reopened.rememberArchive(value), [...reopened.archives.values()]);
+  const messages = resumed.getMessageSnapshot();
+  expect(verificationMessages(resumed, messages).map(message => message.role)).toEqual(['user', 'system']);
+  const changed = messages.map((message, index) => index === 1 ? { ...message, content: 'A different owner instruction.' } : message);
+  expect(verificationMessages(resumed, changed).map(message => message.role)).toEqual(['user', 'user']);
+  expect(verificationMessages(resumed, messages).map(message => message.role)).toEqual(['user', 'system']);
+});
+
+test('private feedback persists no raw credential and retains exact provenance when restored', () => {
+  const f = journal(), conversation = new ConversationManager();
+  registerVerificationArchive(conversation, value => f.store.rememberArchive(value));
+  appendVerificationObservation(conversation, 'password=synthetic-private-runtime-value');
+  const record = f.store.archive?.messageRecords?.[0];
+  expect(record?.id).toStartWith('message-');
+  expect(record).toHaveProperty('contentCommitment'); expect(record).not.toHaveProperty('message');
+  expect(readFileSync(f.path, 'utf8')).not.toContain('synthetic-private-runtime-value');
+  const resumed = new ConversationManager(); resumed.fromJSON(conversation.toJSON() as Parameters<ConversationManager['fromJSON']>[0]);
+  const reopened = new VerificationStore(f.root, f.session);
+  registerVerificationArchive(resumed, value => reopened.rememberArchive(value), [...reopened.archives.values()]);
+  expect(verificationMessages(resumed, resumed.getMessageSnapshot())[0]?.role).toBe('system');
+  expect(verificationMessages(resumed, resumed.getMessageSnapshot())[0]?.role).toBe('system');
+  const different = resumed.getMessageSnapshot().map(message => ({ ...message, content: 'password=another-private-value' }));
+  expect(verificationMessages(resumed, different)[0]?.role).toBe('user');
+  expect(readFileSync(f.path, 'utf8')).not.toContain('synthetic-private-runtime-value');
+  expect(readFileSync(f.path, 'utf8')).not.toContain('another-private-value');
+});
+
+test('earlier stored provenance commitments migrate public originals into exact native records without restoring instruction authority', () => {
+  const f = journal(), conversation = new ConversationManager();
+  conversation.addUserMessage('[Summary] Earlier work is retained as reference.');
+  f.store.rememberArchive({ histories: [], derived: [] });
+  const prior = verificationHash(conversation.getMessageSnapshot()[0]);
+  appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'earlier-position', value: { histories: [], derived: [[0, prior]] } }) + '\n');
+  const restored = new VerificationStore(f.root, f.session);
+  registerVerificationArchive(conversation, value => restored.rememberArchive(value), [...restored.archives.values()]);
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot())[0]?.role).toBe('system');
+  expect(restored.archive?.messageRecords?.[0]).toHaveProperty('message');
+  expect(restored.archive?.messageRecords?.[0]).not.toHaveProperty('contentCommitment');
+  const resumed = new ConversationManager(); resumed.fromJSON(conversation.toJSON() as Parameters<ConversationManager['fromJSON']>[0]);
+  const reopened = new VerificationStore(f.root, f.session);
+  registerVerificationArchive(resumed, value => reopened.rememberArchive(value), [...reopened.archives.values()]);
+  const before = readFileSync(f.path, 'utf8');
+  expect(verificationMessages(resumed, resumed.getMessageSnapshot())[0]?.role).toBe('system');
+  expect(readFileSync(f.path, 'utf8')).toBe(before);
+});
+
+test('compaction matches duplicate occurrences once and archives original owner text instead of elevating generated prose', () => {
+  const owner = {}, duplicate = { role: 'user', content: 'An original owner request.' };
+  const original = [duplicate, duplicate];
+  archiveVerificationCompaction(owner, original, [duplicate, duplicate, duplicate]);
+  expect(verificationMessages(owner, [duplicate, duplicate, duplicate]).map(message => message.role)).toEqual(['user', 'user', 'system']);
+  expect(verificationHistory(owner)[0]?.messages).toEqual(original);
+  archiveVerificationCompaction(owner, [duplicate, duplicate, duplicate], [{ role: 'user', content: 'A generated summary.' }]);
+  expect(verificationHistory(owner)[1]?.messages).toHaveLength(2);
+  expect(verificationMessages(owner, [{ role: 'user', content: 'A generated summary.' }])[0]?.role).toBe('system');
+});
+
+test('compaction preserves reordered exact JSON records and distinguishes property presence and signed zero', () => {
+  const owner = {};
+  const before = [{ role: 'user', content: 'An exact retained owner message.', metadata: { active: true, count: 1 } },
+    { role: 'user', content: 'A message with an explicit field.', flag: undefined },
+    { role: 'user', content: 'A signed numeric observation.', delta: -0 }];
+  const after = [{ metadata: { count: 1, active: true }, content: 'An exact retained owner message.', role: 'user' },
+    { role: 'user', content: 'A message with an explicit field.' },
+    { role: 'user', content: 'A signed numeric observation.', delta: 0 }];
+  archiveVerificationCompaction(owner, before, after);
+  expect(verificationMessages(owner, after).map(message => message.role)).toEqual(['user', 'system', 'system']);
+  expect(verificationHistory(owner)[0]?.messages).toEqual(before);
+});
+
+test('a native provenance reference without its complete archived record holds recovery', () => {
+  const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
+  appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'broken-position', value: { histories: [], derived: [[0, 'message-missing-record']] } }) + '\n');
+  expect(() => new VerificationStore(f.root, f.session)).toThrow('missing archived message record');
+});
+
+test('an inadmissible latest archive cannot silently fall back to earlier message provenance', () => {
+  const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
+  appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'unadmitted-position', value: { histories: [], derived: [[0, 'message-private-record']],
+    messageRecords: [{ id: 'message-private-record', message: { role: 'user', content: 'password=synthetic-unadmitted-private-value' } }] } }) + '\n');
+  expect(() => new VerificationStore(f.root, f.session)).toThrow('unadmitted archived provenance');
 });
 
 test('retrieval indexes compare every native member and preview, and keep their issued IDs on restart', () => {

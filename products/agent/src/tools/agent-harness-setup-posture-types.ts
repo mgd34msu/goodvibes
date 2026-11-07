@@ -122,7 +122,6 @@ export interface SetupConnectedHostAuthPosture {
     readonly present: boolean;
     readonly usable: boolean;
     readonly path: string;
-    readonly fingerprint?: string;
     readonly error?: string;
   };
   readonly compatibilityAuth: {

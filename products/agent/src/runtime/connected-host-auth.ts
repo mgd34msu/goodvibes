@@ -70,10 +70,6 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
   }
 }
 
-export function connectedHostOperatorTokenFingerprint(token: string): string {
-  return createHash('sha256').update(token).digest('hex').slice(0, 12);
-}
-
 export function connectedHostTokenRequiredMessage(path: string): string {
   return [
     'Connected-host operator token is required.',

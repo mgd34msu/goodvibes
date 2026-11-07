@@ -9,7 +9,7 @@ import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/onboarding/index.ts';
-import { connectedHostOperatorTokenFingerprint, connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { clearSetupWizardCheckpoint, saveSetupWizardCheckpoint, setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
 import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -365,7 +365,6 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   };
   const before = readConnectedHostOperatorToken(shellPaths.homeDirectory);
   const explicitUserRequest = readString(args.explicitUserRequest);
-  const beforeFingerprint = before.token ? connectedHostOperatorTokenFingerprint(before.token) : null;
   if (before.token && before.path.startsWith('env:')) {
     return {
       status: 'already_usable_env_token',
@@ -376,7 +375,6 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
         path: before.path,
         present: true,
         usable: true,
-        fingerprint: beforeFingerprint,
         rawValueReturned: false,
       },
       mutation: {
@@ -420,8 +418,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
         },
       };
     }
-    const afterFingerprint = connectedHostOperatorTokenFingerprint(after.token);
-    const changed = beforeFingerprint !== afterFingerprint;
+    const changed = before.token !== after.token;
     const result = before.token
       ? changed ? 'repaired' : 'already_usable'
       : before.present ? 'repaired' : 'created';
@@ -435,7 +432,6 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
         canonicalPath,
         present: true,
         usable: true,
-        fingerprint: afterFingerprint,
         rawValueReturned: false,
         fileMode: safeFileMode(canonicalPath),
       },
@@ -459,7 +455,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
       policy: {
         effect: 'confirmed-local-token-provisioning',
         source: 'SDK platform pairing helper writes the canonical connected-host operator token file with owner-only permissions.',
-        secrets: 'Only path, fingerprint, peer id, and timestamps are returned; the raw token is not returned.',
+        secrets: 'Only path, peer id, and timestamps are returned; the raw token is not returned.',
         rotation: 'This route preserves a valid existing token and only creates or repairs the local canonical file.',
       },
     };
@@ -556,7 +552,7 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
     policy: {
       effect: 'confirmed-redacted-setup-smoke',
       shell: 'No package, host, or shell commands were executed implicitly.',
-      secrets: 'Secrets and connected-host tokens are never returned; token evidence remains presence, path, and fingerprint only.',
+      secrets: 'Secrets and connected-host tokens are never returned; token evidence remains presence and path only.',
       source: smokePlan.policy,
     },
     source: smokePlan.source,

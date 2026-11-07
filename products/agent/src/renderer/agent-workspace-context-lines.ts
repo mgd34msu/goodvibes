@@ -117,7 +117,7 @@ function homeAssistantCockpitLines(snapshot: AgentWorkspaceRuntimeSnapshot): Con
 function companionAccessLine(snapshot: AgentWorkspaceRuntimeSnapshot): ContextLine {
   const access = snapshot.companionAccess;
   const tokenState = access.tokenReadable
-    ? `ready sha256:${access.tokenFingerprint ?? 'unknown'}`
+    ? 'ready'
     : access.tokenPresent
       ? 'present but unreadable'
       : 'missing';

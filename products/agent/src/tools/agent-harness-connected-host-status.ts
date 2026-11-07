@@ -3,7 +3,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../cli/external-runtime.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { connectedHostOperatorTokenFingerprint, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import {
   blockedConnectedHostCapabilities,
   connectedHostCapabilityMap,
@@ -117,7 +117,6 @@ export async function connectedHostStatusSummary(
       present: token.present,
       usable: tokenUsable,
       path: token.path,
-      fingerprint: token.token ? `sha256:${connectedHostOperatorTokenFingerprint(token.token)}` : null,
       error: token.error ?? null,
     },
     liveStatus: runtime,

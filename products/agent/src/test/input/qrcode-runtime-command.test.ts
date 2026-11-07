@@ -47,7 +47,7 @@ describe('qrcode runtime command', () => {
     const text = out.join('\n');
     expect(text).toContain('goodvibes-agent');
     expect(text).toContain('http://127.0.0.1:3421');
-    expect(text).toContain('Token:          present sha256:');
+    expect(text).toContain('Token:          present (hidden in text; QR contains pairing payload)');
     expect(text).toContain('rerun /pair --show-token --yes');
     expect(text).not.toContain('existing-connected-host-token');
     expect(text).not.toContain('QR code panel');
@@ -103,7 +103,7 @@ describe('qrcode runtime command', () => {
 
     const text = out.join('\n');
     expect(text).toContain('goodvibes-agent');
-    expect(text).toContain('Token:          present sha256:');
+    expect(text).toContain('Token:          present (hidden in text; QR contains pairing payload)');
     expect(text).toContain('rerun /pair --show-token --yes');
     expect(text).not.toContain('env-connected-host-token');
     expect(text).not.toContain('Connected-host operator token is required.');

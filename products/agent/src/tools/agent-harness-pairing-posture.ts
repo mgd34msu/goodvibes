@@ -5,7 +5,7 @@ import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-c
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
-import { connectedHostOperatorTokenFingerprint, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
@@ -322,7 +322,6 @@ function pairingState(context: CommandContext, networkAddress: string): Record<s
     token: {
       present: Boolean(tokenRecord.token),
       path: tokenRecord.path,
-      fingerprint: tokenRecord.token ? `sha256:${connectedHostOperatorTokenFingerprint(tokenRecord.token)}` : null,
       rawValueReturned: false,
     },
     companionPayloadReturned: false,

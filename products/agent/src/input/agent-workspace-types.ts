@@ -437,7 +437,6 @@ export interface AgentWorkspaceCompanionAccessSummary {
   readonly tokenPath: string;
   readonly tokenPresent: boolean;
   readonly tokenReadable: boolean;
-  readonly tokenFingerprint: string | null;
   readonly tokenError: string | null;
   readonly pairingReady: boolean;
   readonly qrCommand: '/pair';

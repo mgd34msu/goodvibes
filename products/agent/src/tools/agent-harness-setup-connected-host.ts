@@ -5,7 +5,7 @@ import { getOperatorContract } from '@goodvibes-jev/engine/sdk/contracts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CliServicePosture } from '../cli/service-posture.ts';
-import { connectedHostOperatorTokenFingerprint, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { operatorMethodRoute, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
 import type { OperatorContractMethod, SetupBootstrapPlan, SetupConnectedHostAuthPosture, SetupPlanStatus, SetupRepairCard, SetupRepairCardEffect, SetupRepairLiveEvidence, SetupRepairOutcome, SetupRepairRecommendation, SetupRepairCardState, SetupServiceLifecycleDecision, SetupServiceProbe, SetupServiceProbeStatus } from './agent-harness-setup-posture-types.ts';
@@ -84,7 +84,6 @@ export async function connectedHostAuthPosture(
       present: token.present,
       usable,
       path: token.path,
-      ...(token.token ? { fingerprint: connectedHostOperatorTokenFingerprint(token.token) } : {}),
       ...(token.error ? { error: token.error } : {}),
     },
     compatibilityAuth: {

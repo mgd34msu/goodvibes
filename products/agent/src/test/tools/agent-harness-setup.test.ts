@@ -39,7 +39,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               readonly present: boolean;
               readonly usable: boolean;
               readonly path: string;
-              readonly fingerprint?: string;
             };
             readonly routes: {
               readonly reviewCommand: string;
@@ -116,7 +115,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             readonly path: string;
             readonly present: boolean;
             readonly usable: boolean;
-            readonly fingerprint?: string | null;
             readonly rawValueReturned: boolean;
             readonly fileMode?: string | null;
           };
@@ -143,7 +141,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(provisioned.token.rawValueReturned).toBe(false);
         expect(provisioned.token.path).toBe(join(fixture.root, '.goodvibes', 'daemon', 'operator-tokens.json'));
         expect(provisioned.token.fileMode).toBe('0600');
-        expect(provisioned.token.fingerprint).toHaveLength(12);
+        expect(provisioned.token).not.toHaveProperty('fingerprint');
         expect(provisioned.companionRecord?.surface).toBe('goodvibes-agent');
         expect(provisioned.companionRecord?.peerId).toHaveLength(24);
         expect(provisioned.mutation?.performed).toBe(true);
@@ -166,7 +164,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             readonly operatorToken: {
               readonly present: boolean;
               readonly usable: boolean;
-              readonly fingerprint?: string;
             };
           };
         }>(fixture, { mode: 'setup_item', setupItemId: 'connected-host-auth' });
@@ -175,7 +172,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(ready.signals?.join('\n')).toContain('operator token: readable (not authority evidence)');
         expect(ready.authPosture?.operatorToken.present).toBe(true);
         expect(ready.authPosture?.operatorToken.usable).toBe(true);
-        expect(ready.authPosture?.operatorToken.fingerprint).toHaveLength(12);
+        expect(ready.authPosture?.operatorToken).not.toHaveProperty('fingerprint');
         expect(JSON.stringify(ready)).not.toContain('fixture-connected-host-token');
       } finally {
         fixture.cleanup();

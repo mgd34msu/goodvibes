@@ -22,7 +22,7 @@ import {
   readAgentRuntimeProfileSelection,
 } from '../agent/runtime-profile.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
-import { connectedHostOperatorTokenFingerprint, readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
 import { ensureEmailConfigDefaults, readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/sdk/platform/email';
@@ -252,7 +252,6 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
   const tokenRecord: Pick<ConnectedHostOperatorToken, 'path' | 'present' | 'token' | 'error'> = homeDirectory.length > 0
     ? readConnectedHostOperatorToken(homeDirectory)
     : { path: '(Agent home unavailable)', present: false, token: null };
-  const tokenFingerprint = tokenRecord.token ? connectedHostOperatorTokenFingerprint(tokenRecord.token) : null;
   const pairingReady = Boolean(tokenRecord.token);
   const nextStep = tokenRecord.error
     ? 'Repair the connected-host operator token file through the owning GoodVibes host, then rerun /pair.'
@@ -265,7 +264,6 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
     tokenPath: tokenRecord.path,
     tokenPresent: tokenRecord.present,
     tokenReadable: Boolean(tokenRecord.token),
-    tokenFingerprint,
     tokenError: tokenRecord.error ?? null,
     pairingReady,
     qrCommand: '/pair',

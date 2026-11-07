@@ -1032,13 +1032,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         };
         readonly operatorToken: {
           readonly usable: boolean;
-          readonly fingerprint: string | null;
         };
       };
       expectCompactModelRoute(payload.modelRoute);
       expect(payload.liveStatus.reachable).toBe(true);
       expect(payload.operatorToken.usable).toBe(true);
-      expect(payload.operatorToken.fingerprint?.startsWith('sha256:')).toBe(true);
+      expect(payload.operatorToken).not.toHaveProperty('fingerprint');
       expect(result.output).not.toContain(token);
 
       const alias = await fixture.tool.execute({ mode: 'daemon_status' });

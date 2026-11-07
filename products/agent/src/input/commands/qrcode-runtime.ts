@@ -10,7 +10,7 @@ import {
 } from '@goodvibes-jev/engine/sdk/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../../config/surface.ts';
 import { resolveRuntimeEndpointBinding } from '../../cli/endpoints.ts';
-import { connectedHostOperatorTokenFingerprint, connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
+import { connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
 import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 
 
@@ -22,7 +22,7 @@ function urlHostForBindHost(host: string): string {
 
 function formatTokenLine(token: string, showToken: boolean): string {
   if (showToken) return `Token:          ${token}`;
-  return `Token:          present sha256:${connectedHostOperatorTokenFingerprint(token)} (hidden in text; QR contains pairing payload)`;
+  return 'Token:          present (hidden in text; QR contains pairing payload)';
 }
 
 function formatAgentPairingBlock(info: CompanionConnectionInfo, qr: string, showToken: boolean): string {
@@ -79,7 +79,6 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
         ctx.print([
           'Manual companion token display requires confirmation.',
           '  rerun: /pair --show-token --yes',
-          `  token fingerprint: sha256:${connectedHostOperatorTokenFingerprint(tokenRecord.token)}`,
           '  QR pairing remains available without printing the raw token.',
         ].join('\n'));
         return;

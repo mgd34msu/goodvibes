@@ -33,6 +33,8 @@ interface Archives {
   save?: ((snapshot: VerificationArchive) => void) | undefined;
 }
 const archives = new WeakMap<object, Archives>();
+const detachedMessages = new WeakMap<object, { readonly collection: Archives; readonly derived: ReadonlyMap<number, string>;
+  readonly runtimeMessages: ReadonlyMap<number, string>; readonly records: ReadonlyMap<string, OwnedMessage> }>();
 const empty = (): Archive => ({ histories: [], derived: new Map(), runtimeMessages: new Map(), messageRecords: new Map(), changed: false });
 function collection(owner: object): Archives {
   let found = archives.get(owner);
@@ -98,6 +100,70 @@ function snapshot(branch: string, entry: Archive): VerificationArchive {
     ...(entry.runtimeMessages.size ? { runtimeMessages: [...entry.runtimeMessages] } : {}),
     ...(ids.length ? { messageRecords: ids.map(id => persistedMessage(entry, id)) } : {}) };
 }
+function recordsFor(entry: Archive, derived: ReadonlyMap<number, string>, runtime: ReadonlyMap<number, string>): Map<string, OwnedMessage> {
+  return new Map([...new Set([...derived.values(), ...runtime.values()])].map(id => [id, ownedMessage(entry, id)]));
+}
+/** Called only by native conversation edits. Retire removed records and map
+ * surviving positions through the actual edit, without reading message bodies. */
+export function retainVerificationMessagePositions(owner: object, position: (original: number) => number | undefined): void {
+  const entries = archives.get(owner), current = entries?.branches.get(entries.active);
+  if (!entries || !current || !current.derived.size && !current.runtimeMessages.size && !current.messageRecords.size) return;
+  const project = (values: ReadonlyMap<number, string>) => {
+    const next = new Map<number, string>();
+    for (const [original, id] of values) {
+      const target = position(original);
+      if (target === undefined) continue;
+      if (!Number.isSafeInteger(target) || target < 0 || next.has(target)) throw new VerificationHeldError('invalid native message position');
+      next.set(target, id);
+    }
+    return next;
+  };
+  const derived = project(current.derived), runtimeMessages = project(current.runtimeMessages);
+  const same = (before: ReadonlyMap<number, string>, after: ReadonlyMap<number, string>) =>
+    before.size === after.size && [...before].every(([key, id]) => after.get(key) === id);
+  const records = recordsFor(current, derived, runtimeMessages);
+  if (same(current.derived, derived) && same(current.runtimeMessages, runtimeMessages) && current.messageRecords.size === records.size) return;
+  const next = { ...current, derived, runtimeMessages, messageRecords: records, changed: true };
+  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next));
+}
+/** The native undo array owns its removed records. A discarded undo stack
+ * releases these values through the weak key, including private originals. */
+export function detachVerificationMessages(owner: object, start: number, turn: object): void {
+  const entries = archives.get(owner), current = entries?.branches.get(entries.active);
+  if (!entries || !current) return;
+  const slice = (values: ReadonlyMap<number, string>) => new Map([...values].filter(([position]) => position >= start).map(([position, id]) => [position - start, id]));
+  const derived = slice(current.derived), runtimeMessages = slice(current.runtimeMessages);
+  if (derived.size || runtimeMessages.size) detachedMessages.set(turn, { collection: entries, derived, runtimeMessages,
+    records: recordsFor(current, derived, runtimeMessages) });
+  retainVerificationMessagePositions(owner, position => position < start ? position : undefined);
+}
+export function restoreVerificationMessages(owner: object, start: number, turn: object): void {
+  const held = detachedMessages.get(turn);
+  if (!held) return;
+  const entries = archives.get(owner), current = entries?.branches.get(entries.active);
+  if (!entries || !current || entries !== held.collection) throw new VerificationHeldError('detached message owner retired');
+  const derived = new Map(current.derived), runtimeMessages = new Map(current.runtimeMessages);
+  for (const [position, id] of held.derived) derived.set(start + position, id);
+  for (const [position, id] of held.runtimeMessages) runtimeMessages.set(start + position, id);
+  const next = { ...current, derived, runtimeMessages, messageRecords: new Map([...current.messageRecords, ...held.records]), changed: true };
+  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next)); detachedMessages.delete(turn);
+}
+/** A native metadata edit preserves provenance while issuing a new immutable
+ * record. Borrowed changed bytes cannot silently update the original record. */
+export function updateVerificationMessage(owner: object, position: number, before: Record<string, unknown>, after: Record<string, unknown>): void {
+  const entries = archives.get(owner), current = entries?.branches.get(entries.active);
+  if (!entries || !current) return;
+  const origin = messageOrigin(current, before, position);
+  if (origin === undefined) return;
+  const value = captureOwnedJson(after) as Record<string, unknown>;
+  const previousId = (origin === 'derived' ? current.derived : current.runtimeMessages).get(position);
+  if (previousId !== undefined && isDeepStrictEqual(ownedMessage(current, previousId).message, value)) return;
+  const derived = new Map(current.derived), runtimeMessages = new Map(current.runtimeMessages);
+  derived.delete(position); runtimeMessages.delete(position);
+  const next = { ...current, derived, runtimeMessages, messageRecords: recordsFor(current, derived, runtimeMessages), changed: true };
+  (origin === 'derived' ? derived : runtimeMessages).set(position, retainMessage(next, value));
+  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next));
+}
 export function verificationHistory(owner: object) { return archive(owner).histories; }
 /** A newly constructed conversation retains archived evidence, never another run's message slots. */
 export function beginVerificationConversation(owner: object): void {
@@ -146,7 +212,8 @@ export function mergeVerificationArchive(owner: object, name: string, start: num
   for (const [position, id] of other.derived) if (position >= start) derived.set(targetStart + position - start, id);
   const runtimeMessages = new Map(current.runtimeMessages);
   for (const [position, id] of other.runtimeMessages) if (position >= start) runtimeMessages.set(targetStart + position - start, id);
-  const next: Archive = { histories, derived, runtimeMessages, messageRecords: new Map([...current.messageRecords, ...other.messageRecords]), changed: true };
+  const combined = { ...current, messageRecords: new Map([...current.messageRecords, ...other.messageRecords]) };
+  const next: Archive = { histories, derived, runtimeMessages, messageRecords: recordsFor(combined, derived, runtimeMessages), changed: true };
   entries.save?.(snapshot(entries.active, next)); entries.branches.set(entries.active, next);
 }
 
@@ -258,7 +325,7 @@ export function appendVerificationObservation(owner: {
   const entries = collection(owner), current = archive(owner), runtimeMessages = new Map(current.runtimeMessages);
   const message = messages[position];
   if (!message) throw new VerificationHeldError('missing appended runtime observation');
-  const next = { ...current, runtimeMessages, messageRecords: new Map(current.messageRecords), changed: true };
+  const next = { ...current, runtimeMessages, messageRecords: recordsFor(current, current.derived, runtimeMessages), changed: true };
   runtimeMessages.set(position, retainMessage(next, message));
   entries.branches.set(entries.active, next);
   entries.save?.(snapshot(entries.active, next));

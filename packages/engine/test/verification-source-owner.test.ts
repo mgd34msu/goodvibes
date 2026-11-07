@@ -184,6 +184,63 @@ test('a native provenance reference without its complete archived record holds r
   expect(() => new VerificationStore(f.root, f.session)).toThrow('missing archived message record');
 });
 
+test('undo owns removed provenance, redo restores it, and new user input retires it', () => {
+  const f = journal(), conversation = new ConversationManager();
+  conversation.addUserMessage('Original owner request.');
+  registerVerificationArchive(conversation, value => f.store.rememberArchive(value));
+  appendVerificationObservation(conversation, 'Native observation, never an owner instruction.');
+  const recordId = f.store.archive?.messageRecords?.[0]?.id;
+  const feedback = conversation.getMessageSnapshot()[1]!.content;
+  expect(conversation.undo()).toBe(true);
+  expect(f.store.archive?.messageRecords ?? []).toHaveLength(0);
+  expect(conversation.redo()).toBe(true);
+  expect(f.store.archive?.messageRecords?.[0]?.id).toBe(recordId);
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'system']);
+  expect(conversation.undo()).toBe(true);
+  conversation.addUserMessage(feedback as string);
+  expect(conversation.redo()).toBe(false);
+  expect(f.store.archive?.messageRecords ?? []).toHaveLength(0);
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'user']);
+});
+
+test('native message deletions remap surviving feedback and retire removed source records', () => {
+  const f = journal(), conversation = new ConversationManager();
+  conversation.addUserMessage('Original owner request.');
+  registerVerificationArchive(conversation, value => f.store.rememberArchive(value));
+  conversation.startStreamingBlock();
+  appendVerificationObservation(conversation, 'First native observation.');
+  conversation.finalizeStreamingBlock();
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'system']);
+  conversation.addAssistantMessage('Unsent private draft.');
+  appendVerificationObservation(conversation, 'Second native observation.');
+  conversation.addAssistantMessage('', { toolCalls: [{ id: 'native-read', name: 'read', arguments: { path: 'source.ts' } }] });
+  conversation.addToolResults([{ callId: 'native-read', success: true, output: 'Actual returned source bytes.' }]);
+  conversation.removeMessagesAfter(1, { preserveCompletedTools: true });
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'system', 'system', 'assistant', 'tool']);
+  expect(f.store.archive?.messageRecords).toHaveLength(2);
+  conversation.removeMessagesAfter(1);
+  expect(f.store.archive?.messageRecords ?? []).toHaveLength(0);
+  expect(f.store.archive?.runtimeMessages ?? []).toHaveLength(0);
+});
+
+test('native cancellation preserves feedback origin and a loaded conversation cannot redo another session source', () => {
+  const f = journal(), conversation = new ConversationManager();
+  conversation.addUserMessage('Original owner request.');
+  registerVerificationArchive(conversation, value => f.store.rememberArchive(value));
+  appendVerificationObservation(conversation, 'Native feedback.');
+  const originalId = f.store.archive?.messageRecords?.[0]?.id;
+  conversation.markLastUserMessageCancelled();
+  expect(f.store.archive?.messageRecords?.[0]?.id).not.toBe(originalId);
+  const cancelledId = f.store.archive?.messageRecords?.[0]?.id;
+  conversation.markLastUserMessageCancelled();
+  expect(f.store.archive?.messageRecords?.[0]?.id).toBe(cancelledId);
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'system']);
+  expect(conversation.undo()).toBe(true);
+  conversation.fromJSON({ messages: [{ role: 'user', content: 'Another loaded session.' }] });
+  expect(conversation.redo()).toBe(false);
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user']);
+});
+
 test('an inadmissible latest archive cannot silently fall back to earlier message provenance', () => {
   const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
   appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'unadmitted-position', value: { histories: [], derived: [[0, 'message-private-record']],

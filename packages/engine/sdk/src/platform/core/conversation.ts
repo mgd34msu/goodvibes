@@ -21,7 +21,8 @@ import {
 } from './conversation-utils.js';
 import { applyDiffContent, parseDiffForApply } from './conversation-diff.js';
 import { logger } from '../utils/logger.js';
-import { archiveVerificationCompaction, forkVerificationArchive, mergeVerificationArchive, resetVerificationArchives, restoreVerificationBranch, switchVerificationArchive } from './verification/archive.js';
+import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, mergeVerificationArchive, resetVerificationArchives,
+  restoreVerificationBranch, restoreVerificationMessages, retainVerificationMessagePositions, switchVerificationArchive, updateVerificationMessage } from './verification/archive.js';
 import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
 
 export type TokenUsage = {
@@ -208,6 +209,8 @@ export class ConversationManager {
     // Clear undo stack when new user input is added (can't redo past new input)
     this.undoStack = [];
     this._messagesRevision++;
+    const position = this.messages.length - 1;
+    retainVerificationMessagePositions(this, original => original < position ? original : undefined);
   }
 
   public addAssistantMessage(
@@ -264,6 +267,7 @@ export class ConversationManager {
     const turn = this.messages.splice(lastUserIdx);
     this.undoStack.push(turn);
     this._messagesRevision++;
+    detachVerificationMessages(this, lastUserIdx, turn);
     return true;
   }
 
@@ -274,8 +278,10 @@ export class ConversationManager {
   public redo(): boolean {
     if (this.undoStack.length === 0) return false;
     const turn = this.undoStack.pop()!;
+    const start = this.messages.length;
     this.messages.push(...turn);
     this._messagesRevision++;
+    restoreVerificationMessages(this, start, turn);
     return true;
   }
 
@@ -327,6 +333,7 @@ export class ConversationManager {
 
   public removeMessagesAfter(count: number, options: { readonly preserveCompletedTools?: boolean } = {}): void {
     if (count < this.messages.length) {
+      let keptPositions: Map<number, number> | undefined;
       if (options.preserveCompletedTools) {
         // Tool batches are appended only after their results settle. Preserve
         // their exact call/result pairs: interrupting a later private answer
@@ -334,12 +341,19 @@ export class ConversationManager {
         // saved answers, including drafts between completed tool batches.
         let through = count;
         for (let index = count; index < this.messages.length; index++) if (this.messages[index]?.role === 'tool') through = index + 1;
-        this.messages = [...this.messages.slice(0, count), ...this.messages.slice(count).filter((message, index) =>
-          message.role === 'user' || message.role === 'system'
-          || index + count < through && (message.role === 'tool' || message.role === 'assistant' && !!message.toolCalls?.length))];
+        const positions = new Map<number, number>();
+        this.messages = this.messages.filter((message, index) => {
+          const keep = index < count || message.role === 'user' || message.role === 'system'
+            || index < through && (message.role === 'tool' || message.role === 'assistant' && !!message.toolCalls?.length);
+          if (keep) positions.set(index, positions.size);
+          return keep;
+        });
+        keptPositions = positions;
       } else this.messages.length = count;
       this.streamingMessageIndex = -1;
       this._messagesRevision++;
+      const positions = keptPositions;
+      retainVerificationMessagePositions(this, original => positions ? positions.get(original) : original < count ? original : undefined);
     }
   }
 
@@ -347,8 +361,10 @@ export class ConversationManager {
     for (let i = Math.min(beforeCount, this.messages.length) - 1; i >= 0; i--) {
       const msg = this.messages[i];
       if (msg?.role === 'user') {
+        const before = { ...msg };
         (msg as { cancelled?: boolean }).cancelled = true;
         this._messagesRevision++;
+        updateVerificationMessage(this, i, before, msg);
         return;
       }
     }
@@ -370,11 +386,17 @@ export class ConversationManager {
   }
 
   public finalizeStreamingBlock(): void {
+    let removed: number | undefined;
     if (this.streamingMessageIndex >= 0 && this.messages[this.streamingMessageIndex]?.role === 'assistant') {
+      removed = this.streamingMessageIndex;
       this.messages.splice(this.streamingMessageIndex, 1);
     }
     this.streamingMessageIndex = -1;
     this._messagesRevision++;
+    if (removed !== undefined) {
+      const position = removed;
+      retainVerificationMessagePositions(this, original => original === position ? undefined : original > position ? original - 1 : original);
+    }
   }
 
   public getMessageSnapshot(): ConversationMessageSnapshot[] {
@@ -577,6 +599,7 @@ export class ConversationManager {
     this.branches = restoreBranchMap(data.branches);
     this.currentBranch = data.currentBranch ?? 'main';
     restoreVerificationBranch(this, this.currentBranch);
+    this.undoStack = [];
     this.streamingMessageIndex = -1;
     this._messagesRevision++;
   }

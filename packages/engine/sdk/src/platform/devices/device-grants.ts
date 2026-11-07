@@ -28,7 +28,7 @@
  * Sweeps are idempotent and safe to run from more than one process: each one
  * re-reads the file, recomputes removals from scratch, and writes atomically.
  */
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { PersistentStore } from '../state/persistent-store.js';
 import { isDeviceCapabilityId, type DeviceCapabilityId, type DeviceNodeKind } from './device-capability-contract.js';
@@ -220,18 +220,34 @@ export class DeviceGrantStore {
   private pendingRevocations = 0;
   private memoryGeneration = 0;
   private readonly publicationReceipts = new WeakMap<object, string>();
+  #observationSequence = 0;
+  #fileObservation: { readonly stamp: string | null; readonly bytes: Buffer | null; readonly revision: string } | undefined;
 
   getRevocationGeneration(): number { return this.revocationGeneration; }
   hasPendingRevocations(): boolean { return this.pendingRevocations > 0; }
   /** Observed file incarnation plus contents, not a universal cross-process lock. */
   getObservationRevision(): string {
     const lock = this.store.lockPath;
-    if (!lock) return `memory:${this.memoryGeneration}`;
+    if (!lock) { this.#fileObservation = undefined; return `memory:${this.memoryGeneration}`; }
     const path = lock.slice(0, -5);
+    let observed: { readonly stamp: string | null; readonly bytes: Buffer | null };
     try {
       const stat = statSync(path, { bigint: true });
-      return `${stat.dev}:${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
-    } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent"; throw error; }
+      if (!stat.isFile()) throw new Error('Device ledger is not a file');
+      const stamp = (entry: typeof stat) => `${entry.dev}:${entry.ino}:${entry.mode}:${entry.size}:${entry.ctimeNs}:${entry.mtimeNs}`;
+      const bytes = readFileSync(path), after = statSync(path, { bigint: true });
+      if (stamp(stat) !== stamp(after)) throw new Error('Device ledger changed while reading');
+      observed = { stamp: stamp(after), bytes };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { this.#fileObservation = undefined; throw error; }
+      observed = { stamp: null, bytes: null };
+    }
+    const previous = this.#fileObservation;
+    if (previous && previous.stamp === observed.stamp && (observed.bytes === null
+      ? previous.bytes === null : previous.bytes?.equals(observed.bytes))) return previous.revision;
+    const revision = `observed-file:${(++this.#observationSequence).toString(36)}`;
+    this.#fileObservation = { ...observed, revision };
+    return revision;
   }
 
   constructor(storeOrPath: PersistentStore<DeviceGrantSnapshot> | string, options: DeviceGrantStoreOptions = {}) {

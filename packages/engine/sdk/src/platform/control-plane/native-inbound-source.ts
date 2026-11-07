@@ -1,5 +1,7 @@
 /** Host-private original-source prerequisite. No wire parser, raw store, or owner grant. */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import type { SharedSessionInputRecord } from './session-intents.js';
 
 export interface NativeInboundBrokerIdentity { readonly sessionId: string; readonly inputId: string; }
@@ -29,16 +31,15 @@ export interface NativeInboundSourceResolver {
 export class NativeInboundSourceError extends Error {
   constructor() { super('Original inbound source is unavailable or no longer current.'); }
 }
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const sameNativeInboundSourceRef = (a: NativeInboundSourceRef, b: NativeInboundSourceRef): boolean =>
   Object.keys(a).length === 5 && Object.keys(b).length === 5 && a.sessionId === b.sessionId && a.inputId === b.inputId
   && a.sourceId === b.sourceId && a.sourceRevision === b.sourceRevision && a.requestId === b.requestId;
 const key = (target: NativeInboundBrokerIdentity) => JSON.stringify([target.sessionId, target.inputId]);
 // State and delivery timestamps change. The bound producer facts must not.
-const brokerIdentity = (row: SharedSessionInputRecord) => hash([row.id, row.sessionId, row.intent, row.body,
+const brokerIdentity = (row: SharedSessionInputRecord) => captureOwnedJson([row.id, row.sessionId, row.intent, row.body,
   row.createdAt, row.routeId, row.surfaceKind, row.surfaceId, row.externalId, row.threadId, row.userId]);
 interface Entry { readonly sourceId: string; readonly sourceRevision: string; original: NativeInboundOriginal | undefined; readonly lifetime: AbortSignal; readonly retired: AbortController; cleanup?: () => void;
-  ref?: NativeInboundSourceRef; broker?: string; }
+  ref?: NativeInboundSourceRef; broker?: unknown; }
 
 /**
  * Split the producer capability from its read-only resolver. The composition must
@@ -61,14 +62,14 @@ export function createNativeInboundSourceOwner(deps: {
   const entries = new Set<Entry>();
   const usedInputs = new Set<string>();
   let closed = false;
-  const clear = () => { closed = true; for (const entry of entries) { entry.original = undefined; entry.retired.abort(); entry.cleanup?.(); } entries.clear(); bound.clear(); };
+  const clear = () => { closed = true; for (const entry of entries) { entry.original = undefined; delete entry.broker; entry.retired.abort(); entry.cleanup?.(); } entries.clear(); bound.clear(); };
   deps.lifetime.addEventListener('abort', clear, { once: true });
   const assertLifetime = () => {
     if (closed || deps.lifetime.aborted) throw new NativeInboundSourceError();
     try { deps.assertCurrent(); } catch { clear(); throw new NativeInboundSourceError(); }
   };
   const retire = (entry: Entry) => {
-    entry.original = undefined; entry.retired.abort(); entry.cleanup?.(); entries.delete(entry);
+    entry.original = undefined; delete entry.broker; entry.retired.abort(); entry.cleanup?.(); entries.delete(entry);
     if (entry.ref && bound.get(key(entry.ref)) === entry) bound.delete(key(entry.ref));
   };
   const check = (entry: Entry, ref: NativeInboundSourceRef) => {
@@ -76,7 +77,7 @@ export function createNativeInboundSourceOwner(deps: {
     if (!entry.ref || !sameNativeInboundSourceRef(entry.ref, ref)) throw new NativeInboundSourceError();
     const row = deps.readBrokerInput(ref);
     if (entry.lifetime.aborted || !entry.original || !row || row.id !== ref.inputId
-      || row.sessionId !== ref.sessionId || brokerIdentity(row) !== entry.broker || row.state === 'cancelled'
+      || row.sessionId !== ref.sessionId || !isDeepStrictEqual(brokerIdentity(row), entry.broker) || row.state === 'cancelled'
       || row.state === 'rejected' || row.state === 'failed') { retire(entry); throw new NativeInboundSourceError(); }
   };
   const resolver: NativeInboundSourceResolver = Object.freeze({
@@ -110,7 +111,7 @@ export function createNativeInboundSourceOwner(deps: {
           || value.unsupportedSources.some(item => !item || typeof item.kind !== 'string' || typeof item.label !== 'string')) throw new NativeInboundSourceError();
         const original = Object.freeze({ text: value.text, unsupportedSources: Object.freeze(value.unsupportedSources.map(item => Object.freeze({ kind: item.kind, label: item.label }))) });
         const sourceId = randomUUID();
-        const entry: Entry = { sourceId, sourceRevision: hash({ origin, original }), original, lifetime, retired: new AbortController() };
+        const entry: Entry = { sourceId, sourceRevision: 'captured-original', original, lifetime, retired: new AbortController() };
         const expired = () => retire(entry);
         lifetime.addEventListener('abort', expired, { once: true });
         entry.cleanup = () => lifetime.removeEventListener('abort', expired);
@@ -126,7 +127,7 @@ export function createNativeInboundSourceOwner(deps: {
         if (usedInputs.has(key(target))) throw new NativeInboundSourceError();
         entry.broker = brokerIdentity(row);
         entry.ref = Object.freeze({ sessionId: row.sessionId, inputId: row.id, sourceId: entry.sourceId,
-          sourceRevision: entry.sourceRevision, requestId: `inbound-${hash([entry.sourceId, row.sessionId, row.id])}` });
+          sourceRevision: entry.sourceRevision, requestId: `inbound-${entry.sourceId}` });
         usedInputs.add(key(target)); bound.set(key(target), entry); return entry.ref;
       },
     }),

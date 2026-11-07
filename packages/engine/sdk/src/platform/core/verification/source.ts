@@ -14,12 +14,14 @@ let sourceSequence = 0;
  * Keep native random identity bytes out of the numeric-material alphabet.
  * A persistent source owner reuses the actual retained record when unchanged.
  */
-export function issueVerificationSource(source: VerificationSourceInput): VerificationSource {
+export function issueVerificationId(kind: 's' | 'index'): string {
   sourceNamespace ??= crypto.randomUUID().replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!);
   sourceSequence++;
   if (!Number.isSafeInteger(sourceSequence)) throw new Error('Verification source identity exhausted');
-  const id = `s-${sourceNamespace}-${sourceSequence.toString(36)}`;
-  return { ...source, id };
+  return `${kind}-${sourceNamespace}-${sourceSequence.toString(36)}`;
+}
+export function issueVerificationSource(source: VerificationSourceInput): VerificationSource {
+  return { ...source, id: issueVerificationId('s') };
 }
 
 /** Host call IDs select a small bucket; exact metadata decides membership.

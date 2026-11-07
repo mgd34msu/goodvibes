@@ -56,6 +56,24 @@ test('restoration treats earlier record IDs as opaque and never derives them aga
   expect(issueVerificationSource(source()).id).not.toBe(issueVerificationSource(source()).id);
 });
 
+test('retrieval indexes compare every native member and preview, and keep their issued IDs on restart', () => {
+  const f = journal();
+  const index = { representation: 'source-index' as const, children: [], sourceIds: ['first-source', 'middle-source', 'last-source'],
+    summary: { facts: [{ text: 'RETRIEVAL INDEX ONLY; open the actual originals.', sources: [] }], concerns: [] } };
+  const first = f.store.retainIndex(index);
+  expect(f.store.retainIndex(structuredClone(index))).toBe(first);
+  const changed = { ...index, sourceIds: ['first-source', 'different-middle', 'last-source'] };
+  const second = f.store.retainIndex(changed);
+  expect(second.id).not.toBe(first.id);
+  const differentPreview = f.store.retainIndex({ ...changed, summary: { facts: [{ text: 'A different preview.', sources: [] }], concerns: [] } });
+  expect(differentPreview.id).not.toBe(second.id);
+  const current = f.store.retainIndex(changed), bytes = readFileSync(f.path, 'utf8');
+  const reopened = new VerificationStore(f.root, f.session);
+  expect(reopened.retainIndex(changed).id).toBe(current.id);
+  expect(readFileSync(f.path, 'utf8')).toBe(bytes);
+  expect(current.representation).toBe('source-index');
+});
+
 test('selected read and citation sources retain exact provenance and reuse their native IDs after restart', () => {
   const f = journal();
   const content = '1 | First actual source line.\n2 | Second actual source line.';

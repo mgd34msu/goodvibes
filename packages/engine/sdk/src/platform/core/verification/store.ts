@@ -2,10 +2,11 @@ import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, 
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
-import type { VerificationSource, VerificationSourceInput } from './types.js';
-import { issueVerificationSource, verificationHash } from './source.js';
+import type { VerificationReceipt, VerificationSource, VerificationSourceInput } from './types.js';
+import { issueVerificationId, issueVerificationSource, verificationHash } from './source.js';
 import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
+type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
 
 /** One private append-only journal per session, with deduplicated source chunks
  * and proposal records. Disk records never carry reusable approval authority. */
@@ -15,6 +16,7 @@ export class VerificationStore {
   // Only native kind/reference metadata selects a slot. Its value is the
   // already-retained complete source, never a second text cache or text key.
   private readonly latestSources = new Map<VerificationSource['kind'], Map<string, VerificationSource>>();
+  private readonly latestIndexes = new Map<string, SourceIndex>();
   private readonly written = new Map<string, unknown>();
   private readonly histories = new Map<string, VerificationArchive['histories'][number]>();
   private readonly path: string | undefined;
@@ -48,6 +50,14 @@ export class VerificationStore {
             this.rememberLatestSource(source);
           }
         }
+        if (value.kind === 'index' && value.value && typeof value.value === 'object') {
+          const index = value.value as SourceIndex;
+          if (typeof index.id === 'string' && index.id.startsWith('index-') && index.id === value.key && index.representation === 'source-index'
+            && Array.isArray(index.children) && index.children.every(id => typeof id === 'string')
+            && Array.isArray(index.sourceIds) && index.sourceIds.every(id => typeof id === 'string')) {
+            this.latestIndexes.set(this.indexSlot(index), index);
+          }
+        }
         if (value.kind === 'history' && value.value && typeof value.value === 'object') {
           const history = value.value as VerificationArchive['histories'][number];
           if (Array.isArray(history.messages)) this.histories.set(value.key, history);
@@ -67,7 +77,7 @@ export class VerificationStore {
             this.archives.set(this.archive.branch!, this.archive);
           }
         }
-        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history') {
+        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index') {
           this.written.set(JSON.stringify([value.kind, value.key]), value.value);
         }
       }
@@ -80,7 +90,7 @@ export class VerificationStore {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   }
-  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history', key: string, value: T): T {
+  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index', key: string, value: T): T {
     let record: { readonly kind: typeof kind; readonly key: string; readonly value: T };
     try { record = snapshotJudgmentEvidence({ kind, key, value }) as typeof record; }
     catch (error) { throw new VerificationHeldError('generated verification record admission', { cause: error }); }
@@ -126,6 +136,25 @@ export class VerificationStore {
     const retained = this.append('source', source.id, source);
     this.sources.set(source.id, retained);
     this.rememberLatestSource(retained);
+    return retained;
+  }
+  private indexSlot(index: Omit<SourceIndex, 'id'>): string {
+    const members = index.children.length ? index.children : index.sourceIds;
+    return JSON.stringify([index.children.length ? 'branch' : 'leaf', members.length, members[0] ?? null, members.at(-1) ?? null]);
+  }
+  /** An index names retained sources; its previews never establish their facts.
+   * Persist native index IDs so restart does not regenerate retrieval identities.
+   */
+  retainIndex(index: Omit<VerificationReceipt, 'id'> & { readonly representation: 'source-index' }): VerificationReceipt {
+    const snapshot = captureOwnedJson(index) as Omit<SourceIndex, 'id'>;
+    const slot = this.indexSlot(snapshot), previous = this.latestIndexes.get(slot);
+    if (previous) {
+      const { id: _id, ...value } = previous;
+      if (isDeepStrictEqual(captureOwnedJson(value), snapshot)) return previous;
+    }
+    const id = issueVerificationId('index');
+    const retained = this.append('index', id, { ...snapshot, id });
+    this.latestIndexes.set(slot, retained);
     return retained;
   }
   rememberProposal(key: string, proposal: string): void {

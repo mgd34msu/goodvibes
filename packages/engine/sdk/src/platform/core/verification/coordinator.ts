@@ -388,22 +388,20 @@ export class CompletionVerification {
       executionPreviewOnly: source.execution ? JSON.stringify(source.execution).slice(0, 320) : null,
       previewOnly: { beginning: source.text.slice(0, 100), end: source.text.length > 100 ? source.text.slice(-100) : '' } });
     let nodes = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length).map(page => {
-      const id = `index-${verificationHash(page.map(source => source.id)).slice(0, 24)}`;
-      const receipt: VerificationReceipt = { id, representation: 'source-index', children: [], sourceIds: page.map(source => source.id),
+      const receipt = this.store.retainIndex({ representation: 'source-index', children: [], sourceIds: page.map(source => source.id),
         summary: { facts: [{ text: JSON.stringify({ meaning: 'RETRIEVAL INDEX ONLY. Previews cannot prove completion or source contents. Open exact originals before judging.',
           locationPreviewsOnly: [...new Set(page.flatMap(source => source.text.match(/[\w./-]+/g) ?? []).filter(path => /\.(?:md|zip|tsx?|jsonl?)$/.test(path)))].slice(0, 8).map(path => path.slice(0, 96)),
-          first: describe(page[0]!), last: describe(page.at(-1)!) }), sources: [] }], concerns: [] } };
-      this.nodes.set(id, receipt); return receipt;
+          first: describe(page[0]!), last: describe(page.at(-1)!) }), sources: [] }], concerns: [] } });
+      this.nodes.set(receipt.id, receipt); return receipt;
     }).reverse();
     while (!bounded(nodes.map(node => this.compactNode(node)), maxCharacters)) {
       // This is local index bookkeeping, not a model payload. Fixed groups
       // guarantee fewer nodes even when two verbose previews exceed a frame.
       const groups = Array.from({ length: Math.ceil(nodes.length / 4) }, (_, index) => nodes.slice(index * 4, index * 4 + 4));
       nodes = groups.map(group => {
-        const id = `index-${verificationHash(group.map(node => node.id)).slice(0, 24)}`;
-        const receipt: VerificationReceipt = { id, representation: 'source-index', children: group.map(node => node.id), sourceIds: group.flatMap(node => node.sourceIds),
-          summary: { facts: [{ text: `RETRIEVAL INDEX ONLY; ordered most recent first. First indexed interval: ${group[0]!.summary.facts[0]!.text.slice(0, 900)} Last indexed interval: ${group.at(-1)!.summary.facts[0]!.text.slice(0, 900)}`, sources: [] }], concerns: [] } };
-        this.nodes.set(id, receipt); return receipt;
+        const receipt = this.store.retainIndex({ representation: 'source-index', children: group.map(node => node.id), sourceIds: group.flatMap(node => node.sourceIds),
+          summary: { facts: [{ text: `RETRIEVAL INDEX ONLY; ordered most recent first. First indexed interval: ${group[0]!.summary.facts[0]!.text.slice(0, 900)} Last indexed interval: ${group.at(-1)!.summary.facts[0]!.text.slice(0, 900)}`, sources: [] }], concerns: [] } });
+        this.nodes.set(receipt.id, receipt); return receipt;
       });
     }
     return nodes;

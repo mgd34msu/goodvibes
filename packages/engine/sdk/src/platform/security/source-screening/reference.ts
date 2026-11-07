@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { matchesJudgmentModel, defineBattery, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { captureScreeningSource } from './proposal.js';
 import { SOURCE_SCREENING_LIMITS as LIMITS } from './types.js';
@@ -66,7 +65,7 @@ interface ReadOptions {
   readonly onRetry?: ((progress: JudgmentRetryProgress) => void) | undefined;
 }
 
-/** Owner-local refusal stability. Only digests and typed roles outlive a call. */
+/** Owner-local role cache of already screened parameter names; no URLs or values. */
 export function createResearchReferenceReader(credentialLiterals: readonly string[] = []): {
   read: (reference: CapturedResearchReference, options: ReadOptions) => Promise<Projection>;
   clear: () => void;
@@ -77,7 +76,7 @@ export function createResearchReferenceReader(credentialLiterals: readonly strin
   const role = async (parameter: string, options: ReadOptions): Promise<Role | Hold> => {
     current(options);
     captureScreeningSource([parameter], credentialLiterals);
-    const key = createHash('sha256').update(parameter).digest('hex');
+    const key = parameter;
     if (roles.has(key)) return roles.get(key) ?? 'busy';
     if (roles.size >= LIMITS.referenceRoles) return 'capacity';
     roles.set(key, undefined);

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
-import { types as nodeTypes } from 'node:util';
-import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { judgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 import {
@@ -16,10 +16,8 @@ import {
   type ToolPreparedSettingsMutation,
 } from './input-projection.js';
 import { captureNativeReferenceProjection } from './native-reference-projection.js';
-import { canonicalJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-// Local tool identity is independent of whether its bytes may be sent to hosted judgment.
-const autonomousRevision = (value: unknown): string => createHash('sha256').update(canonicalJson(captureOwnedJson(value) as EntryType)).digest('hex');
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
@@ -364,6 +362,8 @@ export class ToolRegistry {
   private readonly projections = new WeakMap<ProjectedToolCall, CapturedProjection>();
   private readonly projectedArgs = new WeakMap<object, CapturedProjection>();
   private registrationRevision = 0;
+  private definitionSequence = 0;
+  private readonly definitionRevisions = new WeakMap<ProjectionRegistration, { readonly definition: ToolDefinition; readonly revision: string }>();
   private liveInputProjections = 0;
 
   /** Strict compositions bind their exact authority owner once; raw SDK registries remain unbound. */
@@ -492,7 +492,10 @@ export class ToolRegistry {
     const captured = registration.captureNativeReferences ? captureProjectionStructure(args) : captureProjectionArgs(args, name);
     const { executor, definition, rawDefinition } = preparationData(registration.tool, name);
     const assertDefinitionCurrent = retainPlainMetadata(rawDefinition, name);
-    const definitionRevision = autonomousRevision(definition);
+    const previousDefinition = this.definitionRevisions.get(registration);
+    const definitionRevision = previousDefinition && isDeepStrictEqual(previousDefinition.definition, definition)
+      ? previousDefinition.revision : `tool-schema-${(++this.definitionSequence).toString(36)}`;
+    this.definitionRevisions.set(registration, { definition, revision: definitionRevision });
     const combined = combineProjectionSignals(signal, registration.signal);
     const skeleton = { registration, tool: registration.tool, executor, definition, rawDefinition, assertDefinitionCurrent, definitionRevision, captureCurrent, preparationGuards: { callbacks: new Set<() => void>(), revision: 0 }, ownsProjectionSlot: registration.projector !== undefined, executionStarted: false,
       signal: combined, assertCurrent: undefined, assertRepairedArgs: undefined, release: undefined,
@@ -566,7 +569,7 @@ export class ToolRegistry {
         assertRepairedArgs = nativeAssertArgs ? effective => {
           nativeAssertArgs(effective);
           if (projectedRepairedArgs) assertProjectionCurrent(projectedRepairedArgs, effective);
-          else if (autonomousRevision(effective) !== autonomousRevision(originalProjected)) throw new ToolInputProjectionError('binding-changed');
+          else if (!isDeepStrictEqual(captureOwnedJson(effective), captureOwnedJson(originalProjected))) throw new ToolInputProjectionError('binding-changed');
           nativeAssertArgs(effective);
         } : projectedRepairedArgs;
         const projectedContext = projectionContext(projectionProperty(result, 'executionContext'));
@@ -672,8 +675,7 @@ export class ToolRegistry {
       // A graph change can still preserve the prior canonical definition.
       // Compare through the original full path; never adopt a new baseline.
       const current = preparationData(record.tool, call.name, true);
-      const currentRevision = createHash('sha256').update(canonicalJson(current.definition as unknown as EntryType)).digest('hex');
-      if (current.executor !== record.executor || currentRevision !== record.definitionRevision) throw new ToolInputProjectionError('stale');
+      if (current.executor !== record.executor || !isDeepStrictEqual(current.definition, record.definition)) throw new ToolInputProjectionError('stale');
     } else if (execute !== record.executor) {
       throw new ToolInputProjectionError('stale');
     }
@@ -729,7 +731,7 @@ export class ToolRegistry {
     if (record.registration.projector) {
       if (record.assertRepairedArgs) {
         try { assertProjectionCurrent(record.assertRepairedArgs, effective); } catch { throw new ToolInputProjectionError('binding-changed'); }
-      } else if (autonomousRevision(effective) !== autonomousRevision(record.call.args)) {
+      } else if (!isDeepStrictEqual(captureOwnedJson(effective), captureOwnedJson(record.call.args))) {
         throw new ToolInputProjectionError('binding-changed');
       }
     }

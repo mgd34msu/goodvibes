@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
 import { GoodVibesSdkError } from '@goodvibes-jev/engine/errors';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/sdk/contracts';
@@ -30,7 +31,6 @@ const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', ho
 const changed = (): TuiHostPairingResult => ({ status: 'changed', message: 'The selected host, home, bootstrap credential, authority or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): TuiHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
 const unverified = (host: string): TuiHostPairingResult => ({ status: 'paired-unverified', host, message: 'The credential is saved for its original host, but current native authority is unverified. Inspect goodvibes host pair again; do not remint.' });
-const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const isBootstrap = (auth: OperatorMethodOutput<'control.auth.current'>) => auth.authenticated && auth.admin && auth.principalKind === 'token'
   && auth.principalId === 'shared-token' && auth.scopes.some(scope => scope === '*' || scope === 'write:control-plane');
 const isNative = (auth: OperatorMethodOutput<'control.auth.current'>, id: string) => auth.authenticated && auth.admin && auth.principalKind === 'token'
@@ -65,18 +65,18 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     if (state.status === 'unavailable') return { result: unavailable() };
     const sameSelection = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
     const auth = async (token: string, requestSignal?: AbortSignal, sourceCurrent: () => boolean = sameSelection) => {
-      const expectedState = digest(readTuiHostPairing(home, host));
+      const expectedState = readTuiHostPairing(home, host);
       const client = createOperatorSdk({ baseUrl: host, authToken: token, fetchImpl: (input, init) => {
         // SDK setup and retries may await before dispatch. Recheck at the real
         // network boundary so a stale selection cannot send even a read.
-        if (requestSignal?.aborted || !sourceCurrent() || !sameSelection() || digest(readTuiHostPairing(home, host)) !== expectedState) throw new Error('Pairing selection changed');
+        if (requestSignal?.aborted || !sourceCurrent() || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), expectedState)) throw new Error('Pairing selection changed');
         return (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
       } });
       const method = client.getOperation('control.auth.current');
       const schema = method.outputSchema, originalMethod = JSON.stringify(method);
       const assertCurrent = () => {
         requestSignal?.throwIfAborted();
-        if (!sourceCurrent() || !sameSelection() || digest(readTuiHostPairing(home, host)) !== expectedState
+        if (!sourceCurrent() || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), expectedState)
           || client.getOperation('control.auth.current') !== method || method.outputSchema !== schema
           || JSON.stringify(method) !== originalMethod) throw new Error('Pairing authority source changed');
       };
@@ -104,7 +104,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     if (state.status === 'paired') {
       try {
         const live = await auth(state.token, signal);
-        if (signal?.aborted || !sameSelection() || digest(readTuiHostPairing(home, host)) !== digest(state) || !isNative(live, state.tokenId)) return { result: unverified(host) };
+        if (signal?.aborted || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), state) || !isNative(live, state.tokenId)) return { result: unverified(host) };
         return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced.' } };
       } catch { return { result: unverified(host) }; }
     }
@@ -114,10 +114,10 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;
     const live = await auth(token, signal, current);
     if (signal?.aborted) return { result: cancelled() };
-    if (!current() || digest(readTuiHostPairing(home, host)) !== digest(state)) return { result: changed() };
+    if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state)) return { result: changed() };
     if (!isBootstrap(live)) return { result: { status: 'blocked', host, message: 'This host must verify the explicitly selected bootstrap as its legacy shared operator token with write:control-plane. No credential was created.' } };
     const confirmation = `PAIR ${randomBytes(6).toString('hex')}`;
-    const binding = digest([home, host, token, name, state]); let consumed = false;
+    let consumed = false;
     return { result: {
       status: 'preview', host, name, confirmation,
       scopeDisclosure: 'This creates a persistent administrative per-device credential on the displayed GoodVibes host, including native work and fleet execution authority. The bootstrap is the existing daemon-global operator token. The new secret is stored only in this TUI home, bound to this exact origin. The shared token remains active; nothing is revoked.',
@@ -127,10 +127,10 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       if (answer !== confirmation || actionSignal?.aborted) return cancelled();
       let attempted = false;
       try {
-        if (!current() || digest([home, host, token, name, readTuiHostPairing(home, host)]) !== binding) return changed();
+        if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state)) return changed();
         const revalidated = await auth(token, actionSignal, current);
         if (actionSignal?.aborted) return cancelled();
-        if (!current() || digest(readTuiHostPairing(home, host)) !== digest(state) || !isBootstrap(revalidated)) return changed();
+        if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state) || !isBootstrap(revalidated)) return changed();
         const attemptId = randomUUID();
         const begin = await beginTuiHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !actionSignal?.aborted && current());
         if (begin.status !== 'begun') return begin.status === 'cancelled' ? actionSignal?.aborted ? cancelled() : changed() : begin.status === 'conflict' ? changed() : unavailable();

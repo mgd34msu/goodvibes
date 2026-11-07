@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
 import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
@@ -28,7 +29,6 @@ const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', 
 const changed = (): AgentHostPairingResult => ({ status: 'changed', message: 'The selected host, effective credential or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): AgentHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
 const envOverride = (): boolean => Boolean(process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim());
-const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 async function readPairingResponse(response: Response): Promise<unknown> {
   if (!response.body) return null;
@@ -78,14 +78,13 @@ export async function previewAgentHostPairing(
     try { auth = await authClient.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(1500), ...(signal ? [signal] : [])]) }); }
     finally { authClient.dispose(); }
     if (signal?.aborted) return { result: cancelled() };
-    if (!current() || digest(readAgentHostPairing(home, host)) !== digest(state)) return { result: changed() };
+    if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return { result: changed() };
     if (state.status === 'paired' || isNativePairedPrincipal(auth)) {
       return { result: { status: 'already-paired', host, message: 'An existing paired credential is present. This route will not mint or replace it; use setup status to verify the effective credential.' } };
     }
     if (!auth.authenticated || !auth.admin || auth.principalKind !== 'token' || auth.principalId !== 'shared-token'
       || !auth.scopes.some(scope => scope === '*' || scope === 'write:control-plane')) return { result: { status: 'blocked', host, message: 'Migration requires this host to verify the existing legacy shared operator token with write:control-plane. No credential was created.' } };
     const confirmation = `PAIR ${randomBytes(6).toString('hex')}`;
-    const binding = digest([home, host, selected.token, name, state]);
     let consumed = false;
     const result: AgentHostPairingResult = {
       status: 'preview', host, name, confirmation, environmentOverride: envOverride(),
@@ -97,14 +96,14 @@ export async function previewAgentHostPairing(
       consumed = true;
       let attempted = false;
       try {
-        if (!current() || digest([home, host, selected.token, name, readAgentHostPairing(home, host)]) !== binding) return changed();
+        if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
         // Authority can be revoked after preview without replacing the local token.
         const verifier = createOperatorSdk({ baseUrl: host, authToken: selected.token, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
         let live;
         try { live = await verifier.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(1500), ...(actionSignal ? [actionSignal] : [])]) }); }
         finally { verifier.dispose(); }
         if (actionSignal?.aborted) return cancelled();
-        if (!current() || digest(readAgentHostPairing(home, host)) !== digest(state)) return changed();
+        if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
         if (!live.authenticated || !live.admin || live.principalKind !== 'token' || live.principalId !== 'shared-token'
           || !live.scopes.some(scope => scope === '*' || scope === 'write:control-plane')) return changed();
         const attemptId = randomUUID();

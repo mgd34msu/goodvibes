@@ -4494,11 +4494,11 @@
           "answers": {
             "severity": {
               "type": "choice",
-              "choice": "warning",
+              "choice": "info",
               "confidence": 0.99,
               "probabilities": {
-                "info": 0.004,
-                "warning": 0.99,
+                "info": 0.99,
+                "warning": 0.004,
                 "critical": 0.003,
                 "unknown": 0.003
               }

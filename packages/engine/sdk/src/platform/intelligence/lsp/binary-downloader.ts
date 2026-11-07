@@ -137,6 +137,27 @@ async function downloadBinary(binaryDir: string, name: string): Promise<string |
       return null;
     }
 
+    // A publisher checksum is required before installing executable bytes.
+    const sha256Asset = release.assets.find(a => a.name === assetName + '.sha256');
+    if (!sha256Asset) {
+      logger.warn('BinaryDownloader: release has no checksum; automatic installation refused', { name });
+      return null;
+    }
+    const sha256Res = await instrumentedFetch(sha256Asset.browser_download_url, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'goodvibes-sdk' },
+    });
+    if (!sha256Res.ok) {
+      logger.warn('BinaryDownloader: release checksum could not be fetched; installation refused', { name });
+      return null;
+    }
+    const checksum = /^([a-f0-9]{64})(?:[ \t]+\*?([^\r\n]+))?$/i.exec((await sha256Res.text()).trim());
+    if (!checksum || !checksum[1] || (checksum[2] !== undefined && checksum[2] !== assetName && checksum[2] !== `./${assetName}`)) {
+      logger.warn('BinaryDownloader: release checksum is malformed or names another asset; installation refused', { name });
+      return null;
+    }
+    const expectedHash = checksum[1].toLowerCase();
+
     // Download the asset
     const downloadRes = await instrumentedFetch(asset.browser_download_url, {
       signal: AbortSignal.timeout(120000), // 2 min for large binaries
@@ -151,34 +172,11 @@ async function downloadBinary(binaryDir: string, name: string): Promise<string |
     // Fetch the raw bytes first so we can verify SHA256 before decompression
     const rawBytes = await downloadRes.arrayBuffer();
 
-    // SHA256 verification, rust-analyzer publishes .sha256 sidecar files
-    const sha256Asset = release.assets?.find(a => a.name === assetName + '.sha256');
-    if (sha256Asset) {
-      const sha256Res = await instrumentedFetch(sha256Asset.browser_download_url, {
-        signal: AbortSignal.timeout(10000),
-        headers: { 'User-Agent': 'goodvibes-sdk' },
-      });
-      if (sha256Res.ok) {
-        const expectedHash = ((await sha256Res.text()).trim().split(/\s+/)[0]) ?? ''; // format: "hash  filename"
-        if (!/^[a-f0-9]{64}$/.test(expectedHash)) {
-          logger.info('BinaryDownloader: SHA256 sidecar has malformed hash, skipping verification', { name, raw: expectedHash?.slice(0, 80) });
-        } else {
-          const hasher = new Bun.CryptoHasher('sha256');
-          hasher.update(new Uint8Array(rawBytes));
-          const actualHash = hasher.digest('hex');
-          if (actualHash !== expectedHash) {
-            logger.error('BinaryDownloader: SHA256 mismatch, download may be corrupted or tampered', {
-              name, expected: expectedHash, actual: actualHash,
-            });
-            return null;
-          }
-          logger.debug('BinaryDownloader: SHA256 verified', { name });
-        }
-      } else {
-        logger.info('BinaryDownloader: SHA256 sidecar not available, proceeding without verification', { name });
-      }
-    } else {
-      logger.info('BinaryDownloader: no SHA256 sidecar in release, proceeding without verification', { name });
+    // This digest binds downloaded bytes to the publisher's release pin.
+    const actualHash = Bun.CryptoHasher.hash('sha256', new Uint8Array(rawBytes), 'hex');
+    if (actualHash !== expectedHash) {
+      logger.error('BinaryDownloader: release checksum mismatch; installation refused', { name });
+      return null;
     }
 
     // Ensure bin directory exists

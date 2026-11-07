@@ -66,30 +66,36 @@ export function fileMatches(path: string, spec: VerifiedDownloadSpec): boolean {
   }
 }
 
-/** Verification results memoized by (path, size, mtimeMs) so status polls never re-hash. */
-const verificationCache = new Map<string, { size: number; mtimeMs: number; matched: boolean }>();
+/** One result per path, bound to both the actual file revision and expected pin. */
+const verificationCache = new Map<string, { revision: string; expectedBytes: number; expectedSha256: string; matched: boolean }>();
+function verificationFileRevision(path: string): string {
+  const stat = statSync(path, { bigint: true });
+  if (!stat.isFile()) throw new Error('Verification source is not a file');
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
 
 /**
- * Like {@link fileMatches} but cached by (path, size, mtime): repeated status
+ * Like {@link fileMatches} but cached by file revision and expected pin: repeated status
  * polls do not synchronously re-read and re-hash a 63MB model on every call.
- * A file whose size or mtime changed is re-verified with the full hash,
+ * A changed file or expected pin is re-verified with the full hash;
  * provisioning decisions (download skip/replace) always use the full hash.
  */
 export function fileMatchesCached(path: string, spec: VerifiedDownloadSpec): boolean {
-  let size: number;
-  let mtimeMs: number;
+  let revision: string;
   try {
-    const stat = statSync(path);
-    size = stat.size;
-    mtimeMs = stat.mtimeMs;
+    revision = verificationFileRevision(path);
   } catch {
     verificationCache.delete(path);
     return false;
   }
+  const expectedSha256 = spec.sha256.toLowerCase();
   const cached = verificationCache.get(path);
-  if (cached && cached.size === size && cached.mtimeMs === mtimeMs) return cached.matched;
+  if (cached && cached.revision === revision && cached.expectedBytes === spec.bytes && cached.expectedSha256 === expectedSha256) return cached.matched;
   const matched = fileMatches(path, spec);
-  verificationCache.set(path, { size, mtimeMs, matched });
+  try { if (verificationFileRevision(path) !== revision) { verificationCache.delete(path); return false; } }
+  catch { verificationCache.delete(path); return false; }
+  if (verificationCache.size >= 128) verificationCache.clear();
+  verificationCache.set(path, { revision, expectedBytes: spec.bytes, expectedSha256, matched });
   return matched;
 }
 

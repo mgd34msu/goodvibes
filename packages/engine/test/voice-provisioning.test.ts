@@ -334,7 +334,7 @@ describe('provisioning failure handling', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('status verification is cached by (path,size,mtime): the model is hashed once, not per poll', async () => {
+  test('status verification reuses one result only for the same file revision and expected pin', async () => {
     const dir = scratch();
     const { fileMatchesCached } = await import('../sdk/src/platform/voice/provisioning/index.ts');
     const file = join(dir, 'model.onnx');
@@ -349,6 +349,10 @@ describe('provisioning failure handling', () => {
     for (let i = 0; i < 200; i++) expect(fileMatchesCached(file, spec)).toBe(true);
     const cachedMsPer = (performance.now() - t1) / 200;
     expect(cachedMsPer).toBeLessThan(Math.max(0.5, firstMs)); // cached polls are stat-only
+    expect(fileMatchesCached(file, { ...spec, sha256: '0'.repeat(64) })).toBe(false);
+    expect(fileMatchesCached(file, spec)).toBe(true);
+    expect(fileMatchesCached(file, { ...spec, bytes: spec.bytes + 1 })).toBe(false);
+    expect(fileMatchesCached(file, spec)).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 });

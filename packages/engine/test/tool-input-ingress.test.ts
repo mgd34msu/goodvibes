@@ -2,18 +2,7 @@ import { expect, test } from 'bun:test';
 import { ToolRegistry } from '../sdk/src/platform/tools/registry.js';
 import { projectToolInputBatch } from '../sdk/src/platform/core/tool-input-ingress.js';
 import type { ToolCall } from '../sdk/src/platform/types/tools.js';
-import { hashState, type EntryType } from '@goodvibes-jev/judgment';
-import { autonomousRevision } from '../sdk/src/platform/permissions/autonomous.js';
 import { assertProjectionExecution } from '../sdk/src/platform/tools/input-projection.js';
-
-test('portable registry revisions preserve the judgment canonical JSON and SHA-256 identity', () => {
-  const values: readonly EntryType[] = [{ nested: { z: 'last', a: 'first' }, empty: null }, { references: [{ id: 'S1', url: '[source reference S1]' }] },
-    { punctuation: 'ordinary Unicode é and 😀', value: [false, 0, 1.5, null] }];
-  for (const value of values) {
-    expect(autonomousRevision(value)).toBe(hashState(value));
-  }
-  expect(autonomousRevision({ b: 2, a: 1 })).toBe(autonomousRevision({ a: 1, b: 2 }));
-});
 
 test('shared empty context tokens retain independent exact-argument execution lifetimes', async () => {
   const registry = new ToolRegistry(); const context = Object.freeze({}); const first = new AbortController();

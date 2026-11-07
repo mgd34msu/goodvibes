@@ -34,7 +34,7 @@ export class ResponseCompletionError extends Error {
       : problem === 'invalid-evidence' ? 'The completion evidence could not be admitted. Repair is required; retrying unchanged evidence cannot establish completion.'
       : problem === 'rejected-request' ? 'The completion service rejected the request. Repair the request before retrying.'
       : problem === 'capacity' ? 'Completion validation cannot fit the required evidence. The operation has stopped; the draft remains private.'
-      : problem === 'access-blocked' ? 'Jev access is blocked. Completion remains held; account access must be restored before retrying.'
+      : problem === 'access-blocked' ? 'Decision model access is blocked. Completion remains held; account access must be restored before retrying.'
       : 'The completion service returned an unusable result. Completion remains held and requires recovery.', options);
     this.name = 'ResponseCompletionError';
   }
@@ -46,8 +46,8 @@ export class ResponseCompletionAccessError extends ResponseCompletionError {
     super('access-blocked', { cause });
     this.name = 'ResponseCompletionAccessError';
     this.message = status === 402
-      ? 'Jev returned HTTP 402 (Payment Required). Completion remains held and the draft has not been published. Restore account credits or billing at https://console.typesafe.ai/settings/billing, then retry. Completed work is retained.'
-      : `Jev returned HTTP ${status} (${status === 401 ? 'Unauthorized' : 'Forbidden'}). Completion remains held and the draft has not been published. Restore Jev credentials or account access, then retry. Completed work is retained.`;
+      ? 'A configured decision model returned HTTP 402 (Payment Required). Completion remains held and the draft has not been published. Check credits and billing with the configured provider, then retry. Completed work is retained.'
+      : `A configured decision model returned HTTP ${status} (${status === 401 ? 'Unauthorized' : 'Forbidden'}). Completion remains held and the draft has not been published. Check the configured provider credentials, endpoint and account access, then retry. Completed work is retained.`;
   }
 }
 
@@ -56,7 +56,7 @@ function accessFailure(error: unknown): ResponseCompletionAccessError | undefine
   for (let current = error; current instanceof Error && !seen.has(current) && seen.size < 8; current = current.cause) {
     seen.add(current);
     if (current instanceof ResponseCompletionAccessError) return current;
-    if (current instanceof JudgmentError && (current.status === 401 || current.status === 402 || current.status === 403))
+    if (current instanceof JudgmentError && current.kind === 'rejected' && (current.status === 401 || current.status === 402 || current.status === 403))
       return new ResponseCompletionAccessError(current.status, current);
   }
   return undefined;

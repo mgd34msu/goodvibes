@@ -584,6 +584,30 @@ test('progress account refusals surface the account action and cannot silently t
   expect(() => guard.beginFinalization({ content: input.response })).toThrow();
 });
 
+test('decision account recovery instructions do not send other providers to Jev billing', async () => {
+  for (const status of [401, 402, 403] as const) {
+    installJudgmentPort({ model: 'laya', ask: async () => { throw new JudgmentError('rejected', 'Provider access refused', { status }); } });
+    const guard = new ResponseCompletionGuard(), input = source('Retained private draft.');
+    let failure: unknown;
+    try { await guard.check(input); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(ResponseCompletionAccessError);
+    expect(failure).toMatchObject({ problem: 'access-blocked', status });
+    const message = (failure as Error).message;
+    expect(message).toContain('configured provider');
+    expect(message).not.toContain('Jev'); expect(message).not.toContain('typesafe.ai');
+    expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  }
+});
+
+test('an exhausted decision chain retains the availability diagnosis even when its last target returned an auth status', async () => {
+  installJudgmentPort({ model: 'laya', ask: async () => {
+    throw new JudgmentError('unavailable', 'No decision models are currently available.', { status: 401 });
+  } });
+  const input = source('Retained private draft.'), guard = new ResponseCompletionGuard();
+  await expect(guard.checkUntilAvailable(() => input)).rejects.toMatchObject({ problem: 'unavailable' });
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+});
+
 test('an explicit retry can approve the retained draft after the checker is restored', async () => {
   const input = source('Finished.'), guard = new ResponseCompletionGuard();
   await expect(guard.checkUntilAvailable(() => input)).rejects.toMatchObject({ problem: 'unavailable' });

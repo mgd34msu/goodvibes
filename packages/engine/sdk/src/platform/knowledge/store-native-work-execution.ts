@@ -2,7 +2,7 @@ import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
 import { nativeSettlementDigest, nativeWorkAttestationSchema, nativeWorkSettlementSchema, type NativeWorkSettlementReceipt } from '../workflow/work-ledger/native-settlement-types.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
-import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, type DurableContractKey } from '../contract/durable-admission.js';
+import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
@@ -68,7 +68,7 @@ function readRecord(db: SqlReader, projectId: string, key: Lookup): NativeWorkEx
 }
 const sameScopes = (a: readonly string[], b: readonly string[]) => a.length === b.length && [...a].sort().every((scope, index) => scope === [...b].sort()[index]);
 function sameFacts(a: NativeWorkExecutionIntent | NativeWorkExecutionRecord, b: NativeWorkExecutionIntent | NativeWorkExecutionRecord): boolean {
-  return a.projectId === b.projectId && durablePayloadRevision(a.request) === durablePayloadRevision(b.request)
+  return a.projectId === b.projectId && sameDurableRequest(a.request, b.request)
     && Object.keys(a.target).every(key => a.target[key as keyof typeof a.target] === b.target[key as keyof typeof b.target]) && sameScopes(a.authorityScopes, b.authorityScopes);
 }
 function read(db: SqlReader, projectId: string, key: Lookup): NativeWorkExecutionTransaction {

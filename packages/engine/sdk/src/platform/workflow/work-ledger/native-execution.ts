@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
+import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import type { ContractIntegrationInspection } from '../../contract/integration-inspection-wire.js';
@@ -174,11 +174,11 @@ export function createNativeWorkExecutionHost(deps: {
   }
   function assertRecord(current: NativeWorkExecutionTransaction, record: NativeWorkExecutionRecord, owner: ActiveOwner) {
     assertOpen(); assertRecorded(record);
-    if (current.intent && (current.intent.state !== 'associated' || durablePayloadRevision(current.intent.request) !== durablePayloadRevision(record.request))) throw new NativeWorkExecutionError('stale'); const auth = inspectAuthority(record, owner.authority);
+    if (current.intent && (current.intent.state !== 'associated' || !sameDurableRequest(current.intent.request, record.request))) throw new NativeWorkExecutionError('stale'); const auth = inspectAuthority(record, owner.authority);
     if (auth.currentScope.scopeId !== owner.scope.scopeId || auth.currentScope.scopeRevision !== owner.scope.scopeRevision) throw new NativeWorkExecutionError('stale');
     const work = workFor(current, record.target, owner.expected.principalId);
     if (record.state === 'cancelled' || current.record?.state === 'cancelled' || !current.record
-      || durablePayloadRevision(current.record.request) !== durablePayloadRevision(record.request)
+      || !sameDurableRequest(current.record.request, record.request)
       || work.goal !== record.request.input.nativeSource?.goal || JSON.stringify(work.criteria) !== JSON.stringify(record.request.input.nativeSource.criteria)) throw new NativeWorkExecutionError('stale');
   }
   function claimOwner(record: NativeWorkExecutionRecord, authority: NativePairedExecutionAuthority): ActiveOwner {
@@ -194,7 +194,7 @@ export function createNativeWorkExecutionHost(deps: {
       await deps.scopes.withCurrentScope(owner.scope, async assertScope => {
         await deps.storage.transaction(admission.key, current => {
           const record = current.record;
-          if (!record || durablePayloadRevision(record.request) !== admission.payloadRevision) throw new NativeWorkExecutionError('conflict');
+          if (!record || !sameDurableRequest(record.request, admission)) throw new NativeWorkExecutionError('conflict');
           assertRecord(current, record, owner);
           if (record.state === 'launch-claimed' && !owner.claimed) throw new NativeWorkExecutionError('recovery-required');
           const { input: _input, ...receipt } = admission;
@@ -223,7 +223,7 @@ export function createNativeWorkExecutionHost(deps: {
   function assertIntent(current: NativeWorkExecutionTransaction, intent: NativeWorkExecutionIntent): void {
     if (current.intent?.state === 'cancelled') throw new NativeWorkExecutionError('prevented-before-admission');
     if (current.record || !current.intent || current.intent.state !== 'admitting' || current.intent.generation !== intent.generation
-      || !equalTarget(current.intent.target, intent.target) || durablePayloadRevision(current.intent.request) !== durablePayloadRevision(intent.request)) throw new NativeWorkExecutionError('stale');
+      || !equalTarget(current.intent.target, intent.target) || !sameDurableRequest(current.intent.request, intent.request)) throw new NativeWorkExecutionError('stale');
   }
   async function prepareIntent(target: NativeWorkExecutionTarget, authority: NativePairedExecutionAuthority, delivery: Delivery, resume: boolean, signal: AbortSignal, taskEvidence?: string): Promise<NativeWorkExecutionIntent> {
     const expected = paired(authority); const expectedScope = scope();
@@ -240,7 +240,7 @@ export function createNativeWorkExecutionHost(deps: {
           if (!resume) throw new NativeWorkExecutionError(prior.state === 'refused' ? 'refused' : 'pending-intent');
         } else if (resume) throw new NativeWorkExecutionError('not-found');
         const request = requestFor(current, target, expected, expectedScope, prior?.request.input.taskEvidence ?? taskEvidence);
-        if (prior && durablePayloadRevision(prior.request) !== durablePayloadRevision(request)) throw new NativeWorkExecutionError('stale');
+        if (prior && !sameDurableRequest(prior.request, request)) throw new NativeWorkExecutionError('stale');
         const intent = parseNativeWorkExecutionIntent({ version: 1, projectId: deps.projectId, target, authorityScopes: expected.scopes,
           request: prior?.request ?? request, generation: (prior?.generation ?? 0) + 1, state: 'admitting' });
         return { next: null, nextIntent: intent, value: intent };
@@ -280,7 +280,7 @@ export function createNativeWorkExecutionHost(deps: {
       deps.storage.transaction(key, current => {
         assertAuthority(); assertScope(); assertCurrent(); workFor(current, target, expected.principalId);
         if (current.record) {
-          if (durablePayloadRevision(current.record.request) !== durablePayloadRevision(request)) throw new NativeWorkExecutionError('conflict');
+          if (!sameDurableRequest(current.record.request, request)) throw new NativeWorkExecutionError('conflict');
           if (!refreshDecision) return { next: null, value: undefined };
           if (current.record.state !== 'prepared') throw new NativeWorkExecutionError('recovery-required');
           read.recordClaim(); assertAuthority(); assertScope(); assertCurrent();
@@ -417,7 +417,7 @@ export function createNativeWorkExecutionHost(deps: {
       const assertCancellation = () => {
         assertOpen(); const latest = deps.storage.currentByAttempt(attemptId); const live = latest.record ?? latest.intent;
         if (source) {
-          if (!live || durablePayloadRevision(live.request) !== durablePayloadRevision(request)) throw new NativeWorkExecutionError('stale');
+          if (!live || !sameDurableRequest(live.request, request)) throw new NativeWorkExecutionError('stale');
           inspectAuthority(live, authority);
         } else {
           if (live || !suppliedTarget) throw new NativeWorkExecutionError('stale');
@@ -478,7 +478,7 @@ export function createNativeWorkExecutionHost(deps: {
       const key = contract.durableAdmission?.key; if (!key) throw new NativeWorkExecutionError('invalid');
       const owner = active.get(durableKeyIdentity(key)); const current = deps.storage.current(key);
       if (!owner || !current.record || current.record.receipt?.contractId !== contract.id
-        || durablePayloadRevision(current.record.request) !== contract.durableAdmission!.payloadRevision) throw new NativeWorkExecutionError('recovery-required');
+        || !sameDurableRequest(current.record.request, contract.durableAdmission!)) throw new NativeWorkExecutionError('recovery-required');
       const record = current.record;
       const assertCurrent = () => assertRecord(deps.storage.current(key), record, owner);
       assertCurrent(); return { record, authority: owner.authority, assertCurrent };
@@ -496,7 +496,7 @@ export function createNativeWorkExecutionHost(deps: {
       const key = contract.durableAdmission?.key; if (!key) throw new NativeWorkExecutionError('invalid');
       const owner = active.get(durableKeyIdentity(key)); const current = deps.storage.current(key);
       if (!owner || !current.record) throw new NativeWorkExecutionError('recovery-required');
-      if (durablePayloadRevision(current.record.request) !== contract.durableAdmission?.payloadRevision
+      if ((!contract.durableAdmission || !sameDurableRequest(current.record.request, contract.durableAdmission))
         || (current.record.receipt && current.record.receipt.contractId !== contract.id)) throw new NativeWorkExecutionError('conflict');
       assertRecord(current, current.record, owner);
       const binding = current.record.request.binding;

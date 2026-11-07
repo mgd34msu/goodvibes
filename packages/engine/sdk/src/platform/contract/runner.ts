@@ -31,7 +31,7 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * turn to the unit and is held and nudged exactly as a sub-agent is); no
  * engine runs and no sub-agent is spawned.
  */
-import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
+import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -602,7 +602,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     // replay must remain readable even while that boundary waits for its ledger transaction.
     const committed = durableAdmissions.read(frozen.key);
     if (committed !== null) {
-      if (committed.payloadRevision !== durablePayloadRevision(frozen)) throw new DurableContractAdmissionError('conflict');
+      if (!sameDurableRequest(committed, frozen)) throw new DurableContractAdmissionError('conflict');
       return durableResult(committed);
     }
     const release = await durableAdmissions.lock(frozen.key);
@@ -610,7 +610,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (disposed) throw new Error('Contract runner is disposed');
       const existing = durableAdmissions.read(frozen.key);
       if (existing !== null) {
-        if (existing.payloadRevision !== durablePayloadRevision(frozen)) throw new DurableContractAdmissionError('conflict');
+        if (!sameDurableRequest(existing, frozen)) throw new DurableContractAdmissionError('conflict');
         return durableResult(existing);
       }
       requireDecisionFeature('autonomous contract planning and acceptance');

@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
@@ -111,6 +112,15 @@ export function durableKeyHash(key: DurableContractKey): string {
 export function durableKeyIdentity(key: DurableContractKey): string {
   if (!references(key, KEY_FIELDS)) throw new DurableContractAdmissionError('invalid');
   return JSON.stringify([key.workId, key.criteriaId, key.criteriaRevision, key.attemptId]);
+}
+
+/** Compare owned requests after freezeDurableRequest admission. Migrating the
+ * persisted digest format is separate; comparing two complete current native
+ * values requires neither serialization nor cryptographic hashing.
+ */
+export function sameDurableRequest(first: DurableContractRequest, second: DurableContractRequest): boolean {
+  return isDeepStrictEqual(first.key, second.key) && isDeepStrictEqual(first.binding, second.binding)
+    && isDeepStrictEqual(first.input, second.input);
 }
 
 export function freezeDurableRequest(value: DurableContractRequest): DurableContractRequest {

@@ -17,6 +17,9 @@ async function fixture(product: HeadlessProduct, options: HeadlessFixtureOptions
 for (const product of ['agent', 'tui'] as const) describe(`${product} decision policy through real startup/work/completion`, () => {
   test('Classic without credentials edits, reads, executes once, completes and resumes its saved conversation', async () => {
     let workspace = '';
+    // The process fixture deliberately has a minimal PATH. Use the actual
+    // test runner runtime, including when the product itself is a native binary.
+    const bun = `'${process.execPath.replaceAll("'", "'\\''")}'`;
     const f = await fixture(product, { policy: 'Classic - Off', missingCredentials: true,
       settings: { 'permissions.mode': 'yolo', 'sandbox.enabled': false },
       answer(request) {
@@ -24,10 +27,21 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
         const results = request.messages.filter(message => message.role === 'tool').length;
         if (results === 0) return { toolCalls: [{ name: 'write', arguments: { files: [
           { path: 'classic-work.txt', content: 'Native edit landed\n', mode: 'fail_if_exists' },
+          { path: 'classic-proof.test.ts', mode: 'fail_if_exists', content: [
+            "import { expect, test } from 'bun:test';",
+            "import { appendFileSync, readFileSync } from 'node:fs';",
+            "test('native edit and command results remain usable', () => {",
+            "  expect(readFileSync('classic-work.txt', 'utf8')).toBe('Native edit landed\\n');",
+            "  expect(readFileSync('classic-execution.log', 'utf8')).toBe('native-execution\\n');",
+            "  appendFileSync('classic-tests.log', 'passed\\n');",
+            '});',
+          ].join('\n') },
         ] } }] };
         if (results === 1) return { toolCalls: [{ name: 'read', arguments: { files: [{ path: 'classic-work.txt' }] } }] };
         if (results === 2) return { toolCalls: [{ name: 'exec', arguments: { working_dir: workspace,
           commands: [{ cmd: "printf 'native-execution\\n' >> classic-execution.log" }] } }] };
+        if (results === 3) return { toolCalls: [{ name: 'exec', arguments: { working_dir: workspace,
+          commands: [{ cmd: `${bun} test ./classic-proof.test.ts` }] } }] };
         return { text: HEADLESS_REPLY };
       },
     });
@@ -37,6 +51,7 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
     expect(readEnvelope(first).response).toBe(HEADLESS_REPLY);
     expect(readFileSync(join(workspace, 'classic-work.txt'), 'utf8')).toBe('Native edit landed\n');
     expect(readFileSync(join(workspace, 'classic-execution.log'), 'utf8')).toBe('native-execution\n');
+    expect(readFileSync(join(workspace, 'classic-tests.log'), 'utf8')).toBe('passed\n');
     expect(f.home.judgments.allRequests).toHaveLength(0);
 
     // A new actual process loads the saved history. Existing tool results must
@@ -46,8 +61,9 @@ for (const product of ['agent', 'tui'] as const) describe(`${product} decision p
     expect(readEnvelope(resumed).response).toBe(HEADLESS_REPLY);
     const latest = f.model.requests.filter(request => lastUserText(request) === HEADLESS_PROMPT).at(-1);
     expect(JSON.stringify(latest?.messages)).toContain('Native edit landed');
-    expect(latest?.messages.filter(message => message.role === 'tool').length).toBeGreaterThanOrEqual(3);
+    expect(latest?.messages.filter(message => message.role === 'tool').length).toBeGreaterThanOrEqual(4);
     expect(readFileSync(join(workspace, 'classic-execution.log'), 'utf8')).toBe('native-execution\n');
+    expect(readFileSync(join(workspace, 'classic-tests.log'), 'utf8')).toBe('passed\n');
     expect(f.home.judgments.allRequests).toHaveLength(0);
     expect(`${first.stdout}${resumed.stdout}`).not.toContain(f.pairedToken);
   }, 60000);

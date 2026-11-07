@@ -18,6 +18,23 @@
   and remove duplicate effort-remap messages after model changes.
 - Reject repeated claims of live autonomous action receipts and retain the
   decision and claim in the append-only audit history.
+- Redact private draft message bodies with a fixed marker and remove their
+  deterministic display digests without decrypting or rewriting stored bodies.
+- Verify plugin publisher signatures with Ed25519 over the complete manifest,
+  including entry points and hooks. Previous HMAC grants require re-verification.
+- Retain existing code-index embeddings during the schema upgrade while removing
+  per-chunk content and identity hashes. Use the captured source revision for
+  indexes owned by a single run.
+- Compare retained native request, reference and review values directly, remove
+  unused diagnostic digests, and issue native span and work-plan identities.
+
+### SDK changes
+
+- Code chunks expose `fileRevision` in place of `fileHash` and no longer expose
+  `contentHash`; index file lookup uses `getFileRevision`.
+- Remove the unused `autonomousRevision` helper and review-inventory digest
+  fields. Native execution ownership and persisted source checks remain separate
+  from display and bookkeeping identifiers.
 
 ## [3.1.1] - 2026-11-07
 

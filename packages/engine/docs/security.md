@@ -40,16 +40,13 @@ authority as the shared token: `isOperatorAdmin()` returns true for either.
 
 **When to use:** local development, single-user deployments, service-to-service connections where you control both ends.
 
-A single static token is configured. Every request that presents this token is granted full access. Authentication hashes both the presented and configured token to fixed-length SHA-256 digests and compares those digests with a constant-time comparison (`timingSafeEqual`). Hashing first guarantees both buffers are 32 bytes, so neither an early-exit nor a buffer-length check can leak token length through a timing side-channel:
+A single static token is configured. Every request that presents this token is granted full access. `matchesSharedToken()` checks the UTF-8 byte lengths, then compares equal-length buffers with `timingSafeEqual`:
 
 ```ts
 function matchesSharedToken(token: string, sharedToken: string): boolean {
-  // Hash both sides to 32-byte SHA-256 digests so the buffers are always equal
-  // length before timingSafeEqual. There is deliberately no early-return on a
-  // length mismatch, which would otherwise leak token length via timing.
-  const aHash = createHash('sha256').update(token).digest();
-  const bHash = createHash('sha256').update(sharedToken).digest();
-  return timingSafeEqual(aHash, bHash);
+  const supplied = Buffer.from(token, 'utf8');
+  const expected = Buffer.from(sharedToken, 'utf8');
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 ```
 
@@ -69,7 +66,7 @@ Users authenticate with a username and password via the login endpoint. On succe
 - Passwords are hashed with **scrypt** (64-byte key, random salt). The stored hash format is `base64(salt):N:r:p:base64(derived)` (salt, the scrypt cost parameters, then the derived key); the legacy 2-part `salt:hash` form is still accepted on verify for backward compatibility
 - Default session TTL is **1 hour** (`DEFAULT_SESSION_TTL_MS = 3_600_000`)
 - Sessions are pruned on access; expired sessions are rejected and cleaned up
-- Local auth status reports expose `tokenFingerprint` only; raw session bearer tokens are not returned by status APIs
+- Local auth status reports expose an independent opaque session `id`, username and expiry. Use that ID to revoke a session; raw session bearer tokens are not returned by status APIs
 - On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; this file should be deleted after the first login
 - Login failures are locked out per account, independent of the per-IP login rate limiter below. Failures are tracked by username and never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. A successful login clears the failure count.
 

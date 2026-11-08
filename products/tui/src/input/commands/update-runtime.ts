@@ -72,10 +72,10 @@ import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type Update
 import { resolveConfiguredServiceName } from '../../runtime/legacy-daemon-migration.ts';
 import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 
-const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 
 function releaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes-jev/releases/download/${tag}`;
+  return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
 }
 
 async function downloadText(fetchImpl: UpdateFetchLike, url: string): Promise<string> {

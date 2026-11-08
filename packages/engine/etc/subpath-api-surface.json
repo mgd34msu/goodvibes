@@ -52233,7 +52233,7 @@
     {
       "name": "DAEMON_REPO_RELEASES_LATEST_URL",
       "kind": "const",
-      "text": "DAEMON_REPO_RELEASES_LATEST_URL = \"https://github.com/mgd34msu/goodvibes-jev/releases/latest\""
+      "text": "DAEMON_REPO_RELEASES_LATEST_URL = \"https://github.com/mgd34msu/goodvibes/releases/latest\""
     },
     {
       "name": "DAEMON_SPLIT_FLOOR_VERSION",

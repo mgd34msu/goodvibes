@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Follow the repository rename to `mgd34msu/goodvibes` in install/uninstall
+  downloads, native acquisition, updates, release tooling, workflow action
+  references and package/documentation links. Migrate the exact previous
+  monorepo update feed to its new address while retaining update preferences.
+
 - Retain the actual delivered payment-window quote and journal record inside
   the original encrypted request before arming its answer reception, including
   after repricing. Refresh selected native browser controls, preserve original
@@ -284,7 +289,7 @@
 ## [3.1.0] - 2026-11-06
 
 Qualification and delivery evidence is recorded in the
-[release acceptance report](https://github.com/mgd34msu/goodvibes-jev/blob/v3.1.0/docs/releases/3.1.0-qualification.md).
+[release acceptance report](https://github.com/mgd34msu/goodvibes/blob/v3.1.0/docs/releases/3.1.0-qualification.md).
 Native publication requires successful CI on the exact tagged commit and
 verification of its published artifacts.
 
@@ -314,7 +319,7 @@ verification of its published artifacts.
 - Align all workspace and runtime release identities at 3.1.0; keep protocol and storage
   schema identities independent and retain the existing v3.0.0 tag.
 
-See the [release guide](https://github.com/mgd34msu/goodvibes-jev/blob/v3.1.0/docs/releases/3.1.0.md)
+See the [release guide](https://github.com/mgd34msu/goodvibes/blob/v3.1.0/docs/releases/3.1.0.md)
 for policy behavior, limits and qualification requirements.
 
 ## [3.0.0] - 2026-11-06
@@ -356,7 +361,7 @@ for policy behavior, limits and qualification requirements.
   platform exports. Withhold service-log text when redaction is unavailable and
   honor declared workspace package managers without product-local lockfiles.
 
-See the [release guide](https://github.com/mgd34msu/goodvibes-jev/blob/v3.0.0/docs/releases/3.0.0.md)
+See the [release guide](https://github.com/mgd34msu/goodvibes/blob/v3.0.0/docs/releases/3.0.0.md)
 for configuration and qualification boundaries. Native release assets are admitted
 from the exact green CI build and published with checksums. npm publication is a
 separate repository opt-in.

@@ -4,7 +4,7 @@ import { resolveDaemonInstalledFiles } from '../sdk/src/platform/daemon/auto-upd
 import { inspectDaemonNativeInstallation, resolveDaemonNativePayloads } from '../sdk/src/platform/runtime/self-update.js';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
-const DAEMON_REPO_LATEST = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+const DAEMON_REPO_LATEST = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 const execPath = '/home/someone/.local/bin/goodvibes-daemon';
 const cohort = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'native-daemon' });
 const ownedPaths = [execPath, `${execPath}.bun`, `${execPath}.bun.LICENSE.md`, `${execPath}.bun.json`,

@@ -75,10 +75,10 @@ import {
 import { extractTarGzTree } from '../../runtime/tar-archive.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
 
-const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 
 function releaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes-jev/releases/download/${tag}`;
+  return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
 }
 
 /**

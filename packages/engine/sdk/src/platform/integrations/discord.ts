@@ -6,7 +6,7 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 import { VERSION } from '../version.js';
 
-const USER_AGENT = `DiscordBot (https://github.com/mgd34msu/goodvibes-jev, ${VERSION})`;
+const USER_AGENT = `DiscordBot (https://github.com/mgd34msu/goodvibes, ${VERSION})`;
 
 // ---------------------------------------------------------------------------
 // Types

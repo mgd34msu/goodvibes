@@ -7,7 +7,7 @@
  * rollback, and restarts via the service manager. Default-on per the owner
  * directive; `update.auto` turns it off.
  *
- * `releasesUrl` names the authorized goodvibes-jev monorepo release line.
+ * `releasesUrl` names the authorized GoodVibes monorepo release line.
  * Only exact historical default feeds migrate. Explicit custom feeds remain
  * unchanged. Release availability is independent of source readiness.
  *
@@ -17,8 +17,9 @@
  * union / ConfigValue map in schema-types.ts so config.get is typed.
  */
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
-export const DAEMON_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
-const LEGACY_DAEMON_RELEASE_FEEDS = ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest'];
+export const DAEMON_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
+const LEGACY_DAEMON_RELEASE_FEEDS = ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest',
+  'https://github.com/mgd34msu/goodvibes-jev/releases/latest'];
 /** Exact historical defaults only; near matches and custom channels retain their owner intent. */
 export function migrateLegacyDaemonReleaseFeed(parsed: Record<string, unknown>): Record<string, unknown> {
   const update = parsed.update;

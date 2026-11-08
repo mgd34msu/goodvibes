@@ -77,7 +77,7 @@ function stubDaemonReleaseFetch(options: {
         headers: {
           get: (name: string) =>
             name.toLowerCase() === 'location'
-              ? `https://github.com/mgd34msu/goodvibes-jev/releases/tag/${tag}`
+              ? `https://github.com/mgd34msu/goodvibes/releases/tag/${tag}`
               : null,
         },
         text: async () => '',

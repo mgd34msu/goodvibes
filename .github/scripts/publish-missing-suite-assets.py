@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 directory, tag = Path(sys.argv[1]), sys.argv[2]
-repo = 'mgd34msu/goodvibes-jev'
+repo = 'mgd34msu/goodvibes'
 release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], text=True))
 assert not release['draft'] and release['tag_name'] == tag
 assets = {a['name']: a for a in release['assets']}

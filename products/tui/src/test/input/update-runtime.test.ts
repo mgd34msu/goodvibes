@@ -47,7 +47,7 @@ function fakeResponse(spec: FakeResponseSpec) {
   };
 }
 
-const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 
 function buildStubFetch(options: {
   readonly latestTag: string;
@@ -64,7 +64,7 @@ function buildStubFetch(options: {
       return fakeResponse({
         status: 302,
         url,
-        location: `https://github.com/mgd34msu/goodvibes-jev/releases/tag/${options.latestTag}`,
+        location: `https://github.com/mgd34msu/goodvibes/releases/tag/${options.latestTag}`,
       });
     }
     if (url.endsWith('SHA256SUMS.txt')) {

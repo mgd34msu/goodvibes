@@ -12,7 +12,7 @@ import type { UpdateFetchLike } from '../../runtime/update-check.ts';
 // (never a real process), and pinned fixture versions '1.0.0'/'v1.1.0',
 // never the live build VERSION, per this repo's version-decoupled-tests rule.
 
-const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 
 /** A fetch stub whose HEAD /releases/latest redirect names `latestTag`. */
 function stubFetch(latestTag: string): UpdateFetchLike {
@@ -22,7 +22,7 @@ function stubFetch(latestTag: string): UpdateFetchLike {
       ok: true,
       status: 302,
       url,
-      headers: { get: (name: string) => (name.toLowerCase() === 'location' ? `https://github.com/mgd34msu/goodvibes-jev/releases/tag/${latestTag}` : null) },
+      headers: { get: (name: string) => (name.toLowerCase() === 'location' ? `https://github.com/mgd34msu/goodvibes/releases/tag/${latestTag}` : null) },
       text: async () => '',
       arrayBuffer: async () => new ArrayBuffer(0),
     };

@@ -38,5 +38,5 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   --connect-timeout 15 --max-time 120 --retry 2 \
-  https://raw.githubusercontent.com/mgd34msu/goodvibes-jev/main/scripts/install.sh -o "$work/install.sh"
+  https://raw.githubusercontent.com/mgd34msu/goodvibes/main/scripts/install.sh -o "$work/install.sh"
 env GOODVIBES_UNINSTALL=1 sh "$work/install.sh"

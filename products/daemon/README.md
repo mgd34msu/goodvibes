@@ -226,7 +226,7 @@ the production inbox before service activation.
 
 The package remains a private Bun script package with an opt-in local native
 build. The local tooling does not publish a native release or activate automatic
-updates. The release identity is `mgd34msu/goodvibes-jev` and the root version is authoritative. Source
+updates. The release identity is `mgd34msu/goodvibes` and the root version is authoritative. Source
 and emitted modules are included because the existing Bun export condition uses
 source. Use the supported Bun 1.3.14 runtime and built engine workspace.
 

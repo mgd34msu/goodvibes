@@ -152,7 +152,7 @@ test('construction is inert; authenticated channel/history transport maps a real
     `/api/v10/channels/${channel}`,
     `/api/v10/channels/${channel}/messages`,
   ]);
-  expect(f.calls.every((call) => call.userAgent === `DiscordBot (https://github.com/mgd34msu/goodvibes-jev, ${VERSION})`)).toBe(true);
+  expect(f.calls.every((call) => call.userAgent === `DiscordBot (https://github.com/mgd34msu/goodvibes, ${VERSION})`)).toBe(true);
   expect(f.sourceCalls.length).toBeGreaterThan(1);
   expect(JSON.stringify(result)).not.toContain('person@example.test');
   expect(() => f.owner.adapter.assertCurrent!()).not.toThrow();

@@ -31,7 +31,7 @@ export async function refreshReleaseWebUi(options: ReleaseWebUiOptions): Promise
   }
   const signal = AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const base = `https://github.com/mgd34msu/goodvibes-jev/releases/download/v${version}`;
+  const base = `https://github.com/mgd34msu/goodvibes/releases/download/v${version}`;
   async function download(name: string, limit: number): Promise<Buffer> {
     assertCurrent();
     const response = await fetchImpl(`${base}/${name}`, { signal, redirect: 'follow' });

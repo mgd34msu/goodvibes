@@ -42,7 +42,7 @@ const END_TO_END_BUDGET_MS = 180_000;
 const OLD_VERSION = '1.0.0';
 const NEW_VERSION = '1.1.0';
 const NEW_TAG = `v${NEW_VERSION}`;
-const GITHUB_BASE = 'https://github.com/mgd34msu/goodvibes-jev';
+const GITHUB_BASE = 'https://github.com/mgd34msu/goodvibes';
 const LAUNCH_MODULE = join(import.meta.dir, '..', '..', 'cli', 'launch-auto-update.ts');
 
 const artifacts = resolveArtifactNames(process.platform, process.arch);

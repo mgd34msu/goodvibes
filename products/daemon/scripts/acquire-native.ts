@@ -9,7 +9,7 @@ import { UpdateTransactionError } from '@goodvibes-jev/engine/sdk/platform/runti
 import { daemonCiPayloads, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, type DaemonInstallOwner } from './install-native.ts';
 
-export const DAEMON_CI_REPOSITORY = 'mgd34msu/goodvibes-jev';
+export const DAEMON_CI_REPOSITORY = 'mgd34msu/goodvibes';
 const ARTIFACT = 'daemon-native-linux-x64';
 const ARCHIVE = `${ARTIFACT}.tgz`;
 export type RunGitHub = (args: readonly string[]) => string;

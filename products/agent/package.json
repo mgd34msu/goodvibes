@@ -39,13 +39,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgd34msu/goodvibes-jev.git",
+    "url": "git+https://github.com/mgd34msu/goodvibes.git",
     "directory": "products/agent"
   },
   "bugs": {
-    "url": "https://github.com/mgd34msu/goodvibes-jev/issues"
+    "url": "https://github.com/mgd34msu/goodvibes/issues"
   },
-  "homepage": "https://github.com/mgd34msu/goodvibes-jev/tree/main/products/agent",
+  "homepage": "https://github.com/mgd34msu/goodvibes/tree/main/products/agent",
   "keywords": [
     "goodvibes",
     "agent",

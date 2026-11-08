@@ -141,7 +141,7 @@ import { join } from 'node:path';
 const fixture = JSON.parse(readFileSync(process.env.FIXTURE_CI, 'utf8'));
 const args = process.argv.slice(2); const endpoint = args.at(-1);
 if (args[0] === 'run') {
-  if (args[args.indexOf('--repo') + 1] !== 'https://github.com/mgd34msu/goodvibes-jev') process.exit(19);
+  if (args[args.indexOf('--repo') + 1] !== 'https://github.com/mgd34msu/goodvibes') process.exit(19);
   copyFileSync(fixture.archive, join(endpoint, 'daemon-native-linux-x64.tgz'));
 } else if (args[0] === 'api' && args[1] === '--hostname' && args[2] === 'github.com') {
   console.log(JSON.stringify(endpoint.includes('/jobs?') ? [{ jobs: fixture.jobs }] : endpoint.includes('/artifacts?') ? [{ artifacts: [fixture.artifact] }] : fixture.run));

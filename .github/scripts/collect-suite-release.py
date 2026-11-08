@@ -9,7 +9,7 @@ import tarfile
 
 archives, destination, tag = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag)
-repository = 'mgd34msu/goodvibes-jev'
+repository = 'mgd34msu/goodvibes'
 def api(path):
     return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/{path}'], text=True))
 ref = api(f'git/ref/tags/{tag}')['object']

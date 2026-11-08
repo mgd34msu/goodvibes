@@ -5,7 +5,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
 This installs **released binaries**, the browser driver and the WebUI from
-`mgd34msu/goodvibes-jev`. It resolves the release version once and uses that same
+`mgd34msu/goodvibes`. It resolves the release version once and uses that same
 version and checksum manifest for all products. It never clones or builds source.
 Missing assets or mismatched checksums stop installation before replacing programs.
 

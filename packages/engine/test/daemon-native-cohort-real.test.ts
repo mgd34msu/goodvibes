@@ -134,7 +134,7 @@ nativeTest('legacy adoption probes its actual local daemon and publishes the com
   mkdirSync(originalHome); mkdirSync(otherHome); writeFileSync(join(originalHome, 'sentinel'), 'unchanged'); writeFileSync(join(otherHome, 'sentinel'), 'untouched');
   const base = daemonReleaseDownloadBaseUrl('v2.0.24');
   const fetchImpl: UpdateFetchLike = async (url, init) => {
-    if (url === DAEMON_REPO_RELEASES_LATEST_URL) return { ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://github.com/mgd34msu/goodvibes-jev/releases/tag/v2.0.24' : null }, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
+    if (url === DAEMON_REPO_RELEASES_LATEST_URL) return { ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://github.com/mgd34msu/goodvibes/releases/tag/v2.0.24' : null }, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
     return f.fetchImpl(f.base + url.slice(base.length), init);
   };
   expect(await performDaemonHandover({ fetchImpl, binaryPath: f.execPath, assetName: f.targets[0]!.assetName, platform: 'linux', arch })).toEqual({ tag: 'v2.0.24' });
@@ -144,7 +144,8 @@ nativeTest('legacy adoption probes its actual local daemon and publishes the com
 
 test('only exact historical release defaults migrate and only owning settings runtimes persist them', () => {
   const root = mkdtempSync(join(tmpdir(), 'daemon-feed-migration-')); roots.push(root); const path = join(root, 'settings.json');
-  for (const feed of ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest']) {
+  for (const feed of ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest',
+    'https://github.com/mgd34msu/goodvibes-jev/releases/latest']) {
     const config = { update: { releasesUrl: feed, auto: false }, privateOwner: 'retained' }; const before = JSON.stringify(config);
     writeFileSync(path, before);
     expect(applyDaemonReleaseFeedMigrationPass(config, path, { ownsFile: false })).toEqual({ ...config, update: { ...config.update, releasesUrl: DAEMON_RELEASES_LATEST_URL } });

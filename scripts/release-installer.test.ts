@@ -74,7 +74,7 @@ test('released suite installs all products, companions and native receipt withou
   expect(JSON.parse(readFileSync(join(home, 'bin/daemon-installation.json'), 'utf8')).version).toBe(version);
   expect(statSync(join(home, 'bin/lib/sqlite-vec-linux-x64/vec0.so')).mode & 0o777).toBe(0o644);
   const urls = readFileSync(join(root, 'fetches'), 'utf8').trim().split('\n');
-  expect(urls.every(url => url.startsWith(`https://github.com/mgd34msu/goodvibes-jev/releases/download/v${version}/`))).toBe(true);
+  expect(urls.every(url => url.startsWith(`https://github.com/mgd34msu/goodvibes/releases/download/v${version}/`))).toBe(true);
   expect(new Set(urls).size).toBe(urls.length);
   expect(result.stdout).not.toContain('Building');
 });

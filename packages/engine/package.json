@@ -11,13 +11,13 @@
     "control-plane"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/mgd34msu/goodvibes-jev",
+  "homepage": "https://github.com/mgd34msu/goodvibes",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgd34msu/goodvibes-jev.git"
+    "url": "git+https://github.com/mgd34msu/goodvibes.git"
   },
   "bugs": {
-    "url": "https://github.com/mgd34msu/goodvibes-jev/issues"
+    "url": "https://github.com/mgd34msu/goodvibes/issues"
   },
   "engines": {
     "bun": "1.3.14",

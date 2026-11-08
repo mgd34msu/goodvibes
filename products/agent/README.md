@@ -222,7 +222,7 @@ The full settings catalog, the checkpoint-guard keys, and the shared-settings-im
 Agent builds on the existing terminal renderer and workspace foundations of the GoodVibes platform; what differs is the product layer composed on top of them.
 
 ```sh
-git clone https://github.com/mgd34msu/goodvibes-jev.git
+git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes-jev
 bun install
 bun run build

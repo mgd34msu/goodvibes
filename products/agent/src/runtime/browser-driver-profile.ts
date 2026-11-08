@@ -26,7 +26,7 @@ import {
 import { detectInstallKind } from './update-check.ts';
 import { BROWSER_DRIVER_ARCHIVE_NAME, BROWSER_DRIVER_DIR_NAME } from './release-artifacts.ts';
 
-export const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes-jev/releases/latest';
+export const RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 
 export type { DriverRemediationOptions };
 

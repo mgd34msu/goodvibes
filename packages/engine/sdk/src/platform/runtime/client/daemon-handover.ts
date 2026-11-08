@@ -35,7 +35,7 @@ export const DAEMON_REPO_RELEASES_LATEST_URL = DAEMON_RELEASES_LATEST_URL;
 
 /** Download root for an exact selected monorepo release tag. */
 export function daemonReleaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes-jev/releases/download/${tag}`;
+  return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
 }
 
 /** First selected monorepo native cohort version for legacy adoption. */

@@ -41,7 +41,7 @@ test('daemon updates refresh the owned WebUI from the same monorepo version', as
   expect(readFileSync(join(next!,'index.html'),'utf8')).toBe('updated UI');
   expect(readFileSync(join(bundle,'index.html'),'utf8')).toBe('previous UI');
   expect(f.requests).toHaveLength(2);
-  expect(f.requests.every(url=>url.startsWith('https://github.com/mgd34msu/goodvibes-jev/releases/download/v3.1.1/'))).toBe(true);
+  expect(f.requests.every(url=>url.startsWith('https://github.com/mgd34msu/goodvibes/releases/download/v3.1.1/'))).toBe(true);
 });
 test('bad release bytes leave the old UI in place', async () => {
   const f=fixture(true);

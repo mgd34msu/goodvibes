@@ -3538,7 +3538,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "update.releasesUrl",
     "type": "string",
-    "default": "https://github.com/mgd34msu/goodvibes-jev/releases/latest",
+    "default": "https://github.com/mgd34msu/goodvibes/releases/latest",
     "description": "GitHub releases/latest URL for the daemon complete native cohort and source manifest. Exact historical default feeds migrate to goodvibes-jev; explicit custom feeds remain unchanged. A daemon update does not replace sibling product executables"
   },
   {

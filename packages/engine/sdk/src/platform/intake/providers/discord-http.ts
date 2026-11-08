@@ -7,7 +7,7 @@ import type { DiscordInboxHttp } from './discord.js';
 import { VERSION } from '../../version.js';
 
 const ORIGIN = 'https://discord.com';
-const USER_AGENT = `DiscordBot (https://github.com/mgd34msu/goodvibes-jev, ${VERSION})`;
+const USER_AGENT = `DiscordBot (https://github.com/mgd34msu/goodvibes, ${VERSION})`;
 const RESPONSE_LIMIT = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 120_000;

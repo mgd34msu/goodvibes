@@ -56,13 +56,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgd34msu/goodvibes-jev.git",
+    "url": "git+https://github.com/mgd34msu/goodvibes.git",
     "directory": "products/tui"
   },
   "bugs": {
-    "url": "https://github.com/mgd34msu/goodvibes-jev/issues"
+    "url": "https://github.com/mgd34msu/goodvibes/issues"
   },
-  "homepage": "https://github.com/mgd34msu/goodvibes-jev/tree/main/products/tui",
+  "homepage": "https://github.com/mgd34msu/goodvibes/tree/main/products/tui",
   "keywords": [
     "goodvibes",
     "tui",

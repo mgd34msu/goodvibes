@@ -10,13 +10,13 @@
   },
   "description": "The goodvibes platform with Jev judgment built in: the judgment foundation, the engine, and the daemon, TUI, agent and web UI products.",
   "license": "MIT",
-  "homepage": "https://github.com/mgd34msu/goodvibes-jev",
+  "homepage": "https://github.com/mgd34msu/goodvibes",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgd34msu/goodvibes-jev.git"
+    "url": "git+https://github.com/mgd34msu/goodvibes.git"
   },
   "bugs": {
-    "url": "https://github.com/mgd34msu/goodvibes-jev/issues"
+    "url": "https://github.com/mgd34msu/goodvibes/issues"
   },
   "workspaces": [
     "packages/*",

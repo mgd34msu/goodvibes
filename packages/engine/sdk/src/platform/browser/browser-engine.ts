@@ -44,6 +44,15 @@ export { UntrustedEffectError };
 export type { BrowserEngineOptions, BrowserExtractField, BrowserTarget };
 
 
+/** A native click entered the actuator. Later cancellation/validation failures
+ * cannot prove that the remote site received nothing. Keep this value-free so
+ * payment callers cannot mistake a post-click source error for a safe retry.
+ */
+class BrowserClickOutcomeUnknownError extends Error {
+  override readonly name = 'BrowserClickOutcomeUnknownError';
+  constructor() { super('The browser click was attempted, but its result could not be confirmed. Inspect the page before trying again.'); }
+}
+
 /**
  * The browser capability itself: provisioning, sessions, and every page
  * operation, with no Agent-surface types in sight.
@@ -485,26 +494,32 @@ export class BrowserEngine {
     await revalidate(); current();
     await credentialCurrent(); current();
     const urlBefore = page.url();
-    await work.action(signal => locator.click({
-      signal, button: args.button ?? 'left',
-      clickCount: args.clickCount ?? 1,
-      timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
-    }));
-    await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
-    this.snapshots.clear(sessionId, pageId);
-    const navigated = page.url() !== urlBefore;
-    // A navigating click replaces the DOM exactly as an explicit navigate does,
-    // so whatever card material was on the page it left is gone with it.
-    if (navigated) this.cardGuard?.disarm(sessionId, pageId);
-    return {
-      sessionId,
-      pageId,
-      clicked: { ref: args.ref, role: element.role, name: element.name },
-      urlBefore,
-      url: page.url(),
-      navigated,
-      next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
-    };
+    let attempted = false;
+    try {
+      await work.action(signal => {
+        attempted = true;
+        return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1,
+          timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS });
+      });
+      await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
+      this.snapshots.clear(sessionId, pageId);
+      const navigated = page.url() !== urlBefore;
+      // A navigating click replaces the DOM exactly as an explicit navigate does,
+      // so whatever card material was on the page it left is gone with it.
+      if (navigated) this.cardGuard?.disarm(sessionId, pageId);
+      return {
+        sessionId,
+        pageId,
+        clicked: { ref: args.ref, role: element.role, name: element.name },
+        urlBefore,
+        url: page.url(),
+        navigated,
+        next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
+      };
+    } catch (error) {
+      if (attempted) throw new BrowserClickOutcomeUnknownError();
+      throw error;
+    }
   }
 
   /**

@@ -8,6 +8,8 @@ import { browserCredentialPage, BrowserControlIdentityWork } from '../sdk/src/pl
 import { resolveRef } from '../sdk/src/platform/browser/browser-snapshot.js';
 import type { BrowserSnapshot, CardFieldGuard } from '../sdk/src/platform/browser/browser-types.js';
 import type { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
+import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
+import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
 
 type Page = Parameters<typeof resolveRef>[0];
 const expectedPages = new Set<string>();
@@ -63,12 +65,12 @@ function fixture(recordedName = 'Send message') {
   const sessions = { defaultSessionId: () => 'b1', page: async () => ({ pageId: 'p1', page }) } as unknown as BrowserSessionManager;
   let approve = async () => {};
   let liveMaterial = false;
-  const guard: CardFieldGuard = { disarm: () => { liveMaterial = false; }, hasLiveMaterial: () => liveMaterial, redact: (_s: string, _p: string, text: string) => liveMaterial ? text.replaceAll('private-cvv-fixture', '[withheld]') : text };
+  const guard = { disarm: () => { liveMaterial = false; }, hasLiveMaterial: () => liveMaterial, redact: (_s: string, _p: string, text: string) => liveMaterial ? text.replaceAll('private-cvv-fixture', '[withheld]') : text } satisfies CardFieldGuard;
   const engine = new BrowserEngine(sessions, { screenshotDirectory: '/tmp', cardFieldGuard: guard, untrusted: {
     rule: 'test', originOf: () => 'example.test', recordIngest: () => {}, label: input => ({ trust: 'untrusted', surface: 'web-page', origin: input.origin, retrievedAt: 'synthetic', text: input.text, truncated: input.truncated === true, rule: 'test' }),
     evaluateOutwardEffect: async () => { await approve(); return { allowed: true, reason: null, fix: null, untrustedOrigins: [] }; },
   } });
-  return { page, snapshot, engine, effects, locator,
+  return { page, snapshot, engine, effects, locator, guard,
     setName: (name: string) => { actual = { ...actual, name }; remember(); },
     malform: () => { actual = { tag: actual.tag, name: actual.name } as typeof actual; },
     setTag: (tag: string) => { actual = { ...actual, tag }; remember(); },
@@ -195,6 +197,24 @@ describe('BrowserEngine identity effect boundaries', () => {
   test('settled paraphrase reaches an actual engine effect', async () => {
     const f = fixture(); await f.engine.snapshot({}); f.setName('Submit message'); reading();
     await f.engine.click({}, { ref: 'e1' }); expect(f.effects).toEqual(['click']);
+  });
+  test('source retirement after a native click is an uncertain outcome, not a pre-click payment refusal', async () => {
+    const f = fixture(); await f.engine.snapshot({}); reading();
+    let active = true;
+    f.locator.click = async () => { f.effects.push('click'); active = false; };
+    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
+    const result = await driver.submitOrder('e1', { assertCurrent() { if (!active) throw new Error('Private owner diagnostic'); } }).catch(error => error);
+    expect(f.effects).toEqual(['click']); expect(result).toBeInstanceOf(Error);
+    expect(result).not.toBeInstanceOf(CheckoutSubmitRefused);
+    expect(result.name).toBe('BrowserClickOutcomeUnknownError'); expect(result.message).not.toContain('Private owner diagnostic');
+  });
+  test('a typed-looking failure after entering the actuator cannot free a possibly submitted payment', async () => {
+    const f = fixture(); await f.engine.snapshot({}); reading();
+    f.locator.click = async () => { f.effects.push('click'); const error = new Error('Private page diagnostic'); error.name = 'StaleElementError'; throw error; };
+    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
+    const result = await driver.submitOrder('e1').catch(error => error);
+    expect(f.effects).toEqual(['click']); expect(result).not.toBeInstanceOf(CheckoutSubmitRefused);
+    expect(result.name).toBe('BrowserClickOutcomeUnknownError'); expect(result.message).not.toContain('Private page diagnostic');
   });
   test('changed DOM after outward approval never submits', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading(); f.onApproval(async () => { f.setName('Delete account'); });

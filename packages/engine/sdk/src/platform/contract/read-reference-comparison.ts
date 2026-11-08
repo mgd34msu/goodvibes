@@ -1,5 +1,5 @@
 import type { SourceReadEvidence } from './evidence.js';
-import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes-jev/judgment';
 import { compactJsonReference } from './json-reference.js';
 
 type Interval = [number, number];
@@ -126,9 +126,6 @@ export function compareJsonReadReferences(reads: readonly SourceReadEvidence[], 
     if (!groups.length) return [];
     return [{ source: 'native-host-interval-comparison', referencePath: read.path,
       referenceSha256: projected.referenceProjection.currentFileSha256,
-      originalReturnedContentDigest: projected.referenceProjection.originalReturnedContentDigest,
-      observationScopeDigest: hashState(observations.map(({ source, reads }) => ({ source,
-        reads: reads.map(({ path, returnedRanges }) => ({ path, returnedRanges: [...returnedRanges] })) }))),
       observationSources: observations.map(({ source, reads }) => ({ source, records: reads.length })),
       groups: groups.map(group => {
         const expected = new Map<string, Interval[]>();

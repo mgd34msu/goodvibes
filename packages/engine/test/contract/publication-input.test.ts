@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { makeRepo } from './runner-support.js';
 import { captureContractInput, materializeContractInput } from '../../sdk/src/platform/contract/input-snapshot.js';
 import { pinContractInputAdmission } from '../../sdk/src/platform/contract/input-authority.js';
-import { admitPublicationInput } from '../../sdk/src/platform/contract/publication-input.js';
+import { admitPublicationInput, publicationInputOwner } from '../../sdk/src/platform/contract/publication-input.js';
 import { applyCapturedInputDelta } from '../../sdk/src/platform/contract/input-apply.js';
 import { ContractPublicationConflictError } from '../../sdk/src/platform/contract/publication-conflict.js';
 import type { Contract } from '../../sdk/src/platform/contract/types.js';
@@ -229,6 +229,35 @@ test.each(['answer', 'check'] as const)('changing the accepted %s after admissio
     if (changed === 'answer') setup.contract.answer = 'An unreviewed final claim.';
     else setup.contract.checks.push({ id: 'unreviewed-check' } as Contract['checks'][number]);
     await expect(applyCapturedInputDelta(setup.contract, async () => true, setup.signal, admission!)).rejects.toThrow();
+    expect(existsSync(join(setup.root, 'review.md'))).toBe(false);
+    expect(readFileSync(join(setup.root, 'README.md'), 'utf8')).toBe('Later owner note.\n');
+  } finally { rmSync(setup.root, { recursive: true, force: true }); }
+});
+
+test('a nested original criterion change after admission cannot publish the accepted result', async () => {
+  const setup = await fixture();
+  const criterion = { id: 'c1', text: 'Keep all existing report sections.', quote: 'Keep all existing report sections.',
+    origin: 'stated' as const, serves: [], disposition: 'judged' as const, status: 'unread' as const, readings: [] };
+  setup.contract.criteria.push(criterion);
+  try {
+    const admission = await admitPublicationInput(setup.contract, async () => true, setup.signal, async () => () => {});
+    expect(admission).not.toBeNull();
+    criterion.text = 'Delete existing report sections.';
+    await expect(applyCapturedInputDelta(setup.contract, async () => true, setup.signal, admission!)).rejects.toThrow();
+    expect(existsSync(join(setup.root, 'review.md'))).toBe(false);
+  } finally { rmSync(setup.root, { recursive: true, force: true }); }
+});
+
+test('mutating a returned owner snapshot cannot replace the independently retained publication premise', async () => {
+  const setup = await fixture();
+  try {
+    const admission = await admitPublicationInput(setup.contract, async () => true, setup.signal, async () => () => {});
+    if (!admission) throw new Error('Publication was not admitted');
+    const owner = publicationInputOwner(admission, setup.contract);
+    const first = owner.files[0];
+    if (!first) throw new Error('Owner input is empty');
+    Object.assign(first, { mode: first.mode === '100644' ? '100755' : '100644' });
+    await expect(applyCapturedInputDelta(setup.contract, async () => true, setup.signal, admission)).rejects.toThrow();
     expect(existsSync(join(setup.root, 'review.md'))).toBe(false);
     expect(readFileSync(join(setup.root, 'README.md'), 'utf8')).toBe('Later owner note.\n');
   } finally { rmSync(setup.root, { recursive: true, force: true }); }

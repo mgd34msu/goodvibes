@@ -1,4 +1,4 @@
-import { hashState, type DecisionLog, type JsonValue } from '@goodvibes-jev/judgment';
+import type { DecisionLog, JsonValue } from '@goodvibes-jev/judgment';
 import type { ContractView } from './types.js';
 
 /** Read the actual recorded API identity behind host check references. This
@@ -21,7 +21,7 @@ export function judgmentExecutionEvidence(contract: ContractView, log: Pick<Deci
         const key = JSON.stringify([entry.requestedModel, entry.model]);
         models.set(key, (models.get(key) ?? 0) + 1);
       }
-      return { phase, linkedCheckDecisionIdsDigest: hashState(ids), decisions: ids.length,
+      return { phase, decisions: ids.length,
         answered: rows.filter(({ entry }) => entry?.status === 'answered').length,
         models: [...models].map(([key, count]) => { const [requestedModel, model] = JSON.parse(key) as string[]; return { requestedModel: requestedModel!, model: model!, count }; }),
         missingOrUnanswered: rows.filter(({ entry }) => entry?.status !== 'answered').map(({ id }) => id),

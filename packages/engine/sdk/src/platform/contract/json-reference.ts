@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
+import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { SourceReadEvidence } from './evidence.js';
 
 /** Preserve every JSON token and literal while removing display-only whitespace
@@ -32,7 +32,7 @@ export function compactJsonReference(read: SourceReadEvidence, currentFiles: rea
     else if (![' ', '\t', '\r', '\n'].includes(character)) tokens.push(character);
   }
   return { ...read, returnedContent: tokens.join(''), referenceProjection: {
-    format: 'json-without-display-whitespace', originalReturnedContentDigest: hashState(read.returnedContent),
+    format: 'json-without-display-whitespace',
     originalReturnedContentBytes: Buffer.byteLength(read.returnedContent), currentFileSha256: file['sha256'], currentFileBytes: bytes,
-    meaning: 'Complete actual returned reference text matches this current host file identity. Only display line labels and JSON whitespace outside string literals are removed from this check view. Every original JSON token, duplicate key, numeric literal, string value and ordering is preserved. Exact original returned text remains retained in the owned read evidence under its digest. Ranges establish returned scope only; this projection neither proves review quality nor changes acceptance. It is not a view of the original whitespace or proof of a formatting requirement.' } };
+    meaning: 'Complete actual returned reference text matches this current host file identity. Only display line labels and JSON whitespace outside string literals are removed from this check view. Every original JSON token, duplicate key, numeric literal, string value and ordering is preserved. Exact original returned text remains retained in the owned read evidence. Ranges establish returned scope only; this projection neither proves review quality nor changes acceptance. It is not a view of the original whitespace or proof of a formatting requirement.' } };
 }

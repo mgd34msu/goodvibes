@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
-import { hashState } from '@goodvibes-jev/judgment';
 import type { Contract } from './types.js';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { assertContractInputAdmission, authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority } from './input-authority.js';
@@ -16,18 +16,18 @@ interface Admission {
   readonly contract: Contract;
   readonly original: ContractInputSnapshot;
   readonly owner: ContractInputSnapshot;
-  readonly serializedOwner: string;
+  readonly ownerSnapshot: ContractInputSnapshot;
   readonly resultHead: string;
   readonly publicationTree: string;
-  readonly originalScope: string;
-  readonly acceptedEvidence: string;
+  readonly originalScope: JsonValue & object;
+  readonly acceptedEvidence: ReturnType<typeof acceptedPublicationEvidence>;
   readonly assertCurrent: () => void;
   used: boolean;
 }
 const admissions = new WeakMap<PublicationInputAdmission, Admission>();
 const getAdmission = WeakMap.prototype.get, setAdmission = WeakMap.prototype.set, applyAdmission = Reflect.apply, freezeAdmission = Object.freeze;
 const readAdmission = (token: PublicationInputAdmission): Admission | undefined => applyAdmission(getAdmission, admissions, [token]) as Admission | undefined;
-const acceptedPublicationEvidence = (contract: Contract) => JSON.stringify([contract.answer ?? renderContractAnswer(contract), contract.checks.at(-1) ?? null]);
+const acceptedPublicationEvidence = (contract: Contract) => [contract.answer ?? renderContractAnswer(contract), contract.checks.at(-1) ?? null] as const;
 
 function gitBytes(root: string, args: readonly string[]): Buffer {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
@@ -59,10 +59,10 @@ function resultFile(root: string, head: string, path: string, identity: 'resultH
 export async function admitPublicationInput(contract: Contract, filter: ReadAccessFilter | undefined, signal: AbortSignal,
   judge: (evidence: JsonValue & object) => Promise<(() => void) | null>): Promise<PublicationInputAdmission | null> {
   assertContractInputAdmission(contract);
-  const scope = goalObligationSource(contract), originalScope = hashState(scope), acceptedEvidence = acceptedPublicationEvidence(contract);
+  const scope = goalObligationSource(contract), originalScope = structuredClone(scope), acceptedEvidence = structuredClone(acceptedPublicationEvidence(contract));
   const assertScope = () => {
-    if (hashState(goalObligationSource(contract)) !== originalScope) throw new Error('original publication scope changed during assessment');
-    if (acceptedPublicationEvidence(contract) !== acceptedEvidence) throw new Error('accepted publication answer or check changed during assessment');
+    if (!isDeepStrictEqual(goalObligationSource(contract), originalScope)) throw new Error('original publication scope changed during assessment');
+    if (!isDeepStrictEqual(acceptedPublicationEvidence(contract), acceptedEvidence)) throw new Error('accepted publication answer or check changed during assessment');
   };
   const original = contract.inputSnapshot, view = contract.worktreePath, branch = contract.branch;
   if (!original || !view || !branch || !filter) throw new Error('publication recovery requires its captured result and original-owner authority');
@@ -126,7 +126,7 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
     assertContractInputAdmission(contract);
     if (git(view, ['rev-parse', 'HEAD']).trim() !== resultHead) throw new Error('accepted result changed after publication assessment');
     const token = freezeAdmission({ kind: 'publication-input-admission' as const, publicationTree });
-    applyAdmission(setAdmission, admissions, [token, { contract, original, owner, serializedOwner: JSON.stringify(owner), resultHead,
+    applyAdmission(setAdmission, admissions, [token, { contract, original, owner, ownerSnapshot: structuredClone(owner), resultHead,
       publicationTree, originalScope, acceptedEvidence, assertCurrent, used: false }]);
     return token;
   } finally { revokeContractInputAuthority(authority); }
@@ -135,8 +135,8 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
 export function publicationInputOwner(token: PublicationInputAdmission, contract: Contract): ContractInputSnapshot {
   const admission = readAdmission(token);
   if (!admission || admission.used || admission.contract !== contract || admission.original !== contract.inputSnapshot
-    || admission.publicationTree !== token.publicationTree || admission.originalScope !== hashState(goalObligationSource(contract))
-    || admission.acceptedEvidence !== acceptedPublicationEvidence(contract) || JSON.stringify(admission.owner) !== admission.serializedOwner)
+    || admission.publicationTree !== token.publicationTree || !isDeepStrictEqual(admission.originalScope, goalObligationSource(contract))
+    || !isDeepStrictEqual(admission.acceptedEvidence, acceptedPublicationEvidence(contract)) || !isDeepStrictEqual(admission.owner, admission.ownerSnapshot))
     throw new Error('publication input admission is stale or belongs to another result');
   assertContractInputAdmission(contract); admission.assertCurrent();
   if (!contract.worktreePath || git(contract.worktreePath, ['rev-parse', 'HEAD']).trim() !== admission.resultHead)

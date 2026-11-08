@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
@@ -8,6 +7,8 @@ import type { KnowledgeStore } from './store.js';
 import type {
   KnowledgeConsolidationCandidateRecord,
   KnowledgeConsolidationReportRecord,
+  KnowledgeSourceRecord,
+  KnowledgeNodeRecord,
 } from './types.js';
 import {
   coerceStringArray,
@@ -63,14 +64,14 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
   if (!candidate) throw new Error(`Unknown knowledge consolidation candidate: ${id}`);
   if (automatic && (candidate.status !== 'open' || candidate.metadata.judgmentOutcome !== 'act' || candidate.metadata.classOutcome !== 'act')) return candidate;
   if (decision === 'accept' && candidate.status === 'accepted') return candidate;
-  if (decision === 'accept' && typeof candidate.metadata.subjectFingerprint === 'string' && candidate.metadata.subjectFingerprint !== subjectSnapshot(context, candidate.subjectId)) throw new Error('Knowledge candidate is stale; refresh it before accepting.');
+  if (decision === 'accept' && !isCandidateCurrent(context, candidate)) throw new Error('Knowledge candidate is stale; refresh it before accepting.');
   const decidedAt = Date.now();
   let acceptedMemoryId: string | undefined;
   if (decision === 'accept' && candidate.candidateType === 'memory-promotion') {
-    const record = context.store.getItem(candidate.subjectId);
-    if (!record?.source && !record?.node) throw new Error('Knowledge candidate source is missing; no memory was written.');
+    const record = captureSubject(context, candidate.subjectKind, candidate.subjectId);
+    if (!record.source && !record.node) throw new Error('Knowledge candidate source is missing; no memory was written.');
     await context.memoryRegistry.getStore().init();
-    if (typeof candidate.metadata.subjectFingerprint === 'string' && candidate.metadata.subjectFingerprint !== subjectSnapshot(context, candidate.subjectId)) throw new Error('Knowledge candidate changed before its memory write.');
+    if (record.revision !== candidate.metadata.subjectRevision || !isCandidateCurrent(context, candidate)) throw new Error('Knowledge candidate changed before its memory write.');
     const summary = summarizeCompact(candidate.title, 160) ?? candidate.title;
     const detail = input.detail
       ?? candidate.summary
@@ -102,7 +103,9 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
         confidence: Math.max(0, Math.min(100, Math.round(candidate.score))),
         ...(!automatic ? { reviewedAt: decidedAt, reviewedBy: input.decidedBy } : {}),
       },
-    });
+    }, { assertCurrent: () => {
+      if (!isCandidateCurrent(context, candidate)) throw new Error('Knowledge candidate changed before its memory write.');
+    } });
     acceptedMemoryId = memory.id;
   }
   const decided = await context.store.upsertConsolidationCandidate({
@@ -151,8 +154,8 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
     const subjectKind = key.slice(0, separator) as KnowledgeConsolidationCandidateRecord['subjectKind'];
     const subjectId = key.slice(separator + 1);
     if (subjectKind === 'issue') continue;
-    const item = context.store.getItem(subjectId);
-    if (!item?.source && !item?.node) continue;
+    const item = captureSubject(context, subjectKind, subjectId);
+    if ((!item.source && !item.node) || !item.revision) continue;
     const subjectTitle = item.source?.title ?? item.source?.canonicalUri ?? item.node?.title ?? subjectId;
     const subjectSummary = item.source?.summary ?? item.node?.summary ?? item.source?.description;
     const relationCount = subjectKind === 'source'
@@ -167,7 +170,7 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
     const settled = context.store.getConsolidationCandidateBySubject(subjectKind, subjectId, candidateType);
     if (settled && settled.status !== 'open') { proposals.push(settled); continue; }
     if (readings >= readingLimit) break;
-    const snapshot = subjectSnapshot(context, subjectId);
+    const snapshot = item.revision;
     const state = {
       subject: { title: subjectTitle, summary: subjectSummary ?? '', kind: item.node?.kind ?? item.source?.sourceType ?? 'unknown', status: item.node?.status ?? item.source?.status ?? 'unknown', trust: 'untrusted-reference-material', reviewState: typeof item.node?.metadata.reviewState === 'string' ? item.node.metadata.reviewState : 'unreviewed' },
       usage: { count: stats.count, usageKinds: [...stats.usageKinds], sessionCount: stats.sessionIds.size, lastUsedAt: new Date(stats.lastUsedAt).toISOString(), relationCount },
@@ -176,7 +179,7 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
     readings += 1;
     const run = await consolidationReading.run(judgmentPort('engine.knowledge.consolidation'), state, { site: 'engine.knowledge.consolidation' });
     const { keep, memory_class: memoryClass } = run.readings;
-    if (subjectSnapshot(context, subjectId) !== snapshot) {
+    if (subjectRevision(context, subjectKind, subjectId) !== snapshot) {
       run.recordAction('held: subject changed during judgment');
       continue;
     }
@@ -198,7 +201,7 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
       // complete terminal record, including their class, evidence and provenance.
       const latest = context.store.getConsolidationCandidateBySubject(subjectKind, subjectId, candidateType);
       if (latest && latest.status !== 'open') return latest;
-      if (subjectSnapshot(context, subjectId) !== snapshot) throw new Error('Knowledge subject changed before candidate staging.');
+      if (subjectRevision(context, subjectKind, subjectId) !== snapshot) throw new Error('Knowledge subject changed before candidate staging.');
       return context.store.upsertConsolidationCandidate({
         candidateType,
         subjectKind,
@@ -217,7 +220,7 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
           judgmentDecisionId: run.result.decisionId,
           judgmentOutcome: keep.outcome,
           classOutcome: memoryClass.outcome,
-          subjectFingerprint: snapshot,
+          subjectRevision: snapshot,
         },
       });
     });
@@ -254,7 +257,7 @@ async function runDecisionKnowledgeConsolidation(context: KnowledgeConsolidation
     for (const candidate of candidates) {
       if (candidate.candidateType !== 'memory-promotion' || candidate.status !== 'open') continue;
       if (candidate.metadata.judgmentOutcome !== 'act' || candidate.metadata.classOutcome !== 'act') continue;
-      if (candidate.metadata.subjectFingerprint !== subjectSnapshot(context, candidate.subjectId)) continue;
+      if (!isCandidateCurrent(context, candidate)) continue;
       const decided = await queueDecision(context, candidate.id, 'accept', {
         decidedBy: 'knowledge.deep-consolidation',
         memoryClass: candidate.suggestedMemoryClass,
@@ -324,9 +327,35 @@ async function buildUsageStats(context: KnowledgeConsolidationContext, limit = 1
   return stats;
 }
 
-/** Exact content/provenance snapshot, not a semantic similarity guess. */
-function subjectSnapshot(context: KnowledgeConsolidationContext, subjectId: string): string | null {
-  const item = context.store.getItem(subjectId);
-  if (!item?.source && !item?.node) return null;
-  return createHash('sha256').update(JSON.stringify(item.source ?? item.node)).digest('hex');
+/** Capture the selected persisted kind, without relying on a cached item view or
+ * conflating a source and node that happen to share an ID. The row revision is
+ * issued by SQLite on every write, including a content change restored to A.
+ */
+function captureSubject(context: KnowledgeConsolidationContext, kind: KnowledgeConsolidationCandidateRecord['subjectKind'], subjectId: string): {
+  readonly source: KnowledgeSourceRecord | null;
+  readonly node: KnowledgeNodeRecord | null;
+  readonly revision: string | null;
+} {
+  if (kind === 'source') {
+    const snapshot = context.store.getSourceSnapshot({ id: subjectId });
+    return { source: snapshot.source, node: null, revision: snapshot.generation };
+  }
+  if (kind === 'node') {
+    const snapshot = context.store.getRecordSnapshot('node', subjectId);
+    return { source: null, node: snapshot.record as KnowledgeNodeRecord | null, revision: snapshot.generation };
+  }
+  return { source: null, node: null, revision: null };
+}
+
+function subjectRevision(context: KnowledgeConsolidationContext, kind: KnowledgeConsolidationCandidateRecord['subjectKind'], subjectId: string): string | null {
+  return kind === 'source' ? context.store.getSourceGeneration(subjectId)
+    : kind === 'node' ? context.store.getRecordGeneration('node', subjectId) : null;
+}
+
+/** Old digest-only or unbound previews must be refreshed, never rebound during
+ * acceptance. Terminal accepted decisions are recovered before this check.
+ */
+function isCandidateCurrent(context: KnowledgeConsolidationContext, candidate: KnowledgeConsolidationCandidateRecord): boolean {
+  return typeof candidate.metadata.subjectRevision === 'string'
+    && candidate.metadata.subjectRevision === subjectRevision(context, candidate.subjectKind, candidate.subjectId);
 }

@@ -48,7 +48,8 @@ async function harness() {
     embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }), enableVectorIndex: false,
   });
   memories.push(memory);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const dbPath = join(root, 'knowledge.sqlite');
+  const store = new KnowledgeStore({ dbPath });
   await store.init();
   const context: KnowledgeConsolidationContext = { store, memoryRegistry: new MemoryRegistry(memory), syncReviewedMemory: async () => {} };
   async function source(summary = 'Persist order and outbox event in the same transaction.', count = 1) {
@@ -56,7 +57,7 @@ async function harness() {
     for (let i = 0; i < count; i++) await store.upsertUsageRecord({ targetKind: 'source', targetId: record.id, usageKind: 'search-hit', sessionId: 'synthetic-session', score: 1 });
     return record;
   }
-  return { context, store, memory, source };
+  return { context, store, memory, source, dbPath };
 }
 
 function deferred() {
@@ -81,6 +82,8 @@ describe('knowledge consolidation reading', () => {
     expect(candidate?.suggestedMemoryClass).toBe('architecture');
     expect(candidate?.metadata.judgmentOutcome).toBe('act');
     expect(candidate?.metadata.usageCount).toBe(1);
+    expect(candidate?.metadata.subjectRevision).toBe(h.store.getSourceGeneration(candidate!.subjectId));
+    expect(candidate?.metadata).not.toHaveProperty('subjectFingerprint');
     expect(candidate?.evidence).toContain('used 1 time(s) in the last 30 days');
     expect(fake.requests).toHaveLength(1);
     expect(JSON.stringify(fake.requests[0]?.state)).toContain('Persist order and outbox event');
@@ -262,6 +265,106 @@ describe('knowledge consolidation reading', () => {
     await h.store.upsertSource({ ...source, summary: 'Changed after the reading.' });
     await expect(decide(h.context, candidate!.id, 'accept')).rejects.toThrow('stale');
     expect(h.memory.isReady).toBe(false);
+  });
+
+  test('restoring source A after B during a reading does not restore the old candidate permission', async () => {
+    const h = await harness(); const source = await h.source();
+    const originalRevision = h.store.getSourceGeneration(source.id);
+    const paused = pauseReading(readings()); const refreshing = refresh(h.context); await paused.started;
+    await h.store.upsertSource({ ...source, summary: 'Intermediate changed claim.' });
+    await h.store.upsertSource(source);
+    expect(h.store.getSource(source.id)?.summary).toBe(source.summary);
+    expect(h.store.getSourceGeneration(source.id)).not.toBe(originalRevision);
+    paused.release(); expect(await refreshing).toEqual([]);
+    expect(h.memory.isReady).toBe(false);
+  });
+
+  test('acceptance rejects an A-B-A source change and keeps the candidate open for refresh', async () => {
+    const h = await harness(); const source = await h.source(); readings(); const [candidate] = await refresh(h.context);
+    await h.store.upsertSource({ ...source, summary: 'Temporarily changed claim.' }); await h.store.upsertSource(source);
+    await expect(decide(h.context, candidate!.id, 'accept')).rejects.toThrow('stale');
+    expect(h.store.getConsolidationCandidate(candidate!.id)?.status).toBe('open');
+    expect(h.memory.isReady).toBe(false);
+    const [refreshed] = await refresh(h.context);
+    expect(refreshed?.metadata.subjectRevision).not.toBe(candidate!.metadata.subjectRevision);
+    await decide(h.context, refreshed!.id, 'accept');
+    expect(h.memory.retrieve()).toHaveLength(1);
+  });
+
+  test('digest-only previews require a fresh reading while terminal decisions remain idempotent', async () => {
+    const h = await harness(); await h.source(); readings(); const [candidate] = await refresh(h.context);
+    // Shape of an open preview written by a released digest-based reader.
+    const { subjectRevision: _revision, ...metadata } = candidate!.metadata;
+    const oldMetadata = { ...metadata, subjectFingerprint: 'a'.repeat(64) };
+    const sqlite = (h.store as unknown as { sqlite: { run(sql: string, values: unknown[]): void; save(): Promise<void> } }).sqlite;
+    sqlite.run('UPDATE knowledge_consolidation_candidates SET metadata = ? WHERE id = ?', [JSON.stringify(oldMetadata), candidate!.id]);
+    await sqlite.save(); await h.store.close();
+    const restarted = new KnowledgeStore({ dbPath: h.dbPath });
+    const context = { ...h.context, store: restarted };
+    try {
+      await restarted.init();
+      await expect(decide(context, candidate!.id, 'accept')).rejects.toThrow('stale');
+      expect(h.memory.isReady).toBe(false);
+      const [refreshed] = await refresh(context);
+      expect(refreshed?.metadata.subjectRevision).toBe(restarted.getSourceGeneration(candidate!.subjectId));
+      const accepted = await decide(context, candidate!.id, 'accept');
+      installJudgmentPort(undefined);
+      expect(await decide(context, candidate!.id, 'accept')).toEqual(accepted);
+      expect(h.memory.retrieve()).toHaveLength(1);
+    } finally { await restarted.close(); }
+  });
+
+  test('an unchanged persisted row revision accepts after reopening without another decision reading', async () => {
+    const h = await harness(); await h.source(); const fake = readings(); const [candidate] = await refresh(h.context);
+    await h.store.close(); const restarted = new KnowledgeStore({ dbPath: h.dbPath });
+    try {
+      await restarted.init();
+      expect(restarted.getSourceGeneration(candidate!.subjectId)).toBe(candidate!.metadata.subjectRevision);
+      await decide({ ...h.context, store: restarted }, candidate!.id, 'accept');
+      expect(h.memory.retrieve()).toHaveLength(1); expect(fake.requests).toHaveLength(1);
+    } finally { await restarted.close(); }
+  });
+
+  test('a node and source sharing an ID do not share consolidation evidence', async () => {
+    const h = await harness(); const source = await h.source();
+    await h.store.upsertNode({ id: source.id, kind: 'topic', slug: 'separate-node', title: 'Separate node', summary: 'Only the node summary.', status: 'draft' });
+    await h.store.upsertUsageRecord({ targetKind: 'node', targetId: source.id, usageKind: 'search-hit' });
+    const fake = readings(); const candidates = await refresh(h.context);
+    const node = candidates.find(candidate => candidate.subjectKind === 'node');
+    const sourceCandidate = candidates.find(candidate => candidate.subjectKind === 'source');
+    expect(node?.summary).toBe('Only the node summary.');
+    expect(node?.metadata.subjectRevision).toBe(h.store.getRecordGeneration('node', source.id));
+    expect(sourceCandidate?.metadata.subjectRevision).toBe(h.store.getSourceGeneration(source.id));
+    expect(node?.metadata.subjectRevision).not.toBe(sourceCandidate?.metadata.subjectRevision);
+    expect(fake.requests.some(request => JSON.stringify(request.state).includes('Only the node summary.'))).toBe(true);
+    await h.store.upsertSource({ ...source, summary: 'Unrelated source edit.' });
+    await expect(decide(h.context, sourceCandidate!.id, 'accept')).rejects.toThrow('stale');
+    await decide(h.context, node!.id, 'accept'); expect(h.memory.retrieve()).toHaveLength(1);
+  });
+
+  test('the reading and its row revision refer to the same persisted source instead of a stale cache', async () => {
+    const h = await harness(); const source = await h.source();
+    const sqlite = (h.store as unknown as { sqlite: { run(sql: string, values: unknown[]): void; save(): Promise<void> } }).sqlite;
+    sqlite.run('UPDATE knowledge_sources SET summary = ? WHERE id = ?', ['Actual persisted source statement.', source.id]);
+    await sqlite.save();
+    expect(h.store.getSource(source.id)?.summary).toBe(source.summary);
+    const fake = readings(); const [candidate] = await refresh(h.context);
+    expect(candidate?.summary).toBe('Actual persisted source statement.');
+    expect(candidate?.metadata.subjectRevision).toBe(h.store.getSourceGeneration(source.id));
+    expect(JSON.stringify(fake.requests[0]?.state)).toContain('Actual persisted source statement.');
+    expect(JSON.stringify(fake.requests[0]?.state)).not.toContain(source.summary!);
+  });
+
+  test('the row revision is checked at the memory write boundary after a delayed registry call', async () => {
+    const h = await harness(); const source = await h.source(); readings(); const [candidate] = await refresh(h.context);
+    const add = h.context.memoryRegistry.add.bind(h.context.memoryRegistry);
+    h.context.memoryRegistry.add = async (input, operation) => {
+      await h.store.upsertSource({ ...source, summary: 'Changed after memory initialization.' });
+      return add(input, operation);
+    };
+    await expect(decide(h.context, candidate!.id, 'accept')).rejects.toThrow('changed before its memory write');
+    expect(h.memory.retrieve()).toHaveLength(0);
+    expect(h.store.getConsolidationCandidate(candidate!.id)?.status).toBe('open');
   });
 
   test('concurrent accepts serialize and create one durable record', async () => {

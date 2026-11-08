@@ -1,9 +1,10 @@
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
+import { isDeepStrictEqual } from 'node:util';
 
 /** Representation evidence only, never permission to publish. Entries are issued
  * by actual writers/SQL decoders and bind complete object values. JSON copies,
  * replacements and caller-created lookalikes cannot mint this evidence. */
-const representations = new WeakMap<object, { readonly version: string; readonly raw: unknown }>();
+const representations = new WeakMap<object, { readonly view: unknown; readonly raw: unknown }>();
 const immutableRecordVersions = new WeakMap<object, string>();
 const versionGet = WeakMap.prototype.get, versionSet = WeakMap.prototype.set, applyVersion = Reflect.apply;
 export function knowledgeRecordVersion(value: unknown): string {
@@ -26,29 +27,37 @@ export function knowledgeRecordVersion(value: unknown): string {
   if (captured && typeof captured === 'object') applyVersion(versionSet, immutableRecordVersions, [captured, version]);
   return version;
 }
-export function sameKnowledgeRecord(left: unknown, right: unknown): boolean { return knowledgeRecordVersion(left) === knowledgeRecordVersion(right); }
+export function sameKnowledgeRecord(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(captureOwnedJson(left), captureOwnedJson(right));
+}
 function known(value: unknown): unknown | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const entry = representations.get(value);
   if (!entry) return undefined;
-  try { return entry.version === knowledgeRecordVersion(value) ? entry.raw : undefined; } catch { return undefined; }
+  try { return isDeepStrictEqual(captureOwnedJson(value), entry.view) ? entry.raw : undefined; } catch { return undefined; }
 }
 /** Bind decoder/writer-created numeric views to their exact canonical originals.
  * This is internal transport; callers of public replacement APIs never use it. */
 export function retainKnowledgeRepresentation<T>(view: T, raw: unknown): T {
   if (view && typeof view === 'object') representations.delete(view);
-  let captured: unknown;
+  let captured: unknown, capturedView: unknown;
   // A legacy hydration may contain malformed numbers. Do not broaden at-rest
   // rejection; it receives no representation proof and semantic admission holds.
-  try { captured = captureOwnedJson(raw); knowledgeRecordVersion(view); } catch { return view; }
-  const bind = (value: unknown, original: unknown): void => {
-    if (!value || typeof value !== 'object') return;
-    representations.set(value, { version: knowledgeRecordVersion(value), raw: original });
-    if (original && typeof original === 'object') for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      if ((Array.isArray(value) ? key !== 'length' : descriptor.enumerable) && Object.hasOwn(original, key)) bind(descriptor.value, (original as Record<string, unknown>)[key]);
+  try { captured = captureOwnedJson(raw); capturedView = captureOwnedJson(view); } catch { return view; }
+  // Capture each complete value once. Child bindings share their detached
+  // subtrees rather than serializing the same metadata at every nesting level.
+  const pending = [{ value: view as unknown, snapshot: capturedView, original: captured }];
+  while (pending.length) {
+    const entry = pending.pop()!;
+    if (!entry.value || typeof entry.value !== 'object') continue;
+    representations.set(entry.value, { view: entry.snapshot, raw: entry.original });
+    if (!entry.original || typeof entry.original !== 'object' || !entry.snapshot || typeof entry.snapshot !== 'object') continue;
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(entry.value))) {
+      if ((Array.isArray(entry.value) ? key !== 'length' : descriptor.enumerable) && Object.hasOwn(entry.original, key)
+        && Object.hasOwn(entry.snapshot, key)) pending.push({ value: descriptor.value,
+          snapshot: (entry.snapshot as Record<string, unknown>)[key], original: (entry.original as Record<string, unknown>)[key] });
     }
-  };
-  bind(view, captured);
+  }
   return view;
 }
 /** Never converts a primitive based on its name, type, magnitude or value. */

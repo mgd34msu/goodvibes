@@ -1,0 +1,29 @@
+import { expect, test } from 'bun:test';
+import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from '../sdk/src/platform/knowledge/store-record-representation.js';
+
+test('native representation keeps detached raw values without granting copies the original clock representation', () => {
+  const value = { metadata: { stamp: { decidedAt: 4_222_222_222_222 }, description: 'Original' } };
+  const original = { metadata: { stamp: { decidedAt: new Date(value.metadata.stamp.decidedAt).toISOString() }, description: 'Original' } };
+  retainKnowledgeRepresentation(value, original);
+  const expected = structuredClone(original);
+  original.metadata.stamp.decidedAt = 'Mutated external raw input';
+  expect(knowledgeRawRepresentation(value)).toEqual(expected);
+  expect(knowledgeRawRepresentation(structuredClone(value))).toEqual(value);
+  value.metadata.description = 'Changed text';
+  expect(knowledgeRawRepresentation(value)).toEqual({ metadata: { stamp: expected.metadata.stamp, description: 'Changed text' } });
+  value.metadata.stamp = { decidedAt: value.metadata.stamp.decidedAt };
+  expect(knowledgeRawRepresentation(value)).toEqual(value);
+});
+
+test('record equality preserves absence, negative zero and complete array data while ignoring property insertion order', () => {
+  expect(sameKnowledgeRecord({ first: 1, second: 'two' }, { second: 'two', first: 1 })).toBe(true);
+  expect(sameKnowledgeRecord({ value: undefined }, {})).toBe(false);
+  expect(sameKnowledgeRecord({ value: -0 }, { value: 0 })).toBe(false);
+  const values = ['same']; Object.defineProperty(values, 'meaning', { value: 'Additional user input', enumerable: true });
+  expect(sameKnowledgeRecord(values, ['same'])).toBe(false);
+  let getterCalls = 0;
+  const hostile = Object.defineProperty({}, 'value', { enumerable: true, get() { getterCalls++; return 'same'; } });
+  expect(() => sameKnowledgeRecord(hostile, { value: 'same' })).toThrow(JudgmentInputError);
+  expect(getterCalls).toBe(0);
+});

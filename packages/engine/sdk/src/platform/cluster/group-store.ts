@@ -104,12 +104,6 @@ export function preferredKeyRecord(a: GroupKeyRecord, b: GroupKeyRecord): GroupK
 export interface GroupKeyMaterial {
   readonly version: 1;
   readonly groupId: string;
-  /**
-   * The root secret, on the node that CREATED the group. Null on a node that
-   * joined: the root's only job is to have produced the group id, which is
-   * already stored, so there is no reason to spread it.
-   */
-  readonly groupRoot: string | null;
   readonly joinKey: string;
   readonly joinSalt: string;
   readonly joinVerifier: string;
@@ -222,7 +216,6 @@ export function readGroupKeyMaterial(value: unknown): GroupKeyMaterial | null {
   return {
     version: 1,
     groupId: candidate['groupId'],
-    groupRoot: typeof candidate['groupRoot'] === 'string' ? candidate['groupRoot'] : null,
     joinKey: candidate['joinKey'],
     joinSalt: candidate['joinSalt'],
     joinVerifier: candidate['joinVerifier'],
@@ -378,7 +371,6 @@ export async function clearGroupKeyMaterial(secrets: ClusterSecretStore): Promis
 /** Mint the key material for a brand-new group. */
 export function createGroupKeyMaterial(input: {
   readonly groupId: string;
-  readonly groupRoot: string;
   readonly joinKey: string;
   readonly joinSalt: string;
   readonly joinVerifier: string;
@@ -388,7 +380,6 @@ export function createGroupKeyMaterial(input: {
   return {
     version: 1,
     groupId: input.groupId,
-    groupRoot: input.groupRoot,
     joinKey: input.joinKey,
     joinSalt: input.joinSalt,
     joinVerifier: input.joinVerifier,
@@ -421,7 +412,6 @@ export function joiningGroupKeyMaterial(input: {
   return {
     version: 1,
     groupId: input.groupId,
-    groupRoot: null,
     joinKey: input.joinKey,
     joinSalt: input.joinSalt,
     joinVerifier: input.joinVerifier,

@@ -14,10 +14,8 @@
  *                member can admit a newcomer. Deliberately expensive to derive
  *                so that a JOIN KEY THE OPERATOR CHOSE AS A PASSPHRASE cannot
  *                be brute-forced cheaply from a captured verifier.
- *   groupRoot    32 random bytes minted once at create. Never rotates, never
- *                leaves the creating node, never on the wire. Its ONLY job is
- *                to name the group (see deriveGroupId), which is why losing
- *                it costs nothing: the id it produced is already stored.
+ *   groupId      a random public name minted once at create and stored by
+ *                every member. It is independent of keys and survives rotation.
  *   groupKey     32 random bytes per GENERATION. Signs every datagram. Rotates
  *                on a schedule and immediately on any removal.
  *   identity     a per-node ed25519 key pair. The public half lives in the
@@ -175,31 +173,15 @@ export function deriveJoinVerifier(joinKey: string, joinSalt: string): Promise<s
 
 // ── group identity ──────────────────────────────────────────────────────────
 
-/** A fresh group root secret. Minted once per group and never rotated. */
-export function generateGroupRoot(): string {
-  return encodeKeyBytes(randomBytes(KEY_BYTES));
-}
-
-/**
- * The group's public name on the wire.
- *
- * Derived from the ROOT secret and the fixed label 'group', never from a group
- * key, which is the whole reason it survives rotation: rotating produces a new
- * signing key and touches nothing this depends on. Truncated to 10 bytes (80
- * bits) and rendered base32, which is short enough to read out over the phone
- * and far too long to collide with a neighbour's group by accident.
- *
- * It is a one-way function of a secret nobody transmits, so publishing it in a
- * discovery beacon reveals only that a goodvibes group exists here.
+/** A public group name, independent of every signing/join/encryption key.
+ * The 80 random bits retain the existing wire format and collision budget.
+ * Existing memberships always use their stored ID; it is never regenerated.
  */
-export function deriveGroupId(groupRoot: string): string {
-  const root = decodeKeyBytes(groupRoot);
-  if (!root) throw new Error('the group root secret is not a 32-byte value');
-  const digest = createHmac('sha256', root).update('group').digest().subarray(0, 10);
-  return `g${toBase32(digest)}`;
+export function generateGroupId(): string {
+  return `g${toBase32(randomBytes(10))}`;
 }
 
-/** True when `value` has the shape {@link deriveGroupId} produces. */
+/** True when a value has the established public group-name shape. */
 export function isValidGroupId(value: unknown): value is string {
   return typeof value === 'string' && /^g[0-9A-HJKMNP-TV-Z]{16}$/.test(value);
 }

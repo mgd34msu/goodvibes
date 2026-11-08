@@ -292,7 +292,6 @@ describe('the dual-generation acceptance window', () => {
     return {
       version: 1,
       groupId: 'gTESTTESTTESTTEST',
-      groupRoot: null,
       joinKey: 'gvj1-AAAA',
       joinSalt: 'c2FsdHNhbHRzYWx0c2E',
       joinVerifier: 'dmVyaWZpZXI',
@@ -358,7 +357,6 @@ describe('two rotations at once', () => {
     const base: GroupKeyMaterial = {
       version: 1,
       groupId: 'gTESTTESTTESTTEST',
-      groupRoot: null,
       joinKey: 'gvj1-AAAA',
       joinSalt: 'c2FsdHNhbHRzYWx0c2E',
       joinVerifier: 'dmVyaWZpZXI',
@@ -409,7 +407,6 @@ describe('key history bounds', () => {
     let material: GroupKeyMaterial = {
       version: 1,
       groupId: 'gTESTTESTTESTTEST',
-      groupRoot: null,
       joinKey: 'gvj1-AAAA',
       joinSalt: 'c2FsdHNhbHRzYWx0c2E',
       joinVerifier: 'dmVyaWZpZXI',

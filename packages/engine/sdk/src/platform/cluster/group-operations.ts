@@ -13,10 +13,9 @@
  * identically to running it on the machine itself.
  */
 import {
-  deriveGroupId,
+  generateGroupId,
   deriveJoinSalt,
   deriveJoinVerifier,
-  generateGroupRoot,
   generateJoinKey,
   normalizeJoinKey,
 } from './group-crypto.js';
@@ -231,8 +230,7 @@ export async function createGroup(
       'use at least 12 characters, or leave it out and a strong key will be generated',
     );
   }
-  const groupRoot = generateGroupRoot();
-  const groupId = deriveGroupId(groupRoot);
+  const groupId = generateGroupId();
   const joinSalt = deriveJoinSalt(groupId);
   const joinKey = passphrase && passphrase.length > 0 ? passphrase : generateJoinKey();
   const joinVerifier = await deriveJoinVerifier(joinKey, joinSalt);
@@ -240,7 +238,6 @@ export async function createGroup(
 
   const material = createGroupKeyMaterial({
     groupId,
-    groupRoot,
     joinKey,
     joinSalt,
     joinVerifier,

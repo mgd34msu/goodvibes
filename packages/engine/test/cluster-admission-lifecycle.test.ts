@@ -4,7 +4,7 @@ import { FakeClusterClock, GroupAdmissionService, createGroupKeyMaterial } from 
 function fixture(send?: (service: GroupAdmissionService) => Promise<void>) {
   const clock = new FakeClusterClock();
   // Ephemeral dummy cryptographic material, never persisted or sent to a peer.
-  const material = createGroupKeyMaterial({ groupId: 'fixture-group', groupRoot: 'fixture-root', joinKey: 'fixture-join', joinSalt: 'fixture-salt', joinVerifier: 'fixture-verifier', nodeId: 'fixture-node', now: clock.now() });
+  const material = createGroupKeyMaterial({ groupId: 'fixture-group', joinKey: 'fixture-join', joinSalt: 'fixture-salt', joinVerifier: 'fixture-verifier', nodeId: 'fixture-node', now: clock.now() });
   const service: GroupAdmissionService = new GroupAdmissionService({
     nodeId: 'fixture-node', nodeDisplayName: 'fixture', version: '1.0.0', clock,
     logger: { debug() {}, info() {}, warn() {}, error() {} },

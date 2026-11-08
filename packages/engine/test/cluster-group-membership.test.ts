@@ -44,9 +44,8 @@ import {
   MAX_GROUP_TOMBSTONES,
 } from '../sdk/src/platform/cluster/group-state.js';
 import {
-  deriveGroupId,
+  generateGroupId,
   deriveJoinSalt,
-  generateGroupRoot,
   generateNodeKeyMaterial,
 } from '../sdk/src/platform/cluster/group-crypto.js';
 
@@ -632,9 +631,31 @@ describe('bounds', () => {
     await first.runtime.rotate('scheduled', 'test rotation');
     expect(first.runtime.keyMaterial?.groupId).toBe(before);
 
-    // And it is a pure function of the root secret, not of any key.
-    const root = generateGroupRoot();
-    expect(deriveGroupId(root)).toBe(deriveGroupId(root));
+    // Its public random name needs no additional root secret.
+    expect(Object.hasOwn(first.runtime.keyMaterial!, 'groupRoot')).toBe(false);
+    const fresh = generateGroupId();
+    expect(fresh).toMatch(/^g[0-9A-HJKMNP-TV-Z]{16}$/);
+    expect(generateGroupId()).not.toBe(fresh);
+  });
+
+  test('reopening existing group material keeps its stored identity and join verifier while dropping an unused root', async () => {
+    const { world: w, first, groupId, joinKey } = await makeGroupOfOne();
+    const secrets = memorySecrets(first), stored = await secrets.get(GROUP_MATERIAL_SECRET_KEY);
+    if (!stored) throw new Error('Missing stored membership');
+    const material = JSON.parse(stored);
+    // The earlier record shape stored this unused seed only on the creator.
+    material.groupRoot = Buffer.alloc(32, 1).toString('base64url');
+    await secrets.set(GROUP_MATERIAL_SECRET_KEY, JSON.stringify(material));
+    await first.runtime.stop();
+    const restarted = await addGroupNode(w, 'creator-restarted', { reuse: first });
+    expect(restarted.runtime.keyMaterial).toMatchObject({ groupId, joinSalt: material.joinSalt, joinVerifier: material.joinVerifier });
+    expect(Object.hasOwn(restarted.runtime.keyMaterial!, 'groupRoot')).toBe(false);
+    await restarted.runtime.rotate('scheduled', 'fixture rotation after reload');
+    expect(restarted.runtime.keyMaterial?.groupId).toBe(groupId);
+    expect(JSON.parse((await secrets.get(GROUP_MATERIAL_SECRET_KEY))!)).not.toHaveProperty('groupRoot');
+    const peer = await addGroupNode(w, 'new-peer');
+    expect((await joinGroup(peer.context, { groupId, joinKey })).ok).toBe(true);
+    expect(peer.runtime.keyMaterial?.groupId).toBe(groupId);
   });
 });
 
@@ -658,7 +679,6 @@ describe('what reaches the wire', () => {
     }
     expect(text).not.toContain(first.runtime.keyMaterial?.joinVerifier ?? 'never-matches');
     expect(text).not.toContain(first.runtime.keyMaterial?.node.identity.privateKey ?? 'never-matches');
-    expect(text).not.toContain(first.runtime.keyMaterial?.groupRoot ?? 'never-matches');
 
     // A surface reported through status is hashed, never carried in the clear.
     const holdings = second.runtime.surfaceHoldings();

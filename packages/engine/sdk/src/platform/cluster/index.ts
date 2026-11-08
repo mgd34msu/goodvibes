@@ -74,12 +74,11 @@ export {
 export { readClusterSettings } from './config-read.js';
 // ── group identity, membership and keys ─────────────────────────────────────
 export {
-  deriveGroupId,
+  generateGroupId,
   deriveJoinSalt,
   deriveJoinVerifier,
   digestSurfaceId,
   generateGroupKey,
-  generateGroupRoot,
   generateJoinKey,
   generateNodeKeyMaterial,
   isValidGroupId,

@@ -179,6 +179,22 @@ async function readsAsDerived(view: ReturnType<typeof derivationView>, reply: bo
   return !clean;
 }
 
+/** Retain first-source order and exact original text, without serializing it into keys. */
+function uniqueTaintSources(sources: readonly TaintSource[]): readonly TaintSource[] {
+  const surfaces = new Map<string, Map<string, Set<string>>>();
+  const unique: TaintSource[] = [];
+  for (const borrowed of sources) {
+    const source = Object.freeze({ surface: borrowed.surface, origin: borrowed.origin, text: borrowed.text });
+    let origins = surfaces.get(source.surface);
+    if (!origins) { origins = new Map(); surfaces.set(source.surface, origins); }
+    let texts = origins.get(source.origin);
+    if (!texts) { texts = new Set(); origins.set(source.origin, texts); }
+    if (texts.has(source.text)) continue;
+    texts.add(source.text); unique.push(source);
+  }
+  return unique;
+}
+
 /**
  * Find every field of an outward action whose content derives from untrusted
  * input.
@@ -197,46 +213,40 @@ export async function findContentTaint(
   assertTaintActive(options.signal);
   if (sources.length === 0) return [];
   const ownedFields = Object.freeze({ ...fields });
-  const ownedSources = sources.map(source => Object.freeze({ surface: source.surface, origin: source.origin, text: source.text }));
+  const ownedSources = uniqueTaintSources(sources);
   const exact = findExactContainment(ownedFields, ownedSources, options);
   const settled = new Set(exact.map((finding) => finding.field));
   const allowedReplies = new Set((options.replyToEnvelopeSenders ?? []).map(normalizeAddress));
   const exactFields = new Set(options.exactMatchFields ?? []);
   const replyFields = new Set(options.stripQuotedFields ?? []);
 
-  function* comparisons() {
-    for (const [field, text] of Object.entries(ownedFields)) {
-      if (text === undefined || text.trim().length === 0 || settled.has(field)) continue;
-      if (exactFields.has(field) && allowedReplies.has(normalizeAddress(text))) continue;
-      for (const source of ownedSources) {
-        if (settled.has(field)) break;
-        if (source.text.trim().length > 0) yield { field, text, source };
-      }
-    }
-  }
+  const activeSources = ownedSources.filter(source => source.text.trim().length > 0);
+  let pending = Object.entries(ownedFields).flatMap(([field, text]) =>
+    text === undefined || text.trim().length === 0 || settled.has(field)
+      || (exactFields.has(field) && allowedReplies.has(normalizeAddress(text))) ? [] : [{ field, text }]);
 
   // Preflight the whole pass before any reading: a late oversized source must
   // not leave earlier pairs classified against incomplete evidence.
-  for (const pair of comparisons()) derivationView(pair.field, pair.text, pair.source);
+  for (const pair of pending) for (const source of activeSources) derivationView(pair.field, pair.text, source);
   const findings: TaintFinding[] = [...exact];
-  const pending = comparisons();
-  for (;;) {
-    const batch = [];
-    for (let i = 0; i < DERIVATION_CONCURRENCY; i++) {
-      const next = pending.next();
-      if (next.done) break;
-      batch.push(next.value);
+  for (const source of activeSources) {
+    if (pending.length === 0) break;
+    const clean: typeof pending = [];
+    for (let offset = 0; offset < pending.length; offset += DERIVATION_CONCURRENCY) {
+      // Each batch contains distinct fields. A field's next source is never
+      // dispatched before its preceding source has actually cleared it.
+      const batch = pending.slice(offset, offset + DERIVATION_CONCURRENCY);
+      const derived = await mapLimit(batch, DERIVATION_CONCURRENCY, pair =>
+        readsAsDerived(derivationView(pair.field, pair.text, source), replyFields.has(pair.field), options.signal, options.port));
+      assertTaintActive(options.signal);
+      for (const [index, pair] of batch.entries()) {
+        if (derived[index] === false) clean.push(pair);
+        else if (derived[index] === true) findings.push({ field: pair.field, surface: source.surface, origin: source.origin,
+          excerpt: truncate(pair.text.trim()), kind: 'derived' });
+        else throw new JudgmentError('invalid-response', 'A content derivation reading was not returned');
+      }
     }
-    if (batch.length === 0) break;
-    const derived = await mapLimit(batch, DERIVATION_CONCURRENCY, pair =>
-      readsAsDerived(derivationView(pair.field, pair.text, pair.source), replyFields.has(pair.field), options.signal, options.port));
-    assertTaintActive(options.signal);
-    batch.forEach((pair, index) => {
-      if (!derived[index] || settled.has(pair.field)) return;
-      settled.add(pair.field);
-      findings.push({ field: pair.field, surface: pair.source.surface, origin: pair.source.origin,
-        excerpt: truncate(pair.text.trim()), kind: 'derived' });
-    });
+    pending = clean;
   }
   // Report in the caller's field order.
   const order = Object.keys(ownedFields);

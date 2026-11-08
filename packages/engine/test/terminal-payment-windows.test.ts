@@ -106,6 +106,19 @@ test('operation status and stop are available through the actual shared terminal
   f.ui.handleEscape();
 });
 
+test.each([
+  ['invalid-requested-maximum', 'requested maximum is invalid'],
+  ['requested-maximum-exceeded-denied', 'requested maximum was denied'],
+  ['requested-maximum-exceeded-expired', 'requested maximum expired'],
+  ['requested-maximum-exceeded-undeliverable', 'approval notice could not be delivered'],
+] as const)('terminal purchase status explains %s without exposing only its internal code', async (code, explanation) => {
+  const operation: PaymentOperationView = { purchaseId: 'refused-maximum', operationId: 'original-operation', state: 'refused', phase: null,
+    createdAtMs: 1, updatedAtMs: 2, totalMinorUnits: null, currency: null, outcome: `refused:${code}` };
+  const f = fixture({ operation }); await f.open();
+  expect(f.modal.items[0]?.detail).toContain(explanation);
+  expect(f.modal.items[0]?.detail).not.toContain(code);
+});
+
 test.each(['approve', 'deny'] as const)('the selected %s is bound to the displayed notice and sent exactly once', async action => {
   const f = fixture(); await f.open(); f.choose('window-0');
   expect(f.modal.items.every(item => item.detail?.includes(window.notice))).toBe(true);

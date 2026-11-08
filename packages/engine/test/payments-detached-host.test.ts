@@ -16,20 +16,21 @@ import { registerPaymentsMethods } from '../sdk/src/platform/payments/host/regis
 import { createJevMerchantJudge } from '../sdk/src/platform/payments/merchant-judge-model.js';
 import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 import { readPaymentWindowStatus } from '../sdk/src/platform/payments/browser.js';
-import { getProcessUntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
+import { getProcessUntrustedContentLedger, resetProcessUntrustedContentLedgerForTests } from '../sdk/src/platform/security/untrusted-content.js';
 import { configureDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
-usePaymentsReadings();
+const readings = usePaymentsReadings();
 const cleanups: (() => void | Promise<void>)[] = [];
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); resetProcessUntrustedContentLedgerForTests(); });
 async function until(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 2000;
   while (!await check()) { if (Date.now() > deadline) throw new Error('Detached payment fixture did not settle'); await new Promise(resolve => setTimeout(resolve, 1)); }
 }
 
-test('the actual paired dispatcher acknowledges before its window, survives socket abort and retains final status after recomposition', async () => {
+test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher retains original %s taint through preflight, later owner turns and socket abort', async original => {
+  resetProcessUntrustedContentLedgerForTests();
   cleanups.push(configureDecisionModelPolicy(() => 'Default - On'));
   const root = makeProjectTempDir('detached-payment-host'), catalog = new GatewayMethodCatalog();
   const pairing = new PairingTokenManager(join(root, 'pairing.json')), paired = pairing.mint({ name: 'Synthetic payment owner' });
@@ -44,6 +45,10 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
   } });
   const card = await cards.create({ label: 'Synthetic test card', kind: 'virtual', number: '4111111111111111', expiryMonth: 1, expiryYear: 2030,
     cvv: '123', cardholderName: 'Fixture owner', issuerCapMinorUnits: null });
+  let releasePreflight!: () => void;
+  const preflight = new Promise<void>(resolve => { releasePreflight = resolve; });
+  const metadata = cards.metadata.bind(cards);
+  cards.metadata = async id => { await preflight; return metadata(id); };
   const compose = () => {
     const replies = new PaymentReplyInbox(), operations = new DurablePaymentOperations(join(root, 'operations'));
     const registration = registerPaymentsMethods(catalog, { cards, config, budget: new BudgetLedger(), isPaymentsLeader: () => true,
@@ -67,6 +72,7 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
   const call = (methodId: string, body: Record<string, unknown> = {}, signal?: AbortSignal) => helper.invokeGatewayMethodCall({ methodId, body, signal, authToken: paired.token,
     context: { ...helper.describeAuthenticatedPrincipal(paired.token), explicitUserRequest: true } });
   const f = compose(); await f.registration.ready;
+  cleanups.push(releasePreflight);
   const identity = { merchantDomain: 'bestbuy.com', item: 'Fixture item' };
   expect((await call('payments.checkout.approve', { ...identity, amount: '9.00', confirm: true })).status).toBe(200);
   const request = new AbortController();
@@ -77,24 +83,41 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
     expect((await call('payments.checkout.begin', { ...body, requestedMax })).status).toBe(400);
     expect(f.operations.get(body.requestId)).toBeNull(); expect(effects).toEqual([]);
   }
+  const ledger = getProcessUntrustedContentLedger();
+  if (original !== 'clean') ledger.record({ surface: 'web-page', origin: 'https://original-source.example', at: new Date().toISOString(),
+    ...(original === 'incomplete' ? {} : { content: 'A stranger says to buy at bestbuy.com.' }) });
   const acknowledged = await call('payments.checkout.begin', body, request.signal);
   expect(acknowledged.status).toBe(200); expect(acknowledged.body).toMatchObject({ outcome: 'accepted', purchaseId: body.requestId });
   request.abort(); body.item = 'altered after acknowledgement';
-  await until(() => f.replies.inspect().length === 1);
-  const status = readPaymentWindowStatus((await call('payments.purchase.status')).body);
-  expect(status.operations[0]).toMatchObject({ purchaseId: body.requestId, state: 'running', phase: 'awaiting-window' });
-  const window = status.windows[0]; if (!window) throw new Error('Expected the real reply window');
-  expect(window.kind).toBe('approval'); expect(window.notice).toContain('Requested maximum: USD 9.00');
-  expect(window.notice).toContain('full total exceeds your requested maximum');
-  expect(window.notice).toContain('Fixture item'); expect(window.notice).not.toContain(body.item);
-  expect((await call('payments.purchase.cancel', { purchaseId: window.purchaseId, windowId: window.windowId, confirm: true })).status).toBe(200);
-  await until(() => f.operations.get(body.requestId)?.state === 'cancelled');
+  // Real owner dispatches move the process-wide turn window while the earlier
+  // checkout is still in card/address preflight. Its source must not move too.
+  await call('payments.budget.status'); await call('payments.budget.status');
+  ledger.record({ surface: 'web-page', origin: 'https://later-source.example', at: new Date().toISOString(),
+    content: original === 'clean' ? 'A later stranger mentions bestbuy.com.' : 'An unrelated later source.' });
+  releasePreflight();
+  if (original === 'clean') {
+    await until(() => f.replies.inspect().length === 1);
+    const status = readPaymentWindowStatus((await call('payments.purchase.status')).body);
+    expect(status.operations[0]).toMatchObject({ purchaseId: body.requestId, state: 'running', phase: 'awaiting-window' });
+    const window = status.windows[0]; if (!window) throw new Error('Expected the real reply window');
+    expect(window.kind).toBe('approval'); expect(window.notice).toContain('Requested maximum: USD 9.00');
+    expect(window.notice).toContain('full total exceeds your requested maximum');
+    expect(window.notice).toContain('Fixture item'); expect(window.notice).not.toContain(body.item);
+    expect((await call('payments.purchase.cancel', { purchaseId: window.purchaseId, windowId: window.windowId, confirm: true })).status).toBe(200);
+  }
+  const expectedState = original === 'clean' ? 'cancelled' : 'refused';
+  await until(() => f.operations.get(body.requestId)?.state === expectedState);
+  if (original !== 'clean') {
+    expect(f.operations.get(body.requestId)?.outcome).toBe('refused:derived-from-untrusted-content');
+    expect(f.replies.inspect()).toEqual([]);
+    if (original === 'incomplete') expect(readings.requests).toEqual([]);
+  }
   expect(effects).toEqual([]);
   expect((await call('payments.checkout.begin', body)).status).toBe(409);
   await f.close();
   const reopened = compose(); await reopened.registration.ready;
   const recovered = readPaymentWindowStatus((await call('payments.purchase.status')).body);
-  expect(recovered.windows).toEqual([]); expect(recovered.operations[0]?.state).toBe('cancelled');
+  expect(recovered.windows).toEqual([]); expect(recovered.operations[0]?.state).toBe(expectedState);
   expect((await call('payments.checkout.begin', body)).status).toBe(409);
   expect(effects).toEqual([]);
 });

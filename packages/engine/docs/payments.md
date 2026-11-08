@@ -1095,7 +1095,7 @@ The distinction is carried in the **type**, not checked at runtime.
 merchant is permissible only on an owner-origin intent" is a fact the compiler
 enforces rather than a rule a later edit can forget.
 
-Reuses the existing machinery unchanged:
+The payment path uses the shared content-assessment machinery:
 
 - `platform/security/content-taint.ts`, `findContentTaint(fields, sources, options)`
 - `platform/security/untrusted-content.ts`, the process ledger,
@@ -1103,13 +1103,26 @@ Reuses the existing machinery unchanged:
 - `platform/security/turn-boundary.ts`, `startTurnForOwnerRequest()`, so "this
   turn" means what it says and automated work does not reset the window
 
-**The payment path calls `findContentTaint` directly.** It does *not* call
+**The payment path uses the shared taint assessment, without an approval escape.** It does *not* call
 `evaluateOutwardEffect`, because that function accepts an `OwnerApproval` that
 allows a tainted action through (`untrusted-content.ts`, the
 `input.approval && input.approval.action === input.request.action` branch). That
 escape hatch is correct for email and wrong for money, and the way to be sure it
 cannot be reached is to not be on that code path. A test asserts a payment is
 still refused when a valid `OwnerApproval` for the same action is present.
+
+Native checkout admission retains the original untrusted-source evidence before
+asynchronous card/address preflight. The captured window includes the turn that
+the dispatcher's explicit owner request just displaced. Later status requests,
+approval replies and unrelated owner turns cannot erase or replace those facts.
+The same immutable evidence follows the detached operation through its window
+and any verified price revision. Missing, truncated or evicted original evidence
+remains incomplete; a later empty ledger does not clear it. Conversely, an
+unrelated later turn does not taint a purchase whose bound instruction was clean.
+Original paired-owner, payment settings, page and execution-lifetime checks
+still run independently. Direct SDK checkout captures its current evidence at
+entry unless its host supplies an already retained original snapshot. These
+facts are not parsed from the checkout request body and grant no submit authority.
 
 **Which fields are checked, and which deliberately are not.**
 

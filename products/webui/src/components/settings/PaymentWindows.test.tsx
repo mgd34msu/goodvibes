@@ -109,6 +109,18 @@ function operation(): PaymentOperationView {
   return { purchaseId: 'checkout', operationId: 'exact-operation', state: 'running', phase: 'submit-pending',
     createdAtMs: 1, updatedAtMs: 2, totalMinorUnits: 2500, currency: 'USD', outcome: null };
 }
+
+test.each([
+  ['invalid-requested-maximum', 'requested maximum is invalid'],
+  ['requested-maximum-exceeded-denied', 'requested maximum was denied'],
+  ['requested-maximum-exceeded-expired', 'requested maximum expired'],
+  ['requested-maximum-exceeded-undeliverable', 'approval notice could not be delivered'],
+] as const)('browser purchase status explains %s after its window is gone', async (code, explanation) => {
+  pending = false; operations = [{ ...operation(), state: 'refused', phase: null, outcome: `refused:${code}` }];
+  const container = render(); await until(() => container.textContent?.includes(explanation) === true);
+  expect(container.textContent).not.toContain(code);
+  expect(container.textContent).not.toContain('Stop checkout');
+});
 test('operation status remains visible without a window and stopping sends the exact original reference once', async () => {
   pending = false; operations = [operation()];
   const container = render(); await until(() => container.textContent?.includes('Checkout checkout') === true);

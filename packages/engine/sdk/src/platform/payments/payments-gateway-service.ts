@@ -32,6 +32,7 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
@@ -53,7 +54,7 @@ import type { CheckoutPageDriver } from './checkout-page.js';
 import type { GateInput } from './gates.js';
 import type { MerchantJudgePort, MerchantPolicy } from './merchant-recourse.js';
 import type { PaymentNotifier } from './checkout-flow.js';
-import type { UntrustedContentLedger } from '../security/untrusted-content.js';
+import { retainTaintEvidence, type RetainedTaintEvidence, type UntrustedContentLedger } from '../security/untrusted-content.js';
 import type { CurrencyCode, ShippingTier } from './types.js';
 
 export { RECOVERY_IO_TIMEOUT_MS } from './checkout-recovery.js';
@@ -176,6 +177,8 @@ export interface BeginCheckoutInput {
 
 /** Host-only invocation facts; never read from the checkout's wire input. */
 export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
+  /** Original request's host-captured sources, retained before async preflight. */
+  readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly gates?: GateInput | undefined;
   /** Native operation identity assigned before background work starts. */
   readonly purchaseId?: string | undefined;
@@ -249,10 +252,13 @@ export class PaymentsGatewayServiceImpl {
     const purchaseId = options.purchaseId;
     const gates = { ...(options.gates ?? this.deps.gates()) };
     const owner = this.ownership(options);
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId));
+    owner.assertCurrent?.();
+    const taintEvidence = options.taintEvidence === undefined ? retainTaintEvidence(this.deps.untrusted)
+      : captureOwnedJson(options.taintEvidence) as RetainedTaintEvidence;
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence));
   }
 
-  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId?: string): Promise<PaymentBeginResult> {
+  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -328,6 +334,7 @@ export class PaymentsGatewayServiceImpl {
       purchases: this.deps.purchases,
       notifier: this.deps.notifier,
       untrusted: this.deps.untrusted,
+      taintEvidence,
       merchantJudge: this.deps.merchantJudge,
       merchantPolicy: config.merchantPolicy,
       limits: config.limits,

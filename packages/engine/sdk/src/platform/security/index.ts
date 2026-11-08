@@ -32,6 +32,7 @@ export {
   grantOwnerApproval,
   labelUntrustedContent,
   originOf,
+  retainTaintEvidence,
   resetProcessUntrustedContentLedgerForTests,
   surfaceHasCommandAuthority,
 } from './untrusted-content.js';
@@ -41,6 +42,9 @@ export type {
   OutwardEffectRequest,
   OwnerApproval,
   OwnerRemedy,
+  RetainedTaintEvidence,
+  TaintEvidence,
+  TaintEvidenceWindow,
   UntrustedContentEnvelope,
   UntrustedContentPortOptions,
   UntrustedExposure,

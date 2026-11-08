@@ -62,7 +62,7 @@
  * for the full record of the override, and docs/payments.md §9.1.
  */
 import type { TaintFinding } from '../security/content-taint.js';
-import { assessOutwardContent, type UntrustedContentLedger } from '../security/untrusted-content.js';
+import { assessOutwardContent, assessRetainedOutwardContent, type RetainedTaintEvidence, type UntrustedContentLedger } from '../security/untrusted-content.js';
 
 /**
  * A purchase the OWNER asked for.
@@ -128,6 +128,8 @@ export function describeContentInitiatedRefusal(): string {
 export async function evaluatePaymentTaint(input: {
   readonly intent: PaymentIntent;
   readonly ledger: UntrustedContentLedger;
+  /** Host-captured original source evidence for a detached checkout. */
+  readonly evidence?: RetainedTaintEvidence | undefined;
   readonly signal?: AbortSignal | undefined;
 }): Promise<PaymentTaintDecision> {
   const signal = input.signal;
@@ -165,7 +167,9 @@ export async function evaluatePaymentTaint(input: {
 
   const checkedFields = Object.keys(fields).filter((key) => fields[key] !== undefined);
 
-  const assessment = await assessOutwardContent(input.ledger, fields, { exactMatchFields, signal });
+  const assessment = await (input.evidence === undefined
+    ? assessOutwardContent(input.ledger, fields, { exactMatchFields, signal })
+    : assessRetainedOutwardContent(input.evidence, fields, { exactMatchFields, signal }));
   signal?.throwIfAborted();
   if (assessment.kind === 'clean') {
     return { allowed: true, findings: [], reason: null, checkedFields };

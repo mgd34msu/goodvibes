@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Retain each checkout's original untrusted-source evidence before detached
+  preflight. Later owner turns cannot erase taint, replace incomplete evidence
+  or contaminate an originally clean request. Keep the same evidence through
+  approval waits and repricing while checking live authority separately.
+- Explain invalid or exceeded request-specific purchase maximums in both browser
+  and terminal operation status, including denied, expired and undeliverable
+  approvals.
+
 - Retain the exact purchase-window notice and Telegram's actual acknowledged
   chat/message/thread identities in checkout evidence. Notification delivery can
   return this receipt without sending twice; existing string-result callers keep

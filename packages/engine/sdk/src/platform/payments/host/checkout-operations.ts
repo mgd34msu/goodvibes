@@ -16,9 +16,18 @@ import type { BeginCheckoutInput, PaymentBeginResult } from '../payments-gateway
 import { isLivePaymentOperation, type PaymentOperationView, type PaymentOperationCancellation } from '../operation-view.js';
 import { DurablePaymentOperations, PaymentOperationStoreError, checkoutRequestId, type PaymentOperationWriter } from './operation-store.js';
 import type { DaemonPurchaseLedger } from './purchase-ledger.js';
+import type { RetainedTaintEvidence } from '../../security/untrusted-content.js';
 
-export interface DetachedCheckoutSource { readonly principalId: string; readonly assertCurrent: () => void }
-export interface DetachedCheckoutOwner { readonly signal: AbortSignal; readonly assertCurrent: () => void }
+export interface DetachedCheckoutSource {
+  readonly principalId: string;
+  readonly assertCurrent: () => void;
+  readonly taintEvidence?: RetainedTaintEvidence | undefined;
+}
+export interface DetachedCheckoutOwner {
+  readonly signal: AbortSignal;
+  readonly assertCurrent: () => void;
+  readonly taintEvidence?: RetainedTaintEvidence | undefined;
+}
 interface ActiveOperation {
   readonly writer: PaymentOperationWriter;
   readonly abort: AbortController;
@@ -51,6 +60,11 @@ export class CheckoutOperations {
     // when a retry sends different input. The caller must query that exact ID.
     if (this.store.get(id) || this.purchases.get(id)) throw new PaymentOperationStoreError('exists');
     const captured = captureOwnedJson(input) as unknown as BeginCheckoutInput;
+    // Copy host facts and bind the original reader before the handoff. An
+    // embed mutating its source wrapper cannot replace evidence or a guard on
+    // a later background tick. Native source factories already freeze theirs.
+    source = Object.freeze({ principalId: source.principalId, assertCurrent: source.assertCurrent.bind(source),
+      taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence });
     const current = () => {
       if (this.closed) throw new CheckoutOwnershipError();
       source.assertCurrent(); admissionCurrent();
@@ -100,7 +114,8 @@ export class CheckoutOperations {
     try {
       this.current(operation);
       writer.update({ ...writer.read(), state: 'running', updatedAtMs: this.now() });
-      const result = await this.execute(input, writer.purchaseId, { signal: operation.abort.signal, assertCurrent: () => this.current(operation) });
+      const result = await this.execute(input, writer.purchaseId, { signal: operation.abort.signal,
+        assertCurrent: () => this.current(operation), taintEvidence: operation.source.taintEvidence });
       // Completion records facts even after owner cancellation; it grants no
       // further act. Actual journal phase wins over a generic refusal string.
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);

@@ -108,7 +108,7 @@ import type { CardMaterialRedactor } from './card-redaction.js';
 import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms } from './checkout-page.js';
 import type { PurchaseRecord } from './purchase-record.js';
 import type { CheckoutPageClaim, CheckoutRegistry } from './checkout-registry.js';
-import type { UntrustedContentLedger } from '../security/untrusted-content.js';
+import { retainTaintEvidence, type RetainedTaintEvidence, type UntrustedContentLedger } from '../security/untrusted-content.js';
 import { dayKey } from './day.js';
 import type {
   CommandAuthorityChannel,
@@ -183,6 +183,8 @@ export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly purchases: PurchaseLedger;
   readonly notifier: PaymentNotifier;
   readonly untrusted: UntrustedContentLedger;
+  /** Host-only original source facts, never read from PurchaseRequest. */
+  readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly limits: BudgetLimits;
   readonly budgetCurrency: CurrencyCode;
   readonly timezone: string;
@@ -280,6 +282,9 @@ export async function runCheckout(
     owner.assertCurrent();
   };
   const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false };
+  current();
+  deps = { ...deps, taintEvidence: deps.taintEvidence === undefined ? retainTaintEvidence(deps.untrusted)
+    : captureOwnedJson(deps.taintEvidence) as RetainedTaintEvidence };
   try {
     let currentReading = input.reading;
     for (;;) {
@@ -379,7 +384,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     item: request.item,
     requestedMax: request.requestedMax,
   };
-  const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted, signal });
+  const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted, evidence: deps.taintEvidence, signal });
   current();
   if (!taint.allowed) {
     return refused('derived-from-untrusted-content', taint.reason ?? 'Refused: this purchase derives from page content.');

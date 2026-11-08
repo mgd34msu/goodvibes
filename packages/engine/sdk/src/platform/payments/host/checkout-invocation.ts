@@ -4,6 +4,7 @@ import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-conf
 import { HandlerError, type HandlerContextEnvelope } from './handler-plumbing.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
+import { retainTaintEvidence } from '../../security/untrusted-content.js';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,
@@ -61,6 +62,10 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   native: NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>, authorized: NonNullable<HandlerContextEnvelope['isAuthorized']>,
   paired: NonNullable<ReturnType<NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>['current']>>) {
   const expected = captureOwnedJson(paired), config = captureOwnedJson(readPaymentsServiceConfig(deps.config));
+  // The dispatcher starts the owner turn before this handler. Include the
+  // immediately displaced window, then keep these exact facts across later
+  // requests and async card/address preflight. Never recapture at execution.
+  const taintEvidence = retainTaintEvidence(deps.checkout.untrusted, 'since-last-boundary');
   const principalId = paired.principalId;
   const assertCurrent = () => {
     try {
@@ -70,5 +75,5 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
     } catch { throw new HandlerError('The original paired checkout owner, payment settings or browser changed. Inspect this purchase before trying again.', 'FAILED_PRECONDITION', 409); }
   };
   assertCurrent();
-  return Object.freeze({ principalId, assertCurrent });
+  return Object.freeze({ principalId, assertCurrent, taintEvidence });
 }

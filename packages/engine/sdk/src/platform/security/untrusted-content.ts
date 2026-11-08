@@ -45,7 +45,7 @@
  */
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { findContentTaint, describeContentTaint, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
-import { judgmentInputProblem } from '../gate/judgment-input.js';
+import { captureOwnedJson, judgmentInputProblem } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import {
@@ -249,6 +249,22 @@ export interface TaintEvidence {
   assertCurrent(): void;
 }
 
+/** Original source facts owned by one detached operation. This is evidence,
+ * not owner/execution authority, and is never accepted from a tool payload. */
+export type RetainedTaintEvidence = Readonly<Omit<TaintEvidence, 'assertCurrent'>>;
+
+/** Capture before handing work to a new lifetime. Later process-wide turn
+ * boundaries cannot erase or substitute this operation's original evidence. */
+export function retainTaintEvidence(ledger: UntrustedContentLedger, window: TaintEvidenceWindow = 'turn'): RetainedTaintEvidence {
+  const evidence = ledger.captureTaintEvidence(window);
+  const assertCurrent = evidence.assertCurrent.bind(evidence);
+  assertCurrent();
+  const retained = captureOwnedJson({ sources: evidence.sources, complete: evidence.complete, missing: evidence.missing,
+    truncated: evidence.truncated, evicted: evidence.evicted, revision: evidence.revision }) as RetainedTaintEvidence;
+  assertCurrent();
+  return retained;
+}
+
 /**
  * What untrusted content has entered the conversation, and when.
  *
@@ -430,6 +446,41 @@ export async function assessOutwardContent(
 ): Promise<OutwardContentAssessment> {
   if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
   const evidence = ledger.captureTaintEvidence(window);
+  return assessEvidence(evidence, content, options, evidence.assertCurrent.bind(evidence));
+}
+
+/** Compare against the captured original facts, without consulting whichever
+ * unrelated turn now owns the process ledger. Execution must keep its separate
+ * live owner checks. Borrowed snapshots detach before the first await. */
+export async function assessRetainedOutwardContent(
+  evidence: RetainedTaintEvidence,
+  content: Readonly<Record<string, string | undefined>> | undefined,
+  options: TaintOptions = {},
+): Promise<OutwardContentAssessment> {
+  if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+  let captured: RetainedTaintEvidence;
+  try { captured = captureOwnedJson(evidence) as RetainedTaintEvidence; }
+  catch { throw new JudgmentError('invalid-request', 'the retained untrusted-source evidence is invalid'); }
+  if (!captured || typeof captured !== 'object' || !Array.isArray(captured.sources)
+    || Object.keys(captured).some(key => !['sources', 'complete', 'missing', 'truncated', 'evicted', 'revision'].includes(key))
+    || captured.sources.length > MAX_RETAINED_INGESTS
+    || !Number.isSafeInteger(captured.revision) || captured.revision < 0
+    || !['complete', 'missing', 'truncated', 'evicted'].every(key => typeof (captured as unknown as Record<string, unknown>)[key] === 'boolean')
+    || captured.complete !== !(captured.missing || captured.truncated || captured.evicted)
+    || captured.sources.some(source => !source || typeof source !== 'object' || typeof source.surface !== 'string'
+      || typeof source.origin !== 'string' || typeof source.text !== 'string' || source.text.length > MAX_RETAINED_CONTENT_CHARS
+      || Object.keys(source).some(key => !['surface', 'origin', 'text'].includes(key)))) {
+    throw new JudgmentError('invalid-request', 'the retained untrusted-source evidence is invalid');
+  }
+  return assessEvidence(captured, content, options);
+}
+
+async function assessEvidence(
+  evidence: Pick<TaintEvidence, 'sources' | 'complete'>,
+  content: Readonly<Record<string, string | undefined>> | undefined,
+  options: TaintOptions,
+  assertCurrent?: () => void,
+): Promise<OutwardContentAssessment> {
   if (!evidence.complete) return { kind: 'incomplete', findings: [], reason: 'missing-sources' };
   if (evidence.sources.length === 0) return { kind: 'clean', findings: [] };
   if (content === undefined) return { kind: 'incomplete', findings: [], reason: 'missing-content' };
@@ -440,11 +491,11 @@ export async function assessOutwardContent(
   return decisionOrClassic<OutwardContentAssessment>(async () => {
     const findings = await findContentTaint(fields, evidence.sources, options);
     if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
-    evidence.assertCurrent();
+    assertCurrent?.();
     return { kind: findings.length === 0 ? 'clean' : 'tainted', findings };
   }, () => {
     if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
-    evidence.assertCurrent();
+    assertCurrent?.();
     return { kind: 'incomplete' as const, findings: [], reason: 'decision-model-disabled' as const };
   });
 }

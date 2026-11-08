@@ -10,7 +10,7 @@
 
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { randomUUID } from 'node:crypto';
-import { types as nodeTypes } from 'node:util';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { SQLiteStore } from './sqlite-store.js';
@@ -18,6 +18,8 @@ import {
   SqliteVecMemoryIndex,
   type MemoryVectorStats,
   resolveMemoryVectorDbPath,
+  memoryVectorInput,
+  type MemoryVectorSourceRevision,
 } from './memory-vector-store.js';
 import {
   HASHED_MEMORY_EMBEDDING_PROVIDER,
@@ -35,6 +37,8 @@ import {
   normalizeScope,
   recordMatchesPostSqlFilter,
   rowToRecord,
+  MEMORY_SCHEMA_VERSION,
+  validateMemoryRowRevisions,
 } from './memory-store-helpers.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -319,6 +323,7 @@ export class MemoryStore {
           options.vectorDbPath ?? resolveMemoryVectorDbPath(dbPath),
           undefined,
           this.embeddingRegistry,
+          record => this.captureVectorSourceRevision(record),
         );
     ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
   }
@@ -326,7 +331,10 @@ export class MemoryStore {
   async init(): Promise<void> {
     if (this.ready) return;
     this.backendEpoch++;
-    await this.sqlite.init(createSchema as Parameters<SQLiteStore['init']>[0], { storeName: 'memory store', schemaVersion: 1 });
+    await this.sqlite.init(createSchema as Parameters<SQLiteStore['init']>[0], {
+      storeName: 'memory store', schemaVersion: MEMORY_SCHEMA_VERSION,
+      validateCurrentSchema: validateMemoryRowRevisions,
+    });
     this.ready = true;
     await this.vectorIndex?.init();
     this.rebuildVectorIndex();
@@ -1056,12 +1064,37 @@ export class MemoryStore {
       resolveMemoryVectorDbPath(newDbPath),
       undefined,
       this.embeddingRegistry,
+      record => this.captureVectorSourceRevision(record),
     );
     ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
     await this.init();
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
+
+  private captureVectorSourceRevision(record: MemoryRecord): MemoryVectorSourceRevision {
+    const sqlite = this.sqlite, epoch = this.backendEpoch;
+    // Read this connection: a mutation can have committed locally before the
+    // autosave publishes its image to disk. A disk read would bind the old row.
+    const selected = sqlite.exec('SELECT * FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0];
+    const values = selected?.values[0];
+    if (!selected || !values || !isDeepStrictEqual(memoryVectorInput(record), memoryVectorInput(rowToRecord(selected.columns, values)))) {
+      throw new Error('Memory vector record source changed');
+    }
+    const revision = values[selected.columns.indexOf('gv_revision')];
+    if (typeof revision !== 'string' || !/^[0-9a-f]{32}$/.test(revision)) {
+      throw new Error('Memory vector record revision unavailable');
+    }
+    return {
+      revision,
+      assertCurrent: () => {
+        if (!this.ready || this.sqlite !== sqlite || this.backendEpoch !== epoch
+          || sqlite.exec('SELECT gv_revision FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0]?.values[0]?.[0] !== revision) {
+          throw new Error('Memory vector record source changed');
+        }
+      },
+    };
+  }
 
   private createAddRecord(opts: MemoryAddOptions): MemoryRecord {
     const now = Date.now();

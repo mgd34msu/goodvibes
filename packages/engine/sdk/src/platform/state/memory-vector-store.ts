@@ -1,5 +1,6 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
@@ -38,7 +39,7 @@ function bunSqliteDatabase(): typeof import('bun:sqlite').Database {
 export const MEMORY_VECTOR_DIMS = 384;
 
 /** Target `PRAGMA user_version` for the memory vector index. */
-export const MEMORY_VECTOR_SCHEMA_VERSION = 1;
+export const MEMORY_VECTOR_SCHEMA_VERSION = 2;
 export { embedMemoryText } from './memory-embeddings.js';
 
 export interface MemoryVectorSearchFilter {
@@ -98,21 +99,26 @@ export function resolveMemoryVectorDbPath(dbPath?: string): string {
   return `${dbPath}.vec.sqlite`;
 }
 
-export function memoryVectorSourceHash(record: MemoryRecord): string {
-  const source = JSON.stringify({
-    id: record.id,
-    scope: record.scope,
-    cls: record.cls,
-    summary: record.summary,
-    detail: record.detail ?? '',
-    tags: record.tags,
-    provenance: record.provenance,
-    reviewState: record.reviewState,
-    confidence: record.confidence,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-  });
-  return createHash('sha256').update(source).digest('hex');
+/** Native source-store revision, not a hash of private memory text. */
+export interface MemoryVectorSourceRevision {
+  readonly revision: string;
+  readonly assertCurrent: () => void;
+}
+
+type CapturedVectorSource = MemoryVectorSourceRevision & {
+  readonly record: MemoryRecord;
+  readonly published: () => void;
+};
+
+/** Fields that affect embedding or vector filtering, with stored detail normalization. */
+export function memoryVectorInput(record: MemoryRecord) {
+  return {
+    id: record.id, scope: record.scope, cls: record.cls, summary: record.summary,
+    detail: record.detail?.trim() ?? '', tags: record.tags,
+    provenance: record.provenance.map(entry => ({ kind: entry.kind, ref: entry.ref, label: entry.label ?? '' })),
+    reviewState: record.reviewState, confidence: record.confidence,
+    createdAt: record.createdAt, updatedAt: record.updatedAt,
+  };
 }
 
 export function buildMemoryEmbeddingText(record: MemoryRecord): string {
@@ -135,6 +141,37 @@ export class SqliteVecMemoryIndex {
   /** The open in flight, so concurrent init calls share it. */
   private opening: Promise<void> | null = null;
   private static readonly rebuildBatchSize = 25;
+  // Only standalone indices need these snapshots. MemoryStore supplies durable
+  // native revisions, so its index never retains another copy of memory text.
+  private readonly standaloneSources = new Map<string, { record: MemoryRecord; revision: string }>();
+
+  private captureSource(record: MemoryRecord): CapturedVectorSource {
+    const snapshot = structuredClone(record);
+    const native = this.sourceRevision?.(snapshot);
+    const previous = native ? undefined : this.standaloneSources.get(snapshot.id);
+    const selected = previous && isDeepStrictEqual(previous.record, snapshot) ? previous
+      : { record: snapshot, revision: native?.revision ?? `memory-index-${randomUUID()}` };
+    return {
+      record: snapshot,
+      revision: selected.revision,
+      assertCurrent: () => {
+        native?.assertCurrent();
+        if (!isDeepStrictEqual(record, snapshot)) throw new Error('Memory vector record changed');
+        if (!native) {
+          const current = this.standaloneSources.get(snapshot.id);
+          if (current !== previous && current !== selected) throw new Error('Memory vector record source changed');
+        }
+      },
+      published: () => { if (!native) this.standaloneSources.set(snapshot.id, selected); },
+    };
+  }
+
+  private sourceOperation(source: CapturedVectorSource, operation: MemoryOperationOptions): MemoryOperationOptions {
+    return captureMemoryOperation({ signal: operation.signal, assertCurrent: () => {
+      assertMemoryOperationCurrent(operation);
+      source.assertCurrent();
+    } });
+  }
 
   private captureOperation(options?: MemoryOperationOptions): MemoryOperationOptions {
     const lifecycle = captureMemoryOperation(options), db = this.db;
@@ -151,6 +188,7 @@ export class SqliteVecMemoryIndex {
     private readonly dbPath: string,
     private readonly dimensions = MEMORY_VECTOR_DIMS,
     private readonly embeddingRegistry: MemoryEmbeddingProviderRegistry,
+    private readonly sourceRevision?: (record: MemoryRecord) => MemoryVectorSourceRevision,
   ) {}
 
   /**
@@ -185,7 +223,16 @@ export class SqliteVecMemoryIndex {
         dbPath: this.dbPath,
         db: this.db,
         targetVersion: MEMORY_VECTOR_SCHEMA_VERSION,
-        migrations: [{ toVersion: MEMORY_VECTOR_SCHEMA_VERSION, migrate: () => this.createSchema() }],
+        migrations: [{ toVersion: MEMORY_VECTOR_SCHEMA_VERSION, migrate: () => {
+          // v1 only stored content digests, which cannot establish a native row
+          // revision. Snapshot first (above), then rebuild this derived cache.
+          // Primary memories live in the separate memory store and stay intact.
+          this.db?.transaction(() => {
+            this.db?.run('DROP TABLE IF EXISTS memory_vectors');
+            this.db?.run('DROP TABLE IF EXISTS memory_vector_ids');
+            this.createSchema();
+          })();
+        } }],
         closeDb: () => {
           this.db?.close();
           this.db = null;
@@ -231,14 +278,17 @@ export class SqliteVecMemoryIndex {
   }
 
   upsert(record: MemoryRecord, options?: MemoryOperationOptions): void {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
+    const owner = this.captureOperation(options);
+    assertMemoryOperationCurrent(owner);
     if (!this.db || !this.enabled) return;
+    this.upsertCaptured(this.captureSource(record), owner);
+  }
 
+  private upsertCaptured(source: CapturedVectorSource, owner: MemoryOperationOptions): void {
+    const operation = this.sourceOperation(source, owner);
     try {
-      const sourceHash = memoryVectorSourceHash(record);
-      const embedding = this.embedText(buildMemoryEmbeddingText(record), 'record', record.id, operation);
-      this.writeRecord(record, sourceHash, embedding, operation);
+      const embedding = this.embedText(buildMemoryEmbeddingText(source.record), 'record', source.record.id, operation);
+      this.writeRecord(source, embedding, operation);
     } catch (err) {
       assertMemoryOperationCurrent(operation);
       this.markEmbeddingUnavailable(err);
@@ -246,20 +296,20 @@ export class SqliteVecMemoryIndex {
   }
 
   async upsertAsync(record: MemoryRecord, options?: MemoryOperationOptions): Promise<void> {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
+    const owner = this.captureOperation(options);
+    assertMemoryOperationCurrent(owner);
     if (!this.db || !this.enabled) return;
-
-    const sourceHash = memoryVectorSourceHash(record);
+    const source = this.captureSource(record);
+    const operation = this.sourceOperation(source, owner);
     const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
-      text: buildMemoryEmbeddingText(record),
+      text: buildMemoryEmbeddingText(source.record),
       dimensions: this.dimensions,
       usage: 'record',
-      recordId: record.id,
+      recordId: source.record.id,
       signal: operation.signal, beforeAttempt: () => assertMemoryOperationCurrent(operation),
     }), operation);
     const embedding = normalizeMemoryEmbeddingVector(result.vector, this.dimensions);
-    this.writeRecord(record, sourceHash, embedding, operation);
+    this.writeRecord(source, embedding, operation);
   }
 
   delete(recordId: string, options?: MemoryOperationOptions): void {
@@ -269,36 +319,41 @@ export class SqliteVecMemoryIndex {
     const row = this.db.query<RecordIdRow, [string]>(
       'SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
     ).get(recordId);
-    if (!row) return;
+    if (!row) { this.standaloneSources.delete(recordId); return; }
     this.runMutation('DELETE FROM memory_vectors WHERE rowid = ?', [row.rowid], operation);
     this.runMutation('DELETE FROM memory_vector_ids WHERE rowid = ?', [row.rowid], operation);
+    this.standaloneSources.delete(recordId);
   }
 
   sync(records: readonly MemoryRecord[]): void {
     if (!this.db || !this.enabled) return;
+    const operation = this.captureOperation();
+    assertMemoryOperationCurrent(operation);
 
     const seen = new Set<string>();
     const tx = this.db.transaction((entries: readonly MemoryRecord[]) => {
       for (const record of entries) {
         seen.add(record.id);
-        const row = this.db?.query<{ source_hash: string }, [string]>(
-          'SELECT source_hash FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
+        const row = this.db?.query<{ source_revision: string }, [string]>(
+          'SELECT source_revision FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
         ).get(record.id);
-        const sourceHash = memoryVectorSourceHash(record);
-        if (row?.source_hash === sourceHash) continue;
-        this.upsert(record);
+        const source = this.captureSource(record);
+        source.assertCurrent();
+        if (row?.source_revision === source.revision) continue;
+        this.upsertCaptured(source, operation);
       }
 
       const staleRows = this.db?.query<{ record_id: string }, []>(
         'SELECT record_id FROM memory_vector_ids',
       ).all() ?? [];
       for (const stale of staleRows) {
-        if (!seen.has(stale.record_id)) this.delete(stale.record_id);
+        if (!seen.has(stale.record_id)) this.delete(stale.record_id, operation);
       }
     });
     try {
       tx(records);
     } catch (err) {
+      assertMemoryOperationCurrent(operation);
       this.markEmbeddingUnavailable(err);
     }
   }
@@ -308,27 +363,28 @@ export class SqliteVecMemoryIndex {
     assertMemoryOperationCurrent(operation);
     if (!this.db || !this.enabled) return;
 
-    const pending: Array<{ record: MemoryRecord; sourceHash: string; embedding: Float32Array }> = [];
+    const pending: Array<{ source: CapturedVectorSource; embedding: Float32Array }> = [];
 
     for (const record of records) {
-      const row = this.db.query<{ source_hash: string }, [string]>(
-        'SELECT source_hash FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
+      const row = this.db.query<{ source_revision: string }, [string]>(
+        'SELECT source_revision FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
       ).get(record.id);
-      const sourceHash = memoryVectorSourceHash(record);
-      if (!options.force && row?.source_hash === sourceHash) {
+      const source = this.captureSource(record);
+      const sourceOperation = this.sourceOperation(source, operation);
+      assertMemoryOperationCurrent(sourceOperation);
+      if (!options.force && row?.source_revision === source.revision) {
         continue;
       }
 
       const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
-        text: buildMemoryEmbeddingText(record),
+        text: buildMemoryEmbeddingText(source.record),
         dimensions: this.dimensions,
         usage: 'record',
-        recordId: record.id,
-        signal: operation.signal, beforeAttempt: () => assertMemoryOperationCurrent(operation),
-      }), operation);
+        recordId: source.record.id,
+        signal: sourceOperation.signal, beforeAttempt: () => assertMemoryOperationCurrent(sourceOperation),
+      }), sourceOperation);
       pending.push({
-        record,
-        sourceHash,
+        source,
         embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions),
       });
 
@@ -415,6 +471,7 @@ export class SqliteVecMemoryIndex {
   }
 
   close(): void {
+    this.standaloneSources.clear();
     if (!this.db) return;
     this.db.close();
     this.db = null;
@@ -428,7 +485,7 @@ export class SqliteVecMemoryIndex {
       CREATE TABLE IF NOT EXISTS memory_vector_ids (
         rowid       INTEGER PRIMARY KEY AUTOINCREMENT,
         record_id   TEXT NOT NULL UNIQUE,
-        source_hash TEXT NOT NULL DEFAULT '',
+        source_revision TEXT NOT NULL DEFAULT '',
         updated_at  INTEGER NOT NULL DEFAULT 0,
         indexed_at  INTEGER NOT NULL DEFAULT 0
       )
@@ -442,7 +499,6 @@ export class SqliteVecMemoryIndex {
         review_state text,
         confidence integer,
         +record_id text,
-        +source_hash text,
         +updated_at integer,
         +created_at integer
       )
@@ -488,11 +544,11 @@ export class SqliteVecMemoryIndex {
     });
   }
 
-  private writePendingRebuildBatch(entries: Array<{ record: MemoryRecord; sourceHash: string; embedding: Float32Array }>, operation: MemoryOperationOptions): void {
+  private writePendingRebuildBatch(entries: Array<{ source: CapturedVectorSource; embedding: Float32Array }>, operation: MemoryOperationOptions): void {
     if (!this.db || !this.enabled || entries.length === 0) return;
-    const tx = this.db.transaction((batch: Array<{ record: MemoryRecord; sourceHash: string; embedding: Float32Array }>) => {
+    const tx = this.db.transaction((batch: Array<{ source: CapturedVectorSource; embedding: Float32Array }>) => {
       for (const entry of batch) {
-        this.writeRecord(entry.record, entry.sourceHash, entry.embedding, operation);
+        this.writeRecord(entry.source, entry.embedding, this.sourceOperation(entry.source, operation));
       }
     });
     tx(entries);
@@ -504,8 +560,8 @@ export class SqliteVecMemoryIndex {
     assertMemoryOperationCurrent(operation);
   }
 
-  private writeRecord(record: MemoryRecord, sourceHash: string, embedding: Float32Array, operation: MemoryOperationOptions): void {
-    if (memoryVectorSourceHash(record) !== sourceHash) throw new Error('Memory vector record changed');
+  private writeRecord(source: CapturedVectorSource, embedding: Float32Array, operation: MemoryOperationOptions): void {
+    const record = source.record;
     assertMemoryOperationCurrent(operation);
     if (!this.db) return;
     const rowid = this.ensureRowId(record.id, operation);
@@ -513,17 +569,18 @@ export class SqliteVecMemoryIndex {
     this.runMutation('DELETE FROM memory_vectors WHERE rowid = ?', [rowid], operation);
     this.runMutation(
       `INSERT INTO memory_vectors
-         (rowid, embedding, scope, cls, review_state, confidence, record_id, source_hash, updated_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (rowid, embedding, scope, cls, review_state, confidence, record_id, updated_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [rowid, embedding, record.scope, record.cls, record.reviewState,
-        record.confidence, record.id, sourceHash, record.updatedAt, record.createdAt],
+        record.confidence, record.id, record.updatedAt, record.createdAt],
       operation,
     );
     this.runMutation(
       `UPDATE memory_vector_ids
-         SET source_hash = ?, updated_at = ?, indexed_at = ?
+         SET source_revision = ?, updated_at = ?, indexed_at = ?
        WHERE rowid = ?`,
-      [sourceHash, record.updatedAt, Date.now(), rowid], operation);
+      [source.revision, record.updatedAt, Date.now(), rowid], operation);
+    source.published();
     this.error = undefined;
   }
 }

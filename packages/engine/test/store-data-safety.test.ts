@@ -30,11 +30,13 @@ import {
 import { RetentionPolicy } from '../sdk/src/platform/runtime/retention/policy.js';
 import { SnapshotPruner } from '../sdk/src/platform/runtime/retention/pruner.js';
 import { CodeIndexStore } from '../sdk/src/platform/state/code-index-store.js';
-import { SqliteVecMemoryIndex, resolveMemoryVectorDbPath } from '../sdk/src/platform/state/memory-vector-store.js';
+import { SqliteVecMemoryIndex, resolveMemoryVectorDbPath, MEMORY_VECTOR_SCHEMA_VERSION } from '../sdk/src/platform/state/memory-vector-store.js';
 import { MemoryEmbeddingProviderRegistry } from '../sdk/src/platform/state/memory-embeddings.js';
 import { ConfigManager } from '../sdk/src/platform/config/manager.js';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
-import { createSchema as createMemorySchema } from '../sdk/src/platform/state/memory-store-helpers.js';
+import { createSchema as createMemorySchema, MEMORY_SCHEMA_VERSION, validateMemoryRowRevisions } from '../sdk/src/platform/state/memory-store-helpers.js';
+import { MemoryStore } from '../sdk/src/platform/state/memory-store.js';
+import { loadSqliteVecExtension } from '../sdk/src/platform/state/sqlite-vec-loader.js';
 
 async function withScratch<T>(fn: (dir: string) => T | Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'store-safety-'));
@@ -74,26 +76,83 @@ describe('every store the platform writes carries PRAGMA user_version', () => {
     const index = new SqliteVecMemoryIndex(dbPath, undefined, registry);
     await index.init();
     index.close();
-    expect(readUserVersion(dbPath)).toBe(1);
+    expect(readUserVersion(dbPath)).toBe(MEMORY_VECTOR_SCHEMA_VERSION);
   }));
 
   test('memory store (sql.js) stamps and persists its schema version', async () => withScratch(async (dir) => {
     const dbPath = join(dir, 'memory.sqlite');
     const store = new SQLiteStore(dbPath);
-    await store.init(createMemorySchema as Parameters<SQLiteStore['init']>[0], { storeName: 'memory store', schemaVersion: 1 });
+    await store.init(createMemorySchema as Parameters<SQLiteStore['init']>[0], { storeName: 'memory store', schemaVersion: MEMORY_SCHEMA_VERSION, validateCurrentSchema: validateMemoryRowRevisions });
     // A brand-new store touches disk on first save (the long-standing
     // contract); the stamped version rides along in that export.
     await store.save();
     store.close();
-    expect(readUserVersion(dbPath)).toBe(1);
+    expect(readUserVersion(dbPath)).toBe(MEMORY_SCHEMA_VERSION);
 
-    // Reopen: already-current stores migrate nothing and stay at version 1.
+    // Reopen: already-current stores migrate nothing and keep their current version.
     const reopened = new SQLiteStore(dbPath);
-    await reopened.init(createMemorySchema as Parameters<SQLiteStore['init']>[0], { storeName: 'memory store', schemaVersion: 1 });
+    await reopened.init(createMemorySchema as Parameters<SQLiteStore['init']>[0], { storeName: 'memory store', schemaVersion: MEMORY_SCHEMA_VERSION, validateCurrentSchema: validateMemoryRowRevisions });
     reopened.close();
-    expect(readUserVersion(dbPath)).toBe(1);
+    expect(readUserVersion(dbPath)).toBe(MEMORY_SCHEMA_VERSION);
   }));
 });
+
+test('v1 memory and vector migration preserves primary records, snapshots caches, and reuses the rebuilt cache', () => withScratch(async dir => {
+  const dbPath = join(dir, 'memory.sqlite'), vectorPath = resolveMemoryVectorDbPath(dbPath);
+  const primary = new Database(dbPath);
+  try {
+    primary.run(`CREATE TABLE memory_records (
+      id TEXT PRIMARY KEY, scope TEXT NOT NULL, cls TEXT NOT NULL, summary TEXT NOT NULL,
+      detail TEXT, tags TEXT NOT NULL, provenance TEXT NOT NULL, created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL, review_state TEXT NOT NULL DEFAULT 'fresh',
+      confidence INTEGER NOT NULL DEFAULT 60, reviewed_at INTEGER, reviewed_by TEXT,
+      stale_reason TEXT, valid_from INTEGER, valid_until INTEGER
+    )`);
+    primary.run("INSERT INTO memory_records (id, scope, cls, summary, detail, tags, provenance, created_at, updated_at) VALUES ('kept', 'project', 'fact', 'A real saved memory', 'Private detail stays in the primary store', '[]', '[]', 1, 1)");
+    primary.run('PRAGMA user_version = 1');
+  } finally { primary.close(); }
+  const cache = new Database(vectorPath);
+  try {
+    await loadSqliteVecExtension(cache);
+    cache.run(`CREATE TABLE memory_vector_ids (
+      rowid INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL UNIQUE,
+      source_hash TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0,
+      indexed_at INTEGER NOT NULL DEFAULT 0
+    )`);
+    cache.run(`CREATE VIRTUAL TABLE memory_vectors USING vec0(
+      embedding float[384], scope text, cls text, review_state text, confidence integer,
+      +record_id text, +source_hash text, +updated_at integer, +created_at integer
+    )`);
+    cache.run("INSERT INTO memory_vector_ids (record_id, source_hash) VALUES ('kept', 'old-cache-digest')");
+    cache.query(`INSERT INTO memory_vectors (rowid, embedding, scope, cls, review_state, confidence, record_id, source_hash, updated_at, created_at)
+      VALUES (1, ?, 'project', 'fact', 'fresh', 60, 'kept', 'old-cache-digest', 1, 1)`).run(new Float32Array(384).fill(1));
+    cache.run('PRAGMA user_version = 1');
+  } finally { cache.close(); }
+  const registry = new MemoryEmbeddingProviderRegistry({ configManager: new ConfigManager({ configDir: join(dir, 'config') }) });
+  const store = new MemoryStore(dbPath, { embeddingRegistry: registry, vectorDbPath: vectorPath });
+  try {
+    await store.init();
+    expect(store.get('kept')).toMatchObject({ summary: 'A real saved memory', detail: 'Private detail stays in the primary store' });
+    expect(store.vectorStats()).toMatchObject({ available: true, indexedRecords: 1 });
+    await store.save();
+  } finally { store.close(); }
+  expect(readUserVersion(dbPath)).toBe(MEMORY_SCHEMA_VERSION);
+  expect(readUserVersion(vectorPath)).toBe(MEMORY_VECTOR_SCHEMA_VERSION);
+  expect(listStoreSnapshots(dbPath).length).toBeGreaterThan(0);
+  expect(listStoreSnapshots(vectorPath).length).toBeGreaterThan(0);
+  const native = new Database(vectorPath, { readonly: true });
+  try {
+    const columns = native.query<{ name: string }, []>('PRAGMA table_info(memory_vector_ids)').all().map(row => row.name);
+    expect(columns).toContain('source_revision');
+    expect(columns).not.toContain('source_hash');
+  } finally { native.close(); }
+  const reopened = new MemoryStore(dbPath, { embeddingRegistry: registry, vectorDbPath: vectorPath });
+  try {
+    await reopened.init();
+    expect(reopened.vectorStats()).toMatchObject({ available: true, indexedRecords: 1 });
+    expect(reopened.get('kept')?.detail).toBe('Private detail stays in the primary store');
+  } finally { reopened.close(); }
+}));
 
 describe('downgrade guard: an older binary refuses a newer schema honestly', () => {
   test('openVersionedSchema throws a named error and touches nothing', () => withScratch((dir) => {

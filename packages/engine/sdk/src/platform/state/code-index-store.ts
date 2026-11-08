@@ -6,7 +6,7 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  *
  * Deliberately MIRRORS MemoryStore + SqliteVecMemoryIndex (state/memory-store.ts,
  * state/memory-vector-store.ts) rather than reusing them: those classes are
- * hard-keyed to MemoryRecord (schema columns, memoryVectorSourceHash,
+ * hard-keyed to MemoryRecord (schema columns, native memory row revisions,
  * buildMemoryEmbeddingText, record-shaped search filters). Code chunks are a
  * different record shape entirely, so this module is a parallel, independent
  * implementation that reuses only:

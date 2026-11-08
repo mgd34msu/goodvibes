@@ -11,10 +11,10 @@ import { PermissionManager } from '../sdk/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../sdk/src/platform/runtime/permissions/policy-runtime.ts';
 import { MemorySpineClient, createLocalMemoryAccess } from '../sdk/src/platform/runtime/memory-spine/client.ts';
 import { createMemorySpineRestTransport } from '../sdk/src/platform/runtime/memory-spine/rest-transport.ts';
-import { MemoryEmbeddingProviderRegistry, HASHED_MEMORY_EMBEDDING_PROVIDER } from '../sdk/src/platform/state/memory-embeddings.ts';
+import { MemoryEmbeddingProviderRegistry, HASHED_MEMORY_EMBEDDING_PROVIDER, embedMemoryText } from '../sdk/src/platform/state/memory-embeddings.ts';
 import { createBuiltinMemoryEmbeddingProviders } from '../sdk/src/platform/state/memory-embedding-http.ts';
 import { MemoryStore, MemoryRegistry, type MemoryRecord } from '../sdk/src/platform/state/memory-store.ts';
-import { SqliteVecMemoryIndex, memoryVectorSourceHash } from '../sdk/src/platform/state/memory-vector-store.ts';
+import { SqliteVecMemoryIndex } from '../sdk/src/platform/state/memory-vector-store.ts';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
 import type { Tool } from '../sdk/src/platform/types/tools.ts';
 import { forgetGateReadings, gateReadingsPort, READ_ONLY } from './_helpers/gate-readings.ts';
@@ -165,10 +165,109 @@ test('a reentrant store mutation prevents the older operation from overwriting i
   const current = f.store.get(id);
   expect(current?.summary).toBe('newer canonical record');
   if (!current) throw new Error('Native canonical record missing');
+  await f.store.save();
   const native = new Database(f.vectorPath, { readonly: true });
+  const primary = new Database(join(f.root, 'memory.sqlite'), { readonly: true });
   try {
-    expect(native.query<{ source_hash: string }, [string]>('SELECT source_hash FROM memory_vector_ids WHERE record_id = ?').get(id)?.source_hash).toBe(memoryVectorSourceHash(current));
-  } finally { native.close(); }
+    expect(native.query<{ source_revision: string }, [string]>('SELECT source_revision FROM memory_vector_ids WHERE record_id = ?').get(id)?.source_revision)
+      .toBe(primary.query<{ gv_revision: string }, [string]>('SELECT gv_revision FROM memory_records WHERE id = ?').get(id)?.gv_revision);
+  } finally { native.close(); primary.close(); }
+});
+
+test('an unchanged memory cache survives a real store close and reopen without another embedding', async () => {
+  const f = await fixture();
+  let embeddings = 0;
+  f.embeddings.register({ ...HASHED_MEMORY_EMBEDDING_PROVIDER, id: 'revision-reopen', label: 'Local counted embedding',
+    embedSync(request) { embeddings++; return { vector: embedMemoryText(request.text, request.dimensions), dimensions: request.dimensions }; },
+  }, { makeDefault: true });
+  const record = await f.store.add({ cls: 'fact', summary: 'Keep this embedding across a restart', detail: '  stored detail  ', provenance: [{ kind: 'file', ref: 'sample.ts', label: undefined }] });
+  expect(embeddings).toBe(1);
+  await f.store.save(); f.store.close(); embeddings = 0;
+  const reopened = new MemoryStore(join(f.root, 'memory.sqlite'), { embeddingRegistry: f.embeddings, vectorDbPath: f.vectorPath });
+  cleanups.push(() => reopened.close());
+  await reopened.init();
+  expect(reopened.get(record.id)?.summary).toBe(record.summary);
+  expect(reopened.vectorStats().indexedRecords).toBe(1);
+  expect(embeddings).toBe(0);
+});
+
+test('same-clock source changes receive new native revisions, including a return to the original value', async () => {
+  const f = await fixture();
+  const now = spyOn(Date, 'now').mockReturnValue(123456789);
+  cleanups.push(() => now.mockRestore());
+  const record = await f.store.add({ cls: 'fact', summary: 'original' });
+  const revisions: string[] = [];
+  for (const summary of ['original', 'changed', 'original']) {
+    if (revisions.length) f.store.update(record.id, { summary });
+    await f.store.save();
+    const primary = new Database(join(f.root, 'memory.sqlite'), { readonly: true });
+    const vector = new Database(f.vectorPath, { readonly: true });
+    try {
+      const source = primary.query<{ gv_revision: string; updated_at: number }, [string]>('SELECT gv_revision, updated_at FROM memory_records WHERE id = ?').get(record.id);
+      if (!source) throw new Error('Missing native memory revision');
+      expect(source.updated_at).toBe(123456789);
+      expect(source.gv_revision).toMatch(/^[0-9a-f]{32}$/);
+      expect(vector.query<{ source_revision: string }, [string]>('SELECT source_revision FROM memory_vector_ids WHERE record_id = ?').get(record.id)?.source_revision).toBe(source.gv_revision);
+      revisions.push(source.gv_revision);
+    } finally { primary.close(); vector.close(); }
+  }
+  expect(new Set(revisions).size).toBe(3);
+});
+
+test('standalone memory indices compare equal inputs, update changed inputs and retire observations on reopen', async () => {
+  const f = await fixture();
+  const record = await f.store.add({ cls: 'fact', summary: 'first standalone source' });
+  let embeddings = 0;
+  f.embeddings.register({ ...HASHED_MEMORY_EMBEDDING_PROVIDER, id: 'standalone-counted', label: 'Counted standalone embedding',
+    embedSync(request) { embeddings++; return { vector: embedMemoryText(request.text, request.dimensions), dimensions: request.dimensions }; },
+  }, { makeDefault: true });
+  const index = new SqliteVecMemoryIndex(join(f.root, 'standalone.vec.sqlite'), undefined, f.embeddings);
+  cleanups.push(() => index.close()); await index.init();
+  index.sync([record]);
+  index.sync([structuredClone(record)]);
+  expect(embeddings).toBe(1);
+  index.sync([{ ...record, summary: 'a different source at the same time' }]);
+  expect(embeddings).toBe(2);
+  index.close(); await index.init();
+  // Without a primary source owner a new instance cannot attest old inputs.
+  index.sync([record]);
+  expect(embeddings).toBe(3);
+  index.sync([]);
+  expect(index.stats().indexedRecords).toBe(0);
+});
+
+test('mutating an input while a standalone embedding is pending cannot publish that embedding', async () => {
+  const f = await fixture();
+  const record = await f.store.add({ cls: 'fact', summary: 'original embedding request' });
+  const index = new SqliteVecMemoryIndex(join(f.root, 'mutated.vec.sqlite'), undefined, f.embeddings);
+  cleanups.push(() => index.close()); await index.init();
+  const started = deferred<void>(), release = deferred<void>();
+  f.embeddings.register({ id: 'mutable-source', label: 'Pending local embedding', dimensions: 384, local: true,
+    async embed() { started.resolve(); await release.promise; return { vector: new Float32Array(384).fill(1), dimensions: 384 }; },
+  }, { makeDefault: true });
+  const pending = index.upsertAsync(record);
+  await started.promise;
+  record.provenance.push({ kind: 'file', ref: 'changed-after-dispatch.ts' });
+  release.resolve();
+  await expect(pending).rejects.toThrow('Memory vector record changed');
+  expect(index.stats().indexedRecords).toBe(0);
+});
+
+test('a raw native SQL update retires an embedding even when it bypasses the store mutation counter', async () => {
+  const f = await fixture();
+  const record = await f.store.add({ cls: 'fact', summary: 'before the native write' });
+  const sqlite: unknown = Reflect.get(f.store, 'sqlite');
+  if (!(sqlite instanceof SQLiteStore)) throw new Error('Missing actual memory SQLite connection');
+  const started = deferred<void>(), release = deferred<void>();
+  f.embeddings.register({ id: 'native-row-pending', label: 'Pending native source', dimensions: 384, local: true,
+    async embed() { started.resolve(); await release.promise; return { vector: new Float32Array(384).fill(1), dimensions: 384 }; },
+  }, { makeDefault: true });
+  const pending = f.store.rebuildVectorIndexAsync();
+  await started.promise;
+  sqlite.run('UPDATE memory_records SET summary = ? WHERE id = ?', ['after the native write', record.id]);
+  release.resolve();
+  await expect(pending).rejects.toThrow('Memory vector record source changed');
+  expect(f.store.get(record.id)?.summary).toBe('after the native write');
 });
 
 test('prepared local backend scope rejects close and reopen ABA', async () => {

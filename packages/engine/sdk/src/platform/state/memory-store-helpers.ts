@@ -1,5 +1,21 @@
 import type { MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewState, MemoryScope, MemorySearchFilter } from './memory-store.js';
 
+export const MEMORY_SCHEMA_VERSION = 2;
+
+// The stamp changes at the actual SQL write, including updates that leave the
+// timestamp unchanged. Stamp-only writes do not recursively fire the trigger.
+const memoryRevisionTriggers = [
+  `CREATE TRIGGER IF NOT EXISTS memory_record_revision_insert AFTER INSERT ON memory_records BEGIN
+    UPDATE memory_records SET gv_revision = lower(hex(randomblob(16))) WHERE rowid = NEW.rowid;
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS memory_record_revision_update AFTER UPDATE OF
+    id, scope, cls, summary, detail, tags, provenance, review_state, confidence,
+    reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
+    ON memory_records BEGIN
+    UPDATE memory_records SET gv_revision = lower(hex(randomblob(16))) WHERE rowid = NEW.rowid;
+  END`,
+] as const;
+
 export function createSchema(db: { run(sql: string): void; exec(sql: string, params?: (string | number)[]): Array<{ columns: string[]; values: unknown[][] }> }): void {
   db.run('PRAGMA foreign_keys = ON');
 
@@ -37,10 +53,31 @@ export function createSchema(db: { run(sql: string): void; exec(sql: string, par
   ensureColumn(db, 'memory_records', 'stale_reason TEXT', 'stale_reason');
   ensureColumn(db, 'memory_records', 'valid_from INTEGER', 'valid_from');
   ensureColumn(db, 'memory_records', 'valid_until INTEGER', 'valid_until');
+  ensureColumn(db, 'memory_records', "gv_revision TEXT NOT NULL DEFAULT ''", 'gv_revision');
+
+  const revisions = db.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN ('memory_record_revision_insert', 'memory_record_revision_update')")[0]?.values ?? [];
+  if (revisions.length === 0) {
+    // Backfill once during migration. Reopening a current store keeps its stamps.
+    db.run('UPDATE memory_records SET gv_revision = lower(hex(randomblob(16)))');
+    for (const sql of memoryRevisionTriggers) db.run(sql);
+  }
+  validateMemoryRowRevisions(db);
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_memory_cls ON memory_records(cls)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_records(scope)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_records(created_at)`);
+}
+
+/** Check the native writer metadata before using a persisted cache revision. */
+export function validateMemoryRowRevisions(db: { exec(sql: string): Array<{ columns: string[]; values: unknown[][] }> }): void {
+  const columns = db.exec('PRAGMA table_info(memory_records)')[0]?.values ?? [];
+  const revision = columns.find(row => row[1] === 'gv_revision');
+  const triggers = db.exec("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('memory_record_revision_insert', 'memory_record_revision_update')")[0]?.values ?? [];
+  if (!revision || revision[2] !== 'TEXT' || revision[3] !== 1 || revision[4] !== "''"
+    || triggers.length !== memoryRevisionTriggers.length
+    || memoryRevisionTriggers.some(sql => !triggers.some(row => row[0] === sql.replace('IF NOT EXISTS ', '')))) {
+    throw new Error('Memory native row revision schema is unavailable or invalid');
+  }
 }
 
 export function ensureColumn(

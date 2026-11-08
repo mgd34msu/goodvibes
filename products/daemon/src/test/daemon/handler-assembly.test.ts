@@ -128,7 +128,7 @@ test('failed last readiness drains every real surface and retry reuses the same 
   let pendingReply: Promise<unknown> | undefined;
   const providers = { ...f.providers, async registerRemote(ctx: HandlerContext) {
     const surface = await original(ctx);
-    pendingReply = f.payments!.paymentReplies.waitForAnswer({ kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
+    pendingReply = f.payments!.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
     void pendingReply.catch(() => {});
     return { ...surface, ready: Promise.resolve(surface.ready).then(() => { throw failure; }) };
   } };
@@ -179,7 +179,7 @@ test('rollback cleanup failure preserves startup failure and still releases olde
 
 test('legacy unregister starts the same awaited reverse cleanup and rejects owned reply windows', async () => {
   const f = fixture(); const graph = await registerDaemonHandlers(f.ctx, f.providers);
-  const waiting = graph.paymentReplies.waitForAnswer({ kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
+  const waiting = graph.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
   void waiting.catch(() => {});
   graph.unregister();
   const closing = graph.close(); expect(graph.close()).toBe(closing);

@@ -4,7 +4,7 @@ import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../sdk/src/plat
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import { paymentsPort } from './helpers/payments-readings.ts';
 
-const input = { kind: 'veto' as const, channels: ['telegram' as const], notice: 'Fixture purchase notice', deadlineMs: Date.now() + 60_000 };
+const input = { purchaseId: 'fixture-veto', kind: 'veto' as const, channels: ['telegram' as const], notice: 'Fixture purchase notice', deadlineMs: Date.now() + 60_000 };
 
 function deferred() {
   let resolve!: () => void;
@@ -15,7 +15,7 @@ function deferred() {
 test('closing rejects every active window and never reports deadline silence', async () => {
   const inbox = new PaymentReplyInbox();
   const veto = inbox.waitForAnswer(input);
-  const approval = inbox.waitForAnswer({ ...input, kind: 'approval' });
+  const approval = inbox.waitForAnswer({ ...input, purchaseId: 'fixture-approval', kind: 'approval' });
   expect(inbox.pending).toBe(2);
   const close = inbox.close();
   expect(inbox.close()).toBe(close);
@@ -94,7 +94,7 @@ test('failed accepted reading stays observable while close still drains it', asy
   }
 });
 
-test('legacy ignored waits and synchronous close calls do not emit unhandled rejection', async () => {
+test('unobserved waits and synchronous close calls do not emit unhandled rejection', async () => {
   const errors: unknown[] = [];
   const observer = (error: unknown) => { errors.push(error); };
   process.on('unhandledRejection', observer);
@@ -121,7 +121,7 @@ test('the real notifier preserves shutdown rejection on a delivered veto notice'
   expect(await notifier.deliver({ kind: 'veto', message: input.notice })).toEqual([
     { channel: 'telegram', delivered: true, backfillable: true },
   ]);
-  const waiting = notifier.awaitAnswer({ kind: 'veto', deadlineMs: input.deadlineMs });
+  const waiting = notifier.awaitAnswer({ purchaseId: input.purchaseId, notice: input.notice, kind: 'veto', deadlineMs: input.deadlineMs });
   await inbox.close();
   await expect(waiting).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
   expect(notices).toHaveLength(1);

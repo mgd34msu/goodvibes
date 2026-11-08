@@ -88,14 +88,18 @@ export interface PaymentReplySource {
    * Null must mean SILENCE and nothing else. An implementation that resolved
    * null on its own internal error would convert a failure into "the owner did not
    * object", which on the veto path buys something.
+   * Cancellation, a failed reply reading, and a reading still unresolved at
+   * the deadline therefore reject instead of returning null.
    *
    * `notice` is the message the owner was sent; a reply is read against it.
    */
   waitForAnswer(input: {
+    readonly purchaseId: string;
     readonly kind: 'approval' | 'veto';
     readonly deadlineMs: number;
     readonly channels: readonly CommandAuthorityChannel[];
     readonly notice: string;
+    readonly signal?: AbortSignal | undefined;
   }): Promise<{
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
     readonly channel: CommandAuthorityChannel;
@@ -132,17 +136,21 @@ export async function readPaymentReply(
   reply: string,
   kind: 'approval' | 'veto',
   notice: string,
+  signal?: AbortSignal,
 ): Promise<PaymentAnswer | null> {
   requireDecisionFeature('interpreting a purchase approval or veto reply');
+  signal?.throwIfAborted();
   if (reply.trim().length === 0) return null;
   const port = judgmentPort(PAYMENT_REPLY_SITE);
   if (kind === 'approval') {
-    const read = await approvalReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE });
+    const read = await approvalReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, ...(signal === undefined ? {} : { signal }) });
+    signal?.throwIfAborted();
     const answer = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
     read.recordAction(answer ?? 'no answer');
     return answer;
   }
-  const read = await vetoReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE });
+  const read = await vetoReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, ...(signal === undefined ? {} : { signal }) });
+  signal?.throwIfAborted();
   const answer = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
   read.recordAction(answer ?? 'no answer');
   return answer;
@@ -158,13 +166,10 @@ export async function readPaymentReply(
  * would push the decision past the point where the total is still valid.
  */
 export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): PaymentNotifier {
-  // The last notice of each window kind, which a reply is read against.
-  const notices: { approval: string; veto: string } = { approval: '', veto: '' };
   return {
     async deliver(input): Promise<readonly ChannelDelivery[]> {
       const current = () => { input.signal?.throwIfAborted(); input.assertCurrent?.(); };
       current();
-      if (input.kind !== 'notice') notices[input.kind] = input.message;
       const deliveries: ChannelDelivery[] = [];
       for (const target of deps.targets) {
         current();
@@ -200,10 +205,12 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
     async awaitAnswer(input) {
       const channels = deps.targets.map((target) => target.channel);
       return deps.replies.waitForAnswer({
+        purchaseId: input.purchaseId,
         kind: input.kind,
         deadlineMs: input.deadlineMs,
         channels,
-        notice: notices[input.kind],
+        notice: input.notice,
+        signal: input.signal,
       });
     },
   };

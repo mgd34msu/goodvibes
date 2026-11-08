@@ -39,8 +39,13 @@ export interface PaymentNotifier {
    * would be one place where they could be accidentally unified.
    */
   awaitAnswer(input: {
+    /** The exact purchase whose persisted window is being answered. */
+    readonly purchaseId: string;
     readonly kind: 'approval' | 'veto';
+    /** This purchase's notice; never a shared "last notice". */
+    readonly notice: string;
     readonly deadlineMs: number;
+    readonly signal?: AbortSignal | undefined;
   }): Promise<{
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
     readonly channel: CommandAuthorityChannel;

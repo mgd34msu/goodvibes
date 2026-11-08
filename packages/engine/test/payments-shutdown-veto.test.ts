@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
-import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../sdk/src/platform/payments/reply-inbox.js';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import { runCheckout, type CheckoutFlowDeps } from '../sdk/src/platform/payments/checkout-flow.js';
 import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
@@ -11,7 +13,7 @@ import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
 
-test('closing an active delivered veto aborts real checkout before card access or submit', async () => {
+function checkoutFixture(signal?: AbortSignal) {
   const currency = parseCurrencyCode('USD');
   if (currency === null) throw new Error('Invalid fixture currency');
   const inbox = new PaymentReplyInbox();
@@ -27,6 +29,7 @@ test('closing an active delivered veto aborts real checkout before card access o
   let windowOpened!: () => void;
   const opened = new Promise<void>((resolve) => { windowOpened = resolve; });
   const deps: CheckoutFlowDeps = {
+    signal,
     registry, ledger: new BudgetLedger(), redactor: new CardMaterialRedactor(),
     cards: { async metadata() { return null; }, async read() { outward.push('card-read'); throw new Error('Card access must not occur'); } },
     addresses: { async read() { return null; } },
@@ -65,6 +68,11 @@ test('closing an active delivered veto aborts real checkout before card access o
   }, { cardFields: [], shippingTargets: ['fixture-shipping'], placeOrderTarget: 'fixture-submit' }, deps);
   // Observe an unexpected early failure without allowing it to become unhandled.
   void purchase.catch(() => {});
+  return { inbox, journal, outward, delivered, opened, deps, purchase };
+}
+
+test('closing an active delivered veto aborts real checkout before card access or submit', async () => {
+  const { inbox, journal, outward, delivered, opened, deps, purchase } = checkoutFixture();
   try {
     await Promise.race([opened, purchase.then(() => { throw new Error('Checkout never opened its veto window'); })]);
     expect(inbox.pending).toBe(1);
@@ -73,10 +81,45 @@ test('closing an active delivered veto aborts real checkout before card access o
     await inbox.close();
     await expect(purchase).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
     expect(outward).toEqual([]);
-    // The durable unresolved window remains available for the existing recovery
-    // rules; shutdown must not forge either an approval or a completed purchase.
-    expect((await journal.list())[0]?.phase).toBe('awaiting-window');
+    // This is a known pre-submit cancellation. It releases the reservation and
+    // closes the window rather than retaining an ambiguous submit record.
+    expect(await journal.list()).toEqual([]);
+    expect(deps.ledger.snapshot(deps.limits, Date.now(), deps.timezone).item.remaining).toBe(10_000);
   } finally {
     await inbox.close();
+  }
+});
+
+test('the original checkout signal cancels its veto, releases the hold and never accesses card material', async () => {
+  const owner = new AbortController();
+  const { inbox, journal, outward, opened, deps, purchase } = checkoutFixture(owner.signal);
+  try {
+    await Promise.race([opened, purchase.then(() => { throw new Error('Checkout never opened its veto window'); })]);
+    owner.abort();
+    await expect(purchase).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(outward).toEqual([]);
+    expect(await journal.list()).toEqual([]);
+    expect(deps.ledger.snapshot(deps.limits, Date.now(), deps.timezone).item.remaining).toBe(10_000);
+  } finally { await inbox.close(); }
+});
+
+test('decision-model exhaustion while reading an owner veto cannot later buy on silence', async () => {
+  const { inbox, journal, outward, opened, deps, purchase } = checkoutFixture();
+  let previous: ReturnType<typeof installJudgmentPort>;
+  let replaced = false;
+  try {
+    await Promise.race([opened, purchase.then(() => { throw new Error('Checkout never opened its veto window'); })]);
+    previous = installJudgmentPort({ model: 'fixture-unavailable', async ask() { throw new JudgmentError('unavailable', 'No decision models are available'); } });
+    replaced = true;
+    await expect(inbox.offer('telegram', 'stop')).rejects.toBeInstanceOf(JudgmentError);
+    await expect(purchase).rejects.toBeInstanceOf(PaymentReplyWindowError);
+    await expect(purchase).rejects.toMatchObject({ kind: 'reading-failed' });
+    expect(inbox.pending).toBe(0);
+    expect(outward).toEqual([]);
+    expect(await journal.list()).toEqual([]);
+    expect(deps.ledger.snapshot(deps.limits, Date.now(), deps.timezone).item.remaining).toBe(10_000);
+  } finally {
+    await inbox.close();
+    if (replaced) installJudgmentPort(previous);
   }
 });

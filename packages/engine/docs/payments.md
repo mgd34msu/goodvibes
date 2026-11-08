@@ -803,6 +803,20 @@ and no use of `AutomationManager.createJob()` or `AutomationAtSchedule` either.
 The wait for an answer lives on the stack of that one call, not in a persisted
 record.
 
+Each wait now carries its exact `purchaseId`, rendered notice, deadline and
+owning cancellation signal. The notifier does not keep a shared last notice;
+concurrent purchases cannot overwrite the text used to interpret another
+purchase's answer. A second live wait for the same purchase is refused. A late
+reading from a closed window cannot settle a replacement window.
+
+Only a deadline with no unresolved reply reading means silence. Cancellation,
+a failed decision-model reply reading, or a reply still being read at the
+deadline fails the wait instead. This matters especially for veto windows:
+an unavailable reader must not be treated as the owner choosing not to object.
+Known cancellation or reply failure before submission releases the reservation
+and closes that checkout record. The separate `submit-pending` recovery rule
+continues to retain an uncertain submission and never retries it automatically.
+
 `ApprovalBroker` itself does now re-arm restored timers on `start()`
 (`rearmRestoredTimers()`, added to close exactly the restart gap this section
 used to describe), so a *tool-permission* approval built on the broker is

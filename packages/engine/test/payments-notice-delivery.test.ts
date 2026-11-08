@@ -158,14 +158,14 @@ describe('render → deliver → report → window, for each of the four cases',
     if (input.kind === 'approval') {
       let state: ApprovalState = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'awaiting-approval') {
-        const answer = await notifier.awaitAnswer({ kind: 'approval', deadlineMs: 0 });
+        const answer = await notifier.awaitAnswer({ purchaseId: 'fixture-approval', notice: 'the rendered notice', kind: 'approval', deadlineMs: 0 });
         state = advanceApproval(state, answer === null ? { kind: 'deadline' } : { kind: 'approve', channel: answer.channel });
       }
       return { state, sent: channel.sent };
     }
     let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
     if (state === 'open') {
-      const answer = await notifier.awaitAnswer({ kind: 'veto', deadlineMs: 0 });
+      const answer = await notifier.awaitAnswer({ purchaseId: 'fixture-veto', notice: 'the rendered notice', kind: 'veto', deadlineMs: 0 });
       state = advanceVeto(state, answer === null ? { kind: 'deadline' } : { kind: 'object', channel: answer.channel });
     }
     return { state, sent: channel.sent };
@@ -216,7 +216,7 @@ describe('an explicit answer during the window', () => {
     });
     const deliveries = await notifier.deliver({ kind: 'veto', message: 'n' });
     let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
-    const answer = await notifier.awaitAnswer({ kind: 'veto', deadlineMs: 0 });
+    const answer = await notifier.awaitAnswer({ purchaseId: 'fixture-veto', notice: 'n', kind: 'veto', deadlineMs: 0 });
     expect(answer?.answer).toBe('acknowledge');
     state = advanceVeto(state, { kind: 'acknowledge', channel: 'telegram' });
     expect(state).toBe('proceeding-acknowledged');
@@ -231,7 +231,7 @@ describe('an explicit answer during the window', () => {
     });
     const deliveries = await notifier.deliver({ kind: 'veto', message: 'n' });
     let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
-    const answer = await notifier.awaitAnswer({ kind: 'veto', deadlineMs: 0 });
+    const answer = await notifier.awaitAnswer({ purchaseId: 'fixture-veto', notice: 'n', kind: 'veto', deadlineMs: 0 });
     state = advanceVeto(state, { kind: 'object', channel: answer!.channel });
     expect(state).toBe('cancelled');
   });
@@ -294,8 +294,8 @@ describe('reading a reply as an answer', () => {
     const notifier = createChannelPaymentNotifier({ router: channel.router, targets: targets(), replies });
     await notifier.deliver({ kind: 'approval', message: 'approve the hub?' });
     await notifier.deliver({ kind: 'veto', message: 'buying the mouse' });
-    await notifier.awaitAnswer({ kind: 'approval', deadlineMs: 0 });
-    await notifier.awaitAnswer({ kind: 'veto', deadlineMs: 0 });
+    await notifier.awaitAnswer({ purchaseId: 'fixture-approval', notice: 'approve the hub?', kind: 'approval', deadlineMs: 0 });
+    await notifier.awaitAnswer({ purchaseId: 'fixture-veto', notice: 'buying the mouse', kind: 'veto', deadlineMs: 0 });
     expect(seen).toEqual(['approve the hub?', 'buying the mouse']);
   });
 });

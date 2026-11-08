@@ -262,6 +262,8 @@ export async function runCheckout(
 ): Promise<CheckoutOutcome> {
   requireDecisionFeature('automated checkout cart and merchant interpretation');
   const { registry, driver, ledger, notifier, now } = deps;
+  const signal = deps.signal;
+  signal?.throwIfAborted();
 
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
@@ -443,7 +445,7 @@ export async function runCheckout(
   const addressKinds = [...new Set(addressFields.map((entry) => entry.kind))];
   let addresses: AddressStore;
   try {
-    addresses = deps.addresses.prepare ? await deps.addresses.prepare(addressKinds, { signal: deps.signal }) : deps.addresses;
+    addresses = deps.addresses.prepare ? await deps.addresses.prepare(addressKinds, { signal }) : deps.addresses;
     addresses.assertCurrent?.();
     for (const kind of addressKinds) {
       const stored = await addresses.read(kind);
@@ -458,7 +460,7 @@ export async function runCheckout(
     await release();
     return refused('no-shipping-address', 'The stored address could not be verified for this purchase. Nothing was submitted.');
   }
-  const addressCurrent = () => { deps.signal?.throwIfAborted(); addresses.assertCurrent?.(); };
+  const addressCurrent = () => { signal?.throwIfAborted(); addresses.assertCurrent?.(); };
   const addressStillCurrent = () => { try { addressCurrent(); return true; } catch { return false; } };
   let shippingAddress;
   try { shippingAddress = addressKinds.includes('shipping') ? await addresses.read('shipping') : null; addressCurrent(); }
@@ -511,17 +513,18 @@ export async function runCheckout(
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let deliveries: readonly ChannelDelivery[];
-    try { deliveries = await notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal: deps.signal }); addressCurrent(); }
+    try { deliveries = await notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }); addressCurrent(); }
     catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
     const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
     // Persisted so a restart can apply the delivery-keyed recovery rules.
     await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
     let state: ApprovalState = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
     if (state === 'awaiting-approval') {
-      const answer = await notifier.awaitAnswer({
-        kind: 'approval',
-        deadlineMs,
-      });
+      let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+      try {
+        answer = await notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'approval', notice: message, deadlineMs, signal });
+        addressCurrent();
+      } catch (error) { await release(); throw error; }
       if (answer === null) {
         state = advanceApproval(state, { kind: 'deadline' });
       } else {
@@ -580,17 +583,18 @@ export async function runCheckout(
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let deliveries: readonly ChannelDelivery[];
-    try { deliveries = await notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal: deps.signal }); addressCurrent(); }
+    try { deliveries = await notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }); addressCurrent(); }
     catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
     const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
     // Persisted so a restart can apply the delivery-keyed recovery rules.
     await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
     let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
     if (state === 'open') {
-      const answer = await notifier.awaitAnswer({
-        kind: 'veto',
-        deadlineMs,
-      });
+      let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+      try {
+        answer = await notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'veto', notice: message, deadlineMs, signal });
+        addressCurrent();
+      } catch (error) { await release(); throw error; }
       if (answer === null) {
         state = advanceVeto(state, { kind: 'deadline' });
       } else {
@@ -641,7 +645,7 @@ export async function runCheckout(
   if (addressFields.length > 0) {
     const addressFill = await fillAddresses(addressFields, {
       store: addresses,
-      fill: (target, value) => driver.fill(target, value, { assertCurrent: addressCurrent, signal: deps.signal }),
+      fill: (target, value) => driver.fill(target, value, { assertCurrent: addressCurrent, signal }),
     });
     if (!addressFill.ok) {
       await release();
@@ -688,7 +692,7 @@ export async function runCheckout(
   };
   try {
     try { addressCurrent(); } catch { throw new CheckoutSubmitRefused('The stored address changed before submission.'); }
-    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: addressCurrent, signal: deps.signal });
+    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: addressCurrent, signal });
   } catch (error) {
     if (error instanceof CheckoutSubmitRefused) {
       // Refused BEFORE the click reached the merchant (a typed refusal, the

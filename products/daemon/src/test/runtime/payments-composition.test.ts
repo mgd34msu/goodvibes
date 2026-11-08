@@ -58,7 +58,7 @@ test('real product payments register on the existing catalog and read live owner
 
 test('closing before registration settles cannot leave handlers or an answerable window behind', async () => {
   const f = fixture();
-  const waiting = f.services.paymentReplies.waitForAnswer({ kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
+  const waiting = f.services.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
   const closing = f.services.close();
   expect(f.services.close()).toBe(closing);
   await expect(waiting).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
@@ -152,7 +152,7 @@ test('legacy unregister reports cleanup failure while awaited close retains the 
     await expect(f.services.close()).rejects.toThrow('Payment composition did not close cleanly');
     expect(warnings).toHaveLength(1);
     expect(JSON.stringify(warnings)).not.toContain('fixture-sensitive-path');
-    await expect(f.services.paymentReplies.waitForAnswer({ kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 1000 })).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
+    await expect(f.services.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 1000 })).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
   } finally {
     register.mockRestore();
     warn.mockRestore();

@@ -633,7 +633,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       }
       void error;
-      throw new HandlerError('Beginning this checkout failed. Nothing was submitted.', 'INTERNAL_ERROR', 500);
+      throw new HandlerError('Beginning this checkout failed. Check the purchase list and the merchant\'s order history before trying again.', 'INTERNAL_ERROR', 500);
     }
   };
 }

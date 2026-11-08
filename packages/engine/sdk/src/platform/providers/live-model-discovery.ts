@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -156,6 +157,8 @@ export interface LiveModelRefreshOptions {
    * instead of hitting the network on every boot.
    */
   readonly force?: boolean | undefined;
+  /** Host restriction before publication. Retirement rejects instead of using stale account data. */
+  readonly assertCurrent?: (() => void) | undefined;
   /** Bulk discovery may skip an unused optional loopback server that is not running. */
   readonly skipUnavailableLocal?: boolean | undefined;
 }
@@ -166,8 +169,20 @@ export interface LiveModelRefreshOptions {
  * cache-then-dated-static on failure, and persist a successful fetch.
  */
 export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promise<LiveModelDiscoveryResult> {
+  const sourceCurrent = opts.assertCurrent;
+  const assertCurrent = (): void => {
+    try {
+      const result: unknown = sourceCurrent?.();
+      if (result !== undefined) { drainOwned(result); throw new Error(); }
+    } catch (error) {
+      drainOwned(error);
+      throw new Error('The original model-discovery owner is no longer current.');
+    }
+  };
+  assertCurrent();
   const cache = opts.cachePath ? loadModelListCache(opts.cachePath) : null;
   const baseline = cache?.models ?? opts.datedStaticModels;
+  assertCurrent();
 
   if (cache && !opts.force && !cache.unclassifiedModels?.length && !isTtlCacheStale(cache)) {
     return { models: cache.models, source: 'cache', added: [], removed: [] };
@@ -187,6 +202,7 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
 
   try {
     const listing = await opts.fetchLive();
+    assertCurrent();
     const fetched = Array.isArray(listing) ? listing : listing.models;
     const unclassifiedModels = Array.isArray(listing) ? [] : listing.unclassifiedModels;
     if (fetched.length === 0 && unclassifiedModels.length === 0) {
@@ -199,9 +215,11 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
     const { added, removed } = diffModelIds(baseline, fetched);
     const pending = new Set(unclassifiedModels);
     if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels);
+    assertCurrent();
     return { models: fetched, source: 'live', added, removed: removed.filter(id => !pending.has(id)),
       ...(unclassifiedModels.length ? { unclassifiedModels } : {}) };
   } catch (err) {
+    assertCurrent();
     const code = err instanceof Error && 'code' in err ? err.code : undefined;
     if (opts.skipUnavailableLocal && !cache && (code === 'ConnectionRefused' || code === 'ECONNREFUSED')) {
       return { models: opts.datedStaticModels, source: 'dated-static', added: [], removed: [],

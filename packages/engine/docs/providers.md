@@ -73,6 +73,21 @@ route.
 | `alibaba` | Alibaba Cloud | `MODELSTUDIO_API_KEY` (or `DASHSCOPE_API_KEY`, `QWEN_API_KEY`) |
 | `vydra` | Vydra | `VYDRA_API_KEY` |
 
+GitHub Copilot exchanges a session from the configured GitHub credential when
+its provider starts or observes a different credential. Concurrent chat and
+model discovery share that exchange, and later calls reuse the live session
+until its renewal margin. Switching accounts retires the previous session and
+its discovered model metadata; pending requests keep their original account
+and cannot switch credentials halfway through a call. A newly selected account
+refreshes its own live model list before reusing the model-list cache.
+
+Sessions are held in the provider's memory. Restarting exchanges a fresh session
+with GitHub. On first use, earlier token-cache files are replaced with a marker
+containing no bearer or source-credential digest; malformed files retain the
+existing quarantine diagnostic. The GitHub credential remains configured through
+the normal environment/secret setup described above.
+
+
 `openrouter` and `aihubmix` are registered the same way as every other row
 above (a built-in entry with a fixed base URL and a starter model list), but
 neither has an entry in the curated brand-label map, so `GET /api/models`

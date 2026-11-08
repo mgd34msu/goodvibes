@@ -1,22 +1,14 @@
-import { createHash } from 'node:crypto';
-import { readJsonFileOrQuarantine, writeJsonFileAtomicSafe } from '../utils/atomic-json-store.js';
+import { CopilotSessions, COPILOT_TOKEN_ENV_VARS, COPILOT_IO_TIMEOUT_MS, copilotIdeHeaders, type CopilotCredentialOwner } from './github-copilot-session.js';
+import { ProviderAttemptDeniedError } from './attempt-guard.js';
 import { join } from 'node:path';
 import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicCompatProvider } from './anthropic-compat.js';
 import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtime-metadata.js';
 import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
-import { summarizeError, toProviderError } from '../utils/error-display.js';
+import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
-import { logger } from '../utils/logger.js';
 import { readsAsCopilotClaudeModel } from '../routing/provider-cache-readings.js';
-
-const COPILOT_TOKEN_URL = `https://api.github.com/${['copilot', 'internal'].join('_')}/v2/token`;
-const DEFAULT_COPILOT_API_BASE_URL = 'https://api.individual.githubcopilot.com';
-const COPILOT_EDITOR_VERSION = 'vscode/1.96.2';
-const COPILOT_USER_AGENT = 'GitHubCopilotChat/0.26.7';
-const COPILOT_GITHUB_API_VERSION = '2025-04-01';
-const COPILOT_TOKEN_ENV_VARS = ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as const;
 
 /**
  * Dated fallback model list, used when no GitHub token is configured (so a
@@ -47,14 +39,8 @@ export const COPILOT_DATED_STATIC_MODELS: readonly string[] = [
 ];
 export const COPILOT_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
 
-interface CachedCopilotToken {
-  readonly sourceFingerprint?: string;
-  readonly token: string;
-  readonly expiresAt: number;
-  readonly updatedAt: number;
-}
-
 export interface GitHubCopilotProviderOptions {
+  /** Previous credential-cache path, used once to retire its stored bearer. New sessions stay in this provider. */
   readonly tokenCachePath: string;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly fetchFn?: typeof fetch | undefined;
@@ -71,22 +57,6 @@ export function getGitHubCopilotTokenCachePath(cacheDir: string): string {
   return join(cacheDir, 'credentials', 'github-copilot.token.json');
 }
 
-function readFirstEnv(envVars: readonly string[], env: NodeJS.ProcessEnv): string | null {
-  for (const envVar of envVars) {
-    const value = env[envVar]!;
-    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-  }
-  return null;
-}
-
-function buildCopilotIdeHeaders(includeApiVersion = false): Record<string, string> {
-  return {
-    'Editor-Version': COPILOT_EDITOR_VERSION,
-    'User-Agent': COPILOT_USER_AGENT,
-    ...(includeApiVersion ? { 'X-Github-Api-Version': COPILOT_GITHUB_API_VERSION } : {}),
-  };
-}
-
 function hasCopilotVisionInput(messages: ChatRequest['messages']): boolean {
   return messages.some((message) =>
     Array.isArray(message.content) && message.content.some((part) => part.type === 'image'));
@@ -96,130 +66,10 @@ function buildCopilotDynamicHeaders(messages: ChatRequest['messages']): Record<s
   const last = messages[messages.length - 1];
   const initiator = last && last.role !== 'user' ? 'agent' : 'user';
   return {
-    ...buildCopilotIdeHeaders(false),
+    ...copilotIdeHeaders(false),
     'X-Initiator': initiator,
     'Openai-Intent': 'conversation-edits',
     ...(hasCopilotVisionInput(messages) ? { 'Copilot-Vision-Request': 'true' } : {}),
-  };
-}
-
-function isTokenUsable(cache: CachedCopilotToken, now = Date.now()): boolean {
-  return cache.expiresAt - now > 5 * 60 * 1000;
-}
-
-function parseCopilotTokenResponse(value: unknown): { token: string; expiresAt: number } {
-  if (!value || typeof value !== 'object') {
-    throw new Error('Unexpected response from GitHub Copilot token endpoint');
-  }
-  const record = value as Record<string, unknown>;
-  const token = typeof record['token'] === 'string' ? record['token'].trim() : '';
-  const rawExpiresAt = record['expires_at'];
-  if (!token) throw new Error('Copilot token response missing token');
-  let expiresAt: number;
-  if (typeof rawExpiresAt === 'number' && Number.isFinite(rawExpiresAt)) {
-    expiresAt = rawExpiresAt < 100_000_000_000 ? rawExpiresAt * 1000 : rawExpiresAt;
-  } else if (typeof rawExpiresAt === 'string' && rawExpiresAt.trim()) {
-    const parsed = Number.parseInt(rawExpiresAt.trim(), 10);
-    if (!Number.isFinite(parsed)) throw new Error('Copilot token response has invalid expires_at');
-    expiresAt = parsed < 100_000_000_000 ? parsed * 1000 : parsed;
-  } else {
-    throw new Error('Copilot token response missing expires_at');
-  }
-  return { token, expiresAt };
-}
-
-function deriveCopilotApiBaseUrlFromToken(token: string): string | null {
-  const match = token.trim().match(/(?:^|;)\s*proxy-ep=([^;\s]+)/i);
-  const proxyEp = match?.[1]?.trim();
-  if (!proxyEp) return null;
-  const candidate = /^https?:\/\//i.test(proxyEp) ? proxyEp : `https://${proxyEp}`;
-  try {
-    const parsed = new URL(candidate);
-    const host = parsed.hostname.replace(/^proxy\./i, 'api.');
-    return `https://${host}`;
-  } catch {
-    return null;
-  }
-}
-
-function parseCachedCopilotToken(value: unknown): CachedCopilotToken | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Partial<CachedCopilotToken>;
-  if (typeof record.token !== 'string' || record.token.trim().length === 0) return null;
-  if (typeof record.expiresAt !== 'number' || !Number.isFinite(record.expiresAt)) return null;
-  if (typeof record.updatedAt !== 'number' || !Number.isFinite(record.updatedAt)) return null;
-  return {
-    token: record.token,
-    expiresAt: record.expiresAt,
-    updatedAt: record.updatedAt,
-    ...(typeof record.sourceFingerprint === 'string' ? { sourceFingerprint: record.sourceFingerprint } : {}),
-  };
-}
-
-async function resolveCopilotToken(options: GitHubCopilotProviderOptions): Promise<{ token: string; baseUrl: string; expiresAt: number }> {
-  const env = options.env ?? process.env;
-  const fetchFn = options.fetchFn ?? fetch;
-  const githubToken = readFirstEnv(COPILOT_TOKEN_ENV_VARS, env);
-  if (!githubToken) {
-    throw new Error('GitHub Copilot requires COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN.');
-  }
-
-  const sourceFingerprint = createHash('sha256').update(githubToken).digest('hex');
-  const cachePath = options.tokenCachePath;
-  try {
-    const cached = readJsonFileOrQuarantine<CachedCopilotToken>(cachePath, {
-      label: 'providers/github-copilot-token-cache',
-      recovery: 'A fresh Copilot token is exchanged from the GitHub token in the environment on this call and re-cached; nothing is lost beyond one extra token exchange.',
-      validate: (raw) => {
-        const parsed = parseCachedCopilotToken(raw);
-        if (!parsed) throw new Error('token cache does not hold a usable token record');
-        return parsed;
-      },
-    });
-    if (cached && cached.sourceFingerprint === sourceFingerprint && isTokenUsable(cached)) {
-      return {
-        token: cached.token,
-        baseUrl: deriveCopilotApiBaseUrlFromToken(cached.token) ?? DEFAULT_COPILOT_API_BASE_URL,
-        expiresAt: cached.expiresAt,
-      };
-    }
-  } catch (error) {
-    logger.warn('[github-copilot] Token cache load failed', {
-      cachePath,
-      error: summarizeError(error),
-    });
-  }
-
-  const response = await fetchFn(COPILOT_TOKEN_URL, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${githubToken}`,
-      ...buildCopilotIdeHeaders(true),
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Copilot token exchange failed: HTTP ${response.status}`);
-  }
-  const parsed = parseCopilotTokenResponse(await response.json());
-  const cachePayload: CachedCopilotToken = {
-    token: parsed.token,
-    expiresAt: parsed.expiresAt,
-    updatedAt: Date.now(),
-    sourceFingerprint,
-  };
-  // The token in hand is already valid; caching it only saves the next call an
-  // exchange. A cache the filesystem refused must not turn a successful token
-  // exchange into a failed provider call, so the failure is logged with its
-  // path and errno and the token is returned regardless.
-  writeJsonFileAtomicSafe(cachePath, cachePayload, {
-    trailingNewline: false,
-    label: 'providers/github-copilot-token-cache',
-  });
-  return {
-    token: parsed.token,
-    baseUrl: deriveCopilotApiBaseUrlFromToken(parsed.token) ?? DEFAULT_COPILOT_API_BASE_URL,
-    expiresAt: parsed.expiresAt,
   };
 }
 
@@ -280,7 +130,7 @@ interface CopilotModelsResponse {
 /**
  * Fetch GitHub Copilot's live model list: GET /models on the same
  * per-account Copilot API host (and using the same exchanged session token)
- * `resolveCopilotToken` already resolves for chat requests, no new
+ * the provider-owned session store resolves for chat requests, no new
  * credential source, no new env vars. Verified 2026-07-13 against public,
  * independently-implemented Copilot API proxies (e.g. ericc-ch/copilot-api's
  * `getModels()`, which hits the identical `${baseUrl}/models` endpoint with
@@ -294,29 +144,36 @@ interface CopilotModelsResponse {
  * the chat model picker. Each kept entry's `supported_endpoints` and `vendor`
  * are kept with it: they say which transport the model is served on.
  */
-async function fetchCopilotModels(options: GitHubCopilotProviderOptions): Promise<Map<string, CopilotModelFacts>> {
+async function fetchCopilotModels(options: GitHubCopilotProviderOptions, sessions: CopilotSessions, owner: CopilotCredentialOwner): Promise<Map<string, CopilotModelFacts>> {
   const fetchFn = options.fetchFn ?? fetch;
-  const session = await resolveCopilotToken(options);
+  const session = await sessions.resolve(owner);
   const url = `${session.baseUrl.replace(/\/+$/, '')}/models`;
+  const signal = AbortSignal.any([owner.signal, AbortSignal.timeout(COPILOT_IO_TIMEOUT_MS)]);
+  sessions.assertCurrent(owner);
   const res = await fetchFn(url, {
+    signal, redirect: 'error',
     headers: {
       Authorization: `Bearer ${session.token}`,
       Accept: 'application/json',
       'Copilot-Integration-Id': 'vscode-chat',
-      ...buildCopilotIdeHeaders(true),
+      ...copilotIdeHeaders(true),
     },
   });
-  if (!res.ok) {
-    throw new Error(`GitHub Copilot /models (${url}) returned ${res.status} ${res.statusText}`);
-  }
-  const body = await res.json() as CopilotModelsResponse;
-  const models = new Map<string, CopilotModelFacts>();
-  for (const entry of body.data ?? []) {
-    if (entry.capabilities?.type !== undefined && entry.capabilities.type !== 'chat') continue;
-    if (typeof entry.id !== 'string' || entry.id.length === 0) continue;
-    models.set(entry.id, readCopilotModelFacts(entry));
-  }
-  return models;
+  try {
+    sessions.assertCurrent(owner); signal.throwIfAborted();
+    if (!res.ok) {
+      throw new Error(`GitHub Copilot /models (${url}) returned ${res.status} ${res.statusText}`);
+    }
+    const body = await res.json() as CopilotModelsResponse;
+    sessions.assertCurrent(owner); signal.throwIfAborted();
+    const models = new Map<string, CopilotModelFacts>();
+    for (const entry of body.data ?? []) {
+      if (entry.capabilities?.type !== undefined && entry.capabilities.type !== 'chat') continue;
+      if (typeof entry.id !== 'string' || entry.id.length === 0) continue;
+      models.set(entry.id, readCopilotModelFacts(entry));
+    }
+    return models;
+  } finally { if (!res.bodyUsed) await res.body?.cancel().catch(() => {}); }
 }
 
 export class GitHubCopilotProvider implements LLMProvider {
@@ -338,51 +195,94 @@ export class GitHubCopilotProvider implements LLMProvider {
    */
   private _models: string[] = [...COPILOT_DATED_STATIC_MODELS];
   get models(): string[] {
+    this.observeCredentials();
     return this._models;
   }
 
   /** The /models facts of each model from the last live fetch in this process. */
   private readonly modelFacts = new Map<string, CopilotModelFacts>();
 
-  constructor(private readonly options: GitHubCopilotProviderOptions) {}
+  private readonly sessions: CopilotSessions;
+  private modelOwner: CopilotCredentialOwner | null = null;
+  private modelsReadFor: CopilotCredentialOwner | null = null;
 
-  isConfigured(): boolean {
-    return readFirstEnv(COPILOT_TOKEN_ENV_VARS, this.options.env ?? process.env) !== null;
+  constructor(private readonly options: GitHubCopilotProviderOptions) {
+    this.options = { ...options };
+    this.sessions = new CopilotSessions(this.options);
   }
+
+  private observeCredentials(): CopilotCredentialOwner | null {
+    const owner = this.sessions.capture();
+    if (owner !== this.modelOwner) {
+      this.modelOwner = owner;
+      this.modelFacts.clear(); this.modelsReadFor = null;
+      this._models = [...COPILOT_DATED_STATIC_MODELS];
+    }
+    return owner;
+  }
+
+  isConfigured(): boolean { return this.observeCredentials() !== null; }
 
   /**
    * Re-check Copilot's live model list. Called at boot (background,
-   * respects the on-disk TTL cache) and on-demand for a picker-open
+   * refreshes the current account before reusing its model-list TTL cache) and on-demand for a picker-open
    * re-check or an explicit user refresh (`force: true`, bypasses the TTL
    * cache). Always resolves, falls back to the on-disk cache, then to the
    * dated-static list, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
   async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
-    const result = await runLiveModelRefresh({
-      providerName: this.name,
-      cachePath: this.options.modelsCachePath,
-      datedStaticModels: COPILOT_DATED_STATIC_MODELS,
-      datedStaticAsOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
-      isConfigured: this.isConfigured(),
-      fetchLive: async () => {
-        const live = await fetchCopilotModels(this.options);
-        this.modelFacts.clear();
-        for (const [id, facts] of live) this.modelFacts.set(id, facts);
-        return [...live.keys()];
-      },
-      force,
-    });
+    const owner = this.observeCredentials();
+    const retired = (): LiveModelDiscoveryResult => ({ models: [...COPILOT_DATED_STATIC_MODELS], source: 'dated-static',
+      added: [], removed: [], asOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
+      error: 'The Copilot account changed during discovery. Refresh the currently selected account.' });
+    let result: LiveModelDiscoveryResult;
+    try {
+      result = await runLiveModelRefresh({
+        providerName: this.name,
+        cachePath: this.options.modelsCachePath,
+        datedStaticModels: COPILOT_DATED_STATIC_MODELS,
+        datedStaticAsOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
+        isConfigured: owner !== null,
+        assertCurrent: () => { if (this.observeCredentials() !== owner) throw new Error('Copilot account changed during discovery'); },
+        fetchLive: async () => {
+          if (!owner) throw new Error('GitHub Copilot requires a configured GitHub token');
+          const live = await fetchCopilotModels(this.options, this.sessions, owner);
+          this.sessions.assertCurrent(owner);
+          this.modelFacts.clear();
+          for (const [id, facts] of live) this.modelFacts.set(id, facts);
+          return [...live.keys()];
+        },
+        force: force || (owner !== null && this.modelsReadFor !== owner),
+      });
+    } catch (error) {
+      if (this.observeCredentials() !== owner) return retired();
+      throw error;
+    }
+    if (this.observeCredentials() !== owner) return retired();
+    if (result.source === 'live') this.modelsReadFor = owner;
     this._models = [...result.models];
     return result;
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
+    const owner = this.observeCredentials();
+    if (!owner) throw new Error('GitHub Copilot requires COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN.');
+    const callerSignal = params.signal, beforeAttempt = params.beforeAttempt, onDelta = params.onDelta;
+    const signal = callerSignal ? AbortSignal.any([callerSignal, owner.signal]) : owner.signal;
+    const current = () => { signal.throwIfAborted(); this.sessions.assertCurrent(owner); signal.throwIfAborted(); };
+    current();
     const model = params.model ?? this.models[0]!;
     // Outside the try so a judgment port error is not rewrapped as a provider error.
     const anthropicTransport = await this.usesAnthropicTransport(model);
+    current();
+    const request: ChatRequest = { ...params, model, signal,
+      beforeAttempt: async () => { current(); await beforeAttempt?.(); current(); },
+      ...(onDelta ? { onDelta: (delta) => { current(); onDelta(delta); current(); } } : {}),
+    };
     try {
-      const session = await resolveCopilotToken(this.options);
+      const session = await this.sessions.resolve(owner, signal);
+      current();
       const baseURL = `${session.baseUrl.replace(/\/+$/, '')}/v1`;
       const defaultHeaders = buildCopilotDynamicHeaders(params.messages);
       if (anthropicTransport) {
@@ -398,7 +298,7 @@ export class GitHubCopilotProvider implements LLMProvider {
           authHeaderMode: 'bearer',
           streamProtocol: 'anthropic-sse',
         });
-        return provider.chat({ ...params, model });
+        const result = await provider.chat(request); current(); return result;
       }
 
       const provider = new OpenAICompatProvider({
@@ -413,11 +313,13 @@ export class GitHubCopilotProvider implements LLMProvider {
         aliases: ['copilot'],
         streamProtocol: 'openai-sse',
       });
-      return (await instrumentedLlmCall(
-        () => provider.chat({ ...params, model }),
+      const result = (await instrumentedLlmCall(
+        () => provider.chat(request),
         { provider: this.name, model },
       )).result;
+      current(); return result;
     } catch (error) {
+      if (error instanceof ProviderAttemptDeniedError) throw error;
       throw toProviderError(error, {
         provider: this.name,
         operation: 'chat',
@@ -439,7 +341,7 @@ export class GitHubCopilotProvider implements LLMProvider {
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
-    const configured = readFirstEnv(COPILOT_TOKEN_ENV_VARS, this.options.env ?? process.env) !== null;
+    const configured = this.isConfigured();
     const authRoutes = await buildStandardProviderAuthRoutes({
       providerId: this.name,
       apiKeyEnvVars: COPILOT_TOKEN_ENV_VARS,

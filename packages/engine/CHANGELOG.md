@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Keep Copilot sessions under the actual provider's observed credential owner.
+  Concurrent discovery/chat share one exchange; account changes retire old
+  sessions, transport metadata and pending publication. Retry admission retains
+  the original host guard. Retire the earlier disk token cache and its source
+  digest; provider startup now exchanges a fresh session with GitHub.
+
 - Run checkout recovery through the daemon's actual payment registration before
   attaching handlers, including when the browser has not been created. Share
   the registry with subsequent checkout calls. Payment close now retires and

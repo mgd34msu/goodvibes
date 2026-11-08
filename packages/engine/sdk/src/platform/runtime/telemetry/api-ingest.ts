@@ -1,17 +1,14 @@
 import type { RuntimeEventDomain } from '../events/index.js';
 import type { TelemetryRecord } from './api.js';
 import type { ReadableSpan } from './types.js';
+import type { TelemetryTraceIdentities } from './trace-identities.js';
 import { SpanKind as SpanKinds, SpanStatusCode } from './types.js';
-import {
-  appendBounded,
-  createSpanId,
-  normalizeTraceId,
-} from './api-helpers.js';
+import { createSpanId } from './api-helpers.js';
 
 interface IngestTelemetryBaseInput {
   readonly payload: Record<string, unknown>;
-  readonly eventLimit: number;
-  readonly records: TelemetryRecord[];
+  readonly traceIdentities: TelemetryTraceIdentities;
+  readonly appendRecord: (record: TelemetryRecord) => void;
   readonly recordEvent: (type: string, record: TelemetryRecord) => void;
   readonly nextSequence: () => number;
 }
@@ -24,9 +21,7 @@ export function ingestExternalTelemetryLogs(input: IngestTelemetryBaseInput): vo
       const logRecords = listNestedArray(scope, 'logRecords');
       for (const logRecord of logRecords) {
         const entry = objectRecord(logRecord);
-        const record = buildIngestedTelemetryRecord('OTLP_LOG_INGEST', entry, input.nextSequence);
-        appendBounded(input.records, record, input.eventLimit);
-        input.recordEvent('OTLP_LOG_INGEST', record);
+        publishIngestedRecord('OTLP_LOG_INGEST', entry, input);
       }
     }
   }
@@ -34,8 +29,7 @@ export function ingestExternalTelemetryLogs(input: IngestTelemetryBaseInput): vo
 
 export function ingestExternalTelemetryTraces(
   input: IngestTelemetryBaseInput & {
-    readonly spanLimit: number;
-    readonly spans: ReadableSpan[];
+    readonly appendSpan: (span: ReadableSpan) => void;
   },
 ): void {
   const resourceSpans = Array.isArray(input.payload['resourceSpans']) ? input.payload['resourceSpans'] as unknown[] : [];
@@ -46,7 +40,6 @@ export function ingestExternalTelemetryTraces(
       const spans = listNestedArray(scope, 'spans');
       for (const spanPayload of spans) {
         const entry = objectRecord(spanPayload);
-        const traceId = typeof entry['traceId'] === 'string' ? entry['traceId'] : normalizeTraceId(undefined);
         const spanId = typeof entry['spanId'] === 'string' ? entry['spanId'] : createSpanId();
         const name = typeof entry['name'] === 'string' ? entry['name'] : 'otlp.span';
         const startMs = typeof entry['startTimeUnixNano'] === 'number'
@@ -55,7 +48,7 @@ export function ingestExternalTelemetryTraces(
         const endMs = typeof entry['endTimeUnixNano'] === 'number'
           ? Math.floor(entry['endTimeUnixNano'] / 1_000_000)
           : startMs;
-        appendBounded(input.spans, {
+        input.traceIdentities.capture(typeof entry['traceId'] === 'string' ? entry['traceId'] : undefined, traceId => input.appendSpan({
           name,
           kind: SpanKinds.INTERNAL,
           spanContext: { traceId, spanId, isValid: true },
@@ -66,15 +59,13 @@ export function ingestExternalTelemetryTraces(
           events: [],
           status: { code: SpanStatusCode.UNSET },
           instrumentationScope: 'otlp-ingest',
-        }, input.spanLimit);
+        }));
         spansAppended += 1;
       }
     }
   }
   if (spansAppended === 0) return;
-  const record = buildIngestedTelemetryRecord('OTLP_TRACE_INGEST', input.payload, input.nextSequence);
-  appendBounded(input.records, record, input.eventLimit);
-  input.recordEvent('OTLP_TRACE_INGEST', record);
+  publishIngestedRecord('OTLP_TRACE_INGEST', input.payload, input);
 }
 
 export function ingestExternalTelemetryMetrics(input: IngestTelemetryBaseInput): void {
@@ -96,15 +87,22 @@ export function ingestExternalTelemetryMetrics(input: IngestTelemetryBaseInput):
     }
   }
   if (datapointsFound === 0) return;
-  const record = buildIngestedTelemetryRecord('OTLP_METRICS_INGEST', input.payload, input.nextSequence);
-  appendBounded(input.records, record, input.eventLimit);
-  input.recordEvent('OTLP_METRICS_INGEST', record);
+  publishIngestedRecord('OTLP_METRICS_INGEST', input.payload, input);
+}
+
+function publishIngestedRecord(type: string, payload: Record<string, unknown>, input: IngestTelemetryBaseInput): void {
+  input.traceIdentities.capture(typeof payload['traceId'] === 'string' ? payload['traceId'] : undefined, traceId => {
+    const record = buildIngestedTelemetryRecord(type, payload, input.nextSequence, traceId);
+    input.appendRecord(record);
+    input.recordEvent(type, record);
+  });
 }
 
 function buildIngestedTelemetryRecord(
   type: string,
   payload: Record<string, unknown>,
   nextSequence: () => number,
+  traceId: string,
 ): TelemetryRecord {
   const domain: RuntimeEventDomain = 'ops';
   const now = Date.now();
@@ -115,7 +113,7 @@ function buildIngestedTelemetryRecord(
     type,
     timestamp: now,
     severity: 'info',
-    traceId: normalizeTraceId(undefined),
+    traceId,
     sessionId: '',
     source: 'otlp-ingest',
     message: `OTLP ingest: ${type}`,

@@ -9,7 +9,6 @@ import {
   buildSpanCursor,
   clampLimit,
   extractRecordSequence,
-  normalizeTraceId,
   sanitizeRecord,
   sanitizeSpan,
 } from './api-helpers.js';
@@ -46,11 +45,10 @@ export function applyTelemetrySpanFilter(
   filter: TelemetryFilter,
   view: TelemetryViewMode,
 ): { items: readonly ReadableSpan[]; pageInfo: TelemetryPageInfo } {
-  const normalizedTraceId = filter.traceId ? normalizeTraceId(filter.traceId) : undefined;
   const filtered = spans.filter((span) => {
     if (filter.since !== undefined && span.startTimeMs < filter.since) return false;
     if (filter.until !== undefined && span.endTimeMs > filter.until) return false;
-    if (normalizedTraceId && span.spanContext.traceId !== normalizedTraceId) return false;
+    if (filter.traceId && span.spanContext.traceId !== filter.traceId) return false;
     if (filter.turnId !== undefined && span.attributes.turnId !== filter.turnId) return false;
     if (filter.agentId !== undefined && span.attributes.agentId !== filter.agentId) return false;
     if (filter.taskId !== undefined && span.attributes.taskId !== filter.taskId) return false;
@@ -82,7 +80,7 @@ export function telemetryRecordMatches(record: TelemetryRecord, filter: Telemetr
   if (filter.domains && filter.domains.length > 0 && !filter.domains.includes(record.domain)) return false;
   if (filter.eventTypes && filter.eventTypes.length > 0 && !filter.eventTypes.includes(record.type)) return false;
   if (filter.severity && record.severity !== filter.severity) return false;
-  if (filter.traceId && record.traceId !== normalizeTraceId(filter.traceId)) return false;
+  if (filter.traceId && record.traceId !== filter.traceId) return false;
   if (filter.sessionId && record.sessionId !== filter.sessionId) return false;
   if (filter.turnId && record.turnId !== filter.turnId) return false;
   if (filter.agentId && record.agentId !== filter.agentId) return false;

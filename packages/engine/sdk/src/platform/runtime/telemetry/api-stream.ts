@@ -10,10 +10,7 @@ import {
   clampLimit,
   sanitizeRecord,
 } from './api-helpers.js';
-import {
-  resolveTelemetryRecordCursor,
-  telemetryRecordMatches,
-} from './api-query.js';
+import { resolveTelemetryRecordCursor } from './api-query.js';
 
 export interface CreateTelemetryStreamInput {
   readonly request: Request;
@@ -22,6 +19,8 @@ export interface CreateTelemetryStreamInput {
   readonly rawAccessible: boolean;
   readonly assertViewAvailable: () => void;
   readonly records: readonly TelemetryRecord[];
+  /** Resolve source aliases against the collector's live retained identities. */
+  readonly matchesRecord: (record: TelemetryRecord, filter: TelemetryFilter) => boolean;
   readonly listEventPage: (
     filter: TelemetryFilter,
     view: TelemetryViewMode,
@@ -75,7 +74,7 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
       }
       unsub = input.subscribe((record) => {
         if (closed || !checkAccess()) return;
-        if (!telemetryRecordMatches(record, input.filter)) return;
+        if (!input.matchesRecord(record, input.filter)) return;
         const projected = sanitizeRecord(record, input.view);
         controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
       });

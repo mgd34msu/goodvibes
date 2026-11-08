@@ -1,5 +1,6 @@
 import { VERSION } from '../../version.js';
 import { telemetryBufferFill } from '../metrics.js';
+import { TelemetryTraceIdentities } from './trace-identities.js';
 import { normalizeError, type NormalizedError } from '../../utils/error-display.js';
 import type {
   AnyRuntimeEvent,
@@ -38,7 +39,6 @@ import {
   inferSeverity,
   isErrorEventType,
   normalizePayload,
-  normalizeTraceId,
   SERVICE_NAME,
   summarizePayload,
   toAttributeValue,
@@ -47,6 +47,7 @@ import {
 import {
   applyTelemetryRecordFilter,
   applyTelemetrySpanFilter,
+  telemetryRecordMatches,
 } from './api-query.js';
 import { createTelemetryEventStream } from './api-stream.js';
 import {
@@ -218,6 +219,7 @@ export class TelemetryApiService {
   private readonly records: TelemetryRecord[] = [];
   private readonly errors: TelemetryRecord[] = [];
   private readonly spans: ReadableSpan[] = [];
+  private readonly traceIdentities = new TelemetryTraceIdentities();
   private readonly eventCountsByDomain = new Map<string, number>();
   private readonly eventCountsByType = new Map<string, number>();
   private readonly errorCountsByCategory = new Map<string, number>();
@@ -246,10 +248,13 @@ export class TelemetryApiService {
     for (const unsub of this.unsubs) unsub();
     this.unsubs.length = 0;
     this.subscribers.clear();
-    this.activeTurnSpans.clear();
-    this.activeTaskSpans.clear();
-    this.activeAgentSpans.clear();
-    this.activeToolSpans.clear();
+    for (const active of [this.activeTurnSpans, this.activeTaskSpans, this.activeAgentSpans, this.activeToolSpans]) {
+      for (const span of active.values()) this.traceIdentities.release(span.traceId);
+      active.clear();
+    }
+    this.turnSpanIds.clear();
+    this.taskSpanIds.clear();
+    this.agentSpanIds.clear();
   }
 
   subscribe(listener: (record: TelemetryRecord) => void): () => void {
@@ -371,7 +376,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<TelemetryRecord> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetryRecordFilter(this.records, filter, view);
+    const { items, pageInfo } = applyTelemetryRecordFilter(this.records, this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -381,7 +386,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<TelemetryRecord> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetryRecordFilter(this.errors, filter, view);
+    const { items, pageInfo } = applyTelemetryRecordFilter(this.errors, this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -391,7 +396,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<ReadableSpan> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetrySpanFilter(this.spans, filter, view);
+    const { items, pageInfo } = applyTelemetrySpanFilter(this.spans, this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -409,6 +414,7 @@ export class TelemetryApiService {
       rawAccessible: rawAccessible && this.isRawEnabled(),
       assertViewAvailable: () => this.assertViewAvailable(view),
       records: this.records,
+      matchesRecord: (record, nextFilter) => telemetryRecordMatches(record, this.resolveTraceFilter(nextFilter)),
       listEventPage: (nextFilter, nextView, nextRawAccessible) =>
         this.listEventPage(nextFilter, nextView, nextRawAccessible),
       subscribe: (listener) => this.subscribe(listener),
@@ -437,6 +443,36 @@ export class TelemetryApiService {
     }
   }
 
+  private resolveTraceFilter(filter: TelemetryFilter): TelemetryFilter {
+    if (!filter.traceId) return filter;
+    const traceId = this.traceIdentities.resolve(filter.traceId);
+    // An unseen alias cannot equal a native trace ID. Keep it as a nonmatch,
+    // rather than dropping the filter or creating a new identity while querying.
+    return traceId === undefined ? filter : { ...filter, traceId };
+  }
+
+  private appendRecord(record: TelemetryRecord, buffer = this.records, limit = this.eventLimit): void {
+    // Subscribers borrow this same record; its identity must stay fixed until
+    // every retaining buffer releases it.
+    Object.freeze(record);
+    this.traceIdentities.retain(record.traceId);
+    appendBounded(buffer, record, limit, evicted => this.traceIdentities.release(evicted.traceId));
+  }
+
+  private appendSpan(span: ReadableSpan): void {
+    Object.freeze(span.spanContext);
+    Object.freeze(span);
+    this.traceIdentities.retain(span.spanContext.traceId);
+    appendBounded(this.spans, span, this.spanLimit, evicted => this.traceIdentities.release(evicted.spanContext.traceId));
+  }
+
+  private startSyntheticSpan(active: Map<string, ActiveSyntheticSpan>, key: string, span: ActiveSyntheticSpan): void {
+    this.traceIdentities.retain(span.traceId);
+    const previous = active.get(key);
+    active.set(key, span);
+    if (previous !== undefined) this.traceIdentities.release(previous.traceId);
+  }
+
   private handleEnvelope(
     domain: RuntimeEventDomain,
     envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>,
@@ -449,35 +485,37 @@ export class TelemetryApiService {
         ...(extractProvider(payload) ? { provider: extractProvider(payload) } : {}),
       })
       : undefined;
-    const attributes = buildAttributes(domain, envelope, payload);
-    const record: TelemetryRecord = {
-      id: buildRecordId(domain, envelope, this.seq++),
-      domain,
-      type: envelope.type,
-      timestamp: envelope.ts,
-      severity: inferSeverity(envelope.type, normalizedError),
-      traceId: normalizeTraceId(envelope.traceId),
-      sessionId: envelope.sessionId ?? '',
-      ...(envelope.turnId ? { turnId: envelope.turnId } : {}),
-      ...(envelope.agentId ? { agentId: envelope.agentId } : {}),
-      ...(envelope.taskId ? { taskId: envelope.taskId } : {}),
-      source: envelope.source ?? '',
-      message: summarizePayload(envelope.type, payload),
-      payload,
-      attributes,
-      ...(normalizedError ? { error: normalizedError } : {}),
-    };
+    this.traceIdentities.capture(envelope.traceId, traceId => {
+      const attributes = { ...buildAttributes(domain, envelope, payload), traceId };
+      const record: TelemetryRecord = {
+        id: buildRecordId(domain, envelope, this.seq++),
+        domain,
+        type: envelope.type,
+        timestamp: envelope.ts,
+        severity: inferSeverity(envelope.type, normalizedError),
+        traceId,
+        sessionId: envelope.sessionId ?? '',
+        ...(envelope.turnId ? { turnId: envelope.turnId } : {}),
+        ...(envelope.agentId ? { agentId: envelope.agentId } : {}),
+        ...(envelope.taskId ? { taskId: envelope.taskId } : {}),
+        source: envelope.source ?? '',
+        message: summarizePayload(envelope.type, payload),
+        payload,
+        attributes,
+        ...(normalizedError ? { error: normalizedError } : {}),
+      };
 
-    appendBounded(this.records, record, this.eventLimit);
-    this.eventCountsByDomain.set(domain, (this.eventCountsByDomain.get(domain) ?? 0) + 1);
-    this.eventCountsByType.set(envelope.type, (this.eventCountsByType.get(envelope.type) ?? 0) + 1);
-    if (normalizedError) {
-      appendBounded(this.errors, record, this.errorLimit);
-      this.errorCountsByCategory.set(normalizedError.category, (this.errorCountsByCategory.get(normalizedError.category) ?? 0) + 1);
-    }
-    telemetryBufferFill.set(this.records.length / this.eventLimit);
-    this.captureSyntheticSpan(record);
-    this.notify(record);
+      this.appendRecord(record);
+      this.eventCountsByDomain.set(domain, (this.eventCountsByDomain.get(domain) ?? 0) + 1);
+      this.eventCountsByType.set(envelope.type, (this.eventCountsByType.get(envelope.type) ?? 0) + 1);
+      if (normalizedError) {
+        this.appendRecord(record, this.errors, this.errorLimit);
+        this.errorCountsByCategory.set(normalizedError.category, (this.errorCountsByCategory.get(normalizedError.category) ?? 0) + 1);
+      }
+      telemetryBufferFill.set(this.eventLimit > 0 ? this.records.length / this.eventLimit : 0);
+      this.captureSyntheticSpan(record);
+      this.notify(record);
+    });
   }
 
   private captureSyntheticSpan(record: TelemetryRecord): void {
@@ -486,7 +524,7 @@ export class TelemetryApiService {
         if (record.turnId) {
           const spanId = createSpanId();
           this.turnSpanIds.set(record.turnId, spanId);
-          this.activeTurnSpans.set(record.turnId, {
+          this.startSyntheticSpan(this.activeTurnSpans, record.turnId, {
             name: 'turn.lifecycle',
             kind: SpanKinds.INTERNAL,
             traceId: record.traceId,
@@ -500,7 +538,7 @@ export class TelemetryApiService {
         if (record.taskId) {
           const spanId = createSpanId();
           this.taskSpanIds.set(record.taskId, spanId);
-          this.activeTaskSpans.set(record.taskId, {
+          this.startSyntheticSpan(this.activeTaskSpans, record.taskId, {
             name: 'task.lifecycle',
             kind: SpanKinds.INTERNAL,
             traceId: record.traceId,
@@ -516,7 +554,7 @@ export class TelemetryApiService {
           const spanId = createSpanId();
           const parentSpanId = record.taskId ? this.taskSpanIds.get(record.taskId) : undefined;
           this.agentSpanIds.set(record.agentId, spanId);
-          this.activeAgentSpans.set(record.agentId, {
+          this.startSyntheticSpan(this.activeAgentSpans, record.agentId, {
             name: 'agent.lifecycle',
             kind: SpanKinds.INTERNAL,
             traceId: record.traceId,
@@ -538,7 +576,7 @@ export class TelemetryApiService {
               : record.turnId
                 ? this.turnSpanIds.get(record.turnId)
                 : undefined;
-          this.activeToolSpans.set(callId, {
+          this.startSyntheticSpan(this.activeToolSpans, callId, {
             name: 'tool.execute',
             kind: SpanKinds.INTERNAL,
             traceId: record.traceId,
@@ -595,45 +633,49 @@ export class TelemetryApiService {
     };
     if (key) activeMap.delete(key);
 
-    const status: SpanStatus = record.error
-      ? { code: SpanStatusCode.ERROR, message: record.error.summary }
-      : { code: SpanStatusCode.OK };
-    const events: SpanEvent[] = [
-      {
-        name: record.type,
-        timestamp: record.timestamp,
-        attributes: Object.fromEntries(
-          Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
-            .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
-            .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
-        ),
-      },
-    ];
+    try {
+      const status: SpanStatus = record.error
+        ? { code: SpanStatusCode.ERROR, message: record.error.summary }
+        : { code: SpanStatusCode.OK };
+      const events: SpanEvent[] = [
+        {
+          name: record.type,
+          timestamp: record.timestamp,
+          attributes: Object.fromEntries(
+            Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
+              .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
+              .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
+          ),
+        },
+      ];
 
-    appendBounded(this.spans, Object.freeze({
-      name: synthesized.name,
-      kind: synthesized.kind,
-      spanContext: {
-        traceId: synthesized.traceId,
-        spanId: synthesized.spanId,
-        isValid: true,
-      },
-      ...(synthesized.parentSpanId ? { parentSpanId: synthesized.parentSpanId } : {}),
-      startTimeMs: synthesized.startTimeMs,
-      endTimeMs: record.timestamp,
-      durationMs: Math.max(0, record.timestamp - synthesized.startTimeMs),
-      attributes: {
-        ...synthesized.attributes,
-        ...Object.fromEntries(
-          Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
-            .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
-            .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
-        ),
-      },
-      events,
-      status,
-      instrumentationScope: `${SERVICE_NAME}/telemetry`,
-    }), this.spanLimit);
+      this.appendSpan(Object.freeze({
+        name: synthesized.name,
+        kind: synthesized.kind,
+        spanContext: {
+          traceId: synthesized.traceId,
+          spanId: synthesized.spanId,
+          isValid: true,
+        },
+        ...(synthesized.parentSpanId ? { parentSpanId: synthesized.parentSpanId } : {}),
+        startTimeMs: synthesized.startTimeMs,
+        endTimeMs: record.timestamp,
+        durationMs: Math.max(0, record.timestamp - synthesized.startTimeMs),
+        attributes: {
+          ...synthesized.attributes,
+          ...Object.fromEntries(
+            Object.entries(this.buildSpanAttributes(record, { endEventType: record.type }))
+              .map(([spanKey, value]) => [spanKey, toAttributeValue(value)])
+              .filter((entry): entry is [string, AttributeValue] => entry[1] !== undefined),
+          ),
+        },
+        events,
+        status,
+        instrumentationScope: `${SERVICE_NAME}/telemetry`,
+      }));
+    } finally {
+      if (active !== undefined) this.traceIdentities.release(active.traceId);
+    }
   }
 
   private buildSpanAttributes(record: TelemetryRecord, extra: Record<string, unknown> = {}): SpanAttributes {
@@ -696,8 +738,8 @@ export class TelemetryApiService {
   ingestExternalLogs(payload: Record<string, unknown>): void {
     ingestExternalTelemetryLogs({
       payload,
-      eventLimit: this.eventLimit,
-      records: this.records,
+      traceIdentities: this.traceIdentities,
+      appendRecord: record => this.appendRecord(record),
       recordEvent: (type, record) => this.recordIngestedEvent(type, record),
       nextSequence: () => this.seq++,
     });
@@ -711,10 +753,9 @@ export class TelemetryApiService {
   ingestExternalTraces(payload: Record<string, unknown>): void {
     ingestExternalTelemetryTraces({
       payload,
-      eventLimit: this.eventLimit,
-      records: this.records,
-      spanLimit: this.spanLimit,
-      spans: this.spans,
+      traceIdentities: this.traceIdentities,
+      appendRecord: record => this.appendRecord(record),
+      appendSpan: span => this.appendSpan(span),
       recordEvent: (type, record) => this.recordIngestedEvent(type, record),
       nextSequence: () => this.seq++,
     });
@@ -729,8 +770,8 @@ export class TelemetryApiService {
   ingestExternalMetrics(payload: Record<string, unknown>): void {
     ingestExternalTelemetryMetrics({
       payload,
-      eventLimit: this.eventLimit,
-      records: this.records,
+      traceIdentities: this.traceIdentities,
+      appendRecord: record => this.appendRecord(record),
       recordEvent: (type, record) => this.recordIngestedEvent(type, record),
       nextSequence: () => this.seq++,
     });

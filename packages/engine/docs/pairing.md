@@ -54,7 +54,8 @@ Both token shapes are persistent. Unlike session tokens, they do not expire auto
 Revocation is always explicit:
 
 - A per-device pairing token is minted once per pairing and stays valid until it is
-  individually revoked (`pairing.tokens.delete`) or renamed (`pairing.tokens.rename`).
+  individually revoked (`pairing.tokens.delete`). Renaming changes its display
+  label without changing its authority.
 - The legacy shared token survives daemon restarts and stays valid until an operator calls
   `pairing.tokens.revokeShared`; the older, host-level `regenerateCompanionToken` API also
   replaces it (see [Legacy: the shared token](#legacy-the-shared-token)).
@@ -71,6 +72,16 @@ under the daemon's home directory. A daemon's `surfaceRoot` is `tui` for histori
 the terminal app, the chat host, and the web app all read the same directory. The file holds only a
 SHA-256 hash per token, never the plaintext, plus each token's id, user-visible name, created
 timestamp, and last-seen timestamp. It is written at mode `0600`.
+
+When the host issues a native continuation, the private token record also retains
+an issued credential-incarnation ID. Its adjacent `.native-owner` file retains
+an issued owner ID and the exact original directory ancestry. These IDs are
+random references; checking them does not hash the directory or token state.
+Back up that file with the pairing store. Missing or damaged continuation-owner
+evidence prevents continuation lookup, while ordinary token authentication stays
+separate. Copying the files into a different owner directory does not transfer
+the authority to continue an earlier operation. Neither file stores the bearer.
+Previously issued v1 continuations retain their original read-only verifier.
 
 **The legacy shared token** is stored in a single global location under the daemon-home directory:
 

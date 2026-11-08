@@ -27,9 +27,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { AtomicWriteDurabilityError, confirmFileDurable, readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
+import { NativeContinuationOwner, nativeContinuationParents, type NativeContinuationParents } from './native-continuation-owner.js';
 
 const TOKEN_PREFIX = 'gvp_';
 /** Do not thrash the disk stamping last-seen on every request. */
@@ -44,6 +46,9 @@ interface StoredPairingToken {
   readonly tokenHash: string;
   readonly createdAt: number;
   lastSeenAt?: number | undefined;
+  /** Issued once per exact credential incarnation; never derived by hashing
+   * another hash. Kept private alongside its original verifier, not listable. */
+  nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
 }
 
 interface PairingOwnerLock {
@@ -148,25 +153,31 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       throw new Error('pairing token store has an invalid or duplicate record');
     }
     ids.add(record.id); hashes.add(record.tokenHash);
+    const revision = record.nativeContinuationRevision;
+    if (revision !== undefined && (!revision || typeof revision !== 'object' || Array.isArray(revision)
+      || Object.keys(revision).length !== 3 || typeof revision.id !== 'string' || !/^[0-9a-f]{64}$/.test(revision.id)
+      || typeof revision.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(revision.tokenHash)
+      || typeof revision.createdAt !== 'number' || !Number.isFinite(revision.createdAt))) throw new Error('Invalid native credential incarnation');
   }
-  const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+  // Published reader width; newly issued values are ordinary opaque IDs.
+  const isStoredBinding = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
   if (snapshot.revokedNativeSources !== undefined && (!Array.isArray(snapshot.revokedNativeSources)
-    || snapshot.revokedNativeSources.some(value => !isHash(value))
+    || snapshot.revokedNativeSources.some(value => !isStoredBinding(value))
     || new Set(snapshot.revokedNativeSources).size !== snapshot.revokedNativeSources.length)) throw new Error('Invalid native source tombstones');
   if (snapshot.continuations !== undefined) {
     if (!Array.isArray(snapshot.continuations)) throw new Error('Invalid native continuation grants');
     const grants = new Set<string>();
     for (const grant of snapshot.continuations) {
       if (!grant || Object.keys(grant).length !== 13 || typeof grant.id !== 'string' || !/^continuation-[0-9a-f-]{36}$/.test(grant.id)
-        || !isHash(grant.binding) || !isHash(grant.sourceBinding)
-        || (grant.successorSourceBinding !== null && !isHash(grant.successorSourceBinding))
-        || ((grant.consumption === null) !== (grant.successorSourceBinding === null)) || !isHash(grant.tokenRevision)
-        || !isHash(grant.ownerRoot) || (grant.watchBinding !== null && !isHash(grant.watchBinding)) || typeof grant.tokenId !== 'string'
+        || !isStoredBinding(grant.binding) || !isStoredBinding(grant.sourceBinding)
+        || (grant.successorSourceBinding !== null && !isStoredBinding(grant.successorSourceBinding))
+        || ((grant.consumption === null) !== (grant.successorSourceBinding === null)) || !isStoredBinding(grant.tokenRevision)
+        || !isStoredBinding(grant.ownerRoot) || (grant.watchBinding !== null && !isStoredBinding(grant.watchBinding)) || typeof grant.tokenId !== 'string'
         || !Array.isArray(grant.scopes) || !grant.scopes.length || grant.scopes.some(scope => typeof scope !== 'string' || !scope)
         || new Set(grant.scopes).size !== grant.scopes.length || typeof grant.revoked !== 'boolean'
-        || !Number.isFinite(grant.createdAt) || (grant.consumption !== null && !isHash(grant.consumption))
+        || !Number.isFinite(grant.createdAt) || (grant.consumption !== null && !isStoredBinding(grant.consumption))
         || (grant.parent !== null && (!grant.parent || Object.keys(grant.parent).length !== 3 || typeof grant.parent.id !== 'string'
-          || !isHash(grant.parent.binding) || !isHash(grant.parent.consumption)))
+          || !isStoredBinding(grant.parent.binding) || !isStoredBinding(grant.parent.consumption)))
         || grants.has(grant.id)) throw new Error('Invalid native continuation grant');
       grants.add(grant.id);
     }
@@ -244,9 +255,15 @@ export class PairingTokenManager {
   private settingsFaulted = false;
   private readonly settingsAuthorities = new WeakMap<SettingsPairingAuthority, SettingsPairingAuthorityRecord>();
   private readonly readMaxPaired: (() => number | undefined) | null;
+  private readonly continuationOwner: NativeContinuationOwner;
+  // Read-only compatibility with actually issued v1 grants. Cache the exact
+  // published inputs; normal native reads/issuance do not enter this path.
+  private readonly publishedTokenRevisions = new Map<string, { createdAt: number; tokenHash: string; digest: string }>();
+  private publishedRoot: { parents: NativeContinuationParents; digest: string } | undefined;
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
     this.filePath = filePath;
+    this.continuationOwner = new NativeContinuationOwner(filePath);
     this.readMaxPaired = options.maxPaired ?? null;
     this.snapshot = { tokens: [] };
     let lock: PairingOwnerLock | undefined;
@@ -385,6 +402,8 @@ export class PairingTokenManager {
     this.snapshot = snapshot;
     if (snapshot.legacyRevoked === true) this.settingsObservedLegacyRevocation = true;
     this.reindex();
+    const ids = new Set(snapshot.tokens.map(token => token.id));
+    for (const id of this.publishedTokenRevisions.keys()) if (!ids.has(id)) this.publishedTokenRevisions.delete(id);
   }
 
   /** Reload under ownership, persist, THEN expose a successful mutation. */
@@ -557,16 +576,26 @@ export class PairingTokenManager {
     } finally { active = false; lock.release(); }
   }
 
-  private nativeContinuationRoot(): string {
-    if (!lstatSync(this.filePath).isFile()) throw new Error('Native continuation owner file is not ordinary');
-    const identities: string[][] = [];
-    for (let path = dirname(this.filePath);;) {
-      const entry = lstatSync(path, { bigint: true });
-      if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Native continuation owner root is not ordinary');
-      identities.push([path, String(entry.dev), String(entry.ino), String(entry.birthtimeNs)]);
-      const parent = dirname(path); if (parent === path) break; path = parent;
+  private continuationCustodyMatches(grant: StoredNativeContinuationGrant, token: StoredPairingToken): boolean {
+    const revision = token.nativeContinuationRevision;
+    if (revision?.id === grant.tokenRevision) {
+      return revision.createdAt === token.createdAt && revision.tokenHash === token.tokenHash
+        && this.continuationOwner.current() === grant.ownerRoot;
     }
-    return hashToken(JSON.stringify(identities));
+    // Existing v1 bytes are verified against their original representation,
+    // never rewritten as newly issued authority. New grants use random IDs.
+    let published = this.publishedTokenRevisions.get(token.id);
+    if (!published || published.createdAt !== token.createdAt || published.tokenHash !== token.tokenHash) {
+      published = { createdAt: token.createdAt, tokenHash: token.tokenHash,
+        digest: hashToken(JSON.stringify([token.createdAt, token.tokenHash])) };
+      this.publishedTokenRevisions.set(token.id, published);
+    }
+    if (grant.tokenRevision !== published.digest) return false;
+    const parents = nativeContinuationParents(this.filePath);
+    if (!this.publishedRoot || !isDeepStrictEqual(this.publishedRoot.parents, parents)) {
+      this.publishedRoot = { parents, digest: hashToken(JSON.stringify(parents)) };
+    }
+    return grant.ownerRoot === this.publishedRoot.digest;
   }
 
   /**
@@ -605,13 +634,28 @@ export class PairingTokenManager {
     if (snapshot.revokedNativeSources?.includes(sourceBinding)) throw new Error('Native continuation source was cancelled');
     const tokenRecord = snapshot.tokens.find(item => item.id === expected.tokenId);
     if (!tokenRecord) throw new Error('Native continuation pairing is unavailable');
-    const tokenRevision = hashToken(JSON.stringify([tokenRecord.createdAt, tokenRecord.tokenHash])); const ownerRoot = this.nativeContinuationRoot();
     const previous = snapshot.continuations?.find(item => item.tokenId === expected.tokenId && item.binding === binding);
     if (previous) {
-      if (previous.sourceBinding !== sourceBinding || previous.revoked || previous.tokenRevision !== tokenRevision || previous.ownerRoot !== ownerRoot
+      if (previous.sourceBinding !== sourceBinding || previous.revoked || !this.continuationCustodyMatches(previous, tokenRecord)
         || JSON.stringify(previous.parent) !== JSON.stringify(parent)
         || JSON.stringify(previous.scopes) !== JSON.stringify([...expected.scopes].sort())) throw new Error('Native continuation issuance was revoked or changed');
       assertCurrent(); return { changed: false, value: Object.freeze({ id: previous.id, binding: previous.binding }) };
+    }
+    let tokenRevision: string, ownerRoot: string;
+    if (parent) {
+      // A descendant retains its validated parent's exact credential/root
+      // incarnation, including an existing v1 lineage. No new digest is made.
+      const ancestor = snapshot.continuations?.find(item => item.id === parent.id && item.binding === parent.binding && item.consumption === parent.consumption);
+      if (!ancestor || !this.continuationCustodyMatches(ancestor, tokenRecord)) throw new Error('Native continuation parent custody changed');
+      tokenRevision = ancestor.tokenRevision; ownerRoot = ancestor.ownerRoot;
+    } else {
+      if (!tokenRecord.nativeContinuationRevision || tokenRecord.nativeContinuationRevision.createdAt !== tokenRecord.createdAt
+        || tokenRecord.nativeContinuationRevision.tokenHash !== tokenRecord.tokenHash) {
+        tokenRecord.nativeContinuationRevision = { id: randomBytes(32).toString('hex'), createdAt: tokenRecord.createdAt, tokenHash: tokenRecord.tokenHash };
+      }
+      tokenRevision = tokenRecord.nativeContinuationRevision.id;
+      try { ownerRoot = this.continuationOwner.ensure(); }
+      catch (error) { this.nativePersistenceFailed = true; this.settingsFaulted = true; throw error; }
     }
     const grant: StoredNativeContinuationGrant = { id: `continuation-${randomUUID()}`, binding, sourceBinding, successorSourceBinding: null, parent, tokenId: expected.tokenId,
       tokenRevision, ownerRoot, watchBinding: null, scopes: [...expected.scopes].sort(), createdAt: Date.now(), consumption: null, revoked: false };
@@ -628,8 +672,8 @@ export class PairingTokenManager {
       if (readFileSync(this.filePath, 'utf8') !== before) return null;
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
       const token = issued && snapshot.tokens.find(item => item.id === issued.tokenId);
-      if (!issued || !token || issued.ownerRoot !== this.nativeContinuationRoot()
-        || (watchBinding !== undefined && issued.watchBinding !== watchBinding) || issued.tokenRevision !== hashToken(JSON.stringify([token.createdAt, token.tokenHash]))
+      if (!issued || !token || !this.continuationCustodyMatches(issued, token)
+        || (watchBinding !== undefined && issued.watchBinding !== watchBinding)
         || snapshot.revokedNativeSources?.includes(issued.sourceBinding) || (issued.successorSourceBinding !== null && snapshot.revokedNativeSources?.includes(issued.successorSourceBinding))
         || issued.revoked || (consumption !== undefined && issued.consumption !== consumption)) return null;
       const visited = new Set<string>([issued.id]); let child = issued;
@@ -666,7 +710,7 @@ export class PairingTokenManager {
     if (!/^[0-9a-f]{64}$/.test(watchBinding)) throw new Error('Invalid continuation watch binding');
     this.mutate(snapshot => {
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
-      if (!issued || issued.revoked || issued.ownerRoot !== this.nativeContinuationRoot()
+      if (!issued || issued.revoked
         || !snapshot.tokens.some(token => token.id === issued.tokenId)
         || (issued.watchBinding !== null && issued.watchBinding !== watchBinding)) throw new Error('Native continuation watch is unavailable or already bound');
       if (!this.readNativeContinuation(grant)) throw new Error('Native continuation lineage is unavailable');
@@ -681,7 +725,7 @@ export class PairingTokenManager {
     if (typeof successorSourceBinding !== 'string' || !/^[0-9a-f]{64}$/.test(successorSourceBinding) || !/^[0-9a-f]{64}$/.test(consumption)) throw new Error('Invalid continuation consumption');
     this.mutate(snapshot => {
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
-      if (!issued || issued.revoked || issued.ownerRoot !== this.nativeContinuationRoot() || !snapshot.tokens.some(token => token.id === issued.tokenId)
+      if (!issued || issued.revoked || !snapshot.tokens.some(token => token.id === issued.tokenId)
         || snapshot.revokedNativeSources?.includes(successorSourceBinding)
         || (issued.consumption !== null && (issued.consumption !== consumption || issued.successorSourceBinding !== successorSourceBinding))) throw new Error('Native continuation is unavailable or already consumed');
       assertCurrent();

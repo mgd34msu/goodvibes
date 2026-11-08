@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Issue native continuation custody IDs instead of hashing directory and token
+  state for every check. Compare the recorded owner ancestry and credential
+  incarnation directly. Existing v1 grants retain a cached read-only verifier;
+  original lineage, scope, revocation and single-successor checks remain.
+
 - Save the original native checkout request and source evidence in a separate
   encrypted store before acknowledging admission. Own and drain preparation
   through cancellation, retain the original storage callbacks, and clean up

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -10,10 +9,17 @@ function ownerLockPath(file: string): string { return join(dirname(file), '.pair
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const sourceBinding = digest('synthetic exact native source and scope');
-const successorA = digest('synthetic successor A');
-const successorB = digest('synthetic successor B');
+// These bindings select issued records; synthetic labels need distinct opaque
+// fixture identities, not cryptographic digests.
+const identities = new Map<string, string>();
+function identity(label: string): string {
+  let value = identities.get(label);
+  if (value === undefined) { value = (identities.size + 1).toString(16).padStart(64, '0'); identities.set(label, value); }
+  return value;
+}
+const sourceBinding = identity('synthetic exact native source and scope');
+const successorA = identity('synthetic successor A');
+const successorB = identity('synthetic successor B');
 const current = () => {};
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'gv-native-continuation-')); dirs.push(dir);
@@ -41,7 +47,7 @@ describe('private pairing native continuation ownership', () => {
   test('copied watch data and invented IDs cannot create a matching issued record', () => {
     const item = fixture(); const grant = item.issue();
     expect(item.manager.readNativeContinuation({ ...grant, id: 'continuation-11111111-1111-4111-8111-111111111111' })).toBeNull();
-    expect(item.manager.readNativeContinuation({ ...grant, binding: digest('other source') })).toBeNull();
+    expect(item.manager.readNativeContinuation({ ...grant, binding: identity('other source') })).toBeNull();
     const other = fixture();
     expect(other.manager.readNativeContinuation(grant)).toBeNull();
     expect(() => other.manager.consumeNativeContinuation(grant, successorA, current)).toThrow();
@@ -58,14 +64,14 @@ describe('private pairing native continuation ownership', () => {
   });
 
   test('an exact watcher commitment is independently held by the pairing owner across restart', () => {
-    const item = fixture(); const grant = item.issue(); const watch = digest('exact synthetic repo, ref, watcher');
+    const item = fixture(); const grant = item.issue(); const watch = identity('exact synthetic repo, ref, watcher');
     expect(item.manager.readNativeContinuation(grant, undefined, watch)).toBeNull();
     item.manager.bindNativeContinuationWatch(grant, watch, current);
     const restarted = new PairingTokenManager(item.file);
     expect(restarted.readNativeContinuation(grant, undefined, watch)).toEqual(item.authority);
-    expect(restarted.readNativeContinuation(grant, undefined, digest('copied watcher for other repo'))).toBeNull();
+    expect(restarted.readNativeContinuation(grant, undefined, identity('copied watcher for other repo'))).toBeNull();
     expect(() => restarted.bindNativeContinuationWatch(grant, watch, current)).not.toThrow();
-    expect(() => restarted.bindNativeContinuationWatch(grant, digest('other watch'), current)).toThrow();
+    expect(() => restarted.bindNativeContinuationWatch(grant, identity('other watch'), current)).toThrow();
   });
 
   test('revoked issuance tombstone cannot be reminted from the original token and source binding', () => {
@@ -152,10 +158,10 @@ describe('adversarial acceptance requirements', () => {
     expect(() => item.manager.issueNativeContinuation(item.paired.token, { ...item.authority, authorityId: 'other-authority' }, sourceBinding, current)).toThrow();
   });
 
-  test('private persisted hash fields cannot be accepted through JSON array coercion', () => {
+  test('private persisted fixed-width fields cannot be accepted through JSON array coercion', () => {
     for (const field of ['binding', 'tokenRevision', 'ownerRoot', 'watchBinding', 'consumption']) {
       const item = fixture(); const grant = item.issue();
-      item.manager.bindNativeContinuationWatch(grant, digest('synthetic watch'), current);
+      item.manager.bindNativeContinuationWatch(grant, identity('synthetic watch'), current);
       item.manager.consumeNativeContinuation(grant, successorA, current);
       const snapshot = persisted(item.file); snapshot.continuations[0][field] = [snapshot.continuations[0][field]];
       const raw = JSON.stringify(snapshot); writeFileSync(item.file, raw);
@@ -182,7 +188,7 @@ describe('adversarial acceptance requirements', () => {
 
   test('changed credential incarnation behind the same public ID cannot retain a grant', () => {
     const item = fixture(); const grant = item.issue(); const snapshot = persisted(item.file);
-    snapshot.tokens[0].tokenHash = digest('synthetic replacement credential');
+    snapshot.tokens[0].tokenHash = identity('synthetic replacement credential');
     snapshot.tokens[0].createdAt += 1;
     writeFileSync(item.file, JSON.stringify(snapshot));
     expect(item.manager.readNativeContinuation(grant)).toBeNull();
@@ -208,9 +214,9 @@ describe('adversarial acceptance requirements', () => {
 describe('private consumed-successor lineage', () => {
   function lineage() {
     const item = fixture(); const parent = item.issue();
-    item.manager.bindNativeContinuationWatch(parent, digest('synthetic original watch'), current);
+    item.manager.bindNativeContinuationWatch(parent, identity('synthetic original watch'), current);
     item.manager.consumeNativeContinuation(parent, successorA, current);
-    const childBinding = digest('synthetic successor native source');
+    const childBinding = identity('synthetic successor native source');
     const issueChild = () => item.manager.issueNativeContinuationFromGrant(parent, successorA, item.authority, childBinding, current);
     return { ...item, parent, childBinding, issueChild };
   }
@@ -226,18 +232,18 @@ describe('private consumed-successor lineage', () => {
 
   test('unconsumed, mismatched, and forged parent references cannot mint children', () => {
     const item = fixture(); const parent = item.issue();
-    const childBinding = digest('synthetic new source');
+    const childBinding = identity('synthetic new source');
     expect(() => item.manager.issueNativeContinuationFromGrant(parent, successorA, item.authority, childBinding, current)).toThrow();
     item.manager.consumeNativeContinuation(parent, successorA, current);
     expect(() => item.manager.issueNativeContinuationFromGrant(parent, successorB, item.authority, childBinding, current)).toThrow();
-    expect(() => item.manager.issueNativeContinuationFromGrant({ ...parent, binding: digest('copied parent') }, successorA, item.authority, childBinding, current)).toThrow();
+    expect(() => item.manager.issueNativeContinuationFromGrant({ ...parent, binding: identity('copied parent') }, successorA, item.authority, childBinding, current)).toThrow();
     expect(() => item.manager.issueNativeContinuationFromGrant(parent, successorA, { ...item.authority, scopes: ['write:unrequested'] }, childBinding, current)).toThrow();
   });
 
   test('child duplicates retain one successor consumption and cannot be reminted under a different lineage', () => {
     const item = lineage(); const child = item.issueChild();
     expect(item.issueChild()).toEqual(child); item.manager.consumeNativeContinuation(child, successorB, current);
-    expect(() => item.manager.consumeNativeContinuation(item.issueChild(), digest('other successor'), current)).toThrow();
+    expect(() => item.manager.consumeNativeContinuation(item.issueChild(), identity('other successor'), current)).toThrow();
     expect(() => item.manager.issueNativeContinuation(item.paired.token, item.authority, item.childBinding, current)).toThrow();
     item.manager.revokeNativeContinuation(child); expect(() => item.issueChild()).toThrow();
   });
@@ -245,13 +251,13 @@ describe('private consumed-successor lineage', () => {
   test('ancestor revocation blocks descendant reads, binding, consumption, and further issuance after restart', () => {
     const item = lineage(); const child = item.issueChild();
     item.manager.consumeNativeContinuation(child, successorB, current);
-    const grandchild = item.manager.issueNativeContinuationFromGrant(child, successorB, item.authority, digest('synthetic grandchild source'), current);
+    const grandchild = item.manager.issueNativeContinuationFromGrant(child, successorB, item.authority, identity('synthetic grandchild source'), current);
     item.manager.revokeNativeContinuation(item.parent);
     const restarted = new PairingTokenManager(item.file);
     expect(restarted.readNativeContinuation(child)).toBeNull(); expect(restarted.readNativeContinuation(grandchild)).toBeNull();
-    expect(() => restarted.bindNativeContinuationWatch(grandchild, digest('grandchild watch'), current)).toThrow();
-    expect(() => restarted.consumeNativeContinuation(grandchild, digest('grandchild successor'), current)).toThrow();
-    expect(() => restarted.issueNativeContinuationFromGrant(child, successorB, item.authority, digest('another child source'), current)).toThrow();
+    expect(() => restarted.bindNativeContinuationWatch(grandchild, identity('grandchild watch'), current)).toThrow();
+    expect(() => restarted.consumeNativeContinuation(grandchild, identity('grandchild successor'), current)).toThrow();
+    expect(() => restarted.issueNativeContinuationFromGrant(child, successorB, item.authority, identity('another child source'), current)).toThrow();
   });
 
   test('a changed ancestor consumption or missing ancestor cannot leave an orphaned descendant live', () => {
@@ -298,26 +304,26 @@ describe('private consumed-successor lineage', () => {
 
 describe('private native source cancellation custody', () => {
   test('source cancellation survives missing public rows, refuses remint, and leaves another source live', () => {
-    const item = fixture(); const exact = digest('project/root/owner/scope/attempt'); const other = digest('other project/root/owner/scope/attempt');
-    const grant = item.manager.issueNativeContinuation(item.paired.token, item.authority, digest('issuance'), current, exact);
-    const untouched = item.manager.issueNativeContinuation(item.paired.token, item.authority, digest('other issuance'), current, other);
+    const item = fixture(); const exact = identity('project/root/owner/scope/attempt'); const other = identity('other project/root/owner/scope/attempt');
+    const grant = item.manager.issueNativeContinuation(item.paired.token, item.authority, identity('issuance'), current, exact);
+    const untouched = item.manager.issueNativeContinuation(item.paired.token, item.authority, identity('other issuance'), current, other);
     item.manager.revokeNativeContinuationsForSource(exact, current);
     const restart = new PairingTokenManager(item.file);
     expect(restart.readNativeContinuation(grant)).toBeNull(); expect(restart.readNativeContinuation(untouched)).toEqual(item.authority);
-    expect(() => restart.issueNativeContinuation(item.paired.token, item.authority, digest('new issuance'), current, exact)).toThrow('cancelled');
+    expect(() => restart.issueNativeContinuation(item.paired.token, item.authority, identity('new issuance'), current, exact)).toThrow('cancelled');
   });
   test('a consumed successor cancellation retires its parent even before any child issuance', () => {
-    const item = fixture(); const original = digest('original source'); const successor = digest('successor source');
-    const grant = item.manager.issueNativeContinuation(item.paired.token, item.authority, digest('issue'), current, original);
+    const item = fixture(); const original = identity('original source'); const successor = identity('successor source');
+    const grant = item.manager.issueNativeContinuation(item.paired.token, item.authority, identity('issue'), current, original);
     item.manager.consumeNativeContinuation(grant, successorA, current, successor);
-    expect(() => item.manager.consumeNativeContinuation(grant, successorA, current, digest('different successor'))).toThrow();
-    expect(() => item.manager.issueNativeContinuationFromGrant(grant, successorA, item.authority, digest('child'), current, original)).toThrow('differs');
+    expect(() => item.manager.consumeNativeContinuation(grant, successorA, current, identity('different successor'))).toThrow();
+    expect(() => item.manager.issueNativeContinuationFromGrant(grant, successorA, item.authority, identity('child'), current, original)).toThrow('differs');
     item.manager.revokeNativeContinuationsForSource(successor, current);
     expect(new PairingTokenManager(item.file).readNativeContinuation(grant)).toBeNull();
-    expect(() => item.manager.issueNativeContinuationFromGrant(grant, successorA, item.authority, digest('child'), current, successor)).toThrow();
+    expect(() => item.manager.issueNativeContinuationFromGrant(grant, successorA, item.authority, identity('child'), current, successor)).toThrow();
   });
   test('source revocation guard failure and private publication failure never acknowledge success', () => {
-    const item = fixture(); const exact = digest('exact source'); const before = readFileSync(item.file, 'utf8');
+    const item = fixture(); const exact = identity('exact source'); const before = readFileSync(item.file, 'utf8');
     expect(() => item.manager.revokeNativeContinuationsForSource(exact, () => { throw new Error('owner changed'); })).toThrow('owner changed');
     expect(readFileSync(item.file, 'utf8')).toBe(before);
     const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementation(() => { throw new Error('private publication failed'); });
@@ -325,7 +331,7 @@ describe('private native source cancellation custody', () => {
     finally { write.mockRestore(); }
   });
   test('cancellation tombstone exists even when no grant was published yet', () => {
-    const item = fixture(); const exact = digest('not yet published source'); item.manager.revokeNativeContinuationsForSource(exact, current);
+    const item = fixture(); const exact = identity('not yet published source'); item.manager.revokeNativeContinuationsForSource(exact, current);
     expect(() => new PairingTokenManager(item.file).issueNativeContinuation(item.paired.token, item.authority, sourceBinding, current, exact)).toThrow('cancelled');
   });
 });

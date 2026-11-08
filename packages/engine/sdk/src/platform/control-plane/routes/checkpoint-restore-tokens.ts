@@ -4,8 +4,8 @@
  * In-memory, single-use, short-lived confirmation tokens for the
  * `checkpoints.restore` server-side confirmation gate.
  *
- * `checkpoints.restorePreview` mints a token bound to the checkpoint id it
- * previewed; the matching `checkpoints.restore` call consumes it exactly once.
+ * Preview mints a token bound to the checkpoint id or exact private hunk values;
+ * the matching restore/revert call consumes it exactly once.
  * A token expires ~2 minutes after issue and is destroyed the moment it is
  * consumed, so it can neither be replayed nor outlive the caller's decision.
  * This is deliberately NOT a durable, cross-process two-phase protocol, it is
@@ -17,8 +17,9 @@ import { randomUUID } from 'node:crypto';
 /** ~2 minutes: long enough for a human to read a preview and confirm, short enough to not linger. */
 export const RESTORE_TOKEN_TTL_MS = 120_000;
 
+type ConfirmationBinding = string | { readonly path: string; readonly hunk: string };
 interface StoredToken {
-  readonly checkpointId: string;
+  readonly binding: ConfirmationBinding;
   readonly expiresAt: number;
 }
 
@@ -40,29 +41,30 @@ export class RestoreTokenStore {
     private readonly ttlMs: number = RESTORE_TOKEN_TTL_MS,
   ) {}
 
-  /** Mint a fresh single-use token bound to `checkpointId`. */
-  issue(checkpointId: string): IssuedRestoreToken {
+  /** Retain the exact private checkpoint or hunk selection, never a content ID. */
+  issue(binding: ConfirmationBinding): IssuedRestoreToken {
     this.pruneExpired();
     const token = randomUUID();
     const expiresAt = this.now() + this.ttlMs;
-    this.tokens.set(token, { checkpointId, expiresAt });
+    const selected = typeof binding === 'string' ? binding : Object.freeze({ path: binding.path, hunk: binding.hunk });
+    this.tokens.set(token, { binding: selected, expiresAt });
     return { token, expiresAt };
   }
 
   /**
-   * Consume `token` for a restore of `checkpointId`. Returns true only when the
-   * token exists, has not expired, and was minted for this exact checkpoint id.
+   * Consume `token` for the exact checkpoint or hunk selection. Returns true only
+   * when it exists, has not expired, and was minted for these exact values.
    * The token is removed on any consume attempt that finds it (success or
-   * checkpoint-id mismatch), so it can never be reused.
+   * selection mismatch), so it can never be reused.
    */
-  consume(token: string, checkpointId: string): boolean {
+  consume(token: string, binding: ConfirmationBinding): boolean {
     const stored = this.tokens.get(token);
     if (!stored) return false;
     // Single-use: found means spent, regardless of the outcome below.
     this.tokens.delete(token);
     if (stored.expiresAt <= this.now()) return false;
-    if (stored.checkpointId !== checkpointId) return false;
-    return true;
+    return typeof stored.binding === 'string' ? stored.binding === binding
+      : typeof binding !== 'string' && stored.binding.path === binding.path && stored.binding.hunk === binding.hunk;
   }
 
   /** Drop every token past its TTL. Called opportunistically on issue. */

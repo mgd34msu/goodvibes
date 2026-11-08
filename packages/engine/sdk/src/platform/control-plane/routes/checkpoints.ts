@@ -24,7 +24,6 @@
  * preview round-trip is forced on them. A webui that fires restore blind now
  * gets the actionable refusal instead of a silent git-backed workspace rewrite.
  */
-import { createHash } from 'node:crypto';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { WorkspaceCheckpointManager } from '../../workspace/checkpoint/manager.js';
@@ -43,11 +42,6 @@ const REVERT_HUNK_CONFIRM_OPTIONS: readonly string[] = [
   'Pass confirm:true to acknowledge the working-tree write and execute it immediately.',
   'Call checkpoints.revertHunkPreview for this hunk, then pass the returned token as confirmToken.',
 ];
-
-/** Fingerprint binding a revert confirm token to its exact (path, hunk) pair. */
-function revertHunkFingerprint(path: string, hunk: string): string {
-  return createHash('sha256').update(path).update('\0').update(hunk).digest('hex');
-}
 
 /** How many affected paths a restore preview lists inline before it is just a count. */
 const RESTORE_PREVIEW_PATH_SAMPLE_LIMIT = 20;
@@ -324,7 +318,7 @@ export function createCheckpointsRevertHunkPreviewHandler(
     if (!preview.applies) {
       return { ...preview, token: null, expiresAt: null };
     }
-    const { token, expiresAt } = tokens.issue(revertHunkFingerprint(path, hunk));
+    const { token, expiresAt } = tokens.issue({ path, hunk });
     return { ...preview, token, expiresAt };
   };
 }
@@ -349,10 +343,8 @@ export function createCheckpointsRevertHunkHandler(
     const sessionId = optionalString(params.sessionId);
     const confirm = optionalBoolean(params.confirm, 'confirm');
     const confirmToken = optionalString(params.confirmToken);
-    const fingerprint = revertHunkFingerprint(path, hunk);
-
     if (confirmToken !== undefined) {
-      if (!tokens.consume(confirmToken, fingerprint)) {
+      if (!tokens.consume(confirmToken, { path, hunk })) {
         throw new GatewayVerbError(
           'confirmToken is invalid, already used, expired, or was issued for a different hunk, call checkpoints.revertHunkPreview to obtain a fresh one.',
           'INVALID_ARGUMENT',
@@ -418,7 +410,7 @@ export function registerCheckpointGatewayMethods(
   // handlers for this daemon's lifetime.
   const restoreTokens = new RestoreTokenStore();
   // A separate store for the per-hunk revert preview/apply pair, its tokens bind
-  // to a (path, hunk) fingerprint, not a checkpoint id, so they never cross with
+  // to the exact private (path, hunk) pair, so they never cross with
   // the whole-checkpoint restore tokens above.
   const revertHunkTokens = new RestoreTokenStore();
 

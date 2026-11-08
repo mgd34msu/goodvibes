@@ -12,6 +12,23 @@ import {
 } from '../sdk/src/platform/control-plane/routes/checkpoint-restore-tokens.ts';
 
 describe('RestoreTokenStore', () => {
+  test('hunk confirmation binds each original field and never consumes a checkpoint token', () => {
+    const store = new RestoreTokenStore(), selected = { path: 'file.ts', hunk: '@@ original hunk' };
+    const { token } = store.issue(selected);
+    selected.path = 'changed.ts'; selected.hunk = '@@ changed hunk';
+    expect(store.consume(token, { path: 'file.ts', hunk: '@@ original hunk' })).toBe(true);
+    const checkpoint = store.issue('file.ts').token;
+    expect(store.consume(checkpoint, { path: 'file.ts', hunk: '@@ original hunk' })).toBe(false);
+    expect(store.consume(checkpoint, 'file.ts')).toBe(false);
+  });
+
+  test.each(['path', 'hunk'] as const)('a changed hunk %s spends the token without authorizing a different selection', field => {
+    const store = new RestoreTokenStore(), original = { path: 'file.ts', hunk: '@@ selected' };
+    const { token } = store.issue(original);
+    expect(store.consume(token, { ...original, [field]: 'different' })).toBe(false);
+    expect(store.consume(token, original)).toBe(false);
+  });
+
   test('a freshly issued token authorizes exactly its own checkpoint id', () => {
     const store = new RestoreTokenStore();
     const { token } = store.issue('wcp_abc');

@@ -215,6 +215,17 @@ describe('checkpoints.revertHunk handlers (confirm gate)', () => {
     await expect(apply({ body: { path: 'f.ts', hunk: FORWARD_HUNK, confirmToken: p.token }, context: { admin: true } })).rejects.toBeInstanceOf(GatewayVerbError);
   });
 
+  test.each(['path', 'hunk'] as const)('preview confirmation rejects a different %s before any working-tree write', async field => {
+    const tokens = new RestoreTokenStore(), preview = createCheckpointsRevertHunkPreviewHandler(manager(), tokens);
+    const p = await preview({ body: { path: 'f.ts', hunk: FORWARD_HUNK }, context: { admin: true } }) as { token: string };
+    const apply = createCheckpointsRevertHunkHandler(manager(), tokens);
+    const changed = field === 'path' ? { path: 'different.ts', hunk: FORWARD_HUNK } : { path: 'f.ts', hunk: FORWARD_HUNK + '\n' };
+    await expect(apply({ body: { ...changed, confirmToken: p.token }, context: { admin: true } })).rejects.toBeInstanceOf(GatewayVerbError);
+    expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(NEW_CONTENT);
+    await expect(apply({ body: { path: 'f.ts', hunk: FORWARD_HUNK, confirmToken: p.token }, context: { admin: true } })).rejects.toBeInstanceOf(GatewayVerbError);
+    expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(NEW_CONTENT);
+  });
+
   test('a stale hunk under confirm:true is a 409 conflict', async () => {
     writeFileSync(join(root, 'f.ts'), OLD_CONTENT, 'utf8');
     const apply = createCheckpointsRevertHunkHandler(manager(), new RestoreTokenStore());

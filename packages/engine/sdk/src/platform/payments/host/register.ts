@@ -336,24 +336,9 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
   };
 }
 
-/**
- * A checkout verb reached through the service seam despite neither local
- * checkout handler below ever calling it: both call into the ONE
- * `PaymentsGatewayServiceImpl` this registration's checkout pair shares for
- * its whole life, held by `CheckoutServiceHolder` (checkout-handlers.ts), not
- * a fresh instance built per call. Only `begin` needs anything per-invocation,
- * the gate-input cell (`CheckoutGateInputsCell`) it writes just before each
- * call, since the shared service's `gates()` closure has no other way to see a
- * given call's `context.explicitUserRequest` or card/address facts; `fillCard`
- * reads nothing per-invocation at all, it types into fields the prior `begin`
- * already found. Either way, `PaymentsGatewayService`'s plain
- * `beginCheckout(input)`/`fillCardIntoCheckout(input)` shape has no room for
- * that context, which is the actual reason these two verbs are attached as
- * local wrappers rather than through this service (see this file's header).
- * The stub below exists only so `PaymentsGatewayService` stays fully
- * implemented for `registerPaymentsGatewayMethods`'s throwaway first
- * attachment, immediately replaced by `registerPaymentsMethods`.
- */
+/** The generic SDK routes do not carry the original invocation authority.
+ * The local wrappers pass host-only ownership and gate facts to the shared
+ * checkout service. These temporary generic handlers are replaced before ready. */
 function checkoutNotWired(methodId: string): Error {
   return new Error(
     `${methodId} is served by this daemon's own local handler, never through this service. `
@@ -374,10 +359,12 @@ function checkoutNotWired(methodId: string): Error {
  * exactly one place that talks to `DaemonCardStore.create` and to
  * `DaemonPurchaseLedger.list`.
  */
-function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGatewayService {
+function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): PaymentsGatewayService {
   const now = deps.now ?? Date.now;
 
   return {
+    recoverInterruptedCheckouts: () => holder.recoverInterruptedCheckouts(),
+
     async budgetStatus() {
       const config = readPaymentsServiceConfig(deps.config);
       const nowMs = now();
@@ -452,6 +439,8 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
 export interface PaymentsRegistration {
   readonly ready: Promise<void>;
   readonly unregister: Unregister;
+  /** Stop admission immediately and drain accepted checkout and recovery work. */
+  readonly close: () => Promise<void>;
 }
 
 /**
@@ -492,7 +481,8 @@ export function registerPaymentsMethods(
     if (descriptor) descriptors.set(id, descriptor);
   }
 
-  const service = buildPaymentsGatewayService(deps);
+  const checkoutServiceHolder = new CheckoutServiceHolder(deps, deps.checkout.journal);
+  const service = buildPaymentsGatewayService(deps, checkoutServiceHolder);
 
   // Attaches all seven `payments.*` descriptors once its boot recovery sweep
   // finishes. budget/list/delete stay attached through this; create/purchases-
@@ -508,25 +498,6 @@ export function registerPaymentsMethods(
       logger.info('payments boot recovery settled', { sweep });
     },
   });
-
-  // The journal backing this registration's checkout pair's in-flight
-  // registry (the SDK's own `CheckoutRegistry`, built inside
-  // `PaymentsGatewayServiceImpl`'s constructor from whatever `CheckoutJournal`
-  // it is handed, see checkout-handlers.ts's `buildCheckoutService`). It comes
-  // from the composition (`deps.checkout.journal`), which in the real daemon
-  // is `DurableCheckoutJournal` (checkout-journal-store.ts): every phase write
-  // the registry makes, including the `submit-pending` flush checkout-flow.ts's
-  // step 9 issues right before the merchant submit, lands on disk before the
-  // submit happens, so a restart after a crash in that window can tell the
-  // owner "this purchase may already have been submitted, do not resubmit it"
-  // instead of having no record the purchase was ever in flight. Tests compose
-  // the SDK's `MemoryCheckoutJournal` here instead, which is what the seam in
-  // `CheckoutComposition` is for.
-  //
-  // The ONE checkout service instance this registration's approve/begin/
-  // fillCard verbs share for their whole life; see checkout-handlers.ts's own
-  // header.
-  const checkoutServiceHolder = new CheckoutServiceHolder(deps, deps.checkout.journal);
 
   const cardsCreate: TypedHandler<unknown, Record<string, unknown>> = async ({ body }) => {
     const params = asRecord(body);
@@ -634,12 +605,26 @@ export function registerPaymentsMethods(
     ]);
   });
 
-  return {
-    ready,
-    unregister: () => {
-      torn = true;
-      localTeardown?.();
-      restoreDescriptors();
-    },
+  let closing: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    if (closing) return closing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    torn = true;
+    const errors: unknown[] = [];
+    const jobs: Promise<void>[] = [ready];
+    // Retire the owner before catalog callbacks can admit more work.
+    try { jobs.push(checkoutServiceHolder.close()); } catch (error) { errors.push(error); }
+    try { localTeardown?.(); } catch (error) { errors.push(error); }
+    try { restoreDescriptors(); } catch (error) { errors.push(error); }
+    void Promise.allSettled(jobs).then(results => {
+      for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+      if (errors.length) reject(new AggregateError(errors, 'Payment registration did not close cleanly'));
+      else resolve();
+    });
+    // The compatibility void teardown observes rejection; close still reports it.
+    void closing.catch(() => {});
+    return closing;
   };
+  return { ready, close, unregister: () => { void close(); } };
 }

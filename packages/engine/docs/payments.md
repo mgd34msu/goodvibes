@@ -857,7 +857,9 @@ through the broker in the first place.
 **What this means for a restart today:** the in-flight `runCheckout()` call
 is still abandoned when the process dies, but the interruption no longer
 lingers. Registering the payment verbs runs `recoverInterruptedCheckouts()`
-to completion before any handler attaches, so no new checkout can start
+through the actual daemon registration before any handler attaches, even
+before a browser seam exists. The same registry is handed to the lazy browser
+service, so no new checkout can start
 while the sweep reads the journal, and a record live in the current process
 is never treated as interrupted. Recovery settles every remaining record by
 its phase verdict. A checkout that had not submitted releases its budget
@@ -869,6 +871,19 @@ buy the same thing twice. A `submitted` record is closed only after its
 purchase record is verified on the ledger; the submit flush is ordered after
 the record write for exactly this reason, and a journal entry whose record
 is missing is kept and reported honestly rather than declared recorded.
+
+Payment composition shutdown stops checkout admission and aborts its original
+owners before releasing handlers. It awaits admitted card/address preflight,
+browser actions, recovery I/O and accepted reply readings. A dependency that
+ignores cancellation still belongs to this owner until it settles; a recovery
+reporting timeout does not make it safe to replace the composition. Recovery
+coalesces concurrent sweep requests and refuses a new sweep while timed-out I/O
+is still pending. A late result cannot stamp or settle a retired recovery.
+SDK embedders should await `PaymentsGatewayServiceImpl.close()`; daemon
+registrations expose an awaited `close()` as well as the compatibility void
+`unregister()`. A caller must await close before registering replacement handlers.
+This lifecycle does not yet provide detached checkout acknowledgement or resume
+an interrupted browser purchase.
 
 When a window opens, its per-channel delivery report, its deadline, and its
 kind are persisted with the journal record. A restart therefore applies

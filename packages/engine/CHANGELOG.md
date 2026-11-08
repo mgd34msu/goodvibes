@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Run checkout recovery through the daemon's actual payment registration before
+  attaching handlers, including when the browser has not been created. Share
+  the registry with subsequent checkout calls. Payment close now retires and
+  drains preflight, browser, recovery and reply work before replacement. Recovery
+  timeouts report failure while retaining ownership of the underlying I/O.
+  Pass per-invocation gate facts directly instead of using a shared mutable cell.
+
 - Resolve Git placement asynchronously for every contract start path, including
   compatibility APIs. SDK starts now return promises; await them before reading
   the contract. Carry cancellation through preparation and AgentManager ownership,

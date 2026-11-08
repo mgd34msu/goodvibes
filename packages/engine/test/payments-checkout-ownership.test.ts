@@ -164,3 +164,70 @@ test.each(['payments.majorRetailersAdditional', 'payments.majorRetailersExcluded
   expect(outcome.outcome).toBe('purchased'); expect(f.merchantCalls()).toBe(0);
   expect(f.notices[0]?.kind).toBe(key.endsWith('Additional') ? 'veto' : 'approval');
 });
+
+
+function serviceFixture(f: ReturnType<typeof fixture>) {
+  const { deps } = f;
+  const service = new PaymentsGatewayServiceImpl({ ...deps, journal: f.journal,
+    config: () => ({ limits: deps.limits, budgetCurrency: deps.budgetCurrency, timezone: deps.timezone,
+      preferredTier: 'normal', approvalMinutes: deps.approvalMinutes, vetoMinutes: deps.vetoMinutes }),
+    gates: () => deps.gates, driverFor: () => deps.driver, cardFieldGuard: f.redactor });
+  const input = { sessionId: 'session', pageId: 'page', merchantDomain: f.request.merchantDomain,
+    checkoutUrl: f.request.checkoutUrl, item: f.request.item, cardId: f.request.cardId,
+    requestedLines: f.request.requestedLines, reading: f.reading,
+    controls: { cardFields: f.controls.cardFields.map(field => ({ field: field.field, ref: field.target })),
+      shippingTargets: f.controls.shippingTargets, placeOrderTarget: f.controls.placeOrderTarget } };
+  return { service, input };
+}
+
+test.each(['merchant', 'choose', 'submit'] as const)('service shutdown drains an admitted %s call which ignores cancellation', async phase => {
+  const f = fixture(), { service, input } = serviceFixture(f), entered = barrier(), gate = barrier();
+  const suspended = async () => { entered.release(); await gate.wait; if (phase === 'submit') throw new Error('Unknown merchant result'); };
+  if (phase === 'merchant') f.onMerchant(suspended);
+  else if (phase === 'choose') f.onChoose(suspended);
+  else f.onSubmit(suspended);
+  const pending = service.beginCheckout(input), handled = pending.catch(error => error);
+  work.push(pending);
+  await entered.wait;
+  const closing = service.close(); work.push(closing);
+  expect(service.close()).toBe(closing);
+  let drained = false; void closing.then(() => { drained = true; });
+  await Promise.resolve(); await Promise.resolve();
+  expect(drained).toBe(false);
+  await expect(service.beginCheckout(input)).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  gate.release(); await handled; await closing;
+  if (phase === 'submit') {
+    expect(f.ledger.state().reservations[0]?.retainUntilSettled).toBe(true);
+    expect((await f.journal.list())[0]?.phase).toBe('submit-pending');
+    expect(f.records).toEqual([]);
+  } else {
+    expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
+    expect(f.ledger.state().reservations).toEqual([]);
+    expect(await f.journal.list()).toEqual([]);
+  }
+});
+
+test('service close is published before an abort listener can reenter close', async () => {
+  const f = fixture(), { service, input } = serviceFixture(f), entered = barrier(), gate = barrier();
+  let reentered: Promise<void> | undefined;
+  const original = f.deps.driver.choose;
+  f.deps.driver.choose = async (...args) => {
+    args[2]?.signal?.addEventListener('abort', () => { reentered = service.close(); }, { once: true });
+    entered.release(); await gate.wait; await original(...args);
+  };
+  const pending = service.beginCheckout(input), handled = pending.catch(error => error); work.push(pending);
+  await entered.wait;
+  const closing = service.close(); work.push(closing);
+  expect(reentered).toBe(closing);
+  gate.release(); await handled; await closing;
+});
+
+
+test('explicit host gate facts reach the service instead of its default gate reader', async () => {
+  const f = fixture(), { service, input } = serviceFixture(f);
+  try {
+    const result = await service.beginCheckout(input, { gates: { ...f.deps.gates, enabled: false } });
+    expect(result.outcome.startsWith('refused')).toBe(true);
+    expect(readings.requests).toEqual([]); expect(f.effects).toEqual([]);
+  } finally { await service.close(); }
+});

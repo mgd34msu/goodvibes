@@ -268,6 +268,7 @@ export type {
   PaymentsServiceConfig,
   PaymentsServiceDeps,
   BeginCheckoutInput,
+  CheckoutBeginOptions,
   PaymentBeginResult,
   InterruptedCheckoutRecovery,
   CheckoutRecoverySweep,

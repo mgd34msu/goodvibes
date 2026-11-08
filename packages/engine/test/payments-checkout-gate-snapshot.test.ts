@@ -1,16 +1,6 @@
-/**
- * Pins the synchronous prefix of `PaymentsGatewayServiceImpl.beginCheckout`.
- *
- * The daemon primes a per-call gate-inputs cell (its `CheckoutGateInputsCell`)
- * immediately before invoking `beginCheckout` and clears it immediately after
- * the call returns its promise. That is only sound because `beginCheckout`
- * reads `deps.gates()` (and `deps.config()`, `deps.driverFor()`) synchronously,
- * before its first `await`. If an `await` ever lands ahead of the `gates()`
- * read, the daemon-side cell would already be cleared (or repopulated for a
- * different call) by the time the snapshot is taken, and gate inputs would
- * silently bind to the wrong purchase. The daemon side records this contract
- * in its decisions journal; this test is the SDK side of the pin.
- */
+/** Checkout gate facts are captured synchronously before injected config and
+ * driver callbacks. The daemon passes its facts directly as host-only options;
+ * bare SDK callers still supply the synchronous gates() dependency. */
 import { describe, expect, test } from 'bun:test';
 import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
 import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
@@ -144,14 +134,12 @@ describe('beginCheckout synchronous prefix', () => {
     });
 
     // The whole point: the gate snapshot was taken synchronously, inside the
-    // call, before any microtask ran. The daemon's gate-inputs cell is only
-    // valid for exactly that long.
+    // call, before injected config or driver callbacks can reenter.
     expect(order).toContain('gates');
     expect(order.filter((entry) => entry === 'gates')).toHaveLength(1);
     expect(order).toContain('config');
     expect(order).toContain('driverFor');
-    // config is the first read, gates is taken at the runCheckout call site.
-    expect(order.indexOf('config')).toBeLessThan(order.indexOf('gates'));
+    expect(order.indexOf('gates')).toBeLessThan(order.indexOf('config'));
 
     const result = await pending;
     // Gate zero refuses (payments disabled), which proves the snapshot both
@@ -324,7 +312,8 @@ describe('recoverInterruptedCheckouts', () => {
     const failed = results.find((entry) => entry.purchaseId === 'pur-throws');
     const fine = results.find((entry) => entry.purchaseId === 'pur-fine');
     expect(failed!.action).toBe('failed');
-    expect(failed!.message).toContain('ledger unavailable');
+    expect(failed!.message).toContain('requires inspection');
+    expect(JSON.stringify(results)).not.toContain('ledger unavailable');
     expect(fine!.action).toBe('released');
   });
 });

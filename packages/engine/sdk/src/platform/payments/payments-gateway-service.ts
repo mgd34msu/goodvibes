@@ -31,9 +31,9 @@
  */
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
-import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import { CheckoutRegistry, describeInterruption, type CheckoutJournal, type InFlightCheckout, type InterruptedVerdict } from './checkout-registry.js';
-import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
+import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
+import { OwnedWork } from '../utils/owned-work.js';
+import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
 import { CardMaterialRedactor } from './card-redaction.js';
 import { fillCard, FillCardRefusal, type CardFieldTarget } from './fill-card.js';
 import { runCheckout, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
@@ -54,71 +54,9 @@ import type { PaymentNotifier } from './checkout-flow.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import type { CurrencyCode, ShippingTier } from './types.js';
 
-/**
- * Ceiling on each composition-supplied I/O call the recovery sweep makes
- * (notifier delivery, the purchases lookup, the arming-page cleanup hook).
- * Ten seconds is deliberate: long enough for a channel router doing a real
- * network send, short enough that even a journal full of records cannot make
- * verb attachment hang on one wedged dependency. A call that exceeds it is
- * reported through the audit path and the sweep continues.
- */
-export const RECOVERY_IO_TIMEOUT_MS = 10_000;
-
-function withRecoveryTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => {
-      rejectPromise(new Error(`${label} did not settle within ${ms}ms during checkout recovery.`));
-    }, ms);
-    work.then(
-      (value) => { clearTimeout(timer); resolvePromise(value); },
-      (error: unknown) => { clearTimeout(timer); rejectPromise(error); },
-    );
-  });
-}
-
-/** What one boot's recovery sweep did, for the composition's audit log. */
-export interface CheckoutRecoverySweep {
-  /** False when the sweep did not run at all (see `skipped`). */
-  readonly swept: boolean;
-  /** Why a non-swept boot skipped: this daemon is not the payments leader. */
-  readonly skipped?: 'not-leader' | undefined;
-  readonly settlements: readonly InterruptedCheckoutRecovery[];
-}
-
-/** One interrupted checkout settled (or deliberately held) by boot recovery. */
-export interface InterruptedCheckoutRecovery {
-  readonly purchaseId: string;
-  readonly merchantDomain: string;
-  readonly verdict: InterruptedVerdict;
-  /**
-   * `released`: nothing was submitted, the budget hold is released and the
-   * record closed. `held`: the record is kept, either because the submit
-   * outcome is unknowable or because a `submitted` entry's purchase record
-   * could not be verified on the ledger. `closed`: the order was submitted,
-   * its purchase record was verified, and only the journal entry needed
-   * closing. `failed`: settling this one record threw; the message carries
-   * the error and the rest of the sweep continued.
-   */
-  readonly action: 'released' | 'held' | 'closed' | 'failed';
-  readonly reservationReleased: boolean;
-  readonly notified: boolean;
-  /**
-   * What happened with the owner's notice for this record: `delivered` on a
-   * confirmed landing, `failed` when delivery errored, timed out, or landed
-   * nowhere, and `already-notified` when an earlier boot's stamped notice
-   * made a repeat unnecessary.
-   */
-  readonly notice: 'delivered' | 'failed' | 'already-notified';
-  readonly message: string;
-  /**
-   * Present when the record carried a persisted delivery report and the
-   * delivery-keyed window rules were applied; the audit record for which
-   * rule governed and which channels it named.
-   */
-  readonly windowRecovery?: WindowRecovery | undefined;
-  /** Present only for records interrupted while arming the payment. */
-  readonly armingPageCleanup?: 'done' | 'failed' | 'unavailable' | undefined;
-}
+export { RECOVERY_IO_TIMEOUT_MS } from './checkout-recovery.js';
+export type { CheckoutRecoverySweep, InterruptedCheckoutRecovery } from './checkout-recovery.js';
+import { CheckoutRecovery, type CheckoutRecoverySweep } from './checkout-recovery.js';
 
 /** What a `payments.checkout.fillCard` call reports. Field names and a boolean. */
 export interface PaymentFillCardResult {
@@ -177,7 +115,7 @@ export interface PaymentsServiceDeps {
     readonly purchaseId: string;
     readonly sessionId: string;
     readonly pageId: string;
-  }) => Promise<boolean>) | undefined;
+  }, options?: CheckoutOperationOwnership) => Promise<boolean>) | undefined;
   /** The gate inputs the daemon alone can answer, leadership most of all. */
   readonly gates: () => GateInput;
   readonly config: () => PaymentsServiceConfig;
@@ -234,13 +172,52 @@ export interface BeginCheckoutInput {
   readonly merchantDiscovered?: boolean | undefined;
 }
 
+/** Host-only invocation facts; never read from the checkout's wire input. */
+export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
+  readonly gates?: GateInput | undefined;
+}
+
 export class PaymentsGatewayServiceImpl {
   private readonly registry: CheckoutRegistry;
   private readonly redactor: CardMaterialRedactor;
+  private readonly recovery: CheckoutRecovery;
+  private readonly work = new OwnedWork();
+  private readonly abort = new AbortController();
+  private closed = false;
+  private closing: Promise<void> | undefined;
 
-  constructor(private readonly deps: PaymentsServiceDeps) {
-    this.registry = new CheckoutRegistry(deps.journal);
+  constructor(private readonly deps: PaymentsServiceDeps, registry?: CheckoutRegistry) {
+    this.deps = { ...deps };
+    this.registry = registry ?? new CheckoutRegistry(deps.journal);
     this.redactor = deps.cardFieldGuard ?? new CardMaterialRedactor();
+    this.recovery = new CheckoutRecovery({ registry: this.registry, journal: deps.journal,
+      ledger: deps.ledger, purchases: deps.purchases, notifier: deps.notifier,
+      isPaymentsLeader: () => this.deps.gates().isPaymentsLeader, now: deps.now,
+      armingPageCleanup: deps.armingPageCleanup, recoveryIoTimeoutMs: deps.recoveryIoTimeoutMs });
+  }
+
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.closed = true;
+    this.abort.abort(new CheckoutOwnershipError());
+    void Promise.all([this.work.join(), this.recovery.close()]).then(() => resolve(), reject);
+    return this.closing;
+  }
+
+  private ownership(options: CheckoutOperationOwnership) {
+    if (this.closed) throw new CheckoutOwnershipError();
+    const owner = captureCheckoutOwnership(options);
+    const signal = owner.signal ? AbortSignal.any([owner.signal, this.abort.signal]) : this.abort.signal;
+    const assertCurrent = () => {
+      signal.throwIfAborted();
+      if (this.closed) throw new CheckoutOwnershipError();
+      owner.assertCurrent();
+      signal.throwIfAborted();
+    };
+    assertCurrent();
+    return { signal, assertCurrent };
   }
 
   /**
@@ -263,10 +240,18 @@ export class PaymentsGatewayServiceImpl {
    * rather than captured at construction. A budget raised five minutes ago
    * should apply to this purchase.
    */
-  async beginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership = {}): Promise<PaymentBeginResult> {
+  async beginCheckout(input: BeginCheckoutInput, options: CheckoutBeginOptions = {}): Promise<PaymentBeginResult> {
+    if (this.closed) throw new CheckoutOwnershipError();
+    const gates = { ...(options.gates ?? this.deps.gates()) };
+    const owner = this.ownership(options);
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates));
+  }
+
+  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
+    options.assertCurrent?.();
 
     // The item is the OWNER's words. `ownerSuppliedText` refuses anything not
     // from an owner-direct turn, and a null here is a refusal rather than a
@@ -277,6 +262,7 @@ export class PaymentsGatewayServiceImpl {
     }
 
     const driver = this.deps.driverFor(input.sessionId, input.pageId);
+    options.assertCurrent?.();
     const request: PurchaseRequest = {
       purchaseId: `pur-${String(now())}-${Math.random().toString(36).slice(2, 10)}`,
       merchantDomain: input.merchantDomain,
@@ -334,7 +320,7 @@ export class PaymentsGatewayServiceImpl {
       limits: config.limits,
       budgetCurrency: config.budgetCurrency,
       timezone: config.timezone,
-      gates: this.deps.gates(),
+      gates,
       approvalMinutes: config.approvalMinutes,
       vetoMinutes: config.vetoMinutes,
       now,
@@ -343,229 +329,8 @@ export class PaymentsGatewayServiceImpl {
     return this.describe(outcome, request.purchaseId);
   }
 
-  /**
-   * Settle every checkout a restart interrupted, before new checkouts run.
-   *
-   * The journal is the restart's only witness, and records live in this
-   * process are running, not interrupted; the registry filters them out.
-   * Each record settles by its phase verdict. Nothing submitted releases its
-   * budget hold and closes, and the owner's message follows the actual
-   * release result. An unknowable submit keeps its hold and its record. A
-   * `submitted` record is closed only after the purchase record is verified
-   * on the ledger; when it is missing, or this composition cannot look, the
-   * record is kept and the owner is told exactly what is and is not known.
-   * A record interrupted inside a window settles conservatively by refusal,
-   * because delivery of the window's notice cannot be verified after a
-   * restart; the delivery-keyed rules in `recoverInterruptedWindow` apply
-   * once deliveries are persisted.
-   *
-   * A kept record notifies the owner at most once, ever: the first delivered
-   * notice stamps `recoveryNotifiedAtMs` back through the journal. One
-   * record's failure never abandons the rest; it is reported in the results
-   * as `action: 'failed'`. Recovery also cannot clear card material from a
-   * browser page that outlived the process (attach-based compositions): the
-   * composition that owns the page owns that cleanup, including for records
-   * interrupted in the arming phase.
-   */
-  async recoverInterruptedCheckouts(): Promise<CheckoutRecoverySweep> {
-    // Leadership gates the sweep exactly as it gates every verb: a non-leader
-    // daemon must not settle records, release holds, or message the owner
-    // about checkouts another instance owns. The skip is reported, not
-    // silent, so the audit log shows which boot deferred and why.
-    if (!this.deps.gates().isPaymentsLeader) {
-      return { swept: false, skipped: 'not-leader', settlements: [] };
-    }
-    const interrupted = await this.registry.interrupted();
-    const results: InterruptedCheckoutRecovery[] = [];
-    for (const { record, verdict } of interrupted) {
-      try {
-        results.push(await this.settleInterrupted(record, verdict));
-      } catch (error) {
-        results.push({
-          purchaseId: record.purchaseId,
-          merchantDomain: record.merchantDomain,
-          verdict,
-          action: 'failed',
-          reservationReleased: false,
-          notified: false,
-          notice: 'failed',
-          message: error instanceof Error ? error.message : 'Recovery failed for this record.',
-        });
-      }
-    }
-    return { swept: true, settlements: results };
-  }
-
-  private async settleInterrupted(
-    record: InFlightCheckout,
-    verdict: InterruptedVerdict,
-  ): Promise<InterruptedCheckoutRecovery> {
-    const now = this.deps.now ?? Date.now;
-    const ioTimeoutMs = this.deps.recoveryIoTimeoutMs ?? RECOVERY_IO_TIMEOUT_MS;
-    let action: InterruptedCheckoutRecovery['action'];
-    let reservationReleased = false;
-    let message: string;
-    let windowRecovery: WindowRecovery | undefined;
-    let armingPageCleanup: InterruptedCheckoutRecovery['armingPageCleanup'];
-
-    if (verdict === 'not-submitted') {
-      if (record.reservationId !== null) {
-        // In-memory reservations do not survive the restart; releasing is the
-        // honest no-op then, and the real release when recovery runs in-process.
-        reservationReleased = this.deps.ledger.release(record.reservationId);
-      }
-      message = describeInterruption(record, verdict, { reservationReleased });
-      if (record.phase === 'awaiting-window') {
-        message += ` ${this.settleWindowSentence(record, now, (recovery) => { windowRecovery = recovery; })}`;
-      }
-      if (record.phase === 'arming-payment') {
-        armingPageCleanup = await this.runArmingPageCleanup(record, ioTimeoutMs);
-        message += armingPageCleanup === 'done'
-          ? ' The card fields this checkout had started filling were cleared from the page.'
-          : ' This checkout was typing card details when it stopped; I cannot reach that page from'
-            + ' here, so if the browser window is still open, close it or clear the form yourself.';
-      }
-      await this.registry.close(record.purchaseId);
-      action = 'released';
-    } else if (verdict === 'possibly-submitted') {
-      // The crash-between-record-and-flush case: the purchase record may
-      // already be on the ledger even though the journal never saw the
-      // submitted flush. When the lookup proves it, the order completed;
-      // close honestly instead of holding forever. Anything less certain
-      // stays deliberately untouched, because releasing the hold or the
-      // record is what makes a restart buy the thing twice.
-      const verified = await this.verifyPurchaseRecord(record.purchaseId, ioTimeoutMs);
-      message = describeInterruption(record, verdict, { recordVerified: verified });
-      if (verified === true) {
-        await this.registry.close(record.purchaseId);
-        action = 'closed';
-      } else {
-        action = 'held';
-      }
-    } else {
-      // `submitted` is only closed once the purchase record is verified on
-      // the ledger. Journals written under the old flush ordering can carry
-      // `submitted` entries whose crash landed before the record was written.
-      const verified = await this.verifyPurchaseRecord(record.purchaseId, ioTimeoutMs);
-      message = describeInterruption(record, verdict, { recordVerified: verified });
-      if (verified === true) {
-        await this.registry.close(record.purchaseId);
-        action = 'closed';
-      } else {
-        action = 'held';
-      }
-    }
-
-    let notified = false;
-    let notice: InterruptedCheckoutRecovery['notice'];
-    if (record.recoveryNotifiedAtMs !== undefined) {
-      notice = 'already-notified';
-    } else {
-      try {
-        const deliveries = await withRecoveryTimeout(
-          this.deps.notifier.deliver({ kind: 'notice', message }),
-          ioTimeoutMs,
-          'The recovery notice delivery',
-        );
-        notified = deliveries.some((delivery) => delivery.delivered);
-      } catch {
-        notified = false;
-      }
-      notice = notified ? 'delivered' : 'failed';
-      if (notified && action === 'held') {
-        // Stamp kept records so the next boot does not repeat the notice.
-        await this.deps.journal.put({ ...record, recoveryNotifiedAtMs: now() });
-      }
-    }
-    return {
-      purchaseId: record.purchaseId,
-      merchantDomain: record.merchantDomain,
-      verdict,
-      action,
-      reservationReleased,
-      notified,
-      notice,
-      message,
-      ...(windowRecovery !== undefined ? { windowRecovery } : {}),
-      ...(armingPageCleanup !== undefined ? { armingPageCleanup } : {}),
-    };
-  }
-
-  /**
-   * The window sentence for an interrupted-window record, keyed on the
-   * PERSISTED delivery report when one exists. The purchase itself can never
-   * resume after a restart (the page and the in-flight call are gone), so
-   * every branch settles with the hold released and nothing charged; what the
-   * delivery-keyed rules decide is what the owner is told about the notice
-   * and which channels still owe a read.
-   */
-  private async verifyPurchaseRecord(
-    purchaseId: string,
-    ioTimeoutMs: number,
-  ): Promise<boolean | undefined> {
-    if (this.deps.purchases.has === undefined) return undefined;
-    return withRecoveryTimeout(
-      this.deps.purchases.has(purchaseId),
-      ioTimeoutMs,
-      'The purchases lookup',
-    );
-  }
-
-  private settleWindowSentence(
-    record: InFlightCheckout,
-    now: () => number,
-    report: (recovery: WindowRecovery) => void,
-  ): string {
-    const deliveries = record.windowDeliveries ?? [];
-    if (deliveries.length === 0) {
-      // Genuinely no delivery report: honest and narrow, settle by refusal.
-      return 'It stopped inside its approval or veto window, and I could not verify that the'
-        + ' window notice ever reached you, so it settles as refused rather than charged.';
-    }
-    const recovery = recoverInterruptedWindow({
-      deliveries,
-      deadlinePassed: record.windowDeadlineMs === undefined ? true : now() > record.windowDeadlineMs,
-    });
-    report(recovery);
-    const windowName = record.windowKind === 'approval'
-      ? 'approval window'
-      : record.windowKind === 'veto' ? 'veto window' : 'approval or veto window';
-    if (recovery.outcome === 'undeliverable-rule') {
-      return `Its ${windowName} notice never reached you on any channel, so it settles as refused rather than charged.`;
-    }
-    if (recovery.outcome === 'reopen') {
-      const channels = recovery.reopenChannels.join(', ');
-      return `Its ${windowName} notice reached you, but I cannot re-read ${channels} for the span I was down, `
-        + 'so a reply there may have been missed. The purchase could not resume after the restart, nothing '
-        + 'was charged, and it will not be retried; start it again if you still want it.';
-    }
-    const backfill = recovery.backfillChannels.length > 0
-      ? ` Any reply you sent on ${recovery.backfillChannels.join(', ')} while I was down can still be read there.`
-      : '';
-    return `Its ${windowName} notice reached you before the restart. The purchase could not resume `
-      + `afterwards, so nothing was charged and it will not be retried; start it again if you still want it.${backfill}`;
-  }
-
-  private async runArmingPageCleanup(
-    record: InFlightCheckout,
-    ioTimeoutMs: number,
-  ): Promise<'done' | 'failed' | 'unavailable'> {
-    const cleanup = this.deps.armingPageCleanup;
-    if (cleanup === undefined) return 'unavailable';
-    try {
-      const cleared = await withRecoveryTimeout(
-        cleanup({
-          purchaseId: record.purchaseId,
-          sessionId: record.sessionId,
-          pageId: record.pageId,
-        }),
-        ioTimeoutMs,
-        'The arming-page cleanup hook',
-      );
-      return cleared ? 'done' : 'failed';
-    } catch {
-      return 'failed';
-    }
+  recoverInterruptedCheckouts(): Promise<CheckoutRecoverySweep> {
+    return this.recovery.recoverInterruptedCheckouts();
   }
 
   /**
@@ -583,7 +348,12 @@ export class PaymentsGatewayServiceImpl {
     readonly expirySeparator: string | undefined;
     readonly twoDigitYear: boolean | undefined;
   }, options: CheckoutOperationOwnership = {}): Promise<PaymentFillCardResult> {
-    const owner = captureCheckoutOwnership(options);
+    const owner = this.ownership(options);
+    return this.work.run(() => this.runFillCard(input, owner));
+  }
+
+  private async runFillCard(input: Parameters<PaymentsGatewayServiceImpl['fillCardIntoCheckout']>[0],
+    owner: ReturnType<PaymentsGatewayServiceImpl['ownership']>): Promise<PaymentFillCardResult> {
     const signal = owner.signal;
     const targets: CardFieldTarget[] = [];
     for (const entry of input.targets) {

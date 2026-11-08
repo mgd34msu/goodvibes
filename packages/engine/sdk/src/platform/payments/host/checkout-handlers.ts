@@ -2,7 +2,8 @@ import { PostalAddressHeldError } from '../../config/postal-address.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { retainCheckoutInvocation } from './checkout-invocation.js';
 import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
-import type { CheckoutOperationOwnership } from '../checkout-ownership.js';
+import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from '../checkout-ownership.js';
+import { OwnedWork } from '../../utils/owned-work.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -28,7 +29,8 @@ import type { CheckoutOperationOwnership } from '../checkout-ownership.js';
  */
 import { checkAddress } from '../address.js';
 import type { AddressStore } from '../address.js';
-import { CheckoutRegistryError } from '../checkout-registry.js';
+import { CheckoutRegistry, CheckoutRegistryError } from '../checkout-registry.js';
+import { CheckoutRecovery } from '../checkout-recovery.js';
 import type { CheckoutJournal } from '../checkout-registry.js';
 import type { MerchantJudgePort } from '../merchant-recourse.js';
 import type { PaymentNotifier } from '../payment-ports.js';
@@ -299,33 +301,6 @@ async function hasShippingAddress(addresses: AddressStore, owner: CheckoutOperat
 }
 
 /**
- * The per-invocation gate facts the shared checkout service's `gates()`
- * closure reads. A mutable CELL, not a value passed at construction: the
- * service is built ONCE (see `CheckoutServiceHolder` below) and its `gates()`
- * closure is called synchronously, on every `beginCheckout` call, from deep
- * inside that one shared instance, so the only way for it to see THIS call's
- * facts is to read them from somewhere written just before this call and nowhere
- * held between calls.
- *
- * Safe under concurrent calls despite being shared, mutable state, because of
- * WHEN it is read: `checkoutBeginHandler` writes it and then, in the same
- * synchronous span with no `await` between the write and the call, invokes
- * `service.beginCheckout(input)`. `beginCheckout`'s own body runs synchronously
- * up to its first internal `await` (see payments-gateway-service.ts), and
- * `gates()` is invoked inside that synchronous prefix, so the value it reads is
- * always the one THIS call just wrote, captured into a plain `GateInput` object
- * before control ever returns to the event loop. A second call writing the cell
- * later cannot land between the write and the read of an earlier one; only
- * between two DIFFERENT calls' write-then-read pairs, which never interleave
- * with each other's.
- */
-interface CheckoutGateInputsCell {
-  current: { readonly hasUsableCard: boolean; readonly hasShippingAddress: boolean; readonly isOwnerDirectRequest: boolean };
-}
-
-const NO_GATE_INPUTS_YET = { hasUsableCard: false, hasShippingAddress: false, isOwnerDirectRequest: false };
-
-/**
  * Build the ONE `PaymentsGatewayServiceImpl` a registration's checkout pair
  * shares for its whole life. See `CheckoutServiceHolder` for why one, not one
  * per call.
@@ -334,7 +309,7 @@ function buildCheckoutService(
   deps: PaymentsHandlerDeps,
   seam: BrowserCheckoutSeam,
   journal: CheckoutJournal,
-  gateInputs: CheckoutGateInputsCell,
+  registry: CheckoutRegistry,
 ): PaymentsGatewayServiceImpl {
   return new PaymentsGatewayServiceImpl({
     cards: deps.cards,
@@ -350,63 +325,80 @@ function buildCheckoutService(
     gates: () => ({
       enabled: readPaymentsEnabled(deps.config),
       isPaymentsLeader: deps.isPaymentsLeader(),
-      ...gateInputs.current,
+      hasUsableCard: false, hasShippingAddress: false, isOwnerDirectRequest: false,
     }),
     config: () => readPaymentsServiceConfig(deps.config),
     ...(deps.now ? { now: deps.now } : {}),
-  });
+  }, registry);
 }
 
-/**
- * Holds the ONE `PaymentsGatewayServiceImpl` a registration's checkout pair
- * shares for the life of the registration, and the gate-input cell its
- * `gates()` closure reads.
- *
- * ── Why one instance, not one per call ─────────────────────────────────────
- *
- * `PaymentsGatewayServiceImpl` builds its own `CheckoutRegistry` in its
- * constructor (`this.registry = new CheckoutRegistry(deps.journal)`,
- * payments-gateway-service.ts), and that registry's live "which page has a
- * purchase open" map (`byPage`) is IN-MEMORY, per-instance state, not
- * recovered from the journal at construction. The sdk's own header names the
- * property this holder exists to keep: "`begin` opens a checkout and
- * `fillCard` completes one, and they are separate verbs arriving as separate
- * control-plane calls. The in-flight registry has to outlive both, so it
- * lives here for the life of the service rather than being constructed per
- * call." A fresh service (and therefore a fresh, empty registry) built on
- * every call cannot keep that promise: two `begin` calls on the same page each
- * get their own empty map, so the registry's own duplicate guard
- * (`CheckoutRegistry.open` refuses a second open on a page already running
- * one) never fires, and a `fillCard` call afterward finds an empty map too, so
- * it always refuses "no purchase decision is in flight" even for a page that
- * genuinely has one, exactly the honest-sounding but wrong refusal a real
- * caller and a nonexistent one would both get.
- *
- * ── Why memoized on first use, not built at registration ───────────────────
- *
- * `PaymentsGatewayServiceImpl` needs a concrete `BrowserCheckoutSeam` (for
- * `driverFor` and `cardFieldGuard`) to construct, and `deps.checkout.seam()`
- * may still return `undefined` at the moment `registerPaymentsMethods` runs
- * (see `CheckoutComposition.seam`'s own doc comment: the browser composition
- * that fills it runs AFTER this daemon's handlers are registered). So the
- * instance is built lazily, on the first call that finds a real seam, and
- * cached from then on. Safe to cache permanently: `onBrowserCheckout` fires at
- * most once per daemon process (browser-checkout-seam-holder.ts), so once a
- * real seam has been seen it is THE seam for the rest of this registration's
- * life.
- */
+/** Owns the registration's registry before a browser exists. Boot recovery
+ * and the lazy browser service share that same registry, so recovery never
+ * mistakes a live operation for an interrupted one. Invocation gate facts are
+ * passed directly to beginCheckout, without a shared mutable cell.
+ * close stops admission and drains preflight, browser and recovery work before
+ * a replacement registration may use the stores and catalog. */
 export class CheckoutServiceHolder {
   private service: PaymentsGatewayServiceImpl | null = null;
-  readonly gateInputs: CheckoutGateInputsCell = { current: NO_GATE_INPUTS_YET };
+  private readonly registry: CheckoutRegistry;
+  private readonly recovery: CheckoutRecovery;
+  private readonly work = new OwnedWork();
+  private readonly abort = new AbortController();
+  private closed = false;
+  private closing: Promise<void> | undefined;
 
   constructor(
     private readonly deps: PaymentsHandlerDeps,
     private readonly journal: CheckoutJournal,
-  ) {}
+  ) {
+    this.registry = new CheckoutRegistry(journal);
+    this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
+      ledger: deps.budget, purchases: deps.purchases, notifier: deps.checkout.notifier,
+      isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
+  }
 
   serviceFor(seam: BrowserCheckoutSeam): PaymentsGatewayServiceImpl {
-    this.service ??= buildCheckoutService(this.deps, seam, this.journal, this.gateInputs);
+    if (this.closed) throw new HandlerError('Checkout service is closed.', 'FAILED_PRECONDITION', 409);
+    this.service ??= buildCheckoutService(this.deps, seam, this.journal, this.registry);
     return this.service;
+  }
+
+  recoverInterruptedCheckouts() { return this.recovery.recoverInterruptedCheckouts(); }
+
+  run<T>(callback: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new CheckoutOwnershipError());
+    return this.work.run(callback);
+  }
+
+  ownership(options: CheckoutOperationOwnership) {
+    const original = captureCheckoutOwnership(options);
+    const signal = original.signal ? AbortSignal.any([original.signal, this.abort.signal]) : this.abort.signal;
+    const assertCurrent = () => {
+      signal.throwIfAborted();
+      if (this.closed) throw new CheckoutOwnershipError();
+      original.assertCurrent();
+      signal.throwIfAborted();
+    };
+    assertCurrent();
+    return { signal, assertCurrent };
+  }
+
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.closed = true;
+    this.abort.abort(new CheckoutOwnershipError());
+    const jobs: Promise<void>[] = [], errors: unknown[] = [];
+    try { if (this.service) jobs.push(this.service.close()); } catch (error) { errors.push(error); }
+    try { jobs.push(this.recovery.close()); } catch (error) { errors.push(error); }
+    jobs.push(this.work.join());
+    void Promise.allSettled(jobs).then(results => {
+      for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+      if (errors.length) reject(new AggregateError(errors, 'Checkout service did not close cleanly'));
+      else resolve();
+    });
+    return this.closing;
   }
 }
 
@@ -598,7 +590,7 @@ function beginResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImpl['
  * See `checkout-flow.ts`'s own header for the full order.
  */
 export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
-  return async ({ body, context }) => {
+  return async ({ body, context }) => holder.run(async () => {
     const params = asRecord(body);
     const input = parseBeginCheckoutInput(params);
 
@@ -609,8 +601,8 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
 
     const isOwnerDirectRequest = context.explicitUserRequest === true;
     const signal = context.signal;
-    const owner = isOwnerDirectRequest ? retainCheckoutInvocation(deps, seam, context)
-      : { signal, assertCurrent: () => signal?.throwIfAborted() };
+    const owner = holder.ownership(isOwnerDirectRequest ? retainCheckoutInvocation(deps, seam, context)
+      : { signal, assertCurrent: () => signal?.throwIfAborted() });
 
     // The approval is only consulted INSIDE the outer explicitUserRequest
     // layer: a call that never claimed to be owner-direct falls through to
@@ -628,10 +620,9 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     ], 2, read => read());
     owner.assertCurrent();
 
-    // Written immediately before the call it applies to, with no `await`
-    // between: see `CheckoutGateInputsCell`'s own doc comment for why that
-    // ordering is what keeps this safe under concurrent calls.
-    holder.gateInputs.current = {
+    // Host-only facts belong to this invocation, even under reentrant callbacks.
+    const gates = {
+      enabled: readPaymentsEnabled(deps.config), isPaymentsLeader: deps.isPaymentsLeader(),
       hasUsableCard: usableCard === true,
       hasShippingAddress: shippingAddress === true,
       isOwnerDirectRequest,
@@ -639,7 +630,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     const service = holder.serviceFor(seam);
 
     try {
-      const result = await service.beginCheckout(input, owner);
+      const result = await service.beginCheckout(input, { ...owner, gates });
       return beginResultView(result);
     } catch (error) {
       // `CheckoutRegistryError` (a second `begin` finding one already in
@@ -654,22 +645,13 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       void error;
       throw new HandlerError('Beginning this checkout failed. Check the purchase list and the merchant\'s order history before trying again.', 'INTERNAL_ERROR', 500);
     }
-  };
+  });
 }
 
-/**
- * `payments.checkout.fillCard`.
- *
- * No submit approval and no `gates()` reasoning: `fillCardIntoCheckout` never
- * consults either (it types into fields, it does not click a submit control),
- * so this handler's only checkout-specific concern is the same seam
- * availability check `checkoutBeginHandler` makes. It never writes
- * `holder.gateInputs`: whatever a prior `begin` call on this same holder left
- * there (or the `NO_GATE_INPUTS_YET` default, if none ever ran) is simply
- * never read by a fill.
- */
+/** Fill is restricted by the original invocation and registration lifetime.
+ * It uses the registry shared with begin; it does not grant submit authority. */
 export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
-  return async ({ body, context }) => {
+  return async ({ body, context }) => holder.run(async () => {
     const params = asRecord(body);
     const input = parseFillCardInput(params);
 
@@ -678,7 +660,7 @@ export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: Check
       throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
     }
 
-    const owner = retainCheckoutInvocation(deps, seam, context);
+    const owner = holder.ownership(retainCheckoutInvocation(deps, seam, context));
     const service = holder.serviceFor(seam);
 
     try {
@@ -695,5 +677,5 @@ export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: Check
       void error;
       throw new HandlerError('Filling the card into this checkout failed. Nothing was submitted.', 'INTERNAL_ERROR', 500);
     }
-  };
+  });
 }

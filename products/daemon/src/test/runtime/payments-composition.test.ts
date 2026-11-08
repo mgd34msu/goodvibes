@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { GatewayMethodCatalog, type GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, PaymentReplyInboxClosedError, type CheckoutPageDriver } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout } from '@goodvibes-jev/engine/sdk/platform/payments';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createPaymentsServices } from '../../runtime/payments-composition.js';
 import { createBrowserCheckoutSeamHolder } from '../../runtime/browser-checkout-seam-holder.js';
@@ -36,7 +36,7 @@ function fixture(catalog = new GatewayMethodCatalog()) {
 }
 
 function invoke(catalog: GatewayMethodCatalog, id: string, body: unknown = {}) {
-  return catalog.invoke(id, { context: { principalId: 'fixture-owner', metadata: { explicitUserRequest: true } }, body } satisfies GatewayMethodInvocation) as Promise<Record<string, unknown>>;
+  return catalog.invoke(id, { context: { principalId: 'fixture-owner', scopes: ['write:payments'], metadata: { explicitUserRequest: true } }, isAuthorized: scopes => scopes?.every(scope => scope === 'write:payments') ?? true, body } satisfies GatewayMethodInvocation) as Promise<Record<string, unknown>>;
 }
 
 test('real product payments register on the existing catalog and read live owner limits/leadership', async () => {
@@ -156,5 +156,116 @@ test('legacy unregister reports cleanup failure while awaited close retains the 
   } finally {
     register.mockRestore();
     warn.mockRestore();
+  }
+});
+
+
+function barrier() {
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  return { pending, release };
+}
+function journalPath(f: ReturnType<typeof fixture>) {
+  return join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-checkout-journal.json');
+}
+function interruptedRecord(phase: InFlightCheckout['phase'], reservationId: string | null): InFlightCheckout {
+  const currency = parseCurrencyCode('USD'), item = ownerSuppliedText('Fixture item', 'owner-direct');
+  if (!currency || !item) throw new Error('Invalid payment fixture');
+  return { purchaseId: 'old-purchase', sessionId: 'old-session', pageId: 'old-page', merchantDomain: 'bestbuy.com', cardId: 'old-card',
+    item, currency, phase, startedAtMs: 1, updatedAtMs: 2, draw: null, reservationId,
+    shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null };
+}
+
+test('real product boot recovery settles a durable pre-submit hold without a browser seam', async () => {
+  const f = fixture(); await f.services.ready;
+  const held = f.services.budget.reserve({ id: 'old-purchase', itemMinorUnits: 1000, overageMinorUnits: 0, toleranceMinorUnits: 0,
+    limits: { dailyItemMinorUnits: 10_000, dailyOverageMinorUnits: 10_000, perPurchaseCeiling: { enabled: false, minorUnits: 0 },
+      overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 } }, nowMs: Date.now(), timezone: 'UTC', retainUntilSettled: true });
+  expect(held).not.toBeNull(); await f.services.close();
+  const journal = new DurableCheckoutJournal(journalPath(f)); await journal.put(interruptedRecord('awaiting-window', held!.id));
+  const replacement = createPaymentsServices(f.options);
+  try {
+    await replacement.ready;
+    expect(f.browser.get()).toBeUndefined();
+    expect(replacement.budget.state().reservations).toEqual([]);
+    expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
+    expect(f.deliveries).toHaveLength(1);
+    expect(JSON.stringify(f.deliveries)).toContain('before anything was submitted');
+    for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(true);
+  } finally { await replacement.close(); }
+});
+
+test('real product close drains boot recovery delivery and cannot stamp a retired recovery', async () => {
+  const f = fixture(); await f.services.ready; await f.services.close();
+  const journal = new DurableCheckoutJournal(journalPath(f)); await journal.put(interruptedRecord('submit-pending', null));
+  const entered = barrier(), gate = barrier();
+  f.options.channelDeliveryRouter.deliver = async request => { f.deliveries.push(request); entered.release(); await gate.pending; return 'late-notice'; };
+  const replacement = createPaymentsServices(f.options);
+  try {
+    await entered.pending;
+    const closing = replacement.close();
+    expect(replacement.close()).toBe(closing);
+    let drained = false; void closing.then(() => { drained = true; });
+    await Promise.resolve(); await Promise.resolve(); expect(drained).toBe(false);
+    for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
+    gate.release(); await closing;
+    const records = await new DurableCheckoutJournal(journalPath(f)).list();
+    expect(records[0]?.phase).toBe('submit-pending'); expect(records[0]?.recoveryNotifiedAtMs).toBeUndefined();
+    for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
+  } finally { gate.release(); await replacement.close(); }
+});
+
+function beginBody(cardId: string) {
+  return { merchantDomain: 'bestbuy.com', item: 'Fixture item', requestedMax: '11.00', sessionId: 'fixture-session', pageId: 'fixture-page',
+    checkoutUrl: 'https://www.bestbuy.com/checkout', cardId, requestedLines: [{ label: 'Fixture item', quantity: 1 }],
+    lines: [{ label: 'Fixture item', quantity: '1', unitPrice: '$10.00' }], shippingOptions: [{ label: 'Standard', cost: '$0.00' }],
+    cardFields: [{ field: 'number', ref: 'fixture-card' }], placeOrderTarget: 'fixture-submit' };
+}
+
+test.each(['preflight', 'submit'] as const)('actual product close retains an admitted %s operation until it drains', async phase => {
+  const f = fixture(), entered = barrier(), gate = barrier(), window = barrier();
+  const previous = installJudgmentPort(fixturePort()), effects: string[] = [];
+  const driver: CheckoutPageDriver = {
+    identity: () => ({ sessionId: 'fixture-session', pageId: 'fixture-page' }),
+    async url() { return 'https://www.bestbuy.com/checkout'; }, async fill() { effects.push('fill'); }, async choose() {},
+    async fillSecrets(fields) { effects.push('fill-secrets'); return { filledTargets: fields.map(field => field.target), failedTarget: null }; },
+    async submitOrder() { effects.push('submit'); entered.release(); await gate.pending; throw new Error('Unknown merchant outcome'); },
+  };
+  f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => driver, armSubmitApproval: async () => {} });
+  const originalWait = f.services.paymentReplies.waitForAnswer.bind(f.services.paymentReplies);
+  const wait = spyOn(f.services.paymentReplies, 'waitForAnswer').mockImplementation(input => { const pending = originalWait(input); window.release(); return pending; });
+  let restoreMetadata: (() => void) | undefined, pending: Promise<Record<string, unknown>> | undefined;
+  try {
+    await f.services.ready;
+    const card = await f.services.cards.create({ label: 'Fixture', kind: 'virtual', number: '4111111111111111', expiryMonth: 1, expiryYear: 2030, cvv: '123', cardholderName: 'Fixture', issuerCapMinorUnits: null });
+    await invoke(f.catalog, 'payments.checkout.approve', { merchantDomain: 'bestbuy.com', item: 'Fixture item', amount: '11.00', confirm: true });
+    if (phase === 'preflight') {
+      const original = f.services.cards.metadata.bind(f.services.cards);
+      const metadata = spyOn(f.services.cards, 'metadata').mockImplementation(async id => { entered.release(); await gate.pending; return original(id); });
+      restoreMetadata = () => metadata.mockRestore();
+    }
+    pending = invoke(f.catalog, 'payments.checkout.begin', beginBody(card.id));
+    const handled = pending.catch(error => error);
+    if (phase === 'submit') {
+      await Promise.race([window.pending, pending.then(result => { throw new Error(`No payment window: ${JSON.stringify(result)}`); })]);
+      const selected = f.services.paymentReplies.inspect()[0];
+      if (!selected) throw new Error('Expected an actual pending payment window');
+      f.services.paymentReplies.answer({ purchaseId: selected.purchaseId, windowId: selected.windowId, action: 'approve' });
+    }
+    await Promise.race([entered.pending, pending.then(() => { throw new Error('Expected suspended payment operation'); })]);
+    const closing = f.services.close(); let drained = false; void closing.then(() => { drained = true; });
+    await Promise.resolve(); await Promise.resolve(); expect(drained).toBe(false);
+    for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
+    gate.release(); await handled; await closing;
+    if (phase === 'preflight') { expect(effects).toEqual([]); expect(f.services.budget.state().reservations).toEqual([]); }
+    else {
+      expect(effects).toContain('submit'); expect(f.services.budget.state().reservations[0]?.retainUntilSettled).toBe(true);
+      expect((await new DurableCheckoutJournal(journalPath(f)).list())[0]?.phase).toBe('submit-pending');
+    }
+  } finally {
+    gate.release();
+    const closing = f.services.close();
+    await Promise.allSettled(pending ? [pending, closing] : [closing]);
+    restoreMetadata?.(); wait.mockRestore(); installJudgmentPort(previous);
   }
 });

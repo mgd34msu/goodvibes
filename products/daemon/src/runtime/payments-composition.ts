@@ -9,9 +9,9 @@
  *
  * This composition owns that inbox. Stop ingress, then await close before
  * releasing the graph or registering replacement handlers. A facade listener
- * restart borrows the inbox and must not close it. close drains registration
- * and accepted reply readings; it does not claim to drain browser operations
- * already admitted by the gateway, which remain the root's responsibility.
+ * restart borrows the inbox and must not close it. close retires checkout
+ * admission and drains preflight, browser operations, interrupted recovery and
+ * accepted reply readings before the stores/catalog can be reused.
  */
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { controlPlaneStorePath } from '@goodvibes-jev/engine/sdk/platform/control-plane';
@@ -156,17 +156,19 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
     if (closing) return closing;
-    // Both stop admissions synchronously, before waiting for accepted work.
-    const repliesClosed = paymentReplies.close();
-    const errors: unknown[] = [];
-    try { registration.unregister(); } catch (error) { errors.push(error); }
-    closing = Promise.allSettled([registration.ready, repliesClosed]).then((results) => {
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    const errors: unknown[] = [], jobs: Promise<void>[] = [];
+    // Retire both owners synchronously. Attempt both even if one close fails.
+    try { jobs.push(registration.close()); } catch (error) { errors.push(error); }
+    try { jobs.push(paymentReplies.close()); } catch (error) { errors.push(error); }
+    void Promise.allSettled(jobs).then((results) => {
       for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
       if (errors.length > 0) {
         // Fixed diagnostic only: underlying failures can contain owned paths.
         try { logger.warn('Payment composition did not close cleanly', { failureCount: errors.length }); } catch { /* Preserve the cleanup failure. */ }
-        throw new AggregateError(errors, 'Payment composition did not close cleanly');
-      }
+        reject(new AggregateError(errors, 'Payment composition did not close cleanly'));
+      } else resolve();
     });
     // Legacy void callers must not cause unhandled rejection. Awaiting the
     // same promise still reports cleanup failures to the new composition root.

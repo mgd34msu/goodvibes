@@ -25,7 +25,7 @@ test('deferred plan survives restart; no replan, unit or old receipt runs before
   const host: NativeContractDecisionHost = { authorityOf: authority, conditions: (_contract, stage) => stage !== 'plan' ? [] : [{ ref: { id: 'build-evidence', revision }, description: 'Independent evidence arrives', current: () => ({ id: 'build-evidence', revision }),
     wait: signal => new Promise<void>((resolve, reject) => { waits += 1; wake = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }) }] };
   const first = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, nativeDecisions: host, plan: plan(), scripts: {}, port: context => context.name === 'disposition' ? choiceAnswer(context.question, 'defer_0', 0.99) : undefined }));
-  const id = startContract(first, { nativeSource: source }).contract.id;
+  const id = (await startContract(first, { nativeSource: source })).contract.id;
   await waitFor(() => waits === 1, 'first registered deferral');
   const prior = first.store.get(id)!.nativeDecisions!.history.at(-1)!.decision;
   first.dispose(); await first.runner.join(id); harnesses.splice(harnesses.indexOf(first), 1);
@@ -48,7 +48,7 @@ for (const field of ['authorityId', 'authorityRevision', 'scopeId', 'scopeRevisi
     const host: NativeContractDecisionHost = { authorityOf: () => identity, conditions: (_contract, stage) => stage !== 'plan' ? [] : [{ ref: { id: 'build-evidence', revision }, description: 'Independent evidence arrives', current: () => ({ id: 'build-evidence', revision }),
       wait: signal => new Promise<void>((resolve, reject) => { waits += 1; wake = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }) }] };
     const first = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, nativeDecisions: host, plan: plan(), scripts: {}, port: context => context.name === 'disposition' ? choiceAnswer(context.question, 'defer_0', 0.99) : undefined }));
-    const id = startContract(first, { nativeSource: source }).contract.id;
+    const id = (await startContract(first, { nativeSource: source })).contract.id;
     await waitFor(() => waits === 1, 'original registered deferral');
     const prior = first.store.get(id)!.nativeDecisions!.history.at(-1)!.decision;
     first.dispose(); await first.runner.join(id); harnesses.splice(harnesses.indexOf(first), 1);
@@ -88,7 +88,7 @@ test('historical native unshown wait rechecks evidence without an owner approval
   const directory = root(); using log = new SqliteDecisionLog(':memory:');
   const first = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, plan: plan(),
     scripts: { u1: finishes('parser complete') } }));
-  const id = startContract(first, { nativeSource: source }).contract.id;
+  const id = (await startContract(first, { nativeSource: source })).contract.id;
   await waitFor(() => terminal(first, id), 'original native execution'); await first.runner.join(id);
   first.dispose(); harnesses.splice(harnesses.indexOf(first), 1);
   const path = contractPath(directory, id); const saved = (JSON.parse(readFileSync(path, 'utf8')) as { contract: Contract }).contract;
@@ -114,7 +114,7 @@ test('deferred fix planner resumes its retained checked plan without resetting f
       if (context.name === 'disposition' && String((context.state['binding'] as { actionId?: string })?.actionId).includes(':fix-plan:')) return choiceAnswer(context.question, 'defer_0', 0.99);
       return undefined;
     } }));
-  const id = startContract(first, { nativeSource: source }).contract.id; await waitFor(() => waits === 1, 'fix planner deferral');
+  const id = (await startContract(first, { nativeSource: source })).contract.id; await waitFor(() => waits === 1, 'fix planner deferral');
   expect(first.store.get(id)!.fixRounds).toBe(1); first.dispose(); await first.runner.join(id); harnesses.splice(harnesses.indexOf(first), 1);
   let modelRuns = 0;
   const second = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, nativeDecisions: host,

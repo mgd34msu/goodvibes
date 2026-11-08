@@ -220,7 +220,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
    * Starts one contract for work handed to the tool. The unit
    * leaf refusal runs first, in AgentManager, so it is decided in one place.
    */
-  function startContract(input: AgentInput, ask: string, proposedUnits: readonly ProposedUnit[], assertCurrent: () => void, dispatch: ContractRunner['start']): StartedContract {
+  function startContract(input: AgentInput, ask: string, proposedUnits: readonly ProposedUnit[], assertCurrent: () => void, dispatch: ContractRunner['start']): Promise<StartedContract> {
     config.manager.guardContractLeafSpawn(input.parentAgentId);
     const completionRepair = readCompletionRepairContext();
     const taskEvidence = [completionRepair, input.context,
@@ -274,7 +274,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       assertCurrent();
       return owned.record;
     };
-    const startOwnedContract = (input: AgentInput, ask: string, units: readonly ProposedUnit[]): StartedContract => {
+    const startOwnedContract = async (input: AgentInput, ask: string, units: readonly ProposedUnit[]): Promise<StartedContract> => {
       assertCurrent();
       if (options === undefined) {
         return startContract(input, ask, units, assertCurrent, (contractInput) => config.contractRunner.start(contractInput));
@@ -304,10 +304,10 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       signal?.addEventListener('abort', cancelStarted, { once: true });
       try {
         assertCurrent();
-        started = startContract(input, ask, units, assertCurrent, (contractInput) => {
+        started = await startContract(input, ask, units, assertCurrent, (contractInput) => {
           assertRunner();
           signal?.throwIfAborted();
-          return start.call(runner, contractInput);
+          return start.call(runner, contractInput, { signal, assertCurrent: () => { assertRunner(); assertCurrent(); } });
         });
         contractId = started.contract.id;
         ownedContracts.push(cancelStarted);
@@ -402,7 +402,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         if (!input.outsideContract) {
           let started: StartedContract;
           try {
-            started = startOwnedContract(
+            started = await startOwnedContract(
               input,
               input.authoritativeTask && input.authoritativeTask.trim() !== '' ? input.authoritativeTask : input.task,
               [{ task: input.task, ...(input.template ? { template: input.template } : {}) }],
@@ -826,7 +826,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           }));
           let started: StartedContract;
           try {
-            started = startOwnedContract(input, batchAsk(input, units), units);
+            started = await startOwnedContract(input, batchAsk(input, units), units);
           } catch (error) {
             return { success: false, error: summarizeError(error) };
           }

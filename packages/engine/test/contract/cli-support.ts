@@ -125,7 +125,7 @@ export class FakeRunner implements ContractCliRunner {
     if (escalation !== undefined) escalation.resolvedAt = 4_000;
   }
 
-  start(input: StartContractInput): StartedContract {
+  async start(input: StartContractInput): Promise<StartedContract> {
     this.started.push(input);
     const contract = this.hold(makeContract({ ask: input.ask, sessionId: input.sessionId, origin: input.origin, projectRoot: input.projectRoot, status: 'queued' }));
     this.emit({ type: 'CONTRACT_CREATED', contractId: contract.id, sessionId: contract.sessionId, origin: contract.origin, ask: contract.ask, ownerAgentId: contract.ownerAgentId });

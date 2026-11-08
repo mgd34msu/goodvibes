@@ -50,7 +50,7 @@ test('an unrecorded original-obligation answer retains completed work and cannot
   harness = makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('The parser is ready.') } });
   const previous = installJudgmentPort(runnerPort().port);
   try {
-    const { contract, owner } = startContract(harness);
+    const { contract, owner } = (await startContract(harness));
     await waitFor(() => contractOf(harness!, contract.id).decisions.some(decision => decision.reason.startsWith('verification pending:')), 'missing recorded coverage held');
     const current = contractOf(harness, contract.id);
     expect(current.status).not.toBe('passed');
@@ -78,7 +78,7 @@ test.each([0.98, 0.5])('a passed assigned goal and content cannot publish an uns
       currentHarness.runner.cancel(event.contractId, 'Fixture captured the original-obligation hold');
     }
   });
-  const { contract } = startContract(harness);
+  const { contract } = (await startContract(harness));
   await waitFor(() => (harness!.runner.get(contract.id)?.checks.length ?? 0) > 0, 'original-obligation hold');
   const current = contractOf(harness, contract.id);
   expect(captured).toHaveLength(1);
@@ -105,7 +105,7 @@ test.each([false, true])('original coverage records the actual source, output an
   if (native) plan.criteria = [...nativeSourcePlan(nativeSource).criteria];
   harness = makeHarness({ plan, recordNative: native, decisionLog: log, scripts: { u1: finishes('The parser is ready.') },
     port: ({ name, state }) => { if (name === 'original_obligations_unmet') captured.push(state); return undefined; } });
-  const { contract } = startContract(harness, { ask: 'Add a CSV parser module.', ...(native ? { nativeSource } : {}) });
+  const { contract } = (await startContract(harness, { ask: 'Add a CSV parser module.', ...(native ? { nativeSource } : {}) }));
   await waitFor(() => terminal(harness!, contract.id), 'published checked source');
   const current = contractOf(harness, contract.id);
   expect(current.status).toBe('passed');

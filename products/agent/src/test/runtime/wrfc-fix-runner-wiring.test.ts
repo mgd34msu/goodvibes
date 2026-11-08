@@ -67,7 +67,7 @@ describe('Agent composition wires contract correction', () => {
       execFileSync('git', ['add', '.'], { cwd: root });
       execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
       services.configManager.set('contract.stallLimit', 2);
-      const { contract } = services.contractRunner.start({ ask: CONTRACT_ASK, sessionId: 'correction', origin: 'agent-tool', projectRoot: root });
+      const { contract } = (await services.contractRunner.start({ ask: CONTRACT_ASK, sessionId: 'correction', origin: 'agent-tool', projectRoot: root }));
       await waitForContract(() => fixCwd !== undefined, () => JSON.stringify({ contract: services.contractRunner.get(contract.id), requested: fixture.requested }));
       const correcting = services.contractRunner.get(contract.id)!;
       const fix = correcting.groups.find((group) => group.kind === 'fix');

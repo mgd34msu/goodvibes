@@ -65,7 +65,7 @@ function fakeRunner(contracts: ContractView[] = []) {
   const replies: { contractId: string; escalationId: string; text: string }[] = [];
   const runner: ContractIntakeDeps['runner'] = {
     list: (filter) => contracts.filter((contract) => filter?.sessionId === undefined || contract.sessionId === filter.sessionId),
-    start: (input) => {
+    start: async (input) => {
       started.push(input);
       return { contract: { ...makeContract(), id: 'ctr-0000abcd' }, owner: { id: 'agent-owner' } } as never;
     },

@@ -23,7 +23,7 @@ function noOwner(h: Harness, id: string) { expect(h.store.get(id)!.escalations).
 describe('native semantic callers', () => {
   test('unresolved writing proceeds to native planning without a permission decision or manufactured shape', async () => {
     const h = use({ scripts: { u1: finishes('complete parser') }, port: context => context.name === 'forbids_writing' ? noulAnswer(0.5) : undefined });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('passed'); expect(result.shape!.forbids_writing.outcome).toBe('escalate');
     expect(result.nativeDecisions!.history.some(item => item.stage === 'shape')).toBe(false);
     expect(result.nativeDecisions!.history.some(item => item.stage === 'plan' && item.decision.outcome === 'act')).toBe(true); noOwner(h, contract.id);
@@ -31,7 +31,7 @@ describe('native semantic callers', () => {
 
   test('native plan reject starts no units and preserves exact roots', async () => {
     const h = use({ scripts: {}, port: context => isStage(context, 'plan') ? select(context, 'reject') : undefined });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(h.agentsOf('u1')).toHaveLength(0); expect(result.goal).toBe(source.goal);
     expect(result.criteria.map(c => c.text)).toEqual([...source.criteria]); expect(result.criteria[0]!.status).toBe('unread'); noOwner(h, contract.id);
   });
@@ -40,14 +40,14 @@ describe('native semantic callers', () => {
     const bad = plan(); bad.criteria[0]!.text = 'Weaker criterion';
     const scripted = stepPlanner(count => count === 1 ? bad : plan());
     const h = use({ planner: scripted.runner, scripts: { u1: finishes('complete parser') } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('passed'); expect(scripted.of('plan')).toHaveLength(2); expect(result.nativeDecisions!.spent.plan).toBe(2);
     expect(result.nativeDecisions!.history.filter(item => item.stage === 'plan').map(item => item.decision.outcome)).toEqual(['revise', 'act']); noOwner(h, contract.id);
   });
 
   test('unknown model continuation cannot turn into an action or owner prompt', async () => {
     const h = use({ scripts: {}, port: context => isStage(context, 'plan') ? select(context, 'revise_99') : undefined });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(h.agentsOf('u1')).toHaveLength(0); noOwner(h, contract.id);
   });
 
@@ -56,7 +56,7 @@ describe('native semantic callers', () => {
     const h = use({ nativeDecisions: host({ conditions: (_contract, stage) => stage === 'plan' ? [{ ref: { id: 'evidence-ready', revision }, description: 'Independent build evidence arrives',
       current: () => ({ id: 'evidence-ready', revision }), wait: signal => new Promise<void>((resolve, reject) => { wake = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }) }] : [] }),
       scripts: { u1: finishes('complete parser') }, port: context => { if (isStage(context, 'plan') && context.name === 'disposition') return select(context, decisions++ === 0 ? 'defer_0' : 'act'); return undefined; } });
-    const { contract } = startContract(h, { nativeSource: source });
+    const { contract } = (await startContract(h, { nativeSource: source }));
     await waitFor(() => h.store.get(contract.id)?.nativeProgress?.state === 'deferred', 'registered native deferral');
     expect(h.agentsOf('u1')).toHaveLength(0); expect(decisions).toBe(1); noOwner(h, contract.id);
     revision = '2'; wake!();
@@ -70,14 +70,14 @@ describe('native semantic callers', () => {
     let decisions = 0;
     const h = use({ nativeDecisions: host({ conditions: () => [{ ref: { id: 'ready', revision: '1' }, description: 'External evidence', current: () => ({ id: 'ready', revision: '1' }), wait: async () => {} }] }),
       scripts: {}, port: context => { if (isStage(context, 'plan') && context.name === 'disposition') { decisions += 1; return select(context, 'defer_0'); } return undefined; } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(decisions).toBe(1); expect(h.agentsOf('u1')).toHaveLength(0); noOwner(h, contract.id);
   });
 
   test('uncertain act asks only a non-executing outcome and never accepts an unresolved criterion', async () => {
     let decisions = 0;
     const h = use({ scripts: {}, port: context => { if (isStage(context, 'plan') && context.name === 'disposition') return select(context, ++decisions === 1 ? 'act' : 'reject', decisions === 1 ? 0.7 : 0.99); return undefined; } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(decisions).toBe(2); expect(h.agentsOf('u1')).toHaveLength(0); noOwner(h, contract.id);
   });
 
@@ -85,7 +85,7 @@ describe('native semantic callers', () => {
     const scripted = stepPlanner(plan(), { fix: () => plannerOutput(fixPlan([{ serves: ['u1.c1'] }])) });
     const h = use({ planner: scripted.runner, contract: { stallLimit: 1, maxNudgesPerUnit: 1, maxFixRounds: 1 }, scripts: { u1: () => Array.from({ length: 2 }, () => ({ files: { 'src/csv.ts': 'incomplete' }, text: '[p=0.9] incomplete parser' })), 'u1.f1.u1': finishes('real repair evidence') },
       port: context => { const output = context.state['output']; if (judgeOf(context) !== null && typeof output === 'string' && output.includes('Planned fix')) return noulAnswer(0.03); return undefined; } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('passed'); expect(result.units.find(u => u.id === 'u1')!.fixRounds).toBe(1);
     expect(result.nativeDecisions!.history.some(item => item.stage === 'stall')).toBe(true); noOwner(h, contract.id);
   });
@@ -103,7 +103,7 @@ describe('native semantic callers', () => {
         if (judgeOf(context) !== null && typeof output === 'string' && output.includes('Planned fix')) return noulAnswer(0.03);
         return undefined;
       } });
-    const { contract } = startContract(h, { nativeSource: source });
+    const { contract } = (await startContract(h, { nativeSource: source }));
     const result = await done(h, contract.id);
     expect(result.status).toBe('failed');
     expect(attempts).toBe(1);
@@ -123,7 +123,7 @@ describe('native semantic callers', () => {
       h.store.get(record.contractId!)!.units[0]!.fixRounds = 1;
       return keepsFailing(2)(record, run);
     } } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(result.units[0]!.criteria[0]!.status).toBe('unmet'); expect(result.units[0]!.fixRounds).toBe(1);
     expect(result.nativeDecisions!.history.at(-1)!.decision.outcome).toBe('reject'); noOwner(h, contract.id);
   });
@@ -138,7 +138,7 @@ describe('native semantic callers', () => {
         if (isStage(context, 'attempts') && context.name === 'disposition') return select(context, decisions++ === 0 ? 'revise_0' : 'act');
         return undefined;
       } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.error).toBeUndefined(); expect(result.status).toBe('passed'); expect(result.units[0]!.attemptSelection!.pickedId).toBe('u1#a1');
     expect(result.nativeDecisions!.history.filter(record => record.stage === 'attempts').map(record => record.decision.outcome)).toEqual(['revise', 'act']); noOwner(h, contract.id);
     expect(h.events.some(event => event.type === 'CONTRACT_ATTEMPTS_SELECTED' && event.outcome !== 'act')).toBe(false);
@@ -168,7 +168,7 @@ describe('native semantic callers', () => {
       },
     });
     installJudgmentPort(withDecisionLog(real, log));
-    contractId = startContract(h, { nativeSource: source }).contract.id;
+    contractId = (await startContract(h, { nativeSource: source })).contract.id;
     const result = await done(h, contractId); await h.runner.join(contractId);
     expect(sawWaiting).toBe(true); expect(sawSemanticDefer).toBe(false); expect(result.nativeWaiting).toBeUndefined();
     if (mode === 'recover') { expect(result.error).toBeUndefined(); expect(result.status).toBe('passed'); expect(attempts).toBe(3); expect(h.agentsOf('u1')).toHaveLength(1); }
@@ -186,7 +186,7 @@ describe('native semantic callers', () => {
     const agents = new Set<string>(); let revised = false;
     const h = use({ contract: { stallLimit: 1, maxFixRounds: 1 }, scripts: { u1: (record, run) => { agents.add(record.id); return agents.size === 1 ? keepsFailing(2)(record, run) : finishes('fresh real parser')(record, run); } },
       port: context => { if (isStage(context, 'stall') && context.name === 'disposition' && !revised) { revised = true; return select(context, 'revise_0'); } return undefined; } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.error).toBeUndefined(); expect(result.status).toBe('passed'); expect(result.units[0]!.freshAgents).toBe(1);
     expect(result.nativeDecisions!.history.filter(record => record.stage === 'stall').map(record => record.decision.outcome)).toEqual(['revise', 'act']); noOwner(h, contract.id);
   });
@@ -195,7 +195,7 @@ describe('native semantic callers', () => {
     const invalid = fixPlan([{ serves: ['missing-criterion'] }]);
     const scripted = stepPlanner(plan(), { fix: () => plannerOutput(invalid) });
     const h = use({ planner: scripted.runner, contract: { stallLimit: 1, maxFixRounds: 1, planRepairLimit: 1 }, scripts: { u1: keepsFailing(2) } });
-    const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id);
+    const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id);
     expect(result.status).toBe('failed'); expect(result.units[0]!.fixRounds).toBe(1); expect(result.nativeDecisions!.spent['fix:u1:1']).toBe(2); expect(scripted.of('fix')).toHaveLength(2);
     expect(result.nativeDecisions!.history.at(-1)!.decision.outcome).toBe('reject'); noOwner(h, contract.id);
   });
@@ -205,7 +205,7 @@ describe('native semantic callers', () => {
     const h = use({ scripts: {}, planner: { run: async () => { plannerCalls += 1; throw new Error('Checkpoint failure must prevent this invocation'); } } });
     const blocked = spyOn(h.store, 'write').mockReturnValue(false);
     try {
-      const { contract } = startContract(h, { nativeSource: source }); const result = await done(h, contract.id); await h.runner.join(contract.id);
+      const { contract } = (await startContract(h, { nativeSource: source })); const result = await done(h, contract.id); await h.runner.join(contract.id);
       expect(result.status).toBe('failed'); expect(result.error).toBe(`contract ${contract.id} could not start: Native semantic checkpoint failed`);
       expect(blocked).toHaveBeenCalled(); expect(plannerCalls).toBe(0); expect(h.agentsOf('u1')).toHaveLength(0); noOwner(h, contract.id);
     } finally { blocked.mockRestore(); }

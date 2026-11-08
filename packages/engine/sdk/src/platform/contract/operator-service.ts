@@ -145,7 +145,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       );
     }
     const origin: ContractOrigin = hosted === null ? 'external' : 'hosted';
-    const started = (hosted?.runner ?? deps.runner).start({
+    const started = await (hosted?.runner ?? deps.runner).start({
       ask,
       ...(hosted?.selectedModel === undefined ? {} : { selectedModel: hosted.selectedModel }),
       sessionId: input.sessionId ?? OPERATOR_SESSION_ID,

@@ -206,16 +206,18 @@ test('abort during actual contract owner construction cancels only the returned 
   const h = cancellationHarness();
   let restore = () => {};
   try {
-    const unrelated = h.runner.start({ ask: 'Keep the unrelated contract active', sessionId: 'unrelated-session', origin: 'cli', projectRoot: h.root });
+    const unrelated = (await h.runner.start({ ask: 'Keep the unrelated contract active', sessionId: 'unrelated-session', origin: 'cli', projectRoot: h.root }));
     const unrelatedSignal = h.manager.getCancellationSignal(unrelated.owner.id);
     const controller = new AbortController();
     let ownedId: string | undefined;
+    let ownerId: string | undefined;
     const registerAgent = h.messageBus.registerAgent.bind(h.messageBus);
     const registration = spyOn(h.messageBus, 'registerAgent').mockImplementation(participant => {
       const result = registerAgent(participant);
       const record = h.manager.getStatus(participant.agentId);
       if (record?.task === 'Construct the cancelled contract') {
         ownedId = record.contractId;
+        ownerId = record.id;
         controller.abort();
       }
       return result;
@@ -226,9 +228,10 @@ test('abort during actual contract owner construction cancels only the returned 
     expect(result.kind === 'refused' || result.result.success === false).toBe(true);
     if (!ownedId) throw new Error('Actual contract owner construction was not observed');
     await h.runner.join(ownedId);
-    const owned = h.runner.get(ownedId);
-    expect(owned?.status).toBe('cancelled');
-    expect(h.manager.getStatus(owned?.ownerAgentId ?? '')?.status).toBe('cancelled');
+    expect(h.runner.get(ownedId)).toBeNull();
+    expect(ownerId).toBeDefined();
+    await h.manager.join(ownerId!);
+    expect(h.manager.getStatus(ownerId!)?.status).toBe('cancelled');
     expect(unrelated.contract.status).not.toBe('cancelled');
     expect(unrelated.owner.status).not.toBe('cancelled');
     expect(unrelatedSignal?.aborted).toBe(false);

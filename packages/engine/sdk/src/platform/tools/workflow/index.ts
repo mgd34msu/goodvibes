@@ -515,12 +515,12 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               }
             }
             assertCurrent();
-            const started = start.call(runner, {
+            const started = await start.call(runner, {
               ask: task,
               sessionId,
               origin: 'agent-tool',
               projectRoot,
-            });
+            }, { signal, assertCurrent });
             return {
               success: true,
               output: JSON.stringify({

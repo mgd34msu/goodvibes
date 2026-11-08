@@ -42,7 +42,7 @@ for (const mode of ['normal', 'stale', 'stale-check', 'cancel'] as const) {
         return scripted.runner.run(request);
       } },
     });
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'corrective planning result', 20_000);
     const done = h.store.get(contract.id)!;
     expect(fixCalls).toBe(1); expect(done.inputSnapshot!.id).toBe(originalId); expect(done.inputSnapshot).toEqual(originalInput); expect(existsSync(view)).toBe(true);
@@ -83,7 +83,7 @@ test('criteria amendment keeps original grounding while applying the owner\'s ne
       return scripted.runner.run(request);
     } },
   });
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => h.store.get(contract.id)?.status === 'awaiting-owner' || terminal(h, contract.id), 'criteria escalation', 15_000);
   const pending = h.store.get(contract.id)!; expect(pending.status).toBe('awaiting-owner');
   const receipt = structuredClone(pending.inputSnapshot!);

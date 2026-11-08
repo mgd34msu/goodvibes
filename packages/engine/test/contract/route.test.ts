@@ -110,7 +110,7 @@ describe('the runner when the route planner finds no route', () => {
     };
     const h = makeHarness({ plan: oneUnitPlan(1), scripts: {}, routeSelector });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('failed');
@@ -139,7 +139,7 @@ describe('the runner when the route planner finds no route', () => {
       routeSelector,
     });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner' || terminal(h, contract.id), 'the stalled escalation', 15_000);
     const escalation = contractOf(h, contract.id).escalations.at(-1)!;
     expect(escalation.reason).toBe('stalled');

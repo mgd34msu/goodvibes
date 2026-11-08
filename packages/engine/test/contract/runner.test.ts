@@ -62,7 +62,7 @@ describe('the nudge loop', () => {
       },
     }));
     const selection = { id: 'gpt-6.1-sol', registryKey: 'subscription:gpt-6.1-sol', provider: 'subscription', displayName: 'GPT-6.1 Sol' };
-    const { contract, owner } = startContract(h, { selectedModel: selection });
+    const { contract, owner } = (await startContract(h, { selectedModel: selection }));
     selection.provider = 'metered';
     expect(contract.selectedModel?.provider).toBe('subscription');
     expect(owner.provider).toBe('subscription');
@@ -117,7 +117,7 @@ describe('the nudge loop', () => {
         ],
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
 
     const done = h.store.get(contract.id)!;
@@ -142,7 +142,7 @@ describe('the nudge loop', () => {
           : [{ files: { 'src/csv.ts': 'whole\n' }, text: 'finished the parser' }],
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
 
     const done = h.store.get(contract.id)!;
@@ -170,7 +170,7 @@ describe('transport retry through the failure reading', () => {
         u3: () => [{ files: { 'src/convert.ts': 'convert\n' }, text: 'Integration complete.' }],
       },
     }));
-    const { contract } = startContract(h, { ask: PARALLEL_ASK });
+    const { contract } = (await startContract(h, { ask: PARALLEL_ASK }));
     await waitFor(() => h.store.get(contract.id)?.units[0]?.transportRetries === 1, 'the provider retry');
     expect(h.store.get(contract.id)?.status).toBe('running');
     sibling.resolve();
@@ -199,7 +199,7 @@ describe('transport retry through the failure reading', () => {
         },
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
 
     const done = h.store.get(contract.id)!;
@@ -230,7 +230,7 @@ describe('transport retry through the failure reading', () => {
     }));
     const log = new SqliteDecisionLog(':memory:');
     installJudgmentPort(withDecisionLog(judgmentPort('test'), log));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('passed');
@@ -254,7 +254,7 @@ describe('transport retry through the failure reading', () => {
       plan: oneUnitPlan(1),
       scripts: { u1: () => [{ text: 'starting', stop: { kind: 'error', message: 'socket hang up: ECONNRESET (fails twice)' } }] },
     }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
 
     const done = h.store.get(contract.id)!;
@@ -274,7 +274,7 @@ describe('transport retry through the failure reading', () => {
       decisionLog: log,
       scripts: { u1: () => [{ text: 'starting', stop: { kind: 'error', message: 'TypeError: cannot read properties of undefined' } }] },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     const done = h.store.get(contract.id)!;
     expect(done.failureKind).toBe('other');
@@ -295,7 +295,7 @@ describe('the silence watchdog', () => {
       contract: { heartbeatTimeoutMs: 120 },
       scripts: { u1: () => [{ text: 'thinking', stop: { kind: 'hang' } }] },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
 
     const done = h.store.get(contract.id)!;
@@ -321,7 +321,7 @@ describe('cancel', () => {
         u2: () => [{ text: 'never runs' }],
       },
     }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => eventsOf(h, 'CONTRACT_CHECKED').length >= 1, 'the mid-run check');
     expect(h.runner.cancel(contract.id, 'stopped by the operator')).toBe(true);
     expect(h.runner.cancel(contract.id, 'again')).toBe(false);
@@ -342,7 +342,7 @@ describe('cancel', () => {
 
   test("an operator stopping a unit's agent cancels the whole contract", async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: () => [{ text: 'working', stop: { kind: 'hang' } }] } }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => (h.store.get(contract.id)?.units[0]?.agentIds.length ?? 0) === 1, 'the unit agent');
     h.manager.cancel(h.store.get(contract.id)!.units[0]!.agentIds[0]!, 'kill');
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
@@ -356,7 +356,7 @@ describe('cancel', () => {
       plan: oneUnitPlan(1),
       scripts: { u1: () => [{ tool: true, files: { 'src/csv.ts': 'x\n' }, text: 'wrote the parser', after: () => gate }, { text: 'Parser done.' }] },
     }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => h.manager.list().some((record) => record.contractUnitId === 'u1' && record.status === 'running'), 'the unit agent to run');
     const ctx = { sessionId: 'test', traceId: 'test', source: 'test' };
     emitAgentCompleted(h.bus, ctx, { agentId: owner.id, durationMs: 1, output: 'too early' });
@@ -372,7 +372,7 @@ describe('cancel', () => {
 
   test("an operator stopping the contract's owner record cancels the contract and its unit agents", async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: () => [{ text: 'working', stop: { kind: 'hang' } }] } }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => h.manager.list().some((record) => record.contractUnitId === 'u1' && record.status === 'running'), 'the unit agent to run');
     h.manager.cancel(owner.id);
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
@@ -394,7 +394,7 @@ describe('the active-contract cap', () => {
       }),
     };
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: {}, planner }));
-    const started = Array.from({ length: 7 }, () => startContract(h).contract.id);
+    const started = await Promise.all(Array.from({ length: 7 }, async () => (await startContract(h)).contract.id));
     await waitFor(() => started.slice(0, 6).every((id) => h.store.get(id)!.status === 'planning'), 'six contracts planning');
     const seventh = h.store.get(started[6]!)!;
     expect(seventh.status).toBe('queued');
@@ -420,7 +420,7 @@ describe('isolation', () => {
       contract: { isolation: 'auto' },
       scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text: 'parser written' }] },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     expect(contract.baseBranch).toBe(head);
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = h.store.get(contract.id)!;
@@ -438,7 +438,7 @@ describe('isolation', () => {
       contract: { isolation: 'auto' },
       scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text: 'parser written' }] },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     expect(contract.isolation).toBe('worktree');
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = h.store.get(contract.id)!;
@@ -484,7 +484,7 @@ describe('usage roll-up', () => {
         u2: () => [{ files: { 'src/convert.ts': 'c\n' }, text: 'wired' }],
       },
     }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     const done = h.store.get(contract.id)!;
     const unitAgents = done.units.flatMap((unit) => unit.agentIds).map((id) => h.manager.getStatus(id)!);
@@ -540,7 +540,7 @@ describe('the pass guarantee', () => {
           const open = unit.criteria.filter((criterion) => criterion.status !== 'met');
           if (open.length > 0) violations.push(`seed ${seed}: ${unit.id} passed with ${open.map((criterion) => `${criterion.id}=${criterion.status}`).join(', ')}`);
         });
-        const { contract } = startContract(h);
+        const { contract } = (await startContract(h));
         await waitFor(() => terminal(h, contract.id), `seed ${seed} to end`, 10_000);
         expect(violations).toEqual([]);
         const done = h.store.get(contract.id)!;
@@ -567,7 +567,7 @@ describe('the pass guarantee', () => {
 describe('persistence', () => {
   test('the contract tree is written to the store, and get and list read it', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'ok\n' }, text: 'done' }] } }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     h.store.flush();
     expect(existsSync(join(h.root, '.goodvibes', 'contracts', `${contract.id}.json`))).toBe(true);

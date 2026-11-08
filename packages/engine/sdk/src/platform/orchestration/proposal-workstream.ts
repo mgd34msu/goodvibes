@@ -103,7 +103,7 @@ export function fromPlanProposal(
   runner: Pick<ContractRunner, 'startFromPlan'>,
   proposal: PlanProposal,
   launch: ProposalLaunchInput,
-): StartedContract {
+): Promise<StartedContract> {
   const draft = draftFromProposal(proposal);
   return runner.startFromPlan({
     ask: proposal.task,
@@ -129,10 +129,9 @@ export function approveAndLaunchProposal(
   proposal: PlanProposal,
   launch: ProposalLaunchInput,
   opts: { readonly confirm?: boolean | undefined } = {},
-): { launched: true; contractId: string; ownerAgentId: string } | { launched: false; requiresConfirm: true } {
+): Promise<{ launched: true; contractId: string; ownerAgentId: string } | { launched: false; requiresConfirm: true }> {
   if (opts.confirm !== true) {
-    return { launched: false, requiresConfirm: true };
+    return Promise.resolve({ launched: false, requiresConfirm: true });
   }
-  const started = fromPlanProposal(runner, proposal, launch);
-  return { launched: true, contractId: started.contract.id, ownerAgentId: started.owner.id };
+  return fromPlanProposal(runner, proposal, launch).then(started => ({ launched: true as const, contractId: started.contract.id, ownerAgentId: started.owner.id }));
 }

@@ -62,7 +62,7 @@ async function reach(options: Omit<HarnessOptions, 'planner'> & { readonly plann
     } },
   } : {}) });
   harness = h;
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner' || terminal(h, contract.id), `the ${reason} escalation`, 15_000);
   const escalation = contractOf(h, contract.id).escalations.at(-1)!;
   expect(escalation.reason).toBe(reason);
@@ -308,7 +308,7 @@ describe('owner replies (6.3)', () => {
     const h = makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('parser written') },
       port: context => context.name === 'forbids_writing' ? noulAnswer(0.5) : undefined });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'automatic planning to complete');
     expect(contractOf(h, contract.id).status).toBe('passed');
     expect(contractOf(h, contract.id).escalations).toEqual([]);
@@ -317,7 +317,7 @@ describe('owner replies (6.3)', () => {
   test.each([0.2, 0.5])('a criterion reading of %s does not manufacture an unshown approval question', async probability => {
     const h = makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes(`[p=${probability}] parser written`) } });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'automatic evidence check to complete');
     expect(contractOf(h, contract.id).status).toBe('passed');
     expect(contractOf(h, contract.id).units[0]!.criteria[0]!.status).toBe('met');
@@ -370,7 +370,7 @@ describe('what an owner-approved plan names', () => {
       decisionLog: log,
     });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the plan escalation', 15_000);
     const escalation = contractOf(h, contract.id).escalations.at(-1)!;
     expect(escalation.decisionIds?.length).toBeGreaterThan(0);

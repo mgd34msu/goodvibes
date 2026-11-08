@@ -237,7 +237,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
     const passiveOpens = () => opens.mock.calls.filter(([, flags]) => typeof flags === 'number' && (flags & fs.constants.O_NONBLOCK) !== 0);
     let id: string | undefined;
     try {
-      id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'passive-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
+      id = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'passive-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' })).contract.id;
       if (scenario === 'cancel-embedding' || scenario === 'revoke-embedding' || scenario === 'restore-embedding') {
         await waitFor(() => embeddingEntered || ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'scripted embedding entry', 20_000);
         expect(embeddingEntered).toBe(true);

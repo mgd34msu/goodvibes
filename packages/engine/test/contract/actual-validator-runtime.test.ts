@@ -153,7 +153,7 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
   });
   let id: string | undefined;
   try {
-    id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-npx-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
+    id = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-npx-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' })).contract.id;
     try {
       // The real dependency capture and two compiler runs took 135 seconds on
       // the development host. Hosted CI reached 236 seconds before the final

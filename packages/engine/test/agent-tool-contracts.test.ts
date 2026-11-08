@@ -53,7 +53,7 @@ function fakeRunner(manager: AgentManager, contracts: readonly Contract[] = []):
   return {
     starts,
     listFilters,
-    start(input: StartContractInput): StartedContract {
+    async start(input: StartContractInput): Promise<StartedContract> {
       starts.push(input);
       const id = `ctr-${String(starts.length).padStart(8, '0')}`;
       const owner = manager.spawn(

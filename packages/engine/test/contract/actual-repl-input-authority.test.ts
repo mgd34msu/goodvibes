@@ -221,7 +221,7 @@ for (const scenario of ['allowed', 'allowed-node-runtime', 'revoke-after-eval', 
     });
     let id: string | undefined;
     try {
-      const started = runner.start({ ask: 'Add a CSV parser module', sessionId: 'repl-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' });
+      const started = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'repl-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }));
       id = started.contract.id;
       try {
         // The allowed Node case stages and revalidates the real Node/npm/npx

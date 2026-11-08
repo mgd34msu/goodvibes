@@ -31,7 +31,7 @@ describe('Agent contracts isolate delegated work and cancellation', () => {
       git(root, ['add', '.']);
       git(root, ['commit', '-q', '-m', 'fixture']);
       writeFileSync(join(root, 'src/isolation-fixture.ts'), '// owner edit\nexport const delay = 1;\n');
-      const { contract, owner } = services.contractRunner.start({ ask: CONTRACT_ASK, sessionId: 'isolation', origin: 'agent-tool', projectRoot: root });
+      const { contract, owner } = (await services.contractRunner.start({ ask: CONTRACT_ASK, sessionId: 'isolation', origin: 'agent-tool', projectRoot: root }));
       await waitForContract(() => unitCwd !== undefined, () => JSON.stringify({ contract: services.contractRunner.get(contract.id), requested: fixture.requested }));
       const running = services.contractRunner.get(contract.id)!;
       expect(running.isolation).toBe('worktree');

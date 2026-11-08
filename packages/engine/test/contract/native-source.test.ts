@@ -150,7 +150,7 @@ describe('native contract source', () => {
       scripts: scriptsWith({ u1: finishes('initial result') }, unitId => unitId.endsWith('.f1.u1') ? finishes('corrected result') : undefined),
       port: context => { if (judgeOf(context) !== 'deliverable') return undefined; return noulAnswer(JSON.stringify((context.state['evidence'] as Record<string, unknown>)['currentArtifacts']).includes('corrected result') ? 0.03 : 0.9); } });
     harnesses.push(h);
-    const { contract } = startContract(h, { nativeSource: source() });
+    const { contract } = (await startContract(h, { nativeSource: source() }));
     await waitFor(() => terminal(h, contract.id), 'corrected native completion', 15_000);
     const done = h.store.get(contract.id)!;
     expect(done.error).toBeUndefined();
@@ -167,7 +167,7 @@ describe('native contract source', () => {
     const h = makeHarness({ recordNative: true, planner: scripted.runner, contract: { maxFixRounds: 1 }, scripts: { u1: finishes('initial result') },
       port: answers(context => judgeOf(context) === 'deliverable' ? noulAnswer(0.9) : undefined, replyAnswers([{ reading: 'amend' }])) });
     harnesses.push(h);
-    const { contract } = startContract(h, { nativeSource: source() });
+    const { contract } = (await startContract(h, { nativeSource: source() }));
     h.store.get(contract.id)!.fixRounds = 1;
     await waitFor(() => terminal(h, contract.id), 'native refusal at exhausted correction boundary');
     const live = h.store.get(contract.id)!;
@@ -183,7 +183,7 @@ describe('native contract source', () => {
     const restartLog = new SqliteDecisionLog(':memory:'); logs.push(restartLog);
     const first = makeHarness({ recordNative: true, decisionLog: restartLog, root, scripts: {}, planner: { run: () => new Promise(() => undefined) } }); harnesses.push(first);
     const borrowed = { ...source(), criteria: [...source().criteria] };
-    const { contract } = startContract(first, { nativeSource: borrowed });
+    const { contract } = (await startContract(first, { nativeSource: borrowed }));
     borrowed.goal = 'Changed later'; borrowed.criteria.reverse(); borrowed.criteria[0] = 'Changed later';
     expect(contract.nativeSource).toEqual(source());
     await waitFor(() => first.store.get(contract.id)?.status === 'planning', 'initial planning');

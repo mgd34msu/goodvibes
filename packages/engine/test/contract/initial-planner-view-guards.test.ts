@@ -30,7 +30,7 @@ for (const stage of ['map', 'planner'] as const) {
       },
     });
     try {
-      const { contract } = startContract(h);
+      const { contract } = (await startContract(h));
       await waitFor(() => terminal(h, contract.id), 'stale planner held', 15_000);
       const done = h.store.get(contract.id)!;
       console.log(JSON.stringify({
@@ -90,7 +90,7 @@ for (const stage of ['route', 'judgment', 'receipt', 'cancel-map', 'cancel-judgm
       } },
     });
     try {
-      const { contract } = startContract(h);
+      const { contract } = (await startContract(h));
       await waitFor(() => terminal(h, contract.id), 'guarded planning terminal', 15_000);
       expect(mutation).toBe(true);
       expect(h.store.get(contract.id)!.status).toBe(stage.startsWith('cancel') ? 'cancelled' : 'failed');

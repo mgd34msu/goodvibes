@@ -250,7 +250,7 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
         return bunSpawnSync(...args);
       }) as typeof Bun.spawnSync); restorers.push(() => bunSyncTap.mockRestore());
 
-      id = contractRunner.start({ ask: 'Add a CSV parser module', sessionId: 'read-workflow-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
+      id = (await contractRunner.start({ ask: 'Add a CSV parser module', sessionId: 'read-workflow-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' })).contract.id;
       await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contractRunner.get(id!)!.status), 'actual read workflow settlement', 30_000);
       const outcome = contractRunner.get(id)!;
       // Cancellation marks status before every owned callback has drained.

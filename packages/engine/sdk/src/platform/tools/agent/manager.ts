@@ -8,7 +8,7 @@ import type { AgentConstructionBinding } from './contract-binding.js';
 import { ArchetypeLoader } from '../../agents/archetypes.js';
 import { AgentOrchestrator } from '../../agents/orchestrator.js';
 import { AgentMessageBus } from '../../agents/message-bus.js';
-import type { ContractRunner } from '../../contract/runner.js';
+import type { ContractRunner, ContractStartOptions, OwnedStartedContract, StartedContract } from '../../contract/runner.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConversationMessageSnapshot } from '../../core/conversation.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
@@ -122,7 +122,11 @@ export const AGENT_TEMPLATES: Record<string, { description: string; defaultTools
 
 
 /** Legacy starts remain valid; owned starts require an explicit real receipt. */
-export type AgentContractRunner = Pick<ContractRunner, 'startForOwner'> & Partial<Pick<ContractRunner, 'assertOwnedExecution' | 'startOwnedForOwner'>>;
+export interface AgentContractRunner {
+  startForOwner(record: AgentRecord, options?: ContractStartOptions): StartedContract | Promise<StartedContract>;
+  assertOwnedExecution?: ContractRunner['assertOwnedExecution'];
+  startOwnedForOwner?: ((record: AgentRecord, options?: ContractStartOptions) => OwnedStartedContract | Promise<OwnedStartedContract>);
+}
 
 /** An owned spawn was refused before admission because its driver cannot join. */
 export class OwnedAgentExecutionUnavailableError extends Error {
@@ -140,7 +144,7 @@ export interface OwnedAgentExecution {
 
 interface OwnedSpawnContext {
   reserved(record: AgentRecord, slot: AgentExecutionSlot): void;
-  startContract(record: AgentRecord): { readonly settled: Promise<void>; cancel(reason: string): boolean };
+  startContract(record: AgentRecord, signal: AbortSignal): Promise<{ readonly settled: Promise<void>; cancel(reason: string): boolean }>;
 }
 
 interface AgentExecutionSlot {
@@ -329,9 +333,11 @@ export class AgentManager {
    * it. A legacy contract driver is refused before any record/event/work exists.
    */
   spawnOwned(input: AgentInput, options: { readonly signal?: AbortSignal | undefined } = {}): OwnedAgentExecution {
+    options = { ...options };
     input = classicAgentInput(input);
     options.signal?.throwIfAborted();
-    const startOwned = this.contractRunner?.startOwnedForOwner;
+    const runner = this.contractRunner;
+    const startOwned = runner?.startOwnedForOwner;
     if (!input.outsideContract) {
       if (typeof startOwned !== 'function' || typeof this.contractRunner?.assertOwnedExecution !== 'function') {
         throw new OwnedAgentExecutionUnavailableError('Owned agent spawn requires a contract runner with owned execution settlement');
@@ -380,10 +386,16 @@ export class AgentManager {
           );
           if (abortRequested) handle.cancel();
         },
-        startContract: (record) => {
-          const started = startOwned!.call(this.contractRunner, record);
+        startContract: async (record, signal) => {
+          const current = () => {
+            if (this.contractRunner !== runner || runner?.startOwnedForOwner !== startOwned)
+              throw new OwnedAgentExecutionUnavailableError('The original owned contract driver changed');
+          };
+          current();
+          const started = await startOwned!.call(runner, record, { signal, assertCurrent: current });
           cancelContract = (reason) => started.cancel(reason);
-          if (abortRequested) cancelContract('the owning hook was cancelled');
+          if (abortRequested || signal.aborted) cancelContract('the owning hook was cancelled');
+          try { current(); } catch (error) { started.cancel('the owned contract driver changed'); await started.settled; throw error; }
           return started;
         },
       });
@@ -626,8 +638,17 @@ export class AgentManager {
 
       if (startsContract) {
         try {
-          const started = owned ? owned.startContract(record) : this.contractRunner!.startForOwner(record);
-          begin(started.settled);
+          const starting = owned ? owned.startContract(record, controller.signal)
+            : this.contractRunner!.startForOwner(record, { signal: controller.signal });
+          begin(Promise.resolve(starting).then(started => started.settled).catch(error => {
+            if (record.status !== 'cancelled') {
+              record.status = 'failed';
+              record.error = `The contract could not start: ${summarizeError(error)}`;
+              record.completedAt = Date.now();
+            }
+            // Publish the failed/cancelled record only after startup and its
+            // cleanup drained, just as standalone executor settlement does.
+          }));
         } catch (error) {
           record.status = 'failed';
           record.error = `The contract could not start: ${summarizeError(error)}`;

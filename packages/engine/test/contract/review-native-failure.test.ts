@@ -50,7 +50,7 @@ test('review: exhausted decision targets halt a native contract without retrying
   });
   installJudgmentPort(withDecisionLog(real, log));
   try {
-    const id = startContract(h, { nativeSource: source }).contract.id;
+    const id = (await startContract(h, { nativeSource: source })).contract.id;
     await waitFor(() => attempts >= 1, 'native failure judgment request');
     await h.runner.join(id);
     expect(attempts).toBe(1);

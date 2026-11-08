@@ -123,8 +123,8 @@ test('runtime shutdown cancels contract work, flushes its pending store and deta
       if (delay === 250) delayedWrites.push(timer);
       return timer;
     }) as typeof setTimeout;
-    const started = runner.start({ ask: 'Fixture held contract', sessionId: 'fixture-session', origin: 'cli',
-      projectRoot: fixture.workingDirectory, isolation: 'shared' });
+    const started = (await runner.start({ ask: 'Fixture held contract', sessionId: 'fixture-session', origin: 'cli',
+      projectRoot: fixture.workingDirectory, isolation: 'shared' }));
     globalThis.setTimeout = schedule;
     expect(events).toContain('CONTRACT_CREATED');
     // Admission may await input preparation before requesting its first reading.

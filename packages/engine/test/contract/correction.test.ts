@@ -60,7 +60,7 @@ describe('routing a stalled unit', () => {
         return choiceAnswer(context.question, 'split', 0.95);
       }),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'recovered correction to finish', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('failed');
@@ -80,7 +80,7 @@ describe('routing a stalled unit', () => {
         if (context.name === 'route') { readings++; throw new JudgmentError('unavailable', 'temporary transport outage'); }
         return undefined;
       } }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'correction outage to halt');
     await h.runner.join(contract.id);
     expect(contractOf(h, contract.id).status).toBe('failed');
@@ -99,7 +99,7 @@ describe('routing a stalled unit', () => {
       scripts: { u1: keepsFailing(3), 'u1.f1.u1': finishes('fixed the parser') },
       port: answers(fixedOutputsMeet, routeAnswer('split', asked)),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -139,7 +139,7 @@ describe('routing a stalled unit', () => {
       return { model: 'provider-a:model-a', provider: 'provider-a', reason: `${request.purpose} tier` };
     };
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2 }, scripts: { u1 }, routeSelector, port: routeAnswer('fresh') }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -156,7 +156,7 @@ describe('routing a stalled unit', () => {
 
   test('owner: the unit and the contract wait for the owner with the unmet criteria named', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2 }, scripts: { u1: keepsFailing(3) }, port: routeAnswer('owner') }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     const waiting = contractOf(h, contract.id);
     expect(waiting.units[0]!.status).toBe('awaiting-owner');
@@ -173,7 +173,7 @@ describe('routing a stalled unit', () => {
     // u1.c1 reads unmet; a tie for u1.c2 does not invent unmet or unshown work.
     const failsAndUnshown: AgentScript = () => Array.from({ length: 3 }, (_, index) => ({ files: { 'src/csv.ts': `attempt ${index}\n` }, text: `[unmet] attempt ${index} [p=0.9,0.5]` }));
     const h = use(makeHarness({ plan: oneUnitPlan(2), contract: { stallLimit: 2 }, scripts: { u1: failsAndUnshown }, port: routeAnswer('owner', asked) }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     expect(asked).toHaveLength(1);
     expect(asked[0]!['unmet']).toEqual(['u1.c1']);
@@ -186,7 +186,7 @@ describe('routing a stalled unit', () => {
 
   test('a route read below act goes to the owner', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2 }, scripts: { u1: keepsFailing(3) }, port: routeAnswer('split', [], 0.5) }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     expect(contractOf(h, contract.id).escalations[0]!.reason).toBe('stalled');
     expect(eventsOf(h, 'CONTRACT_STALLED')[0]!.route).toBe('owner');
@@ -200,7 +200,7 @@ describe('routing a stalled unit', () => {
       h.store.get(record.contractId!)!.units[0]!.fixRounds = 1;
       return keepsFailing(3)(record, run);
     } }, port: routeAnswer('split', asked) }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     expect(asked).toHaveLength(0);
     const escalation = contractOf(h, contract.id).escalations[0]!;
@@ -220,7 +220,7 @@ describe('routing a stalled unit', () => {
       scripts: { u1: keepsFailing(3), 'u1.f1.u1': finishes('fixed the parser') },
       port: answers(fixedOutputsMeet, routeAnswer('split')),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     expect(contractOf(h, contract.id).status).toBe('passed');
     const fixes = planner.of('fix');
@@ -265,7 +265,7 @@ describe('a merge conflict (7.4)', () => {
       ),
       port: answers(fixedOutputsMeet, routeAnswer('owner', asked)),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -323,7 +323,7 @@ describe('groups and the deliverable (6.4)', () => {
         return failing(context);
       },
     }));
-    id = startContract(h).contract.id;
+    id = (await startContract(h)).contract.id;
     await waitFor(() => terminal(h, id), 'the new repair to finish', 15_000);
     const done = contractOf(h, id);
     expect(done.status).toBe('passed');
@@ -355,7 +355,7 @@ describe('groups and the deliverable (6.4)', () => {
         return undefined;
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the repaired answer to pass', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -386,7 +386,7 @@ describe('groups and the deliverable (6.4)', () => {
       scripts: { u1: finishes('parser written'), 'g1.f1.u1': finishes('exported the parser', 'src/index.ts') },
       port: failsUntilRepairedWork('group'),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -411,7 +411,7 @@ describe('groups and the deliverable (6.4)', () => {
       scripts: scriptsWith({ u1: finishes('parser written') }, (unitId) => (unitId.endsWith('.f1.u1') ? finishes('wired the parser into the cli', 'src/cli.ts') : undefined)),
       port: failsUntilRepairedWork('deliverable'),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');
@@ -426,7 +426,7 @@ describe('groups and the deliverable (6.4)', () => {
 
   test('a deliverable that fails with its fix rounds spent goes to the owner', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), contract: { maxFixRounds: 1 }, scripts: { u1: finishes('parser written') }, port: failsUntilRepairedWork('deliverable') }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     h.store.get(contract.id)!.fixRounds = 1;
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     const escalation = contractOf(h, contract.id).escalations[0]!;
@@ -436,7 +436,7 @@ describe('groups and the deliverable (6.4)', () => {
 
   test('a group without criteria passes without a group check', async () => {
     const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('parser written') } }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     expect(contractOf(h, contract.id).status).toBe('passed');
     expect(eventsOf(h, 'CONTRACT_CHECKED').map((event) => event.scope)).toEqual(['unit', 'deliverable']);

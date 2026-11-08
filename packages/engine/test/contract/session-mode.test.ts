@@ -148,7 +148,7 @@ function writer(root: string, before?: (round: number) => Promise<void>): Orches
 }
 
 async function sessionReady(h: Harness): Promise<string> {
-  const { contract } = startContract(h, { origin: 'turn' });
+  const { contract } = (await startContract(h, { origin: 'turn' }));
   await waitFor(() => contractOf(h, contract.id).units[0]?.status === 'running', 'the session-mode unit to wait for the session', 15_000);
   return contract.id;
 }

@@ -279,8 +279,8 @@ async function fixture(mode: Mode, outcome: Outcome) {
     ]),
     member: () => runtime.agentManager.list().find((record) => record.contractRole === 'unit')!,
     state: () => ({ memberCalls, plannerCalls, memberRoot, memberContent, backups, checkedBeforeDelivery, repairRequestCount: repairRequests.length, readChecks }),
-    start() {
-      id = runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-captured-heal-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }).contract.id;
+    async start() {
+      id = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'actual-captured-heal-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' })).contract.id;
       return id;
     },
     async resume() {
@@ -316,7 +316,7 @@ for (const mode of ['write', 'edit'] as const) {
   test.skipIf(mode === 'edit' && !supported)(`actual captured ${mode} repairs through ToolLLM and reads accepted member bytes before delivery`, async () => {
     const f = await fixture(mode, 'accept');
     try {
-      f.start(); const contract = await f.settle(); const result = f.results.get('captured-heal');
+      await f.start(); const contract = await f.settle(); const result = f.results.get('captured-heal');
       expect(result?.success, JSON.stringify({ result, contract: contract.error })).toBe(true);
       expect(contract.status, contract.error).toBe('passed'); expect(contract.commit?.status).toBe('applied');
       expect(contract.commit?.hash).toBeUndefined(); expect(contract.commit?.note).toContain('uncommitted');
@@ -371,7 +371,7 @@ for (const outcome of ['reject', 'unparsable'] as const) {
   test(`actual captured write ${outcome} repair preserves initial written bytes and backup`, async () => {
     const f = await fixture('write', outcome);
     try {
-      f.start(); await f.settle(); const result = f.results.get('captured-heal');
+      await f.start(); await f.settle(); const result = f.results.get('captured-heal');
       expect(result?.success, JSON.stringify(result)).toBe(true);
       const file = (JSON.parse(result!.output!) as { files: WrittenFile[] }).files[0]!;
       expect(file.auto_heal).toEqual({ attempted: true, healed: false });
@@ -388,7 +388,7 @@ for (const outcome of ['reject', 'unparsable'] as const) {
 test('actual captured repair respects a stored original-owner source denial before ToolLLM admission', async () => {
   const f = await fixture('write', 'deny-before');
   try {
-    const id = f.start();
+    const id = await f.start();
     expect(await f.awaitRepair()).toBe('ended-before-repair');
     const contract = f.runner.get(id)!;
     expect(contract.error ?? '').not.toContain('probability distribution');
@@ -406,7 +406,7 @@ for (const outcome of ['deny-pending', 'revoke-pending', 'cancel-pending'] as co
   test(`actual captured repair ${outcome} withholds a late signal-ignoring model response`, async () => {
     const f = await fixture('write', outcome);
     try {
-      const id = f.start();
+      const id = await f.start();
       const entry = await observed(f.awaitRepair(), 60_000);
       expect(entry.state === 'settled' ? entry.value : entry.state,
         JSON.stringify({ state: f.state(), contract: f.runner.get(id)?.error, results: [...f.results] })).toBe('entered');
@@ -445,7 +445,7 @@ for (const outcome of ['deny-pending', 'revoke-pending', 'cancel-pending'] as co
 test('actual captured repair resumes with a fresh authority/backend for the same member root', async () => {
   const f = await fixture('write', 'resume');
   try {
-    const id = f.start();
+    const id = await f.start();
     expect((await observed(f.resumePaused.promise, 60_000)).state,
       JSON.stringify({ state: f.state(), results: [...f.results], contract: f.runner.get(id)?.error })).toBe('settled');
     const oldMember = f.member(); const oldAuthority = getContractInputAuthority(oldMember)!;

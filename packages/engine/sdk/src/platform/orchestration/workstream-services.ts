@@ -55,6 +55,7 @@ import { calcSessionCost, isModelPriced } from '../providers/session-cost.js';
 import { editItemBrief, moveItemInSpec, removeItemFromSpec } from './workstream-draft-edits.js';
 import { createWorkstreamDraftStore, formatWorkstreamDraftReclaim } from './workstream-draft-store.js';
 import { logger } from '../utils/logger.js';
+import { isDeepStrictEqual } from 'node:util';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { requestRisk } from '../routing/batteries/request.js';
 import { requestState } from '../routing/request-reading.js';
@@ -106,7 +107,7 @@ export interface WorkstreamCommandService {
   approveDraft(id: string): WorkstreamDraft | undefined;
   removeDraft(id: string): boolean;
   /** Start an approved draft's contract (a multi-item draft through runner.startFromPlan, a single-item draft through runner.start), then drop the draft. Returns the contract's id and its owner agent's id; null when the draft is missing or not approved. */
-  launchDraft(id: string): { contractId: string; ownerAgentId: string } | null;
+  launchDraft(id: string): Promise<{ contractId: string; ownerAgentId: string } | null>;
 }
 
 export interface WorkstreamServices {
@@ -262,6 +263,7 @@ function createWorkstreamCommandService(
   plannerSources: PlannerInputSources,
 ): WorkstreamCommandService {
   const drafts = new Map<string, WorkstreamDraft>();
+  const launching = new Map<string, Promise<{ contractId: string; ownerAgentId: string } | null>>();
 
   // The facade's draft journal (workstream-draft-store.ts). Load every persisted
   // proposal at construction so a create/reshape/approve done before a restart
@@ -375,7 +377,7 @@ function createWorkstreamCommandService(
    * writes only their criteria, and every plan check runs. A single-item draft
    * is an ask: the item's task starts the contract.
    */
-  function startDraftContract(draft: WorkstreamDraft): ReturnType<ContractRunner['start']> {
+  function startDraftContract(draft: WorkstreamDraft, options: Parameters<ContractRunner['start']>[1]): ReturnType<ContractRunner['start']> {
     requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
     const spec = draft.spec;
     const launch = {
@@ -386,9 +388,9 @@ function createWorkstreamCommandService(
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
     };
     if (spec.items.length > 1) {
-      return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) });
+      return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) }, options);
     }
-    return contractRunner.start({ ...launch, ask: spec.items[0]?.task ?? draft.task });
+    return contractRunner.start({ ...launch, ask: spec.items[0]?.task ?? draft.task }, options);
   }
 
   return {
@@ -441,12 +443,25 @@ function createWorkstreamCommandService(
       return drafts.delete(id);
     },
     launchDraft(id) {
+      const pending = launching.get(id);
+      if (pending) return pending;
       const draft = drafts.get(id);
-      if (!draft || !draft.approved) return null;
-      const started = startDraftContract(draft);
-      drafts.delete(id);
-      store.remove(id); // launched: the contract store now owns it, so drop the draft snapshot
-      return { contractId: started.contract.id, ownerAgentId: started.owner.id };
+      if (!draft || !draft.approved) return Promise.resolve(null);
+      requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
+      const captured = structuredClone(draft);
+      const unchanged = () => drafts.get(id) === draft && draft.approved && isDeepStrictEqual(draft, captured);
+      const assertCurrent = () => { if (!unchanged()) throw new Error('The approved workstream draft changed before launch'); };
+      const operation = (async () => {
+        const started = await startDraftContract(captured, { assertCurrent });
+        // A later edit is a new draft; never delete it after the old launch
+        // committed, or hide the already accepted contract's acknowledgement.
+        if (unchanged()) { drafts.delete(id); store.remove(id); }
+        return { contractId: started.contract.id, ownerAgentId: started.owner.id };
+      })();
+      launching.set(id, operation);
+      const settled = () => { if (launching.get(id) === operation) launching.delete(id); };
+      void operation.then(settled, settled);
+      return operation;
     },
   };
 }

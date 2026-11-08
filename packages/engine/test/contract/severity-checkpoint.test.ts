@@ -25,7 +25,7 @@ afterEach(async () => {
   }
 });
 
-function setup(criteria = 1, followup: readonly AgentStep[] = [{ text: 'Working on the nudge', stop: { kind: 'hang' } }]) {
+async function setup(criteria = 1, followup: readonly AgentStep[] = [{ text: 'Working on the nudge', stop: { kind: 'hang' } }]) {
   const harness = makeHarness({ root: makeRepo(), plan: oneUnitPlan(criteria), scripts: {
     u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text: 'First incomplete parser [unmet]' }, ...followup],
   } });
@@ -46,7 +46,7 @@ function setup(criteria = 1, followup: readonly AgentStep[] = [{ text: 'Working 
   };
   const previous = installJudgmentPort(port);
   owned.push({ harness, holds, previous });
-  const { contract } = startContract(harness);
+  const { contract } = await startContract(harness);
   return { h: harness, contract, holds };
 }
 
@@ -57,7 +57,7 @@ function persisted(h: Harness, id: string) {
 }
 
 test('late severity changes write an explicit checkpoint without needing another contract event', async () => {
-  const { h, contract, holds } = setup();
+  const { h, contract, holds } = await setup();
   await waitFor(() => holds.length === 1, 'the held severity response');
   const unit = h.store.get(contract.id)!.units[0]!;
   const before = { ...h.store.get(contract.id)!.judgmentUsage };
@@ -73,7 +73,7 @@ test('late severity changes write an explicit checkpoint without needing another
 });
 
 test('a later check keeps its own reading when an earlier severity response arrives', async () => {
-  const { h, contract, holds } = setup(1, [
+  const { h, contract, holds } = await setup(1, [
     { files: { 'src/csv.ts': 'export const parse = () => [];\n' }, text: 'Fixed parser', tool: true },
     { text: 'Continue working', stop: { kind: 'hang' } },
   ]);
@@ -89,7 +89,7 @@ test('a later check keeps its own reading when an earlier severity response arri
 });
 
 test('cancellation joins late severity responses and checkpoints their usage without applying them', async () => {
-  const { h, contract, holds } = setup();
+  const { h, contract, holds } = await setup();
   await waitFor(() => holds.length === 1, 'the held severity response');
   const before = { ...h.store.get(contract.id)!.judgmentUsage };
   expect(h.runner.cancel(contract.id, 'Cancelled by the operator')).toBe(true);
@@ -107,7 +107,7 @@ test('cancellation joins late severity responses and checkpoints their usage wit
 });
 
 test('a sibling severity failure saves successful usage after draining instead of losing the batch', async () => {
-  const { h, contract, holds } = setup(2);
+  const { h, contract, holds } = await setup(2);
   await waitFor(() => holds.length === 2, 'both held severity responses');
   const before = { ...h.store.get(contract.id)!.judgmentUsage };
   holds[0]!.reject(new JudgmentError('unavailable', 'The test endpoint is unavailable'));
@@ -122,7 +122,7 @@ test('a sibling severity failure saves successful usage after draining instead o
 });
 
 test('disposal persists late usage into the resumable snapshot without persisting cancellation state', async () => {
-  const { h, contract, holds } = setup();
+  const { h, contract, holds } = await setup();
   await waitFor(() => holds.length === 1, 'the held severity response');
   h.runner.dispose();
   const before = persisted(h, contract.id);
@@ -139,7 +139,7 @@ test('disposal persists late usage into the resumable snapshot without persistin
 });
 
 test('a failed late checkpoint is a local failure and the drained terminal write retains its usage', async () => {
-  const { h, contract, holds } = setup();
+  const { h, contract, holds } = await setup();
   await waitFor(() => holds.length === 1, 'the held severity response');
   h.store.flush();
   const before = { ...h.store.get(contract.id)!.judgmentUsage };

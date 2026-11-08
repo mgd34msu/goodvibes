@@ -103,9 +103,9 @@ export function createContractIntake(deps: ContractIntakeDeps): ContractIntake {
           const outcome = await deps.runner.reply(route.waiting.contract.id, route.waiting.escalation.id, turn.text);
           return { kind: 'replied', contractId: route.waiting.contract.id, outcome };
         }
-        const started = deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
+        const started = await deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
           ...(deps.getSelectedModel === undefined ? {} : { selectedModel: deps.getSelectedModel() }),
-        });
+        }, { signal: turn.signal });
         route.routed.recordAction(`started contract ${started.contract.id}`);
         return { kind: 'started', contractId: started.contract.id, ownerAgentId: started.owner.id };
       });

@@ -1,4 +1,5 @@
-import { captureAutonomousSource } from '../permissions/autonomous.js';
+import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
@@ -10,8 +11,9 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * The contract runner (docs/design/contract-runner.md sections 1, 2.2, 6.5
  * and 7.3): `createContractRunner(deps)` owns every contract's lifecycle.
  *
- * - `start` creates the contract and its owner record (the record parents and
- *   surfaces wait on; it runs no model) and returns at once. The contract is
+ * - `start` resolves repository placement without blocking the host, then
+ *   creates the contract and its owner record (the record parents and
+ *   surfaces wait on; it runs no model). The contract is
  *   shaped and planned (planner.ts), then its groups run on one orchestration
  *   engine per contract (group-runner.ts) with the full nudge loop
  *   (agent-hooks.ts, unit-failures.ts).
@@ -32,9 +34,9 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * engine runs and no sub-agent is spawned.
  */
 import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
-import { spawnSync } from 'node:child_process';
-import { resolveContractGitPlacement } from './git-placement.js';
+import { resolveContractGitPlacement, resolveContractIsolation, resolveContractBase } from './git-placement.js';
 import { existsSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import type { ContractEvent } from '../../events/contract.js';
 import type { AgentMessageBus } from '../agents/message-bus.js';
@@ -48,7 +50,7 @@ import { emptyWorkItemUsage, type PriceProvenanceFn } from '../orchestration/typ
 import { emitAgentCancelled, emitAgentCompleted, emitAgentFailed } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
-import { startContractOwner } from '../tools/agent/contract-binding.js';
+import { startContractOwner, bindContractActionSignal } from '../tools/agent/contract-binding.js';
 import { delegationForbidden } from './batteries/request-shape.js';
 import { createUnitCheckLoop, queueSessionNudge, type ContractSessionHooks } from './agent-hooks.js';
 import { readContractConfig, type ContractConfigReader } from './config.js';
@@ -139,6 +141,12 @@ export interface OwnedStartedContract extends StartedContract {
   cancel(reason: string): boolean;
 }
 
+/** Live host restrictions on asynchronous preparation; never serialized. */
+export interface ContractStartOptions {
+  readonly signal?: AbortSignal | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
+}
+
 /** The session a contract gets when an agent spawn starts it with no conversation session (AgentManager's own event session). */
 export const AGENT_MANAGER_SESSION_ID = 'agent-manager';
 
@@ -153,24 +161,24 @@ export interface ContractRunner {
   inspectDurable?(key: DurableContractKey): DurableStartedContract | null;
   /** Non-executing drainage confirmation; a live foreign execution lease fails closed. */
   joinDurable?(key: DurableContractKey): Promise<void>;
-  /** Starts a contract from an ask. Returns at once with the contract and its owner agent record. */
-  start(input: StartContractInput): StartedContract;
+  /** Resolves repository placement before publishing the contract and owner. */
+  start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>;
   /**
    * Starts a contract from a plan drafted before it (a launched plan proposal
    * or workstream draft): the planner keeps the drafted units and
    * writes their criteria, and every plan check runs.
    */
-  startFromPlan(input: StartFromPlanInput): StartedContract;
+  startFromPlan(input: StartFromPlanInput, options?: ContractStartOptions): Promise<StartedContract>;
   /**
    * AgentManager.spawn's seam for a spawn that is not outside every contract:
    * the spawned record becomes the owner of a new contract whose
    * ask is its task. No executor runs for it.
    */
-  startForOwner(ownerRecord: AgentRecord): StartedContract;
+  startForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<StartedContract>;
   /** Checks owned-start prerequisites before AgentManager admits an owner record. */
   assertOwnedExecution(): void;
   /** Explicit capability for a scoped spawn; legacy custom runners may omit it. */
-  startOwnedForOwner(ownerRecord: AgentRecord): OwnedStartedContract;
+  startOwnedForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<OwnedStartedContract>;
   /** Waits for the actual work admitted by this contract, after it ends. */
   join(contractId: string): Promise<void>;
   get(contractId: string): ContractView | null;
@@ -200,11 +208,9 @@ export interface ContractRunner {
 }
 
 /** `auto` isolation: a worktree when the root is a git repository with at least one commit, else the shared tree. */
-export function resolveIsolation(setting: 'auto' | 'worktree' | 'shared', projectRoot: string): 'worktree' | 'shared' {
-  if (setting !== 'auto' && setting !== 'worktree' && setting !== 'shared') throw new Error('Invalid contract isolation');
-  if (setting !== 'auto') return setting;
-  const head = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
-  return head.status === 0 ? 'worktree' : 'shared';
+export async function resolveIsolation(setting: 'auto' | 'worktree' | 'shared', projectRoot: string,
+  signal: AbortSignal = new AbortController().signal): Promise<'worktree' | 'shared'> {
+  return resolveContractIsolation(setting, projectRoot, signal);
 }
 
 /**
@@ -213,14 +219,8 @@ export function resolveIsolation(setting: 'auto' | 'worktree' | 'shared', projec
  * branch name the root is not on would measure the work against the wrong
  * history, or against nothing).
  */
-export function currentBase(projectRoot: string): string {
-  const head = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf-8' });
-  const branch = head.status === 0 ? head.stdout.trim() : '';
-  if (branch.length > 0 && branch !== 'HEAD') return branch;
-  const commit = spawnSync('git', ['-C', projectRoot, 'rev-parse', 'HEAD'], { encoding: 'utf-8' });
-  const hash = commit.status === 0 ? commit.stdout.trim() : '';
-  if (hash.length === 0) throw new Error(`cannot read HEAD in ${projectRoot}: ${(commit.stderr ?? '').trim()}`);
-  return hash;
+export async function currentBase(projectRoot: string, signal: AbortSignal = new AbortController().signal): Promise<string> {
+  return resolveContractBase(projectRoot, signal);
 }
 
 /** The count of distinct files the contract's units changed, as their checks recorded them. */
@@ -549,18 +549,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return `Contract ${contract.id}: ${contract.status}`;
   }
 
-  function resolveExecution(input: StartContractInput, id: string): DurableContractExecution {
-    const isolation = resolveIsolation(input.isolation ?? env.config().isolation, input.projectRoot);
-    const short = id.slice('ctr-'.length);
-    return isolation === 'shared' ? { isolation } : { isolation,
-      branch: `contract/${short}`, worktreePath: join(input.projectRoot, '.goodvibes', '.worktrees', 'contract', short), baseBranch: currentBase(input.projectRoot) };
-  }
-
   function captureStartInput(input: StartContractInput, captureModel = true): StartContractInput {
     if (input.nativeSource === undefined && deps.nativeDecisions !== undefined) throw new Error('Native admission requires the complete original source snapshot');
     if (input.nativeSource !== undefined && deps.nativeDecisions === undefined) throw new Error('Native contract requires its authenticated semantic owner');
     const selectedModel = input.selectedModel ?? (captureModel ? deps.getSelectedModel?.() : undefined);
     return { ...input,
+      ...(input.budget === undefined ? {} : { budget: { ...input.budget } }),
+      ...(input.proposedUnits === undefined ? {} : { proposedUnits: input.proposedUnits.map(unit => ({ ...unit })) }),
       ...(selectedModel === undefined ? {} : { selectedModel: { id: selectedModel.id, provider: selectedModel.provider, registryKey: selectedModel.registryKey, displayName: selectedModel.displayName } }),
       ...(input.nativeSource === undefined ? {} : { nativeSource: captureNativeContractSource(input.nativeSource) }),
     };
@@ -679,7 +674,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         const owner = spawnOwner(frozen.input, id);
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
           ownerAgentId: owner.id, payloadRevision: durablePayloadRevision(frozen) });
-        create(frozen.input, id, owner, { durableAdmission: admission }, true, true);
+        create(frozen.input, id, owner, { durableAdmission: admission, execution }, true, true);
         const run = runs.get(id);
         if (run !== undefined && !run.terminal && !disposed) {
           if (admitted.size < env.config().maxActiveContracts) {
@@ -750,42 +745,104 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     } finally { release(); }
   }
 
-  function start(input: StartContractInput): StartedContract {
+  async function prepareStart(input: StartContractInput, id: string, options: ContractStartOptions,
+    extraCurrent: () => void = () => {}, ownerSignal?: AbortSignal) {
+    const originalSignal = options.signal, assertion = options.assertCurrent;
+    const signal = AbortSignal.any([placementAbort.signal, ...(originalSignal ? [originalSignal] : []), ...(ownerSignal ? [ownerSignal] : [])]);
+    const current = (): void => {
+      signal.throwIfAborted();
+      if (disposed) throw new Error('Contract runner is disposed');
+      requireDecisionFeature('autonomous contract planning and acceptance');
+      let result: unknown;
+      try { result = assertion?.(); } catch (error) { drainOwned(error); throw error; }
+      if (result !== undefined) { drainOwned(result); throw new Error('Contract start requires a synchronous current owner'); }
+      extraCurrent();
+      signal.throwIfAborted();
+    };
+    current();
+    const execution = await resolveContractGitPlacement(input.isolation ?? env.config().isolation, input.projectRoot, id, signal);
+    current();
+    return { execution, signal, current };
+  }
+
+  function failedStart(id: string, owner: AgentRecord | undefined): void {
+    const run = runs.get(id);
+    if (run !== undefined) { cancelRun(run, 'contract preparation or publication failed'); return; }
+    try { if (owner !== undefined) deps.agentManager.cancel(owner.id); }
+    finally { settlements.get(id)?.resolve(); }
+  }
+
+  function start(input: StartContractInput, options: ContractStartOptions = {}): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
     const id = newContractId();
-    return create(captured, id, spawnOwner(captured, id), {});
+    return (async () => {
+      const prepared = await prepareStart(captured, id, options);
+      let owner: AgentRecord | undefined;
+      try {
+        prepared.current();
+        owner = spawnOwner(captured, id); prepared.current();
+        return create(captured, id, owner, prepared);
+      } catch (error) { failedStart(id, owner); throw error; }
+    })();
   }
 
-  function startFromPlan(input: StartFromPlanInput): StartedContract {
+  function startFromPlan(input: StartFromPlanInput, options: ContractStartOptions = {}): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const { draft, ...rest } = { ...input, ...captureStartInput(input) };
     const draftPlan = numberDraft(draft);
     const id = newContractId();
-    return create(rest, id, spawnOwner(rest, id), { draftPlan });
+    return (async () => {
+      const prepared = await prepareStart(rest, id, options);
+      let owner: AgentRecord | undefined;
+      try {
+        prepared.current();
+        owner = spawnOwner(rest, id); prepared.current();
+        return create(rest, id, owner, { ...prepared, draftPlan });
+      } catch (error) { failedStart(id, owner); throw error; }
+    })();
   }
 
-  function startForOwner(record: AgentRecord, requireSettlement = false): StartedContract {
+  function startForOwner(record: AgentRecord, options: ContractStartOptions = {}, requireSettlement = false): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (deps.nativeDecisions !== undefined) throw new Error('Native agent starts require source-bearing host admission');
     if (disposed) throw new Error('Contract runner is disposed');
     if (record.contractId !== undefined) throw new Error(`agent ${record.id} already belongs to contract ${record.contractId}`);
     const id = newContractId();
-    record.contractId = id;
-    record.contractRole = 'owner';
-    record.reviewMode = 'contract';
-    startContractOwner(record, { contractId: id, contractRole: 'owner', progress: `Contract ${id}: queued`, settled: reserveSettlement(id).promise }, deps.runtimeBus);
-    const input: StartContractInput = {
-      ask: getContractActionSource(record)?.().goal ?? record.task,
+    const sourceOf = getContractActionSource(record), ownerSignal = getContractActionSignal(record);
+    const source = sourceOf === undefined ? undefined : captureAutonomousSource(sourceOf());
+    const sourceIsCurrent = source === undefined ? undefined : retainAutonomousSource(source);
+    const original = { id: record.id, task: record.task, directory: record.workingDirectory, parent: record.parentAgentId,
+      proposed: record.proposedUnits?.map(unit => ({ ...unit })) };
+    const input = captureStartInput({
+      ask: source?.goal ?? original.task,
       sessionId: AGENT_MANAGER_SESSION_ID,
       origin: 'agent-tool',
       projectRoot: record.workingDirectory ?? deps.projectRoot,
       ...(record.parentAgentId === undefined ? {} : { parentAgentId: record.parentAgentId }),
       ...(record.proposedUnits === undefined ? {} : { proposedUnits: record.proposedUnits }),
+    });
+    let bound = false;
+    const recordCurrent = (): void => {
+      if (record.id !== original.id || record.task !== original.task || record.workingDirectory !== original.directory
+        || record.parentAgentId !== original.parent || !isDeepStrictEqual(record.proposedUnits, original.proposed)
+        || record.contractId !== (bound ? id : undefined) || record.status === 'cancelled' || record.status === 'failed'
+        || record.status === 'completed' || getContractActionSource(record) !== sourceOf || getContractActionSignal(record) !== ownerSignal
+        || (bound && (record.contractRole !== 'owner' || record.reviewMode !== 'contract'))
+        || (sourceOf && sourceIsCurrent && !sourceIsCurrent(sourceOf()))) throw new Error('The original contract owner changed during preparation');
     };
-    return create(captureStartInput(input), id, record, {}, requireSettlement);
+    return (async () => {
+      const prepared = await prepareStart(input, id, options, recordCurrent, ownerSignal);
+      try {
+        prepared.current();
+        record.contractId = id; record.contractRole = 'owner'; record.reviewMode = 'contract'; bound = true;
+        startContractOwner(record, { contractId: id, contractRole: 'owner', progress: `Contract ${id}: queued`, settled: reserveSettlement(id).promise }, deps.runtimeBus);
+        prepared.current();
+        return create(input, id, record, prepared, requireSettlement);
+      } catch (error) { failedStart(id, record); throw error; }
+    })();
   }
 
   function assertOwnedExecution(): void {
@@ -793,17 +850,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (typeof deps.agentManager.join !== 'function') throw new Error('Owned contract requires agent execution settlement');
   }
 
-  function startOwnedForOwner(record: AgentRecord): OwnedStartedContract {
+  function startOwnedForOwner(record: AgentRecord, options: ContractStartOptions = {}): Promise<OwnedStartedContract> {
     assertOwnedExecution();
-    const started = startForOwner(record, true);
-    return {
+    return startForOwner(record, options, true).then(started => ({
       ...started,
       settled: started.settled!,
       cancel: (reason) => {
         const run = runs.get(started.contract.id);
         return run === undefined ? false : cancelRun(run, reason);
       },
-    };
+    }));
   }
 
   /** The owner record parents and surfaces wait on; it runs no executor. */
@@ -826,12 +882,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     input: Omit<StartContractInput, 'proposedUnits'> & Pick<StartContractInput, 'proposedUnits'>,
     id: string,
     owner: AgentRecord,
-    extra: Pick<Contract, 'draftPlan' | 'durableAdmission'>,
+    extra: Pick<Contract, 'draftPlan' | 'durableAdmission'> & {
+      readonly execution: DurableContractExecution;
+      readonly signal?: AbortSignal;
+      readonly current?: () => void;
+    },
     requireSettlement = false,
     deferAdmission = false,
   ): StartedContract {
     const config = env.config();
-    const execution = extra.durableAdmission?.execution ?? resolveExecution(input, id);
+    extra.current?.();
+    const execution = extra.execution;
     const isolation = execution.isolation;
     const sourceOf = getContractActionSource(owner);
     const originalSource = input.nativeSource === undefined && sourceOf ? captureAutonomousSource(sourceOf()) : undefined;
@@ -868,6 +929,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     };
     bindNativeContractSource(contract);
     bindOwnedContractSource(contract, owner);
+    if (extra.signal) {
+      const originalSignal = getContractActionSignal(contract);
+      bindContractActionSignal(contract, originalSignal ? AbortSignal.any([originalSignal, extra.signal]) : extra.signal);
+    }
+    extra.current?.();
     // Establish the immutable identity/checkpoint before publishing this run.
     // A failed admission cannot replace an existing live map or leave an
     // uncommitted run visible to reentrant store/creation observers.
@@ -879,6 +945,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const run = newRun(contract);
     run.requireSettlement = requireSettlement;
     deps.store.put(contract);
+    extra.current?.();
     if (contract.durableAdmission !== undefined) {
       if (!deps.store.write(id)) throw new DurableContractAdmissionError('checkpoint');
     }

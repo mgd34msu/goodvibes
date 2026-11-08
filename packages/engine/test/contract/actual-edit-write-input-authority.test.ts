@@ -338,9 +338,9 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
       });
       let id: string | undefined;
       try {
-        const started = runner.start({
+        const started = (await runner.start({
           ask: 'Add a CSV parser module', sessionId: 'actual-edit-write-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree',
-        });
+        }));
         id = started.contract.id;
         await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'actual captured edit/write settlement', 45_000);
         await runner.join(id);

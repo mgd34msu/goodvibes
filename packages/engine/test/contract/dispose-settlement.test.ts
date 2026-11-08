@@ -29,7 +29,7 @@ test('dispose freezes resumable snapshots before cancellation, then joins real c
       if (!signal.aborted) await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     } finally { await cleanup.promise; }
   } });
-  const { contract } = startContract(first);
+  const { contract } = (await startContract(first));
   await waitFor(() => first.store.get(contract.id)?.units[0]?.activeAgentId !== undefined, 'a running unit');
   first.runner.dispose();
   const contractFile = contractPath(root, contract.id);

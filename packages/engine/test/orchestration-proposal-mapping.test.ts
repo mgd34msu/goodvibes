@@ -43,7 +43,7 @@ function recordingRunner(): { runner: Pick<ContractRunner, 'startFromPlan'>; cal
   return {
     calls,
     runner: {
-      startFromPlan(input) {
+      async startFromPlan(input) {
         calls.push(input);
         return { contract: { id: 'contract-1' }, owner: { id: 'agent-owner-1' } } as unknown as StartedContract;
       },
@@ -110,13 +110,13 @@ describe('draftFromProposal: assemble-time assertions', () => {
 });
 
 describe('fromPlanProposal: launch through the runner', () => {
-  test('starts the drafted plan with origin proposal, the task as the ask, and the launch inputs', () => {
+  test('starts the drafted plan with origin proposal, the task as the ask, and the launch inputs', async () => {
     const { runner, calls } = recordingRunner();
     const proposal = makeProposal([
       proposalItem({ id: 'a', title: 'A', brief: 'a' }),
       proposalItem({ id: 'b', title: 'B', brief: 'b', dependsOn: ['a'] }),
     ]);
-    const started = fromPlanProposal(runner, proposal, { ...launch, isolation: 'worktree', parentAgentId: 'agent-parent' });
+    const started = await fromPlanProposal(runner, proposal, { ...launch, isolation: 'worktree', parentAgentId: 'agent-parent' });
     expect(started.contract.id).toBe('contract-1');
     expect(calls).toEqual([{
       ask: 'Build the thing',
@@ -143,15 +143,15 @@ describe('fromPlanProposal: launch through the runner', () => {
 describe('approveAndLaunchProposal: one confirmed act', () => {
   const proposal = makeProposal([proposalItem({ id: 'wi-1', title: 'Ship it', brief: 'do the shipping' })], { task: 'ship the thing' });
 
-  test('without confirm: structured refusal, nothing started', () => {
+  test('without confirm: structured refusal, nothing started', async () => {
     const { runner, calls } = recordingRunner();
-    expect(approveAndLaunchProposal(runner, proposal, launch, {})).toEqual({ launched: false, requiresConfirm: true });
+    expect(await approveAndLaunchProposal(runner, proposal, launch, {})).toEqual({ launched: false, requiresConfirm: true });
     expect(calls).toHaveLength(0);
   });
 
-  test('with confirm: the contract starts in one call and its ids come back', () => {
+  test('with confirm: the contract starts in one call and its ids come back', async () => {
     const { runner, calls } = recordingRunner();
-    expect(approveAndLaunchProposal(runner, proposal, launch, { confirm: true })).toEqual({
+    expect(await approveAndLaunchProposal(runner, proposal, launch, { confirm: true })).toEqual({
       launched: true,
       contractId: 'contract-1',
       ownerAgentId: 'agent-owner-1',

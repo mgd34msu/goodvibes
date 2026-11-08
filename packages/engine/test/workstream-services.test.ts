@@ -127,8 +127,8 @@ function recordingRunner(): {
     starts,
     planStarts,
     runner: {
-      start: (input) => { starts.push(input); return started(); },
-      startFromPlan: (input) => { planStarts.push(input); return started(); },
+      start: async (input) => { starts.push(input); return started(); },
+      startFromPlan: async (input) => { planStarts.push(input); return started(); },
     },
   };
 }
@@ -193,7 +193,7 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
     expect(starts).toHaveLength(0);
 
     // launch: runner.start with the item's task; the draft is dropped.
-    const result = workstreamCommands.launchDraft(draft.id);
+    const result = await workstreamCommands.launchDraft(draft.id);
     expect(result).toEqual({ contractId: 'contract-1', ownerAgentId: 'owner-1' });
     expect(starts).toEqual([{ ask: 'ship the demo feature', sessionId: 'session-1', origin: 'proposal', projectRoot }]);
     expect(planStarts).toHaveLength(0);
@@ -215,7 +215,7 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
     expect(edited && 'error' in edited).toBe(false);
     workstreamCommands.approveDraft(draft.id);
     session = 'session-late';
-    workstreamCommands.launchDraft(draft.id);
+    await workstreamCommands.launchDraft(draft.id);
 
     expect(starts).toEqual([{
       ask: 'ship the demo feature with tests',
@@ -225,6 +225,52 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
       isolation: 'worktree',
     }]);
     orchestrationEngine.dispose();
+  });
+
+  test('concurrent launches share preparation and a draft edit retires its original approval', async () => {
+    const projectRoot = makeScratchProjectRoot();
+    const { runner, starts } = recordingRunner();
+    const original = runner.start;
+    let release!: () => void, dispatches = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    runner.start = async (input, options) => {
+      dispatches++; await gate; options?.assertCurrent?.(); return original(input, options);
+    };
+    const { orchestrationEngine, workstreamCommands } = makeServices(projectRoot, runner);
+    try {
+      const draft = await workstreamCommands.proposeDraft('ship the demo feature');
+      workstreamCommands.approveDraft(draft.id);
+      const first = workstreamCommands.launchDraft(draft.id);
+      const second = workstreamCommands.launchDraft(draft.id);
+      expect(second).toBe(first); expect(dispatches).toBe(1);
+      void first.catch(() => {});
+      workstreamCommands.editItem(draft.id, '1', 'a new unapproved task');
+      release();
+      await expect(first).rejects.toThrow('draft changed');
+      expect(starts).toHaveLength(0);
+      expect(workstreamCommands.getDraft(draft.id)?.approved).toBe(false);
+      expect(workstreamCommands.getDraft(draft.id)?.spec.items[0]?.task).toBe('a new unapproved task');
+    } finally { release(); orchestrationEngine.dispose(); }
+  });
+
+  test('an edit after contract acceptance preserves the new draft and the accepted acknowledgement', async () => {
+    const projectRoot = makeScratchProjectRoot();
+    const { runner, starts } = recordingRunner(), original = runner.start;
+    const { orchestrationEngine, workstreamCommands } = makeServices(projectRoot, runner);
+    try {
+      const draft = await workstreamCommands.proposeDraft('ship the demo feature');
+      workstreamCommands.approveDraft(draft.id);
+      runner.start = async (input, options) => {
+        options?.assertCurrent?.();
+        const started = await original(input, options);
+        queueMicrotask(() => { workstreamCommands.editItem(draft.id, '1', 'a later draft edit'); });
+        return started;
+      };
+      expect(await workstreamCommands.launchDraft(draft.id)).toEqual({ contractId: 'contract-1', ownerAgentId: 'owner-1' });
+      expect(starts).toHaveLength(1); expect(starts[0]?.ask).toBe('ship the demo feature');
+      expect(workstreamCommands.getDraft(draft.id)?.spec.items[0]?.task).toBe('a later draft edit');
+      expect(workstreamCommands.getDraft(draft.id)?.approved).toBe(false);
+    } finally { orchestrationEngine.dispose(); }
   });
 
   test('resumeAllFromDisk runs at construction and never throws against an empty .goodvibes/orchestration directory', () => {
@@ -248,7 +294,7 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
     await workstreamCommands.editDraft(draft.id, 'revised task');
     expect(workstreamCommands.getDraft(draft.id)!.approved).toBe(false);
 
-    expect(workstreamCommands.launchDraft(draft.id)).toBeNull();
+    expect(await workstreamCommands.launchDraft(draft.id)).toBeNull();
     expect(starts).toHaveLength(0);
     expect(planStarts).toHaveLength(0);
     orchestrationEngine.dispose();
@@ -270,7 +316,7 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
     expect(reloaded!.approved).toBe(true); // approval state persisted too
 
     // And the reloaded, already-approved draft launches straight away.
-    expect(second.workstreamCommands.launchDraft(draft.id)).not.toBeNull();
+    expect(await second.workstreamCommands.launchDraft(draft.id)).not.toBeNull();
     expect(starts.map((input) => input.ask)).toEqual(['persist me across a restart']);
     // Launched ⇒ its draft snapshot is gone, so a THIRD instance sees nothing.
     const third = makeServices(projectRoot, runner);
@@ -333,7 +379,7 @@ describe('createWorkstreamServices: drafts and contract launch', () => {
     const draft = await workstreamCommands.proposeDraft('build a multi-step feature', 'shared');
     const [first, second] = draft.spec.items;
     workstreamCommands.approveDraft(draft.id);
-    expect(workstreamCommands.launchDraft(draft.id)).toEqual({ contractId: 'contract-1', ownerAgentId: 'owner-1' });
+    expect(await workstreamCommands.launchDraft(draft.id)).toEqual({ contractId: 'contract-1', ownerAgentId: 'owner-1' });
 
     expect(starts).toHaveLength(0);
     expect(planStarts).toEqual([{

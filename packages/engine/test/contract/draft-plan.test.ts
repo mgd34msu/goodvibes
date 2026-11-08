@@ -131,7 +131,7 @@ describe('startFromPlan', () => {
       },
     });
     harness = h;
-    const { contract, owner } = h.runner.startFromPlan({
+    const { contract, owner } = (await h.runner.startFromPlan({
       ask: ASK,
       sessionId: 'session-1',
       origin: 'proposal',
@@ -143,7 +143,7 @@ describe('startFromPlan', () => {
           { id: 'item-wire', title: 'Wire convert', brief: 'Edit src/convert.ts.', dependsOn: ['item-parser'] },
         ],
       },
-    });
+    }));
     expect(owner.contractRole).toBe('owner');
     expect(contract.draftPlan?.units.map((unit) => [unit.id, unit.dependsOn])).toEqual([['u1', []], ['u2', ['u1']]]);
     await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(h.store.get(contract.id)?.status ?? ''), 'the contract to settle', 15_000);

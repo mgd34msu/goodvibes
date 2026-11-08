@@ -88,7 +88,7 @@ test('an explicitly started contract is listed in its session across a reload', 
   await manager.init();
   const session = await manager.create({ workspaceRoot: workspace });
   const host = await manager.contractRunners().forSession(session.id);
-  host!.runner.start({ ask: 'Add a --json flag to the export command.', sessionId: session.id, origin: 'hosted', projectRoot: workspace });
+  (await host!.runner.start({ ask: 'Add a --json flag to the export command.', sessionId: session.id, origin: 'hosted', projectRoot: workspace }));
 
   expect(manager.historyOf(session.id).some((message) => message.content.includes('[Project mode]'))).toBe(false);
   expect(runner.started).toEqual([{ ask: 'Add a --json flag to the export command.', sessionId: session.id, origin: 'hosted', projectRoot: workspace }]);
@@ -107,7 +107,7 @@ test('a contract notice and its final answer reach the owning session', async ()
   await manager.init();
   const session = await manager.create({ workspaceRoot: workspace });
   const host = await manager.contractRunners().forSession(session.id);
-  host!.runner.start({ ask: 'Rename the config key everywhere.', sessionId: session.id, origin: 'hosted', projectRoot: workspace });
+  (await host!.runner.start({ ask: 'Rename the config key everywhere.', sessionId: session.id, origin: 'hosted', projectRoot: workspace }));
   const contractId = [...runner.contracts.keys()][0]!;
 
   const question = `Contract ${contractId} could not get unit u1 to pass: the rename misses the docs. Change what is required, or stop?`;
@@ -128,7 +128,7 @@ test('a contract of another session is neither listed nor said here', async () =
   const manager = buildManager();
   await manager.init();
   const session = await manager.create({ workspaceRoot: workspace });
-  const other = runner.start({ ask: 'Other work.', sessionId: 'someone-else', origin: 'hosted', projectRoot: workspace });
+  const other = (await runner.start({ ask: 'Other work.', sessionId: 'someone-else', origin: 'hosted', projectRoot: workspace }));
   escalate(runner, other.contract.id, 'Contract asks someone else.');
   expect(manager.get(session.id)?.contractIds).toEqual([]);
   expect(manager.historyOf(session.id).some((message) => message.content.includes('someone else'))).toBe(false);
@@ -143,7 +143,7 @@ test('the engine gives the contracts operator surface its floors and a live sess
   expect(hosted.runners()).toHaveLength(1);
   const forSession = await hosted.forSession(session.id);
   expect(forSession?.workspaceRoot).toBe(workspace);
-  forSession?.runner.start({ ask: 'From the operator.', sessionId: session.id, origin: 'hosted', projectRoot: workspace });
+  (await forSession?.runner.start({ ask: 'From the operator.', sessionId: session.id, origin: 'hosted', projectRoot: workspace }));
   expect(runner.started.at(-1)).toMatchObject({ ask: 'From the operator.', sessionId: session.id });
   expect(manager.get(session.id)?.contractIds).toHaveLength(1);
   expect(await hosted.forSession('hosted-nobody')).toBeNull();

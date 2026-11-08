@@ -78,7 +78,7 @@ describe('plan sync (6.5)', () => {
       planManager: planManager as unknown as ExecutionPlans,
     });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     await waitFor(() => statusesOf(writes, contractTaskId(contract.id)).at(-1) === 'done', 'the contract task to be done');
     await waitFor(() => statusesOf(writes, unitTaskId(contract.id, 'u1')).at(-1) === 'done', 'the unit task to be done');
@@ -99,7 +99,7 @@ describe('plan sync (6.5)', () => {
     const { service, writes } = recordingWorkPlan();
     const h = makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2 }, scripts: { u1: keepsFailing(3) }, port: routeAnswer('owner'), workPlanService: service });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the owner to be asked', 15_000);
     await waitFor(() => statusesOf(writes, unitTaskId(contract.id, 'u1')).at(-1) === 'blocked', 'the unit task to be blocked');
     await waitFor(() => statusesOf(writes, contractTaskId(contract.id)).at(-1) === 'blocked', 'the contract task to be blocked');

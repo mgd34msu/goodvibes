@@ -15,7 +15,7 @@ test('review: a likely clean quality reading passes without repeated judgment or
     port: context => context.name === 'unsupported_claims' ? noulAnswer(++qualityReads === 1 ? 0.2 : 0.03) : undefined,
   });
   try {
-    const id = startContract(h, { nativeSource: source }).contract.id;
+    const id = (await startContract(h, { nativeSource: source })).contract.id;
     await waitFor(() => terminal(h, id), 'native quality result', 15000); await h.runner.join(id);
     const result = h.store.get(id)!;
     expect(qualityReads).toBe(1);

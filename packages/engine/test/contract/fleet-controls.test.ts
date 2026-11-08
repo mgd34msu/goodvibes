@@ -52,7 +52,7 @@ describe('the fleet verbs through the runner', () => {
       port: noneSelected,
     });
     harness = h;
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => h.store.get(contract.id)?.status === 'awaiting-owner', 'the attempts to go to the owner', 20_000);
     const controls = h.runner.fleetControls();
 

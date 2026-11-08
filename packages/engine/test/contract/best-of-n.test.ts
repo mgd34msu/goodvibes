@@ -81,7 +81,7 @@ describe('best-of-N on the contract runner', () => {
       scripts: { 'u1#a0': writes('export const parse = 0;\n'), 'u1#a1': writes('export const parse = 1;\n') },
       port: selectionPort({ pick: 'u1#a1', confidence: 0.95, fits: { 'u1#a1': 0.96, 'u1#a0': 0.3 } }, offered),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('passed');
@@ -116,7 +116,7 @@ describe('best-of-N on the contract runner', () => {
         },
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     expect(undecided).toHaveLength(1);
     expect(undecided[0]).toMatchObject({ candidateIds: ['u1#a0', 'u1#a1'], proposedId: 'u1#a0', outcome: 'confirm' });
@@ -140,7 +140,7 @@ describe('best-of-N on the contract runner', () => {
         },
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     expect(undecided).toHaveLength(1);
     expect(undecided[0]!.unitId).toBe('u1');
@@ -163,7 +163,7 @@ describe('best-of-N on the contract runner', () => {
       },
       port: selectionPort({ pick: 'u1#a1', confidence: 0.95, fits: { 'u1#a1': 0.96 } }, offered),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('passed');
@@ -184,7 +184,7 @@ describe('best-of-N on the contract runner', () => {
       scripts: { 'u1#a0': refuse, 'u1#a1': refuse },
       port: selectionPort({ pick: 'none', confidence: 0.9, fits: {} }, offered),
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('failed');
@@ -206,7 +206,7 @@ describe('best-of-N on the contract runner', () => {
         return { model: `provider-a:${model}`, provider: 'provider-a', reason: `picked for ${unit?.id ?? 'the planner'}` };
       },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 20_000);
     expect(h.store.get(contract.id)!.status).toBe('passed');
     // The plan unit runs no agent of its own, so only its attempts are routed.
@@ -226,7 +226,7 @@ describe('best-of-N on the contract runner', () => {
       contract: { isolation: 'shared', defaultAttempts: 2 },
       scripts: { u1: writes('export const parse = 1;\n') },
     }));
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('passed');

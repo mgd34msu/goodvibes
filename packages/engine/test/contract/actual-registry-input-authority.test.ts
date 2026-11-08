@@ -125,7 +125,7 @@ for (const scenario of ['allowed', 'revoke-cached'] as const) {
     });
     let id: string | undefined;
     try {
-      const started = runner.start({ ask: 'Add a CSV parser module', sessionId: 'registry-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' });
+      const started = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'registry-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }));
       id = started.contract.id;
       await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'actual registry contract settlement', 30_000);
       const result = runner.get(id)!;

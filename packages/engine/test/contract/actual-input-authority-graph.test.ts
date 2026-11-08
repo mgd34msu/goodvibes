@@ -475,13 +475,13 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
       const ownerIndex = readFileSync(join(root, '.git/index'));
       const ownerHead = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD']).stdout.toString();
       try {
-        const started = runner.start({
+        const started = (await runner.start({
           ask: 'Add a CSV parser module',
           sessionId: 'fixture',
           origin: 'cli',
           projectRoot: root,
           isolation: 'worktree',
-        });
+        }));
         id = started.contract.id;
         if (mode === 'resume') {
           await waitFor(() => paused, 'member provider interrupted', 15_000);

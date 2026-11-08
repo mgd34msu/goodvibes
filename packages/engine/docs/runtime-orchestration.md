@@ -152,6 +152,16 @@ separate review and fix agents. The build design is
 
 ### Where contracts start
 
+SDK callers await `runner.start()`, `startFromPlan()`, `startForOwner()` and
+`startOwnedForOwner()`. Repository placement is resolved asynchronously before
+the contract is published. Their optional `ContractStartOptions` retains the
+original cancellation signal and synchronous `assertCurrent` host callback;
+neither is serialized. Cancellation during preparation drains the Git child
+and admits no contract. `AgentManager.spawn()` still returns its agent record
+immediately and owns the pending preparation through that record's settlement.
+The standalone `resolveIsolation()` and `currentBase()` helpers are asynchronous
+as well.
+
 | Origin | Entry point |
 | --- | --- |
 | `turn` | The contract intake reads a person's turn as work (see [Turn loop](#turn-loop)) |

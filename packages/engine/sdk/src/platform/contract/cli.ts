@@ -286,7 +286,7 @@ async function runCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedCon
   const follower = createFollower(io, opened, args.json);
   let contractId: string;
   try {
-    const started = opened.runner.start({
+    const started = await opened.runner.start({
       ask: args.positionals[0]!,
       sessionId,
       origin: 'cli',

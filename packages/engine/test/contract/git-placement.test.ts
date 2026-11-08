@@ -73,6 +73,7 @@ function holdFirstMetadata() {
     return child;
   }) as typeof childProcess.spawn);
   return { ready, resume: () => child?.kill('SIGTERM'),
+    active: () => child !== undefined && child.exitCode === null && child.signalCode === null,
     async close() {
       tap.mockRestore();
       if (child && child.exitCode === null && child.signalCode === null) {
@@ -129,5 +130,89 @@ test('disposal cancels and drains pre-admission Git before releasing the durable
     const release = await admissions.lease(submitted.key);
     release();
     await metadata.close();
+  } finally { await metadata.close(); }
+});
+
+for (const mode of ['ask', 'draft'] as const) {
+  test(`compatibility ${mode} startup prepares asynchronously before owner publication and keeps the original input`, async () => {
+    const root = repo(), h = harness(root), metadata = holdFirstMetadata();
+    const sync = spyOn(childProcess, 'spawnSync').mockImplementation(() => { throw new Error('Synchronous startup Git is forbidden'); });
+    try {
+      const input = { ask: 'Original approved work', sessionId: 'compatibility', origin: 'cli' as const, projectRoot: root,
+        isolation: 'auto' as const, budget: { maxTokens: 1000 }, proposedUnits: [{ task: 'Original unit' }] };
+      const draft = { goal: input.ask, units: [{ id: 'one', title: 'Original', brief: 'Original task', dependsOn: [], files: ['original.ts'] }] };
+      const pending = mode === 'ask' ? h.runner.start(input) : h.runner.startFromPlan({ ...input, draft });
+      void pending.catch(() => {});
+      await metadata.ready;
+      expect(h.manager.list()).toHaveLength(0); expect(h.runner.list()).toHaveLength(0);
+      input.ask = 'Replacement'; input.projectRoot = '/different-project'; input.budget.maxTokens = 1;
+      input.proposedUnits[0]!.task = 'Replacement unit'; draft.units[0]!.brief = 'Replacement task'; draft.units[0]!.files[0] = 'replacement.ts';
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      metadata.resume();
+      const started = await pending;
+      expect(started.contract).toMatchObject({ ask: 'Original approved work', projectRoot: root,
+        budget: { maxTokens: 1000 }, isolation: 'worktree', baseBranch: 'main' });
+      if (mode === 'ask') expect(started.contract.proposedUnits).toEqual([{ task: 'Original unit' }]);
+      else expect(started.contract.draftPlan?.units[0]).toMatchObject({ brief: 'Original task', files: ['original.ts'] });
+      expect(sync).not.toHaveBeenCalled();
+    } finally { sync.mockRestore(); await metadata.close(); }
+  });
+}
+
+test('the original start signal and assertion cannot be replaced during preparation', async () => {
+  const root = repo(), h = harness(root), metadata = holdFirstMetadata();
+  const original = new AbortController(); let current = true;
+  const options = { signal: original.signal, assertCurrent: () => { if (!current) throw new Error('Original start retired'); } };
+  try {
+    const pending = h.runner.start(request(root).input, options); void pending.catch(() => {});
+    await metadata.ready;
+    options.signal = new AbortController().signal; options.assertCurrent = () => {};
+    current = false; metadata.resume();
+    await expect(pending).rejects.toThrow('Original start retired');
+    expect(h.manager.list()).toHaveLength(0); expect(h.runner.list()).toHaveLength(0);
+    const aborted = h.runner.start(request(root).input, { signal: original.signal }); void aborted.catch(() => {});
+    original.abort(new Error('Original start aborted'));
+    await expect(aborted).rejects.toThrow('Original start aborted');
+    expect(h.manager.list()).toHaveLength(0);
+  } finally { await metadata.close(); }
+});
+
+test('owned AgentManager startup keeps the preparing child owned until cancellation drains it', async () => {
+  const root = repo(), h = harness(root); h.manager.setContractRunner(h.runner);
+  const metadata = holdFirstMetadata();
+  try {
+    const execution = h.manager.spawnOwned({ mode: 'spawn', task: 'Prepare the original owner contract' });
+    await metadata.ready;
+    expect(execution.record.contractId).toBeUndefined(); expect(h.runner.list()).toHaveLength(0);
+    let settled = false; const done = execution.settled.then(record => { settled = true; return record; });
+    expect(settled).toBe(false); execution.cancel();
+    expect((await done).status).toBe('cancelled');
+    await h.manager.join(execution.record.id);
+    expect(metadata.active()).toBe(false); expect(h.runner.list()).toHaveLength(0);
+  } finally { await metadata.close(); }
+});
+
+test('a changed pending agent record cannot retarget the contract prepared for it', async () => {
+  const root = repo(), h = harness(root); h.manager.setContractRunner(h.runner);
+  const metadata = holdFirstMetadata();
+  try {
+    const execution = h.manager.spawnOwned({ mode: 'spawn', task: 'Original owner task' });
+    await metadata.ready;
+    execution.record.task = 'Replacement owner task'; metadata.resume();
+    expect((await execution.settled).status).toBe('failed');
+    expect(h.runner.list()).toHaveLength(0); expect(execution.record.contractId).toBeUndefined();
+  } finally { await metadata.close(); }
+});
+
+test('disposal and invalid asynchronous guards admit no compatibility owner', async () => {
+  const root = repo(), h = harness(root), metadata = holdFirstMetadata();
+  try {
+    await expect(h.runner.start({ ...request(root).input, isolation: 'shared' }, {
+      assertCurrent: () => Promise.reject(new Error('Private rejected guard')),
+    })).rejects.toThrow('synchronous current owner');
+    const pending = h.runner.start(request(root).input); void pending.catch(() => {});
+    await metadata.ready; h.runner.dispose();
+    await expect(pending).rejects.toThrow('disposed');
+    expect(metadata.active()).toBe(false); expect(h.manager.list()).toHaveLength(0);
   } finally { await metadata.close(); }
 });

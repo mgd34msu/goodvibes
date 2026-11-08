@@ -50,7 +50,7 @@ export function fakeRunner(initial: readonly Contract[] = []): FakeRunner {
     cancelled,
     replies,
     emit,
-    start(input) {
+    async start(input) {
       started.push(input);
       const contract = makeContract({
         id: nextContractId(),

@@ -123,7 +123,7 @@ test('ordinary worktree inspection preserves captured input and the runner-parse
     plan: oneUnitPlan(1),
     scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parseCsv = (text: string) => text.split(",");\n' }, text: output }] },
   });
-  const id = startContract(h, { isolation: 'worktree' }).contract.id;
+  const id = (await startContract(h, { isolation: 'worktree' })).contract.id;
   try {
     await h.runner.join(id);
     const record = await inspectOverHttp(h, id, 'ordinary-completed-worktree');
@@ -167,7 +167,7 @@ test.each([
       plan: oneUnitPlan(1),
       scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text: output }] },
     });
-    const id = startContract(h, { isolation: 'worktree' }).contract.id;
+    const id = (await startContract(h, { isolation: 'worktree' })).contract.id;
     try {
       await h.runner.join(id);
       const record = await inspectOverHttp(h, id, `partial-${archetype}-report-worktree`);
@@ -320,7 +320,7 @@ test('real shared transport failover progress survives native GET/LIST while a b
     },
   });
   installJudgmentPort(withDecisionLog(real, log));
-  const id = startContract(h, { nativeSource: source, isolation: 'shared' }).contract.id;
+  const id = (await startContract(h, { nativeSource: source, isolation: 'shared' })).contract.id;
   try {
     await waitFor(
       () => failedRequests === 2 && (h.store.get(id)?.nativeWaiting?.requests.length ?? 0) > 0,

@@ -27,7 +27,7 @@ async function git(root: string, args: readonly string[], signal: AbortSignal): 
     if (signal.aborted) stop();
   });
   signal.throwIfAborted();
-  if (failed) throw new Error('Contract repository metadata could not be read.');
+  if (failed || status === null) throw new Error('Contract repository metadata could not be read.');
   return { status, text: Buffer.concat(chunks).toString('utf8').trim() };
 }
 
@@ -40,14 +40,26 @@ export async function resolveContractGitPlacement(
   contractId: string,
   signal: AbortSignal,
 ): Promise<DurableContractExecution> {
+  const isolation = await resolveContractIsolation(setting, projectRoot, signal);
+  if (isolation === 'shared') return { isolation };
+  const baseBranch = await resolveContractBase(projectRoot, signal);
+  const short = contractId.slice('ctr-'.length);
+  return { isolation: 'worktree', branch: `contract/${short}`,
+    worktreePath: join(projectRoot, '.goodvibes', '.worktrees', 'contract', short), baseBranch };
+}
+
+export async function resolveContractIsolation(setting: 'auto' | 'worktree' | 'shared', projectRoot: string,
+  signal: AbortSignal): Promise<'worktree' | 'shared'> {
   signal.throwIfAborted();
   if (setting !== 'auto' && setting !== 'worktree' && setting !== 'shared') throw new Error('Invalid contract isolation');
-  if (setting === 'shared') return { isolation: 'shared' };
-  if (setting === 'auto') {
-    const verified = await git(projectRoot, ['rev-parse', '--verify', '--quiet', 'HEAD'], signal);
-    if (verified.status !== 0) return { isolation: 'shared' };
-    if (verified.text.length === 0) throw new Error('Contract repository HEAD is unavailable.');
-  }
+  if (setting !== 'auto') return setting;
+  const verified = await git(projectRoot, ['rev-parse', '--verify', '--quiet', 'HEAD'], signal);
+  if (verified.status !== 0) return 'shared';
+  if (verified.text.length === 0) throw new Error('Contract repository HEAD is unavailable.');
+  return 'worktree';
+}
+
+export async function resolveContractBase(projectRoot: string, signal: AbortSignal): Promise<string> {
   const branch = await git(projectRoot, ['rev-parse', '--abbrev-ref', 'HEAD'], signal);
   let baseBranch = branch.status === 0 && branch.text !== 'HEAD' ? branch.text : '';
   if (baseBranch.length === 0) {
@@ -57,7 +69,5 @@ export async function resolveContractGitPlacement(
     if (commit.status !== 0 || commit.text.length === 0) throw new Error('Contract repository HEAD is unavailable.');
     baseBranch = commit.text;
   }
-  const short = contractId.slice('ctr-'.length);
-  return { isolation: 'worktree', branch: `contract/${short}`,
-    worktreePath: join(projectRoot, '.goodvibes', '.worktrees', 'contract', short), baseBranch };
+  return baseBranch;
 }

@@ -198,7 +198,7 @@ test('direct compiled-parent build uses captured config and authorized bytes', a
   });
   let id: string | undefined;
   try {
-    const started = runner.start({ ask: 'Add a CSV parser module', sessionId: 'direct-exec-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' });
+    const started = (await runner.start({ ask: 'Add a CSV parser module', sessionId: 'direct-exec-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree' }));
     id = started.contract.id;
     try {
       await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'actual direct exec contract settlement', 60_000);

@@ -67,7 +67,7 @@ test('authenticated cancel enforces write:fleet and returns true before real chi
     childCleaned = true;
   } });
   const fixture = serveContractCancellation(h);
-  const id = startContract(h, { isolation: 'shared' }).contract.id;
+  const id = (await startContract(h, { isolation: 'shared' })).contract.id;
   try {
     await waitFor(() => h.store.get(id)?.units[0]?.activeAgentId !== undefined, 'running contract unit');
     const before = await inspect(fixture, id, 'live-before');
@@ -107,7 +107,7 @@ test('authenticated cancel enforces write:fleet and returns true before real chi
 
 test('false can describe an actual retained nonterminal record with no live runner', async () => {
   const source = makeHarness({ plan: oneUnitPlan(1), scripts: { u1: () => [{ text: 'Waiting for cancellation', stop: { kind: 'hang' } }] } });
-  const id = startContract(source, { isolation: 'shared' }).contract.id;
+  const id = (await startContract(source, { isolation: 'shared' })).contract.id;
   let retained: ReturnType<typeof makeHarness> | undefined;
   let fixture: HttpFixture | undefined;
   try {

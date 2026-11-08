@@ -26,7 +26,7 @@ for (const stale of [false, true]) {
       },
     } });
     if (!stale) writeFileSync(join(h.root, 'README.md'), 'dirty owner input\n');
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'retained result', 15_000);
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('passed');
@@ -55,7 +55,7 @@ test('map, planner and member share captured dirty bytes after owner changes; ca
     scripts: { u1: (record) => { observed.push(readFileSync(join(record.workingDirectory!, 'README.md'), 'utf8')); return [{ text: 'hold', stop: { kind: 'hang' } }]; } },
   });
   writeFileSync(join(h.root, 'README.md'), original);
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => observed.length === 3, 'member admission', 15_000);
   const before = h.store.get(contract.id)!; const receipt = structuredClone(before.inputSnapshot!);
   expect(observed).toEqual([original, original, original]);
@@ -69,7 +69,7 @@ test('map, planner and member share captured dirty bytes after owner changes; ca
 test('cancel during capture starts no map, shape/planner or member', async () => {
   let calls = 0;
   const h = harness = makeHarness({ contract: { isolation: 'worktree' }, scripts: {}, repositoryMap: async () => { calls++; return ''; }, planner: { async run() { calls++; return { status: 'failed', output: '', elapsedMs: 0 }; } } });
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   h.runner.cancel(contract.id, 'cancel admission');
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(h.store.get(contract.id)?.status).toBe('cancelled'); expect(calls).toBe(0); expect(h.agentsOf('u1')).toEqual([]);
@@ -82,7 +82,7 @@ test('restart during planning reuses the recorded generation despite later owner
   let plannerStarted = false;
   const plan = oneUnitPlan(1);
   const first = makeHarness({ root, plan, contract: { isolation: 'worktree' }, scripts: {}, planner: { run: async () => { plannerStarted = true; return new Promise(() => undefined); } } });
-  const { contract } = startContract(first);
+  const { contract } = (await startContract(first));
   await waitFor(() => plannerStarted, 'first planner', 15_000);
   const receipt = structuredClone(first.store.get(contract.id)!.inputSnapshot!);
   first.store.write(contract.id); first.dispose();
@@ -114,7 +114,7 @@ for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-m
     const path = join(h.root, '.git', marker);
     writeFileSync(path, 'synthetic owner operation\n');
     const index = readFileSync(join(h.root, '.git/index')); const head = git(h.root, 'rev-parse', 'HEAD');
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'held admission');
     const done = h.store.get(contract.id)!;
     expect(done.status).toBe('failed');
@@ -139,7 +139,7 @@ test('a real pending empty owner merge after capture is held without aborting th
     },
   } });
   const head = git(h.root, 'rev-parse', 'HEAD');
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'held apply', 15_000);
   const done = h.store.get(contract.id)!;
   expect(readFileSync(join(h.root, '.git/MERGE_HEAD'), 'utf8').trim()).toBe(mergeHead);
@@ -164,7 +164,7 @@ test('a failed merge after the final check retains concurrent owner writes and i
   writeFileSync(hook, '#!/bin/sh\nprintf "%s\\n" "owner write during final merge" > README.md\nexit 1\n');
   chmodSync(hook, 0o755);
   const head = git(h.root, 'rev-parse', 'HEAD');
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'failed merge without owner rollback', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.status).not.toBe('passed'); expect(done.commit?.status).toBe('failed');
@@ -183,7 +183,7 @@ test('an owner index lock created after capture holds apply without deleting the
     },
   } });
   const head = git(h.root, 'rev-parse', 'HEAD');
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'held apply', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.commit?.status).toBe('failed');

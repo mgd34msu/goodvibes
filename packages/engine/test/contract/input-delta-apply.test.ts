@@ -29,7 +29,7 @@ for (const autoCommit of [false, true]) {
     const index = readFileSync(join(h.root, '.git/index'));
     const head = git(h.root, 'rev-parse', 'HEAD');
     const staged = git(h.root, 'diff', '--cached', '--binary');
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'dirty input delivery', 15_000);
     const done = h.store.get(contract.id)!;
     expect(done.commit?.status).toBe('applied');
@@ -80,7 +80,7 @@ test('a contract publishes independent changes in one file without repeating its
   writeFileSync(join(h.root, 'README.md'), original);
   const index = readFileSync(join(h.root, '.git/index'));
   const head = git(h.root, 'rev-parse', 'HEAD');
-  const { contract } = startContract(h, { ask: goal });
+  const { contract } = (await startContract(h, { ask: goal }));
   await waitFor(() => terminal(h, contract.id), 'merged contract publication', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.status).toBe('passed');
@@ -112,7 +112,7 @@ test('an unsettled publication reading asks for verification without inventing a
       },
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => repairPrompt.length > 0, 'specific publication verification prompt', 15_000);
   h.runner.cancel(contract.id, 'Finished inspecting the held publication repair prompt.');
   await h.runner.join(contract.id);
@@ -140,7 +140,7 @@ test('conflicting later owner edit retains both owner and contract result withou
   writeFileSync(join(h.root, 'src/csv.ts'), 'owner admitted dirty version\n');
   const index = readFileSync(join(h.root, '.git/index'));
   const head = git(h.root, 'rev-parse', 'HEAD');
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'conflicting dirty input hold', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.commit?.status).toBe('failed');
@@ -181,7 +181,7 @@ for (const boundary of ['restricted', 'cancelled'] as const) {
     writeFileSync(join(h.root, 'README.md'), 'owner dirty context\n');
     const index = readFileSync(join(h.root, '.git/index'));
     const head = git(h.root, 'rev-parse', 'HEAD');
-    contractId = startContract(h).contract.id;
+    contractId = (await startContract(h)).contract.id;
     await waitFor(() => boundary === 'cancelled' ? terminal(h, contractId) : h.store.get(contractId)?.commit?.status === 'failed', 'authority hold', 15_000);
     if (boundary === 'cancelled') await h.runner.join(contractId);
     expect(originalTargetChecks).toBeGreaterThan(0);

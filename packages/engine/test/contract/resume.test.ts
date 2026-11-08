@@ -57,7 +57,7 @@ async function interrupt(options: Options, until: (contract: ContractView) => bo
   const first = makeHarness({ ...options, root });
   const ids: string[] = [];
   try {
-    for (let index = 0; index < count; index += 1) ids.push(startContract(first).contract.id);
+    for (let index = 0; index < count; index += 1) ids.push((await startContract(first)).contract.id);
     await waitFor(() => ids.every((id) => {
       const contract = first.store.get(id);
       return contract !== null && until(contract);
@@ -119,7 +119,7 @@ test('a denied worktree publication survives restart, revalidates and publishes 
     readAccessFilter: async () => !first.runner.list({ includeTerminal: true }).some((contract) => contract.status === 'committing'),
   });
   harnesses.push(first);
-  const { contract } = startContract(first);
+  const { contract } = (await startContract(first));
   await waitFor(() => contractIn(first, contract.id).commit?.status === 'failed', 'the denied publication');
   expect(contractIn(first, contract.id).status).toBe('committing');
   expect(existsSync(join(root, 'src/csv.ts'))).toBe(false);
@@ -629,7 +629,7 @@ test.each([false, true])(
     mkdirSync(join(h.root, 'src'), { recursive: true });
     writeFileSync(join(h.root, 'src/csv.ts'), 'export const parser = true;\n');
     writeFileSync(join(h.root, 'src/independent.ts'), 'export const independent = true;\n');
-    const { contract } = startContract(h);
+    const { contract } = (await startContract(h));
     await waitFor(
       () => unitIn(h, contract.id, 'u3')?.status === 'passed' && failures === 1 && unitIn(h, contract.id, 'u1')?.status === 'held',
       'only verifier-failing unit to wait',
@@ -686,7 +686,7 @@ test('read observations are persisted before a candidate or acceptance check exi
     port: (context) => (context.name === 'role' ? choiceAnswer(context.question, 'research', 0.98) : undefined),
   });
   harnesses.push(first);
-  const { contract } = startContract(first);
+  const { contract } = (await startContract(first));
   await waitFor(() => first.agentsOf('u1').some((id) => first.manager.getStatus(id)?.status === 'running'), 'research worker');
   const record = first.manager.getStatus(first.agentsOf('u1')[0]!)!;
   first.runner
@@ -763,7 +763,7 @@ test('a held read-only candidate and its observed source survive restart and rec
           : undefined,
   });
   harnesses.push(first);
-  const { contract } = startContract(first);
+  const { contract } = (await startContract(first));
   await waitFor(
     () => first.agentsOf('u1').some((id) => first.manager.getStatus(id)?.status === 'running'),
     'the read-only worker to start',
@@ -1046,7 +1046,7 @@ describe('units resume at their step', () => {
     roots.push(root);
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text }] },
     });
-    const id = startContract(h).contract.id;
+    const id = (await startContract(h)).contract.id;
     const done = await ended(h, id);
     expect(done.status).toBe('passed');
     const u1 = done.units[0]!;

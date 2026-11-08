@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Resolve Git placement asynchronously for every contract start path, including
+  compatibility APIs. SDK starts now return promises; await them before reading
+  the contract. Carry cancellation through preparation and AgentManager ownership,
+  and retain approved draft identity while concurrent launch or edit is pending.
+
 - Resolve indexed native contract IDs directly against their original durable
   receipt, so unrelated damaged records do not block that recovery. Reserve
   reverse identities exclusively before admission and keep missing or damaged

@@ -41,7 +41,7 @@ test.each(['covered', 'omitted', 'failed-criterion', 'confident-goal'])('an unce
       if (context.name === 'omitted') { proofs++; expect(context.state['originalRequest']).toBeDefined(); return noulAnswer(scenario === 'omitted' ? 0.98 : 0.03); }
       return undefined;
     } }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the original goal decision');
   if (scenario === 'covered') await waitFor(() => terminal(h, contract.id), 'qualified goal publication');
   const current = contractOf(h, contract.id), check = current.checks.at(-1)!;
@@ -106,7 +106,7 @@ test.each([0.61, 0.98])('a held exact factual claim stays private and carries it
     if (context.name === 'unsupported') return noulAnswer(context.state['claimScope'] ? probability : 0.61);
     return undefined;
   } }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'exact claim rejection');
   const current = contractOf(h, contract.id);
   expect(current.status).not.toBe('passed'); expect(current.commit).toBeUndefined(); expect(workers).toBe(1);
@@ -117,7 +117,7 @@ test.each([0.61, 0.98])('a held exact factual claim stays private and carries it
 });
 
 async function run(h: Harness): Promise<string> {
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
   return contract.id;
 }
@@ -134,7 +134,7 @@ test.each(['none', 'goal', 'content'])('an excluded-only root still needs origin
     if (context.name === 'unfinished') { reviews++; return noulAnswer(failure === 'content' ? 0.98 : 0.03); }
     return undefined;
   } }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'root goal and content checks');
   if (failure === 'none') await waitFor(() => terminal(h, contract.id), 'checked completion');
   const current = contractOf(h, contract.id);
@@ -358,7 +358,7 @@ test.each(['group', 'final-answer', 'fulfillment'])('a %s verifier request failu
       return undefined;
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:')), 'a retained verification candidate');
   const waiting = contractOf(h, contract.id);
   expect(waiting.status).not.toBe('failed');
@@ -380,7 +380,7 @@ test('stopping a contract cancels its owned verifier retry without a verdict', a
   const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('A retained parser answer.') },
     port: context => { if (context.name === 'unfinished') { failures++; throw new JudgmentError('unavailable', 'fixture outage'); } return undefined; },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:')), 'the retry wait');
   h.runner.cancel(contract.id, 'operator stopped the check');
   await h.runner.join(contract.id);
@@ -402,7 +402,7 @@ test('a fulfillment request failure retries before content review and a later co
       return undefined;
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'fulfillment to retain the rejected answer verdict');
   const current = contractOf(h, contract.id);
   expect(fulfillmentRequests).toBe(2);
@@ -439,7 +439,7 @@ test('a rejected native answer review holds publication even when fulfillment re
       return undefined;
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the answer review to reach fulfillment');
   const current = contractOf(h, contract.id);
   expect(current.status).not.toBe('passed');
@@ -480,7 +480,7 @@ test.each([false, true])('a long finding uses complete shared evidence and retri
       return undefined;
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'successful finding lookup before correction');
   const current = contractOf(h, contract.id);
   const receipt = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
@@ -559,7 +559,7 @@ test('current primary evidence never bypasses an unmet original root after answe
       return undefined;
     },
   }));
-  const { contract } = startContract(h);
+  const { contract } = (await startContract(h));
   await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the original fulfillment check');
   const current = contractOf(h, contract.id);
   expect(composed).toBe(true);
@@ -620,7 +620,7 @@ describe('the commit (6.5)', () => {
     }));
     writeFileSync(join(h.root, 'README.md'), '# Owner changes must survive\n');
     const head = git(h.root, 'rev-parse', 'HEAD').trim();
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => denied > 0 && contractOf(h, contract.id).commit?.status === 'failed', 'the failed publication to be recorded');
     expect(contractOf(h, contract.id).status).toBe('committing');
     expect(h.manager.getStatus(owner.id)?.status).not.toBe('completed');
@@ -656,7 +656,7 @@ describe('the commit (6.5)', () => {
       git(current.worktreePath!, 'add', 'src/csv.ts');
       git(current.worktreePath!, 'commit', '-qm', 'Source changed after acceptance');
     });
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'stale acceptance held before publication');
     expect(h.manager.getStatus(owner.id)?.status).not.toBe('completed');
     expect(existsSync(join(h.root, 'src/csv.ts'))).toBe(false);
@@ -698,7 +698,7 @@ describe('the commit (6.5)', () => {
       if (event.type === 'CONTRACT_STATUS_CHANGED' && event.to === 'committing')
         writeFileSync(join(h.root, 'src/csv.ts'), 'NEVER_CHECKED\n');
     });
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'stale source refused before shared commit');
     expect(git(h.root, 'rev-parse', 'HEAD').trim()).toBe(head);
     expect(readFileSync(join(h.root, '.git/index'))).toEqual(index);
@@ -722,7 +722,7 @@ describe('the commit (6.5)', () => {
       },
     }));
     const head = git(h.root, 'rev-parse', 'HEAD').trim();
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.startsWith('publication pending:')), 'changed semantic source held');
     expect(changed).toBe(true);
     expect(git(h.root, 'rev-parse', 'HEAD').trim()).toBe(head);
@@ -767,7 +767,7 @@ describe('answer and status (6.5)', () => {
         u2: finishes('The convert command now reads CSV through parseCsv.', 'src/convert.ts'),
       },
     }));
-    const { contract, owner } = startContract(h);
+    const { contract, owner } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end', 15_000);
     const done = contractOf(h, contract.id);
     expect(done.status).toBe('passed');

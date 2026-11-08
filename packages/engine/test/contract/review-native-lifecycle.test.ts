@@ -19,7 +19,7 @@ test('review: authority change during semantic defer cancels pending operation r
       ? choiceAnswer(context.question, planDecisions++ === 0 ? 'defer_0' : 'act', 0.99) : undefined,
   });
   try {
-    const id = startContract(h, { nativeSource: source }).contract.id;
+    const id = (await startContract(h, { nativeSource: source })).contract.id;
     await waitFor(() => wake !== undefined, 'registered semantic condition wait');
     authorityRevision = 'revoked'; evidenceRevision = '2'; wake!();
     await waitFor(() => terminal(h, id), 'terminal native contract', 15000); await h.runner.join(id);

@@ -338,7 +338,7 @@ export function describeInterruption(
   if (options.recordVerified === true) {
     return (
       `A checkout at ${record.merchantDomain} stopped at the point of submitting, but its purchase `
-      + 'record is on the ledger: the order completed and is recorded. Its journal entry is closed.'
+      + 'record is on the ledger: the submission is recorded. Its journal entry is closed.'
     );
   }
   return (

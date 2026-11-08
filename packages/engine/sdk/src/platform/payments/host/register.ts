@@ -95,7 +95,7 @@ import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler } from './wind
 import type { CheckoutComposition } from './checkout-handlers.js';
 import { CardStoreUnreadableError } from './card-store.js';
 import type { DaemonCardStore } from './card-store.js';
-import { MAX_PURCHASE_LIST_LIMIT } from './purchase-ledger.js';
+import { MAX_PURCHASE_LIST_LIMIT, PaymentPurchaseLedgerError } from './purchase-ledger.js';
 import type { DaemonPurchaseLedger, StoredPurchase } from './purchase-ledger.js';
 
 export type { CheckoutComposition } from './checkout-handlers.js';
@@ -230,7 +230,7 @@ async function overStore<T>(what: string, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof CardStoreUnreadableError) {
+    if (error instanceof CardStoreUnreadableError || error instanceof PaymentPurchaseLedgerError) {
       throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
     }
     void error;
@@ -419,8 +419,10 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: Checkout
     },
 
     async listPurchases(input) {
-      const result = deps.purchases.list(input);
-      return { purchases: result.purchases.map(purchaseView), total: result.total };
+      return overStore('Reading purchase history', async () => {
+        const result = deps.purchases.list(input);
+        return { purchases: result.purchases.map(purchaseView), total: result.total };
+      });
     },
   };
 }

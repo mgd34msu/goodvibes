@@ -231,3 +231,45 @@ test('explicit host gate facts reach the service instead of its default gate rea
     expect(readings.requests).toEqual([]); expect(f.effects).toEqual([]);
   } finally { await service.close(); }
 });
+
+
+test('unavailable purchase evidence refuses before any judgment or page effect', async () => {
+  const f = fixture(); f.deps.purchases.assertAvailable = () => { throw new Error('Private damaged purchase path'); };
+  await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  expect(f.effects).toEqual([]); expect(readings.requests).toEqual([]);
+  expect(await f.journal.list()).toEqual([]); expect(f.ledger.state().reservations).toEqual([]);
+});
+
+test('retired purchase evidence after shipping cannot type a card or bypass its captured reader', async () => {
+  const f = fixture(); let available = true;
+  f.deps.purchases.assertAvailable = () => { if (!available) throw new Error('Private damaged purchase path'); };
+  f.onChoose(async () => { available = false; f.deps.purchases.assertAvailable = () => {}; });
+  await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  expect(f.effects).not.toContain('card-read'); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('the submit driver receives the original purchase-evidence fence immediately before its click', async () => {
+  const f = fixture(); let available = true;
+  f.deps.purchases.assertAvailable = () => { if (!available) throw new Error('Private damaged purchase path'); };
+  f.deps.driver.submitOrder = async (_target, owner) => {
+    await Promise.resolve(); available = false;
+    try { owner?.assertCurrent(); } catch { throw new CheckoutSubmitRefused('Purchase evidence unavailable before click'); }
+    f.effects.push('unexpected-click');
+    return { url: 'https://www.bestbuy.com/done', orderId: 'unexpected', verified: true };
+  };
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'submit-not-attempted' });
+  expect(f.effects).not.toContain('unexpected-click'); expect(f.records).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+  expect(f.redactor.hasLiveMaterial('session', 'page')).toBe(true);
+});
+
+
+test('the actual service drains an async purchase-evidence guard and refuses before browser setup', async () => {
+  const f = fixture(); f.deps.purchases.assertAvailable = async () => { throw new Error('Private async ledger guard'); };
+  const { service, input } = serviceFixture(f);
+  try {
+    await expect(service.beginCheckout(input)).rejects.toBeInstanceOf(CheckoutOwnershipError);
+    expect(f.effects).toEqual([]); expect(readings.requests).toEqual([]);
+  } finally { await service.close(); }
+});

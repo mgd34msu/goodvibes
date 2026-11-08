@@ -29,6 +29,7 @@
  * constructed per call, which is also what makes "refuse a fill with no
  * decision in flight" enforceable across two independent invocations.
  */
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
@@ -251,6 +252,11 @@ export class PaymentsGatewayServiceImpl {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
+    options.assertCurrent?.();
+    try {
+      const available: unknown = this.deps.purchases.assertAvailable?.();
+      if (available !== undefined) { drainOwned(available); throw new CheckoutOwnershipError(); }
+    } catch (error) { drainOwned(error); throw error; }
     options.assertCurrent?.();
 
     // The item is the OWNER's words. `ownerSuppliedText` refuses anything not

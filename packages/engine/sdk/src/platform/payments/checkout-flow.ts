@@ -308,6 +308,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
   if (gateRefusal !== null) return refused(gateRefusal.code, gateRefusal.reason);
+  // Capture the original financial reader before any asynchronous work. Other
+  // purchases may append legitimately; availability, rather than unchanged
+  // whole-ledger content, is the restriction on this purchase's next submit.
+  const purchaseEvidence = captureCheckoutOwnership({ signal,
+    assertCurrent: deps.purchases.assertAvailable?.bind(deps.purchases) });
   identityReader = driver.identity;
   const identity = Object.freeze({ ...identityReader.call(driver) });
   originalPage = identity;
@@ -728,6 +733,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   }
 
   if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
+  purchaseEvidence.assertCurrent();
+  addressCurrent();
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
   addressCurrent();
   let fill: Awaited<ReturnType<typeof fillCard>>;
@@ -767,9 +774,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     readonly verified: boolean;
   };
   try {
-    try { addressCurrent(); } catch { throw new CheckoutSubmitRefused('The stored address changed before submission.'); }
+    const submitCurrent = () => { addressCurrent(); purchaseEvidence.assertCurrent(); addressCurrent(); };
+    try { submitCurrent(); } catch { throw new CheckoutSubmitRefused('The original purchase owner, stored address or purchase evidence became unavailable before submission.'); }
     lifecycle.submitMayHaveHappened = true;
-    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: addressCurrent, signal });
+    submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: submitCurrent, signal });
   } catch (error) {
     if (error instanceof CheckoutSubmitRefused) {
       lifecycle.submitMayHaveHappened = false;

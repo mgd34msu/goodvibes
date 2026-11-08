@@ -1,10 +1,10 @@
 import { expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { GatewayMethodCatalog, type GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout, type PurchaseRecord } from '@goodvibes-jev/engine/sdk/platform/payments';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createPaymentsServices } from '../../runtime/payments-composition.js';
 import { createBrowserCheckoutSeamHolder } from '../../runtime/browser-checkout-seam-holder.js';
@@ -268,4 +268,54 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
     await Promise.allSettled(pending ? [pending, closing] : [closing]);
     restoreMetadata?.(); wait.mockRestore(); installJudgmentPort(previous);
   }
+});
+
+
+function purchasePath(f: ReturnType<typeof fixture>) {
+  return join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-purchases.json');
+}
+function recordedSubmission(): PurchaseRecord {
+  return { purchaseId: 'old-purchase', atUtc: '2026-11-08T12:00:00.000Z', dayKey: '2026-11-08', timezone: 'UTC',
+    merchantDomain: 'bestbuy.com', item: 'Fixture item', currency: 'USD', itemMinorUnits: 1000, taxMinorUnits: 0,
+    feesMinorUnits: 0, shippingMinorUnits: 0, totalMinorUnits: 1000, shippingTierRequested: 'normal', shippingTierUsed: 'normal',
+    steppedDown: false, itemPoolDraw: 1000, overagePoolDraw: 0, tolerancePoolDraw: 0, cardLast4: '1111', windowKind: 'veto',
+    windowOutcome: 'proceeded', answeredBy: null, outcome: 'submitted-unverified', refusalReason: null, merchantOrderId: null,
+    refundedAt: null, merchantRecognised: true, merchantQualifier: 'fixture', merchantDiscovered: false };
+}
+
+test('actual boot recovery finds the real recorded submission without upgrading unverified to purchased', async () => {
+  const f = fixture(); await f.services.ready;
+  await f.services.purchases.record(recordedSubmission()); await f.services.close();
+  await new DurableCheckoutJournal(journalPath(f)).put(interruptedRecord('submit-pending', null));
+  const replacement = createPaymentsServices(f.options);
+  try {
+    await replacement.ready;
+    expect(await replacement.purchases.has('old-purchase')).toBe(true);
+    expect(replacement.purchases.get('old-purchase')?.outcome).toBe('submitted-unverified');
+    expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
+    expect(JSON.stringify(f.deliveries)).toContain('submission is recorded');
+    expect(JSON.stringify(f.deliveries)).not.toContain('the order completed');
+    expect(replacement.budget.state().spend).toEqual([]);
+  } finally { await replacement.close(); }
+});
+
+test('a damaged real ledger keeps interrupted evidence and refuses new checkout before browser admission', async () => {
+  const f = fixture(); await f.services.ready; await f.services.close();
+  const damaged = '{"version":1,"purchases":[{'; writeFileSync(purchasePath(f), damaged);
+  await new DurableCheckoutJournal(journalPath(f)).put(interruptedRecord('submit-pending', null));
+  let driverCalls = 0;
+  f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => { driverCalls++; throw new Error('Unexpected browser admission'); }, armSubmitApproval: async () => {} });
+  const replacement = createPaymentsServices(f.options);
+  try {
+    await replacement.ready;
+    expect((await new DurableCheckoutJournal(journalPath(f)).list())[0]?.phase).toBe('submit-pending');
+    expect(f.deliveries).toEqual([]);
+    await expect(invoke(f.catalog, 'payments.purchases.list')).rejects.toMatchObject({ status: 409 });
+    await invoke(f.catalog, 'payments.checkout.approve', { merchantDomain: 'bestbuy.com', item: 'Fixture item', amount: '11.00', confirm: true });
+    let failure: unknown;
+    try { await invoke(f.catalog, 'payments.checkout.begin', beginBody('missing-card')); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ status: 409 }); expect(String(failure)).not.toContain(f.root);
+    expect(driverCalls).toBe(0); expect(readFileSync(purchasePath(f), 'utf8')).toBe(damaged);
+    expect(replacement.budget.state().reservations).toEqual([]);
+  } finally { await replacement.close(); }
 });

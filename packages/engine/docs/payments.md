@@ -898,6 +898,24 @@ is what the owner is told and which channels still owe a read. A record
 recovery keeps notifies the owner once, ever; the notice is stamped back
 through the journal.
 
+The daemon's actual purchase ledger implements the recovery lookup. Only a
+missing, previously unused ledger means no recorded purchases. Invalid JSON,
+unsupported versions, invalid financial rows, invalid UTF-8, unsafe file links
+and loss of an observed ledger report unavailable evidence. Reads do not return
+an empty history for these conditions, and a later append cannot erase the
+original file. Restart the payment host after repairing the original evidence.
+Valid earlier rows without `merchantDiscovered` retain the owner-named default;
+financial amounts, identities, timestamps and outcomes receive no defaults.
+
+Receipt appends serialize through a strict cross-process mutation lock and flush
+file and directory state before returning. The original receipt is detached
+before waiting for that lock. New checkout admission checks the ledger, and the
+original synchronous availability reader is checked again before card entry
+and inside the submit actuator's currentness guard. Other purchases may append
+while a window waits; a healthy newer ledger is allowed. A recorded
+`submitted-unverified` event proves the submission was recorded, not that the
+merchant confirmed the purchase. Recovery preserves that distinction.
+
 Card material on a page that outlived the process is the composition's to
 clear: recovery calls a composition-supplied cleanup hook for checkouts
 interrupted while arming the payment, typed so payments code receives no

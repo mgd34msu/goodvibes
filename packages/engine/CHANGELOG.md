@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Wire the real purchase ledger into interrupted-submission recovery. Keep
+  unverified submissions distinct from verified purchases. Damaged, unsupported
+  or missing-after-observation accounting refuses instead of returning empty
+  history or being overwritten by a later purchase. Serialize append writers,
+  retain the original receipt through lock waits, and recheck ledger availability
+  before card entry and through the actual submit actuator's ownership guard.
+
 - Keep Copilot sessions under the actual provider's observed credential owner.
   Concurrent discovery/chat share one exchange; account changes retire old
   sessions, transport metadata and pending publication. Retry admission retains

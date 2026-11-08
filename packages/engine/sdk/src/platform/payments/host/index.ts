@@ -26,7 +26,7 @@ export type {
   PaymentsSecretStore,
 } from './card-store.js';
 
-export { DaemonPurchaseLedger, MAX_PURCHASE_LIST_LIMIT } from './purchase-ledger.js';
+export { DaemonPurchaseLedger, PaymentPurchaseLedgerError, MAX_PURCHASE_LIST_LIMIT } from './purchase-ledger.js';
 export type { DaemonPurchaseLedgerOptions, PurchaseListQuery, StoredPurchase } from './purchase-ledger.js';
 
 export { DurableBudgetLedger } from './budget-store.js';

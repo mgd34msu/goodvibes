@@ -11,6 +11,9 @@ import type { ChannelDelivery } from './windows.js';
 import type { PaymentAnswerChannel } from './types.js';
 
 export interface PurchaseLedger {
+  /** Synchronous evidence check before admitting a new checkout and again at
+   * the submit actuator. An unreadable ledger must not become empty history. */
+  assertAvailable?(): void;
   record(entry: PurchaseRecord): Promise<void>;
   /**
    * Optional lookup. Boot recovery uses it to verify that a `submitted`

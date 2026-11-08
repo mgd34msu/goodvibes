@@ -470,7 +470,7 @@ describe('registerPaymentsGatewayMethods wiring', () => {
 
     const { settlements } = await service.recoverInterruptedCheckouts();
     expect(settlements[0]!.action).toBe('closed');
-    expect(settlements[0]!.message).toContain('the order completed and is recorded');
+    expect(settlements[0]!.message).toContain('the submission is recorded');
     expect(await journal.list()).toHaveLength(0);
   });
 

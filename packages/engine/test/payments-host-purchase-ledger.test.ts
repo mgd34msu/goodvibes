@@ -13,6 +13,7 @@ import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-recor
 import { DaemonPurchaseLedger, PaymentPurchaseLedgerError, MAX_PURCHASE_LIST_LIMIT } from '../sdk/src/platform/payments/host/purchase-ledger.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { acquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { capturePurchaseRecord } from '../sdk/src/platform/payments/purchase-record-codec.js';
 
 function purchase(overrides: Partial<PurchaseRecord> = {}): PurchaseRecord {
   return {
@@ -163,6 +164,28 @@ test('real recovery lookup finds recorded submissions and keeps unverified disti
   expect(await restarted.has('unverified')).toBe(true);
   expect(restarted.get('unverified')?.outcome).toBe('submitted-unverified');
   expect(restarted.get('absent')).toBeNull();
+});
+
+test('owner maximum survives actual ledger append and reopen without inventing a value on earlier receipts', async () => {
+  const ledger = new DaemonPurchaseLedger({ filePath });
+  await ledger.record(purchase({ purchaseId: 'without-maximum' }));
+  await ledger.record(purchase({ purchaseId: 'with-maximum', requestedMaximumMinorUnits: 6_000 }));
+  const reopened = new DaemonPurchaseLedger({ filePath });
+  expect(reopened.get('with-maximum')?.requestedMaximumMinorUnits).toBe(6_000);
+  expect(Object.hasOwn(reopened.get('without-maximum') ?? {}, 'requestedMaximumMinorUnits')).toBe(false);
+  await reopened.record(purchase({ purchaseId: 'later' }));
+  expect(new DaemonPurchaseLedger({ filePath }).get('with-maximum')?.requestedMaximumMinorUnits).toBe(6_000);
+});
+
+test.each([null, undefined, -1, 0.5, '6000', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('invalid stored owner maximum %s is refused rather than erased', async maximum => {
+  const row = { ...purchase(), requestedMaximumMinorUnits: maximum };
+  expect(capturePurchaseRecord(row)).toBeNull();
+  await expect(new DaemonPurchaseLedger({ filePath }).record(row as unknown as PurchaseRecord)).rejects.toBeInstanceOf(PaymentPurchaseLedgerError);
+});
+
+test('zero stored owner maximum remains present and distinct from no stated limit', async () => {
+  await new DaemonPurchaseLedger({ filePath }).record(purchase({ requestedMaximumMinorUnits: 0 }));
+  expect(new DaemonPurchaseLedger({ filePath }).get('pur-1')?.requestedMaximumMinorUnits).toBe(0);
 });
 
 test.each(['malformed', 'unsupported', 'row', 'utf8', 'directory', 'dangling-link'] as const)('%s accounting is never absent and cannot be replaced by a later record', async kind => {

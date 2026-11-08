@@ -9,7 +9,7 @@ import type { PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/pa
 
 const originalFetch = globalThis.fetch;
 const cleanups: (() => void)[] = [];
-const window = { purchaseId: 'purchase', windowId: 'exact-window-revision', kind: 'approval', notice: 'Buy the owner-selected item for $25.00.', deadlineMs: Date.now() + 60_000 };
+const window = { purchaseId: 'purchase', windowId: 'exact-window-revision', kind: 'approval', notice: 'Approval needed: the full total exceeds your requested maximum.\nTOTAL: USD 25.00\nRequested maximum: USD 20.00', deadlineMs: Date.now() + 60_000 };
 const requests: { path: string; headers: Headers; body: unknown }[] = [];
 let pending = true, answerStatus = 200;
 let operations: PaymentOperationView[] = [];

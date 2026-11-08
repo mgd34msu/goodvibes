@@ -27,6 +27,8 @@ export interface PurchaseRecord {
   readonly feesMinorUnits: MinorUnits;
   readonly shippingMinorUnits: MinorUnits;
   readonly totalMinorUnits: MinorUnits;
+  /** Present only when the original owner request supplied an exact maximum. */
+  readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
   readonly shippingTierRequested: string;
   readonly shippingTierUsed: string;
   readonly steppedDown: boolean;

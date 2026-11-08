@@ -71,6 +71,22 @@ export function minorUnitExponent(currency: string): number {
  */
 export const MAX_PARSEABLE_MINOR_UNITS = 1_000_000_000_000;
 
+/** Exact owner limit in the configured currency, rather than merchant prose.
+ * Accept decimal major units only: no signs, grouping, currency conversion,
+ * ranges or text to strip. In particular, "10 20" must never become 1020. */
+export function parseRequestedMaximum(raw: string, currency: CurrencyCode): MinorUnits | null {
+  const exponent = minorUnitExponent(currency);
+  const grammar = exponent === 0 ? /^\d+$/ : new RegExp(`^\\d+(?:\\.\\d{1,${exponent}})?$`);
+  if (typeof raw !== 'string' || !grammar.test(raw.trim())) return null;
+  // Do not delegate to the merchant parser's grouping rules: in KWD, "1.234"
+  // here is exactly 1234 minor units, never a grouped 1234 major units.
+  const [majorText, fraction = ''] = raw.trim().split('.');
+  const major = Number(majorText);
+  if (!Number.isSafeInteger(major)) return null;
+  const total = major * 10 ** exponent + Number(fraction.padEnd(exponent, '0'));
+  return Number.isSafeInteger(total) && total <= MAX_PARSEABLE_MINOR_UNITS ? total : null;
+}
+
 /** Characters a page may put around a number that carry no numeric meaning. */
 const CURRENCY_ORNAMENT = /[\p{Sc}\s   ]/gu;
 

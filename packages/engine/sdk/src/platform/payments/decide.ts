@@ -23,6 +23,8 @@
  *                 fits at a lower rung → record the step-down, continue
  *                 nothing fits         → tolerance pool, else REFUSE
  *
+ *   2b. FULL TOTAL vs OWNER'S REQUESTED MAXIMUM, if supplied
+ *       over    → explicit approval required; silence never raises the limit
  *   3.  RESERVE
  *   4.  WITHIN BUDGET → VETO WINDOW (silence PROCEEDS)
  *   5.  PAY, with challenge pauses
@@ -43,6 +45,7 @@ import type {
   RefusalCode,
   ShippingOption,
   ShippingTier,
+  BudgetApprovalReason,
 } from './types.js';
 import { SHIPPING_TIERS } from './types.js';
 
@@ -64,6 +67,8 @@ export interface DecisionInput {
   readonly pools: PoolSnapshot;
   readonly budgetCurrency: CurrencyCode;
   readonly preferredTier: ShippingTier;
+  /** Owner's maximum for the entire purchase, including tax, fees and delivery. */
+  readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
 }
 
 export type DecisionOutcome =
@@ -77,6 +82,7 @@ export type DecisionOutcome =
       readonly draw: BudgetDraw;
       readonly shipping: ShippingLadderResult;
       readonly reason: string;
+      readonly approvalReasons: readonly BudgetApprovalReason[];
     }
   | {
       readonly kind: 'within-budget';
@@ -120,6 +126,11 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
         'Refused: the daily item budget is 0, so nothing can be bought yet. '
         + 'Set payments.budget.dailyItem to the most you want spent on items in a day.',
     };
+  }
+
+  const requestedMaximum = input.requestedMaximumMinorUnits;
+  if (requestedMaximum !== undefined && (!Number.isSafeInteger(requestedMaximum) || requestedMaximum < 0)) {
+    return { kind: 'refuse', code: 'invalid-requested-maximum', reason: 'Refused: the requested maximum must be an exact non-negative amount in the budget currency.' };
   }
 
   // ── Step 1: item price against the daily item budget and the ceiling ────
@@ -202,7 +213,11 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
     totalMinorUnits: quoted.itemMinorUnits + fixedUnavoidable + shipping.costMinorUnits,
   };
 
-  if (aboveBudget) {
+  const approvalReasons: BudgetApprovalReason[] = [];
+  if (overDaily) approvalReasons.push('daily-item-budget');
+  if (overCeiling) approvalReasons.push('per-purchase-ceiling');
+  if (requestedMaximum !== undefined && draw.totalMinorUnits > requestedMaximum) approvalReasons.push('requested-maximum');
+  if (approvalReasons.length > 0) {
     const why = overCeiling
       ? `it is over the per-purchase ceiling of ${limits.perPurchaseCeiling.minorUnits}`
       : `only ${pools.item.remaining} is left in today's item budget`;
@@ -210,7 +225,9 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
       kind: 'needs-approval',
       draw,
       shipping,
-      reason: `This item costs ${quoted.itemMinorUnits} and ${why}.`,
+      reason: aboveBudget ? `This item costs ${quoted.itemMinorUnits} and ${why}.`
+        : `The full purchase total ${draw.totalMinorUnits} exceeds the owner's requested maximum ${requestedMaximum}.`,
+      approvalReasons: Object.freeze(approvalReasons),
     };
   }
 

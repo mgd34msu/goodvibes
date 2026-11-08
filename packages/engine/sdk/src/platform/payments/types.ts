@@ -141,6 +141,10 @@ export interface PostalAddress {
 /** Which pool a draw came out of. */
 export type BudgetPool = 'item' | 'overage' | 'tolerance';
 
+/** Host facts that require an explicit answer rather than silence. */
+export type BudgetApprovalReason = 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum';
+export type PurchaseApprovalReason = BudgetApprovalReason | 'merchant-recourse';
+
 /** Every way this capability can say no, each with its own name. */
 export type RefusalCode =
   | 'disabled'
@@ -151,6 +155,10 @@ export type RefusalCode =
   | 'link-validation-failed'
   | 'currency-mismatch'
   | 'recurring-charge'
+  | 'invalid-requested-maximum'
+  | 'requested-maximum-exceeded-undeliverable'
+  | 'requested-maximum-exceeded-denied'
+  | 'requested-maximum-exceeded-expired'
   | 'item-budget-exceeded-undeliverable'
   | 'item-budget-exceeded-denied'
   | 'item-budget-exceeded-expired'

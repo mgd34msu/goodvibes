@@ -61,6 +61,8 @@ export interface PaymentPurchaseView {
   readonly feesMinorUnits: number;
   readonly shippingMinorUnits: number;
   readonly totalMinorUnits: number;
+  /** Original request-specific limit; absent when the owner supplied none. */
+  readonly requestedMaximumMinorUnits?: number | undefined;
   readonly shippingTierRequested: string;
   readonly shippingTierUsed: string;
   readonly steppedDown: boolean;
@@ -447,7 +449,7 @@ export function createPaymentsCheckoutBeginHandler(service: PaymentsGatewayServi
         twoDigitYear: typeof twoDigit === 'boolean' ? twoDigit : undefined,
       },
       preferredTier: optionalString(params['preferredTier']) ?? undefined,
-      requestedMax: optionalString(params['requestedMax']) ?? undefined,
+      requestedMax: params['requestedMax'] === undefined ? undefined : readString(params['requestedMax'], 'requestedMax'),
     });
 
     return {

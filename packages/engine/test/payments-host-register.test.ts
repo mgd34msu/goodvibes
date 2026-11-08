@@ -871,6 +871,16 @@ describe('a store failure never hands a caller the store internals', () => {
 });
 
 describe('payments.purchases.list', () => {
+  test('receipt responses retain a stated maximum and omit it on receipts without one', async () => {
+    await purchases.record(purchase({ purchaseId: 'no-maximum' }));
+    await purchases.record(purchase({ purchaseId: 'with-maximum', requestedMaximumMinorUnits: 6_000 }));
+    const result = await invoke('payments.purchases.list');
+    expect(result).toMatchObject({ purchases: [
+      { purchaseId: 'with-maximum', requestedMaximumMinorUnits: 6_000 }, { purchaseId: 'no-maximum' },
+    ] });
+    const rows = result['purchases'] as Record<string, unknown>[];
+    expect(Object.hasOwn(rows[1] ?? {}, 'requestedMaximumMinorUnits')).toBe(false);
+  });
   test('a row is projected through an allowlist, so an extra stored field cannot escape', async () => {
     await purchases.record({ ...purchase(), secretNote: 'must not ship' } as PurchaseRecord);
     const result = await invoke('payments.purchases.list');

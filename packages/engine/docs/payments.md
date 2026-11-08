@@ -382,6 +382,10 @@ document exists so they cannot again without someone noticing.
     0d. a usable card is configured                                    → REFUSE
     0e. a shipping address is configured                                → REFUSE
 
+    REQUEST MAXIMUM: if supplied, requestedMax must be one exact
+    non-negative decimal amount in the configured budget currency       → REFUSE
+    invalid input rather than dropping or interpreting it as no limit
+
     TAINT: do `item` / `requestedMax` derive from untrusted content?     → REFUSE
     `merchant` / `checkoutUrl` too, unless the OWNER asked us to find
     the merchant (`merchantDiscovered`), in which case they are graded
@@ -428,6 +432,12 @@ document exists so they cannot again without someone noticing.
             │                                  →  draw tolerance, record, continue to 5
             └─ otherwise                       →  REFUSE           (owner ruling)
 
+4c. FULL PAYABLE TOTAL vs OWNER'S REQUESTED MAXIMUM, when supplied
+    item + tax + mandatory fees + selected delivery
+    ├─ over the request maximum → explicit approval, even within daily budgets
+    └─ at or below it           → retain the ordinary budget/merchant window
+    An exhausted overage pool remains a refusal; this creates no bypass.
+
 5.  RESERVE the pools, before the owner is asked anything. A needs-approval
     purchase would fail an ordinary reservation, that is what over budget
     means, so its reservation is taken against the item limit raised by
@@ -448,14 +458,14 @@ document exists so they cannot again without someone noticing.
     └─ undeliverable                    →  PROCEED  (owner ruling: under/at
                                            budget items get through)
 
-    APPROVAL  (above budget OR no recourse established), silence DENIES
+    APPROVAL  (above budget OR above request maximum OR no recourse), silence DENIES
     ├─ silence for windows.approvalMinutes  →  DENIED
     ├─ explicit approve                     →  continue to 7
     ├─ explicit deny                        →  DENIED
     └─ undeliverable                        →  REFUSE
 
-    There is only ever one window per purchase: the total it carries is
-    already final (§8.4).
+    There is one current window per quote. A verified price change voids it
+    and requires a fresh window for the replacement quote (§8.4).
 
 7.  APPLY the shipping tier the ladder chose, FILL the address and then the
     card, and SUBMIT, journalled before the click so a restart can tell
@@ -790,6 +800,23 @@ session-activity signal flipped and asserting an identical deadline.
 
 ### 8.4 The approval carries the final total
 
+An owner can supply `requestedMax` for this purchase. It is expressed as major
+units in `payments.currency`, with a decimal point when needed: `20.00` means
+twenty in a two-decimal currency, and `20.123` means twenty and 123 thousandths
+in KWD. Do not include grouping separators, currency symbols, another currency,
+ranges or prose. Precision must fit the currency. Invalid input refuses; zero
+is a real maximum and is distinct from leaving the field absent.
+
+This limit covers the complete payable total, including tax, mandatory fees and
+the selected delivery. A higher total requires a new explicit approval, even at
+a recognised merchant with ample daily budget. Denial, silence and failed notice
+delivery stop the purchase. Approval authorizes only the displayed quote; it
+does not raise the saved request limit or any configured budget. Each notice
+shows the requested maximum and the actual reasons approval is needed. The
+same notice appears in the browser Payments view and TUI/Agent purchase controls.
+Completed receipts retain `requestedMaximumMinorUnits` when one was supplied;
+earlier receipts and requests without a limit leave that field absent.
+
 Both windows fire at the same point in the flow: once the final total is known
 and before payment. That is what makes the number the owner approves the number
 that is charged.
@@ -825,7 +852,8 @@ reservation. The original page claim stays held while the old budget reservation
 is released, so another checkout cannot take over the page during price reading.
 Its new notice shows the new amount and has a new window ID, even
 when the price decreased. An old operator window ID cannot answer it. The new
-budget result determines whether it requires approval or a veto window. There
+budget result and the original requested maximum determine whether it requires
+approval or a veto window. There
 is no retry after a click may have reached the merchant; that outcome retains
 the protected hold and requires reconciliation.
 

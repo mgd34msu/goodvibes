@@ -360,9 +360,11 @@ export async function classifyMerchant(
  */
 export function windowForPurchase(input: {
   readonly aboveBudget: boolean;
+  /** The complete payable total exceeds the owner's request-specific limit. */
+  readonly aboveRequestedMaximum?: boolean | undefined;
   readonly merchantIsMajor: boolean;
 }): 'approval' | 'veto' {
-  if (input.aboveBudget) return 'approval';
+  if (input.aboveBudget || input.aboveRequestedMaximum === true) return 'approval';
   return input.merchantIsMajor ? 'veto' : 'approval';
 }
 

@@ -74,6 +74,7 @@ import { decidePurchase, type BudgetDraw } from './decide.js';
 import { readShippingTiers } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
+import { parseRequestedMaximum } from './money-parsing.js';
 import {
   classifyMerchant,
   windowForPurchase,
@@ -116,6 +117,7 @@ import type {
   RefusalCode,
   ShippingStepDown,
   ShippingTier,
+  PurchaseApprovalReason,
 } from './types.js';
 
 /** What the owner asked for, in their own words, from an owner-direct turn. */
@@ -136,7 +138,8 @@ export interface PurchaseRequest {
    */
   readonly merchantDiscovered?: boolean | undefined;
   readonly preferredTier: ShippingTier;
-  /** A limit the owner stated in the request, if any. Taint-checked, never page text. */
+  /** Owner's maximum full payable total as an exact amount in the budget currency.
+   * Taint-checked, never page text. Exceeding it requires explicit approval. */
   readonly requestedMax?: string | undefined;
 
   /**
@@ -336,6 +339,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
   if (gateRefusal !== null) return refused(gateRefusal.code, gateRefusal.reason);
+  const requestedMaximumMinorUnits = request.requestedMax === undefined ? undefined : parseRequestedMaximum(request.requestedMax, deps.budgetCurrency);
+  if (requestedMaximumMinorUnits === null) return refused('invalid-requested-maximum', 'Refused: requestedMax must be an exact non-negative amount in the budget currency. Clarify the requested maximum before starting this purchase.');
   const verifyTerms = driver.verifyTerms;
   if (typeof verifyTerms !== 'function') return refused('total-changed', 'Refused: this checkout driver cannot verify the current cart and payable total. Nothing was submitted.');
   termsReader = verifyTerms;
@@ -449,6 +454,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     pools,
     budgetCurrency: deps.budgetCurrency,
     preferredTier: request.preferredTier,
+    requestedMaximumMinorUnits,
   });
   if (decision.kind === 'refuse') return refused(decision.code, decision.reason);
 
@@ -623,6 +629,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     stepDown,
     poolsAfter,
     destination: renderDestination(shippingAddress),
+    ...(requestedMaximumMinorUnits === undefined ? {} : { requestedMaximumMinorUnits }),
+    approvalReasons: [
+      ...(decision.kind === 'needs-approval' ? decision.approvalReasons : []),
+      ...(!merchantVerdict.isMajor ? ['merchant-recourse' as const] : []),
+    ] satisfies readonly PurchaseApprovalReason[],
   };
 
   // ── 6. One notification for this quote, and its new window ──────────────
@@ -634,9 +645,14 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   await registry.advance(request.purchaseId, 'awaiting-window', {}, now());
   addressCurrent();
 
-  const aboveBudget = decision.kind === 'needs-approval';
+  const exceedsRequestedMaximum = requestedMaximumMinorUnits !== undefined && draw.totalMinorUnits > requestedMaximumMinorUnits;
+  const aboveBudget = decision.kind === 'needs-approval' && decision.approvalReasons.some(reason => reason !== 'requested-maximum');
+  const budgetDescription = decision.kind === 'needs-approval' && decision.approvalReasons.includes('per-purchase-ceiling')
+    ? decision.approvalReasons.includes('daily-item-budget') ? 'your configured item spending limits' : 'your per-purchase ceiling'
+    : 'your remaining daily item budget';
   const windowKind: 'approval' | 'veto' = windowForPurchase({
     aboveBudget,
+    aboveRequestedMaximum: exceedsRequestedMaximum,
     merchantIsMajor: merchantVerdict.isMajor,
   });
   let windowOutcome: string;
@@ -700,6 +716,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
           : state === 'denied-timeout'
             ? 'item-budget-exceeded-expired'
             : 'item-budget-exceeded-denied'
+        : exceedsRequestedMaximum
+          ? state === 'denied-undeliverable'
+            ? 'requested-maximum-exceeded-undeliverable'
+            : state === 'denied-timeout'
+              ? 'requested-maximum-exceeded-expired'
+              : 'requested-maximum-exceeded-denied'
         : state === 'denied-undeliverable'
           ? 'merchant-not-recognised-undeliverable'
           : state === 'denied-timeout'
@@ -707,12 +729,18 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             : 'merchant-not-recognised-denied';
       const why = aboveBudget
         ? state === 'denied-undeliverable'
-          ? 'Refused: this is over your daily item budget and I could not reach you to ask. '
+          ? `Refused: this item exceeds ${budgetDescription} and I could not reach you to ask. `
             + 'Over-budget purchases do not go through unasked.'
           : state === 'denied-timeout'
-            ? 'Refused: this was over your daily item budget and the approval window closed with no answer. '
+            ? `Refused: this item exceeds ${budgetDescription} and the approval window closed with no answer. `
               + 'Silence on an over-budget purchase means no.'
             : 'Refused: you said no.'
+        : exceedsRequestedMaximum
+          ? state === 'denied-undeliverable'
+            ? 'Refused: this total exceeds the maximum in your request and I could not reach you for explicit approval. Nothing was bought.'
+            : state === 'denied-timeout'
+              ? 'Refused: this total exceeds the maximum in your request and the approval window ended without an answer. Silence does not raise your limit.'
+              : 'Refused: you did not approve spending above the maximum in your request.'
         : state === 'denied-undeliverable'
           ? 'Refused: I could not reach you to ask about this merchant, and a purchase somewhere '
             + 'I cannot point to a way of getting your money back does not go through unasked.'
@@ -720,7 +748,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             ? 'Refused: the window closed with no answer. Silence means no when the shop is not one '
               + 'you have vouched for.'
             : 'Refused: you said no.';
-      return refused(code, aboveBudget ? why : `${why} ${merchantVerdict.reason}`);
+      return refused(code, aboveBudget || exceedsRequestedMaximum ? why : `${why} ${merchantVerdict.reason}`);
     }
   } else {
     // WITHIN BUDGET AND RECOURSE ESTABLISHED. Silence PROCEEDS. Undeliverable
@@ -950,6 +978,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     feesMinorUnits: checkout.feesMinorUnits,
     shippingMinorUnits: shipping.costMinorUnits,
     totalMinorUnits: draw.totalMinorUnits,
+    ...(requestedMaximumMinorUnits === undefined ? {} : { requestedMaximumMinorUnits }),
     shippingTierRequested: request.preferredTier,
     shippingTierUsed: shipping.tier,
     steppedDown: stepDown !== null,

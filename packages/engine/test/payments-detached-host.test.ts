@@ -68,11 +68,15 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
     context: { ...helper.describeAuthenticatedPrincipal(paired.token), explicitUserRequest: true } });
   const f = compose(); await f.registration.ready;
   const identity = { merchantDomain: 'bestbuy.com', item: 'Fixture item' };
-  expect((await call('payments.checkout.approve', { ...identity, amount: '11.00', confirm: true })).status).toBe(200);
+  expect((await call('payments.checkout.approve', { ...identity, amount: '9.00', confirm: true })).status).toBe(200);
   const request = new AbortController();
-  const body = { ...identity, requestId: 'stable-owner-request', requestedMax: '11.00', sessionId: 'session', pageId: 'page', checkoutUrl: 'https://www.bestbuy.com/checkout', cardId: card.id,
+  const body = { ...identity, requestId: 'stable-owner-request', requestedMax: '9.00', sessionId: 'session', pageId: 'page', checkoutUrl: 'https://www.bestbuy.com/checkout', cardId: card.id,
     requestedLines: [{ label: 'Fixture item', quantity: 1 }], lines: [{ label: 'Fixture item', quantity: '1', unitPrice: '$10.00' }],
     shippingOptions: [{ label: 'Standard', cost: '$0.00' }], cardFields: [{ field: 'number', ref: 'card' }], placeOrderTarget: 'submit' };
+  for (const requestedMax of ['', null, 20, '10 20', 'up to 20']) {
+    expect((await call('payments.checkout.begin', { ...body, requestedMax })).status).toBe(400);
+    expect(f.operations.get(body.requestId)).toBeNull(); expect(effects).toEqual([]);
+  }
   const acknowledged = await call('payments.checkout.begin', body, request.signal);
   expect(acknowledged.status).toBe(200); expect(acknowledged.body).toMatchObject({ outcome: 'accepted', purchaseId: body.requestId });
   request.abort(); body.item = 'altered after acknowledgement';
@@ -80,6 +84,8 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
   const status = readPaymentWindowStatus((await call('payments.purchase.status')).body);
   expect(status.operations[0]).toMatchObject({ purchaseId: body.requestId, state: 'running', phase: 'awaiting-window' });
   const window = status.windows[0]; if (!window) throw new Error('Expected the real reply window');
+  expect(window.kind).toBe('approval'); expect(window.notice).toContain('Requested maximum: USD 9.00');
+  expect(window.notice).toContain('full total exceeds your requested maximum');
   expect(window.notice).toContain('Fixture item'); expect(window.notice).not.toContain(body.item);
   expect((await call('payments.purchase.cancel', { purchaseId: window.purchaseId, windowId: window.windowId, confirm: true })).status).toBe(200);
   await until(() => f.operations.get(body.requestId)?.state === 'cancelled');

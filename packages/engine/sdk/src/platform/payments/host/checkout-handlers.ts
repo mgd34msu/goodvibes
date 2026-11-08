@@ -211,7 +211,7 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
       twoDigitYear: typeof twoDigit === 'boolean' ? twoDigit : undefined,
     },
     preferredTier: optionalShippingTier(params['preferredTier']),
-    requestedMax: optionalNonEmptyString(params['requestedMax']),
+    requestedMax: params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax'),
     // The sdk's own route (routes/payments.ts) never reads this field off the
     // wire at all: `PaymentBeginCheckoutInput` has no `merchantDiscovered`
     // property, and `service.beginCheckout` is called with it simply absent,

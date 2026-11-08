@@ -21,6 +21,8 @@ export function capturePurchaseRecord(value: unknown): PurchaseRecord | null {
     || typeof entry['timezone'] !== 'string' || !isValidTimezone(entry['timezone'])
     || typeof entry['currency'] !== 'string' || !/^[A-Z]{3}$/.test(entry['currency'])
     || !amounts.every(key => typeof entry[key] === 'number' && Number.isSafeInteger(entry[key]) && entry[key] >= 0)
+    || (Object.hasOwn(entry, 'requestedMaximumMinorUnits') && (typeof entry['requestedMaximumMinorUnits'] !== 'number'
+      || !Number.isSafeInteger(entry['requestedMaximumMinorUnits']) || entry['requestedMaximumMinorUnits'] < 0))
     || !tier(entry['shippingTierRequested']) || !tier(entry['shippingTierUsed'])
     || typeof entry['steppedDown'] !== 'boolean'
     || typeof entry['cardLast4'] !== 'string' || !/^(?:\d{4}|\?{4})$/.test(entry['cardLast4'])

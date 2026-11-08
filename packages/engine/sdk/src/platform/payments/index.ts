@@ -30,6 +30,8 @@ export type {
   CardMetadata,
   PostalAddress,
   BudgetPool,
+  BudgetApprovalReason,
+  PurchaseApprovalReason,
   RefusalCode,
 } from './types.js';
 

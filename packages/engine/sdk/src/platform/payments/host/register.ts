@@ -316,6 +316,7 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
     feesMinorUnits: row.feesMinorUnits,
     shippingMinorUnits: row.shippingMinorUnits,
     totalMinorUnits: row.totalMinorUnits,
+    ...(row.requestedMaximumMinorUnits === undefined ? {} : { requestedMaximumMinorUnits: row.requestedMaximumMinorUnits }),
     shippingTierRequested: row.shippingTierRequested,
     shippingTierUsed: row.shippingTierUsed,
     steppedDown: row.steppedDown === true,

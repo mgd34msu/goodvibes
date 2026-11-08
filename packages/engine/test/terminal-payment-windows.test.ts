@@ -20,7 +20,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 const window: PaymentWindowView = { purchaseId: 'purchase-A', windowId: 'window-A', kind: 'approval',
-  notice: 'Merchant: example.com\nItem: the requested item\nTotal: USD 20.00', deadlineMs: Date.now() + 60_000 };
+  notice: 'Approval needed: the full total exceeds your requested maximum.\nMerchant: example.com\nItem: the requested item\nTotal: USD 20.00\nRequested maximum: USD 15.00', deadlineMs: Date.now() + 60_000 };
 async function until(predicate: () => boolean): Promise<void> {
   for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 0)); }
   throw new Error('The expected payment UI state did not appear.');

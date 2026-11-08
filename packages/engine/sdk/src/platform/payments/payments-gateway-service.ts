@@ -39,6 +39,7 @@ import { CardMaterialRedactor } from './card-redaction.js';
 import { fillCard, FillCardRefusal, type CardFieldTarget } from './fill-card.js';
 import { runCheckout, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
 import { extractCheckout, type RawCheckoutReading } from './checkout-extraction.js';
+import { parseRequestedMaximum } from './money-parsing.js';
 import { isCardFieldName } from './card-material.js';
 import { ownerSuppliedText } from './types.js';
 import type { AddressFieldName, AddressFieldTarget, AddressStore } from './address.js';
@@ -256,6 +257,9 @@ export class PaymentsGatewayServiceImpl {
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
     options.assertCurrent?.();
+    if (input.requestedMax !== undefined && parseRequestedMaximum(input.requestedMax, config.budgetCurrency) === null) {
+      return { ...this.refused('The requested maximum must be one non-negative decimal amount in the budget currency, without grouping or prose.'), purchaseId: purchaseId ?? null };
+    }
     try {
       const available: unknown = this.deps.purchases.assertAvailable?.();
       if (available !== undefined) { drainOwned(available); throw new CheckoutOwnershipError(); }

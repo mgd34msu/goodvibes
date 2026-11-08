@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Enforce the owner's request-specific maximum against the complete payable
+  total, including tax, fees and delivery. Exceeding it requires explicit
+  approval even with available daily budget; silence or an undeliverable notice
+  cannot raise it. Repricing retains the original maximum. Approval notices
+  distinguish this limit from daily budgets, ceilings and merchant recourse,
+  and completed purchase receipts retain the original optional maximum.
+
 - Keep navigation, history traversal, snapshots, text reads, waits and new-tab
   navigation in the original page's shutdown drain. Refuse late results before
   publishing page content or replacing snapshot references after session closure.

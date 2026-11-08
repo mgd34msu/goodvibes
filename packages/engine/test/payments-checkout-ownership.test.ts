@@ -19,6 +19,7 @@ import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/p
 import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { withExecutionMode } from '../sdk/src/platform/gate/execution-context.js';
 
 const readings = usePaymentsReadings();
 const roots: string[] = [];
@@ -89,6 +90,86 @@ function fixture() {
     onChoose: (work: () => Promise<void>) => { onChoose = work; }, onSubmit: (work: () => Promise<void>) => { onSubmit = work; },
     onTerms: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onTerms = work; } };
 }
+
+for (const mode of ['safe-owner', 'safe-jev', 'yolo'] as const)
+  for (const answer of ['approve', 'deny', 'silence', 'undeliverable'] as const)
+    test(`owner maximum remains an explicit approval boundary in ${mode}: ${answer}`, async () => {
+      const f = fixture(); Reflect.set(f.request, 'requestedMax', '10.00');
+      let questions = 0;
+      if (answer === 'undeliverable') f.deps.notifier.deliver = async input => {
+        f.notices.push({ kind: input.kind, message: input.message });
+        return [{ channel: 'telegram', delivered: false, backfillable: false }];
+      };
+      f.deps.notifier.awaitAnswer = async input => {
+        questions++; expect(input.kind).toBe('approval');
+        expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+        return answer === 'silence' ? null : { answer: answer === 'approve' ? 'approve' : 'deny', channel: 'operator' };
+      };
+      const outcome = await withExecutionMode(mode, () => f.run());
+      expect(f.notices).toHaveLength(1); expect(f.notices[0]?.kind).toBe('approval');
+      expect(f.notices[0]?.message).toContain('full total exceeds your requested maximum');
+      expect(f.notices[0]?.message).toContain('Requested maximum: USD 10.00');
+      expect(f.notices[0]?.message).not.toContain('remaining daily item budget');
+      expect(questions).toBe(answer === 'undeliverable' ? 0 : 1);
+      if (answer === 'approve') {
+        expect(outcome.kind).toBe('purchased');
+        expect(f.records).toMatchObject([{ totalMinorUnits: 1_100, requestedMaximumMinorUnits: 1_000, windowKind: 'approval', answeredBy: 'operator' }]);
+        expect(f.effects.filter(effect => effect.startsWith('submit:'))).toEqual(['submit:submit-original']);
+      } else {
+        expect(outcome).toMatchObject({ kind: 'refused', code: `requested-maximum-exceeded-${answer === 'silence' ? 'expired' : answer === 'undeliverable' ? 'undeliverable' : 'denied'}` });
+        expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+        expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
+      }
+      expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+    });
+
+test.each(['', 'up to 20 dollars', '-1', '10 20', '10+20', '1e3', '20.001'])('invalid owner maximum %s stops before model, card or notice work', async maximum => {
+  const f = fixture(); Reflect.set(f.request, 'requestedMax', maximum);
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'invalid-requested-maximum' });
+  expect(readings.requests).toEqual([]); expect(f.effects).toEqual([]); expect(f.notices).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test.each(['11.00', '12.00'])('within owner maximum %s keeps the veto window', async maximum => {
+  const f = fixture(); Reflect.set(f.request, 'requestedMax', maximum);
+  expect((await f.run()).kind).toBe('purchased'); expect(f.notices[0]?.kind).toBe('veto');
+  expect(f.records[0]?.requestedMaximumMinorUnits).toBe(maximum === '11.00' ? 1_100 : 1_200);
+});
+
+test('caller mutation cannot raise the retained owner maximum during a merchant reading', async () => {
+  const f = fixture(), entered = barrier(), resume = barrier(); Reflect.set(f.request, 'requestedMax', '10.00');
+  f.onMerchant(async () => { entered.release(); await resume.wait; });
+  f.deps.notifier.awaitAnswer = async input => { expect(input.kind).toBe('approval'); return { answer: 'deny', channel: 'operator' }; };
+  const pending = f.run();
+  try {
+    await entered.wait; Reflect.set(f.request, 'requestedMax', '999.00'); resume.release();
+    expect(await pending).toMatchObject({ kind: 'refused', code: 'requested-maximum-exceeded-denied' });
+    expect(f.notices[0]?.message).toContain('Requested maximum: USD 10.00'); expect(f.effects).not.toContain('card-read');
+  } finally { resume.release(); await pending; }
+});
+
+test.each(['approve', 'deny'] as const)('repricing across the original request maximum needs a new approval: %s', async answer => {
+  const f = fixture(); Reflect.set(f.request, 'requestedMax', '15.00');
+  f.deps.driver.readCurrentQuote = async () => ({ ...f.reading,
+    lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' });
+  let windows = 0;
+  f.deps.notifier.awaitAnswer = async input => {
+    if (++windows === 1) { expect(input.kind).toBe('veto'); f.setLiveTotal(2_200); return { answer: 'acknowledge', channel: 'operator' }; }
+    expect(windows).toBe(2); expect(input.kind).toBe('approval');
+    expect(f.ledger.snapshot(f.deps.limits, f.deps.now(), 'UTC').item.remaining).toBeGreaterThan(0);
+    expect(f.effects).not.toContain('card-read');
+    return { answer, channel: 'operator' };
+  };
+  const result = await f.run();
+  expect(f.notices.map(notice => notice.kind)).toEqual(['veto', 'approval']);
+  expect(f.notices[1]?.message).toContain('Requested maximum: USD 15.00');
+  expect(f.notices[1]?.message).toContain('full total exceeds your requested maximum');
+  expect(f.notices[1]?.message).not.toContain('remaining daily item budget');
+  if (answer === 'approve') {
+    expect(result.kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200, requestedMaximumMinorUnits: 1_500 }]);
+  } else { expect(result).toMatchObject({ kind: 'refused', code: 'requested-maximum-exceeded-denied' }); expect(f.records).toEqual([]); }
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
 
 test.each(['before-card', 'before-submit'] as const)('changed checkout terms %s release the hold and never submit', async phase => {
   const f = fixture(); let calls = 0;
@@ -291,6 +372,23 @@ function serviceFixture(f: ReturnType<typeof fixture>) {
   return { service, input };
 }
 
+test('the checkout service rejects an invalid requested maximum before looking up its browser driver', async () => {
+  const f = fixture(), deps = f.deps;
+  const input = { sessionId: 'session', pageId: 'page', merchantDomain: f.request.merchantDomain,
+    checkoutUrl: f.request.checkoutUrl, item: f.request.item, cardId: f.request.cardId,
+    requestedLines: f.request.requestedLines, reading: f.reading,
+    controls: { cardFields: f.controls.cardFields.map(field => ({ field: field.field, ref: field.target })),
+      shippingTargets: f.controls.shippingTargets, placeOrderTarget: f.controls.placeOrderTarget } };
+  const service = new PaymentsGatewayServiceImpl({ ...deps, journal: f.journal,
+    config: () => ({ limits: deps.limits, budgetCurrency: deps.budgetCurrency, timezone: deps.timezone,
+      preferredTier: 'normal', approvalMinutes: deps.approvalMinutes, vetoMinutes: deps.vetoMinutes }),
+    gates: () => deps.gates, driverFor: () => { throw new Error('Invalid limit reached browser setup'); }, cardFieldGuard: f.redactor });
+  try {
+    expect(await service.beginCheckout({ ...input, requestedMax: '10+20' })).toMatchObject({ outcome: 'refused' });
+    expect(f.effects).toEqual([]); expect(readings.requests).toEqual([]); expect(f.notices).toEqual([]);
+  } finally { await service.close(); }
+});
+
 test.each(['merchant', 'choose', 'submit'] as const)('service shutdown drains an admitted %s call which ignores cancellation', async phase => {
   const f = fixture(), { service, input } = serviceFixture(f), entered = barrier(), gate = barrier();
   const suspended = async () => { entered.release(); await gate.wait; if (phase === 'submit') throw new Error('Unknown merchant result'); };
@@ -476,7 +574,7 @@ test('repricing retains the original page even after releasing the earlier quote
 
 test('actual operator window IDs change on repricing and an old approval cannot settle the new price', async () => {
   const f = fixture(), first = barrier(), second = barrier(), windows: ReturnType<PaymentReplyInbox['inspect']>[number][] = [];
-  Reflect.set(f.deps, 'limits', { ...f.deps.limits, dailyItemMinorUnits: 1_500 });
+  Reflect.set(f.request, 'requestedMax', '15.00');
   const replies = new PaymentReplyInbox({ now: () => f.deps.now() });
   const replacement: RawCheckoutReading = { ...f.reading,
     lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' };
@@ -504,10 +602,12 @@ test('actual operator window IDs change on repricing and an old approval cannot 
     const fresh = windows[1]; if (!fresh) throw new Error('Missing new price window');
     expect(fresh.windowId).not.toBe(old.windowId); expect(fresh.purchaseId).toBe(old.purchaseId);
     expect(old.notice).toContain('11.00'); expect(fresh.notice).toContain('22.00'); expect(fresh.kind).toBe('approval');
+    expect(fresh.notice).toContain('Requested maximum: USD 15.00');
+    expect(fresh.notice).toContain('full total exceeds your requested maximum');
     expect(() => replies.answer({ purchaseId: old.purchaseId, windowId: old.windowId, action: 'approve' })).toThrow(PaymentReplyWindowError);
     expect(f.records).toEqual([]); expect(replies.pending).toBe(1);
     replies.answer({ purchaseId: fresh.purchaseId, windowId: fresh.windowId, action: 'approve' });
-    expect((await purchase).kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200 }]);
+    expect((await purchase).kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200, requestedMaximumMinorUnits: 1_500 }]);
     expect(deliveries).toBe(2); expect(replies.pending).toBe(0);
   } finally { await replies.close(); await handled; }
 });

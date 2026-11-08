@@ -32,6 +32,7 @@ import type {
   OwnerSuppliedText,
   ShippingStepDown,
   ShippingTier,
+  PurchaseApprovalReason,
 } from './types.js';
 
 /**
@@ -73,6 +74,8 @@ export interface PurchaseFacts {
   readonly shippingTier: ShippingTier;
   readonly stepDown: ShippingStepDown | null;
   readonly poolsAfter: PoolSnapshot;
+  readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
+  readonly approvalReasons?: readonly PurchaseApprovalReason[] | undefined;
   /**
    * Where it is going, rendered from the STORED address.
    *
@@ -102,7 +105,7 @@ function exponentFor(currency: string): number {
  * getting a "0.00" back.
  */
 export function formatMinorUnits(amount: MinorUnits, currency: CurrencyCode): string {
-  if (!Number.isInteger(amount) || amount < 0) {
+  if (!Number.isSafeInteger(amount) || amount < 0) {
     throw new RangeError(`Refusing to render a non-integer or negative amount: ${String(amount)}`);
   }
   const exponent = exponentFor(currency);
@@ -120,8 +123,15 @@ export function formatMinorUnits(amount: MinorUnits, currency: CurrencyCode): st
  * which kind of window they are looking at, and the two say opposite things.
  */
 export function renderApprovalMessage(facts: PurchaseFacts, expiresInMinutes: number): string {
+  const reasons: Readonly<Record<PurchaseApprovalReason, string>> = {
+    'daily-item-budget': 'the item exceeds the remaining daily item budget',
+    'per-purchase-ceiling': 'the item exceeds the per-purchase ceiling',
+    'requested-maximum': 'the full total exceeds your requested maximum',
+    'merchant-recourse': 'this merchant needs your explicit approval',
+  };
+  const why = [...new Set(facts.approvalReasons ?? [])].map(reason => reasons[reason]).filter(Boolean);
   const lines = [
-    `Approval needed, this is over your daily item budget.`,
+    why.length ? `Approval needed: ${why.join('; ')}.` : 'Approval needed before this purchase.',
     ``,
     `  ${renderItem(facts.item)}`,
     `  from ${renderMerchant(facts.merchantDomain)}`,
@@ -182,6 +192,7 @@ function amountLines(facts: PurchaseFacts): string[] {
     );
   }
   lines.push(`  TOTAL:    ${formatMinorUnits(facts.totalMinorUnits, facts.currency)}`);
+  if (facts.requestedMaximumMinorUnits !== undefined) lines.push(`  Requested maximum: ${formatMinorUnits(facts.requestedMaximumMinorUnits, facts.currency)} (including tax, fees and delivery)`);
   if (facts.destination !== undefined && facts.destination !== null) {
     lines.push(``, `  Ships to: ${facts.destination}`);
   }
@@ -248,7 +259,7 @@ export function renderPurchaseNotice(input: {
     ? renderApprovalMessage(input.facts, input.expiresInMinutes)
     : renderVetoMessage(input.facts, input.expiresInMinutes);
   if (input.merchantReason === undefined || input.merchantReason.trim().length === 0) return body;
-  const label = input.mode === 'veto' ? 'Why I can go ahead' : 'Why I am asking';
+  const label = input.mode === 'veto' ? 'Why I can go ahead' : 'Merchant recourse';
   return `${body}\n\n  ${label}: ${sanitizeNoticeField(input.merchantReason, 240)}`;
 }
 

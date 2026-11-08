@@ -174,6 +174,8 @@ const PURCHASE_RECORD_SCHEMA = objectSchema(
     feesMinorUnits: NUMBER_SCHEMA,
     shippingMinorUnits: NUMBER_SCHEMA,
     totalMinorUnits: NUMBER_SCHEMA,
+    /** Original owner maximum; absent on requests without one and earlier receipts. */
+    requestedMaximumMinorUnits: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     shippingTierRequested: STRING_SCHEMA,
     shippingTierUsed: STRING_SCHEMA,
     /** Present when the ladder stepped delivery down to fit the overage pool. */
@@ -365,7 +367,7 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     preferredTier: enumSchema(['normal', 'fast', 'fastest']),
     expirySeparator: STRING_SCHEMA,
     twoDigitYear: BOOLEAN_SCHEMA,
-    requestedMax: STRING_SCHEMA,
+    requestedMax: { ...STRING_SCHEMA, pattern: '^\\d+(?:\\.\\d{1,3})?$', description: 'Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it.' },
   },
   [
     'requestId', 'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId',
